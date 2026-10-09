@@ -141,13 +141,13 @@ test("refuses to lend unless the Cloud sign-in is verified for this exact machin
   const folder = async dir => [{ id: randomUUID(), path: dir, write: false }];
   for (const cloud of [null, { status: "signed-out", accountId: null, origin: null }, { status: "unavailable", accountId: "acct_1", origin: null }, { status: "connected", accountId: "acct_1", origin: "https://omb-u-other.fly.dev" }]) {
     const { folderPath, sharing, home } = await lendingFixture(t, { cloud });
-    await assert.rejects(sharing.saveCloud(env, { folders: await folder(folderPath), screen: false }), /Connect to your Cloud first/);
+    await assert.rejects(sharing.saveCloud(env, { folders: await folder(folderPath), screen: false }), /Open My Cloud first/);
     assert.equal(home.connects.length, 0);
     assert.equal(sharing.cloudState(env).enabled, false);
   }
   for (const home of [{ cloudHome: false }, { scopes: ["client"] }]) {
     const { folderPath, sharing, home: server } = await lendingFixture(t, { home });
-    await assert.rejects(sharing.saveCloud(env, { folders: await folder(folderPath), screen: false }), /not your Cloud/);
+    await assert.rejects(sharing.saveCloud(env, { folders: await folder(folderPath), screen: false }), /not My Cloud/);
     assert.equal(server.connects.length, 0);
   }
 });

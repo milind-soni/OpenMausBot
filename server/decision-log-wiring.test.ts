@@ -240,8 +240,7 @@ posixOnly("authorization decisions are logged", () => {
     async () => {
       // the same fake ACP CLI in question mode: the request is an ask, not a
       // permission, so the card must arrive structured and the row must say
-      // a person owes the answer. A tool-call ask has no origin to record —
-      // only the BoatAgent transport ever sets one.
+      // a person owes the answer. A tool-call ask has no origin to record.
       const created = await api("POST", "/api/bots");
       expect(created.status).toBe(201);
       const patched = await api("PATCH", `/api/bots/${created.body.bot.id}`, {
@@ -322,11 +321,15 @@ posixOnly("authorization decisions are logged", () => {
 
   it("GET /api/decisions.csv exports a date range, one line per row, from the month files", async () => {
     const all = (await api("GET", "/api/decisions")).body.decisions as DecisionRow[];
-    const today = new Date().toISOString().slice(0, 10);
-    const res = await fetch(`${BASE}/api/decisions.csv?from=${today}&to=${today}`);
+    // Span the UTC days the rows were written on, not "today": a run that
+    // crosses midnight UTC writes rows on two days (and maybe two month files).
+    const days = all.map((row) => row.at.slice(0, 10)).sort();
+    const from = days[0];
+    const to = days.at(-1);
+    const res = await fetch(`${BASE}/api/decisions.csv?from=${from}&to=${to}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toMatch(/^text\/csv/);
-    expect(res.headers.get("content-disposition")).toBe(`attachment; filename="decisions-${today}-${today}.csv"`);
+    expect(res.headers.get("content-disposition")).toBe(`attachment; filename="decisions-${from}-${to}.csv"`);
     const lines = (await res.text()).trim().split("\n");
     expect(lines[0]).toBe("time,decision,source,bot,tool,summary,rule,unattended,answered_by,thread,request");
     expect(lines).toHaveLength(all.length + 1);

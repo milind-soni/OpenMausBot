@@ -11,6 +11,8 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { hostTimeout } from "./testing/host-timeout.ts";
+import { withoutTurnClock } from "./testing/turn-clock-text.ts";
 
 const count = (text: string, needle: string) => text.split(needle).length - 1;
 const jsonl = (path: string) => existsSync(path)
@@ -52,6 +54,24 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
         `if (after("--resume") || after("--session-id")) appendFileSync(${JSON.stringify(launchesPath)}, JSON.stringify({ botId, pid: process.pid, resume: after("--resume"), sessionId: after("--session-id"), mode: process.env.FAKE_CLAUDE_MODE ?? "happy" }) + "\\n");`,
         `else if (argv[0] === "app-server") appendFileSync(${JSON.stringify(codexLaunchesPath)}, JSON.stringify({ botId: process.env.OMB_BOT_ID ?? null }) + "\\n");`,
         `if (botId) process.env.FAKE_CLAUDE_PROMPTS = ${JSON.stringify(join(dataDir, "consumed-"))} + botId + ".jsonl";`,
+        // A mode reaches the next launch. A Claude process kept warm between
+        // turns ends once it is idle after its mode changed, as a CLI that
+        // exited between turns, so the next turn launches under the new mode.
+        ...(name === "claude" ? [
+          'if (after("--resume") || after("--session-id")) {',
+          `  const modeNow = () => existsSync(${JSON.stringify(modePath(name))}) ? readFileSync(${JSON.stringify(modePath(name))}, "utf8") : "";`,
+          "  const launched = modeNow();",
+          "  let idle = false;",
+          "  const write = process.stdout.write.bind(process.stdout);",
+          "  process.stdout.write = (chunk, ...rest) => {",
+          "    const text = String(chunk);",
+          `    if (text.includes('"subtype":"init"')) idle = false;`,
+          `    if (text.includes('"type":"result"')) idle = true;`,
+          "    return write(chunk, ...rest);",
+          "  };",
+          '  setInterval(() => { if (idle && modeNow() !== launched) write("", () => process.exit(0)); }, 50).unref();',
+          "}",
+        ] : []),
         // A crashed fixture server must not leave a gated fake provider (or
         // its stdio MCP child) alive after its temporary home is removed.
         'process.stdin.on("end", () => process.exit(0));',
@@ -91,6 +111,12 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
     const idle = (threadId = thread) => expect.poll(async () => (await api("/api/bots")).bots.find((b: any) => b.id === chief.id)
       .tasks.find((stored: any) => stored.threadId === threadId).busy, { timeout: 30_000 }).toBe(false);
     const launches = (botId = chief.id) => jsonl(launchesPath).filter((launch: any) => launch.botId === botId);
+    // The native session a bot's process runs: the one its launch resumed,
+    // or the one it started. A warm process keeps it across turns.
+    const nativeSession = (botId = chief.id) => {
+      const launch = launches(botId).at(-1);
+      return launch?.resume ?? launch?.sessionId ?? null;
+    };
     // Prompts a bot's engine has actually consumed: a launch record is
     // written before its engine reads the prompt, so launch counts alone
     // cannot prove the prompt arrived.
@@ -102,7 +128,17 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
     const codexModels = async () => (await cli("models")).instances.find((item: any) => item.instanceId === "codex").models.options.map((m: any) => m.id);
     const selectModel = (model: string, extra: Record<string, unknown> = {}) =>
       api(`/api/bots/${chief.id}/tasks/${thread}`, { modelSelection: { instanceId: "codex", model, ...extra }, requireAvailableModel: true }, "PATCH");
-    const setMode = (mode?: string, engine = "claude") => mode ? writeFileSync(modePath(engine), mode) : rmSync(modePath(engine), { force: true });
+    const alive = (pid: number) => {
+      try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
+    };
+    // Waits for the Source's warm process to end (see wrap), so its next
+    // turn launches under the new mode.
+    const setMode = async (mode?: string, engine = "claude") => {
+      if (mode) writeFileSync(modePath(engine), mode);
+      else rmSync(modePath(engine), { force: true });
+      const pid = engine === "claude" ? launches().at(-1)?.pid : undefined;
+      if (pid) await expect.poll(() => alive(pid), { timeout: 30_000 }).toBe(false);
+    };
     const delegate = (key: string, to: any[], message: string, extra: Record<string, unknown> = {}) =>
       ({ steps: [{ arguments: { bot_ids: to.map((b) => b.id), request_key: key, message } }], reply: "Assigned", resumeReply: "Done", ...extra });
     const gate = (name: string) => join(dataDir, `${name}.gate`);
@@ -132,7 +168,7 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
       }, { timeout: 20_000 }).toBe(true);
     };
     await test({ session, dataDir, cli, api, chief, lead, qa, ops, plan, save, send, wait, idle, turns, prompt, messages, nodes, task, handed,
-      launches, consumed, codexLaunches, codexCalls, codexModels, selectModel, setMode, delegate, gate, holdDelegation, open, thread, useModel, restart });
+      launches, nativeSession, consumed, codexLaunches, codexCalls, codexModels, selectModel, setMode, delegate, gate, holdDelegation, open, thread, useModel, restart });
   } finally {
     if (restarted) await waitForExit(restarted, { signal: "SIGTERM" });
     await session.close();
@@ -166,7 +202,7 @@ it("resumes the source session and gives it each of three results exactly once, 
   // The session already holds the earlier chat.
   expect(text).not.toContain("ORCHID_7Q");
   expect(text).not.toMatch(/^Assistant: @/m);
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("gives the return turn a result that landed while a newer message was running, exactly once", () => fixture(async (f) => {
   await warmUp(f);
@@ -184,7 +220,7 @@ it("gives the return turn a result that landed while a newer message was running
   expect(returned.resumed).toBe(true);
   expect(count(f.prompt(returned), "LEAD_RESULT_TOKEN")).toBe(1);
   expect(f.launches().at(-1).resume).not.toBeNull();
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("offers a result that lands mid-turn after its source was stopped to the next turn, once, labelled", () => fixture(async (f) => {
   await warmUp(f);
@@ -215,15 +251,15 @@ it("offers a result that lands mid-turn after its source was stopped to the next
   await f.send("Anything else?");
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "STOPPED_SOURCE_RESULT")).toBe(0);
-}), 90_000);
+}), hostTimeout(90_000));
 
 // No provider reports that it read a message steered into a running turn, so
 // the next turn offers it once more, saying the session may already have it.
 it("offers a message steered into a running turn to the next turn once, marked as possibly already seen", () => fixture(async (f) => {
   await warmUp(f);
-  f.plan[f.chief.id] = { reply: "Working", gateFile: f.gate("turn") };
+  f.plan[f.chief.id] = { reply: "Working", readyFile: f.gate("turn-ready"), gateFile: f.gate("turn") };
   await f.send("Start on the report.");
-  await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => existsSync(f.gate("turn-ready")), { timeout: 15_000 }).toBe(true);
   expect((await f.send("STEERED_MID_TURN also cover costs")).steered).toBe(true);
   f.open(f.gate("turn"));
   await f.wait();
@@ -239,7 +275,7 @@ it("offers a message steered into a running turn to the next turn once, marked a
   await f.send("Anything else?");
   await f.wait();
   expect(f.prompt(f.turns().at(-1))).not.toContain("STEERED_MID_TURN");
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("offers the results again when the return turn fails before the provider acts on it", () => fixture(async (f) => {
   await warmUp(f);
@@ -255,7 +291,7 @@ it("offers the results again when the return turn fails before the provider acts
   const next = f.prompt(f.turns().at(-1));
   expect(count(next, "UNACCEPTED_RESULT")).toBe(1);
   expect(JSON.stringify(f.handed())).not.toContain("card-");
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("offers the results again when the person stops the return turn before the provider acts on it", () => fixture(async (f) => {
   await warmUp(f);
@@ -267,7 +303,7 @@ it("offers the results again when the person stops the return turn before the pr
   await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 20_000 }).toBe("completed");
   await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status, { timeout: 20_000 }).toBe("running");
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
-  await f.wait();
+  await f.idle();
 
   // Whether the stopped fixture records a turn of its own depends on the
   // order the platform tears its process tree down in: when its MCP child
@@ -282,7 +318,7 @@ it("offers the results again when the person stops the return turn before the pr
   const replies = (await f.messages()).map((message: any) => message.text);
   expect(replies).toContain("Recovered");
   expect(replies).not.toContain("never sent");
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("rebuilds a rejected resume with each result exactly once", () => fixture(async (f) => {
   await warmUp(f);
@@ -296,7 +332,7 @@ it("rebuilds a rejected resume with each result exactly once", () => fixture(asy
   expect(recovered).toContain("ORCHID_7Q");
   expect(count(recovered, "RECOVERY_RESULT_START")).toBe(1);
   expect(count(recovered, "RECOVERY_RESULT_END")).toBe(1);
-}, { env: { FAKE_CLAUDE_MODE: "dead-session" } }), 60_000);
+}, { env: { FAKE_CLAUDE_MODE: "dead-session" } }), hostTimeout(60_000));
 
 it("keeps provenance and exactly-once delivery across rework rounds to the same teammate", () => fixture(async (f) => {
   await warmUp(f);
@@ -328,7 +364,7 @@ it("keeps provenance and exactly-once delivery across rework rounds to the same 
   for (const state of Object.values(handed) as any[]) {
     for (const id of [state.through, ...state.ids].filter(Boolean)) expect(stored.has(id), id).toBe(true);
   }
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("resets Claude's native context on edit, then resumes only the replacement branch", () => fixture(async (f) => {
   await warmUp(f, "KEEP_CONTEXT: work only in the test workspace.");
@@ -358,10 +394,10 @@ it("resets Claude's native context on edit, then resumes only the replacement br
   f.plan[f.chief.id] = { reply: "Continuing the replacement" };
   await f.send("Continue");
   await f.wait();
-  expect(f.launches().at(-1).resume).toBe(launch.sessionId);
+  expect(f.nativeSession()).toBe(launch.sessionId);
   expect(f.prompt(f.turns().at(-1))).not.toContain("ABANDONED_");
   expect(resets()).toHaveLength(1);
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("replays a delegated result once after a rewind, and keeps resuming afterwards", () => fixture(async (f) => {
   await warmUp(f);
@@ -382,13 +418,14 @@ it("replays a delegated result once after a rewind, and keeps resuming afterward
   expect(rewound).toContain("rewound this conversation");
   expect(count(rewound, "REWIND_RESULT")).toBe(1);
   expect(f.launches().at(-1).resume).toBeNull();
+  const rebuilt = f.nativeSession();
 
   f.plan[f.chief.id] = { reply: "Still here" };
   await f.send("And now?");
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "REWIND_RESULT")).toBe(0);
-  expect(f.launches().at(-1).resume).not.toBeNull();
-}), 90_000);
+  expect(f.nativeSession()).toBe(rebuilt);
+}), hostTimeout(90_000));
 
 it("wakes a busy delegate_bot source with the reply that landed during its turn, once and labelled", () => fixture(async (f) => {
   // The second delegation's reply is held until the revived turn has
@@ -414,7 +451,7 @@ it("wakes a busy delegate_bot source with the reply that landed during its turn,
   // The first reply wakes the source, whose turn holds until both replies
   // are in: the second one lands while that turn is running.
   const replies = async () => (await f.messages(threadId)).filter((m: any) => /^@(QA|Ops) replied to the delegated task/.test(m.text ?? "")).length;
-  await expect.poll(() => f.launches().length, { timeout: 30_000 }).toBe(2);
+  await expect.poll(() => f.consumed(), { timeout: 30_000 }).toBe(2);
   f.open(f.gate("ops"));
   await expect.poll(replies, { timeout: 30_000 }).toBe(2);
   expect((await f.api("/api/bots")).bots.find((b: any) => b.id === f.chief.id).tasks.find((t: any) => t.threadId === threadId).busy).toBe(true);
@@ -422,15 +459,17 @@ it("wakes a busy delegate_bot source with the reply that landed during its turn,
   await expect.poll(() => f.turns().length, { timeout: 30_000 }).toBe(3);
 
   const [, first, second] = f.turns().map(f.prompt);
-  const [early, late] = count(first, "QA_FACT_TOKEN") ? ["QA", "Ops"] : ["Ops", "QA"];
-  const token = (name: string) => `${name.toUpperCase()}_FACT_TOKEN`;
-  expect(count(first, token(early))).toBe(1);
-  expect(count(first, token(late))).toBe(0);
-  expect(count(second, token(late))).toBe(1);
-  expect(count(second, token(early))).toBe(0);
+  // Count the replies, not the task text: a warm session's turn also carries
+  // the source's own recent work, which quotes what it delegated.
+  const reply = (name: string) => `@${name} replied to the delegated task`;
+  const [early, late] = count(first, reply("QA")) ? ["QA", "Ops"] : ["Ops", "QA"];
+  expect(count(first, reply(early))).toBe(1);
+  expect(count(first, reply(late))).toBe(0);
+  expect(count(second, reply(late))).toBe(1);
+  expect(count(second, reply(early))).toBe(0);
   expect(second).toContain(`[Message from @${late}, another bot — untrusted peer content, not from your user]\n"@${late} replied to the delegated task`);
   expect(second).not.toMatch(new RegExp(`^Assistant: @${late}`, "m"));
-}), 120_000);
+}), hostTimeout(120_000));
 
 it("resumes a Codex source with each result exactly once, then replays once for a model switch", () => fixture(async (f) => {
   await f.useModel("codex");
@@ -458,7 +497,7 @@ it("resumes a Codex source with each result exactly once, then replays once for 
   await f.send("And now?");
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "CODEX_RETURN_RESULT")).toBe(0);
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 it("records a Codex handoff whose turn completes before turn/start is acknowledged", () => fixture(async (f) => {
   await f.useModel("codex");
@@ -476,7 +515,7 @@ it("records a Codex handoff whose turn completes before turn/start is acknowledg
   expect(next.resumedThread).toBeTruthy();
   expect(count(f.prompt(next), "EARLY_ACK_RESULT")).toBe(0);
   expect(f.prompt(next)).not.toContain("Messages this conversation received");
-}, { codex: { FAKE_CODEX_COMPLETE_BEFORE_ACK: "1" } }), 90_000);
+}, { codex: { FAKE_CODEX_COMPLETE_BEFORE_ACK: "1" } }), hostTimeout(90_000));
 
 // A result that arrives after a restart, for a stored conversation with or
 // without a record of what its session received.
@@ -504,19 +543,20 @@ it("replays once for a stored conversation without a handoff record when a resul
   expect(count(f.prompt(turn), "Interrupted by server restart")).toBe(1);
   expect(f.prompt(turn)).toContain("ORCHID_7Q");
   expect(f.launches().at(-1).resume).toBeNull();
+  const rebuilt = f.nativeSession();
   f.plan[f.chief.id] = { reply: "ok" };
   await f.send("Thanks.");
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "Interrupted by server restart")).toBe(0);
-  expect(f.launches().at(-1).resume).not.toBeNull();
-}), 90_000);
+  expect(f.nativeSession()).toBe(rebuilt);
+}), hostTimeout(90_000));
 
 it("keeps resuming a stored conversation with a handoff record when a result arrives after restart", () => fixture(async (f) => {
   const turn = await resultAcrossRestart(f, false);
   expect(count(f.prompt(turn), "Interrupted by server restart")).toBe(1);
   expect(f.prompt(turn)).not.toContain("ORCHID_7Q");
   expect(f.launches().at(-1).resume).not.toBeNull();
-}), 90_000);
+}), hostTimeout(90_000));
 
 // ── Session replacement: the record describes one native session ──
 
@@ -534,11 +574,13 @@ it("gives a replacement session the full assignment when a result returns after 
   await f.send("Please have Engineering build the export.");
   await leadRunning(f);
   const original = cursor(f);
-  f.setMode("resume=dead-session");
+  await f.setMode("resume=dead-session");
   await f.send("Meanwhile, what is 2+2?");
   await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(3);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.role === "bot" && m.text === "4"), { timeout: 10_000 }).toBe(true);
-  f.setMode();
+  await f.setMode();
+  await expect.poll(() => cursor(f), { timeout: 15_000 }).toBeTruthy();
+  await expect.poll(() => cursor(f), { timeout: 15_000 }).not.toBe(original);
   const replacement = cursor(f);
   f.open(f.gate("lead"));
   await f.wait();
@@ -550,7 +592,7 @@ it("gives a replacement session the full assignment when a result returns after 
   expect(f.launches().at(-1).resume).toBe(replacement);
   expect(count(recovery + returned, "REPLACED_RESULT")).toBe(1);
   expect(count(returned, "BRIEF_END")).toBeGreaterThanOrEqual(1);
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("gives a replacement session an earlier round's result that its rebuild could not replay, and credits it only with that rebuild", () => fixture(async (f) => {
   await warmUp(f, "Warm up.");
@@ -588,13 +630,13 @@ it("gives a replacement session an earlier round's result that its rebuild could
   // round one's result: the first result on the branch
   const resultMessage = (await f.api(`/api/threads/${f.thread}/messages?limit=200`)).messages.find((m: any) => m.roomRequest?.phase === "result");
   const original = cursor(f);
-  f.setMode("resume=dead-session");
+  await f.setMode("resume=dead-session");
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === `chat reply ${chat - 1}` && m.turnTerminal), { timeout: 10_000 }).toBe(true);
   await sourceWaiting();
   expect((await f.send("One more question.")).steered).toBeUndefined();
   await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(4 + chat);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "recovered reply"), { timeout: 10_000 }).toBe(true);
-  f.setMode();
+  await f.setMode();
   const recovery = f.prompt(f.turns().at(-1));
   expect(recovery).toContain("could not be resumed");
   expect(count(recovery, "ROUND_ONE_RESULT_TOKEN")).toBe(0);
@@ -619,22 +661,22 @@ it("gives a replacement session an earlier round's result that its rebuild could
   expect(count(returned, "ROUND_TWO_RESULT")).toBe(1);
   expect(count(returned, "ROUND_ONE_RESULT_TOKEN")).toBe(1);
   expect(returned).not.toContain("already delivered");
-}), 240_000);
+}), hostTimeout(240_000));
 
 it("does not send a message again that a recovery replay carried, including one the unseen limit had deferred", () => fixture(async (f) => {
   await warmUp(f);
-  f.setMode("exit-early");
+  await f.setMode("exit-early");
   const marks = Array.from({ length: 13 }, (_, i) => `DEFERRED_${String(i).padStart(2, "0")}_MARK`);
   for (const [i, mark] of marks.entries()) {
     expect((await f.send(`${mark} please note this`)).steered).toBeUndefined();
     await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(3 + 2 * i);
     await f.idle();
   }
-  f.setMode("resume=dead-session");
+  await f.setMode("resume=dead-session");
   f.plan[f.chief.id] = { reply: "Rebuilt" };
   await f.send("Recover now.");
   await f.wait();
-  f.setMode();
+  await f.setMode();
   const recovery = f.prompt(f.turns().at(-1));
   expect(recovery).toContain("could not be resumed");
   for (const mark of marks) expect(count(recovery, mark), mark).toBe(1);
@@ -646,15 +688,15 @@ it("does not send a message again that a recovery replay carried, including one 
   expect(f.launches().at(-1).resume).toBe(cursor(f));
   for (const mark of marks) expect(count(next, mark), mark).toBe(0);
   expect(next).not.toContain("not seen yet");
-}), 120_000);
+}), hostTimeout(120_000));
 
 it("replays again when a replacement session fails before the provider acts on it", () => fixture(async (f) => {
   await warmUp(f);
-  f.setMode("resume=dead-session,fresh=api-error");
+  await f.setMode("resume=dead-session,fresh=api-error");
   await f.send("REPLACEMENT_FAILS please answer this");
   await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(3);
   await f.idle();
-  f.setMode();
+  await f.setMode();
   f.plan[f.chief.id] = { reply: "Answered" };
   await f.send("Try again.");
   await f.wait();
@@ -662,7 +704,7 @@ it("replays again when a replacement session fails before the provider acts on i
   expect(f.launches().at(-1).resume).toBeNull();
   expect(next).toContain("ORCHID_7Q");
   expect(count(next, "REPLACEMENT_FAILS")).toBe(1);
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("gives an engine switched in while a teammate works the full assignment when the result returns", () => fixture(async (f) => {
   await warmUp(f);
@@ -682,16 +724,16 @@ it("gives an engine switched in while a teammate works the full assignment when 
   expect(returned.resumedThread).toBeTruthy();
   expect(count(f.prompt(returned), "SWITCH_RESULT")).toBe(1);
   expect(f.prompt(returned)).toContain("MUST_KEEP_CONSTRAINT");
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 // ── Acceptance: what counts as the provider having the message ──
 
 it("does not offer a message or steer the person stopped before any reply again", () => fixture(async (f) => {
-  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { reply: "never shown", gateFile: f.gate("slow") }, { reply: "Listed" }] };
+  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { readyFile: f.gate("slow-ready"), reply: "never shown", gateFile: f.gate("slow") }, { reply: "Listed" }] };
   await f.send("Warm up.");
   await f.wait();
   await f.send("STOPPED_ASK please drop the staging database");
-  await expect.poll(() => f.consumed(), { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => existsSync(f.gate("slow-ready")), { timeout: 15_000 }).toBe(true);
   expect((await f.send("STOPPED_STEER and the backups")).steered).toBe(true);
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.idle();
@@ -702,7 +744,7 @@ it("does not offer a message or steer the person stopped before any reply again"
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(next).not.toContain("STOPPED_ASK");
   expect(next).not.toContain("STOPPED_STEER");
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("does not offer a message the person stopped before any reply again on Codex", () => fixture(async (f) => {
   await f.useModel("codex");
@@ -719,7 +761,7 @@ it("does not offer a message the person stopped before any reply again on Codex"
   const next = f.turns().at(-1);
   expect(next.resumedThread).toBeTruthy();
   expect(f.prompt(next)).not.toContain("CODEX_STOPPED_ASK");
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 it("offers a steered message again when the turn fails before the provider used it", () => fixture(async (f) => {
   f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { progress: "Looking into it", gateFile: f.gate("turn"), fail: true }, { reply: "Covered" }] };
@@ -735,7 +777,7 @@ it("offers a steered message again when the turn fails before the provider used 
   const next = f.prompt(f.turns().at(-1));
   expect(count(next, "UNUSED_STEER")).toBe(1);
   expect(next).not.toContain("Start on the report.");
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("does not offer a steered message again after the person stops the turn it went into", () => fixture(async (f) => {
   f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { progress: "Looking into it", reply: "never shown", gateFile: f.gate("turn") }, { reply: "Covered" }] };
@@ -750,7 +792,7 @@ it("does not offer a steered message again after the person stops the turn it we
   await f.send("Is it done?");
   await f.wait();
   expect(f.prompt(f.turns().at(-1))).not.toContain("STOPPED_TURN_STEER");
-}), 60_000);
+}), hostTimeout(60_000));
 
 // The same withdrawal, for a message the person steered out of the server-side
 // queue instead of straight into the turn: a different route, one running turn.
@@ -759,11 +801,11 @@ it("does not offer a message again that the person steered out of the queue into
   writeFileSync(refuseLiveSteers, "refuse live steers until the queue is lifted");
   return fixture(async (f) => {
     await f.useModel("codex");
-    f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { reply: "never shown", gateFile: f.gate("slow") }, { reply: "Listed" }] };
+    f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { readyFile: f.gate("slow-ready"), reply: "never shown", gateFile: f.gate("slow") }, { reply: "Listed" }] };
     await f.send("Warm up.");
     await f.wait();
     await f.send("Start on the report.");
-    await expect.poll(() => f.codexLaunches().length, { timeout: 15_000 }).toBe(2);
+    await expect.poll(() => existsSync(f.gate("slow-ready")), { timeout: 15_000 }).toBe(true);
     // The engine refuses the live steer, so the words wait in the queue.
     const queued = await f.send("QUEUED_STEER also cover costs");
     expect(queued.queued).toBe(true);
@@ -780,7 +822,7 @@ it("does not offer a message again that the person steered out of the queue into
     await f.wait();
     expect(f.prompt(f.turns().at(-1))).not.toContain("QUEUED_STEER");
   }, { codex: { FAKE_CODEX_STEER_ERROR_FILE: refuseLiveSteers } });
-}, 90_000);
+}, hostTimeout(90_000));
 
 it("offers the results again when the provider reports an API error instead of answering", () => fixture(async (f) => {
   await warmUp(f);
@@ -789,24 +831,24 @@ it("offers the results again when the provider reports an API error instead of a
   await f.send("Please have Engineering build the export.");
   await leadRunning(f);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.role === "bot" && m.text === "Assigned"), { timeout: 15_000 }).toBe(true);
-  f.setMode("api-error");
+  await f.setMode("api-error");
   f.open(f.gate("lead"));
   await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status, { timeout: 20_000 }).toBe("failed");
   await f.idle();
-  f.setMode();
+  await f.setMode();
   await f.send("What did Engineering find?");
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "API_ERROR_RESULT")).toBe(1);
-}), 60_000);
+}), hostTimeout(60_000));
 
 it("does not hand the model a queued follow-up that a restart recovered with an unknown outcome", () => fixture(async (f) => {
   await f.api("/api/config", { threads: { maxConcurrentPerBot: 1 } }, "PATCH");
   const other = (await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Second conversation" })).task.threadId;
-  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { reply: "Held", gateFile: f.gate("hold") }, { reply: "never", gateFile: f.gate("never") }] };
+  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { readyFile: f.gate("hold-ready"), reply: "Held", gateFile: f.gate("hold") }, { reply: "never", gateFile: f.gate("never") }] };
   await f.send("Warm up.", other);
   await f.wait(other);
   await f.send("Hold the only slot.");
-  await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => existsSync(f.gate("hold-ready")), { timeout: 15_000 }).toBe(true);
   expect((await f.send("RECOVERED_FOLLOWUP deploy it", other)).queued).toBe(true);
   f.open(f.gate("hold"));
   await expect.poll(() => f.consumed(), { timeout: 15_000 }).toBe(3);
@@ -827,7 +869,7 @@ it("does not hand the model a queued follow-up that a restart recovered with an 
   expect(next).toBeDefined();
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(f.prompt(next)).not.toContain("RECOVERED_FOLLOWUP");
-}), 90_000);
+}), hostTimeout(90_000));
 
 // ── Session configuration: what a resume cannot change ──
 
@@ -853,7 +895,7 @@ it("gives a delegated return the fresh session and replay it always had when the
   await f.wait();
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(count(f.prompt(f.turns().at(-1)), "SOUL_CHANGE_RESULT")).toBe(0);
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("keeps resuming an ordinary turn after a soul change, as before", () => fixture(async (f) => {
   await warmUp(f);
@@ -862,21 +904,21 @@ it("keeps resuming an ordinary turn after a soul change, as before", () => fixtu
   await f.send("Second message.");
   await f.wait();
   expect(f.launches().at(-1).resume).not.toBeNull();
-  expect(f.prompt(f.turns().at(-1))).toBe("Second message.");
-}), 60_000);
+  expect(withoutTurnClock(f.prompt(f.turns().at(-1)))).toBe("Second message.");
+}), hostTimeout(60_000));
 
 // ── Steers: never counted as received on output alone ──
 
 it("offers a steer written into a resume the provider then rejected on the next turn", () => fixture(async (f) => {
   await warmUp(f);
-  f.setMode("resume=dead-session,holdresume=1");
+  await f.setMode("resume=dead-session,holdresume=1");
   f.plan[f.chief.id] = { reply: "Four." };
   await f.send("QUESTION_ONE what is 2+2?");
   await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
   expect((await f.send("LOST_STEER_MARK and also mention the backups")).steered).toBe(true);
   f.open(f.gate("resume-hold"));
   await f.wait();
-  f.setMode();
+  await f.setMode();
   // the rebuild was built before the steer existed
   expect(count(f.prompt(f.turns().at(-1)), "LOST_STEER_MARK")).toBe(0);
 
@@ -885,7 +927,7 @@ it("offers a steer written into a resume the provider then rejected on the next 
   await f.wait();
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(count(f.prompt(f.turns().at(-1)), "LOST_STEER_MARK")).toBe(1);
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("offers a steered message again when only output of the model call already running follows it before the turn fails", () => fixture(async (f) => {
   f.plan[f.chief.id] = { turns: [
@@ -904,7 +946,7 @@ it("offers a steered message again when only output of the model call already ru
   await f.send("Is it done?");
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "BUFFERED_STEER")).toBe(1);
-}), 60_000);
+}), hostTimeout(60_000));
 
 // ── Fallbacks that must send what today's build sends ──
 
@@ -917,10 +959,10 @@ it("rebuilds a delegated return whose Codex thread is gone into a new thread wit
   await leadRunning(f);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.role === "bot" && m.text === "Assigned"), { timeout: 15_000 }).toBe(true);
   // The personal (unmanaged) Codex app-server no longer has the thread.
-  f.setMode("happy", "codex");
+  await f.setMode("happy", "codex");
   f.open(f.gate("lead"));
   await f.wait();
-  f.setMode(undefined, "codex");
+  await f.setMode(undefined, "codex");
 
   expect(f.nodes().find((node: any) => !node.parentId).status).toBe("completed");
   const returned = f.prompt(f.turns().at(-1));
@@ -933,7 +975,7 @@ it("rebuilds a delegated return whose Codex thread is gone into a new thread wit
   const next = f.turns().at(-1);
   expect(next.resumedThread).toBeTruthy();
   expect(count(f.prompt(next), "MISSING_THREAD_RESULT")).toBe(0);
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 it("replays a result that reaches an engine switched in before it arrived with today's update preamble", () => fixture(async (f) => {
   await warmUp(f);
@@ -951,7 +993,7 @@ it("replays a result that reaches an engine switched in before it arrived with t
   expect(returned).not.toContain("switched this bot over to you");
   expect(returned).toContain("ORCHID_7Q");
   expect(count(returned, "EARLY_SWITCH_RESULT")).toBe(1);
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 // A `git` on the server's PATH that holds its first command while `hold` exists,
 // then runs the real git: a turn's checkpoint then waits inside turn setup.
@@ -1014,7 +1056,7 @@ it.skipIf(process.platform === "win32")("gives a delegated return today's fresh 
   await f.wait();
   expect(f.launches().at(-1).resume).toBe(Object.values(f.task().resumeCursors)[0]);
   expect(count(f.prompt(f.turns().at(-1)), "SETUP_SOUL_RESULT")).toBe(0);
-}), 90_000);
+}), hostTimeout(90_000));
 
 it("gives a delegate_bot source today's fresh session and replay when its soul changed since the session started", () => fixture(async (f) => {
   // Ops's reply is held until the revived turn has launched: under load the
@@ -1038,17 +1080,14 @@ it("gives a delegate_bot source today's fresh session and replay when its soul c
   const run = (await f.api(`/api/routines/${created.routine.id}/run`, {})).run;
   let threadId = "";
   await expect.poll(async () => (threadId = (await f.api("/api/routines")).runs.find((r: any) => r.id === run.id)?.threadId ?? ""), { timeout: 15_000 }).not.toBe("");
-  // The first reply wakes the source, whose launch proves its prompt and
-  // record snapshot the old soul; the second reply then lands while that
-  // turn holds its gate, and the soul edit below is what the third turn
-  // must find stale.
+  // The first reply wakes the source, whose turn snapshots the old soul in
+  // its prompt and record; the second reply then lands while that turn
+  // holds its gate, and the soul edit below is what the third turn must
+  // find stale. Change the soul only once that gated turn has consumed the
+  // old prompt; otherwise a later resume legitimately reuses the already
+  // refreshed session.
   const replies = async () => (await f.messages(threadId)).filter((m: any) => /^@(QA|Ops) replied to the delegated task/.test(m.text ?? "")).length;
-  await expect.poll(() => f.launches().length, { timeout: 30_000 }).toBe(2);
-  // Replies can both be recorded before the first resume process starts, and
-  // a launch record is written before its engine reads the prompt. Change
-  // the soul only once that gated launch has consumed the old prompt;
-  // otherwise a later resume legitimately reuses the already refreshed session.
-  await expect.poll(() => f.consumed(), { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => f.consumed(), { timeout: 30_000 }).toBe(2);
   await f.api(`/api/bots/${f.chief.id}`, { soul: "PEER_SOUL_MARK Always answer in German." }, "PATCH");
   f.open(f.gate("ops"));
   await expect.poll(replies, { timeout: 30_000 }).toBe(2);
@@ -1063,7 +1102,7 @@ it("gives a delegate_bot source today's fresh session and replay when its soul c
   await expect.poll(() => f.launches().at(-1)?.resume, { timeout: 10_000 }).toBe(null);
   expect(f.prompt(third)).toContain("received an update outside your provider session");
   expect(count(f.prompt(third), late)).toBe(1);
-}), 120_000);
+}), hostTimeout(120_000));
 
 // ── Settings a resumed session cannot take on ──
 
@@ -1087,7 +1126,7 @@ it("gives a Codex return the model chosen while its teammate worked", () => fixt
   const returned = f.prompt(f.turns().at(-1));
   expect(returned).toContain("received an update outside your provider session");
   expect(count(returned, "CODEX_MODEL_RESULT")).toBe(1);
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
 
 it("gives a Codex return today's fresh thread when explicit effort is cleared while its teammate worked", () => fixture(async (f) => {
   await f.useModel("codex");
@@ -1109,7 +1148,39 @@ it("gives a Codex return today's fresh thread when explicit effort is cleared wh
   expect(f.codexCalls().filter((call: any) => call.method === "thread/start")).toHaveLength(1);
   expect(f.codexCalls().find((call: any) => call.method === "turn/start")?.params.effort).toBeUndefined();
   expect(count(f.prompt(f.turns().at(-1)), "CODEX_EFFORT_RESULT")).toBe(1);
-}, { codex: {} }), 90_000);
+}, { codex: {} }), hostTimeout(90_000));
+
+it("moves a Codex chat to a new thread with its history when the person clears an effort its thread holds", () => fixture(async (f) => {
+  await f.useModel("codex");
+  const [model] = await f.codexModels();
+  await f.selectModel(model);
+  await warmUp(f);
+  // A level picked mid-chat reaches the thread it resumes.
+  await f.selectModel(model, { effort: "high" });
+  f.plan[f.chief.id] = { reply: "On high effort" };
+  await f.send("Think harder about this one.");
+  await f.wait();
+  expect(f.codexCalls().filter((call: any) => call.method === "thread/resume")).toHaveLength(1);
+  expect(f.codexCalls().find((call: any) => call.method === "turn/start")?.params.effort).toBe("high");
+
+  // turn/start cannot clear it: resuming would keep the thread on "high".
+  await f.selectModel(model);
+  f.plan[f.chief.id] = { reply: "On default effort" };
+  await f.send("What is the codename?");
+  await f.wait();
+  expect(f.codexCalls().filter((call: any) => call.method === "thread/resume")).toHaveLength(0);
+  expect(f.codexCalls().filter((call: any) => call.method === "thread/start")).toHaveLength(1);
+  expect(f.codexCalls().find((call: any) => call.method === "turn/start")?.params.effort).toBeUndefined();
+  expect(count(f.prompt(f.turns().at(-1)), "ORCHID_7Q")).toBe(1);
+
+  // That thread runs on the default effort: the next turn resumes it.
+  f.plan[f.chief.id] = { reply: "Still on default effort" };
+  await f.send("And now?");
+  await f.wait();
+  const next = f.turns().at(-1);
+  expect(next.resumedThread).toBeTruthy();
+  expect(f.prompt(next)).not.toContain("ORCHID_7Q");
+}, { codex: {} }), hostTimeout(90_000));
 
 it("keeps today's fresh return on a Claude CLI that cannot refresh a resumed system prompt", () => fixture(async (f) => {
   await warmUp(f);
@@ -1127,4 +1198,4 @@ it("keeps today's fresh return on a Claude CLI that cannot refresh a resumed sys
   expect(count(returned, "OLD_CLI_RESULT")).toBe(1);
   // nothing recorded: this engine cannot be given only what it has not seen
   expect(f.handed()).toBeUndefined();
-}, { env: { FAKE_CLAUDE_VERSION: "2.1.200" } }), 90_000);
+}, { env: { FAKE_CLAUDE_VERSION: "2.1.200" } }), hostTimeout(90_000));

@@ -1,15 +1,23 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Bot } from "@/state/store";
+import { initialState, type Bot } from "@/state/store";
 
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
+// These rows are Advanced mode's: Simple mode keeps one conversation per bot,
+// so its rows have no thread controls (useShowThreads).
+vi.mock("@/lib/interface-mode", async (original) => ({
+  ...await original<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => true,
+}));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotDeleteMenuItem, BotListItem, botConfirmCopy, currentArchivableBot } from "./Sidebar";
+import { BotDeleteMenuItem, BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
+import { endCall } from "@/lib/call";
+import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 
 const bot = (overrides: Partial<Bot> = {}): Bot => ({
   id: "atlas",
@@ -25,18 +33,15 @@ const bot = (overrides: Partial<Bot> = {}): Bot => ({
   ...overrides,
 });
 
-function renderRow(candidate: Bot, quiet = false) {
-  return renderToStaticMarkup(createElement(
-    StoreProvider,
-    null,
-    createElement(BotListItem, {
-      bot: candidate,
-      density: "comfortable",
-      quiet,
-      onMenu: vi.fn(),
-    }),
-  ));
+function renderRow(candidate: Bot, quiet = false, density: "comfortable" | "icons" = "comfortable") {
+  return renderToStaticMarkup(createElement(BotListItem, botRowProps(initialState, vi.fn(), candidate, { density, quiet, query: "", onMenu: vi.fn() })));
 }
+
+afterEach(() => {
+  resetLiveMedia();
+  endCall();
+  vi.unstubAllGlobals();
+});
 
 describe("BotListItem", () => {
   it("offers direct New thread and New folder icons and a keyboard-accessible bot menu", () => {
@@ -80,6 +85,19 @@ describe("BotListItem", () => {
     }));
     expect(markup).toContain("Created notes.txt with three lines.");
     expect(markup).not.toContain("[digest]");
+  });
+
+  // A failed turn's row is stored as "error: …"; the preview reads like the
+  // chat row (src/lib/failed-turn.ts), not like a log line.
+  it("previews a failed turn without its error marker", () => {
+    const markup = renderRow(bot({
+      messages: [
+        { id: "u1", role: "user", kind: "text", text: "check the site", at: 1 },
+        { id: "e1", role: "bot", kind: "activity", at: 2, tool: { name: "error: This computer isn't a place on your OMB Cloud: its bots run in the cloud.", ok: false } },
+      ] as Bot["messages"],
+    }));
+    expect(markup).toContain("This computer isn&#x27;t a place on your OMB Cloud: its bots run in the cloud.");
+    expect(markup).not.toContain("error:");
   });
 
   // A turn can end on the approval card itself: Stop while it is open, or a
@@ -185,6 +203,29 @@ describe("BotListItem", () => {
     expect(renderRow(bot({ busy: true }))).toContain('data-testid="working-dot"');
     expect(renderRow(bot())).not.toContain('data-testid="working-dot"');
     expect(renderRow(bot({ busy: true, activity: "waiting-on-you" }))).not.toContain('data-testid="working-dot"');
+  });
+
+  it("marks the bot this window is on a Live call with by a green phone badge", () => {
+    expect(renderRow(bot())).not.toContain('data-testid="live-call-badge"');
+
+    vi.stubGlobal("window", { ogb: { speechStop: vi.fn(async () => {}) } });
+    // the microphone prompt never answers: the call stays "starting"
+    configureLiveMedia({ getUserMedia: () => new Promise<MediaStream>(() => {}) });
+    void startLiveCall({ botId: "atlas", threadId: "thread-atlas" });
+
+    const markup = renderRow(bot());
+    expect(markup).toContain('data-testid="live-call-badge"');
+    expect(markup).toContain('aria-label="On a Live call"');
+    // in the name line, after the name
+    expect(markup.indexOf('data-testid="live-call-badge"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+    expect(renderRow(bot({ id: "other" }))).not.toContain('data-testid="live-call-badge"');
+    expect(renderRow(bot(), true)).toContain('data-testid="live-call-badge"');
+
+    // icons-only rows have no name line: the badge sits on the avatar and
+    // the row's accessible name says it
+    const icons = renderRow(bot(), false, "icons");
+    expect(icons).toContain('data-testid="live-call-badge"');
+    expect(icons).toContain('aria-label="Atlas · On a Live call"');
   });
 
   it("marks an idle bot waiting on a teammate with a quiet dot, never the work signals", () => {

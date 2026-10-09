@@ -43,7 +43,6 @@ import {
   vpsContainerName,
   vpsContainerRunArgs,
   vpsDockerArgs,
-  vpsDriverError,
   vpsLifecycleBusy,
   vpsSshTunnelArgs,
   vpsStartsForTurn,
@@ -91,6 +90,7 @@ function fixture({
   securityOpt = [],
   memory = 4 * 1024 * 1024 * 1024,
   restartPolicyName = "unless-stopped",
+  hostConfig = {},
   cgroupnsMode,
   imageLabelsMatch = true,
   environmentId = null,
@@ -118,6 +118,7 @@ function fixture({
   securityOpt?: string[];
   memory?: number;
   restartPolicyName?: string;
+  hostConfig?: Record<string, unknown>;
   cgroupnsMode?: string;
   imageLabelsMatch?: boolean;
   environmentId?: string | null;
@@ -196,6 +197,7 @@ function fixture({
             OomKillDisable: false,
             AutoRemove: false,
             RestartPolicy: { Name: restartPolicyName, MaximumRetryCount: 0 },
+            ...hostConfig,
           },
           NetworkSettings: {
             Networks: { [networkMode === "default" ? "bridge" : networkMode]: { IPAddress: "172.17.0.5" } },
@@ -306,7 +308,7 @@ describe("VPS computer", () => {
     expect(() => vpsSshTunnelArgs("production-vps", 45678, "203.0.113.8")).toThrow(/private/);
   });
 
-  it("reports a ready container only when image, labels, limits, mounts, network, and Cua pass", async () => {
+  it("reports a ready container only when image, labels, isolation, mounts, network, and Cua pass", async () => {
     const fake = fixture();
     const status = await vpsComputerStatus(CONFIG, BOT_ID, fake.runner);
     expect(status).toMatchObject({
@@ -342,6 +344,25 @@ describe("VPS computer", () => {
     expect(fake.calls.some(({ args }) => args.includes("openmausbot-preview"))).toBe(false);
     expect(fake.calls.some(({ args }) => args.includes("--screenshot-out-file"))).toBe(false);
   });
+
+  it.each([
+    { Memory: 1024 ** 3, MemorySwap: 2 * 1024 ** 3, NanoCpus: 4_000_000_000, PidsLimit: 1024, ShmSize: 1024 ** 3, OomKillDisable: true },
+    { Memory: 0, MemorySwap: -1, NanoCpus: 0, PidsLimit: -1, ShmSize: 64 * 1024 ** 2, OomKillDisable: null },
+  ])("reuses a VPS container with operator-selected resources: %j", async (hostConfig) => {
+    const fake = fixture({ hostConfig });
+    expect(await vpsComputerStatus(CONFIG, BOT_ID, fake.runner)).toMatchObject({ security: "hardened", ready: true });
+    expect((await vpsComputerAction("provision", CONFIG, BOT_ID, fake.runner)).ready).toBe(true);
+    expect(fake.calls.some(({ args }) => ["rm", "run", "build", "pull"].includes(args[2]!))).toBe(false);
+  });
+
+  it.each(["no", "always", "on-failure", "unless-stopped"])(
+    "reuses a VPS container with operator-selected restart policy %s", async (restartPolicyName) => {
+      const fake = fixture({ restartPolicyName });
+      expect(await vpsComputerStatus(CONFIG, BOT_ID, fake.runner)).toMatchObject({ security: "hardened", ready: true });
+      expect((await vpsComputerAction("provision", CONFIG, BOT_ID, fake.runner)).ready).toBe(true);
+      expect(fake.calls.some(({ args }) => ["rm", "run"].includes(args[2]!))).toBe(false);
+    },
+  );
 
   it("refuses host mounts, public ports, and unowned containers", async () => {
     const mounted = await vpsComputerStatus(CONFIG, BOT_ID, fixture({ mounts: true }).runner);
@@ -391,16 +412,14 @@ describe("VPS computer", () => {
     const unsafeProfile = await vpsComputerStatus(
       CONFIG,
       BOT_ID,
-      fixture({ securityOpt: ["seccomp=unconfined"], memory: 1024, restartPolicyName: "always", cgroupnsMode: "host" }).runner,
+      fixture({ securityOpt: ["seccomp=unconfined"], cgroupnsMode: "host" }).runner,
     );
     expect(unsafeProfile.ready).toBe(false);
     expect(unsafeProfile.security).toBe("unsafe");
 
-    // the VPS container must survive an unwatched reboot: exactly
-    // unless-stopped, so a policy-less container is flagged for recreation
-    const noRestart = await vpsComputerStatus(CONFIG, BOT_ID, fixture({ restartPolicyName: "no" }).runner);
-    expect(noRestart.ready).toBe(false);
-    expect(noRestart.security).toBe("unsafe");
+    const autoRemove = await vpsComputerStatus(CONFIG, BOT_ID, fixture({ hostConfig: { AutoRemove: true } }).runner);
+    expect(autoRemove.ready).toBe(false);
+    expect(autoRemove.security).toBe("unsafe");
 
     const wrongImage = await vpsComputerStatus(CONFIG, BOT_ID, fixture({ containerImageId: "c".repeat(64) }).runner);
     expect(wrongImage.ready).toBe(false);
@@ -921,12 +940,6 @@ describe("VPS computer", () => {
       await Promise.allSettled([provision, stale]);
       spawnMock.mockReset();
     }
-  });
-
-  it("fails clearly for BoatAgent and engines without computer MCP", () => {
-    expect(vpsDriverError("boxAgent", true)).toMatch(/cannot use a self-hosted VPS/);
-    expect(vpsDriverError("codex", false)).toMatch(/cannot mount/);
-    expect(vpsDriverError("claudeAgent", true)).toBeNull();
   });
 
   it("fails cleanly when no VPS alias is configured", async () => {

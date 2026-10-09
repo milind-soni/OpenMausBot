@@ -6,12 +6,10 @@ import { BotSettingsDialog } from "../../src/components/BotSettingsDialog";
 import { RemoteDesktopPanel } from "../../src/components/remote-desktop-panel";
 import { StoreProvider, useStore, type Bot } from "../../src/state/store";
 import { applySkin, readSkin } from "../../src/lib/skins";
+import { publishLiveFrame } from "../../src/lib/live-events";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../../shared/computer-contention";
 import "../../src/styles.css";
 
-// Deliberately inject a valid but blank cached SSE image before connecting.
-// The pre-fix panel keeps showing this even after successful screenshot polls.
-const blank = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 function frame(label: string, color: string) {
   const canvas = document.createElement("canvas");
   canvas.width = 640;
@@ -166,7 +164,6 @@ function Fixture() {
   const [scenario, setScenario] = useState("default");
   useEffect(() => {
     if (bot) {
-      dispatch({ type: "screenFrame", botId: bot.id, png: blank, mime: "image/png" });
       dispatch({ type: "updateBot", botId: bot.id, patch: { computer: "cloud", cloudBackend: "box" } });
       dispatch({ type: "toggleComputer", open: true });
     }
@@ -177,15 +174,6 @@ function Fixture() {
         browserEngine: { kind: "unavailable", installable: true } } });
     }
   }, [state.config, dispatch]);
-  useEffect(() => {
-    const base = state.instances[0];
-    if (base && !state.instances.some((instance) => instance.driverKind === "boxAgent")) {
-      // Registry display only; every cloud operation remains the transport
-      // stub above, never the paid Boat service.
-      dispatch({ type: "instances", instances: [...state.instances,
-        { ...base, instanceId: "fixture-box", driverKind: "boxAgent" }] });
-    }
-  }, [state.instances, dispatch]);
   const fixtureBot: Bot | undefined = bot && (scenario === "default"
     ? { ...bot, busy, tasks: bot.tasks?.map((task) => ({ ...task, busy })) }
     : { ...bot, busy: false, browser: true,
@@ -219,7 +207,9 @@ function Fixture() {
       <button onClick={() => transport.releaseJoin()}>Release desktop join</button>
       <button onClick={() => transport.releaseVm()}>Release VM capture</button>
       <button onClick={() => { vmDesktopReady = true; }}>Finish VM startup</button>
-      <button disabled={!bot} onClick={() => dispatch({ type: "screenFrame", botId: bot.id, png: frame("New live frame", "#312e81"), mime: "image/png" })}>Publish live frame</button>
+      <button disabled={!fixtureBot} onClick={() => fixtureBot && publishLiveFrame({
+        kind: "screen", botId: fixtureBot.id, threadId: fixtureBot.threadId, png: frame("New live frame", "#312e81"), mime: "image/png",
+      })}>Publish live frame</button>
     </div>
     {state.settingsOpen && bot && <BotSettingsDialog key={bot.id} bot={bot} />}
     {state.computerOpen && fixtureBot ? panel === "computer"

@@ -19,7 +19,7 @@ async function withRooms(test: (f: any) => Promise<void>) {
     const destination = (await tool("create_channel", { name: "Engineering", member_ids: [target.id], bulletin: "DESTINATION_ONLY" })).channel;
     const planPath = join(session.info.dataDir, "room-plan.json");
     const plan: Record<string, any> = {
-      [sender.id]: { steps: [{ arguments: { group_id: destination.id, bot_ids: [target.id], request_key: "work", message: "Please build CSV" } }], reply: "Assigned", resumeReply: "Reviewed downstream outcome" },
+      [sender.id]: { steps: [{ arguments: { group_id: destination.id, bot_ids: [target.id], message: "Please build CSV" } }], reply: "Assigned", resumeReply: "Reviewed downstream outcome" },
       [target.id]: { reply: "Built CSV" },
     };
     const savePlan = () => writeFileSync(planPath, JSON.stringify(plan));
@@ -46,7 +46,7 @@ async function addSupervisingChief(f: any, section = "") {
 
 it.each(["", "Leadership"])("lists and coordinates with a supervising Chief and same-section peer in the same room (Chief section %j)", section => withRooms(async f => {
   const chief = await addSupervisingChief(f, section);
-  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id, f.target.id], request_key: "same-room", message: "Review the work here" } }];
+  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id, f.target.id], message: "Review the work here" } }];
   // The fresh coordination brief carries the recipient's own live roster:
   // dispatch-time data must ride the user turn, fenced with its own markers
   // so it can never blend into the assignment text around it.
@@ -67,7 +67,7 @@ it.each(["unmanaged", "outsider", "disallowed-peer"])("refuses supervisor room c
     await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, chief.id, outsider.id] });
   }
   if (reason === "disallowed-peer") await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
-  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { bot_ids: [chief.id], request_key: "refused", message: "Do not bypass the room boundary" } }];
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { bot_ids: [chief.id], message: "Do not bypass the room boundary" } }];
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.nodes()).toEqual([]);
   const turn = f.provider().find((entry: any) => entry.botId === f.sender.id);
@@ -79,7 +79,7 @@ it.each(["unmanaged", "outsider", "disallowed-peer"])("refuses supervisor room c
 it("does not extend supervisor access to a different room", () => withRooms(async f => {
   const chief = await addSupervisingChief(f);
   await f.tool("update_channel", { channel_id: f.destination.id, member_ids: [chief.id] });
-  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [chief.id], request_key: "other-room", message: "Keep supervisor access in the shared conversation" } }];
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [chief.id], message: "Keep supervisor access in the shared conversation" } }];
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.nodes()).toEqual([]);
   expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
@@ -92,7 +92,7 @@ it("refuses queued same-room supervisor work when the owner revokes supervision"
   const gateFile = join(f.session.info.dataDir, "supervisor-result.gate");
   f.plan[chief.id] = { reply: "PRIVATE_SUPERVISOR_RESULT" };
   f.plan[f.sender.id].gateFile = gateFile;
-  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id], request_key: "supervisor", message: "Review this work" } }];
+  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id], message: "Review this work" } }];
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15000 }).toBe("queued");
   await request(`/api/bots/${chief.id}`, { method: "PATCH", headers: { Origin: f.session.info.url }, body: JSON.stringify({ managedSections: [] }) }, f.session.info.url);
@@ -134,7 +134,7 @@ it("lets an explicitly authorized Chief coordinate another team, which can consu
   const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "Engineering")).bot;
   const reviewRoom = (await f.tool("create_channel", { name: "Quality", member_ids: [reviewer.id] })).channel;
   f.plan[f.target.id] = {
-    steps: [{ arguments: { group_id: reviewRoom.id, bot_ids: [reviewer.id], request_key: "test", message: "Check the CSV output" } }],
+    steps: [{ arguments: { group_id: reviewRoom.id, bot_ids: [reviewer.id], message: "Check the CSV output" } }],
     reply: "Sent for verification", resumeReply: "CSV implemented and checked",
   };
   // Multi-line on purpose: results reach the transcript inside a JSON
@@ -221,7 +221,7 @@ it.each(["recipient", "source-reader", "destination-reader"])("refuses cross-sec
 it("refuses same-room coordination in a mixed section room", () => withRooms(async f => {
   await f.api(`/api/bots/${f.target.id}`, { section: "Other company" }, "PATCH");
   await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id] });
-  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { bot_ids: [f.target.id], message: "Review CSV", request_key: "review" } }];
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { bot_ids: [f.target.id], message: "Review CSV" } }];
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.nodes()).toEqual([]);
 }), 45_000);
@@ -274,14 +274,15 @@ it("returns a provider failure to the sender and resumes it to handle the failur
   expect(source.some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
 }), 45_000);
 
-// A duplicate request_key on a failed node used to be receipted "queued"
-// with a promise that its result would resume the sender — but a terminal
-// node never reruns and its report already fired, so the coordinator would
-// wait on an auto-resume that never comes. The receipt must say the earlier
-// assignment is dead and a retry needs a new request_key.
+// A repeat of a failed request used to be receipted "queued" with a promise
+// that its result would resume the sender — but a terminal node never reruns
+// and its report already fired, so the coordinator would wait on an
+// auto-resume that never comes. The receipt must say the earlier assignment
+// is dead, and the repeat must not run it again (a resume that resends the
+// same failing request would otherwise loop until the tree's budget ends).
 it("receipts a retried duplicate of a failed hand-off as failed, not queued behind a resume that never comes", () => withRooms(async f => {
   f.plan[f.target.id].fail = true;
-  f.plan[f.sender.id].resumeSteps = [{ arguments: f.plan[f.sender.id].steps[0].arguments }];
+  f.plan[f.sender.id].resumeSteps = [{ arguments: f.plan[f.sender.id].steps[0].arguments, expectError: true }];
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.provider().map((turn: any) => turn.botId)).toEqual([f.sender.id, f.target.id, f.sender.id]);
   const [assigned, retried] = f.provider().filter((turn: any) => turn.botId === f.sender.id);
@@ -289,10 +290,10 @@ it("receipts a retried duplicate of a failed hand-off as failed, not queued behi
   const first = JSON.parse(assigned.evidence.find((entry: any) => entry.step).response.result.content[0].text);
   expect(first.receipts[0]).toMatchObject({ botId: f.target.id, outcome: "queued" });
   expect(retried.resumed).toBe(true);
-  const retry = JSON.parse(retried.evidence.find((entry: any) => entry.step).response.result.content[0].text);
-  expect(retry.accepted[0]).toMatchObject({ botId: f.target.id, duplicate: true, status: "failed" });
-  expect(retry.receipts[0]).toMatchObject({ botId: f.target.id, outcome: "failed" });
-  expect(retry.receipts[0].detail).toContain("failed and will not rerun or resume you");
+  // Nothing was sent, so the call is refused with the way to retry.
+  const retry = retried.evidence.find((entry: any) => entry.step).response.result;
+  expect(retry.isError).toBe(true);
+  expect(retry.content[0].text).toContain("not sent again: it failed; send it with rework=true to retry");
   expect(f.nodes().filter((n: any) => n.parentId)).toHaveLength(1);
 }), 45_000);
 
@@ -386,7 +387,7 @@ it("pins a busy destination's task even when its active task changes", () => wit
 it("consults multiple existing members and returns once, with no discussion prerequisite or new room settings", () => withRooms(async f => {
   const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
   await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, reviewer.id] });
-  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [f.target.id, reviewer.id], message: "Give one risk from your role", request_key: "consult" } }];
+  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [f.target.id, reviewer.id], message: "Give one risk from your role" } }];
   f.plan[reviewer.id] = { reply: "Privacy risk" };
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.provider().map((turn: any) => turn.botId)).toEqual([f.sender.id, f.target.id, reviewer.id, f.sender.id]);
@@ -448,7 +449,7 @@ it.each([
 ] as const)("refuses %s with a message the caller can act on", (_case, hidden) => withRooms(async f => {
   if (hidden) await f.api(`/api/bots/${f.target.id}`, { hidden: true }, "PATCH");
   const botId = hidden ? f.target.id : "Nobody";
-  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [botId], message: "Review CSV", request_key: "review" } }];
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [botId], message: "Review CSV" } }];
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.nodes()).toEqual([]);
   expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
@@ -464,7 +465,7 @@ it.each([
 // work runs as if the id had been sent. Two teammates sharing a name is the
 // person's naming, so that is refused with the way to the ids, not guessed.
 it("resolves a unique teammate name in a bot_ids slot, and refuses an ambiguous one", () => withRooms(async f => {
-  f.plan[f.sender.id].steps = [{ arguments: { group_id: f.destination.id, bot_ids: [f.target.name], request_key: "work", message: "Please build CSV" } }];
+  f.plan[f.sender.id].steps = [{ arguments: { group_id: f.destination.id, bot_ids: [f.target.name], message: "Please build CSV" } }];
   await f.start(); expect((await f.wait()).status).toBe("settled");
   const node = f.nodes().find((n: any) => n.parentId);
   expect(node.botId).toBe(f.target.id);
@@ -473,7 +474,7 @@ it("resolves a unique teammate name in a bot_ids slot, and refuses an ambiguous 
 
   const twin = (await f.cli("new-bot", "--name", f.target.name, "--section", "A")).bot;
   expect(twin.id).not.toBe(f.target.id);
-  f.plan[f.sender.id] = { steps: [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [f.target.name], message: "Review CSV", request_key: "review" } }], reply: "Refused" };
+  f.plan[f.sender.id] = { steps: [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [f.target.name], message: "Review CSV" } }], reply: "Refused" };
   f.savePlan(); await f.cli("send-channel", "--channel", f.source.id, "--text", "@Director Ask again");
   expect((await f.wait()).status).toBe("settled");
   const refused = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1)
@@ -485,7 +486,7 @@ it("resolves a unique teammate name in a bot_ids slot, and refuses an ambiguous 
 it("does not repeat a shared brief or rerun recipients on an identical tool retry", () => withRooms(async f => {
   const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
   await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, reviewer.id] });
-  const args = { bot_ids: [f.target.id, reviewer.id], message: "Review the release checklist", request_key: "release" };
+  const args = { bot_ids: [f.target.id, reviewer.id], message: "Review the release checklist" };
   f.plan[f.sender.id].steps = [{ arguments: args }, { arguments: args }];
   f.plan[reviewer.id] = { reply: "Release checklist reviewed" };
   await f.start(); expect((await f.wait()).status).toBe("settled");
@@ -499,8 +500,8 @@ it("keeps genuinely different room briefs separate", () => withRooms(async f => 
   const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
   await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, reviewer.id] });
   f.plan[f.sender.id].steps = [
-    { arguments: { bot_ids: [f.target.id], message: "Check the migration", request_key: "migration" } },
-    { arguments: { bot_ids: [reviewer.id], message: "Check the documentation", request_key: "docs" } },
+    { arguments: { bot_ids: [f.target.id], message: "Check the migration" } },
+    { arguments: { bot_ids: [reviewer.id], message: "Check the documentation" } },
   ];
   f.plan[reviewer.id] = { reply: "Documentation reviewed" };
   await f.start(); expect((await f.wait()).status).toBe("settled");

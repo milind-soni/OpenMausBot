@@ -10,6 +10,7 @@ const fixture = vi.hoisted(() => {
 void fixture;
 
 const { VoiceNoteBubble } = await import("./VoiceNoteBubble");
+const { configureLiveMedia, resetLiveMedia, startLiveCall } = await import("@/lib/live-call-media");
 afterAll(() => vi.unstubAllGlobals());
 
 const note = {
@@ -38,5 +39,19 @@ describe("VoiceNoteBubble", () => {
       createElement(VoiceNoteBubble, { attachment: { ...note, path: "/attachments/note.wav" } }),
     );
     expect(markup).toBe("");
+  });
+
+  // A note played over a Live call is heard by the call's microphone (and on
+  // Android it ended the call): the play button waits, and says why.
+  it("cannot be played while this window is on a Live call, and says why", () => {
+    configureLiveMedia({ getUserMedia: () => new Promise<MediaStream>(() => {}) });
+    void startLiveCall({ botId: "b1", threadId: "t1" });
+    try {
+      const markup = renderToStaticMarkup(createElement(VoiceNoteBubble, { attachment: note }));
+      expect(markup).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Voice notes can&#x27;t play during a Live call."/);
+    } finally {
+      resetLiveMedia();
+    }
+    expect(renderToStaticMarkup(createElement(VoiceNoteBubble, { attachment: note }))).toContain('aria-label="Play voice note"');
   });
 });

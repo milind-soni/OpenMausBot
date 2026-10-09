@@ -1,4 +1,4 @@
-import { cloudRunner } from "@/lib/remote-desktop";
+import { boatCapableEngine } from "@/lib/remote-desktop";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
@@ -30,8 +30,10 @@ import {
 } from "@/lib/webhook-credentials";
 import { WEBHOOK_DEFAULT_MAX_PENDING_RUNS, WEBHOOK_MAX_PENDING_RUNS_LIMIT, webhookActivationDefaults, webhookMaxPendingRunsInput, type WebhookAttempt, type WebhookCredential, type WebhookTrigger, type WebhookTriggerInput } from "@/lib/webhooks";
 import { api, useStore, type Bot } from "@/state/store";
+import { copyText } from "@/lib/copy-text";
+import { t } from "@/lib/i18n";
 
-function relativeTime(at?: number) {
+export function relativeTime(at?: number) {
   if (!at) return "Never";
   const elapsed = Math.max(0, Date.now() - at);
   if (elapsed < 60_000) return "Just now";
@@ -48,26 +50,26 @@ function deliverySummary(run: RoutineRun) {
   return { eventName, preview: payload.slice(0, 240) };
 }
 
-function suggestedName(prompt: string, bot?: Bot) {
+export function suggestedName(prompt: string, bot?: Bot) {
   const first = prompt.trim().split(/[.!?\n]/)[0]?.trim().slice(0, 60);
   return first || `${bot?.name ?? "MAUS"} webhook`;
 }
 
-function statusFor(webhook: WebhookTrigger) {
+export function statusFor(webhook: WebhookTrigger) {
   if (webhook.verificationPending) return { label: "Waiting for test", tone: "text-accent", dot: "bg-accent animate-pulse" };
   if (webhook.verifiedAt && !webhook.enabled) return { label: "Ready to enable", tone: "text-warning", dot: "bg-warning" };
   if (webhook.enabled) return { label: "Active", tone: "text-success", dot: "bg-success" };
   return { label: "Paused", tone: "text-ink-secondary", dot: "bg-ink-secondary/50" };
 }
 
-function outcomeTone(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
+export function outcomeTone(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
   if (outcome === "rejected" || run?.status === "failed" || run?.status === "missed") return "text-danger";
   if (run && ["queued", "running", "waiting"].includes(run.status)) return "text-accent";
   if (run?.status === "completed" || outcome === "captured" || outcome === "accepted") return "text-success";
   return "text-ink-secondary";
 }
 
-function outcomeLabel(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
+export function outcomeLabel(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
   if (run) return run.status === "waiting" ? "Needs you" : run.status[0]!.toUpperCase() + run.status.slice(1);
   if (outcome === "captured") return "Test received";
   if (outcome === "duplicate") return "Duplicate";
@@ -76,11 +78,11 @@ function outcomeLabel(outcome: WebhookAttempt["outcome"], run?: RoutineRun) {
   return "Accepted";
 }
 
-function terminalCommand(credential: WebhookCredential) {
+export function terminalCommand(credential: WebhookCredential) {
   return `curl -sS '${credential.url}' --json '{"task":"A customer wrote: This app saved me hours. Write a short thank-you reply."}'`;
 }
 
-function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: WebhookTrigger; bots: Bot[]; onClose: () => void; onCredential: (credential: WebhookCredential, webhookId: string) => void }) {
+export function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: WebhookTrigger; bots: Bot[]; onClose: () => void; onCredential: (credential: WebhookCredential, webhookId: string) => void }) {
   const { state, dispatch } = useStore();
   const [botId, setBotId] = useState(webhook?.botId ?? bots[0]?.id ?? "");
   const [name, setName] = useState(webhook?.name ?? "");
@@ -93,7 +95,7 @@ function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: Web
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  const cloudReady = Boolean(state.config?.box.configured && cloudRunner(state.instances, bots.find(bot => bot.id === botId)?.modelSelection.instanceId)?.snapshot.state === "available");
+  const cloudReady = Boolean(state.config?.box.configured && boatCapableEngine(state.instances, bots.find(bot => bot.id === botId)?.modelSelection.instanceId)?.snapshot.state === "available");
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -165,7 +167,7 @@ function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: Web
             <div className="mt-4 space-y-4">
               <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">Name <span className="font-normal">· optional</span></span><input value={name} onChange={(event) => setName(event.target.value)} placeholder={suggestedName(prompt, bots.find((bot) => bot.id === botId))} className="w-full rounded-xl border border-hairline/60 bg-panel px-3.5 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70" /></label>
               <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">Default instructions <span className="font-normal">· optional</span></span><textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder="For every event, summarize what happened and suggest the next step…" className="w-full resize-y rounded-xl border border-hairline/60 bg-panel px-3.5 py-3 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70" /><span className="mt-1.5 block text-[10.5px] leading-relaxed text-ink-secondary">Use this only when every event needs the same handling rule. Otherwise the request’s task is used.</span></label>
-              <div><div className="mb-2 text-[11.5px] font-medium text-ink-secondary">Run on</div><div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setRunOn("maus")} className={cn("rounded-xl border p-3 text-left", runOn === "maus" ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-panel hover:bg-raised/60")}><div className="flex items-center gap-2 text-[12.5px] font-medium text-ink"><Laptop size={14} />This computer</div></button><button type="button" disabled={!cloudReady && runOn !== "cloud"} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-panel hover:bg-raised/60")}><div className="flex items-center gap-2 text-[12.5px] font-medium text-ink"><Cloud size={14} />Cloud VM</div></button></div></div>
+              <div><div className="mb-2 text-[11.5px] font-medium text-ink-secondary">Run on</div><div className="grid grid-cols-2 gap-2"><button type="button" onClick={() => setRunOn("maus")} className={cn("rounded-xl border p-3 text-left", runOn === "maus" ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-panel hover:bg-raised/60")}><div className="flex items-center gap-2 text-[12.5px] font-medium text-ink"><Laptop size={14} />This computer</div></button><button type="button" disabled={!cloudReady && runOn !== "cloud"} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-panel hover:bg-raised/60")}><div className="flex items-center gap-2 text-[12.5px] font-medium text-ink"><Cloud size={14} />Cloud computer</div></button></div></div>
               <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">Only accept event types <span className="font-normal">· optional</span></span><input value={eventTypes} onChange={(event) => setEventTypes(event.target.value)} placeholder="push, workflow_run" className="w-full rounded-xl border border-hairline/60 bg-panel px-3.5 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70" /><span className="mt-1.5 block text-[10.5px] text-ink-secondary">Comma-separated values from the sender’s event-type header.</span></label>
               <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">Unfinished tasks at once <span className="font-normal">· optional</span></span><input type="number" inputMode="numeric" min={1} max={WEBHOOK_MAX_PENDING_RUNS_LIMIT} step={1} value={maxPendingRuns} onChange={(event) => setMaxPendingRuns(event.target.value)} placeholder={String(WEBHOOK_DEFAULT_MAX_PENDING_RUNS)} className="w-full rounded-xl border border-hairline/60 bg-panel px-3.5 py-2.5 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70" /><span className="mt-1.5 block text-[10.5px] text-ink-secondary">How many of this webhook’s tasks can be queued or running together. More requests get HTTP 429 until one finishes. Leave blank for {WEBHOOK_DEFAULT_MAX_PENDING_RUNS}.</span></label>
             </div>
@@ -178,69 +180,52 @@ function WebhookEditor({ webhook, bots, onClose, onCredential }: { webhook?: Web
   );
 }
 
-interface ActivityItem { id: string; at: number; outcome: WebhookAttempt["outcome"]; eventName: string; preview: string; reason?: string; run?: RoutineRun }
+export interface ActivityItem { id: string; at: number; outcome: WebhookAttempt["outcome"]; eventName: string; preview: string; reason?: string; run?: RoutineRun }
 
-/** A destination-first webhook view: choose a MAUS endpoint on the left, then
- * either copy its setup command or inspect its deliveries on the right. */
-export function WebhooksPanel({
-  bots,
-  createRequest,
-  onCreateHandled,
-}: {
-  bots: Bot[];
-  createRequest: number;
-  onCreateHandled: () => void;
-}) {
-  const { state, dispatch } = useStore();
-  const [editor, setEditor] = useState<WebhookTrigger | "new" | null>(null);
+/** Recent deliveries for one webhook: recorded attempts, plus runs from
+ * before attempts were recorded. Newest first, at most 30. */
+export function webhookActivity(webhook: WebhookTrigger, webhookAttempts: WebhookAttempt[], routineRuns: RoutineRun[]): ActivityItem[] {
+  const runById = new Map(routineRuns.map((run) => [run.id, run]));
+  const attemptsByRun = new Set(webhookAttempts.map((attempt) => attempt.runId).filter(Boolean));
+  const attempts = webhookAttempts
+    .filter((attempt) => attempt.webhookId === webhook.id)
+    .map((attempt) => ({
+      id: attempt.id,
+      at: attempt.receivedAt,
+      outcome: attempt.outcome,
+      eventName: attempt.eventName || (attempt.outcome === "rejected" ? "Rejected request" : "Webhook event"),
+      preview: attempt.preview || "",
+      reason: attempt.reason,
+      run: attempt.runId ? runById.get(attempt.runId) : undefined,
+    }));
+  const legacy = routineRuns
+    .filter((run) => run.webhookId === webhook.id && !attemptsByRun.has(run.id))
+    .map((run) => {
+      const summary = deliverySummary(run);
+      return { id: run.id, at: run.scheduledFor, outcome: "accepted" as const, eventName: summary.eventName, preview: summary.preview, run };
+    });
+  return [...attempts, ...legacy].sort((a, b) => b.at - a.at).slice(0, 30);
+}
+
+/** Pause/enable, delete, and the private-URL copy, shared by the Automations
+ * page's Webhooks tab and the Triggers pop-up. `copy: "link"` puts the
+ * private URL itself on the clipboard; the default is the terminal command. */
+export function useWebhookActions() {
+  const { dispatch } = useStore();
   const [credentials, setCredentials] = useState<Record<string, WebhookCredential>>(() =>
     loadWebhookCredentials(webhookCredentialStore()),
   );
-  const [selectedId, setSelectedId] = useState<string | null>(state.webhooks[0]?.id ?? null);
-  const [tab, setTab] = useState<"setup" | "activity">("setup");
   const [working, setWorking] = useState<string | null>(null);
+  // A second click can arrive before React paints the shared disabled state.
+  // Claim synchronously, so rotations cannot race and save a revoked URL.
+  const workingRef = useRef(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedKind, setCopiedKind] = useState<"command" | "link">("command");
   const [error, setError] = useState("");
-  const runById = useMemo(() => new Map(state.routineRuns.map((run) => [run.id, run])), [state.routineRuns]);
-
-  useEffect(() => {
-    if (!state.webhooks.length) setSelectedId(null);
-    else if (!selectedId || !state.webhooks.some((webhook) => webhook.id === selectedId)) setSelectedId(state.webhooks[0]!.id);
-  }, [selectedId, state.webhooks]);
-
-  useEffect(() => {
-    if (createRequest > 0) {
-      setEditor("new");
-      onCreateHandled();
-    }
-  }, [createRequest, onCreateHandled]);
-
-  const selected = state.webhooks.find((webhook) => webhook.id === selectedId) ?? null;
-  const selectedBot = selected ? bots.find((bot) => bot.id === selected.botId) : undefined;
-  const attemptsByRun = useMemo(() => new Set(state.webhookAttempts.map((attempt) => attempt.runId).filter(Boolean)), [state.webhookAttempts]);
-  const activity = useMemo<ActivityItem[]>(() => {
-    if (!selected) return [];
-    const attempts = state.webhookAttempts
-      .filter((attempt) => attempt.webhookId === selected.id)
-      .map((attempt) => ({
-        id: attempt.id,
-        at: attempt.receivedAt,
-        outcome: attempt.outcome,
-        eventName: attempt.eventName || (attempt.outcome === "rejected" ? "Rejected request" : "Webhook event"),
-        preview: attempt.preview || "",
-        reason: attempt.reason,
-        run: attempt.runId ? runById.get(attempt.runId) : undefined,
-      }));
-    const legacy = state.routineRuns
-      .filter((run) => run.webhookId === selected.id && !attemptsByRun.has(run.id))
-      .map((run) => {
-        const summary = deliverySummary(run);
-        return { id: run.id, at: run.scheduledFor, outcome: "accepted" as const, eventName: summary.eventName, preview: summary.preview, run };
-      });
-    return [...attempts, ...legacy].sort((a, b) => b.at - a.at).slice(0, 30);
-  }, [attemptsByRun, runById, selected, state.routineRuns, state.webhookAttempts]);
 
   const invoke = async (webhook: WebhookTrigger, action: "toggle" | "delete") => {
+    if (workingRef.current) return;
+    workingRef.current = true;
     setWorking(`${webhook.id}:${action}`);
     setError("");
     try {
@@ -263,15 +248,18 @@ export function WebhooksPanel({
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      workingRef.current = false;
       setWorking(null);
     }
   };
 
-  const createAndCopyCommand = async (webhook: WebhookTrigger, replace = false) => {
-    if (replace && !window.confirm("Replace this private URL? Every previously copied command will stop working.")) return;
+  const createAndCopyCommand = async (webhook: WebhookTrigger, replace = false, copy: "command" | "link" = "command") => {
+    if (workingRef.current) return;
+    workingRef.current = true;
     setWorking(`${webhook.id}:command`);
     setError("");
     try {
+      if (replace && !window.confirm("Replace this private URL? Every previously copied command will stop working.")) return;
       let credential = replace ? undefined : credentials[webhook.id];
       if (!credential) {
         const response = await api(`/api/webhooks/${webhook.id}/rotate`, { method: "POST" });
@@ -281,15 +269,61 @@ export function WebhooksPanel({
         saveWebhookCredential(webhookCredentialStore(), webhook.id, credential!);
       }
       if (!credential) throw new Error("Could not create a terminal command");
-      await navigator.clipboard.writeText(terminalCommand(credential));
+      if (await copyText(copy === "link" ? credential.url : terminalCommand(credential)) !== "copied") throw new Error(t("common.copyFailed"));
       setCopiedId(webhook.id);
+      setCopiedKind(copy);
       setTimeout(() => setCopiedId((current) => current === webhook.id ? null : current), 1_800);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
+      workingRef.current = false;
       setWorking(null);
     }
   };
+
+  const rememberCredential = (webhookId: string, credential: WebhookCredential) => {
+    saveWebhookCredential(webhookCredentialStore(), webhookId, credential);
+    setCredentials((current) => ({ ...current, [webhookId]: credential }));
+  };
+
+  return { credentials, setCredentials, rememberCredential, working, copiedId, copiedKind, error, setError, invoke, createAndCopyCommand };
+}
+
+/** A destination-first webhook view: choose a MAUS endpoint on the left, then
+ * either copy its setup command or inspect its deliveries on the right. */
+export function WebhooksPanel({
+  bots,
+  createRequest,
+  onCreateHandled,
+}: {
+  bots: Bot[];
+  createRequest: number;
+  onCreateHandled: () => void;
+}) {
+  const { state, dispatch } = useStore();
+  const [editor, setEditor] = useState<WebhookTrigger | "new" | null>(null);
+  const { credentials, setCredentials, working, copiedId, error, setError, invoke, createAndCopyCommand } = useWebhookActions();
+  const [selectedId, setSelectedId] = useState<string | null>(state.webhooks[0]?.id ?? null);
+  const [tab, setTab] = useState<"setup" | "activity">("setup");
+
+  useEffect(() => {
+    if (!state.webhooks.length) setSelectedId(null);
+    else if (!selectedId || !state.webhooks.some((webhook) => webhook.id === selectedId)) setSelectedId(state.webhooks[0]!.id);
+  }, [selectedId, state.webhooks]);
+
+  useEffect(() => {
+    if (createRequest > 0) {
+      setEditor("new");
+      onCreateHandled();
+    }
+  }, [createRequest, onCreateHandled]);
+
+  const selected = state.webhooks.find((webhook) => webhook.id === selectedId) ?? null;
+  const selectedBot = selected ? bots.find((bot) => bot.id === selected.botId) : undefined;
+  const activity = useMemo<ActivityItem[]>(
+    () => selected ? webhookActivity(selected, state.webhookAttempts, state.routineRuns) : [],
+    [selected, state.routineRuns, state.webhookAttempts],
+  );
 
   const ingress = state.webhookIngress;
   const credential = selected ? credentials[selected.id] : undefined;
@@ -339,7 +373,7 @@ export function WebhooksPanel({
                   {selectedBot ? <BotAvatar bot={selectedBot} state={selected.enabled ? "idle" : "sleeping"} size={44} animated={false} label={selectedBot.name} /> : <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><Webhook size={18} /></div>}
                   <div className="min-w-0">
                     <h3 className="truncate text-[17px] font-semibold text-ink">{selected.name}</h3>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10.5px] text-ink-secondary"><span>{selectedBot?.name ?? "Deleted MAUS"}</span><span>·</span><span>{selected.runOn === "cloud" ? "Cloud VM" : "This computer"}</span></div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10.5px] text-ink-secondary"><span>{selectedBot?.name ?? "Deleted MAUS"}</span><span>·</span><span>{selected.runOn === "cloud" ? "Cloud computer" : "This computer"}</span></div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -374,7 +408,7 @@ export function WebhooksPanel({
                     {selected.verificationSample && !selected.enabled && <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-y border-success/20 bg-success/5 px-3.5 py-3"><div><div className="flex items-center gap-2 text-[11.5px] font-medium text-success"><Check size={13} />Request received</div><p className="mt-1 max-w-[520px] truncate font-mono text-[10px] text-ink-secondary">{selected.verificationSample.preview || "Empty payload"}</p></div><button disabled={Boolean(working)} onClick={() => void invoke(selected, "toggle")} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[11px] font-medium text-white hover:brightness-110"><Play size={12} />Turn on</button></div>}
 
                     <div className="mt-7 border-t border-hairline/35 pt-5">
-                      <div className="grid gap-4 text-[11.5px] sm:grid-cols-2"><div><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Tasks go to</div><div className="mt-1.5 font-medium text-ink">{selectedBot?.name ?? "Deleted MAUS"}</div></div><div><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Runs on</div><div className="mt-1.5 font-medium text-ink">{selected.runOn === "cloud" ? "Cloud VM" : "This computer"}</div></div></div>
+                      <div className="grid gap-4 text-[11.5px] sm:grid-cols-2"><div><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Tasks go to</div><div className="mt-1.5 font-medium text-ink">{selectedBot?.name ?? "Deleted MAUS"}</div></div><div><div className="text-[10px] uppercase tracking-wider text-ink-secondary">Runs on</div><div className="mt-1.5 font-medium text-ink">{selected.runOn === "cloud" ? "Cloud computer" : "This computer"}</div></div></div>
                     </div>
 
                     <details className="group mt-5 border-t border-hairline/35 pt-4"><summary className="flex cursor-pointer list-none items-center justify-between text-[11.5px] font-medium text-ink"><span>Advanced</span><ChevronDown size={14} className="text-ink-secondary transition-transform group-open:rotate-180" /></summary><div className="mt-4 space-y-3 text-[10.5px] leading-relaxed text-ink-secondary">{selected.prompt ? <p><span className="font-medium text-ink">Default instruction:</span> {selected.prompt}</p> : <p>The task or message sent with each request becomes the MAUS instruction.</p>}{selected.eventTypes?.length ? <p><span className="font-medium text-ink">Accepted events:</span> {selected.eventTypes.join(", ")}</p> : <p>All event types are accepted.</p>}<p><span className="font-medium text-ink">Unfinished tasks at once:</span> {selected.maxPendingRuns ?? WEBHOOK_DEFAULT_MAX_PENDING_RUNS}. More requests get HTTP 429 until one finishes.</p><button onClick={() => setEditor(selected)} className="rounded-lg border border-hairline/50 px-3 py-2 text-[11px] font-medium text-ink hover:bg-raised">Edit settings</button></div></details>

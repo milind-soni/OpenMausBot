@@ -4,7 +4,7 @@
 // driver's own install descriptor and never from a request, npm runs with
 // a fixed argument list, and the binary is found on the engines' PATH
 // afterwards because that directory is registered ahead of everything else.
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { EngineInstall } from "./contracts.ts";
@@ -182,9 +182,4 @@ function runNpm(args: string[], env: NodeJS.ProcessEnv, cwd: string, timeoutMs: 
       resolveRun({ code, output });
     });
   });
-}
-
-/** True once something has been installed here, for status pages. */
-export function enginesInstalled(baseDir = DATA_DIR): boolean {
-  return existsSync(enginesBinDir(baseDir));
 }

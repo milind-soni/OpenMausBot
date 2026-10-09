@@ -114,7 +114,7 @@ test("a consumed launch link is not replayed by the companion or updater relaunc
   takeCloudDeepLink(argv);
   const calls = [];
   runInNewContext(`${between("function relaunchAfterDesktopRemoteChange()", 'ipcMain.handle("desktop-remote:state"')}\nrelaunchAfterDesktopRemoteChange();`, {
-    process: { argv }, setTimeout: callback => { callback(); return {}; },
+    desktopShutdownStarted: false, process: { argv }, setTimeout: callback => { callback(); return {}; },
     app: { relaunch: options => calls.push(options.args), quit: () => {} },
   });
   const patched = patchOrganizationUpdater("      relaunch() {\n        this.app.relaunch();\n      }");
@@ -143,8 +143,10 @@ test("startup delivers a pending Cloud link before default navigation", () => {
 test("the Cloud entry checks the owned server, waits for the saved sign-in, and never asks", () => {
   const entry = between("async function openCloudEntry()", "\n}\n");
   const guard = entry.indexOf("if (!serverReady) throw new Error(");
-  const restored = entry.indexOf("await Promise.race([cloudAccountStarted, ");
+  const restored = entry.indexOf("await cloudAccountRestored();");
   assert.ok(guard !== -1 && restored > guard);
+  // The same capped wait the microphone uses while the saved sign-in restores.
+  assert.match(between("function cloudAccountRestored()", "\n}\n"), /Promise\.race\(\[cloudAccountStarted, new Promise\(resolve => setTimeout\(resolve, 5_000\)/);
   for (const action of ["createWindow(", "persistEnvironments(", "win.webContents.send(", "win.loadURL("]) {
     assert.ok(entry.indexOf(action) > restored, `${action} must follow the server guard and the restore`);
   }

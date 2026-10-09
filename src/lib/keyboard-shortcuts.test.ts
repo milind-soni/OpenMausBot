@@ -53,6 +53,12 @@ describe("keyboard-shortcuts", () => {
     expect(empty.length).toBe(0);
   });
 
+  it("lists the Live call chords", () => {
+    const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
+    expect(items.find((item) => item.id === "live-call-mute")).toMatchObject({ macKeys: ["⌘", "⇧", "M"], winKeys: ["Ctrl", "Shift", "M"] });
+    expect(items.find((item) => item.id === "live-call-hang-up")).toMatchObject({ macKeys: ["⌘", "⇧", "H"], winKeys: ["Ctrl", "Shift", "H"] });
+  });
+
   it("lists previous/next in handler order and excludes pointer gestures", () => {
     const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
     const switchBot = items.find((item) => item.id === "switch-bot")!;

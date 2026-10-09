@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import { patchOrganizationUpdater } from "../scripts/patch-organization-updater.mjs";
 import environments from "./environments.cjs";
+import localOrigin from "./local-origin.cjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
 
 const remote = { id: "old", name: "Old cloud", origin: "https://old.example" };
@@ -45,17 +46,46 @@ test("consuming a launch action prevents it replaying on a later restart without
   assert.deepEqual(argv, original);
 });
 
-test("the actual companion relaunch passes consumed arguments and requests normal shutdown", () => {
+test("desktop relaunch accepts every platform once, guards its sender, and preserves consumed arguments and normal shutdown", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
-  const source = main.slice(main.indexOf("function relaunchAfterDesktopRemoteChange()"), main.indexOf('ipcMain.handle("desktop-remote:state"'));
+  const source = main.slice(main.indexOf('ipcMain.handle("desktop:relaunch"'), main.indexOf('ipcMain.handle("speech:start"'))
+    + main.slice(main.indexOf("function requireMainWindowSender("), main.indexOf('ipcMain.handle("desktop-remote:state"'));
   const argv = ["/fixture/OpenMausBot", "--fixture", "openmausbot://organization", "openmausbot://organization?ignored"];
   takeOrganizationDeepLink(argv);
-  const calls = [];
-  runInNewContext(`${source}\nrelaunchAfterDesktopRemoteChange();`, {
-    process: { argv }, setTimeout: callback => { callback(); return {}; },
-    app: { relaunch: options => calls.push(options.args), quit: () => calls.push("quit") },
-  });
-  assert.deepEqual(calls, [["--fixture", "openmausbot://organization?ignored"], "quit"]);
+  const origin = "http://127.0.0.1:48995";
+  localOrigin.setLocalOrigin(origin);
+  for (const platform of ["win32", "linux", "darwin"]) {
+    const handlers = new Map(), timers = [], calls = [];
+    const frame = { url: `${origin}/` }, contents = { mainFrame: frame, getURL: () => `${origin}/` };
+    const mainWindow = { webContents: contents, isDestroyed: () => false };
+    runInNewContext(source, {
+      localOnly: localOrigin.localOnly, mainWindow, desktopShutdownStarted: false,
+      ipcMain: { handle: (name, handler) => handlers.set(name, handler) },
+      BrowserWindow: { fromWebContents: sender => sender === contents ? mainWindow : null },
+      process: { platform, argv },
+      app: { relaunch: options => calls.push(Array.from(options.args)), quit: () => calls.push("quit") },
+      setTimeout: (callback, delay) => { assert.equal(delay, 250); timers.push(callback); return { unref() {} }; },
+    });
+    const relaunch = handlers.get("desktop:relaunch");
+    for (const event of [
+      { sender: contents, senderFrame: { url: "https://remote.example.test/" } },
+      { sender: contents, senderFrame: { url: `${origin}/child` } },
+      { sender: contents, senderFrame: { url: "" } },
+      { sender: { mainFrame: frame }, senderFrame: frame },
+      { sender: contents },
+    ]) assert.throws(() => relaunch(event), /only available|unavailable/, platform);
+    mainWindow.isDestroyed = () => true;
+    assert.throws(() => relaunch({ sender: contents, senderFrame: frame }), /unavailable/, platform);
+    mainWindow.isDestroyed = () => false;
+    assert.equal(timers.length, 0);
+    assert.deepEqual(calls, []);
+    assert.equal(relaunch({ sender: contents, senderFrame: frame }), true, platform);
+    assert.equal(relaunch({ sender: contents, senderFrame: frame }), true, platform);
+    assert.equal(timers.length, 1, `${platform}: repeated calls schedule only one restart`);
+    assert.deepEqual(calls, [], "the IPC response precedes normal shutdown");
+    timers[0]();
+    assert.deepEqual(calls, [["--fixture", "openmausbot://organization?ignored"], "quit"]);
+  }
 });
 
 test("the shipped updater adapter explicitly omits only the fixed action and its reproducible patch fails closed", () => {

@@ -471,3 +471,11 @@ export async function companionCloudDesktopAccess(deviceId, allowed) {
   await control(allowed ? "POST" : "DELETE", `/devices/${deviceId}/cloud-desktop`).catch(() => {});
   return companionState();
 }
+
+/** Browser access is its own per-device grant, never inherited from VM access. */
+export async function companionBrowserControlAccess(deviceId, allowed) {
+  if (!proc) return companionState();
+  if (!/^[\w-]{1,64}$/.test(String(deviceId ?? ""))) return companionState();
+  await control(allowed ? "POST" : "DELETE", `/devices/${deviceId}/browser-control`);
+  return companionState();
+}

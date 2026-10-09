@@ -1,4 +1,5 @@
 import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
+import type { ConnectorCardData } from "../../shared/wire";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
 export const CHANNELS_SECTION_ID = "builtin:channels";
@@ -67,6 +68,23 @@ export function sidebarGoalRunPreview(run: GroupGoalRunCardData): string {
   return summary ? `${label}: ${summary}` : label;
 }
 
+/** The catalog keys a connection card's preview reads its state from. */
+export type SidebarConnectorPreviewKey = "connectors.card.connected" | "connectors.card.waiting" | "connectors.card.connectSecurely";
+
+/** A connection card previews as the app and where it stands, in the
+ * reader's language, never as the English line the computer writes for
+ * phones that cannot draw the card yet. */
+export function sidebarConnectorPreview(
+  connector: Pick<ConnectorCardData, "label" | "status" | "dismissed">,
+  say: (key: SidebarConnectorPreviewKey) => string,
+): string {
+  if (connector.dismissed) return connector.label;
+  const key: SidebarConnectorPreviewKey = connector.status === "connected"
+    ? "connectors.card.connected"
+    : connector.status === "authorizing" ? "connectors.card.waiting" : "connectors.card.connectSecurely";
+  return `${connector.label} · ${say(key)}`;
+}
+
 export function sidebarLayoutInteractive(density: SidebarDensityMode, query: string): boolean {
   return density !== "icons" && query.trim().length === 0;
 }
@@ -78,6 +96,16 @@ export function sidebarSectionCollapsed(
   query: string,
 ): boolean {
   return sidebarLayoutInteractive(density, query) && collapsedIds.includes(id);
+}
+
+/** Thread rows for bots that the circle grid took out of the normal list.
+ * Icons and the row layout already show those rows, so this stays off there. */
+export function pinnedCircleThreadListVisible(
+  circles: boolean,
+  density: SidebarDensityMode,
+  pinnedCount: number,
+): boolean {
+  return circles && density !== "icons" && pinnedCount > 0;
 }
 
 /** Pinned bots are a virtual view. Their saved section is left untouched so

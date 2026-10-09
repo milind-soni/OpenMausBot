@@ -92,6 +92,8 @@ export const assertionSchema = z.discriminatedUnion("kind", [
    * trace shape, and the live tier's argument-agnostic invariant. */
   z.object({ kind: z.literal("toolNames"), bot: z.string(), equals: z.array(z.string()) }),
   z.object({ kind: z.literal("turnOrder"), bots: z.array(z.string()) }),
+  /** Model-visible instructions, including Claude's leading volatile-update reminder. */
+  z.object({ kind: z.literal("instructionsInclude"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
   z.object({ kind: z.literal("systemPromptIncludes"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
   z.object({ kind: z.literal("systemPromptOmits"), bot: z.string(), turn: z.number().int(), omits: z.string() }),
   z.object({ kind: z.literal("promptIncludes"), bot: z.string(), turn: z.number().int(), includes: z.string() }),

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { ArrowUpRight, CalendarClock, Cloud, Crown, Monitor, Sparkles, X } from "lucide-react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
-import { api, useStore, useStreaming } from "@/state/store";
-import { openExternalLink, PRO_URL } from "@/lib/app-links";
+import { api, CLOUD_LINK_SETTINGS, useStore } from "@/state/store";
+import { openExternalLink, PRICING_URL, PRO_URL } from "@/lib/app-links";
+import { buyOfferAllowed, cloudPlanLine, cloudPlanView, type CloudPlanView } from "@/lib/cloud-plan";
 import { emailGateDone } from "@/lib/analytics";
 import { currentStep } from "@/lib/guided-tour";
 import { hintSeen, hintSeenPatch, welcomeDue } from "@/lib/onboarding";
@@ -19,12 +20,18 @@ export const PRO_DISMISSED = "pro-introduction-dismissed-v2";
  * the EU 30-day prior-price rule). */
 export const PRO_LAUNCH_PRICE = "$49";
 export const PRO_LATER_PRICE = "$89";
+/** The other OMB Cloud plans, monthly. Every price is plus applicable tax. */
+export const CLOUD_PERSONAL_PRICE = "$29";
+export const CLOUD_MAX_PRICE = "$99";
 
+/** Only someone signed out, or verified as signed in with no plan, no Cloud
+ * and no payment being linked, is ever offered a plan (src/lib/cloud-plan.ts). */
 export function proOfferAvailable(account: CloudAccountState | null): boolean {
-  return account?.status === "signed-out" || (account?.status === "connected" && account.entitlement?.plan === "free");
+  return buyOfferAllowed(cloudPlanView(account));
 }
 
-function useProOffer() {
+/** The plan as the native snapshot says; null without a bridge (a browser, a remote page). */
+function useCloudPlan(): CloudPlanView | null {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
   const [account, setAccount] = useState<CloudAccountState | null>(null);
   useEffect(() => {
@@ -35,7 +42,19 @@ function useProOffer() {
     void bridge.state().then(next => { if (active && !updated) setAccount(next); }).catch(() => {});
     return () => { active = false; unsubscribe(); };
   }, [bridge]);
-  return Boolean(bridge) && proOfferAvailable(account);
+  return bridge ? cloudPlanView(account) : null;
+}
+
+/** Signed out: someone who already pays signs in first, before any offer. */
+function SignInFirst({ onSignIn }: { onSignIn: () => void }) {
+  return <p className="text-[12.5px] text-ink">{t("pro.havePlan")}{" "}
+    <button type="button" className="font-medium text-accent underline underline-offset-2 hover:text-ink" onClick={onSignIn}>{t("pro.signIn")}</button></p>;
+}
+
+/** Every plan side by side, on the website. */
+function PlansLink({ onOpened }: { onOpened?: () => void }) {
+  return <button type="button" className="py-2 text-[12px] text-ink-secondary underline underline-offset-2 hover:text-ink"
+    onClick={() => void openExternalLink(PRICING_URL).then(onOpened).catch(() => {})}>{t("pro.seePlans")}</button>;
 }
 
 export function ProLink({ onOpened }: { onOpened?: () => void }) {
@@ -51,21 +70,40 @@ export function ProLink({ onOpened }: { onOpened?: () => void }) {
   </div>;
 }
 
-/** Always available in Settings, independent of the introduction's dismissal. */
+/** Always available in Settings, independent of the introduction's dismissal.
+ * Someone with a plan (or one being linked, or one this app cannot check
+ * right now) sees that plan here instead, and the way to it. */
 export function ProSettingsCard() {
-  const available = useProOffer();
-  if (!available) return null;
-  return <section aria-label={t("pro.name")} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline/50 p-3">
+  const { dispatch } = useStore();
+  const view = useCloudPlan();
+  if (!view) return null;
+  if (buyOfferAllowed(view)) {
+    return <section aria-label={t("pro.name")} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline/50 p-3">
+      <div className="flex items-center gap-3">
+        <Crown className="text-ink-secondary" size={18} aria-hidden="true" />
+        <div><h3 className="text-[14px] font-semibold text-ink">{t("pro.name")}</h3>
+          <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.settingsSummary")}</p>
+          <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.fromPrice", { price: CLOUD_PERSONAL_PRICE })}</p></div>
+      </div>
+      <div className="flex flex-col items-end gap-1">
+        {view.kind === "signed-out" && <SignInFirst onSignIn={() => dispatch(CLOUD_LINK_SETTINGS)} />}
+        <div className="flex flex-wrap items-center gap-3"><PlansLink /><ProLink /></div>
+      </div>
+    </section>;
+  }
+  const line = cloudPlanLine(view);
+  if (!line && view.kind !== "reauth") return null;
+  return <section aria-label={t("settings.section.cloudAccount")} data-cloud-plan={view.kind} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-hairline/50 p-3">
     <div className="flex items-center gap-3">
-      <Crown className="text-ink-secondary" size={18} aria-hidden="true" />
-      <div><h3 className="text-[14px] font-semibold text-ink">{t("pro.name")}</h3>
-        <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.settingsSummary")}</p></div>
+      <Cloud className="text-ink-secondary" size={18} aria-hidden="true" />
+      <div><h3 className="text-[14px] font-semibold text-ink">{t("settings.section.cloudAccount")}</h3>
+        <p className="mt-1 text-[12px] text-ink-secondary">{view.kind === "reauth" ? t("pro.reauthShort") : line}</p></div>
     </div>
-    <ProLink />
+    <button type="button" className="ui-button" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}>{t("pro.openCloudSettings")}</button>
   </section>;
 }
 
-export function ProIntroductionCard({ onDismiss }: { onDismiss: () => void }) {
+export function ProIntroductionCard({ onDismiss, onSignIn }: { onDismiss: () => void; onSignIn?: () => void }) {
   return <aside aria-labelledby="pro-introduction-title" onKeyDown={event => {
     if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onDismiss(); }
   }} className="fixed bottom-4 left-4 z-40 max-h-[calc(100dvh-32px)] w-[300px] max-w-[calc(100vw-32px)] overflow-y-auto rounded-xl border border-hairline/40 bg-panel p-3.5 text-ink shadow-2xl shadow-black/20">
@@ -83,9 +121,13 @@ export function ProIntroductionCard({ onDismiss }: { onDismiss: () => void }) {
       <li className="flex items-center gap-2.5"><Monitor size={17} className="shrink-0 text-ink-secondary" aria-hidden="true" />{t("pro.computers")}</li>
       <li className="flex items-center gap-2.5"><CalendarClock size={17} className="shrink-0 text-ink-secondary" aria-hidden="true" />{t("pro.schedule")}</li>
     </ul>
-    <p className="mb-3 text-[12.5px]">{t("pro.launchPrice", { price: PRO_LAUNCH_PRICE, laterPrice: PRO_LATER_PRICE })}</p>
+    <p className="text-[12.5px]">{t("pro.launchPrice", { price: PRO_LAUNCH_PRICE, laterPrice: PRO_LATER_PRICE })}</p>
+    <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.otherPlans", { personal: CLOUD_PERSONAL_PRICE, max: CLOUD_MAX_PRICE })}</p>
+    <p className="mb-3 mt-1 text-[11.5px] text-ink-secondary">{t("pro.tax")}</p>
+    {onSignIn && <div className="mb-2"><SignInFirst onSignIn={onSignIn} /></div>}
     <div className="flex flex-wrap items-center gap-3">
       <ProLink onOpened={onDismiss} />
+      <PlansLink />
       <button type="button" className="py-2 text-[12px] text-ink-secondary hover:text-ink" onClick={onDismiss}>{t("pro.noThanks")}</button>
     </div>
     <p className="mt-2 text-[11px] leading-relaxed text-ink-secondary">{t("pro.disclaimer")}</p>
@@ -94,20 +136,21 @@ export function ProIntroductionCard({ onDismiss }: { onDismiss: () => void }) {
 
 export function ProIntroduction({ quiet = false }: { quiet?: boolean }) {
   const { state, dispatch } = useStore();
-  const { streaming } = useStreaming();
-  const available = useProOffer();
+  const view = useCloudPlan();
+  const available = view !== null && buyOfferAllowed(view);
   const updater = useUpdaterState();
   const [dismissed, setDismissed] = useState(() => {
     try { return localStorage.getItem(PRO_DISMISSED) === "1"; } catch { return false; }
   });
+  // "Sign in" hides the card for now, not for good: signed in with a plan, it never returns anyway.
+  const [signingIn, setSigningIn] = useState(false);
   const record = state.config?.onboarding;
   const busy = state.bots.some(bot => bot.busy || bot.tasks?.some(task => task.busy))
-    || state.groups.some(group => group.working || group.busyBotId)
-    || Object.keys(streaming).length > 0;
+    || state.groups.some(group => group.working || group.busyBotId);
   const setup = state.welcomeOpen || state.tourOpen || (Boolean(record?.completedAt) && currentStep(record) !== null)
     || welcomeDue(state.config, { remoteClient: false, legacyDone: emailGateDone() });
-  if (!available || dismissed || hintSeen(record, PRO_DISMISSED) || !state.connected || !state.config || setup || busy || quiet
-    || state.appSettingsOpen || state.settingsOpen || state.newBotOpen || state.pluginsOpen || state.shortcutsOpen
+  if (!available || dismissed || signingIn || hintSeen(record, PRO_DISMISSED) || !state.connected || !state.config || setup || busy || quiet
+    || state.appSettingsOpen || state.settingsOpen || state.newBotOpen || state.pluginsOpen || state.triggersOpen || state.shortcutsOpen
     || (updater && !["idle", "checking"].includes(updater.status))) return null;
 
   const dismiss = () => {
@@ -119,5 +162,5 @@ export function ProIntroduction({ quiet = false }: { quiet?: boolean }) {
     if (patch) void api("/api/config", { method: "PUT", body: JSON.stringify(patch) })
       .then(config => dispatch({ type: "configStatus", config })).catch(() => {});
   };
-  return <ProIntroductionCard onDismiss={dismiss} />;
+  return <ProIntroductionCard onDismiss={dismiss} onSignIn={view.kind === "signed-out" ? () => { setSigningIn(true); dispatch(CLOUD_LINK_SETTINGS); } : undefined} />;
 }

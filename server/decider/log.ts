@@ -15,6 +15,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 
 import { boundRetentionDays, pruneMonthFiles } from "../decision-log.ts";
+import { monthKey } from "../usage-ledger.ts";
 import type { DeciderFailure, DeciderProvider, DeciderSeam } from "./types.ts";
 
 export const DECIDER_LOG_DIR = "decider-log";
@@ -48,10 +49,6 @@ export function stateHash(state: unknown): string {
     text = "";
   }
   return createHash("sha256").update(text).digest("hex").slice(0, 16);
-}
-
-function monthKey(at: Date): string {
-  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 export function deciderLogFileFor(dataDir: string, at: Date): string {

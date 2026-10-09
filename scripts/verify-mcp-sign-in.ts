@@ -76,8 +76,8 @@ try {
   mkdirSync(evidence, { recursive: true });
   await command("screenshot", join(evidence, "before.png"), "--full");
   await clickButton("Sign in");
-  await command("wait", "--fn", "document.body.textContent.includes('Signing in from another computer?')");
-  await command("click", "summary");
+  // A remote browser with no https address to return to: the paste box is shown up front.
+  await command("wait", "--fn", "document.body.textContent.includes('After you approve, your browser shows a page that can') && document.getElementById('mcp-callback-documents') !== null");
   await command("screenshot", join(evidence, "waiting.png"), "--full");
   await command("fill", "#mcp-callback-documents", "http://127.0.0.1:1/wrong?code=wrong&state=wrong");
   await clickButton("Complete sign-in");
@@ -95,8 +95,7 @@ try {
   // request settles. The new form must not inherit the old busy state.
   await clickButton("Cancel");
   await clickButton("Sign in");
-  await command("wait", "--fn", "document.body.textContent.includes('Signing in from another computer?')");
-  await command("click", "summary");
+  await command("wait", "--fn", "document.body.textContent.includes('After you approve, your browser shows a page that can') && document.getElementById('mcp-callback-documents') !== null");
   const retried = await fetch(authorizationUrl, { redirect: "manual" });
   await command("fill", "#mcp-callback-documents", retried.headers.get("location")!);
   await clickButton("Complete sign-in");
@@ -112,7 +111,7 @@ try {
   await clickButton("Test");
   await command("wait", "--fn", "[...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Sign in')");
   await clickButton("Sign in");
-  await command("wait", "--fn", "document.body.textContent.includes('Signing in from another computer?')");
+  await command("wait", "--fn", "document.body.textContent.includes('After you approve, your browser shows a page that can') && document.getElementById('mcp-callback-documents') !== null");
   const pending = await fetch(authorizationUrl, { redirect: "manual" });
   assert.equal(await evaluate("fetch('/api/auth/logout', {method:'POST',headers:{'content-type':'application/json'}}).then(r=>r.status)"), 200);
   await assert.rejects(fetch(pending.headers.get("location")!));

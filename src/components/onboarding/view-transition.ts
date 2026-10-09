@@ -2,16 +2,17 @@
 // snapshots the old frame, the update is flushed synchronously, and named
 // elements (`view-transition-name`) morph while the rest cross-fades. Falls
 // back to a plain update under reduced motion or without the API, so callers
-// never branch on support.
+// never branch on support. The transition is returned for a caller that has
+// to tidy up after it; null means the update was applied at once.
 import { flushSync } from "react-dom";
 import { reducedMotion } from "@/lib/onboarding";
 
-export function withViewTransition(update: () => void): void {
+export function withViewTransition(update: () => void): ViewTransition | null {
   if (reducedMotion() || typeof document.startViewTransition !== "function") {
     update();
-    return;
+    return null;
   }
-  document.startViewTransition(() => {
+  return document.startViewTransition(() => {
     flushSync(update);
   });
 }

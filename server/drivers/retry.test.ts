@@ -106,3 +106,25 @@ describe("computeBackoff", () => {
     }
   });
 });
+
+describe("classifyError — usage limits", () => {
+  it("keeps a generic short-lived 429 transient in both transport shapes", () => {
+    const text = "HTTP 429: rate limit reached; retry after 1s";
+    expect(classifyError({ text })).toEqual({ transient: true, reason: "rate_limited" });
+    expect(classifyError({ exitCode: 1, stderr: text })).toEqual({ transient: true, reason: "rate_limited" });
+    expect(classifyError({ exitCode: 1, stderr: "API Error: 429 Rate limit reached: weekly limit reached" })).toEqual({ transient: false, reason: "quota" });
+  });
+  // A subscription's usage limit is not a 429 to retry through: the window
+  // is hours away. It is terminal for this engine, and the harness may
+  // carry the task to another account or engine instead.
+  it("calls a subscription usage limit a quota problem, not a retry", () => {
+    for (const text of [
+      "You've hit your usage limit for this session. Try again at 7pm.",
+      "Usage limit reached for Claude Max",
+      "Rate limit reached: weekly limit reached",
+      "You are out of credits",
+    ]) {
+      expect(classifyError({ text }), text).toEqual({ transient: false, reason: "quota" });
+    }
+  });
+});

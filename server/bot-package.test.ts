@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { packageAgentAsMember, parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
+import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
+import { memberFromAgent } from "./package-import.ts";
 
 const validPackage: any = {
   format: "openmaus.package",
@@ -86,7 +87,7 @@ describe("bot packages", () => {
     const soul = "  Preserve precise instructions. 🐭\n";
     input.package.agents[0].soul = soul;
     const parsed = parseBotPackage(renderBotPackageMarkdown(parseBotPackage(input)));
-    expect(packageAgentAsMember(parsed.package.agents[0]).soul).toBe(soul);
+    expect(memberFromAgent(parsed.package.agents[0]).soul).toBe(soul);
     input.package.agents[0].soul = "🐭".repeat(6_001);
     expect(() => parseBotPackage(input)).toThrow("24000 bytes");
   });
@@ -129,7 +130,7 @@ describe("bot packages", () => {
     expect(parsed.package.rooms![0]?.defaultResponder).toEqual({ kind: "agent", agent: "lead" });
     expect(parsed.package.agents[0]).not.toHaveProperty("approvalMode");
     expect(parsed.package.agents[0]).not.toHaveProperty("autoApprove");
-    expect(packageAgentAsMember(parsed.package.agents[0]!)).toEqual({
+    expect(memberFromAgent(parsed.package.agents[0]!)).toEqual({
       key: "lead",
       name: "Ada",
       title: "Research Lead",

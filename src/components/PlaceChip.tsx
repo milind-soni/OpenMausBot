@@ -2,42 +2,56 @@ import { Check } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
-import { browserAvailable, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
-import { instanceSupportsLocalComputer, localComputerSelectable } from "@/lib/local-computer";
+import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
 import { effectivePlace, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
+import { placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat } from "@/lib/place-view";
 import { useStore, type Bot, type Task } from "@/state/store";
+import type { PlaceView } from "../../shared/place-view";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { PlaceIcon } from "./PlaceIcon";
 
 export type PlaceAvailability = Record<Place, boolean>;
 
-/** The same reachability the Works on picker applies, so the chip never
- * offers a place the panel would grey out. */
-export function usePlaceAvailability(bot: Bot): PlaceAvailability {
+/** Each place's view (shared/place-view.ts) for this bot, and whether a
+ * conversation can be pinned there: the same view the Works on cards and
+ * the Simple grid read, so the chip never offers a place the panel would
+ * grey out, and names a problem in the same few words. */
+export function usePlaceViews(bot: Bot): Record<Place, { view: PlaceView; reachable: boolean; policy: boolean }> {
   const { state } = useStore();
   const { capabilities } = useDesktopCapabilities();
-  const instance = state.instances.find((candidate) => candidate.instanceId === bot.modelSelection.instanceId);
-  const computerMcp = instance?.capabilities?.computerMcp === true;
-  const boxAgent = instance?.driverKind === "boxAgent";
+  const seat = usePlaceSeat(state.config, capabilities.host.platform);
+  const backend = bot.cloudBackend === "vps" ? "vps" : "box";
   // Places the enrolled organisation disallows, or this server never
   // offers (an OMB Cloud home), are not reachable.
   const allowed = state.config?.managedPolicy?.computers ?? { thisComputer: true, localVm: true, box: true, vps: true };
-  return {
-    cloud: (bot.cloudBackend === "vps" ? computerMcp && !boxAgent : computerMcp || boxAgent) && (bot.cloudBackend === "vps" ? allowed.vps : allowed.box),
-    vm: Boolean(instance?.snapshot?.state === "available" && computerMcp && !boxAgent) && allowed.localVm && placeOffered("vm", state.config),
-    local: localComputerSelectable({ capabilities, providerSupportsLocal: instanceSupportsLocalComputer(state.instances, bot) }) && allowed.thisComputer && placeOffered("local", state.config),
-    browser: builtInBrowserEnabled(state.config) && browserAvailable(state.config) && instance?.capabilities?.browserMcp === true && !boxAgent,
+  const providerSupportsLocal = instanceSupportsLocalComputer(state.instances, bot);
+  const local = {
+    ready: localComputerSelectable({ capabilities, providerSupportsLocal }),
+    reason: localComputerDisabledReason({ capabilities, providerSupportsLocal }) ?? t("computer.unavailableLocal"),
   };
+  const entry = (place: Place) => {
+    const view = placeViewFor(placeFacts({ bot, place, seat, config: state.config, instances: state.instances, local }));
+    const policy = (place === "cloud" ? allowed[backend] : place === "vm" ? allowed.localVm : place === "local" ? allowed.thisComputer : true)
+      && placeOffered(place, state.config);
+    return { view, policy, reachable: policy && !placeBlocked(view) };
+  };
+  return { cloud: entry("cloud"), vm: entry("vm"), local: entry("local"), browser: entry("browser") };
+}
+
+export function usePlaceAvailability(bot: Bot): PlaceAvailability {
+  const views = usePlaceViews(bot);
+  return { cloud: views.cloud.reachable, vm: views.vm.reachable, local: views.local.reachable, browser: views.browser.reachable };
 }
 
 const DESCRIPTION: Record<Place, "computer.dest.cloudDesc" | "computer.dest.vmDesc" | "computer.dest.localDesc" | "computer.dest.browserDesc"> = {
   cloud: "computer.dest.cloudDesc", vm: "computer.dest.vmDesc", local: "computer.dest.localDesc", browser: "computer.dest.browserDesc",
 };
 
-/** Where this conversation works, always visible beside the send button.
- * Shows the effective place (the conversation's pin, else the bot's Works
- * on), pulses while a turn is acting there, and pins another place for this
+/** Where this conversation works, beside the send button in Advanced mode
+ * (Simple leaves every conversation on its bot's Works on). Shows the
+ * effective place (the conversation's pin, else the bot's Works on), pulses
+ * while a turn is acting there, and pins another place for this
  * conversation only. No confirmation card: choosing is the whole gesture. */
 export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   bot: Bot;
@@ -50,7 +64,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   const motion = useMenuMotion(open);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { state } = useStore();
-  const availability = usePlaceAvailability(bot);
+  const places = usePlaceViews(bot);
   const effective = effectivePlace(bot, task);
   const pinned = Boolean(task?.surface);
   const off = effective === "off";
@@ -69,6 +83,9 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
 
   const choose = (surface: Place | null) => { setOpen(false); if (surface !== (task?.surface ?? null)) onPin(surface); };
   const botDefault = bot.computer ?? "auto";
+  // A bot on Auto offers Auto itself as the unpinned default, rather than
+  // "follow this bot's setting" spelled out to end in the same word.
+  const followsAuto = botDefault === "auto";
 
   return (
     <div className="relative flex items-center" ref={wrapperRef}>
@@ -103,14 +120,19 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
             >
               <PlaceIcon place={botDefault} size={14} className="mt-0.5 shrink-0 opacity-70" aria-hidden="true" />
               <span className="min-w-0 flex-1">
-                <span className="block text-[13px] text-ink">{t("place.followBot")}</span>
-                <span className="block text-[11px] text-ink-secondary">{t("place.followBotDetail", { place: t(placeLabelKey(botDefault)) })}</span>
+                <span className="block text-[13px] text-ink">{followsAuto ? t("place.auto") : t("place.followBot")}</span>
+                <span className="block text-[11px] text-ink-secondary">
+                  {followsAuto ? t("place.autoDetail") : t("place.followBotDetail", { place: t(placeLabelKey(botDefault)) })}
+                </span>
               </span>
               {!pinned && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
             </button>
             {PLACES.filter((place) => placeOffered(place, state.config)).map((place) => {
               const selected = task?.surface === place;
-              const reachable = availability[place];
+              const { view, reachable, policy } = places[place];
+              // A problem is named in the panel's own few words; a place
+              // the organisation or this server never offers stays plain.
+              const detail = !policy ? t("place.unavailable") : placeHasIssue(view) ? view.short : t(DESCRIPTION[place]);
               return (
                 <button
                   key={place}
@@ -118,14 +140,14 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
                   role="menuitemradio"
                   aria-checked={selected}
                   disabled={!reachable}
-                  title={reachable ? undefined : t("place.unavailable")}
+                  title={!policy ? t("place.unavailable") : placeHasIssue(view) ? view.line : undefined}
                   onClick={() => choose(place)}
                   className={cn("flex items-start gap-3 px-4 py-2 text-left", reachable ? "hover:bg-control/60" : "cursor-not-allowed opacity-45", selected && "bg-control/40")}
                 >
                   <PlaceIcon place={place} size={14} className="mt-0.5 shrink-0 opacity-70" aria-hidden="true" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-[13px] text-ink">{t(placeLabelKey(place))}</span>
-                    <span className="block text-[11px] text-ink-secondary">{reachable ? t(DESCRIPTION[place]) : t("place.unavailable")}</span>
+                    <span className="block text-[11px] text-ink-secondary">{detail}</span>
                   </span>
                   {selected && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
                 </button>

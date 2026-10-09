@@ -1,11 +1,12 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   AttachedFileChips,
   AttachedImageGallery,
   MarkdownImagePreview,
+  OutsideWorkspaceFile,
   canonicalDownloadFilename,
   contentDispositionFilename,
   imageGalleryLayout,
@@ -14,6 +15,7 @@ import {
   previewImage,
   previewKeyAction,
   safeDownloadFilename,
+  saveFailureText,
   wrappedImageIndex,
 } from "./AttachmentPreview";
 
@@ -160,6 +162,44 @@ describe("attachment preview surfaces", () => {
     }));
     expect(html).toContain("Save a copy of Final report.pdf");
     expect(html).toContain("type=\"button\"");
+  });
+});
+
+describe("Show in folder for a file outside the workspace", () => {
+  const render = (filePath: string) => renderToStaticMarkup(createElement(OutsideWorkspaceFile, { filePath }));
+
+  it("offers the reveal only for an absolute local path, and only in the local desktop app", () => {
+    vi.stubGlobal("window", { ogb: { revealInFolder: vi.fn(), remoteClient: { active: false } } });
+    try {
+      expect(render("/Users/maus/_draft/ollama-gen.js")).toContain("Show in folder");
+      expect(render("C:\\Users\\Maus\\_draft\\ollama-gen.js")).toContain("Show in folder");
+      // main refuses these, so the person gets the path to look for instead
+      for (const filePath of ["_draft/ollama-gen.js", "\\\\server\\share\\ollama-gen.js"]) {
+        expect(render(filePath)).not.toContain("Show in folder");
+        expect(render(filePath)).toContain(`>${filePath}</code>`);
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("gives a remote client the path, since the file is not on its computer", () => {
+    vi.stubGlobal("window", { ogb: { revealInFolder: vi.fn(), remoteClient: { active: true } } });
+    try {
+      expect(render("/Users/maus/_draft/ollama-gen.js")).toContain(">/Users/maus/_draft/ollama-gen.js</code>");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("a failed save", () => {
+  it("explains a file outside the working folder instead of echoing the server", () => {
+    const server = "the linked file is outside this conversation's workspace";
+    expect(saveFailureText({ reason: server, outsideWorkspace: true }))
+      .toBe("This file is outside this chat's working folder, so it can't be saved from here");
+    expect(saveFailureText({ reason: "the linked file is unavailable", outsideWorkspace: false }))
+      .toBe("the linked file is unavailable");
   });
 });
 

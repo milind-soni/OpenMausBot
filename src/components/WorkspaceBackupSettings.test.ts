@@ -13,7 +13,7 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
 }));
 vi.mock("@/state/store", () => ({ api: fixture.api }));
-import { WorkspaceBackupRecovery, WorkspaceBackupSettings, WorkspaceBackupSummaryView } from "./WorkspaceBackupSettings";
+import { WorkspaceBackupRecovery, WorkspaceBackupRestartNotice, WorkspaceBackupSettings, WorkspaceBackupSummaryView } from "./WorkspaceBackupSettings";
 
 type Node = ReactElement<{ children?: ReactNode; type?: string; disabled?: boolean; value?: string; onChange?: (event: unknown) => void; onSubmit?: (event: unknown) => void; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] {
@@ -21,10 +21,10 @@ function nodes(value: ReactNode): Node[] {
   const node = value as Node;
   return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
 }
-function render(recovery = false) {
+function render(recovery: boolean | "restart" = false) {
   fixture.index = 0; fixture.effects = [];
   let tree: ReactNode;
-  function Capture() { tree = recovery ? WorkspaceBackupRecovery({ children: createElement("p", null, "Normal app") }) : WorkspaceBackupSettings(); return tree; }
+  function Capture() { tree = recovery === "restart" ? WorkspaceBackupRestartNotice() : recovery ? WorkspaceBackupRecovery({ children: createElement("p", null, "Normal app") }) : WorkspaceBackupSettings(); return tree; }
   const html = renderToStaticMarkup(createElement(Capture));
   return { html, nodes: nodes(tree) };
 }
@@ -146,6 +146,52 @@ describe("Settings full backups", () => {
     expect(storage.has("omb-pending-workspace-restore")).toBe(false); expect(window.location.reload).toHaveBeenCalledOnce();
   });
 
+  it("offers a real desktop restart without clearing the restore marker or drafts, once only", async () => {
+    const relaunch = vi.fn().mockResolvedValue(true);
+    vi.stubGlobal("window", { ...window, ogb: { relaunch } });
+    storage.set("omb-pending-workspace-restore", "stage-id"); storage.set("omb-drafts", "keep");
+    fixture.api.mockResolvedValueOnce({ busy: true, pendingRestore: true });
+    render(true); fixture.effects[0](); await flush();
+    expect(render(true).html).toContain("Restart and restore");
+    expect(render(true).html).not.toContain(">Retry<");
+    fixture.values = [];
+    const restart = render("restart").nodes.find(node => node.type === "button")!;
+    restart.props.onClick!(); restart.props.onClick!(); await flush();
+    expect(relaunch).toHaveBeenCalledOnce();
+    expect(render("restart").nodes.find(node => node.type === "button")!.props.disabled).toBe(true);
+    expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
+    expect(storage.get("omb-drafts")).toBe("keep");
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+
+  it.each([false, new Error("Fixture restart unavailable")])("keeps recovery intact and offers a retry when native restart fails (%s)", async result => {
+    const relaunch = result === false ? vi.fn().mockResolvedValue(false) : vi.fn().mockRejectedValue(result);
+    vi.stubGlobal("window", { ...window, ogb: { relaunch } });
+    storage.set("omb-pending-workspace-restore", "stage-id");
+    render("restart").nodes.find(node => node.type === "button")!.props.onClick!(); await flush();
+    const view = render("restart");
+    expect(view.html).toContain("Could not restart OpenMausBot");
+    expect(view.nodes.find(node => node.type === "button")!.props.disabled).toBe(false);
+    expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
+    expect(window.location.reload).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, { relaunch: vi.fn(), remoteClient: { active: true } }])("never restarts the local app for a browser or remote workspace", bridge => {
+    window.ogb = bridge as Window["ogb"];
+    const view = render("restart");
+    expect(view.html).toContain("restart the server process");
+    expect(view.html).not.toContain("Restart and restore");
+    expect(view.nodes.filter(node => node.type === "button")).toHaveLength(0);
+  });
+
+  it("retains the server-status retry for browser recovery", async () => {
+    storage.set("omb-pending-workspace-restore", "stage-id");
+    fixture.api.mockResolvedValueOnce({ busy: true, pendingRestore: true });
+    render(true); fixture.effects[0](); await flush();
+    expect(render(true).html).toContain(">Retry<");
+    expect(render(true).html).not.toContain("Restart and restore");
+  });
+
   it("never imports a different restore's browser state", async () => {
     storage.set("omb-pending-workspace-restore", "my-stage"); storage.set("omb-drafts", "keep");
     fixture.api.mockResolvedValueOnce({ busy: false, lastRestoreId: "another-stage" });
@@ -196,5 +242,27 @@ describe("Settings full backups", () => {
     expect(render(true).html).toContain("Storage unavailable"); expect(render(true).html).not.toContain("Normal app");
     expect(storage.get("omb-drafts")).toBe("keep"); expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
     expect(window.location.reload).not.toHaveBeenCalled();
+  });
+
+  it("on a server open in the desktop app, offers Import from this computer beside the file import: the same copy as the server's own offer", async () => {
+    const move = { state: vi.fn().mockResolvedValue({ phase: "idle", local: { bots: 4, rooms: 1, chats: 37, bytes: 1024 ** 3, files: 9 }, cloud: { contents: { bots: 1, rooms: 0, chats: 0 }, empty: true, freeBytes: 1024 ** 4, previous: null, heldBytes: 0 },
+      suggest: false, destination: { id: "vps", name: "bots.example.test", origin: "https://bots.example.test", kind: "server" }, blocked: null }),
+      start: vi.fn(), cancel: vi.fn(), restorePrevious: vi.fn(), dismiss: vi.fn(), onState: vi.fn(() => () => {}) };
+    vi.stubGlobal("window", { location: { reload: vi.fn() }, ogb: { cloudMove: move } });
+    await ready();
+    render();
+    for (const effect of fixture.effects.slice(1)) effect();
+    await flush();
+    const html = render().html;
+    expect(move.state.mock.calls).toEqual([[undefined]]);
+    expect(html).toContain("Import from this computer");
+    expect(html).toContain("no file or password");
+    expect(html).toContain("bots.example.test is empty. Copy 4 bots and 37 chats here");
+    expect(html.indexOf("Import from this computer")).toBeLessThan(html.indexOf("Import backup"));
+    // In a browser there is no desktop app to copy from.
+    vi.stubGlobal("window", { location: { reload: vi.fn() } });
+    fixture.values = [];
+    await ready();
+    expect(render().html).not.toContain("Import from this computer");
   });
 });

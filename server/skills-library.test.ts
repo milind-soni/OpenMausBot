@@ -109,13 +109,6 @@ describe("skills library store", () => {
     expect(events).toContainEqual({ kind: "review-state", name: "triage" });
   });
 
-  it("resolves a skill name bot-private first, then library, then bundled", () => {
-    expect(library.resolveSkillSourceOrder("x", { private: 1, library: 2, bundled: 3 })).toMatchObject({ source: "private", value: 1 });
-    expect(library.resolveSkillSourceOrder("x", { library: 2, bundled: 3 })).toMatchObject({ source: "library", value: 2 });
-    expect(library.resolveSkillSourceOrder("x", { bundled: 3 })).toMatchObject({ source: "bundled", value: 3 });
-    expect(library.resolveSkillSourceOrder("x", {})).toBeNull();
-  });
-
   it("defaults the feature flag off and switches on only via features.skillsLibrary", () => {
     expect(config.skillsLibraryEnabled({} as AppConfig)).toBe(false);
     expect(config.skillsLibraryEnabled({ features: {} } as AppConfig)).toBe(false);

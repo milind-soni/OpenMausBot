@@ -1,14 +1,11 @@
 import { stringify as stringifyYaml } from "yaml";
 
 import type { JsonValue } from "./schema.ts";
-import type { TeamManifestMember } from "./team-manifest.ts";
 import { cronScheduleLabel } from "../shared/cron-label.ts";
 import {
   BOTMRR_MARKDOWN_VERSION,
   isPackageDocument,
-  PACKAGE_FORMAT,
   PACKAGE_V1_MAX_SKILLS,
-  PACKAGE_V1_VERSION,
   parsePackageV1,
   utf8Bytes,
   type PackageDocumentV1,
@@ -35,16 +32,11 @@ export {
   type PackageTrust,
 } from "../shared/package-format.ts";
 
-export const BOT_PACKAGE_FORMAT = PACKAGE_FORMAT;
-export const BOT_PACKAGE_VERSION = PACKAGE_V1_VERSION;
-export { BOTMRR_MARKDOWN_VERSION };
-export const BOT_PACKAGE_SKILLS_VERSION = 1 as const;
 export const BOT_PACKAGE_MAX_SKILLS = PACKAGE_V1_MAX_SKILLS;
 const BOT_PACKAGE_MARKDOWN_MAX_BYTES = 1_000_000;
 
 export type ParsedBotPackage = PackageDocumentV1;
 export type BotPackageDefinition = ParsedBotPackage["package"];
-export type BotPackageAgent = BotPackageDefinition["agents"][number];
 export type BotPackagePlaybook = NonNullable<BotPackageDefinition["playbooks"]>[number];
 export type BotPackageSkill = NonNullable<BotPackageDefinition["skills"]>["entries"][number];
 
@@ -141,19 +133,4 @@ export function renderBotPackageMarkdown(document: ParsedBotPackage): string {
   const markdown = `---\n${frontmatter}\n---\n\n# ${pkg.name}\n\n${pkg.tagline}\n\n> **Give this file to your Chief of Staff.** It is the complete team blueprint. Any agent system can run it; OpenMausBot can also install it directly.\n\n## Activation\n\nYou are the Chief of Staff for this blueprint. Read the whole document before acting. Confirm the user's goal and any missing inputs, then create or delegate to the specialist roles below. Preserve their names, ownership, boundaries, shared-room rules, and playbooks. If your platform cannot literally spawn agents, perform the roles one at a time and keep their outputs clearly separated.\n\nNever request pasted passwords or secret keys. Use the platform's normal connection flow. Do not send messages, publish content, spend money, delete data, or enable a schedule without the user's explicit approval. All routines start paused.\n\n## Mission\n\n${pkg.summary}\n\n## Outcomes\n\n${list(pkg.outcomes)}\n\n## Connections\n\n${connections}\n\n## Team\n\n${agents}\n\n## Chief of Staff\n\nThe Chief of Staff role is \`${pkg.chiefOfStaff ?? pkg.agents[0].key}\`. This role owns delegation, synthesis, conflict resolution, and the final answer to the user.\n${rooms ? `\n## Shared rooms\n\n${rooms}\n` : ""}${routines ? `\n## Suggested routines\n\n${routines}\n` : ""}${playbooks ? `\n## Playbooks\n\n${playbooks}\n` : ""}${examples ? `\n## Example job\n\n${examples}\n` : ""}\n## Completion rule\n\nReturn one clear result to the user, distinguish evidence from inference, cite source links when the work uses external material, and state what still needs human approval or a connected app.\n`;
   if (utf8Bytes(markdown) > BOT_PACKAGE_MARKDOWN_MAX_BYTES) throw new Error("The bot playbook is too large");
   return markdown;
-}
-
-export function packageAgentAsMember(agent: BotPackageAgent): TeamManifestMember {
-  return {
-    key: agent.key,
-    name: agent.name,
-    title: agent.title ?? "",
-    description: agent.description ?? "",
-    ...(agent.soul !== undefined ? { soul: agent.soul } : {}),
-    appearance: {
-      color: agent.appearance.color,
-      ...(agent.appearance.mascotExpression ? { mascotExpression: agent.appearance.mascotExpression } : {}),
-      ...(agent.appearance.mascotBody ? { mascotBody: agent.appearance.mascotBody } : {}),
-    },
-  };
 }

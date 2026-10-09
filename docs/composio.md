@@ -47,6 +47,42 @@ If a provider or restricted Composio project policy prevents another authorizati
 
 The hosted/managed connected-apps broker exposes the same account-aware response shape and account-specific removal routes as the self-hosted project-key mode; it does not send broker or provider credentials to the renderer.
 
+## Permissions the default connection does not ask for
+
+Each app you connect uses the Composio project's authorization for that app. Unless you set up your own, that is the Composio-managed one, which asks the provider only for Composio's default permissions. Some actions need more. In Gmail:
+
+- **Filters, the vacation responder, IMAP and POP settings** need `https://www.googleapis.com/auth/gmail.settings.basic`.
+- **Forwarding addresses, send-as aliases and delegates** need `https://www.googleapis.com/auth/gmail.settings.sharing`.
+
+Without the permission, Google refuses the call with `403 ACCESS_TOKEN_SCOPE_INSUFFICIENT`. Reconnecting the account does not help: the consent screen asks for the same permissions every time. OpenMausBot adds a note to that refusal, so the bot tells you what to change instead of retrying.
+
+To grant the permission:
+
+1. In the [Composio Dashboard](https://dashboard.composio.dev), open your project's **Auth Configs** and create an auth config for the app (for example Gmail) that uses your own OAuth app credentials.
+2. Add the permissions you need to it, keep it enabled, and leave it available to Tool Router.
+3. In OpenMausBot, open **Connected apps** and reconnect the account. The consent screen now asks for the added permissions.
+
+OpenMausBot uses your project's own auth config for an app automatically, in place of the Composio-managed one. If there are several for the same app, it uses the most recently updated, and it skips disabled ones and ones turned off for Tool Router. Google may require your OAuth app to list the added permissions on its consent screen, and to be verified before people outside your organization can grant them.
+
+On the OpenMausBot Cloud plan, connected apps run through OpenMausBot's managed connection service rather than your own Composio project, so you cannot add permissions yourself; ask OpenMausBot support instead.
+
+## Browser authorization recovery
+
+The web UI reserves an authorization tab during your click, before requesting
+the link. If the browser still blocks it, use **Open authorization page** in
+the Apps modal or connector card. **Continue** / **Open again** reuses the
+pending link instead of creating another account. Links stay in UI memory only;
+after ten minutes, retry requests a fresh link, as required by
+[Composio's connection lifecycle](https://docs.composio.dev/kb/guide/platform-connected-accounts).
+
+If all existing accounts for that app are `INITIALIZING`, `INITIATED`, or
+`EXPIRED`, an alias-less retry gets a unique `omb-retry-…` alias. It never deletes
+or replaces an account: `EXPIRED` can also describe a formerly active grant.
+Active or unknown states still require an explicit unique label, and the
+five-usable-account limit remains. At that limit, inspect the account rows and
+disconnect only an account you intend to revoke. Managed installations need
+the updated broker as well as the updated app; this is not a client-side bypass.
+
 ## Renderer-neutral connection inventory
 
 Desktop, web, and mobile clients can load the complete account inventory in one request:

@@ -12,6 +12,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { ATTACHMENTS_DIR, IMAGE_MAX_BYTES } from "./attachments.ts";
 import type { TurnImageInput } from "./contracts.ts";
+import { decodeAttachmentAttribute } from "./message-file.ts";
 
 /** Matches the companion composer policy. Four maximum-sized images are
  * bounded to 40 MiB before a provider is asked to ingest them. */
@@ -44,24 +45,6 @@ const MIME_BY_EXTENSION: Readonly<Record<string, TurnImageInput["mime"]>> = {
 
 function statusError(status: number, message: string): Error & { status: number } {
   return Object.assign(new Error(message), { status });
-}
-
-/** Decode exactly the entities emitted by the composer. Repeated or unknown
- * encodings stay encoded and therefore cannot acquire a privileged path. */
-function decodeAttachmentAttribute(value: string): string {
-  return value.replace(
-    /&(quot|lt|gt|amp);|&#(9|10|13);/g,
-    (entity, named: string | undefined, numeric: string | undefined) => {
-      if (numeric === "9") return "\t";
-      if (numeric === "10") return "\n";
-      if (numeric === "13") return "\r";
-      if (named === "quot") return '"';
-      if (named === "lt") return "<";
-      if (named === "gt") return ">";
-      if (named === "amp") return "&";
-      return entity;
-    },
-  );
 }
 
 function walk(node: MarkdownNode, visit: (node: MarkdownNode) => void): void {

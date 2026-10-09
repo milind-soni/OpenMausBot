@@ -315,14 +315,21 @@ export function runSummary(steps: RunStep[]): {
 /** @deprecated renamed runSummary. */
 export const verifySummary = runSummary;
 
-/** Whether the bot has already staged a skill from this run: an options
- * message carrying a skill proposal after the run's first step. The card
- * then points at the review instead of offering Save again. */
-export function skillStaged(messages: Message[], steps: RunStep[]): boolean {
+/** What became of a skill the bot wrote from this run: the last skill card
+ * after the run's first step. "saved" once it applied (a bot's own skill
+ * applies at once, with a receipt and Undo), "pending" while its card waits
+ * for the person. Null with none, or once it was undone or declined, so the
+ * card offers Save again. */
+export type RunSkill = "pending" | "saved" | null;
+export function runSkill(messages: Message[], steps: RunStep[]): RunSkill {
   const first = steps[0];
-  if (!first) return false;
+  if (!first) return null;
   const start = messages.findIndex((m) => m.id === first.id);
-  return start >= 0 && messages.slice(start + 1).some((m) => m.kind === "options" && m.card?.skillRequest !== undefined);
+  if (start < 0) return null;
+  const card = messages.slice(start + 1).findLast((m) => m.kind === "options" && m.card?.skillRequest !== undefined)?.card;
+  if (!card || card.undone) return null;
+  if (card.answered === "allow") return "saved";
+  return card.answered || card.dismissed || card.expired ? null : "pending";
 }
 
 const MARK = { passed: "✓", failed: "✗", running: "…" } as const;

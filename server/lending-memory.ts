@@ -40,6 +40,14 @@ export const WORKING_FOLDER_FILES = [".mcp.json", ".claude/settings.json", ".cla
 /** Folders of skills, agents and commands an engine discovers in its working
  * folder: each entry, and a skill's SKILL.md. */
 export const WORKING_FOLDER_DIRS = [".claude/skills", ".claude/agents", ".claude/commands", ".agents/skills"] as const;
+/** The two lists above by first path segment, as the walker looks for them:
+ * each name at the top of a working folder, with the names inside it (none
+ * for a file there, like .mcp.json). These lists alone decide what is watched. */
+const WORKING_FOLDER_TOP = new Map<string, string[]>();
+for (const path of [...WORKING_FOLDER_FILES, ...WORKING_FOLDER_DIRS]) {
+  const [top, inner] = path.split("/") as [string, string?];
+  WORKING_FOLDER_TOP.set(top, [...WORKING_FOLDER_TOP.get(top) ?? [], ...(inner ? [inner] : [])]);
+}
 /** Instruction files an engine reads from its working folder and every
  * folder above it (Claude Code's project memory; Codex's AGENTS.md). */
 export const ANCESTOR_FILES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "AGENTS.override.md"] as const;
@@ -182,17 +190,17 @@ export function memoryFiles(workspace: string, workingFolders: readonly string[]
     const top = listing(folder, ROOT_ENTRY_CAP, true);
     if (top) {
       listedRoots.set(folder, top);
-      for (const name of present(folder, [".mcp.json", ".claude", ".agents"], top)) {
+      for (const name of present(folder, [...WORKING_FOLDER_TOP.keys()], top)) {
         const path = join(folder, name);
-        if (name === ".mcp.json") { add(path, path); continue; }
+        const wanted = WORKING_FOLDER_TOP.get(name)!;
+        if (!wanted.length) { add(path, path); continue; }
         // A link (or a file) in place of the folder is judged by what it
         // is, and a link's files by name through it.
         const inner = listing(path, ROOT_ENTRY_CAP);
         if (!inner) add(path, path);
         if (!inner && !isLink(path)) continue;
-        const wanted = name === ".claude" ? ["settings.json", "settings.local.json", "CLAUDE.md", "skills", "agents", "commands"] : ["skills"];
         for (const entry of inner ? present(path, wanted, inner) : wanted) {
-          if (entry === "skills" || entry === "agents" || entry === "commands") capped(join(path, entry));
+          if ((WORKING_FOLDER_DIRS as readonly string[]).includes(`${name}/${entry}`)) capped(join(path, entry));
           else add(join(path, entry), join(path, entry));
         }
       }
@@ -246,11 +254,6 @@ export function fingerprintOf(files: Record<string, string>): string {
   const hash = createHash("sha256");
   for (const name of Object.keys(files).sort()) hash.update(`${name}\u0000${files[name]}\u0000`);
   return hash.digest("hex");
-}
-
-/** Back-compat for callers that only need the hash of one workspace. */
-export function memoryFingerprint(workspace: string, workingFolders: readonly string[] = []): string {
-  return fingerprintOf(memoryFiles(workspace, workingFolders));
 }
 
 /** What the record keeps of each file: enough to say which ones changed. */

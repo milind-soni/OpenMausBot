@@ -118,6 +118,30 @@ export async function withSavableFile(
   }
 }
 
+// A bot can link a file outside its conversation's workspace, which the server
+// refuses to serve. The person may still ask the file manager to point at it.
+// The path comes from model-written markdown, so it is untrusted: only an
+// absolute local path that exists reaches `reveal`, and nothing here opens,
+// reads or runs it. Network shares and URLs are refused; merely looking up a
+// share can hand this computer's sign-in to whoever runs that server.
+export async function revealInFolder(rawPath, { reveal, fsp = fs.promises, pathApi = path }) {
+  const local = (value) => !/^[\\/]{2}/.test(value) && pathApi.isAbsolute(value);
+  if (typeof rawPath !== "string" || rawPath.includes("\0") || /^[a-z][a-z\d+.-]+:/i.test(rawPath) || !local(rawPath)) {
+    return "invalid";
+  }
+  const target = pathApi.normalize(rawPath);
+  if (!local(target)) return "invalid";
+  let stats;
+  try {
+    stats = await fsp.stat(target);
+  } catch {
+    return "missing";
+  }
+  if (!stats.isFile() && !stats.isDirectory()) return "invalid";
+  reveal(target);
+  return "shown";
+}
+
 // The name the save dialog opens on: "report.docx", or "report (2).docx" when
 // that already exists, so accepting the default never quietly replaces an
 // earlier download. Only a suggestion — the user can type over it, and the

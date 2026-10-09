@@ -107,7 +107,8 @@ export interface Routine {
   /** Conversation that created this routine in chat. Calendar/import-created
    * routines intentionally have no source, and older files migrate in place. */
   sourceThreadId?: string;
-  /** Stable visible report destination; execution still gets a fresh task. */
+  /** Stable visible report destination (the bot's main thread unless the
+   * person chose another); execution still gets a fresh task. */
   resultsThreadId?: string;
   /** Server-private: added from the organization's library. Never on the
    * wire (routineWithHealth drops it); packageStamps() reads it. */
@@ -241,7 +242,7 @@ export interface RoutineInput {
   attachments?: RoutineContextAttachment[];
   continuity?: boolean;
   overlap?: "skip" | "queue";
-  /** Omission preserves routing; null creates a new dedicated results task. */
+  /** Omission preserves routing; null resets it to the bot's main thread. */
   resultsThreadId?: string | null;
 }
 
@@ -281,14 +282,15 @@ export interface RoutineManagerOptions {
   emit?: (payload: Record<string, unknown>) => void;
   botState: (botId: string) => "ready" | "busy" | "missing";
   goalState?: (groupId: string, coordinatorBotId: string) => "ready" | "busy" | "missing";
-  /** A task for one run of `routineId` (it may name who the run is for). */
-  createTask: (botId: string, title: string, activate?: boolean, routineId?: string) => { threadId: string } | null;
+  /** A task for one run (it may name who the run is for). */
+  createTask: (botId: string, title: string, activate?: boolean, run?: RoutineRun) => { threadId: string } | null;
   /** When set, run this bot's routine in that existing conversation instead of
    * a new hidden task. Room goals never use it. */
   joinConversation?: (run: RoutineRun) => string | null;
   createGoalTask?: (groupId: string, title: string) => { threadId: string } | null;
   isResultsThread?: (botId: string, threadId: string) => boolean;
-  /** Reuse routine.resultsThreadId, keep a trusted chat source, or allocate a new ID. */
+  /** Reuse a chosen routine.resultsThreadId, else the bot's main thread (a
+   * Cloud guest's routine may allocate its own). `forceNew` ignores the choice. */
   resolveResultsThread?: (routine: Routine, forceNew: boolean) => string | undefined;
   /** Compensate an uncommitted allocation, only while still empty. */
   discardResultsThread?: (botId: string, threadId: string) => void;
@@ -308,7 +310,7 @@ export interface RoutineManagerOptions {
     runId: string,
     onDispatchError: (message: string) => void,
   ) => Promise<void>;
-  interruptTurn?: (botId: string, threadId: string, runOn: RoutineRunOn) => Promise<void>;
+  interruptTurn?: (botId: string, threadId: string) => Promise<void>;
   interruptGoal?: (
     groupId: string,
     threadId: string,
@@ -631,7 +633,10 @@ function loadSchedule(value: unknown, after: number): RoutineSchedule | null {
   }
 }
 
-function intervalHasRestrictions(schedule: RoutineIntervalSchedule): boolean {
+/** Whether an interval only runs on some weekdays, in a window or until an end. */
+export function intervalHasRestrictions(
+  schedule: Pick<RoutineIntervalSchedule, "weekdays" | "window" | "endsAt">,
+): boolean {
   return schedule.weekdays !== undefined || schedule.window !== undefined || schedule.endsAt !== undefined;
 }
 
@@ -785,6 +790,10 @@ export class RoutineManager {
   private webhookRunReceipts: WebhookRunReceipt[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
+  /** The file existed but could not be read (corrupt JSON or a schema
+   * failure). Saves are refused while set so a fresh empty state can never
+   * overwrite whatever is on disk. Missing means a first run. */
+  private unreadable = false;
 
   constructor(options: RoutineManagerOptions) {
     this.options = options;
@@ -792,6 +801,13 @@ export class RoutineManager {
     this.now = options.now ?? Date.now;
     try {
       const disk = JSON.parse(readFileSync(this.file, "utf8")) as Partial<RoutineFile>;
+      // A store with the wrong top-level shape is damaged, not empty: a
+      // present collection must be a list. Absent ones stay tolerant so
+      // older files without newer receipt fields still load.
+      if (disk === null || typeof disk !== "object" || Array.isArray(disk)) throw new Error("Invalid routines file");
+      for (const key of ["routines", "runs", "routineRequestReceipts", "webhookRunReceipts"] as const) {
+        if (key in disk && !Array.isArray(disk[key])) throw new Error(`Invalid routines file: ${key} is not a list`);
+      }
       this.routines = Array.isArray(disk.routines)
         ? disk.routines.flatMap((routine) => {
             const schedule = loadSchedule(routine.schedule, this.now());
@@ -864,11 +880,21 @@ export class RoutineManager {
         this.webhookRunReceipts.push({ webhookId: run.webhookId, deliveryId: run.deliveryId, runId: run.id, acceptedAt: run.createdAt });
         known.add(key);
       }
-    } catch {
+    } catch (error) {
       this.routines = [];
       this.runs = [];
       this.routineRequestReceipts = [];
       this.webhookRunReceipts = [];
+      // Missing means no routines yet. Any other read failure disables
+      // overwriting the file: the next save must not replace it with nothing.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        this.unreadable = true;
+        // JSON.parse echoes a fragment of its input in some messages, so a
+        // malformed file must never be copied into the server log.
+        const reason = error instanceof SyntaxError ? "invalid JSON"
+          : error instanceof Error ? error.message : "unable to read routines";
+        console.error(`routines: ignoring unreadable ${this.file}: ${reason}`);
+      }
     }
     // A local process cannot still own these turns after a full restart.
     const recovered: RoutineRun[] = [];
@@ -1031,6 +1057,7 @@ export class RoutineManager {
   }
 
   create(input: RoutineInput, request?: RoutineRequestCommitFor<"create">): Routine {
+    this.assertWritable();
     if (request) {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
@@ -1070,6 +1097,7 @@ export class RoutineManager {
     patch: Partial<RoutineInput>,
     request?: RoutineRequestCommitFor<"update" | "pause" | "resume">,
   ): Routine | null {
+    this.assertWritable();
     if (request) {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
@@ -1142,6 +1170,7 @@ export class RoutineManager {
   }
 
   remove(id: string, request?: RoutineRequestCommitFor<"delete">): boolean {
+    this.assertWritable();
     if (request) {
       const receipt = this.matchingRoutineRequestReceipt(request);
       if (receipt) {
@@ -1189,7 +1218,7 @@ export class RoutineManager {
         if (run.target === "room-goal" && run.groupId) {
           void this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
         } else {
-          void this.options.interruptTurn?.(run.botId, run.threadId, run.runOn ?? "maus").catch(() => {});
+          void this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
         }
       }
       changed = true;
@@ -1243,7 +1272,7 @@ export class RoutineManager {
     this.commitMutation(() => {
       run = this.newRun(routine, this.now(), true, allocations, request?.threadId ?? routine.sourceThreadId);
       // Preserve the invoking chat as provenance/fallback for this run.
-      // An explicitly configured results destination continues to win.
+      // The routine's results destination continues to win.
       if (request) run.sourceThreadId = request.threadId;
       if (request) this.rememberRoutineRequest(request, run.id, this.now());
     }, () => this.discardResultsThreads(allocations));
@@ -1275,6 +1304,7 @@ export class RoutineManager {
     deliveryId: string;
     receivedAt: number;
   }): { id: string } {
+    this.assertWritable();
     const existing = this.webhookRunReceipt(input.webhookId, input.deliveryId);
     if (existing) return existing;
     if (this.options.botState(input.botId) === "missing") {
@@ -1384,7 +1414,7 @@ export class RoutineManager {
       if (run.target === "room-goal" && run.groupId) {
         await this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
       } else {
-        await this.options.interruptTurn?.(run.botId, run.threadId, run.runOn ?? "maus").catch(() => {});
+        await this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
       }
     }
     queueMicrotask(() => void this.tick());
@@ -1458,7 +1488,7 @@ export class RoutineManager {
             detail,
           }).catch(() => {});
         } else {
-          await this.options.interruptTurn?.(run.botId, threadId, run.runOn ?? "maus").catch(() => {});
+          await this.options.interruptTurn?.(run.botId, threadId).catch(() => {});
         }
       }
       const dueRoutines = this.routines.filter(
@@ -1591,7 +1621,7 @@ export class RoutineManager {
           ? run.groupId
             ? this.options.createGoalTask?.(run.groupId, title) ?? null
             : null
-          : this.options.createTask(run.botId, title, run.triggerSource === "webhook", run.routineId);
+          : this.options.createTask(run.botId, title, run.triggerSource === "webhook", run);
         if (!task) {
           this.failRun(run, run.target === "room-goal"
             ? "Could not create a room task for this goal"
@@ -1681,7 +1711,14 @@ export class RoutineManager {
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
       if (!event.ok) {
-        this.failRun(run, event.stopReason ?? run.error ?? "The bot did not complete this run");
+        const genericStopReason = event.stopReason === "error" || event.stopReason === "tool_error";
+        this.failRun(
+          run,
+          (genericStopReason ? run.error : undefined) ??
+            event.stopReason ??
+            run.error ??
+            "The bot did not complete this run",
+        );
         queueMicrotask(() => void this.tick());
         return cloneRun(run);
       }
@@ -1847,7 +1884,7 @@ export class RoutineManager {
     if (value === undefined) return;
     if (value === null) {
       const destination = this.options.resolveResultsThread?.(routine, true);
-      if (!destination) throw new Error("Could not create a results thread for this routine");
+      if (!destination) throw new Error("Could not find a results thread for this routine");
       routine.resultsThreadId = destination;
       return () => this.options.discardResultsThread?.(routine.botId, destination);
     }
@@ -1909,6 +1946,10 @@ export class RoutineManager {
     this.routineRequestReceipts.unshift({ ...request, resultId, appliedAt });
   }
 
+  private assertWritable(): void {
+    if (this.unreadable) throw Object.assign(new Error("Saved routines could not be read. Repair routines.json before changing them."), { status: 503 });
+  }
+
   /**
    * A confirmation receipt is only true once the scheduler mutation and its
    * receipt reached the same atomic file. Restore the complete in-memory
@@ -1938,6 +1979,10 @@ export class RoutineManager {
   }
 
   private save() {
+    // The file on disk failed to load, so it may still hold routines this
+    // process cannot see. Management writes refuse above; background saves
+    // (ticks, run events) skip here rather than replacing it with nothing.
+    if (this.unreadable) return;
     // Active receipts own cancellation, timeout, and provider-event routing;
     // evicting one would strand live work. Treat MAX_RUNS as a soft history
     // cap and reclaim only the oldest terminal receipts. An unusually large

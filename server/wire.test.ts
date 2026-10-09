@@ -40,21 +40,39 @@ const fullTask: TaskRecord = {
   resumeCursors: { claude: "cursor" },
   lastInstanceId: "claude",
 };
+const botModel = { instanceId: "codex", model: "bot-model" };
 
 describe("shared wire model", () => {
   it("toWireTask emits exactly the WireTask key set and never the server-private fields", () => {
-    const wire = toWireTask(fullTask);
+    const wire = toWireTask(fullTask, botModel);
     expect(Object.keys(wire).sort()).toEqual([
       "activity", "alwaysAllow", "approvalMode", "archivedAt", "autoApprove",
-      "busy", "closedBy", "createdAt", "cwd", "modelSelection", "openedBy",
+      "busy", "closedBy", "createdAt", "cwd", "followsBotModel", "modelSelection", "openedBy",
       "pinnedMessageId", "projectId", "rewound", "routineRunId", "surface",
       "threadId", "title", "unread", "usage",
     ]);
     expect(wire).not.toHaveProperty("resumeCursors");
     expect(wire).not.toHaveProperty("lastInstanceId");
-    expect(wire).toEqual({ ...fullTask, resumeCursors: undefined, lastInstanceId: undefined });
+    expect(wire).toEqual({ ...fullTask, followsBotModel: false, resumeCursors: undefined, lastInstanceId: undefined });
     expect(fullTask.resumeCursors).toEqual({ claude: "cursor" });
     expect(fullTask.lastInstanceId).toBe("claude");
+  });
+
+  it("tells a client only whether a surface pin is the machine's own record", () => {
+    expect(toWireTask({ ...fullTask, surfaceSource: "auto" }, botModel)).toEqual({ ...toWireTask(fullTask, botModel), surfaceAuto: true });
+    // A person's pin, a pin older than provenance, and no pin carry no flag.
+    expect(toWireTask({ ...fullTask, surfaceSource: "user" }, botModel)).not.toHaveProperty("surfaceAuto");
+    expect(toWireTask(fullTask, botModel)).not.toHaveProperty("surfaceAuto");
+    expect(toWireTask({ ...fullTask, surface: undefined, surfaceSource: "auto" }, botModel)).not.toHaveProperty("surfaceAuto");
+    for (const surfaceSource of ["auto", "user"] as const) {
+      expect(toWireTask({ ...fullTask, surfaceSource }, botModel)).not.toHaveProperty("surfaceSource");
+    }
+  });
+
+  it("sends the model a thread runs on, and whether it follows its bot's", () => {
+    const { modelSelection: _own, ...follower } = fullTask;
+    expect(toWireTask(follower, botModel)).toMatchObject({ modelSelection: botModel, followsBotModel: true });
+    expect(toWireTask(fullTask, botModel)).toMatchObject({ modelSelection: fullTask.modelSelection, followsBotModel: false });
   });
 
   it("bot and group wire projections stay exact (compile-enforced)", () => {

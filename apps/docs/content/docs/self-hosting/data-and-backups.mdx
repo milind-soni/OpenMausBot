@@ -6,6 +6,28 @@ icon: DatabaseBackup
 
 OpenMausBot keeps its application state under `~/.openmausbot`, including configuration, transcripts, message attachments, device pairing state, and the SQLite message store.
 
+## Copy from the desktop app
+
+To bring your computer's bots and chats to a server you run, use the desktop
+app: connect the server in **Settings → Servers**, then choose **Copy this
+computer here** on its row (an empty server also offers it on its own page, and
+its **Settings → Backups** has **Import from this computer**; both bring you to
+that button). There is no file
+and no password to handle: the app uploads the encrypted workspace backup
+directly, continues where a dropped connection left it, backs up what the
+server had (so **Swap back** can put it back), and the server restarts itself
+to install it. API keys and sign-ins stay where they are; routines arrive
+paused. It needs the desktop app paired with an owner code, and a server whose
+email sign-in lets someone besides you in never receives one. Copying again
+replaces the backup **Swap back** would put back; the app says so first.
+
+`openmausbot serve`, `openmausbot service install` and the Docker and Podman
+images start the server again on their own after the copy; a server you
+started some other way finishes installing it at its next start.
+
+Export and import below stay for recovery, and for servers with no desktop app
+nearby.
+
 ## Export and import in Settings
 
 Open **Settings → Backups → Export full backup**. Choose a password of at least

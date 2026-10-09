@@ -22,7 +22,12 @@ the URL, PID, data directory, and persistent log path, then stays attached to
 that exact child. The parent shell and the user's OpenMausBot data are
 untouched. Only `FAKE_CLAUDE_*` variables cross from the launcher's
 environment into that child, so a recipe can script the fake engine's mode,
-replies and tool calls without writing a wrapper CLI.
+replies and tool calls without writing a wrapper CLI. Live calls add one
+exception: `OMB_OPENAI_LIVE_URL` crosses when it is a loopback
+`http://127.0.0.1:PORT` (the fake GPT-Live that
+`node --experimental-strip-types server/testing/fake-openai-live.ts` prints),
+and `OMB_OPENAI_LIVE_KEY` crosses only with it, so that key can only ever
+reach the fake.
 
 Pass the printed URL explicitly from a second terminal:
 
@@ -92,6 +97,14 @@ The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
 paste-back, MCP tools and logout cancellation through the real settings panel
 and a synthetic OAuth provider in a disposable workspace.
 
+The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
+consent, discovery failures, reconnect and disconnect using that same registry
+and a synthetic provider, without accessing a real Whop account.
+
+The [Connected Apps OAuth fixture](connected-apps-oauth.md) checks blocked-popup
+recovery, safe authorization links and abandoned-account retries through real
+renderer components and isolated HTTP routes.
+
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.
 
@@ -148,6 +161,10 @@ The [chat and settings polish fixture](chat-polish.md) exercises attachment
 galleries, opt-in video playback, persisted tool details, and responsive settings
 through the real renderer in an isolated fake-engine workspace.
 
+The [rich tables fixture](rich-tables.md) checks Markdown tables and message-scoped
+CSV/TSV previews, large-file virtualization, sorting, search, export and keyboard
+interaction in a disposable workspace.
+
 The [people invitation fixture](people.md) checks hosted workspace sign-in,
 roles and device revocation through the real HTTP API with a stubbed email
 service. It does not drive the People settings UI through `control-omb`.
@@ -174,28 +191,6 @@ branch and approval preconditions, retry receipts, and refusal to queue or
 steer messages from external interfaces. It also verifies bounded request
 lineage snapshots, Chief continuations and exact-execution Stop without
 interrupting a newer request.
-
-The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
-search and draft isolation using disposable simulators and an offline fixture.
-
-The [iOS Local VM view](ios-local-vm.md) pairs a disposable simulator with an
-isolated server, companion sidecar and synthetic Local VM to check on-demand
-stills and the per-device computer-access gate.
-
-The [Android stream recovery checks](android-stream-recovery.md) exercise early
-stream closure and fallback through disposable HTTP endpoints.
-
-The [iOS transcript checks](ios-transcript.md) cover completed-turn folds,
-Hidden activity, and compact webhook messages using bundled offline data.
-
-The [Android thread checks](android-threads.md) cover the Compose thread tree,
-local selection, draft isolation and installable preview APK.
-
-The [Android server pairing checks](android-server-pairing.md) cover server QR
-confirmation, manual codes, retries and saved-server identity validation.
-
-The [Android transcript checks](android-transcript.md) cover completed-turn
-folds, Hidden reasoning, and compact webhook messages through real Compose UI.
 
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.

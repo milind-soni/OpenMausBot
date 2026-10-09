@@ -17,7 +17,7 @@ const BROWSER_RESTART_TOOL_SPEC = {
   description: "Close and restart your browser. Use this only when a browser tool says a browser action was interrupted and the browser must be restarted. Open pages are closed; afterwards open the page you need again and check whether the interrupted action already happened before repeating it.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
 };
-const BROWSER_INTERRUPTED = `A browser action was interrupted. Restart this browser with the ${BROWSER_RESTART_TOOL} tool before continuing.`;
+const BROWSER_INTERRUPTED = `The browser engine is stuck. Press Restart in the Browser panel, or call ${BROWSER_RESTART_TOOL}, before using browser tools again.`;
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 16_777_216;
 /** Startup, not per-request work: a cold engine spawn can exceed a tight
@@ -32,7 +32,35 @@ export function browserRuntimeEnv(overrides: Record<string, string | undefined>)
   return { ...env, ...overrides };
 }
 
+/** The page size of a headless browser OMB launches, in CSS pixels.
+ *
+ * agent-browser sizes the Chrome *window* (`--window-size=1280,720`). Full
+ * Chrome in headless mode (Chrome for Testing, as the Docker image installs)
+ * takes its emulated browser UI out of that window, so the page itself comes
+ * out 1280×577 while the screencast metadata still reports 1280×720, and the
+ * live view aimed clicks at the wrong place. chrome-headless-shell has no such
+ * UI, so there this changes nothing. agent-browser has no launch option for
+ * the page size; `set viewport` sets it and resizes the window's content area,
+ * which the browser's later tabs inherit. */
+export const BROWSER_VIEWPORT = { width: 1280, height: 720 } as const;
+export const BROWSER_VIEWPORT_ARGS = ["set", "viewport", String(BROWSER_VIEWPORT.width), String(BROWSER_VIEWPORT.height)] as const;
+
+/** Only a headless browser this server launches is OMB's to size. A browser
+ * attached over CDP is someone's own Chrome, and a headed window is the
+ * user's to size. */
+export function ownsBrowserViewport(env: NodeJS.ProcessEnv): boolean {
+  return env.AGENT_BROWSER_HEADLESS === "1" && !env.AGENT_BROWSER_CDP;
+}
+
 export class TransportError extends Error {}
+
+/** An error the engine answered: the action ran and failed (a page that
+ * would not load). Nothing is left running in the browser, so unlike a
+ * timeout or a lost connection it does not need a restart. Errors mark
+ * themselves with `settled: true`. */
+export function isSettledBrowserFailure(error: unknown): boolean {
+  return (error as { settled?: unknown } | null)?.settled === true;
+}
 type Pending = { resolve: (result: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 
 /** A server-owned JSONL client. Neither child stderr nor its environment is
@@ -202,6 +230,9 @@ class BrowserClient {
   }
 }
 
+/** Sets the page size of a session's browser, launching it if needed. */
+export type ApplyViewport = (spec: BrowserSpawnSpec) => Promise<unknown>;
+
 interface Gate {
   owner: string | null;
   ready: boolean;
@@ -218,17 +249,18 @@ export type CloseBrowser = (session: string, spec: BrowserSpawnSpec) => Promise<
 
 export class BrowserRuntime {
   private gates = new Map<string, Gate>();
-  private clients = new Map<string, { key: string; client: BrowserClient }>();
+  private clients = new Map<string, { key: string; client: BrowserClient; viewport?: Promise<unknown> }>();
   /** Last advertised tools per session, so a turn that starts while the
    * browser is uncertain still sees the tools it can use after recovering. */
   private toolLists = new Map<string, unknown>();
   private options: { requestTimeoutMs: number; takeoverTimeoutMs: number; idleMs: number; maxPending: number; resultBudget: number };
   private closeBrowser: CloseBrowser;
+  private applyViewport?: ApplyViewport;
 
-  constructor({ closeBrowser, ...options }: Partial<BrowserRuntime["options"]> & { closeBrowser?: CloseBrowser } = {}) {
-    const budget = Number(process.env.OMB_BROWSER_RESULT_BUDGET);
-    this.options = { requestTimeoutMs: 120_000, takeoverTimeoutMs: 15_000, idleMs: 60_000, maxPending: 16, resultBudget: Number.isFinite(budget) && budget > 0 ? budget : DEFAULT_BROWSER_RESULT_BUDGET, ...options };
+  constructor({ closeBrowser, applyViewport, ...options }: Partial<BrowserRuntime["options"]> & { closeBrowser?: CloseBrowser; applyViewport?: ApplyViewport } = {}) {
+    this.options = { requestTimeoutMs: 120_000, takeoverTimeoutMs: 15_000, idleMs: 60_000, maxPending: 16, resultBudget: DEFAULT_BROWSER_RESULT_BUDGET, ...options };
     this.closeBrowser = closeBrowser ?? (async () => false);
+    this.applyViewport = applyViewport;
   }
 
   private gate(session: string): Gate {
@@ -283,7 +315,11 @@ export class BrowserRuntime {
     // tool is reachable and the engine's tools are there once it succeeds.
     if (this.gate(session).uncertain) {
       if (method === "tools/list") return withRestartTool(this.toolLists.get(session) ?? { tools: [] });
-      throw new Error(BROWSER_INTERRUPTED);
+      // A person still holding the browser hears the pause, not the stuck
+      // engine. Once they hand it back, the call is a tool result — not a
+      // dead MCP server — so this thread can Restart and continue.
+      if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+      return stuckBrowserToolError();
     }
     const invoke = async () => {
       const key = JSON.stringify([spec.command, spec.args, Object.entries(spec.env).sort(([a], [b]) => a.localeCompare(b))]);
@@ -302,6 +338,15 @@ export class BrowserRuntime {
       await entry.client.ready;
       beforeDispatch?.();
       if (method === "tools/call" && this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+      if (method === "tools/call" && this.applyViewport) {
+        // The bot's first call on a transport may launch the browser. Size its
+        // page first, once per transport, so the page, the bot's screenshots
+        // and the live view agree. Failure only leaves the engine's default.
+        entry.viewport ??= this.applyViewport(spec).catch(() => undefined);
+        await entry.viewport;
+        beforeDispatch?.();
+        if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+      }
       try {
         // The model sees slimmed schemas and text-only, bounded results; the
         // launch/session parameters OMB owns never reach the engine from a call.
@@ -361,16 +406,25 @@ export class BrowserRuntime {
         throw error;
       }
     };
-    return method === "tools/call" ? this.withAgentAction(session, invoke) : invoke();
+    if (method !== "tools/call") return invoke();
+    try {
+      return await this.withAgentAction(session, invoke);
+    } catch (error) {
+      if (error instanceof Error && error.message === BROWSER_INTERRUPTED) return stuckBrowserToolError();
+      throw error;
+    }
   }
 
-  async take(session: string, owner: string): Promise<void> {
+  /** Resolves true when the grant had to wait for the bot's own browser
+   * action to finish: the page may have changed since the person aimed. */
+  async take(session: string, owner: string): Promise<boolean> {
     if (!owner) throw new Error("Browser control requires an owner.");
     const gate = this.gate(session);
     if (gate.closing || gate.releasing) throw new Error("Browser control is changing. Try again shortly.");
     if (gate.owner !== null && gate.owner !== owner) throw new Error("Another person controls this browser.");
     gate.owner = owner; // synchronous: no new agent work slips in while draining.
     gate.ready = false;
+    const waited = gate.agents > 0;
     await new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
         clearTimeout(timer);
@@ -388,6 +442,7 @@ export class BrowserRuntime {
       gate.changed.add(check);
       check();
     });
+    return waited;
   }
 
   canControl(session: string, owner: string): boolean {
@@ -396,6 +451,9 @@ export class BrowserRuntime {
   }
 
   heldBy(session: string): string | null { return this.gates.get(session)?.owner ?? null; }
+
+  /** An interrupted action left the browser's state unknown; only a restart clears it. */
+  interrupted(session: string): boolean { return this.gates.get(session)?.uncertain === true; }
 
   /** A disconnected viewer may leave a physical key/button pressed. Never
    * let an agent inherit that input state; explicit restart clears it. */
@@ -423,8 +481,11 @@ export class BrowserRuntime {
     catch (error) {
       // Validation happens before entry. A failed accepted command might still
       // be executing in the daemon; hand-back must not race its completion.
-      gate.uncertain = true;
-      gate.ready = false;
+      // One the engine answered as failed is over, and the browser stays usable.
+      if (!isSettledBrowserFailure(error)) {
+        gate.uncertain = true;
+        gate.ready = false;
+      }
       throw error;
     }
     finally { gate.humans--; this.changed(gate); }
@@ -504,6 +565,10 @@ export class BrowserRuntime {
   async closeAll(): Promise<void> {
     await Promise.all([...new Set([...this.clients.keys(), ...this.gates.keys()])].map((session) => this.close(session)));
   }
+}
+
+function stuckBrowserToolError(): { isError: true; content: Array<{ type: "text"; text: string }> } {
+  return { isError: true, content: [{ type: "text", text: BROWSER_INTERRUPTED }] };
 }
 
 function withRestartTool(result: unknown): unknown {

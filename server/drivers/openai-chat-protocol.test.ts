@@ -45,6 +45,15 @@ describe("streamed chat tool calls", () => {
   });
 });
 
+describe("tool calls per reply", () => {
+  it("accepts 32 calls in one reply and refuses a 33rd", () => {
+    const calls = new ChatToolCalls();
+    calls.add(Array.from({ length: 32 }, (_, index) => ({ index, ...completeCall, id: `call_${index}` })), true);
+    expect(calls.finish("tool_calls", false)).toHaveLength(32);
+    expect(() => new ChatToolCalls().add([{ index: 32, ...completeCall }], true)).toThrow(/invalid tool-call index/);
+  });
+});
+
 describe("complete chat tool calls", () => {
   it.each([
     { ...completeCall, id: null },

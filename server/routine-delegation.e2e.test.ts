@@ -185,10 +185,10 @@ describe("routine delegation through the isolated harness", () => {
     await api("POST", `/api/bots/${source.id}/messages`, { threadId: run.threadId, text: "A new request: ask the peer for a fresh report." });
     const launched = await dump(run.threadId);
     const coordinated = await api("POST", "/api/internal/coordinate-bots", {
-      botIds: [peer.id], requestKey: "fresh-report", message: "Produce a fresh fixture report.",
+      botIds: [peer.id], message: "Produce a fresh fixture report.",
     }, launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN);
-    expect(coordinated.accepted).toHaveLength(1);
-    const requestId = coordinated.accepted[0].requestId;
+    expect(coordinated.receipts).toHaveLength(1);
+    const requestId = coordinated.receipts[0].requestId;
     const handoff = () => JSON.parse(readFileSync(join(fixture.info.dataDir, "room-handoffs.json"), "utf8"))
       .find((node: any) => node.id === requestId);
     finish(run.threadId);

@@ -8,8 +8,9 @@
  * computer is illustrated only after one of these; the built-in browser's
  * read-only calls (snapshot, read, get_text, waits) stay out by the same rule. */
 export const SCREEN_TOUCHING_TOOLS: ReadonlySet<string> = new Set([
-  // cloud boat / remote computer
-  "screenshot", "click", "type_text", "press_key", "scroll", "computer_batch", "open_url", "browser_click", "browser_fill",
+  // cloud boat / remote computer (server/cloud-computer-tools.ts names its
+  // key tool key_press)
+  "screenshot", "click", "type_text", "press_key", "key_press", "scroll", "computer_batch", "open_url", "browser_click", "browser_fill",
   // built-in browser: the Electron surface's names, kept because a bot on an
   // older remote harness can still call them
   "browser_navigate", "browser_type", "browser_press", "browser_scroll", "browser_hover", "browser_drag",

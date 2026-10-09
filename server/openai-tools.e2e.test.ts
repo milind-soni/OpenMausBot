@@ -37,6 +37,9 @@ type ChatRequest = {
 // request (server/drivers/prompt-split.ts, openai-chat.ts).
 const CONTEXT_NOTE = "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:";
 const MEMORY = "Your memory (MEMORY.md):\n# Memory\n- Fixture prefers concise replies.";
+// Who on the team is busy changes whenever a teammate starts or finishes
+// work, so it is volatile too: it must never reach the cached system message.
+const AVAILABILITY = "Team availability";
 /** What the model was actually given: the system message and the newest
  * user message, which carries the volatile context note. */
 function delivered(request: ChatRequest) {
@@ -157,6 +160,11 @@ it("runs structured MCP calls through real harness approval and continuation, pr
       const messages = await control(["messages", "--bot", bot.id, "--task", bot.activeTaskId, "--limit", "20"]);
       const first = delivered(requests[before]!);
       expectMemoryInTurn(requests[before]!, "Write the verification artifact if a structured tool is requested.");
+      if (mode === "ordinary") {
+        // the earlier modes' bots are this bot's teammates
+        expect(first.system).not.toContain(AVAILABILITY);
+        expect(first.turn).toContain(AVAILABILITY);
+      }
       expect(first.all).not.toContain("update it with your file tools");
       expect(first.all).not.toContain("File locations for this bot");
       expect(first.all).not.toContain("read its exact SKILL.md path above with your file tools");
@@ -205,6 +213,7 @@ it("runs structured MCP calls through real harness approval and continuation, pr
         const previewText = JSON.stringify(preview.sections);
         expect(previewText).toContain("Fixture prefers concise replies.");
         expect(previewText).not.toContain("update it with your file tools");
+        if (mode === "ordinary") expect(preview.sections.find((section: any) => section.id === "availability")?.text).toContain(AVAILABILITY);
         const { group } = await api("POST", "/api/groups", {
           name: "API memory room", memberIds: [bot.id],
           setup: { bulletin: "", defaultResponder: { kind: "member", botId: bot.id } },

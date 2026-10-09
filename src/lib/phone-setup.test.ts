@@ -478,6 +478,19 @@ describe("phone setup flow", () => {
     );
   });
 
+  it("keeps the rate-limit explanation and its wait instead of generic setup copy", () => {
+    const requestId = "66666666-6666-4666-8666-666666666666";
+    const busy = "The secure connection service is busy right now. Local Wi-Fi and Tailscale pairing still work; try again in 60 seconds.";
+    expect(
+      normalizePhoneSetupActionError(
+        new Error(
+          `Error invoking remote method 'companion-account:verify-code': Error: ${busy} Reference: ${requestId}.`,
+        ),
+        "We could not finish setup. Try again.",
+      ),
+    ).toBe(`${busy} Reference: ${requestId}.`);
+  });
+
   it("replaces arbitrary IPC details with calm setup copy", () => {
     expect(
       normalizePhoneSetupActionError(

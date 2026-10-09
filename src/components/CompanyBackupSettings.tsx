@@ -4,7 +4,7 @@ import type { WorkspaceBackupSummary } from "../../shared/workspace-backup";
 import { activeLocale, t } from "@/lib/i18n";
 import { collectWorkspaceClientState, WORKSPACE_RESTORE_MARKER } from "@/lib/workspace-backup-client";
 import { Card, Switch } from "./SettingsPrimitives";
-import { WorkspaceBackupSummaryView } from "./WorkspaceBackupSettings";
+import { WorkspaceBackupRestartNotice, WorkspaceBackupSummaryView } from "./WorkspaceBackupSettings";
 
 type BackupBridge = NonNullable<NonNullable<Window["ogb"]>["companyBackups"]>;
 type BackupList = Awaited<ReturnType<BackupBridge["list"]>>;
@@ -256,7 +256,7 @@ export function ConnectedCompanyBackupSettings({ connection, bridge }: { connect
         {schedule.lastBackupAt && Number.isFinite(schedule.lastBackupAt) && <p className="mt-1 text-[12px] text-ink-secondary">{t("companyBackup.lastScheduledBackup", { date: scheduledDate(schedule.lastBackupAt) })}</p>}
         {schedule.message && <p role="status" className="mt-1 break-words text-[12px] text-ink-secondary">{schedule.message}</p>}
       </div>}
-      {needsRestart ? <p role="status" className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-[13px] text-ink">{t("backup.restart")}</p> : <>
+      {needsRestart ? <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-ink"><WorkspaceBackupRestartNotice /></div> : <>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="ui-button" disabled={disabled} onClick={() => openDialog({ kind: "create" })}>{t("companyBackup.create")}</button>
           <button type="button" className="ui-button" disabled={action !== null || state?.busy || needsRestart || loading} onClick={() => void refresh()}>{t("companyBackup.refresh")}</button>
@@ -279,7 +279,7 @@ export function ConnectedCompanyBackupSettings({ connection, bridge }: { connect
     }} onCancel={(event) => { event.preventDefault(); if (!action) closeDialog(); }} className="fixed inset-0 m-auto max-h-[85dvh] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-hairline/50 bg-app p-5 text-ink shadow-xl backdrop:bg-black/45">
       <div className="flex flex-col gap-3">
         <h3 id="company-backup-dialog-title" className="text-[16px] font-semibold">{title}</h3>
-        {needsRestart && <p role="status" className="text-[13px] text-warning">{t("backup.restart")}</p>}
+        {needsRestart && <WorkspaceBackupRestartNotice />}
         {(dialog.kind === "restore" || dialog.kind === "delete") && <div className="text-[13px] text-ink-secondary"><p>{dateLabel(dialog.entry)} · {bytes(dialog.entry.sizeBytes)}</p><code className="break-all text-[11px]">{dialog.entry.id}</code></div>}
         {(dialog.kind === "create" || dialog.kind === "schedule") && <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); if (dialog.kind === "schedule") void configureSchedule(true); else create(); }}>
           <p className="text-[13px] text-ink">{t(dialog.kind === "schedule" ? "companyBackup.scheduleWarning" : "companyBackup.managedUploadWarning", { organization: connection.organization?.name ?? "", email: connection.email ?? "" })}</p>

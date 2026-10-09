@@ -3,7 +3,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  SETUP_PROMPT,
   expandSetupTurnText,
   parseSetupCommand,
   setupModeActive,
@@ -62,13 +61,13 @@ describe("setupSystemPrompt", () => {
   });
 
   it("is the skill_manage-naming block when active with skills on", () => {
-    expect(setupSystemPrompt(true, { skills: true })).toBe(SETUP_PROMPT);
-    expect(SETUP_PROMPT.startsWith("\n\n")).toBe(true);
+    const prompt = setupSystemPrompt(true, { skills: true });
+    expect(prompt.startsWith("\n\n")).toBe(true);
     for (const tool of ["propose_profile", "propose_routine", "skill_manage", "request_credential"]) {
-      expect(SETUP_PROMPT).toContain(tool);
+      expect(prompt).toContain(tool);
     }
-    expect(SETUP_PROMPT).toContain("at most four questions");
-    expect(SETUP_PROMPT).toContain("Ask for missing choices, not an extra yes");
+    expect(prompt).toContain("at most four questions");
+    expect(prompt).toContain("Ask for missing choices, not an extra yes");
   });
 
   it("never mentions skill_manage when active with skills off (or unspecified)", () => {

@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { createProxyHandler } from "../src/proxy.ts";
+import { MAX_SSE_EVENT_BYTES } from "../src/wire.ts";
 import { createConnectedDeviceTracker } from "../src/connected-devices.ts";
 import type { CompanionEndpoint } from "../src/endpoints.ts";
 
@@ -170,7 +171,7 @@ beforeAll(async () => {
   sidecar = createServer(
     createProxyHandler({
       harnessPort: HARNESS_PORT,
-      authenticate: (t) => (t === TOKEN ? { id: "d1", cloudDesktopAccess: true } : null),
+      authenticate: (t) => (t === TOKEN ? { id: "d1", cloudDesktopAccess: true, browserControlAccess: false } : null),
       redeem: (code, deviceName) =>
         code === "424242"
           ? { token: TOKEN, device: { id: "d1", name: String(deviceName) } }
@@ -252,7 +253,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const connections = createConnectedDeviceTracker();
     const delayedProxy = createServer(createProxyHandler({
       harnessPort: delayedHarnessPort,
-      authenticate: () => valid ? { id: "phone-delayed", cloudDesktopAccess: false } : null,
+      authenticate: () => valid ? { id: "phone-delayed", cloudDesktopAccess: false, browserControlAccess: false } : null,
       redeem: () => ({ error: "not pairing" }),
       serverName: () => "Test computer",
       connected: connections.open,
@@ -483,7 +484,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const orphan = createServer(
       createProxyHandler({
         harnessPort: 1,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -515,7 +516,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const stalled = createServer(
       createProxyHandler({
         harnessPort: mutePort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
         // the shipped value is 30s; the behaviour under test is the same one
@@ -566,7 +567,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const relay = createServer(
       createProxyHandler({
         harnessPort: slowPort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -603,7 +604,10 @@ describe("the sidecar in front of an unmodified harness", () => {
   // correct and bounded by nothing. An upstream that opens a `data:` line and
   // never closes it would otherwise be a memory leak with a straight face.
   it("ends a stream whose event never terminates, rather than buffering it", async () => {
-    const TWO_MIB = 2 * 1024 * 1024;
+    // Derived from the ceiling rather than hardcoded: this test hardcoded
+    // 2 MiB and quietly stopped exercising anything the day the ceiling rose
+    // past it to carry browser-live frames.
+    const OVER_CEILING = MAX_SSE_EVENT_BYTES + 512 * 1024;
     const flood = createServer((_req, res) => {
       res.on("error", () => {
         /* the sidecar hangs up on us — that is the pass condition */
@@ -613,7 +617,7 @@ describe("the sidecar in front of an unmodified harness", () => {
       const blob = "x".repeat(64 * 1024);
       let sent = 0;
       const pump = () => {
-        while (sent < TWO_MIB) {
+        while (sent < OVER_CEILING) {
           sent += blob.length;
           if (!res.write(blob)) return void res.once("drain", pump);
         }
@@ -625,7 +629,7 @@ describe("the sidecar in front of an unmodified harness", () => {
     const relay = createServer(
       createProxyHandler({
         harnessPort: floodPort,
-        authenticate: () => ({ cloudDesktopAccess: true }),
+        authenticate: () => ({ cloudDesktopAccess: true, browserControlAccess: false }),
         redeem: () => ({ error: "no" }),
         serverName: () => "Test computer",
       }),
@@ -664,7 +668,7 @@ describe("live companion endpoint refresh", () => {
         // A successful response with no harness on this port also proves the
         // sidecar terminated the route locally.
         harnessPort: 1,
-        authenticate: (token) => token === TOKEN ? { cloudDesktopAccess: false } : null,
+        authenticate: (token) => token === TOKEN ? { cloudDesktopAccess: false, browserControlAccess: false } : null,
         redeem: () => ({ error: "not used" }),
         serverName: () => "Test computer",
         endpoints: () => endpoints,
@@ -1028,5 +1032,56 @@ describe("pairing, end to end", () => {
     } finally {
       await new Promise<void>((r) => control.close(() => r()));
     }
+  });
+});
+
+describe("revoking a capability mid-stream", () => {
+  it("closes a browser-live stream the device already has open", async () => {
+    // The comment on the control page promises this. Before the stream was
+    // registered, `disconnectDevice` only reached /api/events and viewer
+    // relays, so a phone kept watching a signed-in browser after the grant
+    // was taken away.
+    const upstream = createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write("event: ready\ndata: {\"viewerId\":\"v1\"}\n\n");
+    });
+    await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
+    const upstreamPort = (upstream.address() as { port: number }).port;
+
+    const handler = createProxyHandler({
+      harnessPort: upstreamPort,
+      authenticate: () => ({ id: "phone-1", cloudDesktopAccess: false, browserControlAccess: true }),
+      redeem: () => null,
+      endpoints: () => [],
+    } as never);
+    const relay = createServer(handler);
+    await new Promise<void>((r) => relay.listen(0, "127.0.0.1", r));
+    const relayPort = (relay.address() as { port: number }).port;
+
+    const response = await fetch(
+      `http://127.0.0.1:${relayPort}/api/bots/b1/browser/live`,
+      { headers: { authorization: "Bearer t" } },
+    );
+    expect(response.status).toBe(200);
+
+    const reader = response.body!.getReader();
+    await reader.read();
+
+    handler.disconnectDevice?.("phone-1");
+
+    // The stream stops rather than staying open on a revoked grant. The
+    // sidecar destroys the socket, so the reader may end cleanly or throw
+    // "terminated" — either is the connection being gone, which is the point.
+    let ended = false;
+    try {
+      while (!(await reader.read()).done) { /* drain */ }
+      ended = true;
+    } catch {
+      ended = true;
+    }
+    expect(ended).toBe(true);
+
+    relay.close();
+    upstream.close();
   });
 });

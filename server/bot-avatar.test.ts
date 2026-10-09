@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  avatarCropRadius,
   botAvatarProfile,
   botAvatarCropSchema,
   botAvatarUrlFromStoredPath,
@@ -45,6 +46,13 @@ describe("bot avatar profile schema", () => {
     expect(clampAvatarFocus(-0.2)).toBe(0);
     expect(clampAvatarFocus(1.4)).toBe(1);
     expect(clampAvatarFocus(undefined)).toBe(0.5);
+  });
+
+  it("uses the photo crop's radius and does not round a mascot", () => {
+    expect(avatarCropRadius("circle")).toBe("50%");
+    expect(avatarCropRadius("rounded")).toBe("22%");
+    expect(avatarCropRadius("square")).toBe("0");
+    expect(avatarCropRadius("mascot")).toBe("0");
   });
 
   it("falls back safely for malformed persisted data", () => {

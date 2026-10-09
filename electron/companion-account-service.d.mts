@@ -63,4 +63,6 @@ export declare function createCompanionAccountService(options: {
   autoRetryMaxMs?: number;
   endpointCheckIntervalMs?: number;
   firstEndpointCheckMs?: number;
+  /** One line per failed setup step: code, HTTP status, request id, retry delay. */
+  log?: (line: string) => void;
 }): CompanionAccountService;

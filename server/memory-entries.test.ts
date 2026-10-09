@@ -28,6 +28,22 @@ describe("memory entry grammar", () => {
     expect(entries[2]).toMatchObject({ body: "Office is in Mumbai", struck: false });
   });
 
+  it("gives an entry the lines under it: indented ones and a code block it opens, never a fence that does not close", () => {
+    const lines = [
+      "- 2026-09-01 · Deploy command:", "  ```sh", "  railway up", "", "  ```", "  run it from the repo root",
+      "- 2026-09-02 · Older shape:", "```sh", "railway up", "```",
+      "- 2026-09-03 · Snippet ```", "x", "```",
+      "- 2026-09-04 · Code blocks start with ```",
+      "## Notes",
+      "- 2026-09-05 · plain",
+      "a hand-written line",
+    ];
+    expect(parseMemoryEntries(lines.join("\n")).map((e) => [e.line, e.end])).toEqual([[0, 6], [6, 10], [10, 13], [13, 14], [15, 16]]);
+    // a block never runs over the next dated line: a fence it leaves open claims nothing
+    const loose = ["- 2026-09-01 · Code blocks start with ```", "- 2026-09-02 · next", "- 2026-09-03 · Deploy:", "```sh", "railway up", "```"];
+    expect(parseMemoryEntries(loose.join("\n")).map((e) => [e.line, e.end])).toEqual([[0, 1], [1, 2], [2, 6]]);
+  });
+
   it("expires a live entry only after its until day, never a struck one", () => {
     expect(isExpired({ until: "2026-09-14", struck: false }, "2026-09-14")).toBe(false);
     expect(isExpired({ until: "2026-09-14", struck: false }, "2026-09-15")).toBe(true);
@@ -92,8 +108,11 @@ describe("topic headers and the index", () => {
     ]);
     expect(text.split("\n")).toEqual([
       "- memory/dining.md — Dining (also: food)",
-      "- memory/archive.md — expired and replaced notes, kept for the record",
+      "- memory/archive.md — older notes moved out of MEMORY.md, kept for the record",
     ]);
+    // one label from code: an archive the old tidy-up wrote keeps a header that undersells it
+    expect(renderTopicIndex([{ name: "archive.md", header: { title: "Archive", description: "expired notes moved out by the tidy-up", aliases: [] } }]))
+      .toBe("- memory/archive.md — older notes moved out of MEMORY.md, kept for the record");
     const many = Array.from({ length: TOPIC_INDEX_MAX_TOPICS + 5 }, (_, i) => ({ name: `t${String(i).padStart(2, "0")}.md`, header: { aliases: [] } }));
     expect(renderTopicIndex(many)).toContain("…and 5 more in memory/");
   });

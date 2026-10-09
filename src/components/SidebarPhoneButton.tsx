@@ -3,7 +3,7 @@ import { Plus, TabletSmartphone } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { Action } from "@/state/store";
+import { phonePairingSettingsAction } from "@/lib/phone-pairing";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { companionBridge, type CompanionState } from "./PhoneSetupFlow";
 
@@ -113,13 +113,8 @@ export function deriveSidebarPhoneStatus(
   };
 }
 
-type ToggleAppSettingsAction = Extract<Action, { type: "toggleAppSettings" }>;
-
-export const phoneSettingsAction = (): ToggleAppSettingsAction => ({
-  type: "toggleAppSettings",
-  open: true,
-  section: "companion",
-});
+/** Settings → Remote access, at the phone pairing (lib/phone-pairing.ts). */
+export const phoneSettingsAction = phonePairingSettingsAction;
 
 export function useSidebarPhoneStatus(): SidebarPhoneStatus {
   const [snapshot, setSnapshot] = useState<SidebarPhoneSnapshot | null>();

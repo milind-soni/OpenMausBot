@@ -12,6 +12,12 @@ the old five-second lock deadline, sends a message in both Cloud and Auto, then
 releases the screenshot. Both turns must complete with the correct VPS tools mounted.
 The old implementation fails both cases with “the VPS is being prepared.”
 
+The same real-server fixture reuses existing containers with customized resource/OOM settings and an
+operator restart policy, or unlimited budgets and the legacy `no` restart policy. Status must report
+ready, Cloud and Auto turns must receive the existing VPS computer, and the Docker log must contain no
+create, remove, start, stop or settings-reset command. Resource and restart settings are creation
+defaults; ownership, image, network, mount and isolation checks remain required.
+
 The other fixtures cover:
 
 - Concurrent preparation shares one operation; an already-ready computer is checked once.

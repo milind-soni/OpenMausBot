@@ -1,19 +1,24 @@
-// Move to Cloud end to end (docs/cloud-pro.md): a desktop-like server and an
-// OMB Cloud home, each a real server process over HTTP, driven by the
-// desktop's own orchestrator (electron/cloud-move.mjs). The test plays the
-// Admin (it signs the Cloud's pairing requests), Caddy (every Cloud request
-// arrives forwarded, never as the loopback owner) and the launcher (it starts
-// the Cloud's server again when it exits to install a restore). Disposable
-// homes; no network; a synthetic Claude CLI.
+// Copy this computer here end to end (docs/copy-workspace.md): a desktop-like
+// server, an OMB Cloud home and a plain self-hosted server, each a real server
+// process over HTTP, driven by the desktop's own orchestrator
+// (electron/cloud-move.mjs), one code path for both destinations. The test
+// plays the Admin (it signs the Cloud's pairing requests), the desktop
+// window's cookie on the self-hosted server (it mints the owner code), the
+// edge (every request to a destination arrives forwarded, never as the
+// loopback owner) and the launcher (it starts a server again when it exits
+// with RESTART_EXIT_CODE to install a restore). Disposable homes; no network;
+// a synthetic Claude CLI.
 import { createHash, randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { createCloudMove } from "../electron/cloud-move.mjs";
-import { CLOUD_HOME_RESTART_EXIT_CODE, cloudPairingSignature } from "./cloud-home.ts";
+import { createCloudMove, mintOwnerCode } from "../electron/cloud-move.mjs";
+import { cloudPairingSignature } from "./cloud-home.ts";
+import { RESTART_EXIT_CODE } from "./restart.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { stageWorkspaceBackup } from "./workspace-backup.ts";
 import { freePortBlock } from "./testing/ports.ts";
@@ -21,6 +26,9 @@ import { freePortBlock } from "./testing/ports.ts";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0123456789ab.fly.dev";
 const ORIGIN = `https://${HOST}`;
+// A self-hosted server the person added in the desktop app (`openmausbot serve`).
+const SERVER_HOST = "bots.example.test";
+const SERVER_ORIGIN = `https://${SERVER_HOST}`;
 const bootstrapSecret = randomBytes(32).toString("base64url");
 const unique = (label: string) => `${label}-${randomBytes(12).toString("hex")}`;
 // What the desktop holds that must never reach the Cloud.
@@ -29,14 +37,20 @@ const SOURCE_SECRETS = {
   env: unique("source-driver-env"), credential: unique("source-workspace-credential"), provider: unique("source-provider-login"),
 };
 const CLOUD_KEY = unique("sk-ant-cloud");
+const SERVER_KEY = unique("sk-ant-server");
 // The servers never reach the network.
 const OFFLINE = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async () => new Response("offline fixture", { status: 503 });')}`;
 
-interface Fixture { name: string; home: string; dataDir: string; base: string; env: NodeJS.ProcessEnv; child?: ChildProcess; log: string; closing: boolean; boots: number }
+interface Fixture { name: string; host: string; home: string; dataDir: string; base: string; env: NodeJS.ProcessEnv; child?: ChildProcess; log: string; closing: boolean; boots: number;
+  /** A relaunch (exit 75) that failed: thrown by the next request to this server, or by teardown, with its cause. */
+  failure?: Error }
 let source: Fixture;
 let cloud: Fixture;
+let server: Fixture;
 let scratch: string;
 let windowToken: string;
+// The desktop window's own session on the self-hosted server: the cookie its /pair page set.
+let serverCookie: string;
 let movedRoutine = "";
 // The desktop's bots: its first-run starter bot and the one made below.
 let desktopBots: string[];
@@ -47,10 +61,14 @@ async function boot(fixture: Fixture): Promise<void> {
   fixture.boots++;
   child.stdout?.on("data", (chunk) => { fixture.log += chunk; });
   child.stderr?.on("data", (chunk) => { fixture.log += chunk; });
-  // The Cloud home's launcher: start the server again when it asks to.
-  child.once("exit", (code) => { if (code === CLOUD_HOME_RESTART_EXIT_CODE && !fixture.closing && fixture.child === child) void boot(fixture); });
+  // The server's launcher: start it again when it asks to (server/restart.ts).
+  // A relaunch is nobody's await, so its failure is kept for the next request (api) or teardown to throw,
+  // never left as an unhandled rejection.
+  child.once("exit", (code) => { if (code === RESTART_EXIT_CODE && !fixture.closing && fixture.child === child) boot(fixture).catch((error: Error) => { fixture.failure = error; }); });
   const deadline = Date.now() + 30_000;
   for (;;) {
+    // Stopped on purpose (a test or teardown) or already replaced: nothing to report.
+    if (fixture.closing || fixture.child !== child) return;
     if (child.exitCode !== null) throw new Error(`the ${fixture.name} server exited:\n${fixture.log}`);
     try {
       const health = await (await fetch(`${fixture.base}/api/health`)).json() as { pid?: number };
@@ -61,7 +79,7 @@ async function boot(fixture: Fixture): Promise<void> {
   }
 }
 
-async function launch(name: "desktop" | "cloud"): Promise<Fixture> {
+async function launch(name: "desktop" | "cloud" | "server"): Promise<Fixture> {
   const home = mkdtempSync(join(tmpdir(), `omb-move-${name}-`));
   const dataDir = join(home, ".openmausbot");
   mkdirSync(dataDir, { recursive: true });
@@ -79,7 +97,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   };
   writeFileSync(join(dataDir, "config.json"), JSON.stringify(name === "desktop"
     ? { instances, anthropic: { key: SOURCE_SECRETS.anthropic }, tts: { key: SOURCE_SECRETS.tts }, box: { token: SOURCE_SECRETS.box }, features: { sharedComputers: true } }
-    : { instances, anthropic: { key: CLOUD_KEY } }));
+    : { instances, anthropic: { key: name === "cloud" ? CLOUD_KEY : SERVER_KEY } }));
   if (name === "desktop") {
     writeFileSync(join(dataDir, "workspace-credentials.json"), JSON.stringify({ fixture: SOURCE_SECRETS.credential }), { mode: 0o600 });
     mkdirSync(join(dataDir, "providers", "fixture"), { recursive: true });
@@ -95,20 +113,41 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
       OMB_CLOUD_BOOTSTRAP_SECRET: bootstrapSecret, OMB_PUBLIC_URL: ORIGIN,
     } : {}),
+    ...(name === "server" ? { OMB_PUBLIC_URL: SERVER_ORIGIN } : {}),
   };
-  const fixture: Fixture = { name, home, dataDir, base: `http://127.0.0.1:${port}`, env, log: "", closing: false, boots: 0 };
+  const fixture: Fixture = { name, host: name === "server" ? SERVER_HOST : HOST, home, dataDir, base: `http://127.0.0.1:${port}`, env, log: "", closing: false, boots: 0 };
   await boot(fixture);
   return fixture;
 }
 
 /** What the edge adds to every request it forwards: never the owner. */
-const forwarded = { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" };
-async function api(fixture: Fixture, method: string, path: string, options: { body?: unknown; token?: string; remote?: boolean; raw?: Buffer } = {}) {
-  const response = await fetch(`${fixture.base}${path}`, {
+const edge = (fixture: Fixture) => ({ host: fixture.host, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" });
+const forwarded = edge({ host: HOST } as Fixture);
+/** A request as the edge forwards it, with the public Host kept (Node's fetch
+ * always sends its own): what a cookie's same-origin check reads. */
+function viaEdge(url: string, init: RequestInit = {}): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const request = httpRequest({ hostname: target.hostname, port: target.port, path: `${target.pathname}${target.search}`, method: init.method ?? "GET",
+      headers: Object.fromEntries(new Headers(init.headers)) }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => resolve(new Response(chunks.length ? Buffer.concat(chunks) : null, { status: response.statusCode,
+        headers: Object.entries(response.headers).flatMap(([name, value]) => (Array.isArray(value) ? value : value === undefined ? [] : [value]).map((one) => [name, String(one)] as [string, string])) })));
+      response.on("error", reject);
+    });
+    request.on("error", reject);
+    request.end(typeof init.body === "string" ? init.body : undefined);
+  });
+}
+async function api(fixture: Fixture, method: string, path: string, options: { body?: unknown; token?: string; cookie?: string; remote?: boolean; raw?: Buffer } = {}) {
+  if (fixture.failure) throw fixture.failure;
+  const response = await (options.cookie ? viaEdge : fetch)(`${fixture.base}${path}`, {
     method,
     headers: {
-      ...(options.remote || options.token ? forwarded : {}),
+      ...(options.remote || options.token || options.cookie ? edge(fixture) : {}),
       ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+      ...(options.cookie ? { cookie: options.cookie, origin: `https://${fixture.host}` } : {}),
       ...(options.body === undefined ? {} : { "content-type": "application/json" }),
       ...(options.raw ? { "content-type": "application/octet-stream" } : {}),
     },
@@ -130,18 +169,37 @@ async function cloudGrant(): Promise<{ origin: string; code: string; expiresAt: 
   return { origin: ORIGIN, code: granted.code, expiresAt: granted.expiresAt };
 }
 
+/** The network as the desktop sees it: each public origin reaches its server through the edge. */
+const routed = (url: string): { fixture: Fixture; url: string } => {
+  const fixture = url.startsWith(SERVER_ORIGIN) ? server : cloud;
+  return { fixture, url: url.replace(fixture === server ? SERVER_ORIGIN : ORIGIN, fixture.base) };
+};
+/** The desktop window's own fetch on the self-hosted server: its cookie, from that origin. */
+const windowFetch = ((url: string, init: RequestInit = {}) => {
+  const target = routed(String(url));
+  const headers = new Headers(init.headers);
+  expect(headers.get("origin")).toBe(SERVER_ORIGIN);
+  expect(init.credentials).toBe("include");
+  return viaEdge(target.url, { ...init, headers: { ...Object.fromEntries(headers), ...edge(target.fixture), cookie: serverCookie } });
+}) as typeof fetch;
+/** Where a copy goes, as main's destinationFor describes it. */
+const cloudHome = { id: "cloud", name: "My Cloud", origin: ORIGIN, kind: "cloud" as const, grant: cloudGrant };
+const selfHosted = { id: "self", name: SERVER_HOST, origin: SERVER_ORIGIN, kind: "server" as const, grant: () => mintOwnerCode(windowFetch, SERVER_ORIGIN) };
 function mover() {
   return createCloudMove({
     localRequest: (route, init) => fetch(`${source.base}${route}`, init),
-    pairHome: cloudGrant,
-    fetchImpl: ((url: string, init: RequestInit = {}) => fetch(String(url).replace(ORIGIN, cloud.base), {
-      ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...forwarded },
-    })) as typeof fetch,
+    fetchImpl: ((url: string, init: RequestInit = {}) => {
+      const target = routed(String(url));
+      return fetch(target.url, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), ...edge(target.fixture) } });
+    }) as typeof fetch,
     tempRoot: join(scratch, "move-temp"),
     availableBytes: async () => Number.MAX_SAFE_INTEGER,
     pollMs: 150, retryDelaysMs: [100, 300], restartTimeoutMs: 90_000,
   });
 }
+
+/** Why a copy ended as it did (a failed one's error names its step), then the destination's log. */
+const why = (result: { error?: unknown }, fixture: Fixture) => `${JSON.stringify(result.error ?? null)}\n${fixture.log.slice(-2000)}`;
 
 async function newBot(fixture: Fixture, name: string, token?: string) {
   const created = await api(fixture, "POST", "/api/bots", { token, body: { name, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true } });
@@ -177,19 +235,28 @@ function filesUnder(root: string): string[] {
 
 beforeAll(async () => {
   scratch = mkdtempSync(join(tmpdir(), "omb-move-scratch-"));
-  [source, cloud] = await Promise.all([launch("desktop"), launch("cloud")]);
+  [source, cloud, server] = await Promise.all([launch("desktop"), launch("cloud"), launch("server")]);
   // The desktop window's own session on the Cloud, from Connect to my Cloud.
   const paired = await api(cloud, "POST", "/api/auth/pair", { remote: true, body: { code: (await cloudGrant()).code } });
   expect(paired.status, JSON.stringify(paired.body)).toBe(200);
   windowToken = paired.body.token;
+  // …and on the self-hosted server, from Connect to a server with an owner
+  // code (`openmausbot pair`): its /pair page sets this window's cookie.
+  const owner = await api(server, "POST", "/api/auth/pairing", { body: { scopes: ["admin", "client"], label: "Owner code" } });
+  expect(owner.status, JSON.stringify(owner.body)).toBe(200);
+  const pairPage = await viaEdge(`${server.base}/api/auth/pair`, { method: "POST", headers: { ...edge(server), "content-type": "application/json", origin: SERVER_ORIGIN },
+    body: JSON.stringify({ code: owner.body.code, cookie: true, label: "OpenMausBot desktop" }) });
+  expect(pairPage.status).toBe(200);
+  serverCookie = (pairPage.headers.get("set-cookie") ?? "").split(";")[0]!;
+  expect(serverCookie).toMatch(/^omb_session_\d+_\w+=omb_sess_/);
   // The desktop's work: a bot with a real conversation, and a room.
   const planner = await newBot(source, "Moved Planner");
   expect((await api(source, "POST", `/api/bots/${planner.id}/messages`, { body: { text: "Plan the launch party" } })).status).toBe(202);
   await until("the bot's reply", async () => ((await api(source, "GET", `/api/threads/${planner.threadId}/messages`)).body?.messages ?? [])
     .filter((message: { role: string }) => message.role === "bot").length >= 2);
   await idle(source);
-  // …and a routine: the desktop records no writer for it.
-  const routine = await api(source, "POST", "/api/routines", { body: { name: "Weekly plan", prompt: "Plan the week.", botId: planner.id, enabled: false,
+  // …and a routine, switched on here: the desktop records no writer for it.
+  const routine = await api(source, "POST", "/api/routines", { body: { name: "Weekly plan", prompt: "Plan the week.", botId: planner.id, enabled: true,
     schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } } });
   expect(routine.status, JSON.stringify(routine.body)).toBe(201);
   movedRoutine = routine.body.routine.id;
@@ -203,12 +270,14 @@ beforeAll(async () => {
 }, 90_000);
 
 afterAll(async () => {
-  for (const fixture of [source, cloud]) {
+  for (const fixture of [source, cloud, server]) {
     if (!fixture) continue;
     fixture.closing = true;
     await waitForExit(fixture.child, { signal: "SIGTERM" });
   }
-  for (const directory of [source?.home, cloud?.home, scratch]) if (directory) await removeTempDir(directory);
+  for (const directory of [source?.home, cloud?.home, server?.home, scratch]) if (directory) await removeTempDir(directory);
+  const failed = [source, cloud, server].find((fixture) => fixture?.failure);
+  if (failed) throw failed.failure;
 });
 
 it("moves this computer's bots, chats and rooms to an empty Cloud, which keeps its own sign-ins, sessions and switches", async () => {
@@ -217,8 +286,8 @@ it("moves this computer's bots, chats and rooms to an empty Cloud, which keeps i
   expect(before.body).toMatchObject({ empty: true, previous: null });
   const boots = cloud.boots;
 
-  const result = await mover().move();
-  expect(result, cloud.log.slice(-2000)).toMatchObject({ phase: "done", action: "move", previous: false });
+  const result = await mover().move(cloudHome);
+  expect(result, why(result, cloud)).toMatchObject({ phase: "done", action: "move", previous: false, routines: 1, destination: { id: "cloud", origin: ORIGIN, kind: "cloud" } });
   expect(result.moved).toMatchObject({ bots: 2, rooms: 1, chats: 1 });
   expect(cloud.boots).toBe(boots + 1);
 
@@ -243,9 +312,9 @@ it("moves this computer's bots, chats and rooms to an empty Cloud, which keeps i
   expect(authors.writers[movedRoutine]).toBe(ownerKey);
   expect(authors.routines[movedRoutine]).toMatch(/^[a-f0-9]{64}$/);
   expect((await api(cloud, "PATCH", `/api/routines/${movedRoutine}`, { token: windowToken, body: { enabled: false } })).status).toBe(200);
-  // The move's own session was signed out; the window's is the one left.
+  // The copy's own session was signed out; the window's is the one left.
   const sessions = (await api(cloud, "GET", "/api/auth/sessions", { token: windowToken })).body.sessions as Array<{ label: string }>;
-  expect(sessions.map((entry) => entry.label)).not.toContain("Move to Cloud");
+  expect(sessions.map((entry) => entry.label)).not.toContain("Copy from desktop");
 
   // The Cloud keeps its own engine key and its own computer-sharing switch.
   const config = JSON.parse(readFileSync(join(cloud.dataDir, "config.json"), "utf8"));
@@ -287,20 +356,20 @@ it("backs up a Cloud that has work before replacing it; swapping back keeps what
   const before = await api(cloud, "GET", "/api/cloud-move", { token: windowToken });
   expect(before.body).toMatchObject({ empty: false, previous: null });
 
-  const result = await mover().move();
-  expect(result, cloud.log.slice(-2000)).toMatchObject({ phase: "done", previous: true });
+  const result = await mover().move(cloudHome);
+  expect(result, why(result, cloud)).toMatchObject({ phase: "done", previous: true });
   expect((await botNames(cloud, windowToken)).sort()).toEqual(desktopBots);
   const status = await api(cloud, "GET", "/api/cloud-move", { token: windowToken });
   expect(status.body.previous).toMatchObject({ bots: 3, rooms: 1 });
 
   // Work done on the Cloud after the move is not lost by swapping back.
   await newBot(cloud, "Post-move work", windowToken);
-  const swapped = await mover().restorePrevious();
-  expect(swapped, cloud.log.slice(-2000)).toMatchObject({ phase: "done", action: "restore" });
+  const swapped = await mover().restorePrevious(cloudHome);
+  expect(swapped, why(swapped, cloud)).toMatchObject({ phase: "done", action: "restore" });
   expect((await botNames(cloud, windowToken)).sort()).toEqual(["Cloud-only bot", ...desktopBots].sort());
   expect((await api(cloud, "GET", "/api/cloud-move", { token: windowToken })).body.previous).toMatchObject({ bots: 3, rooms: 1 });
-  const again = await mover().restorePrevious();
-  expect(again, cloud.log.slice(-2000)).toMatchObject({ phase: "done", action: "restore" });
+  const again = await mover().restorePrevious(cloudHome);
+  expect(again, why(again, cloud)).toMatchObject({ phase: "done", action: "restore" });
   expect((await botNames(cloud, windowToken)).sort()).toEqual(["Post-move work", ...desktopBots].sort());
 
   // One undo point is all that stays: no safety copies, no staged files.
@@ -314,6 +383,97 @@ it("backs up a Cloud that has work before replacing it; swapping back keeps what
   expect(config.anthropic).toEqual({ key: CLOUD_KEY });
   expect((await api(cloud, "GET", "/api/auth/session", { token: windowToken })).body).toMatchObject({ kind: "session", cloudHome: true });
 }, 300_000);
+
+it("copies this computer to an empty self-hosted server by the same path: the window's own owner session mints the code, and the server keeps its own key", async () => {
+  const before = await api(server, "GET", "/api/cloud-move", { cookie: serverCookie });
+  expect(before.status, JSON.stringify(before.body)).toBe(200);
+  expect(before.body).toMatchObject({ empty: true, previous: null, environmentId: expect.any(String) });
+  const boots = server.boots;
+
+  // From the server's own page: an empty server may be filled from there.
+  const result = await mover().move(selfHosted, { requireEmpty: true });
+  expect(result, why(result, server)).toMatchObject({ phase: "done", action: "move", previous: false, routines: 1, destination: { id: "self", origin: SERVER_ORIGIN, kind: "server" } });
+  expect(result.moved).toMatchObject({ bots: 2, rooms: 1, chats: 1 });
+  // It restarted itself (exit 75) to install the copy.
+  expect(server.boots).toBe(boots + 1);
+
+  // The window's own session (its cookie) survived; the copy's session was signed out.
+  expect((await api(server, "GET", "/api/auth/session", { cookie: serverCookie })).body).toMatchObject({ kind: "session", scopes: ["admin", "client"] });
+  const sessions = (await api(server, "GET", "/api/auth/sessions", { cookie: serverCookie })).body.sessions as Array<{ label: string }>;
+  expect(sessions.map((entry) => entry.label)).not.toContain("Copy from desktop");
+  expect((await botNames(server, undefined)).sort()).toEqual(desktopBots);
+  // Routines arrive paused: on here, off there until the person turns them on.
+  const routines = (await api(server, "GET", "/api/routines")).body.routines as Array<{ id: string; enabled: boolean }>;
+  expect(routines.find((routine) => routine.id === movedRoutine)).toMatchObject({ enabled: false });
+  // The server keeps its own engine key; no desktop secret reaches its volume.
+  expect(JSON.parse(readFileSync(join(server.dataDir, "config.json"), "utf8")).anthropic).toEqual({ key: SERVER_KEY });
+  for (const file of filesUnder(server.home)) {
+    const text = readFileSync(file).toString("latin1");
+    for (const value of Object.values(SOURCE_SECRETS)) expect(text.includes(value), `${value} in ${file}`).toBe(false);
+  }
+  expect(readdirSync(join(server.dataDir, ".backups")).filter((name) => name.startsWith("safety-") || /^[0-9a-f-]{36}$/.test(name))).toEqual([]);
+}, 150_000);
+
+it("a self-hosted server with work is replaced only from this computer's Settings, backed up first, and swaps back", async () => {
+  await newBot(server, "Server-only bot");
+  // Its own page may not replace work it has: nothing is exported.
+  const refused = await mover().move(selfHosted, { requireEmpty: true });
+  expect(refused).toMatchObject({ phase: "failed", error: { code: "not_empty" } });
+  expect((await botNames(server)).sort()).toEqual(["Server-only bot", ...desktopBots].sort());
+
+  const result = await mover().move(selfHosted);
+  expect(result, why(result, server)).toMatchObject({ phase: "done", previous: true });
+  expect((await botNames(server)).sort()).toEqual(desktopBots);
+  expect((await api(server, "GET", "/api/cloud-move", { cookie: serverCookie })).body.previous).toMatchObject({ bots: 3, rooms: 1 });
+  const swapped = await mover().restorePrevious(selfHosted);
+  expect(swapped, why(swapped, server)).toMatchObject({ phase: "done", action: "restore" });
+  expect((await botNames(server)).sort()).toEqual(["Server-only bot", ...desktopBots].sort());
+  expect(readdirSync(join(server.dataDir, ".backups")).filter((name) => name.startsWith("safety-") || /^[0-9a-f-]{36}$/.test(name) || name === "cloud-previous.next")).toEqual([]);
+  expect((await api(server, "GET", "/api/auth/session", { cookie: serverCookie })).body).toMatchObject({ kind: "session" });
+
+  // Swap back keeps one workspace. Copy, then copy again: the second copy's
+  // backup takes the first one's place (the Replace panel says so, with its
+  // date, before it starts), so Swap back returns what the first copy put there.
+  const kept = async () => (await api(server, "GET", "/api/cloud-move", { cookie: serverCookie })).body.previous as { createdAt: string; bots: number };
+  const firstCopy = await mover().move(selfHosted);
+  expect(firstCopy, why(firstCopy, server)).toMatchObject({ phase: "done", previous: true });
+  const first = await kept();
+  expect(first).toMatchObject({ bots: 3 });
+  const secondCopy = await mover().move(selfHosted);
+  expect(secondCopy, why(secondCopy, server)).toMatchObject({ phase: "done", previous: true });
+  const second = await kept();
+  expect(second).toMatchObject({ bots: 2 });
+  expect(second.createdAt > first.createdAt).toBe(true);
+  const swappedBack = await mover().restorePrevious(selfHosted);
+  expect(swappedBack, why(swappedBack, server)).toMatchObject({ phase: "done", action: "restore" });
+  expect((await botNames(server)).sort()).toEqual(desktopBots);
+  // Put the server-only bot back for the next test, as an owner would.
+  await newBot(server, "Server-only bot");
+}, 600_000);
+
+it("a self-hosted server whose email sign-in lets other people in never receives a copy, and says why before anything is exported", async () => {
+  const signIn = async (lists: { admins?: string[]; members?: string[] }) => {
+    server.closing = true;
+    await waitForExit(server.child, { signal: "SIGTERM" });
+    const config = JSON.parse(readFileSync(join(server.dataDir, "config.json"), "utf8"));
+    writeFileSync(join(server.dataDir, "config.json"), JSON.stringify({ ...config, signIn: lists }));
+    server.closing = false;
+    await boot(server);
+  };
+  // `openmausbot access add me@example.test`: only its owner signs in, from a browser too. Still theirs alone.
+  await signIn({ admins: ["me@example.test"] });
+  expect((await api(server, "GET", "/api/cloud-move", { cookie: serverCookie })).status).toBe(200);
+  // `openmausbot access add` lets someone else sign in: the server is shared now.
+  await signIn({ admins: ["me@example.test"], members: ["colleague@example.test"] });
+  const refused = await api(server, "GET", "/api/cloud-move", { cookie: serverCookie });
+  expect(refused).toMatchObject({ status: 403, body: { code: "shared_workspace" } });
+  const exportsBefore = readdirSync(join(source.dataDir, ".backups")).length;
+  const result = await mover().move(selfHosted);
+  expect(result).toMatchObject({ phase: "failed", error: { code: "shared_workspace" } });
+  expect(readdirSync(join(source.dataDir, ".backups")).length).toBe(exportsBefore);
+  expect(existsSync(join(server.dataDir, ".backups", "cloud-move", "upload.json"))).toBe(false);
+  expect((await botNames(server)).sort()).toEqual(["Server-only bot", ...desktopBots].sort());
+}, 120_000);
 
 it("refuses a move too big for a Cloud, an upload that is not a backup, and anyone but the owner's app", async () => {
   const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
@@ -342,8 +502,9 @@ it("refuses a move too big for a Cloud, an upload that is not a backup, and anyo
   expect((await api(cloud, "GET", "/api/cloud-move", { token: phone })).status).toBe(403);
   expect((await api(cloud, "POST", "/api/cloud-move/restore", { token: phone, body: { id: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93" } })).status).toBe(403);
   expect([401, 403]).toContain((await api(cloud, "GET", "/api/cloud-move", { remote: true })).status);
-  // A desktop is not a Cloud home: it never receives a workspace.
-  expect((await api(source, "GET", "/api/cloud-move")).status).toBe(404);
+  // A server receives only from its owner's paired app, never a bare request
+  // on the machine; it still sizes its own workspace for its own desktop.
+  expect((await api(source, "GET", "/api/cloud-move")).status).toBe(403);
   expect((await api(source, "GET", "/api/cloud-move/estimate")).body).toMatchObject({ bots: 2, rooms: 1, chats: 1 });
 }, 60_000);
 

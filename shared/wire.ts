@@ -18,8 +18,8 @@ import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
+import type { PlaceRow } from "./place-view.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
-import type { TighteningRequestCardData } from "./tightening-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { RoutineRunCardData } from "./routine-run.ts";
@@ -82,6 +82,9 @@ export interface TaskOpenedBy {
    * durable conversation between two bots; "work" closes itself once its
    * result has been reported. */
   kind?: "pair" | "work";
+  /** The opener's own conversation this "work" thread was opened from.
+   * Everything that conversation later sends this bot continues here. */
+  threadId?: string;
   at: number;
 }
 
@@ -146,12 +149,21 @@ export interface WireTask {
    * "until then" and reads treat an expired value as absent, so no timer or
    * migration is ever needed. Absent = not snoozed. */
   snoozedUntil?: number;
-  /** Defaults are copied when a task is created. */
+  /** The model this thread's turns run on: its own when a person picked one
+   * in this thread, else its bot's (followsBotModel). The server stores none
+   * for a thread that follows its bot, and always sends the effective one. */
   modelSelection?: ModelSelection;
+  /** true: the thread runs on its bot's model and moves with it; false: a
+   * person picked this thread's model. Derived at projection, never stored;
+   * absent from servers older than this field. */
+  followsBotModel?: boolean;
   approvalMode?: ApprovalMode;
   autoApprove?: boolean;
   alwaysAllow?: string[];
   unread?: boolean;
+  /** The newest message on screen the last time the person read this
+   * conversation. The New divider goes after it. */
+  lastReadMessageId?: string;
   /** true after an edit/branch-switch rewound the visible conversation. */
   rewound?: boolean;
   pinnedMessageId?: string;
@@ -164,6 +176,12 @@ export interface WireTask {
   turnStartedAt?: number;
   /** Where this conversation works when pinned; absent = follow the bot. */
   surface?: Surface;
+  /** The pin above is the machine's own record (where an Auto turn landed,
+   * or the bot's select_computer choice), not a person's, so the next Works
+   * on change moves it. Derived at projection from the server-private
+   * provenance and never stored; absent on a person's pin and on a pin from
+   * before the server recorded who set it. */
+  surfaceAuto?: true;
   /** what this task has spent, banked once per turn */
   usage?: TaskUsage;
   /** the folder this task's turns run in, pinned on its first turn. */
@@ -264,7 +282,8 @@ export interface WireBot {
   avatarFocusY?: number;
   /** True when any task has unread output. */
   unread: boolean;
-  /** Default for new tasks; navigating tasks never changes this value. */
+  /** The bot's model: every thread without a model of its own runs on it
+   * and moves with it. Navigating tasks never changes this value. */
   modelSelection: ModelSelection;
   /** where the bot works ("Works on"). Unset = auto. */
   computer?: Surface | "off";
@@ -314,6 +333,10 @@ export interface WireBot {
    * false = none); an explicit `{}` grants no tools. Grants never travel in
    * shareable exports and imported bots always land with none. */
   connectorTools?: Record<string, ConnectorToolGrant>;
+  connectorScopes?: { apps: Record<string, "read" | "write"> };
+  outbound?: { policy: "ask" | "allow"; dailyCap: number };
+  /** Ordered backups used only by opt-in, pre-prompt startup recovery. */
+  fallback?: Array<{ instanceId: string; model: string }>;
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
   /** Memory upkeep: the harness captures facts from finished chats into
@@ -360,13 +383,17 @@ export interface ResolvedSender {
 /** Who answered a card: a signed-in person (named as their messages are), the
  * owner on this machine, or a session-less local caller on a shared server
  * (`worker`: the Slack worker, or any other process on that machine). */
-export type CardAnswerer =
+export type CardAnswerer = (
   /** `person`: the answering session's opaque person key, recorded on an OMB
    * Cloud home only, where it decides whether an answer came from the owner
    * (server/cloud-lending.ts). */
   | { kind: "session"; name: string; person?: string }
   | { kind: "loopback" }
-  | { kind: "worker" };
+  | { kind: "worker" }
+) & {
+  /** "call": decided by voice on a Live call, not tapped. */
+  via?: "call";
+};
 
 /** One transcript line. Serialized as stored — the durable delivery
  * identity (roomRequest) rides the wire unchanged. */
@@ -406,12 +433,18 @@ export interface WireMessage {
     /** error rows: the installed Claude Code is too old for the model, and
      * the UI can offer to update it in place. */
     claudeUpdate?: boolean;
+    /** error rows: the place this turn could not use (shared/place-view.ts). */
+    place?: PlaceRow;
     /** Provider item identity, scoped to the owning turn. */
     itemId?: string;
     /** Whether the harness captured the full redacted result. Private
      * server-local spill paths are not exposed to clients. */
     fullResult?: boolean;
   };
+  /** A bot line a "post" webhook wrote: whoever called the webhook chose
+   * its words. On a Cloud home a conversation holding one is someone else's
+   * for lending and memory (server/cloud-lending.ts reportsFromOthers). */
+  webhookPost?: boolean;
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;
   /** user messages a peer bot handed to this thread's RUNNING turn through
@@ -419,8 +452,14 @@ export interface WireMessage {
    * a new request. The text is stored enveloped exactly as injected, so any
    * later reader sees the sender and the not-steering framing. */
   aside?: boolean;
-  /** A user-role message that arrived through the server's HTTP API. */
-  via?: "api";
+  /** A user-role message that arrived through the server's HTTP API
+   * ("api"), or a request a person spoke on a Live call ("call"). */
+  via?: "api" | "call";
+  /** A user line an external interface relayed through the guarded send
+   * route (the Slack worker, for someone else, as this computer): nobody
+   * typed it in one of this workspace's clients. A Live call never reads it
+   * back as what the caller typed. */
+  relayed?: boolean;
   /** Which person sent this user message, when the workspace has more than
    * one. The server authenticates per person but used to attribute every
    * user turn to the single profile name, so on a shared or paired instance
@@ -479,6 +518,10 @@ export interface WireMessage {
 }
 
 export interface OptionCardData {
+  /** calls: one per outbound call the card covers, in subtitle order. Absent
+   * on cards from older computers. */
+  outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
+  teamMemoryRequest?: { section: string; entryId: string; kind: string };
   title: string;
   subtitle: string;
   options: string[];
@@ -511,19 +554,59 @@ export interface OptionCardData {
   commandAllowlist?: CommandAllowlistCandidate;
   /** Local actions never share remembered grants with cloud/tool approvals. */
   approvalScope?: "local-computer";
+  /** The bot's change applied without a person (a change to the bot itself,
+   * or Full access): clients show a one-line receipt with Undo instead of
+   * the approval box. */
+  autoApplied?: boolean;
+  /** A person undid that change. */
+  undone?: boolean;
   /** A durable chat-created routine proposal. */
   routineRequest?: RoutineRequestCardData;
   /** A durable profile-change proposal (propose_profile). */
   profileRequest?: ProfileRequestCardData;
   /** A durable default-model proposal (propose_model). */
   modelRequest?: ModelRequestCardData;
-  /** A durable authority-tightening proposal (propose_tightening). */
-  tighteningRequest?: TighteningRequestCardData;
   teamSetupRequest?: TeamSetupRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;
   /** A provider's structured question set. */
   questionRequest?: QuestionRequestCardData;
+}
+
+/** Which app holds the microphone of a Live call: the desktop app (its own
+ * page or a server's page in it), a web browser, or a phone. Self-declared;
+ * for display and logs only. The phone apps show a value they do not know as
+ * "another device". */
+export type LiveClient = "desktop" | "web" | "ios" | "android";
+export type LiveCallStatus = "connecting" | "live" | "ending" | "ended";
+/** Why a call ended. "signed-out": the sign-in or paired phone that started
+ * it was signed out, revoked or unpaired. A client that does not know a
+ * reason shows the call's `error` text, or plain "Call ended.". */
+export type LiveEndReason =
+  | "hung-up" | "idle" | "expired" | "content" | "remote-hangup" | "connection-lost"
+  | "sideband-lost" | "deleted" | "shutdown" | "signed-out" | "error";
+
+/** The one Live call a harness runs. Never carries the key or any speech. */
+export interface LiveCallState {
+  callId: string;
+  botId: string;
+  threadId: string;
+  client: LiveClient;
+  voice: string;
+  /** epoch ms when the session was created */
+  startedAt: number;
+  status: LiveCallStatus;
+  endReason?: LiveEndReason;
+  /** short, user-facing; present when the call ended on a problem */
+  error?: string;
+}
+
+/** Non-secret Live settings, as GET /api/config and PATCH /api/live/settings report them. */
+export interface LiveSettings {
+  configured: boolean;
+  voice: string;
+  readTypedReplies: boolean;
+  idleMinutes: number;
 }
 
 export interface ConnectorCardData {
@@ -578,6 +661,9 @@ export interface GroupTask {
   pinnedMessageId?: string;
   /** The person pinned this channel thread above the update-ordered list. */
   pinned?: boolean;
+  /** This conversation's own turn ceiling, in whole minutes. Absent uses
+   * the global group turn limit. Direct chats do not use this ceiling. */
+  turnTimeoutMinutes?: number;
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
   /** The first message already drove a title attempt for this thread, so a
@@ -601,6 +687,9 @@ export interface WireGroup {
   /** The room's shared instructions. */
   bulletin: string;
   unread: boolean;
+  /** The newest message on screen the last time the person read this
+   * conversation. The New divider goes after it. */
+  lastReadMessageId?: string;
   createdAt: number;
   /** true for auto-created bot-bot channels. */
   dm?: boolean;
@@ -628,6 +717,9 @@ export interface WireGroup {
   /** True while any member (or hand-off) is mid-turn. Computed at
    * projection time, never persisted. */
   working: boolean;
+  /** A direct-message channel's turn ceiling. Null on the wire means the
+   * global group limit. Channel conversations store theirs on each task. */
+  turnTimeoutMinutes?: number | null;
 }
 
 // ── live wire frames ───────────────────────────────────────────────────
@@ -686,9 +778,13 @@ export type ServerFrame =
   | { kind: "webhook.deleted"; webhookId: string }
   | { kind: "runtime"; event: RuntimeEvent }
   | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string }
-  | { kind: "computer"; botId: string; state: "provisioning" | "waking" }
+  /** A bot's computer is being set up or woken for a turn; the chat shows
+   * one progress line until its first screen frame. `place` names a cloud
+   * computer (absent: a Local VM). */
+  | { kind: "computer"; botId: string; state: "provisioning" | "waking"; place?: "cloud" }
   | { kind: "computer-control"; botId: string; held: boolean; helpReason: string | null }
   | { kind: "bot.deleted"; botId: string }
+  | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** The config status object spread flat into the frame; its full typing
    * is the deferred client-model extraction (see j1-phase-bc-progress). */
   | ({ kind: "config" } & Record<string, unknown>);

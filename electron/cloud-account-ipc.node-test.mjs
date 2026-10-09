@@ -5,8 +5,8 @@ import vm from "node:vm";
 import localOrigin from "./local-origin.cjs";
 import environments from "./environments.cjs";
 
-const origin = "http://127.0.0.1:48993", methods = ["state", "begin", "reopen", "cancel", "refresh", "signOut", "openDashboard"];
-const bridgeMethods = [...methods, "connectHome"];
+const origin = "http://127.0.0.1:48993", methods = ["state", "begin", "signInAgain", "reopen", "cancel", "refresh", "signOut", "openDashboard"];
+const bridgeMethods = [...methods, "connectHome", "connectHomeForPhone"];
 function preload({ enabled = true, remote = false } = {}) {
   let bridge; const invoked = [];
   vm.runInNewContext(readFileSync(new URL("./preload.cjs", import.meta.url), "utf8"), {
@@ -43,5 +43,6 @@ test("production personal Cloud IPC guards exact local main frame and forwards n
     for (const sender of [{ sender: contents, senderFrame: { url: `${origin}/subframe` } }, { sender: {}, senderFrame: frame },
       { sender: contents, senderFrame: { url: "https://remote.example.test" } }, { sender: contents }]) assert.throws(() => handle(sender), /only available/);
   }
-  assert.deepEqual(calls, bridgeMethods.map(method => [method]));
+  // connectHomeForPhone forwards only its own fixed "phone", never what the page sent.
+  assert.deepEqual(calls, bridgeMethods.map(method => method === "connectHomeForPhone" ? ["connectHome", "phone"] : [method]));
 });

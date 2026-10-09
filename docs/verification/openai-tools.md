@@ -54,6 +54,12 @@ non-streaming responses, tool errors, and lifecycle edge cases:
 pnpm exec vitest run server/drivers/openai-chat-tools.test.ts server/workspace.test.ts
 ```
 
+One turn stops after 64 model steps, or 200 tool calls in total (each reply
+may carry up to 32). The stop says so in one line with one next action: the
+steps so far already ran, so ask only for what's left (retrying the whole task
+would repeat them). A batch that would pass 200 runs none of its calls. There
+is no per-bot or per-thread setting for either number.
+
 The harness proves the OpenAI-compatible adapter and the shared execution
 path. It does not establish that every third-party model supports tools, or
 that live Grok and MiniMax services accept a particular schema. Model support
@@ -63,10 +69,11 @@ and service-specific limits remain separate from the implemented protocol.
 
 The OpenAI-compatible driver opts into structured image input and mounts the
 harness-provided `localComputer` and `browser` stdio descriptors. It does not
-discover or grant a desktop itself. Host, VM, VPS and room routing continue to
-use the harness's existing ownership and permission gates. The driver's Boat
-bridge consumes the separately leased cloud descriptor and keeps the selected
-API model; other engines retain their native Boat runner.
+discover or grant a desktop itself. Host, VM, VPS, Boat and room routing
+continue to use the harness's existing ownership and permission gates. A Boat
+cloud computer arrives in the same `localComputer` slot as every other
+computer (`harness-mcp-proxy computer`), so the selected API model is kept, as
+it is for every engine with computer tools.
 
 MCP images become bounded inline image parts. Tool results retain their call IDs;
 only after the full tool-result batch is appended does a separate image message
@@ -92,19 +99,40 @@ approval denial with no side effect, malformed images and a screenshot larger
 than the ordinary text frame limit. They do not use real desktop access or paid
 inference, and do not establish vision/tool support for every provider model.
 
-### Boat bridge
+### Boat cloud computer
 
-`pnpm exec vitest run server/drivers/chat-boat-tools.test.ts server/openai-boat.e2e.test.ts`
+`pnpm exec vitest run server/cloud-computer-tools.test.ts server/harness-mcp-proxy.test.ts server/openai-boat.e2e.test.ts server/hosted-desktop.e2e.test.ts`
 tests an owned loopback Boat/API fixture. It covers direct chats, group member
 turns and cloud routines retaining the selected model, screenshots arriving as
-image parts, and human control blocking an approved action. Bridge tests cover
-each advertised action, invalid arguments, expired control capabilities,
-changed ownership and in-flight cancellation without replay.
+image parts, and human control blocking an approved action. The tool tests
+cover each advertised action, invalid arguments (checked against the
+advertised schema before anything reaches the Boat), expired turn
+capabilities and in-flight cancellation without replay. The hosted-desktop
+fixture runs the same tools for a Claude bot and proves Boat's own runner is
+never asked.
+
+`pnpm exec vitest run server/cloud-computer-lazy.e2e.test.ts server/cloud-computer-slow-start.e2e.test.ts server/computer-selection.test.ts server/room-turn-end.test.ts server/boat-wait-ready.test.ts src/components/ComputerPanel.lazy.test.ts`
+proves a cloud computer starts only when the bot uses it. Against a loopback
+relay that counts every request, a plain chat ("hi") on Works on: Cloud
+computer, in a bot's chat or a room, makes no relay call; choosing Cloud
+computer or opening the Computer panel creates and wakes nothing; the first
+computer call creates the computer once (or wakes a sleeping one, waiting for
+the wake), with one progress line in the chat. A signed-out engine fails with
+the usual sign-in row and a Tool selection without the computer is refused,
+both with no relay call. A relay that accepts a readiness poll and never
+answers ends the wait inside its budget. select_computer counts the cloud
+computer a turn starts on its first call as already selected, so the request
+is not restarted or pinned. A start the relay refuses is reported with its
+cause: in a room, once, under the member's name; on a cloud routine, as the
+run's error. A first start slower than one call's wait answers "still
+starting" and a later call works with one create; a start that stalls ends at
+the start budget with one row.
 
 Model screenshots use native resolution and a separate file from panel frames.
 Every action rechecks the harness control gate. Commands run with an isolated
-environment; Boat and control credentials do not enter model messages. Tests
-use synthetic image bytes, not a paid Boat account or real desktop input.
+environment; the Boat credential stays in the harness, and the agent process
+holds only a turn-scoped capability that ends with the turn. Tests use
+synthetic image bytes, not a paid Boat account or real desktop input.
 
 ## Text-only model connections
 
@@ -131,6 +159,20 @@ explicit unsupported-tools HTTP 400/422 rejection permits one retry without
 that optional tool. Authentication, schema and network failures do not trigger
 this downgrade, nor does a response after any tool call. The next turn offers
 questions again. No fallback replays a requested operation without its tools.
+When a provider refuses a tool call (Groq's `tool_use_failed`, mid-stream or
+as HTTP 400: a tool the model was not given, or arguments that miss the
+schema), nothing ran, so the same request is sent again, up to three attempts
+in all, each shown as a retrying row. Once answer text has streamed the refusal
+ends the turn instead, so one reply never joins two attempts. A turn that runs
+out of attempts says in plain words what happened and what to do next,
+followed by the provider's message. With no earlier tool call in the turn,
+nothing ran and the chat's Retry sends it again; after earlier calls ran, it
+asks only for what's left, since a Retry of the whole request would repeat
+them. A resend never repeats an earlier call: its result is already in the
+request.
+Each refusal's full error object, `failed_generation` included, is written to
+the thread's redacted native log (`native/THREAD.ndjson` in the data
+directory), next to the tool names every request offered.
 
 Cloud routine readiness uses the executing bot’s selected runner (including a
 thread’s model override at dispatch), rather than any available cloud engine.

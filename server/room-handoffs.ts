@@ -226,17 +226,11 @@ export class RoomHandoffs {
     if (path.some(n => n.botId === target.botId && (!n.groupId || !target.groupId || n.groupId === target.groupId))) {
       throw new Error("Cannot assign work back to an ancestor; results return automatically");
     }
-    const existing = this.children(parent.id).find(n => n.key === key);
-    if (existing) {
-      if (existing.groupId !== target.groupId || existing.botId !== target.botId || existing.text !== text ||
-        existing.kind !== kind || existing.requestBatchKey !== requestBatchKey) throw new Error("request_key was already used for different work");
-      return { node: existing, duplicate: true };
-    }
-    if (requestBatchKey && target.groupId) {
-      const batch = this.children(parent.id).filter(n => n.requestBatchKey === requestBatchKey && n.groupId === target.groupId);
-      if (batch.some(n => n.text !== text || n.threadId !== target.threadId)) throw new Error("request_key was already used for different room work");
-      if (batch.some(n => n.startedAt !== undefined)) throw new Error("This shared room request has already started; use a new request_key for additional recipients");
-    }
+    // The same text to the same teammate and place under one parent is one
+    // request, so a repeat lands on it. Only rework=true runs a finished or
+    // failed one again.
+    const existing = this.children(parent.id).findLast(n => n.botId === target.botId && n.groupId === target.groupId && n.text === text);
+    if (existing && !(rework && terminal(existing))) return { node: existing, duplicate: true };
     if (!rework && this.children(parent.id).some(n => n.kind === kind &&
       n.groupId === target.groupId && n.botId === target.botId && n.status === "completed")) {
       throw new Error("This agent already completed your assignment. Do not send acknowledgements or approvals as new work. Finish with your decision; results return automatically. Only use rework=true for concrete additional work.");
@@ -322,6 +316,16 @@ export class RoomHandoffs {
   activeDirect(threadId: string) {
     return [...this.nodes.values()].some(n => !n.groupId && n.threadId === threadId && !terminal(n));
   }
+  /** The conversation that assigned the unsettled direct work running in
+   * this thread, or undefined when nothing it does is awaited. */
+  assignerOf(threadId: string): RoomHandoff | undefined {
+    for (const node of this.nodes.values()) {
+      if (terminal(node) || !node.parentId || node.groupId || node.threadId !== threadId) continue;
+      const parent = this.nodes.get(node.parentId);
+      if (parent) return parent;
+    }
+    return undefined;
+  }
   /** Work this conversation handed out that has not settled yet. The
    * conversation's own node is not outstanding — only what it waits on. */
   outstandingDirect(threadId: string): RoomHandoff[] {
@@ -329,6 +333,21 @@ export class RoomHandoffs {
       if (terminal(node) || !node.parentId) return false;
       const parent = this.nodes.get(node.parentId);
       return Boolean(parent && !parent.groupId && parent.threadId === threadId);
+    });
+  }
+  /** Teammate work that has not settled yet, as ids only: who asked, who is
+   * working on it, and where. The request and result text stay out, so the
+   * Team map can show the link without reading anyone's conversation. */
+  liveEdges(): Array<{ sourceBotId: string; targetBotId: string; state: "queued" | "running"; threadId: string; groupId?: string }> {
+    return [...this.nodes.values()].flatMap(node => {
+      if (terminal(node) || !node.parentId) return [];
+      const parent = this.nodes.get(node.parentId);
+      if (!parent || parent.botId === node.botId) return [];
+      return [{
+        sourceBotId: parent.botId, targetBotId: node.botId,
+        state: node.status === "queued" ? "queued" as const : "running" as const,
+        threadId: node.threadId, ...(node.groupId ? { groupId: node.groupId } : {}),
+      }];
     });
   }
   /** Stop this conversation without reaching into a teammate that is already

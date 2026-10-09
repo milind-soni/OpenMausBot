@@ -50,6 +50,7 @@ let askResponse: StubAskResponse = { botName: "Helper", text: "hi from helper" }
 let lastDelegateBody: any = null;
 let lastDelegationUrl: string | null = null;
 let delegationStatusResponse: unknown = { status: "done", toBotName: "Helper", result: "All done." };
+let delegationStatusCode = 200;
 let delegateResponse: unknown = { queued: true, message: "Delegation queued." };
 let lastThreadBody: any = null;
 let threadCalls = 0;
@@ -91,7 +92,7 @@ let lastSessionSearchUrl = "";
 let lastSessionReadUrl = "";
 let lastMemoryBody: any = null;
 let lastMemoryLogBody: any = null;
-let memoryResponse: unknown = { ok: true, text: "- new fact", truncated: false, bytes: 10 };
+let memoryResponse: unknown = { ok: true, truncated: false };
 let memoryStatus = 200;
 let sessionSearchResponse: unknown = {
   hits: [
@@ -272,7 +273,7 @@ beforeAll(async () => {
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/delegations/")) {
       lastDelegationUrl = req.url;
-      res.writeHead(200, { "content-type": "application/json" });
+      res.writeHead(delegationStatusCode, { "content-type": "application/json" });
       res.end(JSON.stringify(delegationStatusResponse));
       return;
     }
@@ -458,6 +459,8 @@ beforeAll(async () => {
       OMB_TURN_DEPTH: "0",
       OMB_SKILL_AUTHORING_ENABLED: "1",
       OMB_SHARED_COMPUTERS_ENABLED: "1",
+      // A Chief's turn, so the Chief-only team tools are mounted too.
+      OMB_CHIEF_OF_STAFF: "1",
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -486,10 +489,18 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     for (const tool of new Set(proposalCases.map(entry => entry.tool))) {
       const description = list.result.tools.find((entry: { name: string }) => entry.name === tool).description;
-      expect(description).toContain("granted Full Access may apply the change immediately");
+      // Team setup applies only at Full access; a bot's own routines,
+      // skills and profile apply at any level.
+      if (tool === "propose_team_setup" || tool === "propose_bot_deletion") {
+        expect(description).toContain("granted Full Access may apply the change immediately");
+        expect(description).toContain("Never claim success from the permission mode alone");
+      } else {
+        expect(description).toContain("a change to your own routines, skills, profile or model applies immediately");
+        expect(description).toContain("a change for another bot may wait for the person's confirmation");
+        expect(description).toContain("Never claim success without an applied result");
+      }
       expect(description).toContain("If applied, continue the requested work without another confirmation");
       expect(description).toContain("Only a pending result requires ending the turn");
-      expect(description).toContain("Never claim success from the permission mode alone");
       expect(description).toContain("does not elevate another bot's execution permissions");
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
@@ -605,7 +616,7 @@ describe("agents-proxy MCP surface", () => {
 
   it("answers the MCP handshake and lists the agents tools", async () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
-    expect(init.result.serverInfo.name).toContain("agents");
+    expect(init.result.serverInfo.name).toBe("openmausbot-agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
       "tool_result_read",
@@ -641,8 +652,10 @@ describe("agents-proxy MCP surface", () => {
       "propose_routine_action",
       "propose_profile",
       "propose_model",
+      "propose_team_memory",
       "skills_list",
       "skill_manage",
+      "add_mcp_server",
     ]);
     const ask = list.result.tools.find((tool: { name: string }) => tool.name === "ask_bot");
     const delegate = list.result.tools.find((tool: { name: string }) => tool.name === "delegate_bot");
@@ -917,19 +930,13 @@ describe("agents-proxy MCP surface", () => {
     postResponse = { ok: true, messageId: "msg-1", roomName: "Launch" };
   });
 
-  it("stops a turn at three posts and says so without another round trip", async () => {
+  it("counts no posts of its own: a proxy serving several turns leaves the per-turn limit to the harness", async () => {
     const before = postCalls;
-    // one post is already spent by the test above
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 4; i++) {
       const ok = await callTool("post_to_room", { group_id: "room-launch", message: `update ${i}` });
       expect(ok.result.isError).toBeFalsy();
     }
-    expect(postCalls).toBe(before + 2);
-    const capped = await callTool("post_to_room", { group_id: "room-launch", message: "one more" });
-    expect(capped.result.isError).toBe(true);
-    expect(capped.result.content[0].text).toMatch(/do not retry/i);
-    // the refusal is the proxy's own: the harness was never asked
-    expect(postCalls).toBe(before + 2);
+    expect(postCalls).toBe(before + 4);
   });
 
   it("ask_bot forwards sender + depth and returns the reply", async () => {
@@ -964,13 +971,6 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("delivered to this conversation automatically");
     expect(text).not.toContain("wait_delegation");
     expect(res.result.isError).toBeFalsy();
-
-    lastDelegationUrl = null;
-    const check = await callTool("check_delegation", { task_id: "task-9" });
-    expect(check.result.isError).toBe(true);
-    expect(check.result.content[0].text).toContain("delegated during this turn");
-    expect(check.result.content[0].text).toContain("Finish your response now");
-    expect(lastDelegationUrl).toBeNull();
   });
 
   it.each([[15_000, "15 seconds"], [240_000, "4 minutes"]])("renders a timeout conversion after %s ms with the task id and guidance", async (waitedMs, duration) => {
@@ -984,13 +984,6 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("delivered to this conversation automatically");
     expect(text).not.toContain("wait_delegation");
     expect(res.result.isError).toBeFalsy();
-
-    lastDelegationUrl = null;
-    const wait = await callTool("wait_delegation", { task_id: "task-42", timeout_seconds: 240 });
-    expect(wait.result.isError).toBe(true);
-    expect(wait.result.content[0].text).toContain("delegated during this turn");
-    expect(wait.result.content[0].text).toContain("delivered to this conversation automatically");
-    expect(lastDelegationUrl).toBeNull();
   });
 
   it("surfaces the harness's depth refusal as a tool error", async () => {
@@ -1127,20 +1120,15 @@ describe("agents-proxy MCP surface", () => {
     expect(refused.result.content[0].text).toContain("title must fit on one line");
   });
 
-  it("stops a turn at five opened threads and tells the model not to retry", async () => {
-    // three threads were already opened above (the refusal did not count)
+  it("counts no threads of its own: a proxy serving several turns leaves the per-turn limit to the harness", async () => {
+    // three threads were already opened above
     threadResponse = { threadId: "thread-n", title: "More", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
-    for (let i = 0; i < 2; i++) {
+    const before = threadCalls;
+    for (let i = 0; i < 3; i++) {
       const ok = await callTool("start_thread", { title: `More ${i}`, message: "go" });
       expect(ok.result.isError).toBeFalsy();
     }
-    const before = threadCalls;
-    const capped = await callTool("start_thread", { title: "One more", message: "go" });
-    expect(capped.result.isError).toBe(true);
-    expect(capped.result.content[0].text).toMatch(/do not retry/i);
-    expect(capped.result.content[0].text).toContain("which threads you still wanted to open");
-    // the refusal is the proxy's own: the harness was never asked
-    expect(threadCalls).toBe(before);
+    expect(threadCalls).toBe(before + 3);
   });
 
   it("lets a Chief create a bounded specialist through the harness", async () => {
@@ -1235,7 +1223,7 @@ describe("agents-proxy MCP surface", () => {
     expect(lastCredentialBody).toBeNull();
   });
 
-  it("hands back the task id and rejects sequential same-turn status calls", async () => {
+  it("hands back the task id, and relays the harness's refusal to check it in the same turn", async () => {
     delegateResponse = {
       queued: true,
       taskId: "task-abc123",
@@ -1247,15 +1235,22 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.content[0].text).toContain("Do not check or wait for it in this turn");
     expect(res.result.content[0].text).not.toContain("wait_delegation");
 
-    lastDelegationUrl = null;
-    for (const name of ["check_delegation", "wait_delegation"]) {
-      const status = await callTool(name, { task_id: "task-abc123", timeout_seconds: 240 });
-      expect(status.result.isError).toBe(true);
-      expect(status.result.content[0].text).toContain("delegated during this turn");
-      expect(status.result.content[0].text).toContain("Finish your response now");
-      expect(status.result.content[0].text).toContain("delivered to this conversation automatically");
+    // Which turn made it is the harness's to know: a warm proxy serves many.
+    delegationStatusCode = 409;
+    delegationStatusResponse = { error: "Task task-abc123 was delegated during this turn. Finish your response now so the other bot can work; its result will be delivered to this conversation automatically." };
+    try {
+      for (const name of ["check_delegation", "wait_delegation"]) {
+        lastDelegationUrl = null;
+        const status = await callTool(name, { task_id: "task-abc123", timeout_seconds: 240 });
+        expect(status.result.isError).toBe(true);
+        expect(status.result.content[0].text).toContain("delegated during this turn");
+        expect(status.result.content[0].text).toContain("Finish your response now");
+        expect(lastDelegationUrl).toContain("/api/internal/delegations/task-abc123?");
+      }
+    } finally {
+      delegationStatusCode = 200;
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
     }
-    expect(lastDelegationUrl).toBeNull();
     delegateResponse = { queued: true, message: "Delegation queued." };
   });
 
@@ -1285,6 +1280,25 @@ describe("agents-proxy MCP surface", () => {
     expect(waiting.result.content[0].text).toContain("after 45s");
     expect(lastDelegationUrl).toContain("wait_ms=45000");
     delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+  });
+
+  it("check_delegation says when the teammate is stopped on the person's approval", async () => {
+    delegationStatusResponse = {
+      status: "running",
+      toBotName: "Helper",
+      elapsedMs: 90_000,
+      recentActivity: ["Bash: echo hi"],
+      awaitingPerson: { kind: "approval", tool: "Bash", threadTitle: "Guarded task" },
+    };
+    try {
+      const text = (await callTool("check_delegation", { task_id: "task-later456" })).result.content[0].text;
+      expect(text).toContain("is waiting on the person's approval");
+      expect(text).toContain('@Helper stopped at a card in its thread "Guarded task" (to run Bash)');
+      expect(text).toContain("Tell the person now");
+      expect(text).not.toContain("is running with");
+    } finally {
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+    }
   });
 
   it("check_delegation explains a queued handoff: who it is waiting on, and when it expires", async () => {
@@ -1334,12 +1348,12 @@ describe("agents-proxy MCP surface", () => {
       action: "replace", text: "- New preference", oldText: "- Old preference",
     });
     // the harness echoes the entry it wrote, so the model can replace it later by exact text
-    memoryResponse = { ok: true, text: "- new fact", truncated: false, bytes: 10, entry: '- 2026-09-10 · from chat "Setup" · New preference' };
+    memoryResponse = { ok: true, truncated: false, entry: '- 2026-09-10 · from chat "Setup" · New preference' };
     const echoed = await callTool("memory_update", { action: "supersede", text: "New preference", old_text: "- Old preference" });
     expect(echoed.result.isError).toBe(false);
     expect(echoed.result.content[0].text).toBe('Memory updated. Entry: - 2026-09-10 · from chat "Setup" · New preference');
     expect(lastMemoryBody).toMatchObject({ action: "supersede", text: "New preference", oldText: "- Old preference" });
-    memoryResponse = { ok: true, text: "- new fact", truncated: false, bytes: 10 };
+    memoryResponse = { ok: true, truncated: false };
     const append = await callTool("memory_update", { action: "append", text: "- Another fact" });
     expect(append.result.isError).toBe(false);
     expect(lastMemoryBody).toEqual({
@@ -1361,7 +1375,8 @@ describe("agents-proxy MCP surface", () => {
     // minimal satisfier instead of the intended text — the same class of
     // failure as the schema-conversion issues behind the flat-schema rule.
     // Blank text is still rejected by the handler (asserted above).
-    expect(schema.properties.text).toMatchObject({ minLength: 1 });
+    // one fact per call, the same cap updateMemory holds (MEMORY_ENTRY_MAX_CHARS)
+    expect(schema.properties.text).toMatchObject({ minLength: 1, maxLength: 1000 });
     expect(schema.properties.text).not.toHaveProperty("pattern");
     memoryStatus = 409;
     memoryResponse = { error: "oldText must match exactly once in the latest memory." };
@@ -1369,39 +1384,26 @@ describe("agents-proxy MCP surface", () => {
     expect(stale.result.isError).toBe(true);
     expect(stale.result.content[0].text).toContain("latest memory");
     memoryStatus = 200;
-    memoryResponse = { ok: true, text: "- new fact", truncated: false, bytes: 10 };
+    memoryResponse = { ok: true, truncated: false };
   });
 
-  it("memory_update relays a full-file refusal with the newest entries and closes after three refusals in a turn", async () => {
-    memoryStatus = 413;
+  it("memory_update on a full file says what moved to the archive, and stays open however many writes a turn makes", async () => {
     memoryResponse = {
-      ok: false, code: "over-budget",
-      error: "MEMORY.md would be 201 lines and 9000 bytes; only the first 200 lines / 24000 bytes load at the start of a session, and nothing past that is ever read. Consolidate now: replace or remove older entries, or move detail to a memory/<topic>.md file; do not retry the same append.",
-      lines: 201, bytes: 9000, budget: { lines: 200, bytes: 24000 },
-      recent: ["- 2026-09-09 · from chat \"A\" · fact 199", "- 2026-09-10 · from chat \"B\" · fact 200"],
+      ok: true, truncated: false,
+      entry: '- 2026-09-10 · from chat "Setup" · fact 201',
+      moved: ["- 2026-08-01 · from chat \"A\" · fact 1"],
     };
-    const full = await callTool("memory_update", { action: "append", text: "fact 201" });
-    expect(full.result.isError).toBe(true);
-    expect(full.result.content[0].text).toContain("Consolidate now: replace or remove older entries, or move detail to a memory/<topic>.md file; do not retry the same append.");
-    expect(full.result.content[0].text).toContain("Most recent entries, oldest first:\n- 2026-09-09 · from chat \"A\" · fact 199\n- 2026-09-10");
-    // The proxy lives for one turn and an earlier test already spent one
-    // refusal; keep refusing until the tool closes, which must take at most
-    // three refusals from a fresh counter.
-    let closed = "";
-    for (let attempt = 0; attempt < 3 && !closed; attempt += 1) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
       lastMemoryBody = null;
-      const again = await callTool("memory_update", { action: "append", text: "fact 201" });
-      expect(again.result.isError).toBe(true);
-      if (again.result.content[0].text.includes("closed for the rest of this turn")) closed = again.result.content[0].text;
+      const full = await callTool("memory_update", { action: "append", text: "fact 201" });
+      expect(full.result.isError).toBe(false);
+      expect(full.result.content[0].text).toBe(
+        'Memory updated. Entry: - 2026-09-10 · from chat "Setup" · fact 201\n' +
+        'To stay within what loads each session, moved 1 older entry to memory/archive.md (session_search finds them):\n- 2026-08-01 · from chat "A" · fact 1',
+      );
+      expect(lastMemoryBody).toMatchObject({ action: "append", text: "fact 201" });
     }
-    expect(closed).toContain("3 were refused. Do not retry.");
-    // closed means closed: nothing reached the harness for that call
-    expect(lastMemoryBody).toBeNull();
-    memoryStatus = 200;
-    memoryResponse = { ok: true, text: "- new fact", truncated: false, bytes: 10 };
-    const after = await callTool("memory_update", { action: "append", text: "one more" });
-    expect(after.result.isError).toBe(true);
-    expect(lastMemoryBody).toBeNull();
+    memoryResponse = { ok: true, truncated: false };
   });
 
   it("memory_log appends to today's log through the harness and says so, never loading it anywhere", async () => {
@@ -2153,9 +2155,10 @@ describe("standing external runtime", () => {
   });
 });
 
-// Opt-in computer sharing is off unless the harness turns it on. A separate
-// child is the only honest check: the tool list is frozen at module load.
-describe("with computer sharing off (the default)", () => {
+// Opt-in computer sharing is off unless the harness turns it on, and so are
+// the Chief-only tools. A separate child is the only honest check: the tool
+// list is frozen at module load.
+describe("with computer sharing off and no Chief of Staff (the defaults)", () => {
   let gated: ChildProcess;
   const gatedPending = new Map<number, (msg: any) => void>();
   let gatedId = 500;
@@ -2179,7 +2182,7 @@ describe("with computer sharing off (the default)", () => {
         OMB_COMMS_TOKEN: TOKEN,
         OMB_TURN_DEPTH: "0",
         OMB_SKILL_AUTHORING_ENABLED: "1",
-        // deliberately no OMB_SHARED_COMPUTERS_ENABLED
+        // deliberately no OMB_SHARED_COMPUTERS_ENABLED or OMB_CHIEF_OF_STAFF
       },
       stdio: ["pipe", "pipe", "inherit"],
     });
@@ -2218,6 +2221,31 @@ describe("with computer sharing off (the default)", () => {
       const refused = await gatedRpc("tools/call", { name, arguments: { computer_id: "x", action: "list_files" } });
       expect(refused.error?.message ?? refused.result?.content?.[0]?.text).toMatch(/unknown tool|turned off/i);
     }
+  });
+
+  it("shows a bot that is not a Chief none of the Chief-only tools or parameters", async () => {
+    type ListedTool = { name: string; description: string; inputSchema: { properties: Record<string, unknown> } };
+    const tools = new Map(((await gatedRpc("tools/list")).result.tools as ListedTool[]).map((tool) => [tool.name, tool]));
+    for (const name of ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"]) {
+      expect(tools.has(name), name).toBe(false);
+    }
+    for (const name of ["propose_profile", "propose_model"]) {
+      expect(tools.get(name)!.inputSchema.properties).not.toHaveProperty("for_bot_id");
+      expect(tools.get(name)!.description).not.toContain("for_bot_id");
+    }
+    // A routine change may still target a reachable section peer.
+    expect(tools.get("propose_routine_action")!.inputSchema.properties).toHaveProperty("for_bot_id");
+  });
+
+  it("refuses a Chief-only tool called by name without reaching the harness", async () => {
+    lastCreateBody = null;
+    lastCreateRoomBody = null;
+    const created = await gatedRpc("tools/call", { name: "create_bot", arguments: { name: "Scout", role: "Ops", instructions: "Work." } });
+    expect(created.error).toMatchObject({ code: -32602, message: "Unknown tool: create_bot" });
+    const room = await gatedRpc("tools/call", { name: "create_room", arguments: { name: "Ops", member_bot_ids: ["bot-helper"] } });
+    expect(room.error).toMatchObject({ code: -32602, message: "Unknown tool: create_room" });
+    expect(lastCreateBody).toBeNull();
+    expect(lastCreateRoomBody).toBeNull();
   });
 });
 
@@ -2272,11 +2300,11 @@ describe("coordinate_bots arguments (room turn)", () => {
 
   it("maps camelCase aliases onto the canonical snake_case fields", async () => {
     const res = await roomRpc("tools/call", { name: "coordinate_bots", arguments: {
-      botIds: ["bot-helper"], message: "please review the patch", requestKey: "review-1",
+      botIds: ["bot-helper"], message: "please review the patch",
     } });
     expect(res.result.isError).toBeFalsy();
     expect(lastCoordinateBody).toMatchObject({
-      botIds: ["bot-helper"], message: "please review the patch", requestKey: "review-1",
+      botIds: ["bot-helper"], message: "please review the patch",
     });
   });
 
@@ -2331,13 +2359,16 @@ describe("coordinate_bots arguments (room turn)", () => {
   it("keeps the documented snake_case key when both spellings arrive", async () => {
     const res = await roomRpc("tools/call", { name: "coordinate_bots", arguments: {
       bot_ids: ["bot-helper"], botIds: ["bot-other"], group_id: "room-right", groupId: "room-wrong",
-      message: "m", request_key: "k-2", requestKey: "wrong",
+      message: "m", request_key: "from an older tool list", label: "from an older tool list",
     } });
     expect(res.result.isError).toBeFalsy();
     expect(lastCoordinateBody).toMatchObject({
-      botIds: ["bot-helper"], groupId: "room-right", requestKey: "k-2",
+      botIds: ["bot-helper"], groupId: "room-right",
     });
     expect(lastCoordinateBody.botIds).not.toContain("bot-other");
+    // Fields from an older tool list are dropped.
+    expect(lastCoordinateBody).not.toHaveProperty("requestKey");
+    expect(lastCoordinateBody).not.toHaveProperty("label");
   });
 
   it("names the expected snake_case fields when arguments are unusable", async () => {
@@ -2347,7 +2378,7 @@ describe("coordinate_bots arguments (room turn)", () => {
     } });
     expect(res.result.isError).toBe(true);
     const text = res.result.content[0].text;
-    for (const field of ["bot_ids", "message", "request_key", "group_id", "rework", "label"]) {
+    for (const field of ["bot_ids", "message", "group_id", "rework"]) {
       expect(text).toContain(field);
     }
     expect(text).toContain("botIds");

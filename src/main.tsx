@@ -7,6 +7,7 @@ import {
 import { bootstrapBrand } from "./lib/brand";
 import { applySkin, readSkin } from "./lib/skins";
 import { applyFont, readFont } from "./lib/fonts";
+import { settleAdvancedModeDefault } from "./lib/interface-mode";
 import { BrowserSignInPage } from "./pair/BrowserSignInPage";
 import { PairPage } from "./pair/PairPage";
 import "katex/dist/katex.min.css";
@@ -16,6 +17,9 @@ import "./styles.css";
 // render would show one frame of the default palette first. The brand (window
 // title, accent) is fetched the same way so a white-labelled deployment never
 // flashes the default name; it waits at most a moment and falls back silently.
+// Simple vs Advanced is decided first: applySkin below writes omb-skin, which
+// would otherwise make every fresh install look like an existing one.
+settleAdvancedModeDefault();
 applySkin(readSkin());
 applyFont(readFont());
 

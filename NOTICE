@@ -15,6 +15,12 @@ Copyright 2026 T3 Tools Inc., used under the MIT License.
 The secure phone credential transport uses @hpke/core and @hpke/common from
 hpke-js, Copyright 2023-2024 Ajitomi Daisuke, used under the MIT License.
 
+The Android companion app bundles a prebuilt WebRTC library for Live calls
+(io.github.webrtc-sdk:android), built from the WebRTC project, Copyright (c)
+2011, The WebRTC project authors, used under the BSD 3-Clause License. WebRTC
+includes third-party components under their own licenses, listed with the
+library.
+
 Selected provider icon paths are from Simple Icons, used under CC0 1.0.
 The Cohere provider icon path is from Lobe Icons, Copyright 2023 LobeHub,
 used under the MIT License.
@@ -30,3 +36,7 @@ The browser desktop viewer bundles the unmodified noVNC 1.7.0 library,
 Copyright the noVNC authors, under MPL-2.0 and its accompanying licenses.
 Attribution, license terms and the corresponding source location are in
 public/novnc-NOTICE.txt (novnc-NOTICE.txt in the built UI).
+The iOS companion app bundles a prebuilt WebRTC library for Live calls
+(stasel/WebRTC), built from the WebRTC project, Copyright (c) 2011, The WebRTC
+project authors, used under the BSD 3-Clause License. WebRTC includes
+third-party components under their own licenses, listed with the library.

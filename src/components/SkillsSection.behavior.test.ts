@@ -101,15 +101,19 @@ describe("Skills library review and assignment controls", () => {
   });
 
   it("requires the same source review before enabling a per-bot library skill", async () => {
-    fixture.values = [[{ ...skill(), origin: "library" }], ["order-audit"], [], "", [], false, "", "", null, null, "", false, ""];
+    // Hook call order: useManagedSkills (shared with the Simple bot panel) owns
+    // skills…reviewing (0-8) and the assignment guard ref (9); the section then
+    // owns viewing, source, importing and importMessage (10-13).
+    fixture.values = [[{ ...skill(), origin: "library" }], ["order-audit"], [], "", [], false, "", "", null, { current: false }, null, "", false, ""];
     fixture.request.mockImplementation(async (_url, options) => options?.method ? {} : { text: source });
     named(render(true), "Enable order-audit").props.onClick!();
     await flush();
     expect(fixture.request).toHaveBeenCalledTimes(1);
     expect(fixture.request).toHaveBeenCalledWith("/api/skills-library/order-audit");
-    const tree = render(true);
-    expect(tree.find((node) => node.type === "pre")!.props.children).toBe(source);
-    button(tree, "Enable reviewed skill").props.onClick!();
+    // The review step is the shared SkillReviewDialog, given the fetched source.
+    const review = render(true).find((node) => typeof node.type === "function" && node.type.name === "SkillReviewDialog")!;
+    expect(review.props.text).toBe(source);
+    (review.props.onEnable as () => void)();
     await flush();
     expect(fixture.request).toHaveBeenCalledWith("/api/skills-library/order-audit", expect.objectContaining({ method: "PATCH", body: '{"enabled":true}' }));
   });

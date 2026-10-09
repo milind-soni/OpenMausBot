@@ -15,10 +15,9 @@ and removes their temporary data; the printed harness log remains.
 
 Verify these transitions with computer use:
 
-1. On initial connection, **Cloud screen connected** appears. The fixture
-   deliberately injects an old blank SSE frame before mounting the connection;
-   that frame must not hide the new screenshot. The old implementation fails
-   this check by continuing to display a black rectangle.
+1. On initial connection, **Cloud screen connected** appears. The panel hears
+   live frames only while its preview is up, so a frame sent before it
+   connected cannot hide this screenshot.
 2. Select **corrupt**, then **Reconnect panel**. The panel must show an image
    error and **Retry preview**, rather than a blank image with an Open button.
 3. Select **slow**, then **Retry preview**. The panel immediately shows

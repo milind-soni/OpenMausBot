@@ -2,11 +2,12 @@
 // errors. The command has one inline copy action and one primary next step;
 // unusable model lists stay out of the way until the engine is ready.
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, Copy, Download, ExternalLink, KeyRound, Loader2, LogIn, TerminalSquare } from "lucide-react";
+import { AlertTriangle, Check, Copy, Download, ExternalLink, KeyRound, Loader2, LogIn, TerminalSquare, X } from "lucide-react";
 import { api, type EngineInstall, type InstanceInfo, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { CodexDeviceSignIn } from "./CodexDeviceSignIn";
+import { copyText } from "@/lib/copy-text";
+import { DEVICE_SIGN_IN_COPY, DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ClaudeSignIn } from "./ClaudeSignIn";
 
 type Platform = "darwin" | "win32" | "linux";
@@ -31,10 +32,34 @@ export function needsSignIn(instance: InstanceInfo | undefined): boolean {
   return instance?.snapshot.state === "available" && instance.snapshot.authenticated === false;
 }
 
+/** The card EngineSetup shows for this engine is its sign-in — not an API
+ * key row, an install, or a note that it cannot be set up here. A caller
+ * that words a line around that card (a failed turn's headline) asks this,
+ * so the line and the card never disagree. */
+export function offersSignIn(instance: InstanceInfo | undefined): boolean {
+  return Boolean(instance && needsSignIn(instance) && instance.install
+    && !instance.snapshot.authenticationUnavailableReason && !apiKeySetup(instance));
+}
+
 /** The engine needs setup; unavailable does not prove its CLI is absent.
  * Local-model injection still requires an available engine, but no cloud sign-in. */
 export function needsCli(instance: InstanceInfo | undefined): boolean {
   return instance?.snapshot.state !== "available";
+}
+
+/** A terminal opened from this page runs on the machine the server runs on:
+ * the desktop app's own window on its own server. Never a browser, a paired
+ * remote client, or My Cloud, where a terminal command is a dead end. */
+export function serverTerminal(cloudHome: boolean): boolean {
+  return Boolean(window.ogb?.openInstallTerminal) && window.ogb?.remoteClient?.active !== true && !cloudHome;
+}
+
+/** Grok Build cannot run here (no Grok CLI on this server, an older Cloud
+ * computer image for one) and nobody here can install it. Its models are
+ * still an xAI API key away, so the card says that instead of handing over
+ * an install command that cannot run. */
+export function grokKeyInstead(instance: InstanceInfo, cloudHome: boolean): boolean {
+  return instance.driverKind === "grokAgent" && needsCli(instance) && !serverTerminal(cloudHome);
 }
 
 export function CommandRow({
@@ -46,22 +71,21 @@ export function CommandRow({
   actionLabel: string;
   compact?: boolean;
 }) {
-  const [status, setStatus] = useState<"copied" | "opened" | null>(null);
+  const [status, setStatus] = useState<"copied" | "failed" | "opened" | null>(null);
   const canOpen = typeof window !== "undefined" && Boolean(window.ogb?.openInstallTerminal);
 
-  const settle = (next: "copied" | "opened") => {
+  const settle = (next: "copied" | "failed" | "opened") => {
     setStatus(next);
     window.setTimeout(() => setStatus(null), 2200);
   };
 
+  // The command remains selectable when clipboard access is blocked.
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(command);
-      settle("copied");
-    } catch {
-      // The command remains selectable when clipboard access is blocked.
-    }
+    const result = await copyText(command);
+    if (result !== "empty") settle(result);
   };
+  const copyIcon = (size: number) => status === "copied" ? <Check size={size} className="text-success" />
+    : status === "failed" ? <X size={size} className="text-danger" /> : <Copy size={size} />;
 
   const openTerminal = async () => {
     const opened = await window.ogb!.openInstallTerminal!(command);
@@ -81,8 +105,8 @@ export function CommandRow({
           title={t("engineSetup.copyCommand")}
           className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-ink-secondary hover:bg-control hover:text-ink"
         >
-          {status === "copied" ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-          {status === "copied" ? t("engineSetup.copied") : t("engineSetup.copy")}
+          {copyIcon(12)}
+          {t(status === "copied" ? "engineSetup.copied" : status === "failed" ? "common.copyFailed" : "engineSetup.copy")}
         </button>
         {canOpen && (
           <button
@@ -117,8 +141,8 @@ export function CommandRow({
             title={t("engineSetup.copyCommand")}
             className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-ink-secondary hover:bg-control hover:text-ink"
           >
-            {status === "copied" ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-            {status === "copied" ? t("engineSetup.copied") : t("engineSetup.copy")}
+            {copyIcon(12)}
+            {t(status === "copied" ? "engineSetup.copied" : status === "failed" ? "common.copyFailed" : "engineSetup.copy")}
           </button>
         )}
       </div>
@@ -143,8 +167,8 @@ export function CommandRow({
           onClick={() => void copy()}
           className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[12.5px] font-semibold text-ink hover:bg-raised-hover"
         >
-          {status === "copied" ? <Check size={14} className="text-success" /> : <Copy size={14} />}
-          {status === "copied" ? t("engineSetup.commandCopied") : t("engineSetup.copyCommand")}
+          {copyIcon(14)}
+          {t(status === "copied" ? "engineSetup.commandCopied" : status === "failed" ? "common.copyFailed" : "engineSetup.copyCommand")}
         </button>
       )}
     </div>
@@ -393,22 +417,30 @@ export function isApiKeyEngine(instance: InstanceInfo | undefined): boolean {
   return instance.driverKind !== "claudeAgent" || Boolean(instance.snapshot.version);
 }
 
-function ApiKeyEngineSetup({ instance, className, unframed }: { instance: InstanceInfo; className?: string; unframed: boolean }) {
+/** A key engine whose key is saved. A mistyped key counts too: it is only
+ * found wrong when used or tested. */
+export function hasSavedApiKey(instance: InstanceInfo): boolean {
+  return isApiKeyEngine(instance) && instance.snapshot.authenticated === true;
+}
+
+/** Its setup is a key in Settings → API keys, and that is not done yet. */
+function apiKeySetup(instance: InstanceInfo): boolean {
+  return (isApiKeyEngine(instance) || instance.install?.settings === "connections") && !instance.snapshot.authenticationUnavailableReason
+    && (instance.snapshot.state !== "available" || instance.snapshot.authenticated === false);
+}
+
+function GrokKeyInstead({ className, unframed }: { className?: string; unframed: boolean }) {
   const { dispatch } = useStore();
   const remote = window.ogb?.remoteClient?.active === true;
   return (
-    <div data-engine-setup-api-key className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
+    <div data-engine-setup-key-instead className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-inset text-ink-secondary">
           <KeyRound size={14} />
         </span>
-        <div className="min-w-0">
-          <div className="text-[13px] font-semibold text-ink">{t("engineSetup.apiKey.title", { name: instance.displayName })}</div>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {remote ? t("engineSetup.apiKey.remote") : t("engineSetup.apiKey.description")}
-          </p>
-        </div>
+        <p className="min-w-0 text-[12.5px] leading-relaxed text-ink">{t("engineSetup.grok.notInstalled")}</p>
       </div>
+      {/* a remote client's Settings has no API keys to open (ApiKeyEngineSetup) */}
       {!remote && (
         <button
           type="button"
@@ -416,11 +448,56 @@ function ApiKeyEngineSetup({ instance, className, unframed }: { instance: Instan
           className="mt-3 flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-raised-hover"
         >
           <KeyRound size={13} aria-hidden="true" />
-          {t("engineSetup.apiKey.open")}
+          {t("engineSetup.grok.addKey")}
         </button>
       )}
     </div>
   );
+}
+
+/** `configured`: the key is saved, so the card offers to change it instead.
+ * A typo'd key still counts as saved, and this is the way back to fix it. */
+function ApiKeyEngineSetup({ instance, className, unframed, configured = false }: { instance: InstanceInfo; className?: string; unframed: boolean; configured?: boolean }) {
+  const { dispatch } = useStore();
+  const remote = window.ogb?.remoteClient?.active === true;
+  const copy = configured
+    ? { title: "engineSetup.apiKey.configuredTitle", description: remote ? "engineSetup.apiKey.configuredRemote" : "engineSetup.apiKey.configuredDescription", action: "engineSetup.apiKey.change" } as const
+    : { title: "engineSetup.apiKey.title", description: remote ? "engineSetup.apiKey.remote" : "engineSetup.apiKey.description", action: "engineSetup.apiKey.open" } as const;
+  return (
+    <div data-engine-setup-api-key={configured ? "configured" : ""} className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-inset text-ink-secondary">
+          <KeyRound size={14} />
+        </span>
+        <div className="min-w-0">
+          <div className="text-[13px] font-semibold text-ink">{t(copy.title, { name: instance.displayName })}</div>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t(copy.description)}</p>
+        </div>
+      </div>
+      {/* a saved key the provider refused reads as installed but signed out */}
+      {needsSignIn(instance) && (
+        <p role="alert" className="mt-2 text-[12px] leading-relaxed text-danger">{t("engineSetup.apiKey.rejected")}</p>
+      )}
+      {!remote && (
+        <button
+          type="button"
+          onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}
+          className="mt-3 flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-raised-hover"
+        >
+          <KeyRound size={13} aria-hidden="true" />
+          {t(copy.action)}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A ready engine that runs on a pasted key: name the key and link to where it
+ * is replaced or cleared. Without this, saving any key (even a wrong one)
+ * left Model providers with no way back to it. */
+export function ApiKeyEngineManage({ instance, className }: { instance: InstanceInfo; className?: string }) {
+  if (!hasSavedApiKey(instance)) return null;
+  return <ApiKeyEngineSetup instance={instance} className={className} unframed={false} configured />;
 }
 
 export function EngineSetup({
@@ -440,6 +517,8 @@ export function EngineSetup({
    * model that runs this CLI with the organisation's access). */
   description?: string;
 }) {
+  const { state } = useStore();
+  const cloudHome = state.config?.cloudHome === true;
   const install = instance.install;
   const installCommand = installCommandFor(install);
   const signInCommand = install?.signInCommand;
@@ -447,6 +526,7 @@ export function EngineSetup({
   const deviceSignIn = signInOnly && instance.authentication?.method === "device-code";
   const browserSignIn = signInOnly && instance.authentication?.method === "browser-pkce";
   const pasteSignIn = signInOnly && instance.authentication?.method === "paste-code";
+  const provider = deviceSignInProvider(instance.driverKind);
   const command = signInOnly ? signInCommand : installCommand;
   const title = signInOnly
     ? t("engineSetup.signInTitle", { name: instance.displayName })
@@ -455,7 +535,7 @@ export function EngineSetup({
     ? browserSignIn
       ? t("engineSetup.chatgpt.description")
       : deviceSignIn
-      ? t("engineSetup.device.description")
+      ? t(DEVICE_SIGN_IN_COPY[provider].description)
       : pasteSignIn
       ? t("engineSetup.claude.description")
       : install?.managed
@@ -471,9 +551,12 @@ export function EngineSetup({
         ? t("engineSetup.installDescSignIn")
         : t("engineSetup.installDesc"));
 
-  if ((isApiKeyEngine(instance) || install?.settings === "connections") && !instance.snapshot.authenticationUnavailableReason
-    && (instance.snapshot.state !== "available" || instance.snapshot.authenticated === false)) {
+  if (apiKeySetup(instance)) {
     return <ApiKeyEngineSetup instance={instance} className={className} unframed={unframed} />;
+  }
+
+  if (intent === "cloud" && grokKeyInstead(instance, cloudHome)) {
+    return <GrokKeyInstead className={className} unframed={unframed} />;
   }
 
   // Some engines are configured elsewhere (for example, a cloud computer
@@ -508,7 +591,17 @@ export function EngineSetup({
       )}
 
       {deviceSignIn || browserSignIn ? (
-        <CodexDeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} browserPkce={browserSignIn} />
+        <>
+          <DeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} browserPkce={browserSignIn} provider={provider} />
+          {/* Grok keeps its terminal sign-in for people who prefer one, where
+              a terminal runs on this server; the code above needs none. */}
+          {deviceSignIn && provider === "grok" && signInCommand && serverTerminal(cloudHome) && (
+            <details className="mt-2 rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[11.5px] text-ink-secondary">
+              <summary className="cursor-pointer select-none">{t("engineSetup.preferTerminal")}</summary>
+              <CommandRow command={signInCommand} actionLabel={t("engineSetup.openSignIn")} compact />
+            </details>
+          )}
+        </>
       ) : pasteSignIn ? (
         <ClaudeSignIn key={instance.instanceId} instanceId={instance.instanceId} />
       ) : install.server && !signInOnly ? (

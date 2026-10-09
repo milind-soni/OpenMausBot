@@ -248,6 +248,15 @@ Upgrade with `docker compose pull omb && docker compose up -d` (or
 `git pull && docker compose up -d --build`). State (chats, routines,
 engine logins, paired sessions) is on the `data` volume; back that up.
 
+The published image installs the current Chrome for Testing whenever a new
+Stable ships. A build from source keeps the Chrome (and any `ENGINES`) it
+installed first, because those layers sit beneath the app and stay cached
+across code changes. To pick up the current ones, rebuild with a new tag:
+
+```sh
+docker compose build --build-arg CHROME_CACHE_TAG=$(date +%F) omb && docker compose up -d
+```
+
 ## From source
 
 Requirements: Node 24+, pnpm, and at least one agent CLI installed and
@@ -437,6 +446,30 @@ with a workspace you trust; its bots and AI providers may receive shared content
 Folder transfers are limited to 256 KiB per file and do not follow links or
 delete files. Local screen control also needs OS permissions and a supported
 desktop driver. Microphone access is not included.
+
+**Bring this computer's bots and chats.** When the server you just connected
+is empty, its page shows **Bring your bots and chats from this computer**
+with **Copy** and **Not now**; **Copy** takes you to this computer's
+**Settings → Servers → Copy this computer here** for that server, where you
+start it (a server's own page never starts a copy itself). Any time later, that
+button on the server's row replaces what the server has (backed up on the
+server first; **Swap {server} back** puts it back; copying again replaces that
+backup, and the panel says so). On the server's own page, **Settings → Backups
+→ Import from this computer** leads to the same place. No file, no password: the app uploads the encrypted workspace
+backup directly, continues where a dropped connection left it, and the server
+restarts itself to install it. API keys, engine sign-ins and paired devices
+stay where they are on both sides; routines arrive paused. The desktop app must
+be paired with an owner code (not `--client`), and a server whose email sign-in
+lets someone besides you in (a member, a second admin or a whole `@domain`
+added with `openmausbot access add`) never receives one; your own address
+alone is fine. Behind a proxy, allow uploads of at least 1 MB
+(nginx: `client_max_body_size 64m`); smaller parts are tried before the copy
+says so. How each
+way of running the server restarts itself: `openmausbot serve` and
+`service install` start it again in the same process, the Docker and Podman
+images run `server-launcher.js`, which does the same inside the container; a
+server started any other way installs the copy at its next start. Details:
+[docs/copy-workspace.md](copy-workspace.md).
 
 Only conversations you start yourself on that server can use what you share;
 other people's bots, routines and webhooks there cannot. Keys and sign-in
@@ -953,8 +986,9 @@ peers, ask, delegate, and read the status of its own delegations. Opening
 threads, creating bots or rooms, skills, memory and every other internal route
 answer 403. External mode advertises only `list_bots`, `ask_bot`, `delegate_bot`,
 `check_delegation` and `wait_delegation`. It can check a delegation from the
-same long-running process without inventing a turn end. The server still
-enforces peer access and approval settings. An idle source starts dispatch
+same long-running process without inventing a turn end, and a settled handoff
+never wakes the bot's own engine on that thread to answer it again. The server
+still enforces peer access and approval settings. An idle source starts dispatch
 immediately; a busy teammate is queued until available. Regular in-app turns
 keep their existing dispatch timing.
 

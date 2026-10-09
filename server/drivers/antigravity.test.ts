@@ -37,7 +37,6 @@ import { VERIFICATION_TEMP_KEY, antigravityTempDir, sweepAntigravityTemp } from 
 import {
   AntigravityDriver,
   STATIC_ANTIGRAVITY_MODELS,
-  antigravityModelsFromSession,
   antigravityPermissionMode,
 } from "./antigravity.ts";
 
@@ -95,13 +94,6 @@ describe("official Antigravity catalog", () => {
       ],
     }];
     expect(catalogFromAntigravityConfigOptions(options, "missing")).toEqual({
-      default: "account-low",
-      options: [
-        { id: "account-high", label: "Account High" },
-        { id: "account-low", label: "Account Low" },
-      ],
-    });
-    expect(antigravityModelsFromSession(options)).toEqual({
       default: "account-low",
       options: [
         { id: "account-high", label: "Account High" },

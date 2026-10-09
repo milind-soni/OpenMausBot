@@ -7,6 +7,7 @@
 // ACP mounts MCP servers per session and uses the same trusted approval cards
 // as OpenMausBot's other ACP engines.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
+import { antigravityAccount } from "./antigravity-account.ts";
 import type {
   DriverCreateInput,
   ModelCatalog,
@@ -18,7 +19,6 @@ import { createAcpDriver, type AcpConfig, type AcpSupport } from "./acp/core.ts"
 import {
   AntigravityAuthController,
   antigravityProfileAuthenticated,
-  catalogFromAntigravityConfigOptions,
   prepareAntigravityProfile,
   probeAntigravityModels,
   validateAntigravityRuntime,
@@ -47,10 +47,6 @@ export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
 export function antigravityPermissionMode(fullAuto: boolean, approvalMode?: ApprovalMode): "yolo" | "auto_edit" | "default" {
   if (fullAuto) return "yolo";
   return approvalMode === "edits" ? "auto_edit" : "default";
-}
-
-export function antigravityModelsFromSession(value: unknown): ModelCatalog | null {
-  return catalogFromAntigravityConfigOptions(value, STATIC_ANTIGRAVITY_MODELS.default);
 }
 
 const managedAsset = resolveAntigravityReleaseAsset();
@@ -132,6 +128,7 @@ const support: AcpSupport = {
         state: "available",
         version: runtime.version,
         authenticated: await antigravityProfileAuthenticated(profile),
+        account: await antigravityAccount(profile.tokenPath),
       };
     } catch (error) {
       return { state: "unavailable", reason: error instanceof Error ? error.message : String(error) };

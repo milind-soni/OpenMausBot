@@ -8,21 +8,13 @@
 // aliases recall matches. An entry judged core is remembered and not asked
 // about again. Pure here: the caller reads, calls the model, writes and
 // journals.
-import { factIdentity, isExpired, parseMemoryEntries, type MemoryEntryLine } from "./memory-entries.ts";
+import { alwaysCore, factIdentity, isExpired, parseMemoryEntries, type MemoryEntryLine } from "./memory-entries.ts";
 import { topicFileName } from "./memory-capture.ts";
 
 export const ORGANIZE_MARKER = "You are the ORGANIZE step of a memory system";
 /** One pass moves at most this many entries. */
 export const MAX_MOVES = 20;
 const PROMPT_ENTRIES = 60;
-/** Lines the model may not move, whatever it answers: a safety or health
- * fact must load into every turn. Seen live — a model moved "is vegetarian"
- * into a food topic despite being told diet is core. */
-const ALWAYS_CORE = /\b(?:allerg\w*|anaphyla\w*|intoleran\w*|vegetarian|vegan|halal|kosher|gluten|lactose|diet\w*|diabet\w*|asthma\w*|epilep\w*|pregnan\w*|medicat\w*|medicine|medical|disabilit\w*|wheelchair|blind|deaf|health)\b/i;
-
-export function alwaysCore(body: string): boolean {
-  return ALWAYS_CORE.test(body);
-}
 
 export interface TopicMove {
   entry: MemoryEntryLine;

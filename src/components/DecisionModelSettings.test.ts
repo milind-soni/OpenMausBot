@@ -186,7 +186,7 @@ describe("DecisionModelSettings", () => {
     for (const [result, text] of [
       [{ ok: false, reason: "http_error", status: 402 }, "Decisions are included with an active Cloud subscription."],
       [{ ok: false, reason: "rate_limited", status: 429 }, "Your Cloud plan&#x27;s decisions are busy or used up for this month. Try again later."],
-      [{ ok: false, reason: "rejected", status: 401 }, "OMB Cloud did not accept this machine&#x27;s decisions. Try again later."],
+      [{ ok: false, reason: "rejected", status: 401 }, "OpenMausBot Cloud did not accept this machine&#x27;s decisions. Try again later."],
     ] as const) {
       fixture.api.mockResolvedValueOnce(result);
       click(render().test);

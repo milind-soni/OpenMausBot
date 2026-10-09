@@ -6,6 +6,26 @@ credentials, SQLite data, transcripts, and computers. The iPhone trusts a Mac
 by scanning the QR code shown in desktop **Settings → Remote access**; it does not need
 an OpenMausBot account of its own.
 
+## Use My Cloud on your phone
+
+With OMB Cloud, pair the phone with your Cloud instead of your computer, and
+it keeps working while the computer is off.
+
+1. In the desktop app, open the menu under your name and choose **Get the
+   phone app**: the App Store for iPhone, or the APK for Android. Scan its code
+   with the phone's camera.
+2. In the same menu, choose **Connect your phone · to your Cloud (always on)**.
+   (**Settings → OpenMausBot Cloud → Use My Cloud on your phone** does the same.) The
+   app opens your Cloud in its window, at the Cloud's phone pairing.
+3. Choose **Create pairing code** and scan the QR code with the phone app.
+
+On your computer, **Connect your phone** offers your Cloud first and this
+computer second, once your plan is paid and your Cloud is Ready. Until the Cloud
+is Ready it offers only *to this computer*, with a note that the Cloud will show
+there. With the Cloud open in the app window, the entry reads *to your Cloud*
+and pairs with it directly. On another server it pairs with that server, and it
+is shown only to a session allowed to make pairing codes there.
+
 ## Current status
 
 The first version includes:
@@ -370,12 +390,6 @@ companion/
   src/origin.ts       private per-launch hosted origin listener
   src/control.ts      loopback-only control plane
   src/mdns.ts         Bonjour advertisement
-
-ios/
-  Sources/CompanionCore/   models, HTTP, SSE, state fold
-  Tests/CompanionCoreTests/ captured-contract and core tests
-  App/                     SwiftUI, lifecycle, discovery, Keychain
-  project.yml              generated Xcode project specification
 ```
 
 ## Verification contract
@@ -387,15 +401,6 @@ pnpm typecheck
 pnpm test
 pnpm build:companion
 pnpm check:electron
-
-cd ios
-swift test
-xcodegen generate
-xcodebuild -project OpenMausCompanion.xcodeproj \
-  -scheme OpenMausCompanion \
-  -sdk iphonesimulator \
-  -destination 'generic/platform=iOS Simulator' \
-  CODE_SIGNING_ALLOWED=NO build
 ```
 
 The simulator validates compilation, launch, layout, manual address parsing,

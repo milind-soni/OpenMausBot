@@ -55,6 +55,10 @@ function open(): DatabaseSync {
       PRIMARY KEY (thread_id, id)
     );
     CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id);
+    -- at is not part of the primary key, so newest-per-thread reads cannot
+    -- walk these rows in time order on messages_thread. Created on every
+    -- open, including a database that already has messages.
+    CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
     CREATE TABLE IF NOT EXISTS thread_state (
       thread_id TEXT PRIMARY KEY,
       active_leaf_id TEXT
@@ -228,7 +232,9 @@ export interface FollowupPayload {
   unattended?: boolean;
   peerAsk?: Message["peerAsk"];
   mode?: "chat" | "goal";
-  via?: "api";
+  /** "api": a room line sent through the local API with no session behind
+   * it. "call": a person's words relayed from a Live call. */
+  via?: "api" | "call";
   /** Who queued these words. Absent on the owner's own sends and on every
    * row written before this existed; both read as the profile name. */
   sender?: ResolvedSender;
@@ -829,6 +835,13 @@ export function indexMemoryFile(botId: string, path: string, text: string, stat:
 
 export function removeMemoryFile(botId: string, path: string): void {
   db().prepare("DELETE FROM memory_files WHERE bot_id = ? AND path = ?").run(botId, path);
+}
+
+/** Remove one bot's memory-file rows. The delete trigger drops the
+ * matching external-content FTS rows, the same way deleting a thread's
+ * messages drops theirs. */
+export function deleteBotMemoryFiles(botId: string): void {
+  db().prepare("DELETE FROM memory_files WHERE bot_id = ?").run(botId);
 }
 
 /** What is indexed for a bot, so the caller can compare against the disk. */

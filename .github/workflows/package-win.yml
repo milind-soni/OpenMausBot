@@ -67,6 +67,8 @@ jobs:
           # missing → utilityProcess.fork fails → the 🐭 "Couldn't start the
           # bot server" page
           [ -f "$res/server/index.js" ] || { echo "::error::missing $res/server/index.js"; fail=1; }
+          # missing → the desktop falls back to index.js with no compile cache
+          [ -f "$res/server/desktop-entry.mjs" ] || { echo "::error::missing $res/server/desktop-entry.mjs"; fail=1; }
           # missing → the server has nothing to serve → black window
           [ -f "$res/ui/index.html" ] || { echo "::error::missing $res/ui/index.html"; fail=1; }
           [ -f "$res/cloudflared/cloudflared.exe" ] || {

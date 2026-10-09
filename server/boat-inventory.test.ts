@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createServer, type IncomingMessage, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 type ProviderBoat = Record<string, unknown> & { id: string; name: string; state: string };
@@ -27,6 +27,9 @@ describe("OpenMaus-managed Boat inventory", () => {
   let deleteBody: Record<string, unknown> | null = null;
   let deletionPollStatus = 200;
   let directStatus = 200;
+  /** Accept direct Boat reads and never answer them: a stalled relay. */
+  let directHangs = false;
+  const hung: ServerResponse[] = [];
   let deletionStatuses: DeletionStatus[] = ["completed"];
   let lastDeletionStatus: DeletionStatus = "completed";
   let deletionTargetId = "";
@@ -104,6 +107,7 @@ describe("OpenMaus-managed Boat inventory", () => {
       }
       const direct = boats.find((candidate) => url.pathname.endsWith(`/boxes/${candidate.id}`));
       if (direct && req.method === "GET") {
+        if (directHangs) { hung.push(res); return; }
         res.writeHead(directStatus).end(JSON.stringify(
           directStatus < 400
             ? { ok: true, box: direct }
@@ -133,6 +137,8 @@ describe("OpenMaus-managed Boat inventory", () => {
     deleteBody = null;
     deletionPollStatus = 200;
     directStatus = 200;
+    directHangs = false;
+    for (const response of hung.splice(0)) response.end("{}");
     deletionStatuses = ["completed"];
     lastDeletionStatus = "completed";
     deletionTargetId = "";
@@ -147,6 +153,7 @@ describe("OpenMaus-managed Boat inventory", () => {
 
   afterAll(async () => {
     vi.unstubAllEnvs();
+    for (const response of hung.splice(0)) response.end("{}");
     await new Promise<void>((resolve) => api.close(() => resolve()));
   });
 
@@ -659,6 +666,27 @@ describe("OpenMaus-managed Boat inventory", () => {
     await expect(boat.deleteManagedBoat(cfg, owners, boxId, managedName)).resolves.toEqual({ ok: true });
     expect(journal.boatCreateRecoverySnapshot().some((entry) => entry.botId === botId)).toBe(false);
   });
+
+  it("bounds the direct read of a known Boat, so a stalled relay can't hold a turn's setup", async () => {
+    const botId = "stalled-direct-read";
+    boats = [{ id: "bx_456789ab", name: legacyNameFor(botId), state: "ready" }];
+    await expect(boat.findBoat(cfg, botId)).resolves.toMatchObject({ id: "bx_456789ab" }); // caches the id
+    directHangs = true;
+    requests.length = 0;
+    // The direct read's own deadline expires at once instead of after 20 s;
+    // the listing behind it keeps its real one. Without a deadline the read
+    // waits on the stalled relay and this test times out.
+    const deadline = vi.spyOn(AbortSignal, "timeout")
+      .mockImplementationOnce(() => AbortSignal.abort(new DOMException("deadline", "TimeoutError")));
+    try {
+      await expect(boat.findBoat(cfg, botId)).resolves.toMatchObject({ id: "bx_456789ab" });
+      expect(deadline).toHaveBeenNthCalledWith(1, 20_000);
+      // Gave up on the direct read and answered from the listing.
+      expect(requests.map(request => `${request.method} ${request.path}`)).toEqual(["GET /api/box/v1/boxes"]);
+    } finally {
+      deadline.mockRestore();
+    }
+  }, 10_000);
 
   it("finds an existing boat on a later page and fails closed when listing is unavailable", async () => {
     const secondPageBot = "existing-second-page";

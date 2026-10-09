@@ -31,7 +31,9 @@ import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
+import { openStartupModelCatalog, writeStartupModelCache } from "../../startup-model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
+import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
@@ -84,7 +86,7 @@ import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
 import { canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { gateServer } from "../../mcp-gate-config.ts";
+import { gateServer, mcpStdioServer } from "../../mcp-gate-config.ts";
 
 /** Failures the person fixes on their provider account, not by retrying:
  * the process that reported one is healthy and stays pooled. */
@@ -163,8 +165,8 @@ interface AcpTurn {
   runningTools: Set<string>;
   /** Synthetic item ids handed to `tool_call` notifications the agent sent
    * without a `toolCallId`: lifecycle consumers pair a tool's start with
-   * its completion by `itemId` (the #1653 computer-call fence among them),
-   * so an unkeyed call must still carry one stable id across both events. */
+   * its completion by `itemId` (the tool chip's result among them), so an
+   * unkeyed call must still carry one stable id across both events. */
   unkeyedToolIds: string[];
   interruptTimer: ReturnType<typeof setTimeout> | null;
   /** ends the quiet-status watch started with the prompt */
@@ -286,6 +288,11 @@ export interface AcpSupport {
   loginNote: string;
   /** How a user installs this harness's CLI; surfaced by the setup UI. */
   install?: EngineInstall;
+  /** The CLI's own device-code login (`grok login --device-auth`), offered
+   * in the app wherever this engine reads signed out. It runs with the same
+   * binary and environment as the turns, and is confirmed by isAuthenticated's
+   * own evidence (device-auth.ts). */
+  deviceSignIn?: DeviceSignIn;
   /** CLI argv AFTER the binary name to enter ACP stdio mode. */
   spawnArgs(config: AcpConfig, turn: SendTurnInput): string[];
   /** Provider credential variables this ACP child is allowed to inherit. */
@@ -322,8 +329,15 @@ export interface AcpSupport {
    * sends no prompt and discards the process (see approvalUnconfirmed). */
   sessionScopedApproval?: boolean;
   /** Mutate the child env in place: strip a key, inject a policy. Receives the
-   *  instance config so a support can vary with fullAuto. */
-  transformEnv?(env: Record<string, string | undefined>, config: AcpConfig, instanceId: string): void;
+   *  instance config so a support can vary with fullAuto, and the instance
+   *  environment so it can tell a key the server put there on purpose from
+   *  one riding along in the server's own env. */
+  transformEnv?(
+    env: Record<string, string | undefined>,
+    config: AcpConfig,
+    instanceId: string,
+    instanceEnvironment: Readonly<Record<string, string>>,
+  ): void;
   /** Resolve a managed or account-scoped executable just before use. */
   resolveCommand?(
     env: Record<string, string | undefined>,
@@ -412,10 +426,12 @@ export interface AcpSupport {
 }
 
 const envOr = (key: string, fallback: number): number => Number(process.env[key] ?? fallback);
-const INIT_TIMEOUT = envOr("OPENMAUS_ACP_INIT_TIMEOUT_MS", 300_000);
-const SESSION_CONFIG_TIMEOUT = envOr("OPENMAUS_ACP_SESSION_CONFIG_TIMEOUT_MS", 300_000); // configureSession's per-request default
-const NEW_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_NEW_SESSION_TIMEOUT_MS", 300_000);
-const LOAD_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_LOAD_SESSION_TIMEOUT_MS", 120_000); // history replay on a long thread is slow
+const INIT_TIMEOUT = 300_000;
+const SESSION_CONFIG_TIMEOUT = 300_000; // configureSession's per-request default
+const NEW_SESSION_TIMEOUT = 300_000;
+const LOAD_SESSION_TIMEOUT = 120_000; // history replay on a long thread is slow
+/** How long a quiet agent shows no sign of life before it is called stuck. */
+const ACP_STUCK_AFTER_MS = 180_000;
 /** ACP agents may compact their own history without telling the client;
  * re-send the full prompt after this many bare turns as a backstop to
  * compaction detection. */
@@ -673,7 +689,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         // The operator's own secrets are outside any driver's allowlist.
         stripControlPlaneEnv(env);
-        support.transformEnv?.(env, activeConfig, instanceId);
+        support.transformEnv?.(env, activeConfig, instanceId, input.environment);
         return env;
       };
       let models = support.models;
@@ -691,8 +707,26 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         } catch {
           // Keep the last usable catalog when an optional discovery source is down.
         }
+        try { writeStartupModelCache(instanceId, models); } catch { /* derived cache */ }
       };
-      if (support.resolveModelsOnCreate !== false) await refreshModels();
+      // A later start serves the saved list and refreshes behind listen.
+      // The first run still waits so the seeded default model does not change.
+      // Engines with no resolver (Gemini, custom ACP) and Antigravity
+      // (resolveModelsOnCreate: false) stay on the instant path.
+      let startupModelRefresh: Promise<void> | null = null;
+      if (support.resolveModels && support.resolveModelsOnCreate !== false) {
+        startupModelRefresh = (await openStartupModelCatalog({
+          instanceId,
+          use: (catalog) => { models = catalog; },
+          current: () => models,
+          refresh: refreshModels,
+        }))?.pending ?? null;
+      } else if (support.resolveModelsOnCreate !== false) {
+        await refreshModels();
+      }
+      const deviceSignIn = support.deviceSignIn
+        ? new DeviceAuthController(support.deviceSignIn, { cli: config.cli, environment: () => childEnv(), onAuthenticated: refreshModels })
+        : null;
       const listeners = new Set<RuntimeEventListener>();
       interface Turn {
         stop: () => void;
@@ -814,12 +848,18 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // ACP session mcpServers: stdio is the baseline every ACP agent
       // supports (mcpCapabilities.http/.sse only add EXTRA transports), so
       // an injected stdio proxy — e.g. the peer-agent comms tool — attaches
-      // fine here. A url server is listed in ACP's http/sse shape and kept
-      // for the session only when the agent advertised that transport.
-      // env and headers are the ACP {name,value}[] shape.
-      type AcpMcpServer =
-        | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
-        | { type: "http" | "sse"; name: string; url: string; headers: Array<{ name: string; value: string }> };
+      // fine here. env is the ACP {name,value}[] shape.
+      //
+      // A URL server is always mounted as OpenMausBot's remote proxy, even
+      // for an agent that advertises http/sse: the proxy opens the
+      // connection with the same minimal handshake as Settings → Test
+      // (mcp-http.ts), where an agent's own MCP client adds capability
+      // fields a strict server refuses (grok 1.0.25 sends
+      // capabilities.extensions; rmcp 3.2, which it links, can add
+      // elicitation.form.schemaValidation, the field a Voluum
+      // server named before every tool came back "Tool not found"). The
+      // catalog passes through whole: the agent searches tools itself.
+      type AcpMcpServer = { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> };
       const acpMcpServers = (turn: SendTurnInput) => {
         const servers: AcpMcpServer[] = [];
         const acpEnv = (env: Record<string, string>) =>
@@ -858,17 +898,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // config boundary; this is defense in depth).
         for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
           if (servers.some((existing) => existing.name === name)) continue;
-          if ("url" in server) {
-            servers.push({ type: server.type, name, url: server.url, headers: acpEnv(server.headers) });
-            continue;
-          }
-          servers.push({ name, command: server.command, args: server.args, env: acpEnv(server.env) });
+          const stdio = "url" in server ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } }) : server;
+          if (!stdio) continue;
+          servers.push({ name, command: stdio.command, args: stdio.args ?? [], env: acpEnv(stdio.env ?? {}) });
         }
         if (turn.toolScope === undefined) return servers;
         return servers.filter((server) => canUseMcpServer(turn.toolScope, server.name)).map((server) => {
-          const original = "url" in server
-            ? { type: server.type, url: server.url, headers: Object.fromEntries(server.headers.map(({ name, value }) => [name, value])) }
-            : { command: server.command, args: server.args, env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])) };
+          const original = { command: server.command, args: server.args, env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])) };
           const gated = gateServer({ name: server.name, server: original, threadId: turn.threadId, budget: 0,
             toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } });
           if (!gated) throw new Error("Tool selection requires an MCP gate.");
@@ -941,7 +977,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           // "no sign of life" is called only once that has lasted minutes.
           if (next.kind === "no-signs") {
             noSignsSince ??= now;
-            if (now - noSignsSince < envOr("OMB_ACP_STUCK_AFTER_MS", 180_000)) next = { kind: "between-requests" };
+            if (now - noSignsSince < ACP_STUCK_AFTER_MS) next = { kind: "between-requests" };
           } else {
             noSignsSince = null;
           }
@@ -1521,6 +1557,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
 
       const sendTurn = async (turn: SendTurnInput) => {
+        if (startupModelRefresh) await startupModelRefresh;
         const parsedScope = parseToolScope(turn.toolScope);
         if (!parsedScope.ok) throw new Error(parsedScope.error);
         turn = { ...turn, toolScope: parsedScope.scope };
@@ -1590,9 +1627,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // session, so the model is not a separate axis; fullAuto covers the
         // transformEnv-policy supports (opencode). mcpServers are session
         // establishment inputs — they ride session/new and session/load over
-        // the wire — and the harness mints fresh integration bearer tokens
-        // every turn. Most agents apply changes on live load; those that cache
-        // the old MCP clients must resume on a fresh process (see sessionKey).
+        // the wire — and change when a turn's integrations or their grants do
+        // (a thread keeps its integration credentials across turns). Most
+        // agents apply changes on live load; those that cache the old MCP
+        // clients must resume on a fresh process (see sessionKey).
         // The env the spawned child actually receives is part of the
         // contract too, and arrives hashed as envFingerprint for the same
         // reason.
@@ -1844,19 +1882,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 // no fresh session bookkeeping
                 break;
               }
-              // stdio is every agent's baseline; a url server rides only with
-              // an agent that advertised its transport, so an agent without
-              // http/sse never sees an entry it would refuse the session over
-              const sessionServers = mcpServers.filter((server) =>
-                !("type" in server) || init?.agentCapabilities?.mcpCapabilities?.[server.type] === true);
               const selectionParams = narrowsNativeTools(turn.toolScope)
-                ? support.toolScopeSessionParams!(turn, init, sessionServers.length > 0, { config: turnConfig, env, cwd }) : {};
+                ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
               let loaded = false;
               if (cursor) {
                 try {
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                    { sessionId: cursor, cwd, mcpServers: sessionServers, ...selectionParams },
+                    { sessionId: cursor, cwd, mcpServers, ...selectionParams },
                     LOAD_SESSION_TIMEOUT,
                     (result) => {
                       if (result) {
@@ -1912,7 +1945,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              sessionResult = await request("session/new", { cwd, mcpServers: sessionServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
+              sessionResult = await request("session/new", { cwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result);
@@ -2261,6 +2294,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return models;
         },
         refreshModels: support.resolveModels ? refreshModels : undefined,
+        ...(startupModelRefresh ? { startupModelRefresh } : {}),
+        ...(deviceSignIn ? {
+          startAuthentication: () => deviceSignIn.start(),
+          getAuthentication: (flowId: string) => deviceSignIn.get(flowId),
+          cancelAuthentication: () => deviceSignIn.cancel(),
+        } : {}),
         snapshot,
         adapter: {
           provider: DRIVER_KIND,
@@ -2303,6 +2342,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           },
         },
         dispose: async () => {
+          await deviceSignIn?.dispose();
           for (const { stop } of active.values()) stop();
           for (const threadId of Array.from(sessions.keys())) closeSession(threadId, "dispose");
           for (const [threadId, children] of retiring) {

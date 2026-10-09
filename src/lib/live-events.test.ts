@@ -93,14 +93,9 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("live events URL", () => {
-  it("builds cold, resumable, and screen-free stream URLs", () => {
+  it("builds cold and resumable stream URLs", () => {
     expect(liveEventsUrl()).toBe("/api/events");
-    expect(liveEventsUrl({ screens: true })).toBe("/api/events");
     expect(liveEventsUrl({ since: "ab12cd34:9" })).toBe("/api/events?since=ab12cd34%3A9");
-    expect(liveEventsUrl({ since: "ab12cd34:9", screens: false })).toBe(
-      "/api/events?since=ab12cd34%3A9&screens=off",
-    );
-    expect(liveEventsUrl({ screens: false })).toBe("/api/events?screens=off");
   });
 });
 

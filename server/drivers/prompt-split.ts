@@ -1,9 +1,9 @@
 // The stable/volatile prompt split, shared by the drivers that deliver it.
 // The stable half is everything that must stay byte-identical for a
 // provider's cached prefix (or a spawned CLI's session contract) to
-// survive; the volatile half (memory, mentions, outstanding teammate
-// work, recent work) legitimately changes mid-conversation and reaches
-// the model inside the turn that changed it, after the cacheable prefix.
+// survive; the volatile half (the sections in VOLATILE_SECTIONS,
+// system-prompt.ts) legitimately changes mid-conversation and reaches the
+// model inside the turn that changed it, after the cacheable prefix.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -35,7 +35,7 @@ export const VOLATILE_CONTEXT_NOTE_PREFIX =
   "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:";
 
 export const VOLATILE_CONTEXT_CLEARED_NOTE =
-  "The OpenMausBot context notes from earlier in this conversation (memory, mentions, outstanding teammate work) have been cleared; the standing instructions still apply.";
+  "The OpenMausBot context notes from earlier in this conversation have been cleared; the standing instructions still apply.";
 
 /** The labelled block that carries a changed volatile half inside a user
  * turn. A half that is empty and always was needs no note; one that was

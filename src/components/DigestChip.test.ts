@@ -15,6 +15,30 @@ const message: Message = {
 };
 
 describe("DigestChip", () => {
+  it("does not draw a receipt for a reply with no recorded work", () => {
+    for (const files of [undefined, { changed: [], added: [], deleted: [] }]) {
+      const html = renderToStaticMarkup(createElement(DigestChip, { message: {
+        ...message, digest: { ...message.digest!, tools: [], toolsDropped: 0, toolCalls: 0,
+          files, memory: [], memoryDropped: 0 },
+      } }));
+      expect(html).toBe("");
+    }
+  });
+
+  it("keeps file, memory, and truncated work even without a sampled tool", () => {
+    const quiet = { ...message.digest!, tools: [], toolsDropped: 0, toolCalls: 0,
+      files: undefined, memory: [], memoryDropped: 0 };
+    for (const work of [
+      { files: { changed: ["notes.txt"], added: [], deleted: [] } },
+      { memory: [{ kind: "updated" as const, path: "MEMORY.md" }] },
+      { toolsDropped: 2 }, { toolCalls: 2 }, { memoryDropped: 2 },
+      { files: { changed: [], added: [], deleted: [], truncated: 2 } },
+    ]) {
+      const html = renderToStaticMarkup(createElement(DigestChip, { message: { ...message, digest: { ...quiet, ...work } } }));
+      expect(html).toContain('data-testid="digest-chip"');
+    }
+  });
+
   it("shows compaction as expandable historical text, never executable markup", () => {
     const html = renderToStaticMarkup(createElement(CompactionChip, { message: {
       id: "context", role: "bot", kind: "compaction", at: 1,

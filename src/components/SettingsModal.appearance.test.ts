@@ -16,11 +16,14 @@ const fixture = vi.hoisted(() => ({
   setSidebarDensity: vi.fn(),
   notificationSounds: true,
   setNotificationSounds: vi.fn(),
+  advancedMode: false,
+  setAdvancedMode: vi.fn(),
   api: vi.fn(),
   dispatch: vi.fn(),
   switches: [] as ComponentProps<typeof Switch>[],
 }));
-vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
+// The Cloud account card reads the host platform (what a saved sign-in still locked asks for).
+vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: { platform: "darwin" } } }) }));
 
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
@@ -29,6 +32,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 vi.mock("@/lib/thread-preferences", () => ({
   useShowThreads: () => fixture.showThreads,
+  useShowThreadsChoice: () => fixture.showThreads,
   setShowThreads: fixture.setShowThreads,
 }));
 vi.mock("@/lib/run-card-preferences", () => ({
@@ -43,6 +47,10 @@ vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
 vi.mock("@/lib/notification-preferences", () => ({
   useNotificationSounds: () => fixture.notificationSounds,
   setNotificationSounds: fixture.setNotificationSounds,
+}));
+vi.mock("@/lib/interface-mode", () => ({
+  useAdvancedMode: () => fixture.advancedMode,
+  setAdvancedMode: fixture.setAdvancedMode,
 }));
 vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 vi.mock("./SettingsPrimitives", async (importOriginal) => {
@@ -63,6 +71,8 @@ beforeEach(() => {
   fixture.showRunCard = true;
   fixture.sidebarDensity = "comfortable";
   fixture.notificationSounds = true;
+  // these pin the Advanced rail; Simple has its own suite (SettingsModal.simple.test.ts)
+  fixture.advancedMode = true;
   fixture.switches = [];
   vi.stubGlobal("window", {});
   vi.stubGlobal("document", { documentElement: { dataset: {} } });
@@ -77,6 +87,31 @@ afterEach(() => {
 const render = () => renderToStaticMarkup(createElement(SettingsModal));
 
 describe("Settings → Appearance", () => {
+  it.each([true, false])("flips Advanced mode from the top of General when the switch is %s", (enabled) => {
+    fixture.section = "general";
+    fixture.advancedMode = enabled;
+    const html = render();
+    expect(html.indexOf('aria-label="Advanced mode"')).toBeLessThan(html.indexOf("Language"));
+    expect(html).toContain('aria-label="Advanced mode"');
+    expect(html).toContain("Nothing is deleted either way");
+    const toggle = fixture.switches.find((props) => props["aria-label"] === "Advanced mode")!;
+    expect(toggle.checked).toBe(enabled);
+    toggle.onClick!({} as never);
+    expect(fixture.setAdvancedMode).toHaveBeenCalledWith(!enabled);
+    expect(fixture.api).not.toHaveBeenCalled();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Advanced mode switch reachable from a paired remote client", () => {
+    vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
+    expect(render()).toContain('aria-label="Advanced mode"');
+  });
+
+  it("does not repeat the Advanced mode switch in Appearance on this computer", () => {
+    expect(render()).not.toContain('aria-label="Advanced mode"');
+  });
+
+
   it("groups skins, thread visibility, and tool-call display with preservation copy", () => {
     const html = render();
     expect(html).toContain('<option value="appearance" selected="">Appearance</option>');
@@ -239,7 +274,7 @@ describe("Settings → Appearance", () => {
   it("offers personal Cloud separately and only through the local desktop bridge", () => {
     fixture.section = "cloudAccount";
     vi.stubGlobal("window", { ogb: { cloudAccount: {} } });
-    expect(render()).toContain('<option value="cloudAccount" selected="">OMB Cloud</option>');
+    expect(render()).toContain('<option value="cloudAccount" selected="">OpenMausBot Cloud</option>');
     expect(render()).toContain("Free local use");
     fixture.section = "appearance";
     vi.stubGlobal("window", {}); expect(render()).not.toContain('<option value="cloudAccount"');

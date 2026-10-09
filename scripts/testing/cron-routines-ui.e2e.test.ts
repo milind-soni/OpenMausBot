@@ -53,7 +53,7 @@ afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
   for (const choice of ["monthly", "yearly", "cron"]) expect(callOptions).not.toContain(choice);
   await click("Routine");
   expect(await evaluate("document.body.innerText")).toContain("Bot’s current setup");
-  expect(await evaluate("document.body.innerText")).toContain("Boat-hosted agent");
+  expect(await evaluate("document.body.innerText")).toContain("Runs the whole job on the bot's cloud computer");
   expect(await evaluate("document.body.innerText")).toContain("including a self-hosted VPS");
   expect(await repeatOptions()).toEqual(expect.arrayContaining(["monthly", "yearly", "cron"]));
   await select("Repeat", "monthly");

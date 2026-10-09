@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
-import { updateErrorMessage } from "./update-errors.mjs";
+import { updateErrorMessage, updateErrorNeedsPerson } from "./update-errors.mjs";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
 
 test("update failures keep integrity and certificate errors distinct from recoverable environment errors", () => {
@@ -24,6 +24,17 @@ test("update failures keep integrity and certificate errors distinct from recove
   assert.equal(updateErrorMessage(new Error("unknown failure")), "unknown failure");
 });
 
+test("only failures the person must fix are theirs to see when nobody asked", () => {
+  for (const message of ["sha512 checksum mismatch", "code signature is invalid", "ENOSPC: write failed", "EPERM: unlink C:\\cache.zip", "EBUSY: rename"]) {
+    assert.equal(updateErrorNeedsPerson(new Error(message)), true, message);
+  }
+  assert.equal(updateErrorNeedsPerson(Object.assign(new Error("sha512 mismatch"), { code: "ERR_UPDATER_CHECKSUM_MISMATCH" })), true);
+  // These may pass by themselves: the next hourly check tries again.
+  for (const message of ["ETIMEDOUT", "ECONNRESET", "HTTP 503 Service Unavailable", "net::ERR_INTERNET_DISCONNECTED", "Cannot find latest-mac.yml: 404", "net::ERR_CERT_AUTHORITY_INVALID", "unknown failure"]) {
+    assert.equal(updateErrorNeedsPerson(new Error(message)), false, message);
+  }
+});
+
 test("actionable messages do not permit retrying failed native staging", async () => {
   const updater = new EventEmitter();
   let state = {};
@@ -38,10 +49,13 @@ test("actionable messages do not permit retrying failed native staging", async (
     throw error;
   };
   updater.quitAndInstall = () => { installs++; };
-  await coordinator.download();
+  // The hourly check finds the update, and it downloads by itself.
+  updater.checkForUpdates = async () => { updater.emit("update-available", { version: "2.0.0" }); };
+  await coordinator.check();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(state.retryable, false);
   assert.match(state.message, /Free some space.*Quit and reopen/);
-  await coordinator.download();
+  await coordinator.check(true);
   coordinator.install();
   assert.equal(downloads, 1);
   assert.equal(installs, 0);

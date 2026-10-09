@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
 import { t } from "@/lib/i18n";
+import { copyText, type CopyFeedback } from "@/lib/copy-text";
 import { api } from "@/state/store";
 import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/session";
 import { readMembership } from "../lib/membership";
+import { revealPhonePairing } from "../lib/phone-pairing";
 import { Card } from "./SettingsPrimitives";
 
 /** What the server hands out for a new device (POST /api/auth/pairing). */
@@ -69,8 +71,10 @@ const quiet = "rounded-md border border-hairline/50 px-3 py-1.5 text-[13px] text
  * paired from (MOCA-84). `canPairDevices` decides who may act. On an OMB
  * Cloud home (`cloudHome`), which is personal, every device paired is one of
  * the owner's own, with full access: no chat-only choice, only the owner's
- * devices listed, and one line saying why. */
-export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false }: { initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean }) {
+ * devices listed, and one line saying why. `focusRequest` counts up when
+ * "Connect your phone" opened Settings here: the card scrolls into view with
+ * focus on Create pairing code, once it knows what it may show. */
+export function ServerPairingCard({ initialSession = null, initialPairingCodes = true, cloudHome = false, focusRequest = 0 }: { initialSession?: SessionState | null; initialPairingCodes?: boolean; cloudHome?: boolean; focusRequest?: number }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
   // A hosted workspace refuses pairing codes: people sign in through the
   // organisation's portal. Offer only the signed-in devices there.
@@ -80,9 +84,11 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   const [devices, setDevices] = useState<PairedDevice[]>([]);
   const [current, setCurrent] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<CopyFeedback>("idle");
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const root = useRef<HTMLDivElement>(null);
+  const revealed = useRef(0);
 
   async function loadDevices() {
     try {
@@ -104,6 +110,13 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
     });
   }, []);
 
+  // The card renders nothing until the session is known; reveal it then,
+  // once per request. Any other Settings navigation ends the request (0).
+  useEffect(() => {
+    if (!focusRequest) revealed.current = 0;
+    else if (revealed.current !== focusRequest && revealPhonePairing(root.current)) revealed.current = focusRequest;
+  }, [focusRequest, session]);
+
   useEffect(() => {
     if (!offer) return;
     const timer = setInterval(() => setNow(Date.now()), 15_000);
@@ -113,9 +126,11 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   if (!canPairDevices(session)) {
     if (pairingBlockedReason(session) !== "chat-only") return null;
     return (
-      <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
-        <p data-server-pairing-chat-only className="mt-3 text-[13px] text-ink-secondary">{t(pairingCodes ? "remote.serverPairing.chatOnly" : "remote.serverPairing.portalChatOnly")}</p>
-      </Card>
+      <div ref={root} tabIndex={-1} data-phone-pairing="server" className="scroll-mt-4 rounded-xl focus:outline-none">
+        <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
+          <p data-server-pairing-chat-only className="mt-3 text-[13px] text-ink-secondary">{t(pairingCodes ? "remote.serverPairing.chatOnly" : "remote.serverPairing.portalChatOnly")}</p>
+        </Card>
+      </div>
     );
   }
   const expired = offer ? offer.expiresAt <= now : false;
@@ -124,7 +139,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   async function create() {
     setBusy(true);
     setError(null);
-    setCopied(false);
+    setCopied("idle");
     try {
       const body: PairingOffer = await api("/api/auth/pairing", { method: "POST", body: JSON.stringify({ scopes: scope === "admin" || cloudHome ? ["admin", "client"] : ["client"] }) });
       setOffer(body);
@@ -148,15 +163,12 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
 
   async function copyLink() {
     if (!offer?.url) return;
-    try {
-      await navigator.clipboard.writeText(offer.url);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
+    const result = await copyText(offer.url);
+    if (result !== "empty") setCopied(result);
   }
 
   return (
+    <div ref={root} tabIndex={-1} data-phone-pairing="server" className="scroll-mt-4 rounded-xl focus:outline-none">
     <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
       {pairingCodes && cloudHome ? <p data-server-pairing-personal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.cloudPersonal")}</p> : null}
       {pairingCodes ? <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -170,7 +182,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
             {t("remote.serverPairing.scope.client")}
           </label>
         </>}
-        <button type="button" onClick={() => void create()} disabled={busy} className={button}>
+        <button type="button" data-phone-pairing-action onClick={() => void create()} disabled={busy} className={button}>
           {busy ? t("remote.serverPairing.creating") : t("remote.serverPairing.create")}
         </button>
       </div> : <p data-server-pairing-portal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
@@ -192,7 +204,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <code className="break-all text-[12px] text-ink-secondary">{offer.url}</code>
                     <button type="button" onClick={() => void copyLink()} className={quiet}>
-                      {copied ? t("remote.serverPairing.copied") : t("remote.serverPairing.copyLink")}
+                      {t(copied === "copied" ? "remote.serverPairing.copied" : copied === "failed" ? "common.copyFailed" : "remote.serverPairing.copyLink")}
                     </button>
                   </div>
                 ) : (
@@ -232,5 +244,6 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       )}
       {error ? <p className="mt-3 text-[13px] text-danger">{error}</p> : null}
     </Card>
+    </div>
   );
 }

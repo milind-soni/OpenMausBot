@@ -78,7 +78,7 @@ describe("Boat deletion journal", () => {
     vi.resetModules();
     journal = await import("./boat-delete-journal.ts");
     expect(journal.getBoatDeletion("bx_23456789")).toEqual(prepared);
-    expect(journal.isBoatDeletionPending("bx_23456789")).toBe(true);
+    expect(journal.getBoatDeletion("bx_23456789")).not.toBeNull();
     expect(journal.hasPendingBoatDeletionForBot("owner-bot")).toBe(true);
 
     const path = join(dataDir, "box-delete-requests.json");
@@ -102,7 +102,7 @@ describe("Boat deletion journal", () => {
     expect(journal.markBoatDeletionAccepted("bx_23456789", operation()).status).toBe("processing");
     const completed = journal.markBoatDeletionAccepted("bx_23456789", operation("bx_23456789", "completed"));
     expect(completed.status).toBe("completed");
-    expect(journal.listBoatDeletions()).toEqual([completed]);
+    expect(journal.boatDeletionSnapshot()).toEqual([completed]);
 
     const snapshot = journal.boatDeletionSnapshot();
     snapshot[0]!.name = "mutated outside";
@@ -123,13 +123,13 @@ describe("Boat deletion journal", () => {
       operation("bx_23456789", "blocked"),
     );
     expect(blocked).toMatchObject({ phase: "blocked", operationId: OPERATION_ID, status: "blocked" });
-    expect(journal.isBoatDeletionPending("bx_23456789")).toBe(true);
+    expect(journal.getBoatDeletion("bx_23456789")).not.toBeNull();
 
     const retried = journal.prepareBoatDeletion(identity);
     expect(retried).toMatchObject({ ...identity, phase: "prepared" });
     expect(retried).not.toHaveProperty("operationId");
     expect(retried).not.toHaveProperty("status");
-    expect(journal.isBoatDeletionPending("bx_23456789")).toBe(true);
+    expect(journal.getBoatDeletion("bx_23456789")).not.toBeNull();
   });
 
   it("refuses identity conflicts and non-target-bound provider receipts", async () => {

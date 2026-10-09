@@ -91,8 +91,8 @@ export function readTopicHead(path: string): string {
   }
 }
 
-/** One line per topic, capped by count and length. The archive the tidy-up
- * keeps is listed last and labelled, so it is not mistaken for current notes. */
+/** One line per topic, capped by count and length. The archive is listed
+ * last and labelled, so it is not mistaken for current notes. */
 export function renderTopicIndex(topics: ReadonlyArray<{ name: string; header: TopicHeader }>): string {
   if (!topics.length) return "";
   const ordered = [...topics].sort((a, b) => Number(a.name === "archive.md") - Number(b.name === "archive.md") || a.name.localeCompare(b.name));
@@ -104,8 +104,8 @@ export function renderTopicIndex(topics: ReadonlyArray<{ name: string; header: T
       omitted += 1;
       continue;
     }
-    const about = name === "archive.md" && !header.title && !header.description
-      ? "expired and replaced notes, kept for the record"
+    const about = name === "archive.md"
+      ? "older notes moved out of MEMORY.md, kept for the record"
       : [header.title, header.description].filter(Boolean).join(" — ");
     const also = header.aliases.length ? ` (also: ${header.aliases.join(", ")})` : "";
     const line = `- memory/${name}${about ? ` — ${about}` : ""}${also}`.replace(/\s+/g, " ");

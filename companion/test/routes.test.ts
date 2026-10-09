@@ -7,7 +7,7 @@
 // and the one that quietly stopped being true once before.
 import { describe, expect, it } from "vitest";
 
-import { denyReason, isCloudDesktopAccess } from "../src/routes.ts";
+import { denyReason, isBrowserControlAccess, isCloudDesktopAccess, isCompanionNotice } from "../src/routes.ts";
 
 const ask = (method: string, path: string, authenticated = true) =>
   denyReason({ method, path, authenticated });
@@ -33,7 +33,7 @@ describe("credentials", () => {
 });
 
 describe("what the app may do", () => {
-  // Every request in ios/Sources/CompanionCore/Client.swift. If one of these
+  // Every request the phone apps make. If one of these
   // fails, a screen on the phone is broken.
   const calls: Array<[string, string]> = [
     ["GET", "/api/health"],
@@ -56,6 +56,14 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/always-allow"],
     ["POST", "/api/bots/bot_123/messages/msg_2/edit"],
     ["GET", "/api/bots/bot_123/overview"],
+    // Read-only: what the bot did, with the outcome (server/activity.ts).
+    ["GET", "/api/bots/bot_123/activity"],
+    // The section's shared team memory: read it, add an entry, answer or
+    // edit one, remove one. Content, not execution policy.
+    ["GET", "/api/team-memory"],
+    ["POST", "/api/team-memory"],
+    ["PATCH", "/api/team-memory/entry_1"],
+    ["DELETE", "/api/team-memory/entry_1"],
     ["POST", "/api/bots/bot_123/active-branch"],
     ["POST", "/api/bots/bot_123/compact"],
     ["POST", "/api/bots/bot_123/tasks"],
@@ -94,6 +102,10 @@ describe("what the app may do", () => {
     ["GET", "/api/tts/voices"],
     ["POST", "/api/tts/prepare"],
     ["POST", "/api/tts/speak"],
+    ["POST", "/api/live/session"],
+    ["POST", "/api/live/call/end"],
+    ["GET", "/api/live/call"],
+    ["PATCH", "/api/live/settings"],
     ["GET", "/api/routines"],
     ["POST", "/api/routines"],
     ["PATCH", "/api/routines/routine_1"],
@@ -167,6 +179,18 @@ describe("what it may not", () => {
     }
     expect(ask("GET", "/api/routines")).toBeNull();
     expect(ask("POST", "/api/routines/routine_1/run")).toBeNull();
+  });
+
+  // The companion tells the harness itself when it unpaired a phone, so the
+  // call that phone holds ends. That notice is the companion's, never a
+  // phone's: no paired device may send it, even about itself.
+  it("keeps the unpaired-phone notice for the companion alone", () => {
+    expect(ask("POST", "/api/live/device-revoked")?.status).toBe(404);
+    expect(ask("POST", "/api/live/device-revoked", false)?.status).toBe(401);
+    expect(isCompanionNotice("POST", "/api/live/device-revoked")).toBe(true);
+    expect(isCompanionNotice("GET", "/api/live/device-revoked")).toBe(false);
+    expect(isCompanionNotice("POST", "/api/live/device-revoked/x")).toBe(false);
+    expect(isCompanionNotice("POST", "/api/live/call/end")).toBe(false);
   });
 
   it("denies the peer-agent endpoints exist at all", () => {
@@ -266,6 +290,18 @@ describe("what it may not", () => {
     }
   });
 
+  // A phone may start, end and follow a Live call and change its voice and
+  // timing, never the OpenAI key it runs on, and nothing else under /api/live.
+  it("allows only the four Live call routes, never the key", () => {
+    expect(ask("POST", "/api/live/summary")?.status).toBe(404);
+    expect(ask("PUT", "/api/config")?.status).toBe(403);
+    expect(allowed("PUT", "/api/live/settings")).toBe(false);
+    expect(allowed("GET", "/api/live/settings")).toBe(false);
+    expect(allowed("GET", "/api/live/session")).toBe(false);
+    expect(allowed("POST", "/api/live/call")).toBe(false);
+    expect(allowed("POST", "/api/live/call/end/extra")).toBe(false);
+  });
+
   it("is not fooled by a prefix", () => {
     expect(allowed("GET", "/api/bots/bot_123/computer")).toBe(false);
     expect(allowed("GET", "/api/botsandthensome")).toBe(false);
@@ -287,5 +323,35 @@ describe("what it may not", () => {
       expect(allowed("POST", path), path).toBe(false);
       expect(allowed("DELETE", path), path).toBe(false);
     }
+  });
+});
+
+describe("browser control", () => {
+  it("allows the live stream and the action channel, and nothing else under browser/", () => {
+    expect(allowed("GET", "/api/bots/b1/browser/live")).toBe(true);
+    expect(allowed("POST", "/api/bots/b1/browser/action")).toBe(true);
+    // The two verbs are not interchangeable: the stream is a GET and the
+    // action channel is a POST, and neither route answers the other's method.
+    expect(allowed("POST", "/api/bots/b1/browser/live")).toBe(false);
+    expect(allowed("GET", "/api/bots/b1/browser/action")).toBe(false);
+    // Anything else the harness may grow under this prefix stays closed.
+    expect(allowed("POST", "/api/bots/b1/browser/restart")).toBe(false);
+    expect(allowed("GET", "/api/bots/b1/browser")).toBe(false);
+  });
+
+  it("classifies exactly the two routes as needing the browser capability", () => {
+    expect(isBrowserControlAccess("GET", "/api/bots/b1/browser/live")).toBe(true);
+    expect(isBrowserControlAccess("POST", "/api/bots/b1/browser/action")).toBe(true);
+    expect(isBrowserControlAccess("GET", "/api/bots/b1/messages")).toBe(false);
+    // Driving a bot's signed-in browser is not the same permission as a
+    // throwaway cloud desktop, so the classifiers must not overlap.
+    expect(isBrowserControlAccess("POST", "/api/bots/b1/computer/join")).toBe(false);
+    expect(isCloudDesktopAccess("GET", "/api/bots/b1/browser/live")).toBe(false);
+  });
+
+  it("anchors the bot id so a traversal cannot reach another route", () => {
+    expect(allowed("GET", "/api/bots/b1/browser/live/../../config")).toBe(false);
+    expect(allowed("GET", "/api/bots/b1/browser/live?x=1")).toBe(false);
+    expect(isBrowserControlAccess("GET", "/api/bots/b1/browser/live/extra")).toBe(false);
   });
 });

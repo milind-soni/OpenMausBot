@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ModelRequestService, type ModelRequestStore, type OptionCardLike } from "./model-requests.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import type { BotRecord } from "./store.ts";
+import { directApply, type DirectApplyCheck } from "./direct-apply.ts";
 
 interface StoredMessage {
   id: string;
@@ -149,7 +150,7 @@ describe("ModelRequestService", () => {
   it("auto-applies under Full Access without exposing an unanswered card", () => {
     const store = new MemoryStore();
     const bot = addBot(store, "Scout");
-    const service = new ModelRequestService({ store, autoApply: () => true, driverCapabilities: caps });
+    const service = new ModelRequestService({ store, autoApply: () => "full-access", driverCapabilities: caps });
     const submitted = service.submit({
       botId: bot.id, threadId: bot.threadId,
       selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked",
@@ -224,5 +225,59 @@ describe("ModelRequestService", () => {
     expect(() => service.propose({ botId: "ghost", threadId: bot.threadId, selection: { instanceId: "claude", model: "opus" }, reason: "asked" }))
       .toThrow("That bot no longer exists");
     expect(store.threads.size).toBe(0);
+  });
+});
+
+describe("a bot's own model changes", () => {
+  // The server's rule (server/direct-apply.ts) at Ask.
+  const rule: DirectApplyCheck = (botId, _threadId, targetBotId) => directApply({ fullAccess: false, botId, targetBotId, blocked: false });
+
+  it("applies its own switch at Ask, keeps the card for a peer's, and undoes once", () => {
+    const store = new MemoryStore();
+    const bot = addBot(store, "Scout");
+    const peer = addBot(store, "Peer");
+    const service = new ModelRequestService({ store, autoApply: rule });
+    const own = service.submit({ botId: bot.id, threadId: bot.threadId, selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked" });
+    expect(own).toMatchObject({ state: "applied", appliedBy: "self" });
+    expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ autoApplied: true, answered: "allow" });
+    const other = service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked" });
+    expect(other.state).toBe("pending");
+    expect(peer.modelSelection).toEqual({ instanceId: "claude", model: "sonnet" });
+
+    const undo = () => service.undo({ botId: bot.id, threadId: bot.threadId, requestId: own.requestId });
+    expect(undo()).toMatchObject({ state: "undone", targetBotId: bot.id });
+    expect(bot.modelSelection).toEqual({ instanceId: "claude", model: "sonnet" });
+    expect(undo()).toMatchObject({ state: "already_undone" });
+  });
+
+  it("is not held back by the open-card budget, which still holds a card", () => {
+    const store = new MemoryStore();
+    const bot = addBot(store, "Scout");
+    const peer = addBot(store, "Peer");
+    const canPersist = (_botId: string, _threadId: string, opensCard: boolean) =>
+      opensCard ? { ok: false as const, status: 429, error: "confirm or cancel an existing proposal first" } : { ok: true as const };
+    const service = new ModelRequestService({ store, autoApply: rule, canPersist });
+    expect(service.submit({ botId: bot.id, threadId: bot.threadId, selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked" }).state)
+      .toBe("applied");
+    expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked" }))
+      .toThrow("confirm or cancel an existing proposal first");
+  });
+
+  it("refuses Undo once the default moved, and keeps the switch's own checks", () => {
+    const store = new MemoryStore();
+    const bot = addBot(store, "Scout");
+    let refusal: string | null = null;
+    const service = new ModelRequestService({ store, autoApply: rule, validateModel: () => refusal });
+    const first = service.submit({ botId: bot.id, threadId: bot.threadId, selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked" });
+    store.applyModelDefault(bot.id, { instanceId: "claude", model: "opus" });
+    expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: first.requestId }))
+      .toMatchObject({ state: "invalid", stale: true });
+    expect(bot.modelSelection).toEqual({ instanceId: "claude", model: "opus" });
+
+    const second = service.submit({ botId: bot.id, threadId: bot.threadId, selection: { instanceId: "codex", model: "gpt-fixture" }, reason: "asked" });
+    refusal = "Wait for the approval-level confirmation before changing this bot's model";
+    expect(service.undo({ botId: bot.id, threadId: bot.threadId, requestId: second.requestId }))
+      .toMatchObject({ state: "invalid", error: refusal });
+    expect(bot.modelSelection).toEqual({ instanceId: "codex", model: "gpt-fixture" });
   });
 });

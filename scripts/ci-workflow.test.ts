@@ -38,16 +38,24 @@ describe("CI concurrency", () => {
     // One group for every main push: GitHub keeps the running run and only
     // the newest waiting one, so a burst of merges cannot pile up full runs.
     expect(workflow.concurrency.group).toBe(
-      "ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.ref }}",
+      "ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}",
     );
   });
 
   it("stops a closed PR's run by joining ci.yml's PR group", () => {
     const stop = parse(readFileSync(new URL("../.github/workflows/ci-stop-closed.yml", import.meta.url), "utf8"));
     expect(stop.on).toEqual({ pull_request: { types: ["closed"] } });
-    expect(stop.concurrency).toEqual({ group: "ci-${{ github.ref }}", "cancel-in-progress": true });
-    // For pull_request events ci.yml's group expression reduces to github.ref.
-    expect(workflow.concurrency.group.endsWith("|| github.ref }}")).toBe(true);
+    expect(stop.concurrency).toEqual({ group: "ci-pr-${{ github.event.pull_request.number }}", "cancel-in-progress": true });
+    // For pull_request events ci.yml's group expression reduces to pr-<number>.
+    expect(workflow.concurrency.group).toContain("github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)");
+  });
+
+  it("never lets a merged PR's stop run join main's group", () => {
+    // A merged PR's closed event reports the base branch as github.ref, so any
+    // ref-named group here cancelled main's CI on every merge (Oct 3 2026).
+    const stop = parse(readFileSync(new URL("../.github/workflows/ci-stop-closed.yml", import.meta.url), "utf8"));
+    expect(stop.concurrency.group).not.toContain("github.ref");
+    expect(stop.concurrency.group).toContain("github.event.pull_request.number");
     expect(stop.permissions).toEqual({});
   });
 
@@ -63,19 +71,16 @@ describe("CI concurrency", () => {
     expect(workflow.jobs.vitest.strategy.matrix).toEqual({
       os: "${{ fromJSON(needs.static.outputs.vitest_os) }}", shard: [1, 2, 3, 4],
     });
+    expect(workflow.jobs.vitest["timeout-minutes"]).toBe("${{ matrix.os == 'ubuntu-latest' && 20 || 35 }}");
   });
 
-  it("keeps each PR to one macOS job unless native code changed", () => {
+  it("keeps each PR to one macOS job", () => {
     const macosJobs = Object.entries(workflow.jobs as Record<string, { "runs-on": string; strategy?: { matrix?: { os?: unknown } } }>)
       .filter(([, job]) => job["runs-on"] === "macos-latest" || JSON.stringify(job.strategy?.matrix?.os ?? "").includes("macos"))
       .map(([name]) => name);
-    expect(macosJobs.sort()).toEqual(["electron-smokes", "ios"]);
+    expect(macosJobs.sort()).toEqual(["electron-smokes"]);
     const smokes = workflow.jobs["electron-smokes"].steps.map((step: { run?: string }) => step.run);
     expect(smokes).toContain("pnpm test:packaged-server");
-    expect(workflow.jobs.ios.steps.some((step: { run?: string }) => step.run?.includes("verify-ios-thread-navigation"))).toBe(false);
-    const ui = parse(readFileSync(new URL("../.github/workflows/ios-thread-ui.yml", import.meta.url), "utf8"));
-    expect(ui.jobs["thread-ui"].steps.some((step: { run?: string }) => step.run === "bash scripts/verify-ios-thread-navigation-ci.sh")).toBe(true);
-    expect(Object.keys(ui.on).sort()).toEqual(["push", "schedule", "workflow_dispatch"]);
   });
 
   it("makes a release wait for its commit's CI gate before any draft", () => {
@@ -90,6 +95,41 @@ describe("CI concurrency", () => {
     expect(readFileSync(new URL("./release-ci.mjs", import.meta.url), "utf8")).toContain(`job.name === "${workflow.jobs.gate.name}"`);
     // The release lane is a branch, so its runs get their own concurrency group.
     expect(workflow.on).toHaveProperty("workflow_dispatch");
+  });
+
+  it("checks out every module the release gate imports", () => {
+    const release = parse(readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"));
+    const checkout = release.jobs.ci.steps.find((step: { uses?: string }) => step.uses?.startsWith("actions/checkout@"));
+    const sparse = (checkout.with["sparse-checkout"] as string).split("\n").map((line) => line.trim()).filter(Boolean);
+    const imports = [...readFileSync(new URL("./release-ci.mjs", import.meta.url), "utf8").matchAll(/^import .* from "\.\/([^"]+)";$/gm)]
+      .map((match) => `scripts/${match[1]}`);
+    expect(imports).toContain("scripts/ci-scope.mjs");
+    expect(sparse.sort()).toEqual(["scripts/release-ci.mjs", ...imports].sort());
+  });
+
+  it("lets push scoping read the previous commit's CI, and nothing more", () => {
+    // ci-scope.mjs runs a push's docs- or version-only diff without the runtime
+    // jobs only when the commit before it has its own green run.
+    expect(workflow.jobs.static.permissions).toEqual({ contents: "read", actions: "read" });
+    const scope = workflow.jobs.static.steps.find((step: { id?: string }) => step.id === "scope");
+    expect(scope.env).toEqual({ GH_TOKEN: "${{ github.token }}" });
+    for (const [name, job] of Object.entries(workflow.jobs) as [string, { permissions?: unknown }][]) {
+      if (name !== "static") expect(job.permissions, name).toBeUndefined();
+    }
+  });
+
+  it("reports every known flaky test that needed a retry in the vitest job summary", () => {
+    const steps = workflow.jobs.vitest.steps as { name?: string; run?: string; if?: string; env?: Record<string, string> }[];
+    const tests = steps.findIndex((step) => step.name === "Run tests");
+    const report = steps.findIndex((step) => step.run === "node scripts/testing/ci-retry-summary.mjs");
+    expect(report).toBe(tests + 1);
+    expect(steps[report]!.if).toBe("${{ !cancelled() }}");
+    // The runner context exists only at step level, never in a job's env.
+    expect(workflow.jobs.vitest.env).toBeUndefined();
+    for (const step of [steps[tests]!, steps[report]!]) {
+      expect(step.env).toEqual({ OMB_VITEST_RETRY_LOG: "${{ runner.temp }}/vitest-retries.jsonl" });
+    }
+    expect(readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8")).toContain('runner: "./scripts/testing/ci-retry-runner.ts"');
   });
 
   it.each(requiredRuntimeJobs)("fails closed for every required %s outcome", (job) => {
@@ -120,7 +160,7 @@ describe("CI concurrency", () => {
     expect(workflow.jobs.static.steps[0].with["fetch-depth"]).toBe(0);
     expect(workflow.jobs.static.steps.find((step: { id?: string }) => step.id === "scope").run).toBe("node scripts/ci-scope.mjs");
     expect(workflow.jobs.static.outputs).toEqual({
-      runtime: "${{ steps.scope.outputs.runtime }}", mobile: "${{ steps.scope.outputs.mobile }}",
+      runtime: "${{ steps.scope.outputs.runtime }}",
       vitest_os: "${{ steps.scope.outputs.vitest_os }}",
     });
     expect(workflow.jobs.static.steps.some((step: { run?: string }) =>
@@ -144,7 +184,7 @@ describe("CI concurrency", () => {
         continue;
       }
       expect(job.needs).toBe("static");
-      expect(job.if).toBe(`needs.static.outputs.${["ios", "android"].includes(name) ? "mobile" : "runtime"} == 'true'`);
+      expect(job.if).toBe("needs.static.outputs.runtime == 'true'");
     }
   });
 
