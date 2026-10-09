@@ -78,6 +78,15 @@ export interface DataColumn {
   sample?: string[];
 }
 
+/** One entry of the bot's table catalog, as GET /data reports it from DuckDB. */
+export interface DataTable {
+  name: string;
+  /** A quoted identifier ready to paste into SQL; `name` remains the identity. */
+  sqlName?: string;
+  rowCount: number;
+  columns: DataColumn[];
+}
+
 /** A table the bot loaded, as the Sources strip and `data_load` report it. */
 export interface DataSource {
   name: string;

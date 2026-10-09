@@ -14,7 +14,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import type { BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, LiveSettings, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
-import { DATA_ROUTES, type DataSheet } from "../../shared/data-surface";
+import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-surface";
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
@@ -1036,6 +1036,9 @@ export interface AppState {
    * when its Data tab first opens and replaced whole by every `data` frame.
    * The grid pages rows itself, so a sheet stays small. */
   dataSheets: Record<string, DataSheet>;
+  /** The bot's table catalog as GET /data last reported it: DuckDB's own
+   * list, not a copy on the sheet, so a load and a CREATE agree. */
+  dataTables: Record<string, DataTable[]>;
   dataResultFocus: { botId: string; id: string; requestId: number; consumed: boolean } | null;
   /** Only the currently mounted Data view, not the last Open in Data request. */
   dataView: import("@/lib/composer-attachments").DataViewContext | null;
@@ -1226,6 +1229,8 @@ export type Action =
       sendId?: string;
       replyToId?: string;
       threadId?: string;
+      /** The Data result the person is viewing, for the model only; never part of the text. */
+      dataContext?: import("../../shared/data-context").DataContext;
       onError?: () => void;
     }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string; reason?: SteerQueueReason }
@@ -1295,7 +1300,7 @@ export type Action =
   | { type: "computerStart"; botId: string; start: ComputerStart | null }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
   /** A whole sheet from the server: a `data` frame or the first GET. */
-  | { type: "dataSheet"; sheet: DataSheet }
+  | { type: "dataSheet"; sheet: DataSheet; tables?: DataTable[] }
   | { type: "dataView"; view: AppState["dataView"] }
   | { type: "loadDataSheet"; botId: string; onError?: (message: string) => void }
   | { type: "modelVariantRuntime"; event: RuntimeEvent }
@@ -2524,7 +2529,11 @@ export function reducer(state: AppState, action: Action): AppState {
     case "loadDataSheet":
       return state;
     case "dataSheet":
-      return { ...state, dataSheets: { ...state.dataSheets, [action.sheet.botId]: action.sheet } };
+      return {
+        ...state,
+        dataSheets: { ...state.dataSheets, [action.sheet.botId]: action.sheet },
+        ...(action.tables ? { dataTables: { ...state.dataTables, [action.sheet.botId]: action.tables } } : {}),
+      };
     case "dataView":
       return { ...state, dataView: action.view };
     case "sendGroup": {
@@ -2552,6 +2561,12 @@ export function reducer(state: AppState, action: Action): AppState {
 
 /** GET sheet answers with the sheet itself or wrapped as `{ sheet }`; an
  * empty answer (a bot that has never used data) is an empty sheet. */
+/** GET /data answers `{ sheet, tables }`; a `data` frame carries only the sheet. */
+export function dataTablesFromResponse(body: unknown): DataTable[] {
+  const tables = body && typeof body === "object" && "tables" in body ? (body as { tables: unknown }).tables : undefined;
+  return Array.isArray(tables) ? (tables as DataTable[]).filter((table) => table && typeof table.name === "string") : [];
+}
+
 export function dataSheetFromResponse(body: unknown, botId: string): DataSheet {
   const candidate = body && typeof body === "object" && "sheet" in body ? (body as { sheet: unknown }).sheet : body;
   if (candidate && typeof candidate === "object" && Array.isArray((candidate as DataSheet).cards)) {
@@ -2607,6 +2622,7 @@ export const initialState: AppState = {
   deletingBots: {},
   computerControl: {},
   dataSheets: {},
+  dataTables: {},
   dataResultFocus: null,
   dataView: null,
   focusMessage: null,
@@ -3210,7 +3226,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // from raising the app-wide error line.
         case "loadDataSheet":
           api(DATA_ROUTES.sheet(action.botId))
-            .then((body) => rawDispatch({ type: "dataSheet", sheet: dataSheetFromResponse(body, action.botId) }))
+            .then((body) => rawDispatch({ type: "dataSheet", sheet: dataSheetFromResponse(body, action.botId), tables: dataTablesFromResponse(body) }))
             .catch((error) => (action.onError ?? showError)(error instanceof Error ? error.message : String(error)));
           break;
         case "markRoutineRunSeen":
@@ -3284,7 +3300,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
             .then(() => api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
-                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId }),
+                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.dataContext ? { dataContext: action.dataContext } : {}) }),
               }))
             .then((body) => {
               if (body?.message && typeof body.threadId === "string") {

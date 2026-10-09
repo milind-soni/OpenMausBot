@@ -98,7 +98,7 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
   }, [bot.id, sheet, dispatch, requestKey, requestedCard?.id, state.connected]);
 
   const cards = useMemo(() => cardsLatestFirst(sheet?.cards ?? []), [sheet?.cards]);
-  const tables = sheet?.tables ?? sheet?.sources ?? [];
+  const tables = state.dataTables[bot.id] ?? sheet?.sources ?? [];
   const selectedCard = selection ? cards.find((card) => card.id === selection.cardId) : null;
   const card = selection ? selectedCard ?? null : cards[0] ?? null;
   // The result the SQL box edits. A text result or an empty sheet has none,

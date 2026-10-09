@@ -159,7 +159,7 @@ describe("dataRpc", () => {
     const { deps } = harness();
     await dataRpc({ method: "tools/call", params: { name: "data_sql", arguments: { sql: 'CREATE TABLE "derived" AS SELECT 1' } } }, deps);
     expect(deps.sheet.sheet()).not.toHaveProperty("tables");
-    const described = await dataRpc({ method: "tools/call", params: { name: "data_describe", arguments: {} } }, deps) as { structuredContent: { tables: unknown[] } };
+    const described = await dataRpc({ method: "tools/call", params: { name: "data_describe", arguments: {} } }, deps) as unknown as { structuredContent: { tables: unknown[] } };
     expect(described.structuredContent.tables).toEqual([{ name: "derived", rowCount: 3 }]);
   });
 });

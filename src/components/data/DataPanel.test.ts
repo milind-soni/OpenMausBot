@@ -6,12 +6,13 @@ import { EditorView } from "codemirror";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DataCard, DataPage, DataSheet } from "../../../shared/data-surface";
+import type { DataCard, DataPage, DataSheet, DataTable } from "../../../shared/data-surface";
 import type { Bot } from "@/state/store";
 import { setLocale } from "@/lib/i18n";
 
 const fixture = vi.hoisted(() => ({
   sheets: {} as Record<string, DataSheet>,
+  tables: {} as Record<string, DataTable[]>,
   connected: true,
   dispatch: vi.fn(),
   api: vi.fn(),
@@ -20,7 +21,7 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock("@/state/store", () => ({
   api: fixture.api,
-  useStore: () => ({ state: { dataSheets: fixture.sheets, connected: fixture.connected }, dispatch: fixture.dispatch }),
+  useStore: () => ({ state: { dataSheets: fixture.sheets, dataTables: fixture.tables, connected: fixture.connected }, dispatch: fixture.dispatch }),
 }));
 vi.mock("../ChatMarkdown", () => ({ ChatMarkdown: ({ text }: { text: string }) => createElement("div", { "data-testid": "markdown" }, text) }));
 vi.mock("vega-embed", () => {
@@ -86,6 +87,7 @@ beforeEach(() => {
   setLocale("en");
   vi.clearAllMocks();
   fixture.sheets = {};
+  fixture.tables = {};
   fixture.connected = true;
   fixture.embedLoaded = false;
   fixture.embed.mockResolvedValue({ view: { resize: () => ({ runAsync: async () => undefined }) }, finalize: vi.fn() });
@@ -548,10 +550,11 @@ describe("DataPanel", () => {
   });
 
   it("shows catalog table names and counts as plain references without extra controls", async () => {
-    fixture.sheets = { pepper: { ...sheet([card("orders", {})]), tables: [
+    fixture.sheets = { pepper: sheet([card("orders", {})]) };
+    fixture.tables = { pepper: [
       { name: "sales", rowCount: 2, columns: [{ name: "amount", type: "DOUBLE" }] },
       { name: "monthly sales", sqlName: '"monthly sales"', rowCount: 10, columns: [] },
-    ] } };
+    ] };
     render();
     await settle();
     expect(host.querySelectorAll("article")).toHaveLength(1);

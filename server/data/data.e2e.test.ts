@@ -131,7 +131,8 @@ it("loads, queries, shows, pages, renders and exports through the real server", 
     expect(prompt.endsWith(`${envelope(prompt)[0]}\n\nOnly show north.`), prompt).toBe(true);
     expect(JSON.parse(envelope(prompt)[0]!.slice("<data-context>".length, -"</data-context>".length))).toMatchObject({ cardId: tableCard.data.id, draftSql, hint: expect.stringContaining("data_describe({id:cardId})") });
     await settled();
-    const stored = ((await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as Array<Record<string, any>>).find((message) => message.id === sent.message.id);
+    const stored = ((await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as Array<Record<string, any>>).find((message) => message.id === sent.message.id)!;
+    expect(stored).toBeDefined();
     expect(stored.text).toBe("Only show north.");
     expect(stored.text).not.toContain("<data-context>");
     expect(stored.dataContext).toEqual({ cardId: tableCard.data.id, draftSql });
