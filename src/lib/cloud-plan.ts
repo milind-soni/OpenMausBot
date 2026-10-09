@@ -56,6 +56,17 @@ export function buyOfferAllowed(view: CloudPlanView): boolean {
   return view.kind === "signed-out" || view.kind === "free";
 }
 
+/** What the X research card offers someone whose server has no plan
+ * credential yet: a paying desktop is still connecting it; signed out (or a
+ * sign-in that ended), sign in; verified free, get a plan. Nothing where the
+ * state is unknown or someone may already pay, and without a desktop bridge. */
+export function xResearchAction(view: CloudPlanView | null): "connecting" | "sign-in" | "get-pro" | null {
+  if (!view) return null;
+  if (view.kind === "paid") return "connecting";
+  if (view.kind === "signed-out" || view.kind === "reauth") return "sign-in";
+  return view.kind === "free" ? "get-pro" : null;
+}
+
 /** The plan in one line, or null where there is no plan to name. */
 export function cloudPlanLine(view: CloudPlanView): string | null {
   switch (view.kind) {

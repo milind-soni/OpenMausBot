@@ -202,3 +202,44 @@ describe("AccessSection Works on", () => {
     expect(render(makeBot({ computer: "cloud" }))).not.toContain("Boat");
   });
 });
+
+describe("X research card", () => {
+  it("is a Cloud plan feature: locked, with the switch off and disabled, when this server has no plan credential", () => {
+    fixture.config = { xResearch: { included: false } } as Partial<ConfigStatus>;
+    const html = render(makeBot());
+    expect(html).toContain("X research is included with OpenMausBot Cloud plans.");
+    expect(html).toMatch(/aria-label="Let this bot search and read X"[^>]* disabled=""/);
+  });
+
+  it("offers the switch when the plan is included, and says what each search costs the plan", () => {
+    fixture.config = { xResearch: { included: true } } as Partial<ConfigStatus>;
+    const off = render(makeBot());
+    expect(off).toContain("Let this bot search and read X without an X account.");
+    expect(off).not.toMatch(/aria-label="Let this bot search and read X"[^>]* disabled=""/);
+    const on = render(makeBot({ xResearch: true }));
+    expect(on).toMatch(/aria-label="Let this bot search and read X"[^>]*aria-checked="true"/);
+    expect(on).toContain("Included with your OpenMausBot Cloud plan.");
+  });
+
+  it("says plainly when the plan's Cloud does not offer X research right now, instead of connecting forever", () => {
+    fixture.config = { xResearch: { included: false, unavailable: true } } as Partial<ConfigStatus>;
+    const html = render(makeBot());
+    expect(html).toContain("X research isn’t available from OpenMausBot Cloud right now.");
+    expect(html).not.toContain("Connecting");
+  });
+
+  it("is not offered while a new bot or the New bot defaults are being drafted", async () => {
+    fixture.config = { xResearch: { included: true } } as Partial<ConfigStatus>;
+    const { BotEditorContext } = await import("./BotEditorContext");
+    const { api } = await import("@/state/store");
+    const html = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(AccessSection, { bot: makeBot(), derived: makeDerived() }))));
+    expect(html).not.toContain("Let this bot search and read X");
+  });
+
+  it("still lets a bot that is on be turned off after the plan has gone", () => {
+    fixture.config = { xResearch: { included: false } } as Partial<ConfigStatus>;
+    const html = render(makeBot({ xResearch: true }));
+    expect(html).not.toMatch(/aria-label="Let this bot search and read X"[^>]* disabled=""/);
+  });
+});

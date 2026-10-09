@@ -306,6 +306,10 @@ export interface WireBot {
   /** Whether this bot may send voice notes. Absent/true = allowed; false
    * hides the tool and refuses the route even with a voice configured. */
   voiceNotes?: boolean;
+  /** Whether this bot may use the X research tools (x_search, x_user_posts,
+   * x_post, x_profile), which spend the workspace's treg balance.
+   * Absent/false = off: the person turns it on per bot. */
+  xResearch?: boolean;
   /** Whether this bot uses native memory. Absent/true = enabled. */
   memoryEnabled?: boolean;
   /** Queue direct-chat messages behind outstanding delegated work. */

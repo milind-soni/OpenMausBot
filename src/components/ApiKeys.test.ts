@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StoreProvider } from "@/state/store";
 import * as store from "@/state/store";
-import { AnthropicEveryClaudeBot, ApiKeyRow, looksLikeKey, OpenAiCompatUrl, OpenCodeProviderKeys } from "./ApiKeys";
+import { AnthropicEveryClaudeBot, ApiKeyRow, desktopCredentialSlot, looksLikeKey, OpenAiCompatUrl, OpenCodeProviderKeys } from "./ApiKeys";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -137,5 +137,13 @@ describe("provider key rows", () => {
     expect(html).toContain("OpenAI-compatible base URL");
     expect(html).toContain('placeholder="https://api.groq.com/openai/v1"');
     expect(html).toContain("localhost:11434/v1");
+  });
+});
+
+
+describe("desktop credential slots", () => {
+  it("saves the desktop-held keys in the encrypted store, so Clear removes them there too", () => {
+    expect(desktopCredentialSlot("box")).toBe("boxToken");
+    expect(desktopCredentialSlot("openai")).toBeUndefined();
   });
 });

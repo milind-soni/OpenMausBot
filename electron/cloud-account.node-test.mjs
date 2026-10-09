@@ -13,7 +13,7 @@ async function fixture(t, options = {}) {
   const f = { now: 1_800_000_000_000, requests: [], browsers: [], states: [], saved: null, approved: false, revoked: false,
     sessionStatus: 200, invalidIdentity: false, invalidEntitlement: false, badUrl: false, failWrite: false, slowToken: null,
     entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 }, timer: null, delay: null, cloud: undefined, expiresIn: 600,
-    disk: { status: 404, body: "<!doctype html>not here" }, sessionPage: null, sessionError: null, tokenPage: null };
+    disk: { status: 404, body: "<!doctype html>not here" }, x: { status: 404, body: { error: "unsupported" } }, sessionPage: null, sessionError: null, tokenPage: null };
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "fixture-device" }, account: { id: "fixture-account", email: "person@example.test" } });
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
@@ -25,6 +25,7 @@ async function fixture(t, options = {}) {
       if (typeof f.disk.body === "string") { res.writeHead(f.disk.status, { "content-type": "text/html" }); return res.end(f.disk.body); }
       return send(f.disk.status, f.disk.body);
     }
+    if (req.url === "/api/cloud/desktop/services/x" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.x.status, f.x.body);
     if (req.url === "/api/cloud/desktop/token") {
       if (f.tokenPage) { res.writeHead(f.tokenPage, { "content-type": "text/html" }); return res.end("<!doctype html>Just a moment"); }
       if (f.slowToken) await f.slowToken;
@@ -432,4 +433,21 @@ test("cancelling during the encrypted write queues deletion after it and cannot 
   const f = await fixture(t, { store }); await f.client.begin(); f.approved = true; f.tick(); await until(() => writing);
   const cancellation = f.client.cancel(); release(); await cancellation; await until(() => f.revoked);
   assert.equal(await store.read(), null); assert.equal(f.client.state().status, "signed-out"); assert.equal(f.client.state().entitlement, undefined);
+});
+
+test("X research access: this sign-in's own relay token, null without a plan or the service, never a URL off the Cloud's origin", async t => {
+  const f = await fixture(t);
+  const before = f.requests.length;
+  assert.equal(await f.client.xResearchAccess(), null);
+  assert.equal(f.requests.length, before);
+  await f.connect();
+  const token = `omb_xd_${"a".repeat(43)}`, url = `${f.origin}/api/cloud/services/x`;
+  f.x = { status: 200, body: { cloudContractVersion: 1, url, token } };
+  assert.deepEqual(await f.client.xResearchAccess(), { url, token });
+  assert.ok(f.requests.some(r => r.route === "/api/cloud/desktop/services/x" && r.method === "POST" && r.token === `Bearer ${accessToken}`));
+  f.x = { status: 402, body: { error: "subscription_inactive" } }; assert.equal(await f.client.xResearchAccess(), null);
+  f.x = { status: 404, body: { error: "unsupported" } }; assert.equal(await f.client.xResearchAccess(), null);
+  f.x = { status: 200, body: { cloudContractVersion: 1, url: "https://elsewhere.example.test/api/cloud/services/x", token } }; await assert.rejects(f.client.xResearchAccess(), /Invalid/);
+  f.x = { status: 200, body: { cloudContractVersion: 1, url, token: "short" } }; await assert.rejects(f.client.xResearchAccess(), /Invalid/);
+  f.x = { status: 500, body: { error: "down" } }; await assert.rejects(f.client.xResearchAccess());
 });

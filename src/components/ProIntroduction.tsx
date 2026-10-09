@@ -31,7 +31,7 @@ export function proOfferAvailable(account: CloudAccountState | null): boolean {
 }
 
 /** The plan as the native snapshot says; null without a bridge (a browser, a remote page). */
-function useCloudPlan(): CloudPlanView | null {
+export function useCloudPlan(): CloudPlanView | null {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
   const [account, setAccount] = useState<CloudAccountState | null>(null);
   useEffect(() => {

@@ -83,6 +83,11 @@ function profiles(): Record<string, Profile> {
   for (const name of ["direct+skills+shared+voice", "room+own-thread+skills+shared+voice", "direct+skills+shared+voice+non-chief", "room+own-thread+skills+shared+voice+non-chief"]) {
     all[`${name}+cloud-home`] = { family: all[name]!.family, env: { ...all[name]!.env, OMB_CLOUD_HOME: "1" } };
   }
+  // X research is one more switch, on only for a bot its person turned on.
+  // The fullest profiles carry it, so every other profile stays a subset.
+  for (const name of ["direct+skills+shared+voice", "room+own-thread+skills+shared+voice"]) {
+    all[`${name}+x`] = { family: all[name]!.family, env: { ...all[name]!.env, OMB_X_RESEARCH: "1" } };
+  }
   all.external = { family: "external", env: { OMB_EXTERNAL_RUNTIME: "1" } };
   // The external switch wins over every other one; pin that it still does.
   all["external+everything"] = {
@@ -96,6 +101,7 @@ function profiles(): Record<string, Profile> {
       OMB_VOICE_NOTES: "1",
       OMB_CLOUD_HOME: "1",
       OMB_CHIEF_OF_STAFF: "1",
+      OMB_X_RESEARCH: "1",
     },
   };
   return all;
@@ -110,7 +116,7 @@ const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_b
 /** The profile of each family that mounts the most: checked in whole, as
  * readable JSON. Every other profile is a by-name subset of one of these and
  * is pinned by tool names, byte count and sha256 in profiles.json. */
-const FULL = { direct: "direct+skills+shared+voice", room: "room+own-thread+skills+shared+voice", external: "external" } as const;
+const FULL = { direct: "direct+skills+shared+voice+x", room: "room+own-thread+skills+shared+voice+x", external: "external" } as const;
 
 /** Bytes measured when the budget was last set. A profile may not exceed this
  * by more than 2%, and may not undercut it by more than 2% either: a smaller
@@ -124,6 +130,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "direct+skills+voice": 50761,
   "direct+skills+shared": 51765,
   "direct+skills+shared+voice": 52506,
+  "direct+skills+shared+voice+x": 56281,
   "room": 46523,
   "room+voice": 47264,
   "room+shared": 48268,
@@ -140,6 +147,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "room+own-thread+skills+voice": 50477,
   "room+own-thread+skills+shared": 51481,
   "room+own-thread+skills+shared+voice": 52222,
+  "room+own-thread+skills+shared+voice+x": 55997,
   "direct+skills+shared+voice+cloud-home": 51580,
   "room+own-thread+skills+shared+voice+cloud-home": 51296,
   "direct+non-chief": 38657,
@@ -320,6 +328,21 @@ describe("agents proxy tools/list golden", () => {
     }
     // A standing external runtime is shown none of them, Chief or not.
     expect(wires["external+everything"]).toBe(wires.external);
+  });
+
+  it("shows the X tools only to a bot switched on for X research, and never to an external runtime", () => {
+    const X = ["x_search", "x_user_posts", "x_post", "x_profile"];
+    for (const [name, profile] of Object.entries(PROFILES)) {
+      const names = toolsOf(wires[name]!).map((tool) => tool.name);
+      const on = profile.env.OMB_X_RESEARCH === "1" && profile.family !== "external";
+      for (const tool of X) expect(names.includes(tool), `${name}: ${tool}`).toBe(on);
+    }
+    const switchedOn = Object.keys(PROFILES).filter((name) => name.endsWith("+x"));
+    expect(switchedOn).toHaveLength(2);
+    for (const name of switchedOn) {
+      const without = toolsOf(wires[name.slice(0, -"+x".length)]!).map((tool) => tool.name);
+      expect(toolsOf(wires[name]!).map((tool) => tool.name).filter((tool) => !X.includes(tool))).toEqual(without);
+    }
   });
 
   it("is what the catalog module computes in-process, so another front end mounts the same tools", () => {

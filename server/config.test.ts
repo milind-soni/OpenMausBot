@@ -2109,3 +2109,26 @@ describe("a value derived from config.json", () => {
     },
   );
 });
+
+describe("X research's included relay token", () => {
+  it("still loads a config.json saved with the old own treg token, and keeps that token out of the config", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ budgets: { monthlyUsd: 25, warnAtPercent: 70 }, treg: { token: "treg_old" } }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const loaded = loadConfig();
+      expect(loaded.budgets).toEqual({ monthlyUsd: 25, warnAtPercent: 70 });
+      expect(JSON.stringify(loaded)).not.toContain("treg_old");
+      expect(warn.mock.calls.some(([line]) => String(line).includes("ignoring"))).toBe(false);
+    } finally {
+      warn.mockRestore();
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("is a workspace credential that never reaches an engine, and there is no own treg token any more", () => {
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_X_TOKEN");
+    expect(WORKSPACE_CREDENTIAL_ENV).not.toContain("OMB_TREG_TOKEN");
+  });
+});

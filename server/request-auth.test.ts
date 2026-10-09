@@ -131,6 +131,9 @@ describe("scopes", () => {
     expect(clientBotPatchViolation({ pinned: true, color: "green" })).toBeNull();
     expect(clientBotPatchViolation({ unread: true, autoApprove: true })).toBe("autoApprove");
     expect(clientBotPatchViolation({ cwd: "/" })).toBe("cwd");
+    // X research counts against the Cloud plan's X calls: a paired
+    // phone may not switch it on.
+    expect(clientBotPatchViolation({ xResearch: true })).toBe("xResearch");
     expect(clientBotPatchViolation([])).toBe("body");
     expect(clientGroupPatchViolation({ name: "Ops", unread: false, turnTimeoutMinutes: 30 })).toBeNull();
     expect(clientGroupPatchViolation({ cwd: "/tmp" })).toBe("cwd");
