@@ -93,25 +93,29 @@ app.whenReady().then(async () => {
   const remoteOnly = process.argv.includes("--remote-approval-only");
   const desktopToken = randomBytes(32).toString("base64url");
   const coordinator = createTrustedApprovalModeCoordinator({ randomId: randomUUID });
-  child = utilityProcess.fork(join(root, "server/index.ts"), [], {
-    cwd: root,
-    execArgv: ["--experimental-strip-types"],
-    env: {
-      HOME: home, USERPROFILE: home, OMB_DATA_DIR: home, PATH: "",
-      ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(webhookPort),
-      OMB_TEST_INTERNAL_CAPABILITY_KEY: testCapabilityKey,
-      ...(remoteOnly ? { OMB_DESKTOP_PARENT: "1" } : {}),
-      FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump,
-      FAKE_ACP_MODE: "permission", FAKE_ACP_AUTH_METHOD: "oauth-personal",
-      FAKE_ACP_MODELS: "gemini-3.8-flash-high,gemini-3.8-flash-low", FAKE_ACP_MODES: "default,yolo",
-    },
-    stdio: "pipe",
-  });
-  child.stdout.on("data", (chunk) => { logs += chunk; });
-  child.stderr.on("data", (chunk) => { logs += chunk; });
-  child.on("message", (message) => coordinator.receive(child, message));
-  child.on("exit", () => coordinator.rejectProcess(child));
+  const startServer = () => {
+    const proc = utilityProcess.fork(join(root, "server/index.ts"), [], {
+      cwd: root,
+      execArgv: ["--experimental-strip-types"],
+      env: {
+        HOME: home, USERPROFILE: home, OMB_DATA_DIR: home, PATH: "",
+        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(webhookPort),
+        OMB_TEST_INTERNAL_CAPABILITY_KEY: testCapabilityKey,
+        ...(remoteOnly ? { OMB_DESKTOP_PARENT: "1" } : {}),
+        FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump,
+        FAKE_ACP_MODE: "permission", FAKE_ACP_AUTH_METHOD: "oauth-personal",
+        FAKE_ACP_MODELS: "gemini-3.8-flash-high,gemini-3.8-flash-low", FAKE_ACP_MODES: "default,yolo",
+      },
+      stdio: "pipe",
+    });
+    proc.stdout.on("data", (chunk) => { logs += chunk; });
+    proc.stderr.on("data", (chunk) => { logs += chunk; });
+    proc.on("message", (message) => coordinator.receive(proc, message));
+    proc.on("exit", () => coordinator.rejectProcess(proc));
+    return proc;
+  };
+  child = startServer();
   const api = async (path, method = "GET", body, headers = {}) => {
     const response = await fetch(`http://127.0.0.1:${port}${path}`, {
       method, headers: { "content-type": "application/json", ...(remoteOnly ? { "x-openmausbot-desktop-owner": desktopToken } : {}), ...headers },
@@ -122,7 +126,14 @@ app.whenReady().then(async () => {
   await until(() => api("/api/health").catch(() => null));
   if (remoteOnly) {
     child.postMessage({ type: "openmausbot:desktop-mutation-token", token: desktopToken });
-    await require("./testing/remote-approval-smoke.cjs")({ child, api, until, url: `http://127.0.0.1:${port}`, home, root });
+    await require("./testing/remote-approval-smoke.cjs")({ child, api, until, url: `http://127.0.0.1:${port}`, home, root,
+      restart: async () => {
+        const exited = once(child, "exit"); child.kill(); await exited;
+        child = startServer();
+        await until(() => api("/api/health").catch(() => null));
+        child.postMessage({ type: "openmausbot:desktop-mutation-token", token: desktopToken });
+      },
+    });
     return;
   }
   const verifyUi = () => require("./testing/approval-ui-smoke.cjs")({ root, url: `http://127.0.0.1:${port}`, api, until,

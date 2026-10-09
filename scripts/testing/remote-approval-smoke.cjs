@@ -4,7 +4,7 @@ const { readFileSync, mkdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { createTrustedApprovalModeCoordinator } = require("../../electron/approval-trusted-mode.cjs");
 
-module.exports = async ({ child, api, until, url, home, root }) => {
+module.exports = async ({ child, api, until, url, home, root, restart }) => {
   const { createDesktopKey, createRemoteApprovalAuthority, signedRequest } = await import("../../electron/remote-approval-authority.mjs");
   const { createRemoteApprovalClient } = await import("../../electron/remote-approval-client.mjs");
   const keepAlive = () => {};
@@ -185,11 +185,25 @@ module.exports = async ({ child, api, until, url, home, root }) => {
     assert.equal((await api(`/api/auth/sessions/${identity.device}`, "DELETE")).status, 200);
     await until(async () => await mode() === "ask");
     assert.equal((await client.status()).available, false);
+    await client.stop(); await authority.stop().catch(() => {});
+    cookie = await pair();
+    await client.enroll();
+    await authority.authorize(authority.pending()[0].id);
+    await client.setFull(bot.id, selected.threadId);
+    const oldIdentity = (await remote("/api/desktop-approval")).body;
+    const laptopKey = Object.values(laptop.remoteApprovalKeys)[0];
+    const oldBootProof = signedRequest(laptopKey, { ...oldIdentity, origin: remoteOrigin, action: "status" });
+    await restart();
+    await until(async () => await mode() === "ask");
+    assert.equal((await snapshot()).approvalMode, defaultMode);
+    assert.equal((await snapshot()).tasks.find(row => row.threadId === sibling.threadId).approvalMode, siblingMode);
+    assert.deepEqual(JSON.parse(readFileSync(join(home, "remote-approval-recovery.json"), "utf8")), []);
+    assert.equal((await remote("/api/desktop-approval", "POST", oldBootProof)).status, 403);
     console.log(JSON.stringify({ remoteDesktopApproval: true, savedEnvironment: "Mac Mini — Tailscale", ownerEnrollment: true,
       privateFiveSteps: true, persistedThread: true, defaultUnchanged: true, siblingUnchanged: true,
       httpFullAndCustomRejected: true, chatOnlyRejected: true, unpairedRejected: true, botTokenRejected: true,
       unenrolledKeyRejected: true, wrongOriginRejected: true, nativeCancel: true, lostReplyRecovered: true, revokedPairingRecovered: true,
-      nativeDialogCallbacks: nativeDialogs.length }));
+      hostRestartRecovered: true, staleBootRejected: true, nativeDialogCallbacks: nativeDialogs.length }));
   } finally {
     await client.stop(); await authority.stop().catch(() => {}); child.off("message", listener);
     require("electron").app.off("window-all-closed", keepAlive);

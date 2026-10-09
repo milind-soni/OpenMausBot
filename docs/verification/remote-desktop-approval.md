@@ -66,7 +66,8 @@ application.
 Evidence includes native cancellation, lost commit-reply recovery, paired
 owner success and persisted thread state, rejection of HTTP Full/Custom,
 unpaired/bot-token/chat-only callers, wrong origins and unenrolled keys,
-pairing revocation, unchanged siblings/default, and the Composer with no
+pairing revocation, actual utility-process restart recovery and rejection of
+a previous boot’s proof, unchanged siblings/default, and the Composer with no
 local approvals bridge and no remote Custom option. Node tests cover
 signature replay, expiry, wrong workspace/device/boot/target, owner-binding
 revocation and the shared warning. Server tests cover private-phase pairing
