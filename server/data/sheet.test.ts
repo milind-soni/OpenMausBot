@@ -51,7 +51,7 @@ describe("DataSheetStore", () => {
     // Every change reached the clients with the whole sheet and no counter.
     expect(frames.length).toBe(5);
     expect(frames.at(-1)).toMatchObject({ kind: "data", botId: "bot-1" });
-    expect((frames.at(-1)!.sheet as Record<string, unknown>).seq).toBeUndefined();
+    expect((frames.at(-1)!.sheet as unknown as Record<string, unknown>).seq).toBeUndefined();
     expect(frames.at(-1)!.sheet.cards.map((card) => card.id)).toEqual(["c_1", "c_3"]);
   });
 
