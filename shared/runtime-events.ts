@@ -157,7 +157,10 @@ export type RuntimeEvent = RuntimeEventBase &
         /** The provider can keep an allow for the rest of its session
          * ("Always allow this session"): Claude through its own suggested
          * permission rules, ACP agents through `allow_always` or the
-         * driver's per-session memory. Unset when answers are one-shot. */
+         * driver's per-session memory. A chat-completions engine has no
+         * provider session, so it keeps that one exact operation in memory
+         * for the thread until the process drops it. Unset or false when
+         * answers are one-shot. */
         allowSession?: boolean;
       }
     | {

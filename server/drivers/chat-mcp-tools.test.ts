@@ -71,6 +71,26 @@ afterEach(async () => {
 });
 
 describe("Chat MCP session", () => {
+  it("keeps built-in agents grants across turn-token renewal, but scopes them to the server and configuration", async () => {
+    const f = fixture();
+    const grant = async (token: string, extra: Record<string, string> = {}, builtIn = true) => {
+      const server = { ...f.server, env: { ...f.server.env, OMB_COMMS_TOKEN: token, ...extra } };
+      const session = await mountChatTools(builtIn ? { agents: server } : { custom: { agents: server } }, f.controller.signal, false);
+      sessions.push(session);
+      const key = session.view("agents_write", { value: "same operation" }).grant;
+      await session.close();
+      expect(key).toBeTruthy();
+      return key;
+    };
+    const first = await grant("fixture-turn-one");
+    expect(await grant("fixture-turn-two")).toBe(first);
+    expect(await grant("fixture-turn-two", { OMB_HARNESS_URL: "http://different.fixture" })).not.toBe(first);
+    expect(await grant("fixture-turn-two", { OMB_CHIEF_OF_STAFF: "1" })).not.toBe(first);
+    // A custom server cannot opt into the exception just by using the
+    // agents name or naming one of its settings OMB_COMMS_TOKEN.
+    expect(await grant("fixture-turn-two", {}, false)).not.toBe(await grant("fixture-turn-one", {}, false));
+  });
+
   it("starts no server when the owner selected no MCP tools", async () => {
     const f = fixture();
     const session = await f.mount(false, false, { allow: ["native:ask_user"] });
@@ -327,7 +347,7 @@ describe("Chat MCP tool directory", () => {
       // searching runs no tool of the server, so no card; call_tool shows its target
       expect(session.view("whop_search_tools", { query: "list payments" })).toEqual({ title: "whop_search_tools", input: { query: "list payments" }, ask: false });
       const args = { name: "payments_list", arguments: { company_id: "biz_1" } };
-      expect(session.view("whop_call_tool", args)).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true });
+      expect(session.view("whop_call_tool", args)).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: expect.stringMatching(/^whop\n[0-9a-f]{64}\npayments_list$/) });
       await expect(session.execute("whop_call_tool", args, controller.signal)).resolves.toMatchObject({ ok: true, text: "remote execution recorded" });
       expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
       // a mistake the directory answers with guidance runs nothing and fails nothing
@@ -366,7 +386,7 @@ describe("Chat MCP tool directory", () => {
       const session = await mountChatTools({ custom: { whop: { type: "http", url: remote.url, headers: {} } } }, controller.signal);
       sessions.push(session);
       expect(session.definitions.map((tool) => tool.function.name)).toEqual(whopLikeCatalog(5).map((tool) => `whop_${tool.name.replace("-", "_")}`));
-      expect(session.view("whop_payments_list", { company_id: "biz_1" })).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true });
+      expect(session.view("whop_payments_list", { company_id: "biz_1" })).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: expect.stringMatching(/^whop\n[0-9a-f]{64}\npayments_list$/) });
     } finally { await remote.close(); }
   });
 });

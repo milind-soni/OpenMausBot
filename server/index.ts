@@ -5628,6 +5628,7 @@ store.onChange((change) => {
       break;
     case "thread.deleted":
       directRequestOwners.delete(change.threadId);
+      for (const instance of registry.instances()) instance.adapter.forgetThread?.(change.threadId);
       stoppedTurns.delete(change.threadId);
       routines?.forgetRoutineRequestReceiptsForThread(change.threadId);
       // A deleted destination must not strand an approval in an internal

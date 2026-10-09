@@ -15,7 +15,7 @@ import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
-import { createChatToolApproval } from "./chat-tool-approval.ts";
+import { chatSessionOperationKey, createChatSessionMemory, createChatToolApproval } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
@@ -242,6 +242,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
   /** Models whose endpoint rejected an echoed `reasoning_content`. In memory
    * only: later rounds and turns omit the field instead of failing again. */
   const reasoningReplayRejected = new Set<string>();
+  /** Exact tool calls the person allowed for a thread. Process memory only. */
+  const sessionMemory = createChatSessionMemory();
 
   const emit = (event: RuntimeEvent) => {
     for (const listener of Array.from(listeners)) listener(event);
@@ -503,9 +505,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     });
     const approval = createChatToolApproval({
       signal: abort.signal,
+      remember: (sessionKey) => sessionMemory.remember(turn.threadId, sessionKey),
       open: (ask) => emit({
         ...base(turn.threadId, turnId), type: "request.opened", requestType: "permission",
-        requestId: ask.id, tool: ask.tool, summary: ask.summary, allowSession: false,
+        requestId: ask.id, tool: ask.tool, summary: ask.summary,
+        allowSession: ask.sessionKey ? true : false,
       }),
       resolved: (ask, allowed, source) => emit({
         ...base(turn.threadId, turnId), type: "request.resolved", requestId: ask.id,
@@ -737,9 +741,15 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 // prompt. This runtime has no provider reviewer to hand it to,
                 // so it is honoured here: without it every single tool call on
                 // an OpenAI-compatible engine stops for a card, and a Chief's
-                // delegated Full access cannot help either.
+                // delegated Full access cannot help either. A guest turn never
+                // stores a session grant. Sends, computer control and browser
+                // control stay a card every time.
+                const sessionKey = turn.guestConfined || !shown.ask
+                  ? null
+                  : chatSessionOperationKey(shown.title, shown.input, shown.grant);
                 const allowed = turn.approvalMode === "full" || !shown.ask
-                  || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.");
+                  || (sessionKey !== null && sessionMemory.has(turn.threadId, sessionKey))
+                  || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.", sessionKey);
                 abort.signal.throwIfAborted();
                 emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
                   title: shown.title, ...(shownPreview ? { input: shownPreview } : {}),
@@ -867,7 +877,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         await turn.done;
       },
       respondToRequest: async (threadId, requestId, decision) =>
-        active.get(threadId)?.approval.answer(requestId, decision.behavior, decision.message) ?? "unavailable",
+        active.get(threadId)?.approval.answer(requestId, decision.behavior, decision.message, decision.always) ?? "unavailable",
       steer: async (threadId, text) => {
         // This engine has no external session to respect — parking the
         // words in the live turn's entry IS delivery into the loop, so a
@@ -881,6 +891,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         return "steered";
       },
       hasSession: (threadId) => active.has(threadId),
+      forgetThread: (threadId) => sessionMemory.forget(threadId),
       stopAll: async () => {
         const turns = [...active.values()];
         for (const turn of turns) turn.abort.abort();
@@ -902,6 +913,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       for (const turn of turns) turn.abort.abort();
       await Promise.all(turns.map((turn) => turn.done));
       listeners.clear();
+      sessionMemory.clear();
     },
   };
 }

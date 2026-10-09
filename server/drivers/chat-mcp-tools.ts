@@ -1,5 +1,6 @@
 // Per-turn MCP transport for the shared Chat Completions runtime. Approval is
 // owned by the caller; only registered, schema-validated calls reach this file.
+import { createHash } from "node:crypto";
 import type { ValidateFunction } from "ajv";
 import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
@@ -20,7 +21,15 @@ export interface ChatToolResult { text: string; ok: boolean; images?: ChatImageP
 /** How one call is shown to the person: the tool named on its approval card
  * and in the transcript, the input previewed there, and whether a card is
  * needed at all. */
-export interface ChatToolCallView { title: string; input: Record<string, unknown>; ask: boolean }
+export interface ChatToolCallView {
+  title: string; input: Record<string, unknown>; ask: boolean;
+  /** Which mounted server runs the call and the tool it runs there: the
+   * server's name, a digest of how it is started (command, arguments and
+   * environment, so a changed address, command or setting is a different
+   * server), and the upstream tool name. A remembered session grant is tied
+   * to it. Absent when no mounted tool matches the name. */
+  grant?: string;
+}
 /** The transport cannot safely continue this turn. A dispatched operation may
  * already have taken effect, so callers must not retry it through a new round. */
 export class ChatToolSessionError extends Error {}
@@ -35,6 +44,18 @@ export interface ChatToolSession {
 }
 
 type Server = { command: string; args: string[]; env: Record<string, string> };
+/** A stable digest of how a server is started. Kept in memory only, and
+ * hashed so environment values are never held as text in a grant key. */
+function serverIdentity(name: string, server: Server, builtInAgents: boolean): string {
+  // This capability is freshly minted for every turn, not a change of
+  // account/server. The internal routes still validate the current token.
+  // Keep every other setting in the identity, and never grant this exception
+  // to a custom MCP server that happens to use the same name or variable.
+  const env = Object.fromEntries(Object.entries(server.env)
+    .filter(([key]) => !builtInAgents || key !== "OMB_COMMS_TOKEN")
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0));
+  return createHash("sha256").update(JSON.stringify([name, builtInAgents, server.command, server.args, env])).digest("hex");
+}
 /** A provider-safe tool name: the server's name and the tool's, joined. */
 function chatToolName(server: string, tool: string): string {
   return `${server}_${tool}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "mcp_tool";
@@ -276,7 +297,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const cancel = () => { void close().catch(() => {}); };
   signal.addEventListener("abort", cancel, { once: true });
   const definitions: ChatToolDefinition[] = [];
-  const registered = new Map<string, { client: ChatMcpClient; server: string; builtInBrowser: boolean; name: string; schema: ValidateFunction; searched: boolean }>();
+  const registered = new Map<string, { client: ChatMcpClient; server: string; identity: string; builtInBrowser: boolean; name: string; schema: ValidateFunction; searched: boolean }>();
   try {
     if (signal.aborted) throw aborted();
     // Start independent servers concurrently; consume results in config order
@@ -294,11 +315,11 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       // A searched URL server answers over the internet: its initialize and
       // whole tools/list get the URL budget; command servers keep theirs.
       const tools = await client.tools(signal, include, searchable.has(name) ? REMOTE_MCP_STARTUP_MS : STARTUP_MS);
-      return { name, client, builtInBrowser: descriptor === integrations?.browser, tools };
+      return { name, identity: serverIdentity(name, descriptor, name === "agents" && descriptor === integrations?.agents), client, builtInBrowser: descriptor === integrations?.browser, tools };
     }));
     for (const mount of mounts) {
       if (mount.status === "rejected") throw mount.reason;
-      const { name: server, client, builtInBrowser, tools } = mount.value;
+      const { name: server, identity, client, builtInBrowser, tools } = mount.value;
       const originalNames = new Set<string>();
       for (const tool of tools) {
         if (!object(tool) || typeof tool.name !== "string" || !tool.name.trim() || originalNames.has(tool.name)) throw new Error("MCP server advertised an invalid or duplicate tool name");
@@ -319,7 +340,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         const base = chatToolName(server, tool.name);
         let name = base;
         for (let index = 2; registered.has(name); index += 1) { const suffix = `_${index}`; name = base.slice(0, 64 - suffix.length) + suffix; }
-        registered.set(name, { client, server, builtInBrowser, name: tool.name, schema, searched: searchable.has(server) });
+        registered.set(name, { client, server, identity, builtInBrowser, name: tool.name, schema, searched: searchable.has(server) });
         definitions.push({ type: "function", function: { name, description, parameters } });
         if (Buffer.byteLength(JSON.stringify(definitions)) > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
       }
@@ -347,8 +368,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     const tool = registered.get(name);
     const runs = tool ? target(tool, args) : name;
     if (runs === undefined) return { title: name, input: args, ask: false };
-    if (!tool?.searched || tool.name !== CALL_TOOL) return { title: name, input: args, ask: true };
-    return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true };
+    const grant = tool ? `${tool.server}\n${tool.identity}\n${runs}` : undefined;
+    if (!tool?.searched || tool.name !== CALL_TOOL) return { title: name, input: args, ask: true, ...(grant ? { grant } : {}) };
+    return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
   };
   return {
     definitions, validate, view, close,

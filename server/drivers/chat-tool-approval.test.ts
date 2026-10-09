@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createChatToolApproval } from "./chat-tool-approval.ts";
+import { chatSessionOperationKey, createChatSessionMemory, createChatToolApproval, SESSION_KEYS_PER_THREAD_MAX, SESSION_THREADS_MAX } from "./chat-tool-approval.ts";
 
 afterEach(() => vi.useRealTimers());
 
@@ -183,5 +183,65 @@ describe("chat tool question lifecycle", () => {
     expect(gate.answer(request.id, "allow")).toBe("allowed-once");
 
     await expect(allowed).resolves.toBe(true);
+  });
+
+  it("remembers a session allow only for the exact operation the card carried", async () => {
+    const remember = vi.fn();
+    const open = vi.fn();
+    const gate = createChatToolApproval({
+      signal: new AbortController().signal, open, resolved: vi.fn(), openQuestion: vi.fn(), resolvedQuestion: vi.fn(), remember,
+    });
+    const once = gate.ask("fx_write", "note", "fx_write\n{\"note\":\"one\"}");
+    const session = gate.ask("fx_write", "note", "fx_write\n{\"note\":\"two\"}");
+    const plain = gate.ask("fx_write", "note");
+    const ids = open.mock.calls.map(([request]) => request.id as string);
+
+    expect(gate.answer(ids[0]!, "allow")).toBe("allowed-once");
+    expect(gate.answer(ids[1]!, "allow", undefined, true)).toBe("allowed-once");
+    expect(gate.answer(ids[2]!, "allow", undefined, true)).toBe("allowed-once");
+    expect(remember).toHaveBeenCalledExactlyOnceWith("fx_write\n{\"note\":\"two\"}");
+    await expect(Promise.all([once, session, plain])).resolves.toEqual([true, true, true]);
+
+    const server = "fx\nabc\nwrite";
+    const same = chatSessionOperationKey("fx_write", { note: "one", extra: true }, server);
+    expect(same).toBe(chatSessionOperationKey("fx_write", { extra: true, note: "one" }, server));
+    expect(chatSessionOperationKey("fx_write", { note: "one", extra: true }, "fx\ndef\nwrite")).not.toBe(same);
+    expect(chatSessionOperationKey("fx_write", { note: "one" }, undefined)).toBeNull();
+    expect(chatSessionOperationKey("computer_click", { x: 1 }, server)).toBeNull();
+    expect(chatSessionOperationKey("browser_navigate", { url: "https://example.test" }, server)).toBeNull();
+    expect(chatSessionOperationKey("composio_gmail_send_email", { to: "a@example.test" }, server)).toBeNull();
+    expect(chatSessionOperationKey("ask_user", { questions: [] }, server)).toBeNull();
+  });
+});
+
+describe("chat session memory", () => {
+  it("drops one thread's grants on forget and every grant on clear", () => {
+    const memory = createChatSessionMemory();
+    memory.remember("a", "k1");
+    memory.remember("b", "k1");
+    memory.forget("a");
+    expect(memory.has("a", "k1")).toBe(false);
+    expect(memory.has("b", "k1")).toBe(true);
+    memory.forget("missing");
+    memory.clear();
+    expect(memory.has("b", "k1")).toBe(false);
+    expect(memory.threadCount).toBe(0);
+  });
+
+  it("keeps at most the newest threads and grants", () => {
+    const memory = createChatSessionMemory();
+    for (let index = 0; index <= SESSION_THREADS_MAX; index += 1) memory.remember(`t${index}`, "k");
+    expect(memory.threadCount).toBe(SESSION_THREADS_MAX);
+    expect(memory.has("t0", "k")).toBe(false);
+    expect(memory.has(`t${SESSION_THREADS_MAX}`, "k")).toBe(true);
+    // Using a thread again keeps it from being the oldest.
+    memory.remember("t1", "k");
+    memory.remember("fresh", "k");
+    expect(memory.has("t1", "k")).toBe(true);
+    expect(memory.has("t2", "k")).toBe(false);
+
+    for (let index = 0; index <= SESSION_KEYS_PER_THREAD_MAX; index += 1) memory.remember("many", `k${index}`);
+    expect(memory.has("many", "k0")).toBe(false);
+    expect(memory.has("many", `k${SESSION_KEYS_PER_THREAD_MAX}`)).toBe(true);
   });
 });

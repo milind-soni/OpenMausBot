@@ -349,7 +349,9 @@ export interface ProviderAdapter {
       /** "Always allow this session": hand the provider its own remembered
        * approval (Claude's suggested permission rules, ACP `allow_always`)
        * so it stops asking about this operation for the rest of the
-       * session. The app keeps no grant of its own. */
+       * session. The chat-completions runtime has no provider session to
+       * hand it to, so it keeps that one exact operation in memory for the
+       * thread until the process drops it. It is not written to disk. */
       always?: boolean;
     },
   ): Promise<RequestOutcome>;
@@ -366,6 +368,10 @@ export interface ProviderAdapter {
    *   may already be running, and replaying them would execute them twice. */
   steer?(threadId: ThreadId, text: string): Promise<SteerOutcome>;
   hasSession(threadId: ThreadId): boolean;
+  /** The thread was deleted: drop anything kept in memory for it, such as
+   * the chat-completions runtime's "Always allow this session" grants.
+   * Optional: drivers that keep nothing per thread leave it out. */
+  forgetThread?(threadId: ThreadId): void;
   stopAll(): Promise<void>;
   onEvent(listener: RuntimeEventListener): () => void;
 }
