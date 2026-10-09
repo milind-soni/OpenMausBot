@@ -1518,9 +1518,7 @@ describe("idle tunnel reclaim", () => {
     offlineFor(offline.tunnel, 22);
     connected(healthy.tunnel);
     connected(degraded.tunnel, "degraded");
-    // Below the seven-day floor of OMB_TUNNEL_OFFLINE_RECLAIM_DAYS, so never
-    // idle whatever wrangler.jsonc configures.
-    offlineFor(recentlyDown.tunnel, 5);
+    offlineFor(recentlyDown.tunnel, 3);
     neverRan(recentlySeen.tunnel, 30);
     neverRan(recentlyReconciled.tunnel, 30);
     neverRan(mismatched.tunnel, 30);
@@ -1535,7 +1533,9 @@ describe("idle tunnel reclaim", () => {
     cloudflare.calls.length = 0;
     const logged = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
-    await runScheduledCleanup(worker);
+    // The deployed policy, pinned here so retuning wrangler.jsonc cannot change
+    // which of these endpoints count as idle.
+    await runScheduledCleanup(worker, { OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: "7" });
 
     for (const reclaimed of [neverConnected, offline]) {
       expect(await endpointState(reclaimed.id)).toMatchObject({
