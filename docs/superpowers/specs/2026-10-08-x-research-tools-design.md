@@ -94,8 +94,10 @@ search over many broad ones.
 | `x_post` | `post` (required; an `x.com` or `twitter.com` status URL, or a bare id), `replies` (default false: when true, also the first page of up to 20 replies) | one post, optional replies |
 | `x_profile` | `handle` (required) | profile |
 
-At most 50 posts per call keeps the result under the 24,000-character
-`capResult` threshold, so the bot rarely needs `tool_result_read`.
+At most 50 posts per call. Long posts can still push 50 past the 24,000-character
+`capResult` threshold, so the client drops trailing posts to stay under 22,000
+characters and sets `more`; `newestId` and `more` come first in the JSON so no
+cut can hide them.
 
 ### Result shape
 
@@ -136,9 +138,9 @@ Results are compact JSON text, never a scraper's raw JSON.
 
 - `x_search` appends ` since_id:<id>` to the query, and also drops any post
   whose id is not greater than `sinceId` (ids compared as `BigInt`).
-- `x_user_posts` reads newest first and stops at the first post whose id is not
-  greater than `sinceId`, except a pinned post, which is skipped because it can
-  be old and still be listed first.
+- `x_user_posts` reads newest first. Every row of a fetched page is read (the
+  page is paid for), old ones skipped; an old post past a page's first row ends
+  the paging. A pinned post is never taken as that signal.
 - `sinceId` must be all digits; anything else is a 400 with a plain message.
 
 ## Architecture
@@ -185,7 +187,8 @@ bot ──tools/call──▶ agents-proxy (stdio)
   alias list and drops a row with no usable id. Ids are taken only as digit
   strings or safe integers.
 - Pure helpers (`toPost`, `parsePostRef`, `normalizeHandle`) are exported and
-  tested on their own.
+  tested on their own. Links may be typed without `https://`; X's own pages
+  (`home`, `search`, `i/…`, `explore`…) are never read as handles.
 
 ### `server/routes/x-research.ts` (new): internal routes
 
@@ -252,15 +255,18 @@ Electron credential name `tregToken`.
 ## Settings UI
 
 - `src/components/ApiKeys.tsx`: a `treg` section with label, description and
-  link. It saves through `PUT /api/config`, as the xAI key does; the desktop
-  shell moves it into the encrypted store at boot. Test calls
+  link. In the desktop app it saves through `credential:set` (the encrypted
+  store), like Box and OpenCode Go, so Clear also removes the stored copy; the
+  external save leaves an empty tombstone in config.json. Browsers and dev
+  builds save through `PUT /api/config`. Test calls
   `POST /api/x-research/test` and shows the balance in dollars.
 - `src/components/SettingsModal.tsx`: render the row under Integrations, after
   Box, and add search keywords ("x", "twitter", "treg", "scraper").
 - `src/components/bot-settings/AccessSection.tsx`: the X research card with a
   `Switch` that patches `xResearch`.
 - Bot field `xResearch?: boolean` in `shared/wire.ts` and `src/state/store.tsx`;
-  `PATCH /api/bots/:id` accepts it as a boolean (next to `voiceNotes`);
+  `PATCH /api/bots/:id` accepts it as a boolean (next to `voiceNotes`); the
+  card is hidden while a bot or the New bot defaults are being drafted;
   `src/state/bot-patch-queue.ts` allows it. A paired phone cannot set it:
   phone tokens may patch only the display fields in `CLIENT_BOT_PATCH_FIELDS`
   (`server/request-auth.ts`), and a test pins that `xResearch` is refused.
