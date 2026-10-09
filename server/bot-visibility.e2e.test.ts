@@ -588,9 +588,11 @@ posixOnly("per-bot visibility on a shared workspace", () => {
         body: JSON.stringify({ botId: ids.board, threadId: boardThread }),
       });
       const { token } = await minted.json() as { token: string };
+      const engine = (await api("GET", "/api/instances", undefined, BOSS)).body.instances.find((instance: any) => instance.instanceId === "grok");
       const created = await fetch(`${BASE}/api/internal/create-bot`, {
         method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: "Layoff Modeler", role: "Models RIF scenarios", instructions: "SECRET-INSTR model the reduction" }),
+        body: JSON.stringify({ name: "Layoff Modeler", role: "Models RIF scenarios", instructions: "SECRET-INSTR model the reduction",
+          modelSelection: { instanceId: "grok", model: engine.models.default } }),
       });
       const card = await created.json() as { requestId: string; state: string };
       expect(created.status, JSON.stringify(card)).toBe(201);

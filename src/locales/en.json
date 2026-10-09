@@ -1139,6 +1139,8 @@
   "chat.computerWaking": "Waking {name}'s cloud computer…",
   "chat.jumpToLatest": "Jump to latest",
   "chat.jumpToLatestAria": "Jump to latest messages",
+  "chat.newMessages": "New",
+  "chat.newMessagesAria": "New messages",
   "chat.verify.title": "This run",
   "chat.verify.aria": "This run",
   "chat.verify.steps": "Run steps",

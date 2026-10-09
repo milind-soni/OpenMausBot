@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
+import { withoutTurnClock } from "./testing/turn-clock-text.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const FAKE_CLAUDE = join(ROOT, "server/testing/fake-claude-cli.ts");
@@ -265,7 +266,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
     const listed = await computerCall(sent, "tools/list");
     expect(listed.body.result.tools.map((tool: { name: string }) => tool.name)).toContain("screenshot");
     await finish(bot.id);
-    expect((await lastReply(bot.id))?.text).toContain("reply to: hi");
+    expect(withoutTurnClock((await lastReply(bot.id))?.text ?? "")).toContain("reply to: hi");
     expect(requests.slice(before)).toEqual([]);
     expect(starts(bot.id)).toEqual([]);
     await apiOk("DELETE", `/api/bots/${bot.id}`);

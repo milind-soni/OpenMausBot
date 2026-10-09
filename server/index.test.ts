@@ -10036,6 +10036,24 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("records where the person stopped reading a thread", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      const task = async () => (await api("GET", "/api/bots")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        .tasks.find((candidate: { threadId: string }) => candidate.threadId === bot.threadId);
+      const newest = (await api("GET", `/api/threads/${bot.threadId}/messages?limit=50`)).body.messages.at(-1)?.id;
+      expect(newest).toBeTruthy();
+      expect((await task()).lastReadMessageId).toBeUndefined();
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { unread: true })).status).toBe(200);
+      const read = await api("POST", `/api/bots/${bot.id}/read`, { threadId: bot.threadId });
+      expect(read.status).toBe(200);
+      expect(await task()).toMatchObject({ unread: false, lastReadMessageId: newest });
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("applies a bot's own chat-created routine at once and keeps a teammate's behind its card", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     let routineId = "";

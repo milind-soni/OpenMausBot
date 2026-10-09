@@ -70,6 +70,9 @@ import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
+import { useUnreadDivider } from "@/hooks/use-unread-divider";
+import { unreadMessageIds } from "@/lib/unread-divider";
+import { NewMessagesDivider } from "./NewMessagesDivider";
 import { appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
 import { citationPreviewText, splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
@@ -345,6 +348,8 @@ export const Transcript = memo(function Transcript({
   messages,
   transcript,
   emergingId,
+  unreadDividerId = null,
+  unreadDividerFading = false,
   onReply,
 }: {
   group: Group;
@@ -356,6 +361,9 @@ export const Transcript = memo(function Transcript({
   /** Full room transcript, used to resolve quoted messages outside the mounted window. */
   transcript: Message[];
   emergingId?: string | null;
+  /** The New divider goes above the row holding this message. */
+  unreadDividerId?: string | null;
+  unreadDividerFading?: boolean;
   onReply: (message: Message) => void;
 }) {
   const { state, dispatch } = useStore();
@@ -369,6 +377,15 @@ export const Transcript = memo(function Transcript({
   const newestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id;
   const focus = state.focusMessage;
   const focusedId = focus && !focus.consumed && focus.threadId === group.threadId ? focus.messageId : null;
+  // The divider sits above the first drawn row from its message on; hidden
+  // tool lines are not items here.
+  const unreadIds = useMemo(() => unreadMessageIds(messages, unreadDividerId), [messages, unreadDividerId]);
+  let dividerPlaced = false;
+  const dividerAbove = (rows: readonly Message[]) => {
+    if (!unreadIds || dividerPlaced || !rows.some((row) => unreadIds.has(row.id))) return null;
+    dividerPlaced = true;
+    return <NewMessagesDivider fading={unreadDividerFading} />;
+  };
   return (
     <>
       {items.map((item, i) => {
@@ -376,8 +393,9 @@ export const Transcript = memo(function Transcript({
         const prev = previous && (previous.kind === "run" ? previous.messages.at(-1) : previous.message);
         const first = item.kind === "run" ? item.messages[0] : item.message;
         const newDay = !prev || localDay(prev.at) !== localDay(first.at);
+        const divider = dividerAbove(item.kind === "run" ? item.messages : [item.message]);
         if (item.kind === "run") {
-          if (!showToolCalls) return null;
+          if (!showToolCalls) return divider && <div key={item.id} className="contents">{divider}</div>;
           const cluster = !prev || prev.role !== first.role || prev.from?.botId !== first.from?.botId || newDay;
           return (
             <div key={item.id} className="contents">
@@ -386,6 +404,7 @@ export const Transcript = memo(function Transcript({
                   {dayLabel(first.at)} {formatTime(first.at)}
                 </div>
               )}
+              {divider}
               {first.from && cluster && (
                 <ClusterLabel bot={memberOf(first.from.botId)} name={first.from.name} color={first.from.color} />
               )}
@@ -473,7 +492,7 @@ export const Transcript = memo(function Transcript({
               onReply={onReply}
             />
           ) : null;
-        if (!row) return null;
+        if (!row) return divider && <div key={m.id} className="contents">{divider}</div>;
         return (
           <div key={m.id} className="contents" data-mid={m.id}>
             {newDay && (
@@ -481,6 +500,7 @@ export const Transcript = memo(function Transcript({
                 {dayLabel(m.at)} {formatTime(m.at)}
               </div>
             )}
+            {divider}
             {!user && m.from && newCluster && !(m.kind === "activity" && m.comm) && (
               <ClusterLabel bot={memberOf(m.from.botId)} name={m.from.name} color={m.from.color} />
             )}
@@ -1183,6 +1203,7 @@ export function GroupView({ group }: { group: Group }) {
     pinOn: [group.busyBotId, group.working, composerDock.pad],
     transcriptShown: !setupPending,
   });
+  const unreadDivider = useUnreadDivider({ threadId: group.threadId, messages: group.messages, following });
 
   useEffect(() => setBulletinDraft(group.bulletin), [group.id, group.bulletin]);
   // an open folder editor belongs to the room it was opened in
@@ -1487,6 +1508,8 @@ export function GroupView({ group }: { group: Group }) {
             messages={windowedMessages}
             transcript={group.messages}
             emergingId={popping?.id}
+            unreadDividerId={unreadDivider.messageId}
+            unreadDividerFading={unreadDivider.fading}
             onReply={selectReply}
           />
           {laterCount > 0 && (

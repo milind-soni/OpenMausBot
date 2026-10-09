@@ -17,7 +17,7 @@ const BROWSER_RESTART_TOOL_SPEC = {
   description: "Close and restart your browser. Use this only when a browser tool says a browser action was interrupted and the browser must be restarted. Open pages are closed; afterwards open the page you need again and check whether the interrupted action already happened before repeating it.",
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
 };
-const BROWSER_INTERRUPTED = `A browser action was interrupted. Restart this browser with the ${BROWSER_RESTART_TOOL} tool before continuing.`;
+const BROWSER_INTERRUPTED = `The browser engine is stuck. Press Restart in the Browser panel, or call ${BROWSER_RESTART_TOOL}, before using browser tools again.`;
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 16_777_216;
 /** Startup, not per-request work: a cold engine spawn can exceed a tight
@@ -53,6 +53,14 @@ export function ownsBrowserViewport(env: NodeJS.ProcessEnv): boolean {
 }
 
 export class TransportError extends Error {}
+
+/** An error the engine answered: the action ran and failed (a page that
+ * would not load). Nothing is left running in the browser, so unlike a
+ * timeout or a lost connection it does not need a restart. Errors mark
+ * themselves with `settled: true`. */
+export function isSettledBrowserFailure(error: unknown): boolean {
+  return (error as { settled?: unknown } | null)?.settled === true;
+}
 type Pending = { resolve: (result: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout };
 
 /** A server-owned JSONL client. Neither child stderr nor its environment is
@@ -307,7 +315,11 @@ export class BrowserRuntime {
     // tool is reachable and the engine's tools are there once it succeeds.
     if (this.gate(session).uncertain) {
       if (method === "tools/list") return withRestartTool(this.toolLists.get(session) ?? { tools: [] });
-      throw new Error(BROWSER_INTERRUPTED);
+      // A person still holding the browser hears the pause, not the stuck
+      // engine. Once they hand it back, the call is a tool result — not a
+      // dead MCP server — so this thread can Restart and continue.
+      if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+      return stuckBrowserToolError();
     }
     const invoke = async () => {
       const key = JSON.stringify([spec.command, spec.args, Object.entries(spec.env).sort(([a], [b]) => a.localeCompare(b))]);
@@ -394,7 +406,13 @@ export class BrowserRuntime {
         throw error;
       }
     };
-    return method === "tools/call" ? this.withAgentAction(session, invoke) : invoke();
+    if (method !== "tools/call") return invoke();
+    try {
+      return await this.withAgentAction(session, invoke);
+    } catch (error) {
+      if (error instanceof Error && error.message === BROWSER_INTERRUPTED) return stuckBrowserToolError();
+      throw error;
+    }
   }
 
   /** Resolves true when the grant had to wait for the bot's own browser
@@ -463,8 +481,11 @@ export class BrowserRuntime {
     catch (error) {
       // Validation happens before entry. A failed accepted command might still
       // be executing in the daemon; hand-back must not race its completion.
-      gate.uncertain = true;
-      gate.ready = false;
+      // One the engine answered as failed is over, and the browser stays usable.
+      if (!isSettledBrowserFailure(error)) {
+        gate.uncertain = true;
+        gate.ready = false;
+      }
       throw error;
     }
     finally { gate.humans--; this.changed(gate); }
@@ -544,6 +565,10 @@ export class BrowserRuntime {
   async closeAll(): Promise<void> {
     await Promise.all([...new Set([...this.clients.keys(), ...this.gates.keys()])].map((session) => this.close(session)));
   }
+}
+
+function stuckBrowserToolError(): { isError: true; content: Array<{ type: "text"; text: string }> } {
+  return { isError: true, content: [{ type: "text", text: BROWSER_INTERRUPTED }] };
 }
 
 function withRestartTool(result: unknown): unknown {
