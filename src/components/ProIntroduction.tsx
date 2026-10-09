@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { ArrowUpRight, CalendarClock, Cloud, Crown, Monitor, Sparkles, X } from "lucide-react";
 import type { CloudAccountState } from "../../electron/cloud-account.mjs";
 import { api, CLOUD_LINK_SETTINGS, useStore } from "@/state/store";
@@ -100,6 +100,36 @@ export function ProSettingsCard() {
         <p className="mt-1 text-[12px] text-ink-secondary">{view.kind === "reauth" ? t("pro.reauthShort") : line}</p></div>
     </div>
     <button type="button" className="ui-button" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}>{t("pro.openCloudSettings")}</button>
+  </section>;
+}
+
+/** Live calls need a Pro plan (the harness's 402 `needsPro`): the Pro card,
+ * in the call button's pop-up where the key form would be. The same rule as
+ * the card in Settings: an offer only where buyOfferAllowed says (signed
+ * out, signing in first); anyone who pays, may pay, or whose plan is not
+ * known yet sees that plan, when there is one to name, and the way to it. A
+ * window that cannot read the plan (a browser, a server's page) says only
+ * what Live calls need. */
+export function LiveProPrompt() {
+  const { dispatch } = useStore();
+  const view = useCloudPlan();
+  const titleId = useId();
+  const offer = view && buyOfferAllowed(view) ? view : null;
+  const line = !view || offer ? null : view.kind === "reauth" ? t("pro.reauthShort") : cloudPlanLine(view);
+  return <section aria-labelledby={titleId} data-cloud-plan={view?.kind} className="flex flex-col gap-2.5 rounded-xl border border-hairline bg-panel p-4 text-left">
+    <div className="flex items-center gap-2.5">
+      <Crown size={16} className="shrink-0 text-ink-secondary" aria-hidden="true" />
+      <h2 id={titleId} className="text-[13.5px] font-medium text-ink">{t("call.live.proTitle")}</h2>
+    </div>
+    <p className="text-[12.5px] leading-[1.45] text-ink-secondary">{t("call.live.proExplain")}</p>
+    {offer ? <>
+      {offer.kind === "signed-out" && <SignInFirst onSignIn={() => dispatch(CLOUD_LINK_SETTINGS)} />}
+      <p className="text-[12px] text-ink-secondary">{t("pro.fromPrice", { price: CLOUD_PERSONAL_PRICE })}</p>
+      <div className="flex flex-wrap items-center gap-3"><ProLink /><PlansLink /></div>
+    </> : view && <>
+      {line && <p className="text-[12.5px] text-ink">{line}</p>}
+      <button type="button" className="ui-button self-start" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}>{t("pro.openCloudSettings")}</button>
+    </>}
   </section>;
 }
 

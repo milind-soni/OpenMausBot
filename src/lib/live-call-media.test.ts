@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentCall } from "./call";
 import {
-  applyCaption, checkLiveSignIn, configureLiveMedia, dismissKeyPrompt, endNotice, handleLiveCallKey, hangUpLiveCall, isLiveCallRunning, liveCallShortcut,
+  applyCaption, checkLiveSignIn, configureLiveMedia, dismissStartPrompt, endNotice, handleLiveCallKey, hangUpLiveCall, isLiveCallRunning, liveCallShortcut,
   liveMedia, onLiveStreamConnected, onServerCall, resetLiveMedia, setLiveMuted, startLiveCall, subscribeLiveMedia, takeLiveCallAction,
 } from "./live-call-media";
 import { ApiError } from "@/state/store";
@@ -118,6 +118,21 @@ describe("live call media", () => {
     expect(liveMedia()).toMatchObject({ phase: "idle", needsKey: true });
     expect(track.stopped).toBe(true);
     expect(currentCall()).toBeNull();
+  });
+
+  // Live calls need a Pro plan; the harness says so before it would ask for a key.
+  it("shows the Pro prompt, never the key form, and releases the microphone", async () => {
+    request.mockRejectedValueOnce(new ApiError("Live calls need a Pro plan.", 402, { needsPro: true }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    expect(liveMedia()).toMatchObject({ phase: "idle", needsPro: true, needsKey: false, botId: "b1", threadId: "t1", notice: null, action: null });
+    expect(track.stopped).toBe(true);
+    expect(peer.closed).toBe(true);
+    expect(currentCall()).toBeNull();
+    // no session exists, so there is nothing to end on the harness
+    expect(endRequests()).toEqual([]);
+    // the next call starts clean
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    expect(liveMedia()).toMatchObject({ phase: "starting", needsPro: false, callId: "c1" });
   });
 
   it("says who is on the line when another call runs", async () => {
@@ -514,10 +529,19 @@ describe("live call media", () => {
   it("drops the key prompt only for the bot it was left for", async () => {
     request.mockRejectedValueOnce(new ApiError("Add an OpenAI API key to use Live calls.", 409, { needsKey: true }));
     await startLiveCall({ botId: "b1", threadId: "t1" });
-    dismissKeyPrompt("b2");
+    dismissStartPrompt("b2");
     expect(liveMedia()).toMatchObject({ needsKey: true, botId: "b1" });
-    dismissKeyPrompt("b1");
+    dismissStartPrompt("b1");
     expect(liveMedia()).toMatchObject({ phase: "idle", needsKey: false, botId: null });
+  });
+
+  it("drops the Pro prompt only for the bot it was left for", async () => {
+    request.mockRejectedValueOnce(new ApiError("Live calls need a Pro plan.", 402, { needsPro: true }));
+    await startLiveCall({ botId: "b1", threadId: "t1" });
+    dismissStartPrompt("b2");
+    expect(liveMedia()).toMatchObject({ needsPro: true, botId: "b1" });
+    dismissStartPrompt("b1");
+    expect(liveMedia()).toMatchObject({ phase: "idle", needsPro: false, botId: null });
   });
 
   it("plays blocked audio on the next click and clears the hint", async () => {

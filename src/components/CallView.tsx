@@ -26,7 +26,7 @@ import { useMenuMotion } from "./MenuMotion";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
 import { CALL_MODES, callModeHint, effectiveCallMode, setCallMode, useCallMode, type CallMode } from "@/lib/call-mode";
 import { NO, YES } from "../../shared/call-consent";
-import { dismissKeyPrompt, hangUpLiveCall, isLiveCallRunning, startLiveCall, useLiveMedia } from "@/lib/live-call-media";
+import { dismissStartPrompt, hangUpLiveCall, isLiveCallRunning, startLiveCall, useLiveMedia } from "@/lib/live-call-media";
 import { t } from "@/lib/i18n";
 import { speaker } from "@/lib/tts";
 import { localSystemVoiceActive } from "@/lib/local-voice";
@@ -35,6 +35,7 @@ import { usePushToTalk } from "@/lib/push-to-talk";
 import { BotAvatar } from "./Avatar";
 import { navigateThreadMenu } from "./BotProjects";
 import { LiveKeySetup } from "./LiveKeySetup";
+import { LiveProPrompt } from "./ProIntroduction";
 import { liveLineHeldElsewhere } from "./LiveCallBar";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { track } from "@/lib/analytics";
@@ -152,13 +153,19 @@ export function CallTargetButton({
   // here. A Live call always asks for the microphone first, so a page that
   // can't have one says so before anyone pastes a key it can't use.
   const keyPopover = canLive && !active && media.needsKey && media.botId === targetId;
+  // The harness answered that Live calls need a Pro plan (it asks for a key
+  // only after that): the Pro card here, where the key form would be.
+  const proPopover = canLive && !active && media.needsPro && media.botId === targetId;
+  const startPrompt = keyPopover || proPopover;
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const chevronRef = useRef<HTMLButtonElement>(null);
   const keyRef = useRef<HTMLDivElement>(null);
+  const proRef = useRef<HTMLDivElement>(null);
   const helpId = useId();
   const menuId = useId();
   const keyId = useId();
+  const proId = useId();
   const elsewhereName = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId)?.name : undefined;
   const composer = placement === "composer";
   const label = active
@@ -192,16 +199,18 @@ export function CallTargetButton({
   const closePopovers = useCallback(() => {
     setHelpOpen(false);
     setMenuOpen(false);
-    dismissKeyPrompt(targetId);
+    dismissStartPrompt(targetId);
   }, [targetId]);
 
-  // The "no key" answer belongs to this chat's call attempt: leaving the
-  // chat drops it, so it never reopens (and takes focus) on a later visit.
-  useEffect(() => () => dismissKeyPrompt(targetId), [targetId]);
+  // The "no key" (or "no Pro plan") answer belongs to this chat's call
+  // attempt: leaving the chat drops it, so it never reopens (and takes
+  // focus) on a later visit.
+  useEffect(() => () => dismissStartPrompt(targetId), [targetId]);
 
   /** Start a call in this mode. Live never opens the overlay: the media
    * module marks the call and the call bar shows it. A Live call with no key
-   * yet asks for the microphone, then for the key (the harness's needsKey). */
+   * yet asks for the microphone, then for the key (the harness's needsKey);
+   * without a Pro plan, it shows the Pro card instead (needsPro). */
   const start = (next: CallMode) => {
     setHelpOpen(false);
     setMenuOpen(false);
@@ -218,7 +227,7 @@ export function CallTargetButton({
     startCall(targetId);
   };
 
-  const popoverOpen = helpOpen || menuOpen || keyPopover;
+  const popoverOpen = helpOpen || menuOpen || startPrompt;
   useEffect(() => {
     if (!popoverOpen) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
@@ -245,6 +254,15 @@ export function CallTargetButton({
     keyShown.current = keyPopover;
     if (opened) keyRef.current?.querySelector<HTMLInputElement>("input")?.focus();
   }, [keyPopover]);
+  // ...and on the Pro card itself: what it offers depends on the plan, which
+  // arrives a moment after it opens, so a button focused first could be
+  // replaced under the person's focus.
+  const proShown = useRef(proPopover);
+  useEffect(() => {
+    const opened = proPopover && !proShown.current;
+    proShown.current = proPopover;
+    if (opened) proRef.current?.focus();
+  }, [proPopover]);
 
   // Another device (a phone, another window) holds the one Live line: no
   // button that would start a Live call here, as on the iPhone. The remote
@@ -263,7 +281,7 @@ export function CallTargetButton({
             return;
           }
           if (onCall) return endCall(targetId);
-          if (keyPopover) {
+          if (startPrompt) {
             closePopovers();
             return;
           }
@@ -274,8 +292,8 @@ export function CallTargetButton({
           }
           start(liveMode ? "live" : "turns");
         }}
-        aria-expanded={unavailable ? helpOpen : keyPopover ? true : undefined}
-        aria-controls={unavailable ? helpId : keyPopover ? keyId : undefined}
+        aria-expanded={unavailable ? helpOpen : startPrompt ? true : undefined}
+        aria-controls={unavailable ? helpId : keyPopover ? keyId : proPopover ? proId : undefined}
         aria-label={label}
         title={label}
         data-call-button={placement}
@@ -350,6 +368,17 @@ export function CallTargetButton({
             // the press that asked for the key already counted as a call
             onSaved={() => void startLiveCall({ botId: targetId, threadId: liveThreadId })}
           />
+        </div>
+      )}
+
+      {proPopover && (
+        <div
+          ref={proRef}
+          id={proId}
+          tabIndex={-1}
+          className={cn("animate-pop-in absolute right-0 z-30 w-[340px] max-w-[90vw] rounded-xl shadow-2xl outline-none", composer ? "bottom-full mb-1.5" : "top-full mt-1.5")}
+        >
+          <LiveProPrompt />
         </div>
       )}
 

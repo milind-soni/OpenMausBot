@@ -3616,6 +3616,8 @@
   "call.live.keyField": "OpenAI API key for Live calls",
   "call.live.keySaving": "Saving…",
   "call.live.keySaveAndCall": "Save and start the call",
+  "call.live.proTitle": "Live calls need a Pro plan",
+  "call.live.proExplain": "Any active OpenMausBot Cloud plan unlocks them: Personal, Pro or Max. Calls also use your own OpenAI API key.",
   "settings.group.you": "You",
   "settings.group.ai": "AI",
   "settings.group.computers": "Computers",

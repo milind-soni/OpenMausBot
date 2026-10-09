@@ -16,7 +16,7 @@ vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f
 vi.mock("@/lib/analytics", () => ({ emailGateDone: () => false }));
 vi.mock("@/lib/updater", () => ({ useUpdaterState: () => f.updater }));
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
-import { PRO_DISMISSED, ProIntroduction, ProSettingsCard, proOfferAvailable } from "./ProIntroduction";
+import { LiveProPrompt, PRO_DISMISSED, ProIntroduction, ProSettingsCard, proOfferAvailable } from "./ProIntroduction";
 
 /** The first card's dismissal id, in browser storage and the workspace hint record. */
 const OLD_DISMISSED = "pro-introduction-dismissed";
@@ -168,4 +168,51 @@ it("in Settings, someone with a plan sees that plan and the way to it, never Get
   let tree: ReactNode; function Capture() { tree = ProSettingsCard(); return tree; } renderToStaticMarkup(createElement(Capture));
   nodes(tree).find(node => node.type === "button" && node.props.children === "OMB Cloud settings")!.props.onClick!();
   expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
+});
+
+// Live calls need a Pro plan (the harness's 402 needsPro): the call button
+// shows this card where the key form would be. It is the Pro card's rule:
+// an offer only to someone signed out (signing in first) or free.
+const livePrompt = (state: CloudAccountState | null) => { f.values = [state]; f.index = 0; return renderToStaticMarkup(createElement(LiveProPrompt)); };
+it("for a Live call, offers Pro only to someone signed out, signing in first, or free", () => {
+  const out = livePrompt(signedOut);
+  for (const text of ["Live calls need a Pro plan", "Personal, Pro or Max", "Already have a Cloud plan?", "OMB Cloud plans from $29/month", "Get Pro", "See all plans"]) expect(out).toContain(text);
+  expect(out.indexOf("Already have a Cloud plan?")).toBeLessThan(out.indexOf("Get Pro"));
+  const free = livePrompt(plan());
+  expect(free).toContain("Get Pro"); expect(free).not.toContain("Already have a Cloud plan?");
+  // Sign in opens Settings at the Cloud sign-in, as the Pro card's does.
+  f.values = [signedOut]; f.index = 0;
+  let tree: ReactNode; function Capture() { tree = LiveProPrompt(); return tree; } renderToStaticMarkup(createElement(Capture));
+  const signIn = nodes(tree).find(node => typeof (node.props as { onSignIn?: unknown }).onSignIn === "function") as ReactElement<{ onSignIn: () => void }>;
+  signIn.props.onSignIn();
+  expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true });
+});
+it("for a Live call, someone who pays, may pay, or whose plan is unknown sees the plan and the way to it, never an offer", () => {
+  for (const [state, text] of [
+    [plan({ entitlement: paid("pro", "inactive") }), "Pro · not active right now"],
+    [plan({ machine: { status: "payment-problem", origin: "https://home.fly.dev" } }), "OpenMausBot Cloud · not active right now"],
+    [plan({ purchase: { state: "confirming", tier: "personal" } }), "Personal · payment received"],
+    [plan({ entitlement: paid("max") }), "Max active · verified by OpenMausBot Cloud"],
+    [{ status: "unavailable", lastPlan: { tier: "personal", active: false } }, "Personal · checking with OpenMausBot Cloud…"],
+    [{ status: "reauth-required", message: "expired", lastPlan: { tier: "max", active: false } }, "Sign in again to use your Cloud on this computer"],
+    [{ status: "unavailable" }, null], [{ status: "connecting" }, null], [{ status: "signed-out", message: "restoring" }, null], [null, null],
+  ] as const) {
+    const html = livePrompt(state as CloudAccountState | null);
+    expect(html, JSON.stringify(state)).toContain("Live calls need a Pro plan");
+    if (text) expect(html, JSON.stringify(state)).toContain(text);
+    expect(html, JSON.stringify(state)).toContain("OMB Cloud settings");
+    for (const offer of ["Get Pro", "See all plans", "$29", "Already have a Cloud plan?"]) expect(html, JSON.stringify(state)).not.toContain(offer);
+  }
+  f.values = [plan({ entitlement: paid("pro", "inactive") })]; f.index = 0;
+  let tree: ReactNode; function Capture() { tree = LiveProPrompt(); return tree; } renderToStaticMarkup(createElement(Capture));
+  nodes(tree).find(node => node.type === "button" && node.props.children === "OMB Cloud settings")!.props.onClick!();
+  expect(f.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
+});
+it("for a Live call, a window that cannot read the plan (a browser, a server's page) says only what Live calls need", () => {
+  for (const ogb of [{}, { cloudAccount: window.ogb!.cloudAccount, remoteClient: { active: true } }]) {
+    vi.stubGlobal("window", { ogb });
+    const html = livePrompt(signedOut);
+    expect(html).toContain("Live calls need a Pro plan");
+    for (const more of ["Get Pro", "See all plans", "Already have a Cloud plan?", "OMB Cloud settings"]) expect(html).not.toContain(more);
+  }
 });
