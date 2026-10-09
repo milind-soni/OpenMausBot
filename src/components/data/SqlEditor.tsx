@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { EditorView, minimalSetup } from "codemirror";
-import { Annotation, Compartment, EditorState } from "@codemirror/state";
+import { Annotation, Compartment } from "@codemirror/state";
 import { PostgreSQL, SQLDialect, sql as sqlLanguage } from "@codemirror/lang-sql";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
@@ -30,7 +30,7 @@ const appearance = (scheme: ColorScheme) => [
 ];
 
 /** Local query echoes preserve the draft; a completed bot edit is authoritative. */
-export function SqlEditor({ sql, externalRevision, readOnly, onChange }: { sql: string; externalRevision?: string; readOnly?: boolean; onChange: (sql: string) => void }) {
+export function SqlEditor({ sql, externalRevision, onChange }: { sql: string; externalRevision?: string; onChange: (sql: string) => void }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const configuration = useRef(new Compartment());
@@ -57,10 +57,10 @@ export function SqlEditor({ sql, externalRevision, readOnly, onChange }: { sql: 
   }, []);
   useEffect(() => {
     view.current?.dispatch({ effects: configuration.current.reconfigure([
-      ...appearance(scheme), EditorState.readOnly.of(Boolean(readOnly)), EditorView.editable.of(!readOnly),
+      ...appearance(scheme),
       EditorView.contentAttributes.of({ "aria-label": t("data.editor.label"), "aria-multiline": "true", spellcheck: "false" }),
     ]) });
-  }, [scheme, readOnly]);
+  }, [scheme]);
   useEffect(() => {
     if (externalRevision === undefined || externalRevision === lastExternalRevision.current) return;
     lastExternalRevision.current = externalRevision;

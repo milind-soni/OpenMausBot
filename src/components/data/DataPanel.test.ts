@@ -67,6 +67,10 @@ const typeAndRun = async (text: string) => {
   await settle();
 };
 const runRequests = () => fixture.api.mock.calls.filter(([path]) => path.endsWith("/run"));
+const cancelRequests = () => fixture.api.mock.calls.filter(([path]) => path.endsWith("/cancel"));
+/** Runs never answer, so a request is still on the wire when the test looks at it. */
+const holdRuns = () => fixture.api.mockImplementation((path: string) => path.endsWith("/run") ? new Promise(() => {}) : Promise.resolve(page));
+const cancelButton = () => [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Cancel");
 const viewedResult = () => fixture.dispatch.mock.calls.filter(([action]) => action.type === "dataView").at(-1)?.[0].view;
 const separator = () => host.querySelector<HTMLDivElement>('[data-testid="data-query-resize"]')!;
 const dock = () => host.querySelector<HTMLDivElement>('[data-testid="data-query"]')!;
@@ -156,6 +160,7 @@ describe("DataPanel", () => {
 
   it("clears selection context for missing results, other bots, and thread changes", async () => {
     fixture.sheets.pepper = sheet([card("orders", {})]);
+    holdRuns();
     render();
     await settle();
     await typeAndRun("select unfinished");
@@ -306,8 +311,64 @@ describe("DataPanel", () => {
     fixture.sheets = { pepper: sheet([]) };
     render();
     await settle();
-    expect(host.querySelector('[data-testid="data-empty"]')?.textContent).toBe("Ask your bot to load a file and show a result.");
+    expect(host.querySelector('[data-testid="data-empty"]')?.textContent).toBe("Ask your bot to load a file, or write SQL below.");
     expect(fixture.dispatch.mock.calls.filter(([action]) => action.type === "loadDataSheet")).toHaveLength(1);
+  });
+
+  it("offers SQL on an empty sheet: the first run makes the card, which takes over without losing the typing", async () => {
+    fixture.sheets = { pepper: sheet([]) };
+    let answerCreate!: (body: unknown) => void;
+    fixture.api.mockImplementation((path: string) => path.endsWith("/run") ? new Promise((resolve) => { answerCreate = resolve; }) : Promise.resolve(page));
+    render();
+    await settle();
+    expect(editorValue()).toBe("");
+    expect(viewedResult()).toBeNull();
+    await typeAndRun("select 1");
+    expect(runRequests()).toHaveLength(1);
+    expect(JSON.parse(runRequests()[0]![1].body)).toEqual({ sql: "select 1" });
+    expect(host.querySelector('[data-testid="data-result-footer"]')?.textContent).toContain("Running…");
+    // Typed before the card arrives: no second card, the text waits for it.
+    await typeAndRun("select 1 + 1");
+    expect(runRequests()).toHaveLength(1);
+    const created = card("c_new", { by: "person", status: "running", result: null, rowCount: undefined, sql: "select 1" });
+    fixture.sheets = { pepper: sheet([created]) };
+    render();
+    await settle();
+    expect(host.querySelector("article")?.getAttribute("data-card-id")).toBe("c_new");
+    expect(editorValue()).toBe("select 1 + 1");
+    expect(viewedResult()).toEqual({ botId: "pepper", threadId: "thread-1", cardId: "c_new", draftSql: "select 1 + 1" });
+    // The waiting text runs on the new card; with no result yet it is a plain re-run, not a live edit.
+    expect(runRequests()).toHaveLength(2);
+    expect(JSON.parse(runRequests()[1]![1].body)).toEqual({ cardId: "c_new", sql: "select 1 + 1" });
+    answerCreate({ card: { id: "c_new" }, result: { id: "c_new" } });
+    await settle();
+    fixture.sheets = { pepper: sheet([{ ...created, status: "ready", result: "q_new", rowCount: 2, sql: "select 1 + 1" }]) };
+    render();
+    await settle();
+    expect(editorValue()).toBe("select 1 + 1");
+    expect(viewedResult()).toEqual({ botId: "pepper", threadId: "thread-1", cardId: "c_new" });
+    await typeAndRun("select 2");
+    expect(JSON.parse(runRequests()[2]![1].body)).toEqual({ cardId: "c_new", sql: "select 2", live: true });
+    expect(host.querySelector('[data-testid="data-result-footer"]')?.textContent).toContain("Running…");
+  });
+
+  it("shows Cancel while a live run is on the wire; Cancel drops it and asks the server to stop the card", async () => {
+    fixture.sheets = { pepper: sheet([card("orders", {})]) };
+    holdRuns();
+    render();
+    await settle();
+    expect(cancelButton()).toBeUndefined();
+    await typeAndRun("select 2");
+    const signal = runRequests()[0]![1].signal as AbortSignal;
+    expect(host.querySelector('[data-testid="data-result-footer"]')?.textContent).toContain("Running…");
+    expect(host.querySelector('[role="region"]')).not.toBeNull();
+    flushSync(() => cancelButton()!.click());
+    await settle();
+    expect(signal.aborted).toBe(true);
+    expect(cancelRequests().map(([path, init]) => [path, init.method, JSON.parse(init.body)])).toEqual([["/api/bots/pepper/data/cancel", "POST", { cardId: "orders" }]]);
+    expect(cancelButton()).toBeUndefined();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(editorValue()).toBe("select 2");
   });
 
   it("shows only the latest result, preserves history and keeps SQL and references in one dock", async () => {
@@ -320,7 +381,8 @@ describe("DataPanel", () => {
     expect(host.querySelectorAll("article")).toHaveLength(1);
     expect(host.querySelector("article")?.getAttribute("aria-label")).toBe("Reading");
     expect(host.querySelector("article h3, article header")).toBeNull();
-    expect(host.querySelector('[data-testid="sql-editor"]')).toBeNull();
+    // A text result has no SQL: the box is there, empty, for a new query.
+    expect(editorValue()).toBe("");
     expect(host.querySelector('[data-testid="sources-strip"]')?.textContent).toContain("sales");
     expect(host.querySelector('[data-testid="markdown"]')?.textContent).toBe("**Up** 12%");
     expect(fixture.api).not.toHaveBeenCalled();
@@ -372,17 +434,20 @@ describe("DataPanel", () => {
     render();
     await settle();
     expect(host.textContent).toContain("Running…");
-    const cancel = [...host.querySelectorAll("button")].find((button) => button.textContent === "Cancel")!;
-    flushSync(() => cancel.click());
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "cancelDataCard", botId: "pepper", cardId: "slow" });
-    expect(editorDom().getAttribute("contenteditable")).toBe("false");
+    flushSync(() => cancelButton()!.click());
+    await settle();
+    expect(cancelRequests().map(([, init]) => JSON.parse(init.body))).toEqual([{ cardId: "slow" }]);
     expect(editorValue()).toBe("select * from slow");
+    // Still editable: with no result to keep, an edit re-runs the card outright.
     const editor = editorDom();
-    fixture.sheets = { pepper: sheet([card("slow", {})]) };
+    await typeAndRun("select 5");
+    expect(JSON.parse(runRequests()[0]![1].body)).toEqual({ cardId: "slow", sql: "select 5" });
+    fixture.sheets = { pepper: sheet([card("slow", { by: "person", sql: "select 5" })]) };
     render();
     await settle();
     expect(editorDom()).toBe(editor);
-    expect(editorDom().getAttribute("contenteditable")).toBe("true");
+    expect(editorValue()).toBe("select 5");
+    expect(cancelButton()).toBeUndefined();
   });
 
   it("shows DuckDB's own message on a failed result, with SQL still available", async () => {
@@ -400,6 +465,7 @@ describe("DataPanel", () => {
 
   it("runs the text once typing pauses, latest text winning, and aborts the run a newer edit replaces", async () => {
     fixture.sheets = { pepper: sheet([card("orders", {})]) };
+    holdRuns();
     render();
     await settle();
     // Five keystrokes inside the pause: one run, with the final text.
@@ -425,6 +491,7 @@ describe("DataPanel", () => {
 
   it("keeps typed SQL through broadcasts and prefills the newly selected result", async () => {
     fixture.sheets = { pepper: sheet([card("old", {}), card("orders", {})]) };
+    holdRuns();
     render();
     await settle();
     expect(editorValue()).toBe("select * from orders");
@@ -527,7 +594,7 @@ describe("DataPanel", () => {
     render();
     await settle();
     let rejectOld!: (error: Error) => void;
-    fixture.api.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
+    holdRuns().mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
     await typeAndRun("select incomplete");
     await typeAndRun("select 1");
     rejectOld(new Error("Old query error"));

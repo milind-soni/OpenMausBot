@@ -3860,7 +3860,7 @@
   "screenLoad.failed": "This screen couldn’t load. Reload the window to open it.",
   "screenLoad.reload": "Reload",
   "data.loading": "Loading data…",
-  "data.empty": "Ask your bot to load a file and show a result.",
+  "data.empty": "Ask your bot to load a file, or write SQL below.",
   "data.history": "History",
   "data.latest": "Latest result",
   "data.openResult": "Open in Data",
