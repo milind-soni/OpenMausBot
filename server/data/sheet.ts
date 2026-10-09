@@ -3,7 +3,7 @@
 // their chart spec, never their rows: rows live in DuckDB (omb_results) and
 // the panel pages them, so the file stays small enough to send whole on
 // every change. One store per bot; the tools and the panel routes share it.
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { DATA_LIMITS, type DataBroadcast, type DataCard, type DataSheet, type DataSource } from "../../shared/data-surface.ts";
@@ -218,8 +218,15 @@ export class DataSheetRegistry {
     return store;
   }
 
-  /** When a bot is deleted: the folder goes with it, so forget the store. */
+  /** Drops the in-memory store (a test, or a bot whose folder is gone). */
   forget(botId: string): void {
     this.stores.delete(botId);
+  }
+
+  /** When a bot is deleted: forget the store and remove its sheet.json. */
+  delete(botId: string): void {
+    const dir = this.deps.dir?.(botId) ?? botFolder(botId);
+    this.stores.delete(botId);
+    rmSync(join(dir, SHEET_FILE), { force: true });
   }
 }

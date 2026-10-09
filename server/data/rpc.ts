@@ -6,6 +6,9 @@
 import { DATA_INSTRUCTIONS } from "./instructions.ts";
 import { DATA_TOOLS, dataErrorResult, dataToolCallProblem, runDataTool, type DataContext, type DataToolResult } from "./tools.ts";
 
+/** Where harness-mcp-proxy data posts: `/api/internal/${kind}/mcp`. */
+export const DATA_INTERNAL_MCP_PATH = "/api/internal/data/mcp";
+
 export interface DataRpcDeps extends Omit<DataContext, "connection" | "by"> {
   /** Throws when the turn's capability is no longer live. */
   assertActive(): void;
