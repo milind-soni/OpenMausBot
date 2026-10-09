@@ -84,6 +84,7 @@ import { createComputerSharing, validateSharedFolders } from "./computer-sharing
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
 import { cloudPlanSnapshot, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
+import { createIncludedXSync } from "./included-x.mjs";
 import { cloudHomeConnectUrl, cloudPlanDisk, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, withCloudHome } from "./cloud-home.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, moveFit, moveRefusal, moveSenderDestination, parseCloudMoveStatus } from "./cloud-move.mjs";
@@ -296,6 +297,17 @@ let secureCredentialState = null;
 let desktopDataDirLease = null;
 let managedDesktop = null;
 let cloudAccount = null;
+// X research's relay access while the Cloud plan is paid (included-x.mjs):
+// fetched once per sign-in, held in memory, posted to the local server, and
+// posted again whenever that server restarts.
+const includedX = createIncludedXSync({
+  fetchAccess: () => cloudAccount ? cloudAccount.xResearchAccess() : Promise.resolve(null),
+  send: access => {
+    if (!serverProc) return;
+    try { serverProc.postMessage({ type: "openmausbot:included-x", access }); }
+    catch (error) { slog(`X research access sync failed: ${error?.message ?? error}`); }
+  },
+});
 // Settles once a saved Cloud sign-in is restored and checked (or there is none).
 let cloudAccountStarted = Promise.resolve();
 // True while that restore is under way: a Cloud page asking for the microphone waits for it.
@@ -334,6 +346,7 @@ const serverSupervisor = createServerSupervisor({
     // Re-read the latest account credentials; registration may have completed
     // while the replacement child's health probe was pending.
     syncManagedComposioCredentials();
+    includedX.serverStarted();
     // A restarted runtime has no library catalog until main sends it again.
     orgLibrary?.runtimeReady();
     if (managedDesktop) void managedDesktop.refresh().catch(() => {});
@@ -1025,6 +1038,7 @@ function ensureCloudAccount() {
     platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer", appVersion: app.getVersion(),
     openBrowser: url => shell.openExternal(url),
     onState: state => {
+      void includedX.onState(state);
       rememberCloudHome(state);
       rememberedHome = rememberedCloudHome(rememberedHome, state);
       // My Cloud's page, refused while the sign-in was being restored, now
