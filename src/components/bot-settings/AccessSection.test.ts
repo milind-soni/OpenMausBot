@@ -212,6 +212,15 @@ describe("X research card", () => {
     expect(html).toMatch(/aria-label="Let this bot search and read X"[^>]*disabled/);
   });
 
+  it("is not offered while a new bot or the New bot defaults are being drafted", async () => {
+    fixture.config = { treg: { configured: true } } as Partial<ConfigStatus>;
+    const { BotEditorContext } = await import("./BotEditorContext");
+    const { api } = await import("@/state/store");
+    const html = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(BotEditorContext.Provider, { value: { request: api, draft: true } }, createElement(AccessSection, { bot: makeBot(), derived: makeDerived() }))));
+    expect(html).not.toContain("Let this bot search and read X");
+  });
+
   it("shows the switch on for a bot switched on, with a token saved", () => {
     fixture.config = { treg: { configured: true } } as Partial<ConfigStatus>;
     const html = render(makeBot({ xResearch: true }));

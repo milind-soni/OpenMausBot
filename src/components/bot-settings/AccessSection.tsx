@@ -739,7 +739,10 @@ export function AccessSection({
         />
       </div>
 
-      <XResearchCard bot={bot} patch={patch} />
+      {/* A draft (a new bot, or the New bot defaults) has no saved bot to
+          spend from, and the defaults schema has no such field: switch X
+          research on once the bot exists. */}
+      {!draft && <XResearchCard bot={bot} patch={patch} />}
 
       {!draft && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Webhooks</div>
