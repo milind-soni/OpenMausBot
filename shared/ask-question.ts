@@ -273,6 +273,26 @@ export function answerWithoutPreamble(answer: string): string {
   return answer.startsWith(`${ANSWER_PREAMBLE}\n\n`) ? answer.slice(ANSWER_PREAMBLE.length + 2) : answer;
 }
 
+/** The longest formatted answer OMB will echo back to an engine in free
+ * text (Cursor's skipped-question reason). formatQuestionAnswers itself does
+ * not truncate. A card reply weighs at most one block per question, each
+ * repeating the question text and holding every option label plus a
+ * custom answer, so a reply typed in a card is never cut. Only a longer
+ * message typed in chat is. */
+export const MAX_ANSWER_ECHO = ANSWER_PREAMBLE.length + MAX_QUESTIONS
+  * ("\n\nQ: \nA: ".length + MAX_QUESTION_TEXT + MAX_OPTIONS * (MAX_LABEL + ", ".length) + MAX_CUSTOM_ANSWER);
+
+/** Cap a formatted answer for echoing back. An over-cap echo is cut back to
+ * the last whole block so no partial answer reads as one, and says it was
+ * truncated. */
+export function capAnswerEcho(answer: string, limit = MAX_ANSWER_ECHO): string {
+  if (answer.length <= limit) return answer;
+  const cut = answer.slice(0, limit);
+  const boundary = cut.lastIndexOf("\n\nQ: ");
+  const kept = boundary > 0 ? cut.slice(0, boundary) : cut;
+  return kept + "\n\n[answer truncated]";
+}
+
 /**
  * The answer text, read back as one value per question.
  *
@@ -293,6 +313,47 @@ export function questionAnswersByQuestion(
   questions: readonly AskQuestion[],
 ): Record<string, string> {
   return questionAnswersById(message, questions.map(question => ({ id: question.question, question })));
+}
+
+/**
+ * One question's answer read back as the option labels it picked, plus any
+ * words of the person's own, for a protocol that answers by option rather
+ * than by text (Grok's ask_user_question, Cursor's ask_question).
+ *
+ * The card writes a single-choice answer as one label or the typed reply,
+ * and a multi-select answer as the picked labels joined by ", " with a typed
+ * reply last. A label may itself contain ", ", so a multi-select answer can
+ * read more than one way. Every reading is tried: one that is labels from
+ * end to end wins over one that leaves words over. When the best readings
+ * disagree, the whole answer is the person's own words, never a guessed
+ * option.
+ */
+export function pickedOptionLabels(answer: string, question: AskQuestion): { labels: string[]; other?: string } {
+  const text = answer.trim();
+  const labels = question.options.map((option) => option.label);
+  if (!question.multiSelect) {
+    if (labels.includes(text)) return { labels: [text] };
+    return text ? { labels: [], other: text } : { labels: [] };
+  }
+  const whole: string[][] = [];
+  const partial: Array<{ labels: string[]; other: string }> = [];
+  const read = (rest: string, picked: string[]): void => {
+    const next = labels.filter((label) => !picked.includes(label) && (rest === label || rest.startsWith(`${label}, `)));
+    if (!next.length) {
+      if (rest) partial.push({ labels: picked, other: rest });
+      else whole.push(picked);
+      return;
+    }
+    for (const label of next) read(rest.slice(label.length + 2), [...picked, label]);
+  };
+  read(text, []);
+  const key = (reading: { labels: string[]; other?: string }) => JSON.stringify([[...reading.labels].sort(), reading.other ?? null]);
+  // read() always records at least one reading; an empty answer is one
+  // reading with no labels.
+  const readings = whole.length ? whole.map((picked) => ({ labels: picked })) : partial;
+  const first = readings[0]!;
+  const agree = readings.every((reading) => key(reading) === key(first));
+  return agree ? first : { labels: [], other: text };
 }
 
 /** Longest protocol id accepted. Ids are harness-internal keys, never shown
@@ -333,6 +394,12 @@ export function parseProtocolAskQuestions(entries: unknown): ProtocolAskQuestion
     if (parsed.length === MAX_QUESTIONS) break;
   }
   return parsed.length ? parsed : null;
+}
+
+/** True when two questions share their text. A card reply answers by
+ * question text, so it cannot tell such questions apart. */
+export function repeatsQuestionText(questions: readonly ProtocolAskQuestion[]): boolean {
+  return new Set(questions.map(({ question }) => question.question)).size !== questions.length;
 }
 
 /**

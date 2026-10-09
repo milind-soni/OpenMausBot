@@ -65,9 +65,20 @@ one: both **Ask for approval** and **Approve for me** launch Cursor without
 `--force`, then OpenMausBot handles its permission requests according to the
 bot's current level.
 
+## Questions
+
+Cursor's AskQuestion tool sends `cursor/ask_question`. OpenMausBot shows all
+of its questions on one question card, including multi-select questions, and
+answers with the option ids the person picked. Cursor's reply format has no
+free text. If any answer is in the person's own words, OpenMausBot replies
+`skipped` and puts every answer in the reason, which Cursor gives the model
+as it is. An unanswered card replies `cancelled`. A question that arrives as
+one `session/request_permission` per question (Cursor's fallback) still
+becomes the one-question card it was before.
+
 ## What this driver does not do yet
 
-- Cursor ACP extension methods (`cursor/ask_question`, `cursor/create_plan`,
+- The other Cursor ACP extension methods (`cursor/create_plan`,
   todos/tasks/images) are not given a dedicated UI. Unknown JSON-RPC requests
   are rejected with method-not-found so the CLI is not left blocked.
 - MCP servers passed in `session/new` follow Cursor's ACP limitations; prefer

@@ -11,7 +11,11 @@
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
-import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { createAcpDriver, type AcpQuestionRequest, type AcpSupport } from "./core.ts";
+import {
+  capAnswerEcho, formatQuestionAnswers, MAX_QUESTIONS, parseChoices, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById,
+  repeatsQuestionText,
+} from "../../../shared/ask-question.ts";
 
 /** Translate an argv `--model` slug into the id this ACP session will accept.
  *
@@ -383,8 +387,66 @@ export function classifyCursorError(error: unknown): ProviderErrorCode | undefin
   return undefined;
 }
 
+/** Cursor's AskQuestion tool blocks on this request (cursor.com/docs/cli/acp;
+ * verified in cursor-agent 2026.10.01, src/acp/interaction-handlers/
+ * ask-question-handler.ts: sent as `cursor/ask_question` with no `_`
+ * prefix and no sessionId). A client that refuses it with -32601 still gets
+ * Cursor's own fallback of one session/request_permission per question.
+ *
+ * Cursor answers by option id only. When any answer is in the person's own
+ * words, the whole reply goes back as `skipped` with every answer as the
+ * reason, which Cursor hands the model verbatim: a typed answer is never
+ * forced onto an option, and no part of the reply is silently dropped. */
+export const CURSOR_ASK_QUESTION: AcpQuestionRequest = {
+  cancelled: { outcome: { outcome: "cancelled" } },
+  parse(params) {
+    const raw = (params as { questions?: unknown } | null)?.questions;
+    // More questions than a card holds are refused whole, as for Grok.
+    if (!Array.isArray(raw) || raw.length > MAX_QUESTIONS) return null;
+    const parsed = parseProtocolAskQuestions(raw.map((entry) =>
+      entry && typeof entry === "object"
+        ? { id: entry.id, question: entry.prompt, options: entry.options, multiSelect: entry.allowMultiple === true }
+        : entry));
+    // A card reply cannot tell two identical questions apart (their ids
+    // differ, their Q: blocks do not), so such a set is refused whole.
+    if (!parsed || repeatsQuestionText(parsed)) return null;
+    const rawOptions = new Map<string, unknown[]>(raw.flatMap((entry) =>
+      entry && typeof entry.id === "string" && Array.isArray(entry.options) ? [[entry.id, entry.options]] : []));
+    // Card labels are trimmed and capped; map one back to the option that
+    // produced it, and never guess when two options normalize alike.
+    const optionId = (questionId: string, label: string): string | null => {
+      const matches = (rawOptions.get(questionId) ?? []).filter((option) => parseChoices([option], 1)?.[0] === label);
+      const id = matches.length === 1 ? (matches[0] as { id?: unknown }).id : null;
+      return typeof id === "string" ? id : null;
+    };
+    const questions = parsed.map(({ question }) => question);
+    return {
+      questions,
+      answered(message) {
+        const byId = questionAnswersById(message, parsed);
+        const answers: Array<{ questionId: string; selectedOptionIds: string[] }> = [];
+        let ownWords = false;
+        for (const { id, question } of parsed) {
+          const reply = byId[id];
+          if (reply === undefined) continue;
+          const { labels, other } = pickedOptionLabels(reply, question);
+          const selectedOptionIds = labels.map((label) => optionId(id, label));
+          if (other !== undefined || selectedOptionIds.some((selected) => selected === null)) ownWords = true;
+          else answers.push({ questionId: id, selectedOptionIds: selectedOptionIds as string[] });
+        }
+        if (ownWords) {
+          const reason = formatQuestionAnswers(questions, parsed.map(({ id }) => byId[id] ? [byId[id]] : []));
+          return { outcome: { outcome: "skipped", reason: capAnswerEcho(reason) } };
+        }
+        return answers.length ? { outcome: { outcome: "answered", answers } } : null;
+      },
+    };
+  },
+};
+
 const support = (run: typeof execCli): AcpSupport => ({
   driverKind: "cursorAgent",
+  questionRequests: { "cursor/ask_question": CURSOR_ASK_QUESTION },
   displayName: "Cursor",
   models: STATIC_CURSOR_MODELS,
   // Cursor and other coding agents can both install a generic `agent` shim.

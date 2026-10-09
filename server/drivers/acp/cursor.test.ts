@@ -1,10 +1,10 @@
-import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ensureDirs, NATIVE_DIR } from "../../config.ts";
+import { ensureDirs } from "../../config.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import {
@@ -307,37 +307,153 @@ describe("CursorAgentDriver", () => {
     }
   });
 
-  it("answers cursor/ask_question method-not-found instead of guessing its shape", async () => {
-    // cursor/ask_question's wire shape is unverified, so the driver keeps the
-    // fail-closed default: reject the method, never answer it with a guessed
-    // shape. The fake prompt completes only after the rejection arrives.
-    ensureDirs();
-    chmodSync(FAKE_CLI, 0o755);
-    process.env.FAKE_ACP_MODE = "ask-question-unsupported";
-    const instance = await CursorAgentDriver.create({
-      instanceId: "cursor-ask-unwired",
-      displayName: "Cursor",
-      environment: {},
-      enabled: true,
-      config: { cli: FAKE_CLI, fullAuto: false },
+  describe("cursor/ask_question", () => {
+    // The wire shape as cursor-agent 2026.10.01 sends it
+    // (src/acp/interaction-handlers/ask-question-handler.ts): no sessionId,
+    // a prompt per question, option ids, and allowMultiple.
+    const TWO_QUESTIONS = {
+      toolCallId: "ask-1",
+      title: "Setup",
+      questions: [
+        { id: "color", prompt: "Which color?", options: [{ id: "blue-id", label: "Blue" }, { id: "green-id", label: "Green" }], allowMultiple: false },
+        { id: "sizes", prompt: "Which sizes?", options: [{ id: "s-id", label: "Small" }, { id: "m-id", label: "Medium, roomy" }, { id: "l-id", label: "Large" }], allowMultiple: true },
+      ],
+    };
+    let scratch: string;
+    let instance: Awaited<ReturnType<typeof CursorAgentDriver.create>>;
+    let recorder: ReturnType<typeof recordEvents>;
+
+    const start = async (threadId: string, env: Record<string, string> = {}) => {
+      ensureDirs();
+      chmodSync(FAKE_CLI, 0o755);
+      scratch = mkdtempSync(join(tmpdir(), "omb-cursor-ask-"));
+      Object.assign(process.env, { FAKE_ACP_MODE: "ask-question", FAKE_ACP_ASK_ANSWER: join(scratch, "answer.json"), ...env });
+      instance = await CursorAgentDriver.create({
+        instanceId: "cursor-ask",
+        displayName: "Cursor",
+        environment: {},
+        enabled: true,
+        config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      recorder = recordEvents(instance.adapter);
+      const { turnId } = await instance.adapter.sendTurn({ threadId, text: "hi" });
+      return turnId;
+    };
+    const reply = () => JSON.parse(readFileSync(join(scratch, "answer.json"), "utf8"));
+
+    afterEach(async () => {
+      recorder?.stop();
+      await instance?.dispose();
+      for (const key of ["FAKE_ACP_MODE", "FAKE_ACP_ASK_ANSWER", "FAKE_ACP_ASK_PARAMS", "FAKE_ACP_ASK_METHOD", "FAKE_ACP_ASK_TIMING"]) delete process.env[key];
+      if (scratch) await removeTempDir(scratch);
     });
-    const recorder = recordEvents(instance.adapter);
-    try {
-      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-cursor-ask-unwired", text: "hi" });
+
+    it("opens one question card and answers single and multi-select picks by option id", async () => {
+      const turnId = await start("t-cursor-ask", { FAKE_ACP_ASK_PARAMS: JSON.stringify(TWO_QUESTIONS) });
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      expect(opened).toMatchObject({
+        requestType: "question",
+        tool: "ask_user",
+        summary: "Which color? (+1 more question)",
+        questions: [
+          { question: "Which color?", options: [{ label: "Blue" }, { label: "Green" }] },
+          { question: "Which sizes?", multiSelect: true, options: [{ label: "Small" }, { label: "Medium, roomy" }, { label: "Large" }] },
+        ],
+      });
+      // two questions cannot be answered by one flat button
+      expect(opened).not.toHaveProperty("choices");
+      const outcome = await instance.adapter.respondToRequest("t-cursor-ask", (opened as { requestId: string }).requestId, {
+        behavior: "answer",
+        message: "The user answered your questions.\n\nQ: Which color?\nA: Green\n\nQ: Which sizes?\nA: Medium, roomy, Large",
+      });
+      expect(outcome).toBe("answered");
+      expect(await recorder.until((e) => e.type === "request.resolved")).toMatchObject({ behavior: "answer", source: "user" });
       await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
-      const outbound = readFileSync(join(NATIVE_DIR, "t-cursor-ask-unwired.ndjson"), "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as { dir?: string; msg?: { id?: number; error?: { code?: number } } });
-      // The native log is append-only across runs of the whole file: the
-      // latest reply for this id is this run's, not a stale earlier one.
-      const reply = outbound.filter((entry) => entry.dir === "out" && entry.msg?.id === 9300).at(-1);
-      expect(reply?.msg?.error).toMatchObject({ code: -32601 });
-    } finally {
-      recorder.stop();
-      await instance.dispose();
-      delete process.env.FAKE_ACP_MODE;
-    }
+      expect(reply()).toEqual({ result: { outcome: { outcome: "answered", answers: [
+        { questionId: "color", selectedOptionIds: ["green-id"] },
+        { questionId: "sizes", selectedOptionIds: ["m-id", "l-id"] },
+      ] } } });
+    });
+
+    it("offers flat choices for one question and maps a bare label", async () => {
+      await start("t-cursor-ask-flat");
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      expect(opened).toMatchObject({ summary: "Which color?", choices: ["Blue", "Green"] });
+      await instance.adapter.respondToRequest("t-cursor-ask-flat", (opened as { requestId: string }).requestId, { behavior: "answer", message: "Blue" });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toEqual({ result: { outcome: { outcome: "answered", answers: [{ questionId: "color", selectedOptionIds: ["blue-id"] }] } } });
+    });
+
+    it("skips with every answer as the reason when the person typed their own words", async () => {
+      await start("t-cursor-ask-own", { FAKE_ACP_ASK_PARAMS: JSON.stringify(TWO_QUESTIONS) });
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      const outcome = await instance.adapter.respondToRequest("t-cursor-ask-own", (opened as { requestId: string }).requestId, {
+        behavior: "answer",
+        message: "The user answered your questions.\n\nQ: Which color?\nA: Blue\n\nQ: Which sizes?\nA: Small, one in XXL too",
+      });
+      expect(outcome).toBe("answered");
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toEqual({ result: { outcome: { outcome: "skipped", reason:
+        "The user answered your questions.\n\nQ: Which color?\nA: Blue\n\nQ: Which sizes?\nA: Small, one in XXL too" } } });
+    });
+
+    it("cancels the request when the turn settles with the card still open", async () => {
+      await start("t-cursor-ask-settle", { FAKE_ACP_ASK_TIMING: "with-result" });
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(await recorder.until((e) => e.type === "request.resolved")).toMatchObject({
+        requestId: (opened as { requestId: string }).requestId, behavior: "deny", source: "system",
+      });
+      for (let i = 0; i < 80 && !existsSync(join(scratch, "answer.json")); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(reply()).toEqual({ result: { outcome: { outcome: "cancelled" } } });
+    });
+
+    it("cancels a request that arrives between turns without opening a card", async () => {
+      await start("t-cursor-ask-idle", { FAKE_ACP_ASK_TIMING: "after-result" });
+      await recorder.until((e) => e.type === "turn.completed");
+      for (let i = 0; i < 80 && !existsSync(join(scratch, "answer.json")); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(reply()).toEqual({ result: { outcome: { outcome: "cancelled" } } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+
+    it("refuses malformed params with invalid params instead of leaving Cursor blocked", async () => {
+      await start("t-cursor-ask-bad", { FAKE_ACP_ASK_PARAMS: JSON.stringify({ questions: [{ question: "Which color?", options: ["Blue"] }] }) });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toMatchObject({ error: { code: -32602 } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+
+    it("refuses more questions than one card holds instead of answering only some", async () => {
+      const seven = Array.from({ length: 7 }, (_, i) => ({ id: `q${i}`, prompt: `Question ${i}?`, options: [{ id: `o${i}`, label: "Yes" }] }));
+      await start("t-cursor-ask-many", { FAKE_ACP_ASK_PARAMS: JSON.stringify({ toolCallId: "ask-7", questions: seven }) });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toMatchObject({ error: { code: -32602, message: "ask needs 1 to 6 distinct questions with question text" } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+
+    it("refuses two questions with the same text, whose answers a card could not tell apart", async () => {
+      const twins = [0, 1].map((i) => ({ id: `q${i}`, prompt: "Which color?", options: [{ id: `o${i}`, label: "Blue" }] }));
+      await start("t-cursor-ask-twins", { FAKE_ACP_ASK_PARAMS: JSON.stringify({ toolCallId: "ask-twins", questions: twins }) });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toMatchObject({ error: { code: -32602 } });
+      expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    });
+
+    it("cancels an unanswered card after 15 minutes", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        await start("t-cursor-ask-timeout");
+        const opened = await recorder.until((e) => e.type === "request.opened");
+        await vi.advanceTimersByTimeAsync(15 * 60_000);
+        expect(await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId)).toMatchObject({
+          behavior: "deny", source: "timeout",
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(reply()).toEqual({ result: { outcome: { outcome: "cancelled" } } });
+    });
   });
 
   it("keeps going when session/set_model is missing and argv already pinned the model", async () => {

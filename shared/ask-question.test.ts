@@ -2,17 +2,21 @@ import { describe, expect, it } from "vitest";
 
 import {
   answerWithoutPreamble,
+  capAnswerEcho,
   askQuestionSummary,
   ASK_USER_TOOL,
   ASK_USER_TOOL_DEFINITION,
   formatQuestionAnswers,
   isPersistentQuestionCard,
+  MAX_ANSWER_ECHO,
+  MAX_CUSTOM_ANSWER,
   MAX_OPTIONS,
   MAX_QUESTION_TEXT,
   MAX_QUESTIONS,
   parseAskQuestions,
   parseChoices,
   parseProtocolAskQuestions,
+  pickedOptionLabels,
   shouldSettleRequestCard,
   questionAnswersById,
   questionAnswersByQuestion,
@@ -213,6 +217,28 @@ describe("answerWithoutPreamble", () => {
   });
 });
 
+describe("capAnswerEcho", () => {
+  it("leaves an answer within the limit alone", () => {
+    expect(capAnswerEcho("Q: Which?\nA: Opus", 100)).toBe("Q: Which?\nA: Opus");
+  });
+
+  it("never cuts a reply a card can produce", () => {
+    const questions = Array.from({ length: MAX_QUESTIONS }, (_, i) => ({
+      question: `${i}`.padEnd(MAX_QUESTION_TEXT, "q"),
+      options: Array.from({ length: MAX_OPTIONS }, (_, j) => ({ label: `${j}`.padEnd(120, "l") })),
+    }));
+    const answers = questions.map((question) => [...question.options.map((option) => option.label), "c".repeat(MAX_CUSTOM_ANSWER)]);
+    const reply = formatQuestionAnswers(questions, answers);
+    expect(reply.length).toBeLessThanOrEqual(MAX_ANSWER_ECHO);
+    expect(capAnswerEcho(reply)).toBe(reply);
+  });
+
+  it("cuts an over-limit answer back to the last whole block and says so", () => {
+    const answer = "Q: One?\nA: First\n\nQ: Two?\nA: " + "x".repeat(50);
+    expect(capAnswerEcho(answer, 40)).toBe("Q: One?\nA: First\n\n[answer truncated]");
+  });
+});
+
 describe("questionAnswersByQuestion", () => {
   const questions = parseAskQuestions({
     questions: [
@@ -347,6 +373,34 @@ describe("questionAnswersById", () => {
   it("files nothing when a bare reply could answer any of several ids", () => {
     expect(questionAnswersById("Yes", questions)).toEqual({});
     expect(questionAnswersById("   ", questions.slice(0, 1))).toEqual({});
+  });
+});
+
+describe("pickedOptionLabels", () => {
+  const single = { question: "Which color?", options: [{ label: "Blue" }, { label: "Green" }] };
+  const multi = { question: "Which sizes?", multiSelect: true, options: [{ label: "Small" }, { label: "Small, fitted" }, { label: "Large" }] };
+
+  it("reads a single-choice answer as one label or the person's own words", () => {
+    expect(pickedOptionLabels(" Green ", single)).toEqual({ labels: ["Green"] });
+    expect(pickedOptionLabels("Blue, Green", single)).toEqual({ labels: [], other: "Blue, Green" });
+  });
+
+  it("splits a multi-select answer into whole labels, with typed words last", () => {
+    expect(pickedOptionLabels("Small, fitted, Large", multi)).toEqual({ labels: ["Small, fitted", "Large"] });
+    expect(pickedOptionLabels("Large, Small", multi)).toEqual({ labels: ["Large", "Small"] });
+    expect(pickedOptionLabels("Small, and an XXL", multi)).toEqual({ labels: ["Small"], other: "and an XXL" });
+    expect(pickedOptionLabels("Only XXL", multi)).toEqual({ labels: [], other: "Only XXL" });
+  });
+
+  it("reads an answer that splits into labels more than one way as the person's own words", () => {
+    const overlapping = { question: "Which?", multiSelect: true, options: [{ label: "A" }, { label: "B, C" }, { label: "A, B" }, { label: "C" }] };
+    // "A" + "B, C" and "A, B" + "C" both fit: no option is guessed.
+    expect(pickedOptionLabels("A, B, C", overlapping)).toEqual({ labels: [], other: "A, B, C" });
+    // Only the label "A, B" reads it to the end; "A" would leave "B" over.
+    expect(pickedOptionLabels("A, B", overlapping)).toEqual({ labels: ["A, B"] });
+    const twoWays = { question: "Which?", multiSelect: true, options: [{ label: "A" }, { label: "B" }, { label: "A, B" }] };
+    expect(pickedOptionLabels("A, B", twoWays)).toEqual({ labels: [], other: "A, B" });
+    expect(pickedOptionLabels("C, D", overlapping)).toEqual({ labels: ["C"], other: "D" });
   });
 });
 

@@ -75,7 +75,10 @@ import type {
 import { newEventId, newId, TurnNotStartedError } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
-import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
+import {
+  askQuestionSummary, MAX_QUESTION_TEXT, MAX_QUESTIONS, parseAskQuestions, parseChoices, questionAnswersByQuestion, questionChoices,
+  type AskQuestion,
+} from "../../../shared/ask-question.ts";
 
 import { appendNative } from "../native.ts";
 import { acpPermissionCommand, permissionLaunchCwd } from "../permission-command.ts";
@@ -243,8 +246,25 @@ interface AcpSession {
   launchModel?: string;
 }
 
+/** A vendor request that blocks the agent until a person answers structured
+ *  questions (Grok's `_x.ai/ask_user_question`, Cursor's
+ *  `cursor/ask_question`). The core turns it into one question card; no
+ *  approval level answers it. */
+export interface AcpQuestionRequest {
+  /** The card's questions and the reply for the person's answer, or null
+   *  when the params carry no answerable question (refused as invalid
+   *  params, so the agent is never left waiting). `answered` returns null
+   *  when the reply maps to nothing, which then reads as not answered. */
+  parse(params: unknown): { questions: AskQuestion[]; answered(message: string): unknown } | null;
+  /** The reply when nobody answered: the turn ended, the ask timed out, or
+   *  it arrived between turns. */
+  cancelled: unknown;
+}
+
 /** Per-harness specifics — everything that differs between Grok, Gemini, … */
 export interface AcpSupport {
+  /** Vendor question requests by JSON-RPC method (see AcpQuestionRequest). */
+  questionRequests?: Readonly<Record<string, AcpQuestionRequest>>;
   /** Verified native catalog parameters, applied before both new and restored sessions. */
   toolScopeSessionParams?(turn: SendTurnInput, initializeResult: unknown, hasMcp: boolean,
     context: { config: AcpConfig; env: Record<string, string | undefined>; cwd: string }): Record<string, unknown>;
@@ -660,6 +680,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
   const decodeConfig = decodeAcpConfig(support.defaultCli);
   const DENY_TIMEOUT_NOTE =
     "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
+  // own keys only: a method named like an Object.prototype member is not one
+  const questionRequestFor = (method: unknown): AcpQuestionRequest | undefined =>
+    typeof method === "string" && support.questionRequests && Object.hasOwn(support.questionRequests, method)
+      ? support.questionRequests[method]
+      : undefined;
 
   return {
     driverKind: DRIVER_KIND,
@@ -1231,6 +1256,56 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
         };
 
+        // A vendor question request → one question card for the whole set.
+        // Only the person's own reply is answered; a turn that settles or a
+        // card left unanswered sends the vendor's cancelled reply, so the
+        // agent is never left blocked and no system note reads as an answer.
+        const handleQuestionRequest = (msg: any, current: AcpTurn, questionRequest: AcpQuestionRequest) => {
+          const parsed = questionRequest.parse(msg.params);
+          if (!parsed) {
+            return send({
+              jsonrpc: "2.0",
+              id: msg.id,
+              error: { code: -32602, message: `ask needs 1 to ${MAX_QUESTIONS} distinct questions with question text` },
+            });
+          }
+          current.flushAssistantText();
+          const requestId = newId();
+          const finish = (behavior: string, source: "user" | "timeout" | "system" = "user", message?: string): RequestOutcome => {
+            if (!current.asks.delete(requestId)) return "unavailable";
+            clearTimeout(timer);
+            const reply = behavior === "answer" && source === "user" && typeof message === "string" && message.trim()
+              ? parsed.answered(message)
+              : null;
+            const answered = reply !== null && reply !== undefined;
+            send({ jsonrpc: "2.0", id: msg.id, result: answered ? reply : questionRequest.cancelled });
+            emit({
+              ...base(threadId, current.turnId),
+              type: "request.resolved",
+              requestId,
+              behavior: answered ? "answer" : "deny",
+              source,
+            });
+            return answered ? "answered" : "rejected";
+          };
+          const timer = setTimeout(() => finish("deny", "timeout"), 15 * 60_000);
+          timer.unref?.();
+          current.asks.set(requestId, finish);
+          const choices = questionChoices(parsed.questions);
+          emit({
+            ...base(threadId, current.turnId),
+            type: "request.opened",
+            requestId,
+            requestType: "question",
+            // the name the ASKS_A_PERSON backstop knows: no mode answers it
+            tool: "ask_user",
+            summary: askQuestionSummary(parsed.questions),
+            questions: parsed.questions,
+            ...(choices ? { choices } : {}),
+            approvalScope: current.controlsHost ? "local-computer" : undefined,
+          });
+        };
+
         // server→client permission request → canonical request.opened,
         // answered fail-closed for the running turn
         const handleServerRequest = (msg: any, current: AcpTurn) => {
@@ -1239,6 +1314,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             void handleClientFileRequest(msg);
             return;
           }
+          const questionRequest = questionRequestFor(msg.method);
+          if (questionRequest) return handleQuestionRequest(msg, current, questionRequest);
           if (msg.method !== "session/request_permission") {
             // never leave an unknown server request hanging — the agent blocks
             return send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
@@ -1514,11 +1591,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               const current = session.current;
               if (!current) {
                 // between turns nothing is brokered: cancel a permission
-                // request and refuse anything else — the agent must never
-                // block on an unanswered request
+                // request or a question and refuse anything else — the agent
+                // must never block on an unanswered request
+                const questionRequest = questionRequestFor(msg.method);
                 send(msg.method === "session/request_permission"
                   ? { jsonrpc: "2.0", id: msg.id, result: { outcome: { outcome: "cancelled" } } }
-                  : { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
+                  : questionRequest
+                    ? { jsonrpc: "2.0", id: msg.id, result: questionRequest.cancelled }
+                    : { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
               } else {
                 handleServerRequest(msg, current);
               }

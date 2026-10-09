@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
+import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
 import {
   applyPiLocalCatalog,
@@ -808,6 +809,21 @@ describe("PiDriver turns (fake CLI)", () => {
     }
     expect(JSON.stringify(rows)).not.toContain("anthropic-secret-value");
     expect(JSON.stringify(rows)).not.toContain("openai-secret-value");
+  });
+
+  it("loads the extension's ask_user on a plain turn unless the tool selection excludes it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-ask-user-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-ask-user", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    await expect(instance.adapter.sendTurn({ threadId: "t-ask-user-scoped", text: "hi", toolScope: { allow: ["native:read"] } })).rejects.toThrow(/enforcement/i);
+    const rows = readFileSync(dump, "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line) as { argv?: string[]; mcpConfig?: { askUser?: boolean; mcpServers?: object } | null })
+      .filter((row) => row.argv?.includes("-e"));
+    expect(rows.map((row) => row.mcpConfig?.askUser)).toEqual([true, false]);
+    expect(rows[0].mcpConfig?.mcpServers).toEqual({});
+    await removeTempDir(dir);
   });
 
   it("mounts integrations as stdio MCP servers and loads the pi-mcp-extension", async () => {

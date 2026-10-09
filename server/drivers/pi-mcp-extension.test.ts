@@ -526,3 +526,80 @@ describe("Pi MCP extension registration", () => {
     await handlers.get("session_shutdown")?.();
   });
 });
+
+describe("Pi ask_user tool", () => {
+  const load = async (config: Record<string, unknown>, active = ["read", "ask_user"]) => {
+    const dir = tempDir();
+    process.env.OMB_MCP_CONFIG = join(dir, "mcp.json");
+    writeFileSync(process.env.OMB_MCP_CONFIG, JSON.stringify(config));
+    const tools: RegisteredTool[] = [];
+    let current = active;
+    await extension({
+      registerTool(tool) { tools.push(tool); },
+      on() {},
+      getActiveTools: () => [...current],
+      setActiveTools: (names) => { current = names; },
+    });
+    return tools.find((tool) => tool.name === "ask_user");
+  };
+  // What pi's RPC mode does with each dialog: the driver answers with the
+  // picked label, the person's typed words, or a cancel (undefined).
+  const dialogs = (replies: Array<string | undefined>) => {
+    const asked: Array<{ method: string; title: string; options?: string[] }> = [];
+    const next = async () => replies.shift();
+    return { asked, ctx: { ui: {
+      confirm: async () => false,
+      select: async (title: string, options: string[]) => { asked.push({ method: "select", title, options }); return next(); },
+      input: async (title: string) => { asked.push({ method: "input", title }); return next(); },
+    } } };
+  };
+  const QUESTIONS = { questions: [
+    { question: "Which color?", options: [{ label: "Blue" }, { label: "Green", description: "the calm one" }] },
+    { question: "Any notes?" },
+  ] };
+
+  it("registers only when the driver allows it and the selection includes native:ask_user", async () => {
+    expect(await load({})).toBeUndefined();
+    expect(await load({ askUser: true, toolScope: { allow: ["native:read"] } })).toBeUndefined();
+    const tool = await load({ askUser: true, toolScope: { allow: ["native:ask_user"] } });
+    expect(tool).toMatchObject({ name: "ask_user", exposure: "model-only" });
+  });
+
+  it("asks each question in turn and returns the answers in the shared Q:/A: form", async () => {
+    const tool = (await load({ askUser: true }))!;
+    const { asked, ctx } = dialogs(["Green", "Ship it on Friday"]);
+    const result = await tool.execute("call-1", QUESTIONS, undefined, undefined, ctx);
+    expect(asked).toEqual([
+      // the description shows under the question; the labels stay exact
+      { method: "select", title: "Which color?\n\nGreen: the calm one", options: ["Blue", "Green"] },
+      { method: "input", title: "Any notes?" },
+    ]);
+    expect(result.content).toEqual([{ type: "text", text:
+      "The user answered your questions.\n\nQ: Which color?\nA: Green\n\nQ: Any notes?\nA: Ship it on Friday" }]);
+  });
+
+  it("returns the person's own words when they answer a select in free text", async () => {
+    const tool = (await load({ askUser: true }))!;
+    const result = await tool.execute("call-2", { questions: [QUESTIONS.questions[0]] }, undefined, undefined, dialogs(["Purple, please"]).ctx);
+    expect(result.content).toEqual([{ type: "text", text: "The user answered your questions.\n\nQ: Which color?\nA: Purple, please" }]);
+  });
+
+  it("says plainly when nobody answered, and stops at the first unanswered question", async () => {
+    const tool = (await load({ askUser: true }))!;
+    await expect(tool.execute("call-3", QUESTIONS, undefined, undefined, dialogs([undefined]).ctx)).rejects.toThrow(/did not answer/);
+    const partial = dialogs(["Blue", undefined]);
+    const result = await tool.execute("call-4", QUESTIONS, undefined, undefined, partial.ctx);
+    expect(partial.asked).toHaveLength(2);
+    expect(result.content[0]).toMatchObject({ text: expect.stringContaining("Q: Which color?\nA: Blue\n\nThe person did not answer the other questions.") });
+  });
+
+  it("refuses multi-select and malformed calls with words the model can act on", async () => {
+    const tool = (await load({ askUser: true }))!;
+    const { asked, ctx } = dialogs([]);
+    await expect(tool.execute("call-5", { questions: [{ question: "Which?", multiSelect: true, options: [{ label: "A" }, { label: "B" }] }] }, undefined, undefined, ctx))
+      .rejects.toThrow(/one answer per question/);
+    await expect(tool.execute("call-6", { questions: [] }, undefined, undefined, ctx)).rejects.toThrow(/malformed/);
+    expect(asked).toEqual([]);
+  });
+});
+
