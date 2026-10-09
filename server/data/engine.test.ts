@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { DATA_LIMITS, DATA_RESULTS_SCHEMA } from "../../shared/data-surface.ts";
-import { closeNames, createDataEngine, dataEngine, duckdbDirectory, instanceSettings, levenshtein, likePattern, type DataEngineOptions } from "./engine.ts";
+import { CLOSE_DRAIN_MS, closeNames, createDataEngine, dataEngine, drainLanes, duckdbDirectory, instanceSettings, levenshtein, likePattern, type DataEngineOptions } from "./engine.ts";
 import { DataFailure, type BotDatabase, type DataEngine } from "./types.ts";
 
 const root = mkdtempSync(join(tmpdir(), "omb-data-engine-"));
@@ -49,7 +49,15 @@ const bot = { connection: "bot" as const };
 const panel = { connection: "panel" as const };
 
 afterAll(async () => {
-  await Promise.all(engines.map((e) => e.closeAll()));
+  // A close gives up on a stuck statement after CLOSE_DRAIN_MS; the hook must
+  // outlast that for every engine, and a Windows runner that still hangs in
+  // the native close is not a failure of these tests.
+  const closing = Promise.all(engines.map((e) => e.closeAll()));
+  const gaveUp = new Promise<"gave-up">((resolve) => setTimeout(() => resolve("gave-up"), CLOSE_DRAIN_MS * 2).unref());
+  if (await Promise.race([closing.then(() => "closed" as const), gaveUp]) === "gave-up") {
+    if (process.platform !== "win32") throw new Error("closeAll did not finish");
+    console.warn("engine.test: closeAll still running on Windows; leaving it to the process");
+  }
   // Windows keeps a just-closed database busy for a while (EPERM on rm); a
   // temp directory left on a runner is not a test failure there. rm's retry
   // delay grows linearly, so 10 × 100 ms stays well inside the hook timeout.
@@ -59,6 +67,17 @@ afterAll(async () => {
     if (process.platform !== "win32") throw error;
     console.warn(`engine.test: left ${root} behind: ${(error as Error).message}`);
   }
+}, CLOSE_DRAIN_MS * 4);
+
+describe("closing", () => {
+  it("drains idle lanes at once, and gives up on one that never finishes", async () => {
+    const idle = { run: async <T,>(_sql: string, _options: object, work: () => Promise<T>) => work() };
+    expect(await drainLanes([idle, idle], 1_000)).toBe(true);
+    const stuck = { run: <T,>() => new Promise<T>(() => undefined) };
+    const started = Date.now();
+    expect(await drainLanes([idle, stuck], 50)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
 });
 
 describe("loading the binding", () => {

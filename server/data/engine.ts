@@ -236,6 +236,20 @@ interface Open {
   reserved: Set<string>;
 }
 
+/** How long a close waits for interrupted statements to finish before it
+ * gives up on the native handles. */
+export const CLOSE_DRAIN_MS = 10_000;
+
+/** Resolves true once every lane has run its queue dry, false when one is
+ * still busy after `ms`. A statement DuckDB did not stop (seen on Windows)
+ * would otherwise hold a close, and so the server's shutdown, forever. */
+export async function drainLanes(lanes: Array<{ run<T>(sql: string, options: object, work: () => Promise<T>): Promise<T> }>, ms: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | undefined;
+  const drained = Promise.all(lanes.map((lane) => lane.run("", {}, async () => undefined).catch(() => undefined))).then(() => true);
+  const expired = new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), ms); timer.unref(); });
+  try { return await Promise.race([drained, expired]); } finally { clearTimeout(timer); }
+}
+
 interface CatalogEntry {
   schema: string;
   name: string;
@@ -663,9 +677,13 @@ FROM ${from}, omb_range WHERE ${id} IS NOT NULL GROUP BY bin ORDER BY bin`;
       let open: Open;
       try { open = await pending; } catch { return; }
       // Closing a connection with a statement in flight is undefined; interrupt
-      // first, then let the lanes drain.
+      // first, then let the lanes drain. One that never drains keeps its
+      // handles: the process reclaims them, and nothing else waits on it.
       for (const lane of Object.values(open.lanes)) lane.interrupt();
-      await Promise.all(Object.values(open.lanes).map((lane) => lane.run("", {}, async () => undefined).catch(() => undefined)));
+      if (!await drainLanes(Object.values(open.lanes), CLOSE_DRAIN_MS)) {
+        console.warn(`data: ${this.botId}'s database still had a statement running after ${CLOSE_DRAIN_MS} ms; its handles are left to the process`);
+        return;
+      }
       for (const lane of Object.values(open.lanes)) lane.connection.closeSync();
       open.instance.closeSync();
     })();
