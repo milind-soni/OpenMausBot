@@ -388,6 +388,9 @@ describe("lifecycle", () => {
     const db = await e.forBot("doomed");
     await db.run("CREATE TABLE t AS SELECT 1", bot);
     const folder = join(root, "bots", "doomed");
+    // Leftovers of an earlier run: written once the database is closed, since
+    // Windows refuses to open the WAL while DuckDB holds it.
+    await db.close();
     mkdirSync(join(folder, "data-tmp"), { recursive: true });
     writeFileSync(join(folder, "data-tmp", "spill.tmp"), "x");
     writeFileSync(join(folder, "data.duckdb.wal"), "x");
