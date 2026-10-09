@@ -517,6 +517,17 @@ export function Composer({
     ? state.instances.find((instance) => instance.instanceId === modeBot.modelSelection.instanceId)
     : undefined;
   const trustedThreadAccess = Boolean(!remoteClient && window.ogb?.approvals && capabilities.host.packaged);
+  const [remoteFullAvailable, setRemoteFullAvailable] = useState(false);
+  useEffect(() => {
+    if (trustedThreadAccess || !window.ogb?.remoteApprovals) return;
+    let disposed = false;
+    const refresh = () => { void window.ogb!.remoteApprovals!.status().then(value => {
+      if (!disposed) setRemoteFullAvailable(value.available === true);
+    }).catch(() => { if (!disposed) setRemoteFullAvailable(false); }); };
+    refresh();
+    const timer = window.setInterval(refresh, 5_000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [trustedThreadAccess]);
   const uploadImage = useCallback(async (file: File): Promise<Attachment | null> => {
     const optimistic = optimisticImageAttachment(file);
     if (!optimistic) return null;
@@ -562,6 +573,11 @@ export function Composer({
   };
   const setApprovalMode = (mode: ApprovalMode) => {
     if (!modeBot || modeBot.busy || mode === approvalModeFor(modeBot)) return;
+    if (mode === "full" && remoteFullAvailable && !trustedThreadAccess) {
+      dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId,
+        patch: { approvalMode: "full", confirmFullAccess: true } });
+      return; // consent is obtained by Electron's native dialog
+    }
     if ((mode === "full" || mode === "custom") && !trustedThreadAccess) return;
     if (mode === "full") {
       setApprovalWarning({ mode, botId: modeBot.id, threadId: modeBot.threadId });
@@ -1043,6 +1059,12 @@ export function Composer({
                   onSelect={setApprovalMode}
                   disabled={Boolean(modeBot.busy)}
                   trustedModesAvailable={trustedThreadAccess}
+                  remoteFullAvailable={remoteFullAvailable}
+                  trustedModesNotice={window.ogb?.remoteApprovals && !trustedThreadAccess
+                    ? remoteFullAvailable
+                      ? "This laptop is authorized. Keep it connected; connection loss returns this conversation to Ask."
+                      : "Remote Full access needs one-time host authorization: Server → Authorize this laptop for Full access."
+                    : undefined}
                   onManageCommandAllowlist={ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: modeBot.id, botName: modeBot.name, threadId: modeBot.threadId }) : undefined}
                 />
               )}

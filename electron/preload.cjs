@@ -42,7 +42,7 @@ const isLocalPage = !localOrigin || location.origin === localOrigin;
 // cloudPlan: only that verified Cloud (its setup checklist, its plan line).
 /** A saved server's id, forwarded only from this computer's own page. */
 const savedServer = id => isLocalPage && typeof id === "string" && /^[\w-]{1,64}$/.test(id) ? [id] : [];
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan", "remoteApprovals"]);
 // updater: this app's updates, so the person sees "Restart to update" on My
 // Cloud too; a remote page restarts only on a click. Main says, once as the
 // page loads, whether it answers this page: pages built before it answered My
@@ -137,6 +137,10 @@ const bridge = {
   /** Full/Custom and transitions out of Custom are deliberately unavailable
    * through the loopback API. The local renderer applies those changes over
    * the embedded server's private utilityProcess port. */
+  remoteApprovals: {
+    status: () => ipcRenderer.invoke("remote-approvals:status"),
+    setFull: (botId, threadId) => ipcRenderer.invoke("remote-approvals:full", botId, threadId),
+  },
   approvals: {
     setMode: (botId, mode, options) => ipcRenderer.invoke("approvals:set-trusted-mode", botId, mode, options),
   },

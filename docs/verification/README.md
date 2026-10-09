@@ -52,6 +52,7 @@ Use only mapped, tested commands:
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
 - [Profile proposal and credential-card lifecycle](proposal-cards.md)
 - [Full Access without duplicate approvals](full-access.md)
+- [Owner-enrolled remote desktop approval](remote-desktop-approval.md)
 - [Exact command allowlist UI and saved rules](command-allowlist.md)
 - [Peer approval denial, expiry, and cancellation](peer-approvals.md)
 - [Waiting for an occupied desktop](computer-wait.md)

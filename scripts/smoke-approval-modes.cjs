@@ -3,7 +3,7 @@
 // only a disposable home and fake Claude/Antigravity/Codex/Grok CLIs. Never uses the live app.
 const { app, utilityProcess } = require("electron");
 const assert = require("node:assert/strict");
-const { randomUUID, createHash } = require("node:crypto");
+const { randomUUID, randomBytes, createHash } = require("node:crypto");
 const { mkdtempSync, mkdirSync, copyFileSync, chmodSync, writeFileSync, readFileSync, rmSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
@@ -90,6 +90,8 @@ app.whenReady().then(async () => {
   } }));
   const dump = join(home, "claude-argv.json");
   const testCapabilityKey = randomUUID();
+  const remoteOnly = process.argv.includes("--remote-approval-only");
+  const desktopToken = randomBytes(32).toString("base64url");
   const coordinator = createTrustedApprovalModeCoordinator({ randomId: randomUUID });
   child = utilityProcess.fork(join(root, "server/index.ts"), [], {
     cwd: root,
@@ -99,6 +101,7 @@ app.whenReady().then(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(webhookPort),
       OMB_TEST_INTERNAL_CAPABILITY_KEY: testCapabilityKey,
+      ...(remoteOnly ? { OMB_DESKTOP_PARENT: "1" } : {}),
       FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump,
       FAKE_ACP_MODE: "permission", FAKE_ACP_AUTH_METHOD: "oauth-personal",
       FAKE_ACP_MODELS: "gemini-3.8-flash-high,gemini-3.8-flash-low", FAKE_ACP_MODES: "default,yolo",
@@ -111,12 +114,17 @@ app.whenReady().then(async () => {
   child.on("exit", () => coordinator.rejectProcess(child));
   const api = async (path, method = "GET", body, headers = {}) => {
     const response = await fetch(`http://127.0.0.1:${port}${path}`, {
-      method, headers: { "content-type": "application/json", ...headers },
+      method, headers: { "content-type": "application/json", ...(remoteOnly ? { "x-openmausbot-desktop-owner": desktopToken } : {}), ...headers },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     return { status: response.status, body: await response.json() };
   };
   await until(() => api("/api/health").catch(() => null));
+  if (remoteOnly) {
+    child.postMessage({ type: "openmausbot:desktop-mutation-token", token: desktopToken });
+    await require("./testing/remote-approval-smoke.cjs")({ child, api, until, url: `http://127.0.0.1:${port}`, home, root });
+    return;
+  }
   const verifyUi = () => require("./testing/approval-ui-smoke.cjs")({ root, url: `http://127.0.0.1:${port}`, api, until,
     grant: (botId, mode, options) => coordinator.request(child, botId, mode, options),
   });

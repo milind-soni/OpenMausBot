@@ -33,6 +33,7 @@ afterPack: ./scripts/after-pack.mjs
 # ELECTRON_RUN_AS_NODE (the agentcal-hq pattern).
 files:
   - electron/**
+  - shared/full-access-warning.mjs
   - "!electron/**/*.test.*"
   - "!electron/resources/speech-helper"
   - "!electron/resources/speech-helper.swift"

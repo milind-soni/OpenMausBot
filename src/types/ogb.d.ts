@@ -188,6 +188,10 @@ const __APP_VERSION__: string;
       };
       /** Local-shell-only bridge for trusted approval-mode transitions. It is
        * absent on remote server pages and in older desktop builds. */
+      remoteApprovals?: {
+        status(): Promise<{ available: boolean }>;
+        setFull(botId: string, threadId: string): Promise<import("../state/store").Bot>;
+      };
       approvals?: {
         setMode(
           botId: string,
