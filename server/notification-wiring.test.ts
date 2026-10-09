@@ -149,7 +149,8 @@ posixOnly("routine failure notification wiring", () => {
           botId: bot.id,
           title: "Routine Scout's routine failed",
         });
-        expect(frame.notification.threadId).not.toBe(bot.threadId);
+        // The card, and so the notification, lands in the bot's main thread.
+        expect(frame.notification.threadId).toBe(bot.threadId);
         expect(frame.notification.body).toContain("Broken nightly report");
 
         const receipts = await api("GET", "/api/routines");

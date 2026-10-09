@@ -39,7 +39,8 @@ vi.mock("@/state/store", async (importOriginal) => {
 });
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
-  useDesktopCapabilities: () => ({ capabilities: { dictation: fixture.dictation }, ready: true }),
+  // the Mac app: only a Mac is sent to This computer for a call
+  useDesktopCapabilities: () => ({ capabilities: { host: { platform: "darwin" }, dictation: fixture.dictation }, ready: true }),
 }));
 vi.mock("@/lib/call", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/call")>(),
@@ -65,6 +66,7 @@ vi.mock("./VoiceSetupDialog", () => ({
 }));
 
 const { CallButton, CallTargetButton } = await import("./CallView");
+const { configureLiveMedia, liveMedia, resetLiveMedia } = await import("@/lib/live-call-media");
 
 const pepper: Bot = {
   id: "pepper", threadId: "t", name: "Pepper", title: "", description: "", color: "green",
@@ -124,7 +126,10 @@ beforeEach(() => {
   fixture.track.mockClear();
   vi.stubGlobal("window", { ogb: { speechStart: () => {} } });
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => {
+  resetLiveMedia();
+  vi.unstubAllGlobals();
+});
 
 describe("setting up a voice from the call button", () => {
   it("offers Set up voice in the help, which opens the pop-up instead of the bot's settings", () => {
@@ -252,11 +257,21 @@ describe("setting up a voice from the call button", () => {
     expect(render(room).html).not.toContain("data-voice-setup-stub");
   });
 
-  it("keeps Choose This computer as the help when the device is the problem", () => {
+  // A server's page can't take turns, so a missing voice is no reason to
+  // stop: the call is Live. Its first press asks for the microphone (then,
+  // if the server has no key, for the key), never for a voice.
+  it("starts the Live call, not voice set-up, where the device can't take turns", () => {
     fixture.dictation = { available: false, reasonCode: "remote-server" };
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>(() => {}));
+    configureLiveMedia({ getUserMedia });
     click(find(render(), "data-call-button"));
-    const help = render();
-    expect(help.html).toContain("Choose This computer");
-    expect(help.html).not.toContain("Set up voice");
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(liveMedia()).toMatchObject({ phase: "starting", botId: "pepper", threadId: "t" });
+    expect(fixture.track).toHaveBeenCalledWith("call_started", { driver: "codex", mode: "live" });
+    const after = render();
+    expect(after.html).not.toContain("Set up voice");
+    expect(after.html).not.toContain("Call unavailable");
+    expect(after.html).not.toContain("Choose This computer");
+    expect(fixture.dialog).toBeNull();
   });
 });

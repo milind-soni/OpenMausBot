@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!--
-      The launcher background. Black, matching the iOS app icon: the mascot
-      carries the brand green and the tile behind it stays dark, so the two
-      stores and the two home screens show the same icon.
-    -->
-    <color name="launcher_background">#FF000000</color>
-</resources>

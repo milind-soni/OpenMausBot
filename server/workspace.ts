@@ -24,7 +24,7 @@ export const TASK_WORKSPACES_DIR = join(DATA_DIR, "task-workspaces");
 
 /** MCP support does not imply native filesystem tools or a local working directory. */
 export function supportsWorkspaceFiles(driverKind: string): boolean {
-  return !["grok", "openai-compat", "minimax", "mistral", "cerebras", "boxAgent"].includes(driverKind);
+  return !["grok", "openai-compat", "minimax", "mistral", "cerebras"].includes(driverKind);
 }
 
 /** Default task files are private to the thread, outside the bot's shared
@@ -125,7 +125,7 @@ function memoryEntryStat(path: string) {
 /** File locations, not file contents or wider tool permissions. Threads keep
  * independent working directories; the same bot can find its earlier output
  * without assuming that a file absent from the current directory was lost. */
-export function workspaceLocationsPrompt(botId: string, cwd: string | undefined, botCwd?: string): string {
+export function workspaceLocationsPrompt(botId: string, cwd: string | undefined, botCwd?: string, opts: { attachFile?: boolean } = {}): string {
   return "\n\nFile locations for this bot (absolute paths): " + JSON.stringify({
     currentWorkingFolder: cwd ?? "Provider default; inspect the working directory before using relative paths",
     sharedBotFolder: workspaceDir(botId),
@@ -133,7 +133,12 @@ export function workspaceLocationsPrompt(botId: string, cwd: string | undefined,
     ...(botCwd ? { configuredProjectFolder: botCwd } : {}),
   }) + ". Different conversations can have different working folders. For an existing file, use the exact path from the conversation; if missing here, check this bot's listed folders before saying it is gone or recreating it." +
     " Follow an explicitly requested destination. Otherwise put new task output in the current working folder and report its absolute path so another thread or room can use it." +
-    " Do not move old files, edit another active thread's work, or read another bot's private folders without authorization. These paths do not grant additional access.";
+    " Do not move old files, edit another active thread's work, or read another bot's private folders without authorization. These paths do not grant additional access." +
+    // Chat links open only inside the conversation's folders; attach_file
+    // copies one file the turn saved elsewhere (server/message-file.ts).
+    (opts.attachFile
+      ? " Chat links open only files in currentWorkingFolder and sharedBotFolder. When you save a file for the person somewhere else, also attach it with attach_file in the same turn so it opens from chat. For many files, attach the few that matter most, such as a preview."
+      : "");
 }
 
 /** Lines as a person counts them: a file that ends in a newline has no

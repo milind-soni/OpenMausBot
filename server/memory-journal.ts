@@ -501,3 +501,14 @@ export function resetMemoryJournalState(): void {
   baselines.clear();
   turnBots.clear();
 }
+
+/** A deleted bot's baseline and any turn still in flight. The files are
+ * already gone. A baseline left behind would journal those deletions the
+ * next time a turn looked, and would write the journal file back. */
+export function forgetBotMemoryJournal(botId: string): void {
+  baselines.delete(botId);
+  for (const [threadId, bots] of turnBots) {
+    if (!bots.delete(botId)) continue;
+    if (bots.size === 0) turnBots.delete(threadId);
+  }
+}

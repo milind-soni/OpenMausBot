@@ -54,6 +54,11 @@
 //                     (a JSON array of lines) to Qwen's debug log for this
 //                     session, one line every FAKE_ACP_LOG_EVERY_MS (default
 //                     100), repeating the last, as Qwen does while it retries)
+//                   | mcp-tools (connect every server in session/new's mcpServers
+//                     the way the agent's own client does, stdio or http,
+//                     with grok 1.0.25's initialize (FAKE_ACP_MCP_HANDSHAKE JSON
+//                     overrides it), list its tools, and reply one line per
+//                     server: "<name>: <tool>,<tool>" or "<name> failed: <why>")
 //                   | lend-question (call list_shared_computers through the
 //                     injected agents MCP, ask a question card, call it again
 //                     once the card is answered, and reply
@@ -276,6 +281,7 @@ const dumpEnv = Object.fromEntries(
     "KIMI_MODEL_DISPLAY_NAME",
     "TEST_TURN_MODEL",
     "MY_AGENT_TOKEN",
+    "VENICE_API_KEY",
     "GEMINI_HOME",
     "AGY_ACP_FORCE_FILE_STORAGE",
     "ANTIGRAVITY_HARNESS_PATH",
@@ -419,6 +425,56 @@ let hangKeepAlive: ReturnType<typeof setInterval> | null = null;
 // ask-peer mode: the "agents" MCP server entry from session/new's mcpServers
 type McpEntry = { command: string; args?: string[]; env?: Array<{ name: string; value: string }> };
 let agentsMcp: McpEntry | null = null;
+// mcp-tools mode: every entry from the last session/new or session/load
+type AnyMcpEntry = { name: string; command?: string; args?: string[]; env?: Array<{ name: string; value: string }>; url?: string; headers?: Array<{ name: string; value: string }> };
+let sessionMcp: AnyMcpEntry[] = [];
+/** grok 1.0.25's initialize (`grok mcp doctor`, captured Oct 8 2026) */
+const GROK_MCP_HANDSHAKE = { protocolVersion: "2025-11-25", capabilities: { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } } }, clientInfo: { name: "grok-shell", version: "1.0.25" } };
+
+/** Connect one server as the agent's own MCP client would and list its tools. */
+async function listMcpTools(entry: AnyMcpEntry, handshake: unknown): Promise<string[]> {
+  const names = (result: any) => (result?.tools ?? []).map((tool: { name: string }) => tool.name);
+  if (typeof entry.url === "string") {
+    const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+    for (const { name, value } of entry.headers ?? []) headers[name] = value;
+    const post = async (frame: object) => {
+      const response = await fetch(entry.url!, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...frame }), signal: AbortSignal.timeout(20_000) });
+      const session = response.headers.get("mcp-session-id");
+      if (session) headers["mcp-session-id"] = session;
+      const text = await response.text();
+      const body = text.split("\n").find((line) => line.startsWith("data:"))?.slice(5) ?? text;
+      const parsed = body.trim() ? JSON.parse(body) : {};
+      if (!response.ok || parsed.error) throw new Error(`HTTP ${response.status} ${parsed.error?.message ?? ""}`.trim());
+      return parsed.result;
+    };
+    await post({ id: 1, method: "initialize", params: handshake });
+    await post({ method: "notifications/initialized" });
+    return names(await post({ id: 2, method: "tools/list", params: {} }));
+  }
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    for (const { name, value } of entry.env ?? []) env[name] = value;
+    const child = spawn(entry.command!, entry.args ?? [], { env, stdio: ["pipe", "pipe", "ignore"] });
+    const finish = (error: Error | null, tools?: string[]) => { clearTimeout(timer); child.kill(); if (error) reject(error); else resolve(tools!); };
+    const timer = setTimeout(() => finish(new Error("mcp timeout")), 20_000);
+    child.on("error", (error) => finish(error));
+    const write = (frame: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...frame })}\n`);
+    let pending = "";
+    child.stdout.on("data", (chunk) => {
+      pending += chunk;
+      for (let nl = pending.indexOf("\n"); nl !== -1; nl = pending.indexOf("\n")) {
+        const line = pending.slice(0, nl);
+        pending = pending.slice(nl + 1);
+        let frame: any;
+        try { frame = JSON.parse(line); } catch { continue; }
+        if (frame.error) return finish(new Error(String(frame.error.message)));
+        if (frame.id === 1) { write({ method: "notifications/initialized" }); write({ id: 2, method: "tools/list", params: {} }); }
+        if (frame.id === 2) return finish(null, names(frame.result));
+      }
+    });
+    write({ id: 1, method: "initialize", params: handshake });
+  });
+}
 // the session this process established, for FAKE_ACP_REJECT_LIVE_LOAD_FILE
 let liveSession: string | null = null;
 let rpcFailure: unknown = null;
@@ -458,7 +514,7 @@ function failRpc(msg: { method: string; id: unknown }): boolean {
 
 /** Minimal one-shot MCP stdio client: initialize, call each tool in
  * sequence, return the text of the last result. Dependency-free. */
-function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: string) => object }>, strict = false): Promise<string> {
+function driveMcp(entry: McpEntry, calls: Array<{ name: string | (() => string); args: (prev: string) => object }>, strict = false): Promise<string> {
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
     for (const { name, value } of entry.env ?? []) env[name] = value;
@@ -476,7 +532,8 @@ function driveMcp(entry: McpEntry, calls: Array<{ name: string; args: (prev: str
         return resolve(last);
       }
       const call = calls[step];
-      write({ jsonrpc: "2.0", id: step + 2, method: "tools/call", params: { name: call.name, arguments: call.args(last) } });
+      const args = call.args(last);
+      write({ jsonrpc: "2.0", id: step + 2, method: "tools/call", params: { name: typeof call.name === "function" ? call.name() : call.name, arguments: args } });
     };
     let buf = "";
     child.stdout.on("data", (c) => {
@@ -636,6 +693,7 @@ function handle(msg: any) {
         writeFileSync(process.env.FAKE_ACP_DUMP, JSON.stringify(dumpState, null, 2));
       }
       agentsMcp = servers.find((s: any) => s?.name === "agents") ?? null;
+      sessionMcp = servers as AnyMcpEntry[];
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(servers, null, 2));
       }
@@ -669,12 +727,13 @@ function handle(msg: any) {
       const cachedLiveLoad = process.env.FAKE_ACP_CACHED_LIVE_LOAD === "1" && liveSession === msg.params?.sessionId;
       // like a real agent that reconnects its MCP servers on load, so a
       // later turn on this process carries that turn's own token
-      if ((mode === "safe-agent-reads" || mode === "chief-delegate") && !cachedLiveLoad) {
+      if ((mode === "safe-agent-reads" || mode === "chief-delegate" || mode === "create-peer") && !cachedLiveLoad) {
         agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
       }
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
       }
+      if (!cachedLiveLoad) sessionMcp = msg.params?.mcpServers ?? [];
       const opts = configOptions();
       const mdls = sessionModels();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
@@ -878,7 +937,7 @@ function handle(msg: any) {
       if (mode === "unkeyed-tool") {
         // An agent that violates the ACP spec by omitting toolCallId: the
         // turn's lifecycle pair must still carry one stable id so consumers
-        // can pair the start with its completion (#1653 computer-call fence).
+        // can pair the start with its completion.
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", title: "run", rawInput: { command: "echo done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", status: "completed", rawOutput: { output: "done" } } } });
         out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "done" } } } });
@@ -989,6 +1048,17 @@ function handle(msg: any) {
           });
         return;
       }
+      if (mode === "mcp-tools") {
+        const handshake = process.env.FAKE_ACP_MCP_HANDSHAKE ? JSON.parse(process.env.FAKE_ACP_MCP_HANDSHAKE) : GROK_MCP_HANDSHAKE;
+        void Promise.all(sessionMcp.map((entry) => listMcpTools(entry, handshake).then(
+          (tools) => `${entry.name}: ${tools.join(",")}`,
+          (error: Error) => `${entry.name} failed: ${error.message}`,
+        ))).then((lines) => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: lines.join("\n") } } } });
+          complete();
+        });
+        return;
+      }
       if (mode === "ask-peer" && agentsMcp) {
         // the comms e2e: reach a peer bot through the injected agents proxy
         // and reply with whatever it said (the peer's fake runs plain happy
@@ -1011,22 +1081,31 @@ function handle(msg: any) {
         return;
       }
       if (mode === "create-peer" && agentsMcp) {
+        // Below Full access create_bot only shows the team setup card. Once
+        // the person applies it the Chief resumes, finds Pixel and delegates.
+        let listed = "";
         void driveMcp(agentsMcp, [
+          { name: "list_bots", args: () => ({}) },
           {
             name: "create_bot",
-            args: () => ({
-              name: "Pixel",
-              role: "Product designer",
-              instructions: "Design and review the user experience.",
-            }),
+            args: (bots) => {
+              listed = bots;
+              return {
+                name: "Pixel",
+                role: "Product designer",
+                instructions: "Design and review the user experience.",
+              };
+            },
           },
           {
-            name: "delegate_bot",
-            args: (created) => ({
-              bot_id: /id: ([\w-]+)/.exec(created)?.[1] ?? "",
-              message: "Review the new onboarding flow.",
-              reason: "design review",
-            }),
+            // The routine turn has delegate_bot. The resumed turn after the
+            // card is a person's turn, which coordinates instead.
+            name: () => (listed.includes("coordinate_bots") ? "coordinate_bots" : "delegate_bot"),
+            args: (created) => {
+              const id = /id: ([\w-]+)/.exec(created)?.[1] ?? /^- Pixel\b.*?\[id: ([\w-]+)/m.exec(listed)?.[1] ?? "";
+              const message = "Review the new onboarding flow.";
+              return listed.includes("coordinate_bots") ? { bot_ids: [id], message } : { bot_id: id, message, reason: "design review" };
+            },
           },
         ])
           .then((reply) => {

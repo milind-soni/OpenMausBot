@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, BellOff, Clock, Clock3, FolderInput, Link2, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
 import type { BotProject, Task } from "@/state/store";
@@ -7,6 +7,7 @@ import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
 import { threadRefUrl } from "@/lib/thread-refs";
+import { copyText } from "@/lib/copy-text";
 import { ConfirmDialog } from "./ConfirmDialog";
 
 type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates"> & {
@@ -29,23 +30,29 @@ export function formatUpdatedAt(at: number): string {
  * The caller supplies "now" so one clock tick re-renders a whole list
  * instead of each row keeping its own timer. */
 export function threadUpdatedLabel(at: number, now: number): string {
-  if (!Number.isFinite(at) || at <= 0) return "";
-  if (!Number.isFinite(now)) return formatUpdatedAt(at);
+  if (stampClock(at, now) === undefined) return formatUpdatedAt(at);
   const seconds = Math.max(0, Math.round((now - at) / 1000));
   if (seconds < 45) return t("task.updated.justNow");
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return t("task.updated.minutes", { count: minutes });
   const hours = Math.round(minutes / 60);
-  // Tier on unrounded time like the week gate below: 23.5 hours rounds to
-  // a display of "24 h ago" without a day having actually passed.
+  // Tier on unrounded time like the week gate in stampClock: 23.5 hours
+  // rounds to a display of "24 h ago" without a day having actually passed.
   if (seconds < 86_400) return t("task.updated.hours", { count: hours });
   const days = Math.round(hours / 24);
   if (days === 1) return t("task.updated.yesterday");
-  // Gate the fallback on unrounded elapsed time: six and a half days rounds
-  // to "7 d ago" but is still inside the week, so the absolute date waits
-  // for a full seven days.
-  if (seconds < 7 * 86_400) return t("task.updated.days", { count: days });
-  return formatUpdatedAt(at);
+  return t("task.updated.days", { count: days });
+}
+
+/** The clock a row's stamp reads: the list's tick while the stamp is
+ * relative, nothing once it is a fixed date (a week or more old;
+ * threadUpdatedLabel reads it too). A row with no clock keeps its date and
+ * skips the list's tick. The week is unrounded elapsed time: six and a half
+ * days rounds to "7 d ago" but is still inside the week, so the absolute
+ * date waits for a full seven days. */
+export function stampClock(at: number, now: number): number | undefined {
+  if (!Number.isFinite(at) || at <= 0 || !Number.isFinite(now)) return undefined;
+  return Math.max(0, Math.round((now - at) / 1000)) < 7 * 86_400 ? now : undefined;
 }
 
 /** Newest message, else when the thread was created. Missing stamps sort as
@@ -224,9 +231,7 @@ export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
     .map((entry) => entry.task);
 }
 
-/** One quiet row for bot and group histories. Surface denotes selection;
- * working/waiting/unread remain independent signals, never different cards. */
-export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onRefreshPermissions, activityLabel, now }: {
+type ThreadRowProps = {
   task: ThreadRowTask;
   /** the bot or room that owns the thread: the link's ?bot= */
   ownerId: string;
@@ -235,22 +240,43 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   folders?: BotProject[];
   /** Live verb the chat pane already derives ("Reading a file"); shown only while the row is working. */
   activityLabel?: string;
-  /** The list's shared clock tick; the visible stamp renders relative to it.
-   * Omit to keep the absolute date everywhere. */
+  /** The list's clock tick while the stamp reads relative (stampClock).
+   * Omit to keep the absolute date. */
   now?: number;
-  onSelect: () => void;
-  onRename: (title: string) => void;
+  /** The app language. Rows show catalog strings, so a change re-renders them. */
+  locale: string;
+  /** The row's actions take the thread they act on, so a list hands every
+   * row the same functions and a memoized row skips its list's renders. */
+  onSelect: (task: ThreadRowTask) => void;
+  onRename: (task: ThreadRowTask, title: string) => void;
   /** Present only where generated titles are available. Calls back once the
    * request settles, ok or not; the new title arrives with the bot event. */
-  onRegenerateTitle?: (onSettled: (ok: boolean) => void) => void;
-  onDelete: () => void;
-  onMove?: (folderId: string | null) => void;
-  onArchive?: (archivedAt: number | null) => void;
-  onPin?: (pinned: boolean) => void;
-  onSnooze?: (snoozedUntil: number | null) => void;
+  onRegenerateTitle?: (task: ThreadRowTask, onSettled: (ok: boolean) => void) => void;
+  onDelete: (task: ThreadRowTask) => void;
+  onMove?: (task: ThreadRowTask, folderId: string | null) => void;
+  onArchive?: (task: ThreadRowTask, archivedAt: number | null) => void;
+  onPin?: (task: ThreadRowTask, pinned: boolean) => void;
+  onSnooze?: (task: ThreadRowTask, snoozedUntil: number | null) => void;
   /** Copy this bot's current approval level and saved approvals onto this thread. */
-  onRefreshPermissions?: () => void;
-}) {
+  onRefreshPermissions?: (task: ThreadRowTask) => void;
+};
+
+/** Same fields, each the same value: lists build each row's task afresh
+ * (with its queued and working state), so the object itself is new on every
+ * list render even when nothing in it changed. */
+const sameFields = <T extends object>(a: T, b: T): boolean => {
+  const keys = Object.keys(a) as (keyof T)[];
+  return keys.length === Object.keys(b).length && keys.every((key) => Object.is(a[key], b[key]));
+};
+
+/** A row renders again only when a field of its thread or one of its other
+ * props changes. */
+const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { task, ...next }: ThreadRowProps): boolean =>
+  sameFields(previousTask, task) && sameFields(previous, next);
+
+/** One quiet row for bot and group histories. Surface denotes selection;
+ * working/waiting/unread remain independent signals, never different cards. */
+export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onRefreshPermissions, activityLabel, now }: ThreadRowProps) {
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
   const menuMotion = useHeldMenuMotion(menu);
   const [renaming, setRenaming] = useState(false);
@@ -272,23 +298,22 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const copyLink = () => {
     setMenu(null);
-    navigator.clipboard?.writeText(threadRefUrl({ botId: ownerId, threadId: task.threadId })).catch(() => {
-      // clipboard write rejected — the link stays available to copy again
-    });
+    // A failed write leaves the link available to copy again.
+    void copyText(threadRefUrl({ botId: ownerId, threadId: task.threadId }));
   };
   // The menu stays open on "Regenerating…" until the answer lands; a failure
   // keeps it open behind the error so the person can rename by hand.
   const regenerateTitle = () => {
     if (!onRegenerateTitle || regenerating) return;
     setRegenerating(true);
-    onRegenerateTitle((ok) => { setRegenerating(false); if (ok) setMenu(null); });
+    onRegenerateTitle(task, (ok) => { setRegenerating(false); if (ok) setMenu(null); });
   };
   const finishRename = (save: boolean) => {
     if (finishing.current) return;
     finishing.current = true;
     const title = save ? nextRename(task.title, draft) : null;
     setRenaming(false);
-    if (title) onRename(title);
+    if (title) onRename(task, title);
   };
   useEffect(() => {
     if (!menu) return;
@@ -321,15 +346,17 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
         onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
-        className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[12.5px] text-ink outline-none" /> : <button
+        dir="auto" className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[12.5px] text-ink outline-none" /> : <button
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined}
         title={[task.title, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
-        onClick={onSelect} onDoubleClick={startRename}
+        onClick={() => onSelect(task)} onDoubleClick={startRename}
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
         onKeyDown={(event) => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
         className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink")}>
         <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{task.title}</span>
+          {/* dir=auto keeps an Arabic title's start and ellipsizes its end.
+              max-w-max keeps flex-1 from pushing a byline off a short English title. */}
+          <span dir="auto" className={cn("min-w-0 flex-1 max-w-max truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{task.title}</span>
           {byline && (
             // the same line and size as the title, only quieter: a second
             // line per thread made the list twice as tall as it needs to be
@@ -355,25 +382,25 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
       {onRegenerateTitle && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{regenerating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
       {onMove && Boolean(folders?.length) && <label className="block rounded px-2.5 py-2 text-[12px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={12} />{t("folder.move")}</span>
         <select aria-label={t("folder.moveNamed", { title: task.title })} value={folders?.some((folder) => folder.id === task.projectId) ? task.projectId : ""}
-          onChange={(event) => { onMove(event.target.value || null); setMenu(null); }} className="w-full rounded border border-hairline/40 bg-card px-1 py-1 text-ink outline-none">
+          onChange={(event) => { onMove(task, event.target.value || null); setMenu(null); }} className="w-full rounded border border-hairline/40 bg-card px-1 py-1 text-ink outline-none">
           <option value="">{t("folder.none")}</option>{folders?.map((folder) => <option key={folder.id} value={folder.id}>{folder.emoji ? `${folder.emoji} ` : ""}{folder.name}</option>)}
         </select>
       </label>}
-      {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task.pinned !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised">{task.pinned === true ? <PinOff size={12} /> : <Pin size={12} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
-      {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
+      {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised">{task.pinned === true ? <PinOff size={12} /> : <Pin size={12} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
+      {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(task, isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
       {onSnooze && <div className="px-2.5 pt-1">
         <span className="flex items-center gap-2 text-[11px] text-ink-secondary"><Clock size={12} />{t("task.snooze")}</span>
         <div className="mt-0.5 flex flex-col">
           {[{ label: t("task.snoozeUntilActivity"), at: 0 }, { label: t("task.snoozeTonight"), at: nextSixPm() }, { label: t("task.snoozeTomorrow"), at: tomorrowNineAm() }].map((preset) => (
-            <button key={preset.label} type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onSnooze(preset.at); }} className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{preset.label}</button>
+            <button key={preset.label} type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onSnooze(task, preset.at); }} className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{preset.label}</button>
           ))}
         </div>
       </div>}
-      {onSnooze && snoozed && <button type="button" onClick={() => { setMenu(null); onSnooze(null); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><BellOff size={12} />{t("task.stopSnoozing")}</button>}
-      {onRefreshPermissions && <button type="button" disabled={isWorking(task)} title={t("task.refreshPermissionsHint")} onClick={() => { setMenu(null); onRefreshPermissions(); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40"><RefreshCw size={12} />{t("task.refreshPermissions")}</button>}
+      {onSnooze && snoozed && <button type="button" onClick={() => { setMenu(null); onSnooze(task, null); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><BellOff size={12} />{t("task.stopSnoozing")}</button>}
+      {onRefreshPermissions && <button type="button" disabled={isWorking(task)} title={t("task.refreshPermissionsHint")} onClick={() => { setMenu(null); onRefreshPermissions(task); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40"><RefreshCw size={12} />{t("task.refreshPermissions")}</button>}
       <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-danger hover:bg-raised disabled:opacity-40"><Trash2 size={12} />{t("task.deleteAria")}</button>
     </div>, document.body)}
     <ConfirmDialog open={deleting} title={t("task.deleteConfirm")} body={t("task.deleteBody", { title: task.title })} confirmLabel={t("task.deleteAria")}
-      onCancel={() => setDeleting(false)} onConfirm={() => { if (!isWorking(task)) onDelete(); setDeleting(false); }} returnFocusRef={actionRef} />
+      onCancel={() => setDeleting(false)} onConfirm={() => { if (!isWorking(task)) onDelete(task); setDeleting(false); }} returnFocusRef={actionRef} />
   </>;
-}
+}, sameThreadRow);

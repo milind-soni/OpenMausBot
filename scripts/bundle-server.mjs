@@ -47,7 +47,7 @@ const ENTRY_POINTS = [
   "openmausbot.ts",
   "pair-cli.ts",
   "workspace-backup.worker.ts",
-  // the OMB Cloud Pro home image's entry point (deploy/fly/Dockerfile): it
+  // the OMB Cloud Pro home image's entry point (Dockerfile, cloud-home): it
   // spawns index.js beside it and the Caddy edge
   "cloud-home-start.ts",
   // the container image's entry point (Dockerfile, deploy/podman): it spawns
@@ -155,6 +155,12 @@ if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
   });
   copyFileSync(join(root, "enterprise", "LICENSE"), join(root, "dist-server", "enterprise", "LICENSE"));
 }
+
+// The packaged desktop forks this bootstrap rather than index.js
+// (electron/server-child-launch.mjs): it turns on Node's compile cache for the
+// server process, then imports index.js beside it. Copied, not bundled:
+// esbuild would inline index.js into it.
+copyFileSync(join(root, "scripts", "desktop-server-entry.mjs"), join(root, "dist-server", "desktop-entry.mjs"));
 
 // The model catalog snapshot (server/model-catalog/catalog.ts) is read from
 // disk, not inlined: 1.5 MB of JSON has no place in index.js. The bundle looks

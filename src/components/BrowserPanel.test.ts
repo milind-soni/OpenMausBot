@@ -181,6 +181,36 @@ describe("live browser connection lifecycle", () => {
     expect(fixture.setters[0]).not.toHaveBeenCalled();
   });
 
+  it("waits on a busy browser without spending the retry budget, and stops waiting once ready", () => {
+    vi.useFakeTimers();
+    render();
+    const cleanup = fixture.effects[2]!();
+    const source = FixtureEventSource.instances[0]!;
+    const busy = fixture.setters[13]!;
+    source.emit("waiting", { reason: "busy" });
+    source.emit("waiting", { reason: "busy" });
+    expect(busy).toHaveBeenLastCalledWith(true);
+    vi.advanceTimersByTime(30_000);
+    expect(fixture.setters[0]).not.toHaveBeenCalled();
+    source.emit("ready", { viewerId: "after-busy" });
+    expect(busy).toHaveBeenLastCalledWith(false);
+    cleanup?.();
+  });
+
+  it("shows a busy timeout as the server's reason and does not retry it", () => {
+    vi.useFakeTimers();
+    render();
+    const cleanup = fixture.effects[2]!();
+    const source = FixtureEventSource.instances[0]!;
+    source.emit("waiting", { reason: "busy" });
+    source.emit("error", { retryable: false, message: "The bot is still using this browser. Reconnect when it has finished." });
+    expect(fixture.setters[7]).toHaveBeenLastCalledWith("The bot is still using this browser. Reconnect when it has finished.");
+    expect(fixture.setters[13]).toHaveBeenLastCalledWith(false);
+    vi.advanceTimersByTime(30_000);
+    expect(fixture.setters[0]).not.toHaveBeenCalled();
+    cleanup?.();
+  });
+
   it("does not retry terminal server refusals", () => {
     vi.useFakeTimers();
     render();

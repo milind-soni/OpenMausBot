@@ -1,8 +1,14 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import { Loader2, Trash2, X } from "lucide-react";
 import type { CommandAllowRule, CommandAllowlistResponse } from "../../shared/command-allowlist";
 import { api, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
+
+// Electron collects -webkit-app-region from layout boxes and ignores z-index,
+// so the chat header's drag strip swallows clicks that land on top of it.
+// This dialog's close button is in that band whenever the list is tall.
+const overlayStyle = { WebkitAppRegion: "no-drag" } as CSSProperties;
 
 /** Mounted for one captured bot/thread, so switching conversations cannot
  * redirect an in-flight save or reuse another bot's working folder. */
@@ -21,6 +27,8 @@ export function CommandAllowlistDialog({ botId, botName, threadId, onClose }: {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
   const mounted = useRef(false);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
@@ -34,8 +42,19 @@ export function CommandAllowlistDialog({ botId, botName, threadId, onClose }: {
     mounted.current = true;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     closeRef.current?.focus();
+    // The opener keeps focus, and a drag-region click can blur the close
+    // button. Bot settings then sees this dialog and leaves Escape alone, so
+    // the key has to be taken here, before that parent handler runs.
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing || event.defaultPrevented) return;
+      event.preventDefault();
+      event.stopPropagation();
+      onCloseRef.current();
+    };
+    window.addEventListener("keydown", onKey, true);
     return () => {
       mounted.current = false;
+      window.removeEventListener("keydown", onKey, true);
       if (opener?.isConnected) opener.focus();
     };
   }, []);
@@ -85,12 +104,15 @@ export function CommandAllowlistDialog({ botId, botName, threadId, onClose }: {
     }
   };
 
-  return (
+  // Portaled to the document so the overlay is after every drag region and is
+  // not trapped in the composer dock (pointer-events none, z-index 2).
+  const overlay = (
     <div
+      data-thread-overlay
+      style={overlayStyle}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4"
       onMouseDown={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}
       onKeyDown={(event) => {
-        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); return; }
         if (event.key !== "Tab") return;
         const controls = dialogRef.current?.querySelectorAll<HTMLElement>(
           "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex='0']",
@@ -115,15 +137,15 @@ export function CommandAllowlistDialog({ botId, botName, threadId, onClose }: {
         tabIndex={-1}
         className="flex max-h-[85dvh] w-full max-w-[520px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl"
       >
-        <div className="flex items-start justify-between gap-4 px-5 pt-5">
-          <div>
+        <div className="flex shrink-0 items-start justify-between gap-4 px-5 pt-5">
+          <div className="min-w-0">
             <h2 id={titleId} className="text-[16px] font-semibold text-ink">{t("commandAllowlist.title")}</h2>
             <p className="mt-1 text-[12px] text-ink-secondary">{t("commandAllowlist.forBot", { name: botName })}</p>
           </div>
-          <button ref={closeRef} type="button" onClick={onClose} aria-label={t("commandAllowlist.close")}
-            className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"><X size={17} /></button>
+          <button ref={closeRef} type="button" onMouseDown={(event) => event.stopPropagation()} onClick={onClose} aria-label={t("commandAllowlist.close")}
+            className="shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"><X size={17} className="pointer-events-none" /></button>
         </div>
-        <div className="overflow-y-auto px-5 pb-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
           <p id={scopeId} className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("commandAllowlist.scope")}</p>
           {loading && <p role="status" className="mt-5 flex items-center gap-2 text-[13px] text-ink-secondary">
             <Loader2 size={15} className="animate-spin" aria-hidden="true" />{t("commandAllowlist.loading")}
@@ -173,4 +195,5 @@ export function CommandAllowlistDialog({ botId, botName, threadId, onClose }: {
       </div>
     </div>
   );
+  return createPortal(overlay, document.body);
 }

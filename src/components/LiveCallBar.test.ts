@@ -3,7 +3,7 @@ import { hangUpRemoteCall, liveCallBarView, liveLineHeldElsewhere } from "./Live
 import type { LiveMediaState } from "@/lib/live-call-media";
 
 const bot = { id: "b1", threadId: "t1", name: "Ada" };
-const idle: LiveMediaState = { phase: "idle", callId: null, botId: null, threadId: null, startedAt: null, muted: false, caption: "", heard: "", notice: null, needsKey: false, busyWith: null, canRetry: false, hangingUp: false };
+const idle: LiveMediaState = { phase: "idle", callId: null, botId: null, threadId: null, startedAt: null, muted: false, caption: "", heard: "", notice: null, needsKey: false, busyWith: null, action: null, hangingUp: false };
 
 describe("liveCallBarView", () => {
   it("shows nothing without a call on this chat", () => {
@@ -38,6 +38,10 @@ describe("liveCallBarView", () => {
     const server = { callId: "c9", botId: "b1", threadId: "t1", client: "ios", voice: "marin", startedAt: 0, status: "live" } as const;
     expect(liveCallBarView({ bot, media: idle, server, now: 0 })).toEqual({ kind: "remote", title: "Ada is on a Live call from an iPhone", callId: "c9" });
   });
+  it("shows a web browser's call on this chat", () => {
+    const server = { callId: "c9", botId: "b1", threadId: "t1", client: "web", voice: "marin", startedAt: 0, status: "live" } as const;
+    expect(liveCallBarView({ bot, media: idle, server, now: 0 })).toEqual({ kind: "remote", title: "Ada is on a Live call from a web browser", callId: "c9" });
+  });
   it("hides a phone's call while it ends, and shows one in a status it does not know, so it can be hung up", () => {
     const server = { callId: "c9", botId: "b1", threadId: "t1", client: "ios", voice: "marin", startedAt: 0, status: "live" } as const;
     expect(liveCallBarView({ bot, media: idle, server: { ...server, status: "ending" }, now: 0 })).toBeNull();
@@ -45,10 +49,12 @@ describe("liveCallBarView", () => {
     const unknown = { ...server, status: "on-hold" } as unknown as typeof server;
     expect(liveCallBarView({ bot, media: idle, server: unknown, now: 0 })).toMatchObject({ kind: "remote", callId: "c9" });
   });
-  it("shows why a call ended, with Try again only where a retry can help", () => {
-    expect(liveCallBarView({ bot, media: { ...idle, phase: "failed", botId: "b1", threadId: "t1", notice: "Call dropped.", canRetry: true }, server: null, now: 0 })).toEqual({ kind: "notice", text: "Call dropped.", retry: true });
-    expect(liveCallBarView({ bot, media: { ...idle, phase: "failed", botId: "b1", threadId: "t1", notice: "The microphone is blocked.", canRetry: false }, server: null, now: 0 })).toEqual({ kind: "notice", text: "The microphone is blocked.", retry: false });
-    expect(liveCallBarView({ bot, media: { ...idle, phase: "ended", botId: "b1", threadId: "t1", notice: "Call ended.", canRetry: true }, server: null, now: 0 })).toEqual({ kind: "notice", text: "Call ended.", retry: false });
+  it("shows why a call stopped, with the one action that helps", () => {
+    expect(liveCallBarView({ bot, media: { ...idle, phase: "failed", botId: "b1", threadId: "t1", notice: "Call dropped.", action: "retry" }, server: null, now: 0 })).toEqual({ kind: "notice", text: "Call dropped.", action: "retry" });
+    expect(liveCallBarView({ bot, media: { ...idle, phase: "failed", botId: "b1", threadId: "t1", notice: "The app didn't let this page use the microphone.", action: "open-in-browser" }, server: null, now: 0 })).toEqual({ kind: "notice", text: "The app didn't let this page use the microphone.", action: "open-in-browser" });
+    expect(liveCallBarView({ bot, media: { ...idle, phase: "failed", botId: "b1", threadId: "t1", notice: "Another Live call is running.", action: null }, server: null, now: 0 })).toEqual({ kind: "notice", text: "Another Live call is running.", action: null });
+    // a call that ended by itself needs nothing done
+    expect(liveCallBarView({ bot, media: { ...idle, phase: "ended", botId: "b1", threadId: "t1", notice: "Call ended.", action: "retry" }, server: null, now: 0 })).toEqual({ kind: "notice", text: "Call ended.", action: null });
   });
 });
 

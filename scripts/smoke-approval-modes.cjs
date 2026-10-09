@@ -284,9 +284,12 @@ app.whenReady().then(async () => {
       const argv = JSON.parse(readFileSync(grokDump, "utf8")).argv;
       assert.equal(argv[argv.indexOf("--permission-mode") + 1], mode === "auto" ? "auto" : "default");
       assert.equal(argv[argv.indexOf("-m") + 1], model);
+      // The same level keeps the live session; a new level gives the
+      // integrations new credentials, so the conversation is loaded again.
       const methods = JSON.parse(readFileSync(grokRpc, "utf8"));
-      assert.ok(methods.includes(turn === 0 ? "session/new" : "session/load"));
-      console.log(JSON.stringify({ provider: "grok", model, mode, resumed: turn > 0, reviewedReads: mode === "auto", realAgentsMcp: true }));
+      assert.ok(methods.includes(turn < 2 ? "session/new" : "session/load"));
+      if (turn < 2) assert.ok(!methods.includes("session/load"));
+      console.log(JSON.stringify({ provider: "grok", model, mode, resumed: turn === 2, reviewedReads: mode === "auto", realAgentsMcp: true }));
     }
   }
   for (const instanceId of ["grok-delete", "grok-credential", "grok-spoof", "grok-question"]) {
@@ -331,9 +334,12 @@ app.whenReady().then(async () => {
       assert.equal(prompted.model, model);
       const calls = JSON.parse(readFileSync(`${agyDump}.config.json`, "utf8"));
       assert.equal(calls.findLast((call) => call.params.configId === "mode")?.params.value, native);
+      // The same level keeps the live session; a new level gives the
+      // integrations new credentials, so the conversation is resumed.
       const rpc = JSON.parse(readFileSync(agyRpc, "utf8"));
-      assert.ok(rpc.includes(turn === 0 ? "session/new" : "session/resume"));
-      console.log(JSON.stringify({ provider: "antigravity", model, mode, native, resumed: turn > 0, autoApproved: mode === "full", humanApproved: mode !== "full" }));
+      assert.ok(rpc.includes(turn < 2 ? "session/new" : "session/resume"));
+      if (turn < 2) assert.ok(!rpc.includes("session/resume"));
+      console.log(JSON.stringify({ provider: "antigravity", model, mode, native, resumed: turn >= 2, autoApproved: mode === "full", humanApproved: mode !== "full" }));
     }
   }
   const questionBot = (await api("/api/bots", "POST", { modelSelection: { instanceId: "agy-question", model: "gemini-3.8-flash-high" } })).body.bot;

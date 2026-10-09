@@ -625,6 +625,64 @@ describe("lanAddresses", () => {
       }),
     ).toEqual([]);
   });
+
+  // Oct 3: an Android phone was handed http://172.19.96.1:8810 for a Windows
+  // PC. That is the Windows side of WSL2's virtual switch; the phone on the
+  // Wi-Fi can never reach it. Windows names its adapters, it does not number
+  // them, so the macOS-only `en0` rule left Wi-Fi and every vEthernet adapter
+  // tied, and enumeration order put WSL first.
+  it("puts a Windows PC's Wi-Fi ahead of its WSL and Hyper-V adapters", () => {
+    expect(
+      lanAddresses({
+        "vEthernet (WSL (Hyper-V firewall))": [ipv4("172.19.96.1")],
+        "vEthernet (Default Switch)": [ipv4("172.27.208.1")],
+        "Wi-Fi": [ipv4("192.168.1.34")],
+        "Loopback Pseudo-Interface 1": [ipv4("127.0.0.1", true)],
+      }),
+    ).toEqual(["192.168.1.34", "172.19.96.1", "172.27.208.1"]);
+  });
+
+  it("puts wired Ethernet ahead of Docker Desktop, VirtualBox, VMware and a VPN", () => {
+    expect(
+      lanAddresses({
+        "vEthernet (WSL)": [ipv4("172.30.16.1")],
+        "VirtualBox Host-Only Network": [ipv4("192.168.56.1")],
+        "VMware Network Adapter VMnet8": [ipv4("192.168.80.1")],
+        "OpenVPN Data Channel Offload": [ipv4("10.8.0.6")],
+        Tailscale: [ipv4("100.101.102.103")],
+        "Ethernet 2": [ipv4("10.0.0.15")],
+      })[0],
+    ).toBe("10.0.0.15");
+  });
+
+  it("reads localized Windows names: German WLAN, and an unrecognized one still beats a virtual adapter", () => {
+    expect(
+      lanAddresses({
+        "vEthernet (Default Switch)": [ipv4("172.27.208.1")],
+        WLAN: [ipv4("192.168.178.20")],
+      }),
+    ).toEqual(["192.168.178.20", "172.27.208.1"]);
+    expect(
+      lanAddresses({
+        "vEthernet (WSL)": [ipv4("172.19.96.1")],
+        "以太网": [ipv4("192.168.0.9")],
+      }),
+    ).toEqual(["192.168.0.9", "172.19.96.1"]);
+  });
+
+  it("puts a Linux machine's real interface ahead of docker0, bridges, libvirt and the tailnet", () => {
+    expect(
+      lanAddresses({
+        docker0: [ipv4("172.17.0.1")],
+        "br-3f2a1b9c0d4e": [ipv4("172.18.0.1")],
+        virbr0: [ipv4("192.168.122.1")],
+        veth1a2b3c: [ipv4("172.17.0.9")],
+        tailscale0: [ipv4("100.101.1.2")],
+        wlp2s0: [ipv4("192.168.1.20")],
+        enp3s0: [ipv4("192.168.1.21")],
+      }).slice(0, 2),
+    ).toEqual(["192.168.1.20", "192.168.1.21"]);
+  });
 });
 
 // Tailscale hands out 100.64.0.0/10 (RFC 6598 shared address space), which

@@ -34,7 +34,7 @@ import { basename, join } from "node:path";
 
 import type { AutoVerdictSource } from "./auto-approve.ts";
 import { redactSecrets } from "./redact.ts";
-import { csvCell } from "./usage-ledger.ts";
+import { csvCell, monthKey } from "./usage-ledger.ts";
 
 /** A verdict's outcome. auto-* rows came from a policy — connector grants,
  * auto-approve rules — with no card in front of a person; user-* rows
@@ -45,11 +45,13 @@ export type DecisionKind =
   | "card-shown"
   | "user-approved"
   | "user-denied"
+  | "user-undone"
   | "review-would-approve"
   | "review-would-deny";
 
 /** Who or what produced the decision. The AutoVerdictSource values carry
- * straight through from auto-approve.ts; `question` marks cards a rule may
+ * straight through from auto-approve.ts; `self` a bot's change to itself
+ * that applied at its level (server/direct-apply.ts); `question` marks cards a rule may
  * never answer, `auto-fallback` a card shown after delivery failed, `routine`
  * a durable chat scheduling proposal, `skill` a staged learned-skill card,
  * `profile` a bot proposed a profile change, `model` a bot proposed a default-model
@@ -59,13 +61,13 @@ export type DecisionKind =
  * by editing a bot's connectorTools, so the call itself needed no card. */
 export type DecisionSource =
   | AutoVerdictSource
+  | "self"
   | "question"
   | "auto-fallback"
   | "routine"
   | "skill"
   | "profile"
   | "model"
-  | "tightening"
   | "user"
   | "connector-scope"
   | "outbound"
@@ -102,8 +104,8 @@ export interface DecisionRow {
   /** "call": that person answered by voice on a Live call, not with a tap */
   via?: "call";
   /** how the ask reached the fold: a tool call (absent) or a block parsed
-   * out of model-authored output ("output", the BoatAgent transport).
-   * Question cards only. */
+   * out of model-authored output ("output", only in rows the removed
+   * Computer engine wrote). Question cards only. */
   origin?: "output";
 }
 
@@ -146,10 +148,6 @@ const actorScope = new AsyncLocalStorage<{ actor: DecisionActor; via?: "call" }>
  * without each resolver having to thread it through. */
 export function withDecisionActor<T>(actor: DecisionActor, work: () => T, via?: "call"): T {
   return actorScope.run(via ? { actor, via } : { actor }, work);
-}
-
-function monthKey(at: Date): string {
-  return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 export function decisionFileFor(dataDir: string, at: Date): string {

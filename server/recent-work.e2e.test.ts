@@ -46,6 +46,16 @@ it("carries a bot's recent 1:1 work into a room turn, tells the room, logs the t
       return undefined;
     }
   };
+  // What the bot was given for its latest turn. A process kept warm keeps its
+  // launch-time instructions; a part that changed since arrives in the
+  // turn's own message.
+  const given = () => {
+    const sent = dump();
+    const content = (sent?.prompt as { message?: { content?: unknown } } | undefined)?.message?.content;
+    const text = typeof content === "string" ? content
+      : Array.isArray(content) ? content.map((part: { text?: unknown }) => typeof part?.text === "string" ? part.text : "").join("\n") : "";
+    return `${sent?.systemPrompt ?? ""}\n${text}`;
+  };
   try {
     // SAFETY: control-omb returns the created bot record under `bot`
     const { bot: lead } = await runControlOmb(["new-bot", "--name", "Lead"], { env }) as { bot: { id: string; threadId: string } };
@@ -55,7 +65,7 @@ it("carries a bot's recent 1:1 work into a room turn, tells the room, logs the t
     // The first 1:1 turn: nothing said anywhere else yet, so no brief.
     await runControlOmb(["send", "--bot", lead.id, "--text", "Please reconcile the September invoices."], { env });
     await runControlOmb(["wait", "--bot", lead.id, "--timeout", "30"], { env });
-    const first = dump()?.systemPrompt ?? "";
+    const first = given();
     expect(first).not.toContain("Your recent work");
 
     // The finished turn left one line in Lead's daily log, sourced to the chat.
@@ -75,7 +85,7 @@ it("carries a bot's recent 1:1 work into a room turn, tells the room, logs the t
       return text.includes("Reply to the conversation above as") || JSON.stringify(dump()?.prompt ?? "").includes("Reply to the conversation above as");
     }, { timeout: 30_000 }).toBe(true);
     await runControlOmb(["wait", "--bot", lead.id, "--timeout", "30"], { env });
-    const room = dump()?.systemPrompt ?? "";
+    const room = given();
     expect(room).toContain("Your recent work");
     expect(room).toMatch(/- today \d{2}:\d{2} · 1:1 with User · (?:"[^"]*" · )?you said: "/);
     const exported = await api("GET", `/api/threads/${group.threadId}/export?format=json`) as { messages?: Array<{ kind?: string; tool?: { name?: string } }> };
@@ -86,7 +96,7 @@ it("carries a bot's recent 1:1 work into a room turn, tells the room, logs the t
     // Back the other way: Lead's next 1:1 turn knows what it said in the room.
     await runControlOmb(["send", "--bot", lead.id, "--text", "And now?"], { env });
     await runControlOmb(["wait", "--bot", lead.id, "--timeout", "30"], { env });
-    const second = dump()?.systemPrompt ?? "";
+    const second = given();
     expect(second).toContain("Your recent work");
     expect(second).toContain('room "Standup" · you said: "');
     // the room turn was logged too, sourced to the room

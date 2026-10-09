@@ -14,12 +14,11 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
-import { placeOffered } from "@/lib/place";
+import { placeFacts, placeViewFor, usePlaceSeat } from "@/lib/place-view";
 import { shortPath } from "@/lib/short-path";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
 import { ConfirmDialog } from "../ConfirmDialog";
-import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
 import { Switch } from "../SettingsPrimitives";
 import { ProposalStatus } from "./ProposalStatus";
 import { ToolSelectionCard } from "./ToolSelectionCard";
@@ -519,7 +518,6 @@ export function AccessSection({
   const { state, dispatch } = useStore();
   const {
     patch,
-    canUseVps,
     canUseConnectedApps,
     connectedAppsConfigured,
     connectedAppsEnabled,
@@ -530,13 +528,13 @@ export function AccessSection({
     browserFeature,
     browserAllowed,
     browserEnabled,
-    browserSelectable,
-    browserDisabledReason,
-    localSelectable,
-    localDisabledReason,
   } = derived;
   const browserInstallable = state.config?.browserEngine?.installable === true;
-  const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
+  const { capabilities } = useDesktopCapabilities();
+  const placeSeat = usePlaceSeat(state.config, capabilities.host?.platform ?? "other");
+  const worksOn = placeViewFor(placeFacts({
+    bot, place: bot.computer ?? "auto", seat: placeSeat, config: state.config, instances: state.instances,
+  }));
   const [inventory, setInventory] = useState<ConnectorInventory | null>(null);
 
   useEffect(() => {
@@ -559,62 +557,22 @@ export function AccessSection({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Works on</div>
-        <div className="mt-0.5 text-[13px] text-ink-secondary">
-          Where this bot works{bot.computer ? "" : " (currently: auto)"}. Browser is the built-in browser tab only; no desktop.
-        </div>
+      {/* Where it works is chosen in one place, the Computer panel; here is
+          its one line (shared/place-view.ts), the same words the panel uses. */}
+      <div className="rounded-xl bg-card p-4" data-testid="access-works-on">
+        <div className="text-[15px] font-medium text-ink">{t("access.worksOn", { name: bot.name, short: worksOn.short })}</div>
         <ProposalStatus bot={bot} kind="owner" />
-        <div className="mt-3 flex overflow-hidden rounded-lg border border-hairline/40">
-          {([
-            [null, "Auto"],
-            ["cloud", "Cloud"],
-            ["vm", "Local VM"],
-            ["local", "This computer"],
-            ["browser", "Browser"],
-            ["off", "Off"],
-          ] as const).filter(([mode]) => mode === null || mode === "off" || placeOffered(mode, state.config)).map(([mode, label], i) => (
-            <button
-              key={mode ?? "auto"}
-              disabled={(mode === "local" && !localSelectable) || (mode === "browser" && !browserSelectable)}
-              title={
-                mode === "local" && !localSelectable
-                  ? localDisabledReason ?? undefined
-                  : mode === "browser"
-                    ? browserSelectable ? "The built-in browser tab only; no desktop" : browserDisabledReason
-                    : mode === "off"
-                      ? "No computer and no built-in browser"
-                      : undefined
-              }
-              onClick={() => {
-                if ((mode === null && bot.computer === undefined) || mode === bot.computer) return;
-                if (mode === "local" && derived.approvalMode === "auto") setLocalAutoWarning(bot.id);
-                // a browser-only bot must actually have its browser: flip
-                // the per-bot switch on with the destination
-                else if (mode === "browser") patch({ computer: mode, browser: true });
-                else patch({ computer: mode });
-              }}
-              className={cn(
-                "flex-1 py-1.5 text-[13px] capitalize",
-                i > 0 && "border-l border-hairline/40",
-                ((mode === "local" && !localSelectable) || (mode === "browser" && !browserSelectable)) && "cursor-not-allowed opacity-40",
-                (mode === null ? bot.computer === undefined : bot.computer === mode)
-                  ? "bg-control text-ink"
-                  : "text-ink-secondary hover:bg-control/60 hover:text-ink",
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {bot.computer === "off" && (
-          <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-ink-secondary">
-            <span className="font-medium text-ink">Off means no screen.</span>{" "}
-            This bot gets no computer and no built-in browser, so it cannot open a web page, click, or type
-            anywhere. Its connected apps, MCP servers, files and chat all still work.
-          </div>
-        )}
-        {(!bot.computer || bot.computer === "cloud") && (
+        <button
+          type="button"
+          onClick={() => {
+            dispatch({ type: "toggleSettings", open: false });
+            dispatch({ type: "toggleComputer", open: true });
+          }}
+          className="mt-3 rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
+        >
+          {t("place.action.openComputerPanel")}
+        </button>
+        {(!bot.computer || bot.computer === "cloud") && !state.config?.cloudHome && (
           <>
             {!bot.computer && (
               <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-ink-secondary">
@@ -624,7 +582,6 @@ export function AccessSection({
             )}
             <CloudBackendPicker
               value={bot.cloudBackend ?? "box"}
-              vpsSupported={canUseVps}
               onChange={(backend) => patch({ cloudBackend: backend })}
             />
             {!bot.computer && bot.cloudBackend === "vps" && (
@@ -720,7 +677,7 @@ export function AccessSection({
                 : !canUseBrowser
                   ? "This bot's current model cannot use the built-in browser."
                   : bot.computer === "off"
-                    ? "Works on is set to Off, so this bot has no browser. Pick another destination above to give it one."
+                    ? "Works on is set to Off, so this bot has no browser. Choose another place in the Computer panel to give it one."
                     : browserEnabled
                       ? "This bot has its own browser with its own logins."
                       : "Keep the built-in browser unavailable to this bot."}
@@ -793,16 +750,6 @@ export function AccessSection({
         )}
       </div>}
 
-      <LocalComputerAutoWarning
-        open={localAutoWarning !== null}
-        onCancel={() => setLocalAutoWarning(null)}
-        onConfirm={() => {
-          const target = localAutoWarning;
-          setLocalAutoWarning(null);
-          if (!target) return;
-          dispatch({ type: "updateBot", botId: target, patch: { computer: "local", acknowledgeLocalAuto: true } });
-        }}
-      />
     </div>
   );
 }

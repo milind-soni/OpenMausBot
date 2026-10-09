@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
 import {
   autoSelectsLocalComputer,
+  busyBoatView,
   instanceSupportsLocalComputer,
-  linuxAutoDescription,
   localComputerDisabledReason,
   localComputerSelectable,
   persistedComputerSelectionMatches,
@@ -68,7 +68,6 @@ describe("local computer UI eligibility", () => {
   });
 
   it("states that Linux Auto never selects this computer", () => {
-    expect(linuxAutoDescription()).toContain("otherwise computer use stays off");
     expect(
       autoSelectsLocalComputer({
         platform: "linux",
@@ -125,7 +124,7 @@ describe("local computer UI eligibility", () => {
       }
     }
     expect(resolveBoatPanelAction({ computer: "cloud", configured: true, boatState: "idle",
-      canUseCloud: true, autoLocal: true, teamComputer: true })).toBe("ensure-boat");
+      canUseCloud: true, autoLocal: true, teamComputer: true })).toBe("attach-ready-boat");
   });
 
   it("never creates a missing Boat merely because an Auto panel opened", () => {
@@ -167,21 +166,19 @@ describe("local computer UI eligibility", () => {
     }
   });
 
-  it("provisions only after an explicit Cloud choice", () => {
-    expect(resolveBoatPanelAction({
-      computer: "cloud",
-      configured: true,
-      boatState: null,
-      canUseCloud: true,
-      autoLocal: true,
-    })).toBe("ensure-boat");
-    expect(resolveBoatPanelAction({
-      computer: "cloud",
-      configured: true,
-      boatState: "archived",
-      canUseCloud: true,
-      autoLocal: true,
-    })).toBe("ensure-boat");
+  it("never creates or wakes a Boat because Cloud computer was chosen or the panel opened", () => {
+    // The bot's first computer call starts it; the panel only says so, and
+    // starting it now is the person's own button.
+    const cloud = { computer: "cloud" as const, configured: true, canUseCloud: true, autoLocal: true };
+    expect(resolveBoatPanelAction({ ...cloud, boatState: null })).toBe("cloud-new");
+    for (const boatState of ["archived", "stopped"]) {
+      expect(resolveBoatPanelAction({ ...cloud, boatState })).toBe("cloud-asleep");
+    }
+    for (const boatState of ["idle", "ready", "running"]) {
+      expect(resolveBoatPanelAction({ ...cloud, boatState })).toBe("attach-ready-boat");
+    }
+    // Starting already (the person's button, or another conversation): watch it come up.
+    expect(resolveBoatPanelAction({ ...cloud, boatState: "provisioning" })).toBe("busy-boat");
   });
 
   it("watches instead of provisioning while a turn owns the box", () => {
@@ -201,9 +198,23 @@ describe("local computer UI eligibility", () => {
     expect(resolveBoatPanelAction({ ...cloud, computer: undefined, boatState: null, autoLocal: false })).toBe("auto-unavailable");
   });
 
-  it("never gives the box-native engine a passive Auto creation exception", () => {
+  it("while it watches, spins only for a cloud computer that is really starting", () => {
+    // Missing or asleep: only the bot's first computer call starts it, and a
+    // turn that never uses the screen never does. Nothing to wait for.
+    expect(busyBoatView(null, true)).toEqual({ line: "computer.cloud.new", spinner: false });
+    expect(busyBoatView(null, false)).toEqual({ line: "computer.cloud.new", spinner: false });
+    for (const boatState of ["archived", "stopped"]) {
+      expect(busyBoatView(boatState, true)).toEqual({ line: "computer.cloud.asleep", spinner: false });
+      expect(busyBoatView(boatState, false)).toEqual({ line: "computer.cloud.asleep", spinner: false });
+    }
+    // Starting: a turn is bringing it up, or it is still coming up after one.
+    expect(busyBoatView("provisioning", true)).toEqual({ line: "computer.phase.busyBoat", spinner: true });
+    expect(busyBoatView("resuming", false)).toEqual({ line: "computer.phase.starting", spinner: true });
+  });
+
+  it("never gives any engine a passive Auto creation exception", () => {
     // Engine kind intentionally is not an input: every engine follows the
-    // same read-only Auto rule, including boxAgent.
+    // same read-only Auto rule.
     expect(resolveBoatPanelAction({
       computer: undefined,
       configured: true,

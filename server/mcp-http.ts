@@ -1,8 +1,13 @@
 // A small MCP client for servers OpenMausBot does not start itself: the
-// current streamable HTTP transport and the older SSE one. The engines
-// speak to these servers natively; this client exists for the Test button
-// (prove the handshake, list the tools) and for anything else the harness
-// itself must ask a remote server. It never logs a header value.
+// current streamable HTTP transport and the older SSE one. It runs the
+// Test button (prove the handshake, list the tools) and the stdio proxy
+// (mcp-remote-proxy.ts) every engine except Claude Code reaches these
+// servers through, so a bot's turn opens the connection with the same
+// minimal handshake Test proved. It never logs a header value.
+import { request as httpRequest, type IncomingMessage } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { Readable } from "node:stream";
+
 import type { RemoteMcpSpec } from "./contracts.ts";
 
 export type McpHttpFailure = "network" | "status" | "protocol";
@@ -22,9 +27,39 @@ export class McpHttpError extends Error {
   }
 }
 
-/** Bytes of one response (or one SSE stream) a probe is willing to read. */
-const MAX_BODY_BYTES = 1_048_576;
+/** The server answered the request with a JSON-RPC error object: its own
+ * code (when it gave a whole number) and its own words. Unlike the other
+ * protocol failures these are the server's reply, which a caller may relay
+ * to the engine once it has removed anything secret. */
+export class McpRpcError extends McpHttpError {
+  readonly code: number | undefined;
+  readonly detail: string;
+
+  constructor(code: number | undefined, detail: string) {
+    super("protocol", `MCP error: ${detail}`);
+    this.name = "McpRpcError";
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+/** Bytes of one response (or one SSE stream) this client reads, for the
+ * Test button and for the stdio proxy alike. Whop's official server answers
+ * tools/list with 425 tools in 1.2 MB of JSON, its largest single tool alone
+ * ~51 KB, so a 1 MB cap refused it outright. Still bounded: a server that
+ * keeps talking cannot fill memory. */
+export const MAX_REMOTE_MCP_BYTES = 32 * 1024 * 1024;
 const PROTOCOL_VERSION = "2025-06-18";
+
+/** How long a URL server may take to initialize and list its tools, over
+ * the internet: the Test button's budget, and a searched server's at a bot's
+ * startup. Command servers start on this computer and keep 8 s. */
+export const REMOTE_MCP_STARTUP_MS = 30_000;
+
+/** The private environment record one remote-proxy mount reads its settings
+ * from, when several mounts share one environment (Codex): only this name
+ * reaches argv, never the address or a header value. */
+export const REMOTE_MCP_CONFIG_ENV = /^OMB_REMOTE_MCP_CONFIG_[a-f0-9]{64}$/;
 
 interface JsonRpcMessage {
   jsonrpc?: unknown;
@@ -60,7 +95,8 @@ export function remoteMcpSpec(value: unknown): RemoteMcpSpec | undefined {
 function unwrap(message: JsonRpcMessage): unknown {
   if (message.error !== undefined) {
     const detail = isRecord(message.error) && typeof message.error.message === "string" ? message.error.message : "request failed";
-    throw new McpHttpError("protocol", `MCP error: ${detail}`);
+    const code = isRecord(message.error) && Number.isSafeInteger(message.error.code) ? message.error.code as number : undefined;
+    throw new McpRpcError(code, detail);
   }
   return message.result;
 }
@@ -102,7 +138,7 @@ async function readSse(
   response: Response,
   signal: AbortSignal,
   onEvent: (event: SseEvent) => "stop" | undefined,
-  maxBytes = MAX_BODY_BYTES,
+  maxBytes = MAX_REMOTE_MCP_BYTES,
 ): Promise<void> {
   const reader = response.body?.getReader();
   if (!reader) throw new McpHttpError("protocol", "empty event stream");
@@ -134,7 +170,7 @@ async function readSse(
   }
 }
 
-async function readBounded(response: Response, maxBytes = MAX_BODY_BYTES): Promise<string> {
+async function readBounded(response: Response, maxBytes = MAX_REMOTE_MCP_BYTES): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return "";
   const decoder = new TextDecoder();
@@ -173,7 +209,7 @@ export class RemoteMcpClient {
   constructor(target: RemoteMcpSpec, options: { fetch?: typeof fetch; maxBytes?: number; onNotification?: (message: JsonRpcMessage) => void } = {}) {
     this.target = target;
     this.fetchImpl = options.fetch ?? fetch;
-    this.maxBytes = options.maxBytes ?? MAX_BODY_BYTES;
+    this.maxBytes = options.maxBytes ?? MAX_REMOTE_MCP_BYTES;
     this.onNotification = options.onNotification;
   }
 
@@ -384,9 +420,121 @@ export class RemoteMcpClient {
     });
   }
 
+  /** Server messages that are not this client's responses: notifications
+   * go to the caller; a ping is answered, as every MCP party must; any other
+   * request (elicitation, sampling, roots…) is refused at once, since this
+   * client offers none of them. Left unanswered, a server waiting on one
+   * holds its own reply until the call times out. */
   private deliverNotifications(parsed: JsonRpcMessage | JsonRpcMessage[] | null): void {
     for (const message of Array.isArray(parsed) ? parsed : parsed ? [parsed] : []) {
-      if (typeof message.method === "string" && message.id === undefined) this.onNotification?.(message);
+      if (typeof message.method !== "string") continue;
+      if (message.id === undefined) this.onNotification?.(message);
+      else if (typeof message.id === "string" || typeof message.id === "number") void this.answerRequest(message.id, message.method);
     }
   }
+
+  private async answerRequest(id: string | number, method: string): Promise<void> {
+    if (this.closed) return;
+    const frame = method === "ping"
+      ? { jsonrpc: "2.0", id, result: {} }
+      : { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not supported by this client" } };
+    try {
+      if (this.target.type === "sse") await this.ssePost(frame, AbortSignal.timeout(10_000));
+      else drain(await this.post(this.target.url, frame, AbortSignal.timeout(10_000)));
+    } catch {
+      // the server's own timeout ends what it was waiting for
+    }
+  }
+}
+
+// ── plain http:// through the person's HTTP_PROXY ──
+// Node's own env-proxy mode is kept off for an http:// server (Node 24's
+// fetch hangs on a plain request sent through it; mcp-gate-config.ts), yet
+// an internal http:// server may be reachable only through that proxy, as
+// it was for an engine's own client. So such a request is sent to the proxy
+// itself, in absolute form, the way curl and the engines do. https:// stays
+// with fetch and its CONNECT tunnel.
+
+/** Hosts never sent through a proxy: this computer. */
+function isLoopback(host: string): boolean {
+  return host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127\.\d+\.\d+\.\d+$/.test(host);
+}
+
+/** Whether NO_PROXY (curl's rules: a name matches itself and its
+ * subdomains, a leading dot or `*.` is ignored, `*` matches everything, an
+ * optional port must match) or loopback keeps `target` off the proxy. */
+export function bypassesProxy(target: URL, noProxy: string): boolean {
+  const host = target.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (isLoopback(host)) return true;
+  const port = target.port || (target.protocol === "https:" ? "443" : "80");
+  for (const raw of noProxy.split(/[\s,]+/)) {
+    const entry = raw.trim().toLowerCase();
+    if (!entry) continue;
+    if (entry === "*") return true;
+    const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(entry);
+    const hostPort = !bracketed && entry.split(":").length === 2 ? entry.split(":") : undefined;
+    const name = (bracketed?.[1] ?? hostPort?.[0] ?? entry).replace(/^\*?\./, "");
+    const entryPort = bracketed?.[2] ?? hostPort?.[1];
+    if (entryPort && entryPort !== port) continue;
+    if (name && (host === name || host.endsWith(`.${name}`))) return true;
+  }
+  return false;
+}
+
+/** A fetch that sends plain http:// requests through `env`'s HTTP proxy
+ * (http_proxy, then HTTP_PROXY) unless NO_PROXY or loopback exempts them;
+ * everything else goes to `fallback`. Undefined when no HTTP proxy is set. */
+export function plainHttpProxyFetch(env: Record<string, string | undefined>, fallback: typeof fetch = fetch): typeof fetch | undefined {
+  const configured = env.http_proxy || env.HTTP_PROXY;
+  if (!configured) return undefined;
+  let proxy: URL;
+  try {
+    proxy = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(configured) ? configured : `http://${configured}`);
+    if (proxy.protocol !== "http:" && proxy.protocol !== "https:") return undefined;
+  } catch { return undefined; }
+  const noProxy = [env.no_proxy, env.NO_PROXY].filter(Boolean).join(",");
+  const authorization = proxy.username
+    ? `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString("base64")}`
+    : undefined;
+  const proxied = (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
+    const target = new URL(input instanceof Request ? input.url : String(input));
+    const body = init.body;
+    if (input instanceof Request || target.protocol !== "http:" || bypassesProxy(target, noProxy) || (body != null && typeof body !== "string")) {
+      return fallback(input, init);
+    }
+    const headers: Record<string, string> = {};
+    new Headers(init.headers).forEach((value, name) => { headers[name] = value; });
+    headers.host = target.host;
+    if (authorization) headers["proxy-authorization"] = authorization;
+    if (typeof body === "string") headers["content-length"] = String(Buffer.byteLength(body));
+    return new Promise<Response>((resolve, reject) => {
+      const send = proxy.protocol === "https:" ? httpsRequest : httpRequest;
+      const request = send({
+        host: proxy.hostname.replace(/^\[|\]$/g, ""),
+        port: proxy.port || (proxy.protocol === "https:" ? 443 : 80),
+        method: init.method ?? "GET",
+        path: target.href,
+        headers,
+        ...(init.signal ? { signal: init.signal } : {}),
+      });
+      request.on("response", (response: IncomingMessage) => {
+        const status = response.statusCode ?? 502;
+        const received = new Headers();
+        for (const [name, value] of Object.entries(response.headers)) {
+          for (const entry of Array.isArray(value) ? value : value === undefined ? [] : [value]) received.append(name, entry);
+        }
+        const empty = status === 204 || status === 205 || status === 304;
+        if (empty) response.resume();
+        try {
+          resolve(new Response(empty ? null : Readable.toWeb(response) as ReadableStream<Uint8Array>, { status, statusText: response.statusMessage, headers: received }));
+        } catch (error) {
+          response.destroy();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+      request.on("error", reject);
+      request.end(body ?? undefined);
+    });
+  };
+  return proxied as typeof fetch;
 }

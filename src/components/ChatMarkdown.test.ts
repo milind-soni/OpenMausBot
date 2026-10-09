@@ -26,6 +26,22 @@ vi.mock("react", async (importOriginal) => {
   return { ...react, useEffect: vi.fn(react.useEffect) };
 });
 
+// The highlighter is created once per page. Tests replace what that one
+// instance calls, instead of swapping the module out from under it.
+const shiki = vi.hoisted(() => ({
+  codeToHtml: vi.fn(async (_code: string, _options: unknown) => "<pre></pre>"),
+  loadLanguage: vi.fn(async (_grammar: unknown) => undefined),
+}));
+vi.mock("shiki/core", () => ({
+  createHighlighterCore: async () => ({
+    codeToHtml: (code: string, options: unknown) => shiki.codeToHtml(code, options),
+    loadLanguage: (grammar: unknown) => shiki.loadLanguage(grammar),
+  }),
+}));
+vi.mock("shiki/engine/javascript", () => ({
+  createJavaScriptRegexEngine: () => ({}),
+}));
+
 describe("mention highlighting", () => {
   const mentionPeers = [{ name: "Atlas" }, { name: "調査担当" }];
   it("carries bot colors into Markdown without coloring everyone as a bot", () => {
@@ -279,7 +295,7 @@ describe("repaired tables", () => {
     }));
     expect(html).toContain('font-semibold">Pros | Cons</div>');
     expect(html.match(/<table\b/g)).toHaveLength(1);
-    expect(html).toContain(">a | b</th>");
+    expect(html).toContain(">a | b</span>");
     expect(html.match(/<th\b/g)).toHaveLength(2);
   });
 
@@ -330,15 +346,14 @@ it("requests both code palettes for skin-aware highlighting", async () => {
   const originalUseEffect = (await vi.importActual<typeof React>("react")).useEffect;
   const effects: React.EffectCallback[] = [];
   const effect = vi.mocked(React.useEffect).mockImplementation((callback) => { effects.push(callback); });
-  const codeToHtml = vi.fn().mockResolvedValue("<pre>dual palette</pre>");
-  vi.doMock("shiki", () => ({ codeToHtml }));
+  shiki.codeToHtml.mockResolvedValue("<pre>dual palette</pre>");
   const cleanup: ReturnType<React.EffectCallback>[] = [];
   // effects stay captured, so each static render is a fresh first frame
   const fence = createElement(ChatMarkdown, { text: "```text\nPalette regression sample\n```" });
   try {
     expect(renderToStaticMarkup(fence)).not.toContain("dual palette");
     for (const callback of effects.splice(0)) cleanup.push(callback());
-    await vi.waitFor(() => expect(codeToHtml).toHaveBeenCalledWith("Palette regression sample", {
+    await vi.waitFor(() => expect(shiki.codeToHtml).toHaveBeenCalledWith("Palette regression sample", {
       lang: "text",
       themes: { light: "github-light-default", dark: "github-dark-default" },
       defaultColor: "light-dark()",
@@ -349,7 +364,7 @@ it("requests both code palettes for skin-aware highlighting", async () => {
   } finally {
     for (const close of cleanup) if (typeof close === "function") close();
     effect.mockImplementation(originalUseEffect);
-    vi.doUnmock("shiki");
+    shiki.codeToHtml.mockReset();
   }
 });
 
@@ -359,8 +374,7 @@ it("keeps the newest highlighted code within both the count and the size bound",
   const effect = vi.mocked(React.useEffect).mockImplementation((callback) => { effects.push(callback); });
   // each block's highlighted HTML is padded to the size the step needs
   let htmlChars = 0;
-  const codeToHtml = vi.fn(async (code: string) => `<pre class="cache-probe">${code}</pre>`.padEnd(htmlChars, " "));
-  vi.doMock("shiki", () => ({ codeToHtml }));
+  shiki.codeToHtml.mockImplementation(async (code: string) => `<pre class="cache-probe">${code}</pre>`.padEnd(htmlChars, " "));
   const cleanup: ReturnType<React.EffectCallback>[] = [];
   const block = (code: string) => createElement(CodeBlock, { code, lang: "text" });
   // a cached block paints highlighted in its first frame
@@ -371,11 +385,11 @@ it("keeps the newest highlighted code within both the count and the size bound",
   };
   // mount a block and let its highlight settle
   const highlight = async (code: string) => {
-    const calls = codeToHtml.mock.results.length;
+    const calls = shiki.codeToHtml.mock.results.length;
     renderToStaticMarkup(block(code));
     for (const callback of effects.splice(0)) cleanup.push(callback());
-    await vi.waitFor(() => expect(codeToHtml.mock.results.length).toBe(calls + 1), { interval: 1 });
-    await codeToHtml.mock.results[calls]!.value;
+    await vi.waitFor(() => expect(shiki.codeToHtml.mock.results.length).toBe(calls + 1), { interval: 1 });
+    await shiki.codeToHtml.mock.results[calls]!.value;
     await new Promise((resolve) => setTimeout(resolve, 0));
   };
   try {
@@ -404,7 +418,39 @@ it("keeps the newest highlighted code within both the count and the size bound",
   } finally {
     for (const close of cleanup) if (typeof close === "function") close();
     effect.mockImplementation(originalUseEffect);
-    vi.doUnmock("shiki");
+    shiki.codeToHtml.mockReset();
+  }
+});
+
+it("loads a curated grammar once and leaves an unbundled language plain", async () => {
+  const originalUseEffect = (await vi.importActual<typeof React>("react")).useEffect;
+  const effects: React.EffectCallback[] = [];
+  const effect = vi.mocked(React.useEffect).mockImplementation((callback) => { effects.push(callback); });
+  shiki.codeToHtml.mockResolvedValue("<pre>typed</pre>");
+  shiki.loadLanguage.mockClear();
+  const cleanup: ReturnType<React.EffectCallback>[] = [];
+  const paint = (text: string) => {
+    renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    for (const callback of effects.splice(0)) cleanup.push(callback());
+  };
+  try {
+    paint("```ts\nconst a = 1\n```");
+    await vi.waitFor(() => expect(shiki.loadLanguage).toHaveBeenCalledTimes(1));
+    const grammar = shiki.loadLanguage.mock.calls[0]?.[0] as unknown as { name?: string }[];
+    expect(grammar[0]?.name).toBe("typescript");
+    expect(shiki.codeToHtml).toHaveBeenCalledWith("const a = 1", expect.objectContaining({ lang: "typescript" }));
+    paint("```ts\nconst b = 2\n```");
+    await vi.waitFor(() => expect(shiki.codeToHtml).toHaveBeenCalledWith("const b = 2", expect.objectContaining({ lang: "typescript" })));
+    expect(shiki.loadLanguage).toHaveBeenCalledTimes(1);
+    const before = shiki.codeToHtml.mock.calls.length;
+    paint("```zig\nfn main() void {}\n```");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(shiki.codeToHtml.mock.calls.length).toBe(before);
+  } finally {
+    for (const close of cleanup) if (typeof close === "function") close();
+    effect.mockImplementation(originalUseEffect);
+    shiki.codeToHtml.mockReset();
+    shiki.loadLanguage.mockReset();
   }
 });
 
@@ -572,6 +618,100 @@ describe("ChatMarkdown attachments", () => {
     expect(html).toContain("Unavailable legacy file reference");
     expect(html).not.toContain("href=\"/workspace/final-report.pdf\"");
     expect(html).not.toContain("type=\"button\"");
+  });
+
+  it("lists the files of a linked folder under the link", () => {
+    const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+      state: "idle",
+      reason: "",
+      savedTo: "",
+      outsideWorkspace: false,
+      folder: {
+        name: "04_post",
+        entries: [{ name: "cover.png", bytes: 2048, mime: "image/png" }],
+        truncated: false,
+      },
+      save: vi.fn(async () => undefined),
+    });
+    try {
+      const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+        text: "[post](Instagram/04_post/)", message: { threadId: "thread-1", messageId: "message-1" },
+      }));
+      expect(html).toContain("aria-label=\"Files in 04_post\"");
+      expect(html).toContain("cover.png");
+      expect(html).toContain("2 KB");
+    } finally {
+      save.mockRestore();
+    }
+  });
+
+  describe("a file link outside the conversation's workspace", () => {
+    const filePath = "C:\\Users\\Maus\\_draft\\ollama-gen.js";
+    const render = (outsideWorkspace: boolean, href = filePath) => {
+      const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+        state: "failed",
+        reason: "the linked file is outside this conversation's workspace",
+        savedTo: "",
+        outsideWorkspace,
+        folder: null,
+        save: vi.fn(async () => undefined),
+      });
+      try {
+        return renderToStaticMarkup(createElement(ChatMarkdown, {
+          text: `[ollama-gen.js](${href})`, message: { threadId: "thread-1", messageId: "message-1" },
+        }));
+      } finally {
+        save.mockRestore();
+      }
+    };
+    const revealInFolder = vi.fn(async () => "shown" as const);
+
+    it("offers Show in folder in the local desktop app, without printing the path", () => {
+      vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
+      try {
+        const html = render(true);
+        expect(html).toContain("This file is outside this chat&#x27;s working folder, so it can&#x27;t be saved from here");
+        expect(html).not.toContain("the linked file is outside");
+        expect(html).toContain("Show in folder");
+        expect(html).not.toContain("<code");
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("shows the full path as selectable text to a remote client instead", () => {
+      vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: true } } });
+      try {
+        const html = render(true);
+        expect(html).not.toContain("Show in folder");
+        expect(html).toMatch(/<code[^>]*select-all[^>]*>C:\\Users\\Maus\\_draft\\ollama-gen\.js<\/code>/);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("does not offer a retry for a refusal that happens on every try", () => {
+      // The arrow read as a retry or a loading state, for files and folders alike.
+      expect(render(true)).not.toContain("lucide-rotate-ccw");
+      expect(render(true, "file:///Users/maus/Desktop/designs/Posts/2026-10-08_News")).not.toContain("lucide-rotate-ccw");
+      expect(render(false)).toContain("lucide-rotate-ccw");
+    });
+
+    it("shows the path in a browser, which has no desktop bridge", () => {
+      expect(render(true)).toContain(`>${filePath}</code>`);
+    });
+
+    it("leaves other failures alone", () => {
+      vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
+      try {
+        const html = render(false);
+        expect(html).toContain("the linked file is outside this conversation&#x27;s workspace");
+        expect(html).not.toContain("Show in folder");
+        expect(html).not.toContain(filePath);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
   });
 
   it("makes a message-authorized file link downloadable", () => {
@@ -763,7 +903,7 @@ describe("bidi: message content carries its own direction", () => {
     expect(html).toContain("list-disc space-y-1 ps-5");
     expect(html).toContain("list-decimal space-y-1 ps-5");
     expect(html).toContain("border-s-2 border-hairline ps-3");
-    expect(html).toContain("px-2 py-1.5 text-start font-semibold");
+    expect(html).toContain('scope="col"');
     expect(html).not.toMatch(/class="[^"]*\bpl-5\b/);
     expect(html).not.toMatch(/class="[^"]*\bborder-l-2\b/);
     expect(html).not.toMatch(/class="[^"]*\btext-left\b/);

@@ -13,12 +13,15 @@
 // themselves, so a snippet never reorders and never scrambles the RTL
 // sentence holding it.
 import { createContext, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import type { HighlighterCore } from "shiki/core";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { fromMarkdown, type Options as MarkdownParseOptions } from "mdast-util-from-markdown";
-import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
+import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText, X } from "lucide-react";
+import { useCopyFeedback } from "@/lib/copy-text";
+import { t } from "@/lib/i18n";
 import { remarkMentions, type MentionPeer } from "@/lib/mentions";
 
 import {
@@ -32,8 +35,10 @@ import { repairMarkdownTables } from "../lib/markdown-tables";
 import { TRANSCRIPT_WINDOW_SIZE } from "../lib/transcript-window";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
 import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
-import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, saveFailureText, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
+import { MarkdownTable } from "./MarkdownTable";
+import { TableFileButton } from "./TableFilePreview";
 
 // highlighted code, so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content hashes. The two-theme HTML is about 20 to 28 times
@@ -71,6 +76,137 @@ const hash = (s: string) => {
   }
   return (h >>> 0).toString(36);
 };
+
+// Shiki's package entry registers every grammar and theme (hundreds of
+// chunks). Chat only ever asks for the two GitHub themes and the languages
+// the code-block badge already names, so each of those is its own import and
+// the rest never enter the bundle. A fence loads its grammar the first time
+// it appears; a later fence for the same language waits on that load.
+const LIGHT_THEME = "github-light-default";
+const DARK_THEME = "github-dark-default";
+const grammarLoaders = {
+  javascript: () => import("shiki/langs/javascript.mjs"),
+  jsx: () => import("shiki/langs/jsx.mjs"),
+  typescript: () => import("shiki/langs/typescript.mjs"),
+  tsx: () => import("shiki/langs/tsx.mjs"),
+  json: () => import("shiki/langs/json.mjs"),
+  jsonc: () => import("shiki/langs/jsonc.mjs"),
+  json5: () => import("shiki/langs/json5.mjs"),
+  bash: () => import("shiki/langs/bash.mjs"),
+  powershell: () => import("shiki/langs/powershell.mjs"),
+  fish: () => import("shiki/langs/fish.mjs"),
+  python: () => import("shiki/langs/python.mjs"),
+  html: () => import("shiki/langs/html.mjs"),
+  css: () => import("shiki/langs/css.mjs"),
+  scss: () => import("shiki/langs/scss.mjs"),
+  sass: () => import("shiki/langs/sass.mjs"),
+  less: () => import("shiki/langs/less.mjs"),
+  markdown: () => import("shiki/langs/markdown.mjs"),
+  mdx: () => import("shiki/langs/mdx.mjs"),
+  yaml: () => import("shiki/langs/yaml.mjs"),
+  toml: () => import("shiki/langs/toml.mjs"),
+  xml: () => import("shiki/langs/xml.mjs"),
+  c: () => import("shiki/langs/c.mjs"),
+  cpp: () => import("shiki/langs/cpp.mjs"),
+  csharp: () => import("shiki/langs/csharp.mjs"),
+  rust: () => import("shiki/langs/rust.mjs"),
+  go: () => import("shiki/langs/go.mjs"),
+  ruby: () => import("shiki/langs/ruby.mjs"),
+  php: () => import("shiki/langs/php.mjs"),
+  java: () => import("shiki/langs/java.mjs"),
+  kotlin: () => import("shiki/langs/kotlin.mjs"),
+  swift: () => import("shiki/langs/swift.mjs"),
+  dart: () => import("shiki/langs/dart.mjs"),
+  r: () => import("shiki/langs/r.mjs"),
+  lua: () => import("shiki/langs/lua.mjs"),
+  sql: () => import("shiki/langs/sql.mjs"),
+  graphql: () => import("shiki/langs/graphql.mjs"),
+  proto: () => import("shiki/langs/proto.mjs"),
+  dockerfile: () => import("shiki/langs/dockerfile.mjs"),
+  makefile: () => import("shiki/langs/makefile.mjs"),
+  diff: () => import("shiki/langs/diff.mjs"),
+  wasm: () => import("shiki/langs/wasm.mjs"),
+};
+type GrammarFile = keyof typeof grammarLoaders;
+/** Fence ids that are not themselves the grammar file name. */
+const grammarAlias: Record<string, GrammarFile> = {
+  js: "javascript", node: "javascript",
+  ts: "typescript",
+  sh: "bash", zsh: "bash", shell: "bash",
+  ps1: "powershell",
+  py: "python",
+  htm: "html",
+  yml: "yaml",
+  md: "markdown",
+  svg: "xml",
+  "c++": "cpp", cc: "cpp", cxx: "cpp",
+  cs: "csharp", "c#": "csharp",
+  rs: "rust",
+  golang: "go",
+  rb: "ruby",
+  kt: "kotlin",
+  gql: "graphql",
+  protobuf: "proto",
+  docker: "dockerfile",
+  make: "makefile",
+};
+const PLAIN_LANGS = new Set(["", "text", "txt", "plaintext", "plain"]);
+let highlighterPromise: Promise<HighlighterCore> | undefined;
+const grammarLoading = new Map<string, Promise<void>>();
+
+function grammarFile(lang: string): GrammarFile | undefined {
+  const alias = grammarAlias[lang];
+  if (alias) return alias;
+  return Object.prototype.hasOwnProperty.call(grammarLoaders, lang) ? lang as GrammarFile : undefined;
+}
+
+function getHighlighter(): Promise<HighlighterCore> {
+  if (highlighterPromise) return highlighterPromise;
+  const created = (async () => {
+    const { createHighlighterCore } = await import("shiki/core");
+    const { createJavaScriptRegexEngine } = await import("shiki/engine/javascript");
+    return createHighlighterCore({
+      themes: [
+        import("shiki/themes/github-light-default.mjs").then((mod) => mod.default),
+        import("shiki/themes/github-dark-default.mjs").then((mod) => mod.default),
+      ],
+      langs: [],
+      engine: createJavaScriptRegexEngine(),
+    });
+  })().catch((error: unknown) => {
+    highlighterPromise = undefined;
+    throw error;
+  });
+  highlighterPromise = created;
+  return created;
+}
+
+function loadGrammar(highlighter: HighlighterCore, file: GrammarFile): Promise<void> {
+  const pending = grammarLoading.get(file);
+  if (pending) return pending;
+  const next = grammarLoaders[file]().then((mod) => highlighter.loadLanguage(mod.default)).catch((error: unknown) => {
+    grammarLoading.delete(file);
+    throw error;
+  });
+  grammarLoading.set(file, next);
+  return next;
+}
+
+/** Highlight with the two chat themes. A language outside the curated set
+ * rejects, and the code block keeps its plain text. */
+async function highlightFence(code: string, lang: string): Promise<string> {
+  const highlighter = await getHighlighter();
+  const requested = lang.trim().toLowerCase();
+  const plain = PLAIN_LANGS.has(requested);
+  const file = plain ? undefined : grammarFile(requested);
+  if (!plain && !file) throw new Error(`No bundled grammar for ${requested}`);
+  if (file) await loadGrammar(highlighter, file);
+  return highlighter.codeToHtml(code, {
+    lang: file ?? "text",
+    themes: { light: LIGHT_THEME, dark: DARK_THEME },
+    defaultColor: "light-dark()",
+  });
+}
 const highlightKey = (lang: string, code: string) => `${lang}:${hash(code)}`;
 const mermaidKey = (scheme: "dark" | "light", code: string) => `${scheme}:${hash(code)}`;
 
@@ -236,34 +372,15 @@ export function CodeBlock({ code, lang }: CodeBlockProps) {
   // React compares dangerouslySetInnerHTML by identity: a fresh object each
   // render would rebuild the highlighted DOM on every re-render
   const markup = useMemo(() => (html ? { __html: html } : null), [html]);
-  const [copied, setCopied] = useState(false);
+  const { state: copied, copy } = useCopyFeedback(code);
   const [wrapLines, setWrapLines] = useState(false);
-  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current !== null) {
-        clearTimeout(copyTimeoutRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     const key = highlightKey(lang, code);
     const cached = highlightCache.get(key);
     if (cached) return setHtml(cached);
     let alive = true;
-    import("shiki")
-      .then((shiki) =>
-        shiki.codeToHtml(code, {
-          lang: lang || "text",
-          themes: {
-            light: "github-light-default",
-            dark: "github-dark-default",
-          },
-          defaultColor: "light-dark()",
-        }),
-      )
+    highlightFence(code, lang || "text")
       .then((out) => {
         if (!alive) return;
         rememberHighlight(key, out);
@@ -276,22 +393,6 @@ export function CodeBlock({ code, lang }: CodeBlockProps) {
       alive = false;
     };
   }, [code, lang]);
-
-  const copy = () => {
-    if (!navigator.clipboard?.writeText) return;
-    navigator.clipboard
-      .writeText(code)
-      .then(() => {
-        setCopied(true);
-        if (copyTimeoutRef.current !== null) {
-          clearTimeout(copyTimeoutRef.current);
-        }
-        copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => {
-        // Clipboard write rejected or failed silently
-      });
-  };
 
   const download = () => {
     const filename = getSnippetFileName(lang);
@@ -346,10 +447,15 @@ export function CodeBlock({ code, lang }: CodeBlockProps) {
             type="button"
             onClick={copy}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
-            title={copied ? "Copied to clipboard" : "Copy code"}
-            aria-label={copied ? "Code copied to clipboard" : "Copy code to clipboard"}
+            title={copied === "copied" ? "Copied to clipboard" : copied === "failed" ? t("common.copyFailed") : "Copy code"}
+            aria-label={copied === "copied" ? "Code copied to clipboard" : copied === "failed" ? t("common.copyFailed") : "Copy code to clipboard"}
           >
-            {copied ? (
+            {copied === "failed" ? (
+              <>
+                <X size={12} className="text-danger" aria-hidden="true" />
+                <span className="text-danger font-medium hidden sm:inline">{t("common.copyFailed")}</span>
+              </>
+            ) : copied === "copied" ? (
               <>
                 <Check size={12} className="text-success" aria-hidden="true" />
                 <span className="text-success font-medium hidden sm:inline">Copied!</span>
@@ -431,8 +537,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
   const markup = useMemo(() => (svg ? { __html: svg } : null), [svg]);
   const [error, setError] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { state: copied, copy } = useCopyFeedback(code);
 
   // Skins are stamped on <html>, a subtree could someday carry its own, so
   // watch the whole document for data-skin changes and re-render the diagram
@@ -486,30 +591,6 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
     };
   }, [code, skinEpoch]);
 
-  useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current !== null) {
-        clearTimeout(copyTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const copy = () => {
-    if (!navigator.clipboard?.writeText) return;
-    navigator.clipboard
-      .writeText(code)
-      .then(() => {
-        setCopied(true);
-        if (copyTimeoutRef.current !== null) {
-          clearTimeout(copyTimeoutRef.current);
-        }
-        copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
-      })
-      .catch(() => {
-        // Clipboard write rejected or failed silently
-      });
-  };
-
   // Diagrams read left-to-right whatever language surrounds them, so the
   // frame pins its own direction rather than inheriting the message's.
   return (
@@ -538,10 +619,15 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
             type="button"
             onClick={copy}
             className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
-            title={copied ? "Copied to clipboard" : "Copy diagram source"}
-            aria-label={copied ? "Diagram source copied to clipboard" : "Copy diagram source to clipboard"}
+            title={copied === "copied" ? "Copied to clipboard" : copied === "failed" ? t("common.copyFailed") : "Copy diagram source"}
+            aria-label={copied === "copied" ? "Diagram source copied to clipboard" : copied === "failed" ? t("common.copyFailed") : "Copy diagram source to clipboard"}
           >
-            {copied ? (
+            {copied === "failed" ? (
+              <>
+                <X size={12} className="text-danger" aria-hidden="true" />
+                <span className="text-danger font-medium hidden sm:inline">{t("common.copyFailed")}</span>
+              </>
+            ) : copied === "copied" ? (
               <>
                 <Check size={12} className="text-success" aria-hidden="true" />
                 <span className="text-success font-medium hidden sm:inline">Copied!</span>
@@ -595,6 +681,7 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
 
   return (
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
+      <TableFileButton path={filePath} name={filePath.split(/[\\/]/).at(-1) ?? filePath} message={message} />
       <button
         type="button"
         onClick={() => void save.save()}
@@ -608,7 +695,7 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
         ) : save.state === "saved" ? (
           <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
         ) : save.state === "failed" ? (
-          <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
+          !save.outsideWorkspace && <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
         ) : (
           <Download size={12} className="shrink-0" aria-hidden="true" />
         )}
@@ -619,9 +706,15 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
           title={save.state === "saved" ? save.savedTo : undefined}
           className={`text-[12px] ${save.state === "saved" ? "text-success" : save.state === "failed" ? "text-danger" : "text-ink-secondary"}`}
         >
-          {save.state === "failed" ? save.reason : label}
+          {save.state === "failed" ? saveFailureText(save) : label}
         </span>
       )}
+      {save.state === "failed" && save.outsideWorkspace && (
+        <span className="inline-flex flex-wrap items-center gap-x-1.5 text-[12px]">
+          <OutsideWorkspaceFile filePath={filePath} />
+        </span>
+      )}
+      {save.folder && <MessageFolderFiles folderPath={filePath} listing={save.folder} message={message} />}
     </span>
   );
 }
@@ -922,11 +1015,7 @@ const MARKDOWN_COMPONENTS: Components = {
   },
   a: MarkdownLink,
   table({ node, children }: BlockProps) {
-    return (
-      <div className="overflow-x-auto">
-        <table dir={blockDirection(node)} className="w-full border-collapse text-[13.5px]">{children}</table>
-      </div>
-    );
+    return <MarkdownTable direction={blockDirection(node)}>{children}</MarkdownTable>;
   },
   th({ children }: { children?: ReactNode }) {
     return (

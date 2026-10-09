@@ -7,6 +7,7 @@ import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { BrowserViewport, type BrowserFrame } from "./BrowserViewport";
 import { createBrowserInputQueue } from "@/lib/browser-input-queue";
 import { createBrowserControl, type BrowserInteraction, type BrowserTakeStatus } from "@/lib/browser-control";
+import { resolveAddressBarInput } from "@/lib/browser-address";
 
 interface BrowserTab { tabId: string; title: string; url: string; active: boolean }
 type ViewerFrame = BrowserFrame & { viewerId: string; generation: number };
@@ -35,6 +36,8 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
   const [viewport, setViewport] = useState({ width: 1280, height: 720 });
   const [takeStatus, setTakeStatus] = useState<BrowserTakeStatus>("");
   const [fullscreen, setFullscreen] = useState(false);
+  // The server keeps the view open while the bot's own command holds the browser.
+  const [busy, setBusy] = useState(false);
   const viewer = useRef("");
   const generation = useRef(0);
   const pendingOperation = useRef<number | null>(null);
@@ -98,7 +101,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     viewer.current = ""; pendingOperation.current = null; haltMessage.current = "";
     urlEditing.current = false;
-    setFrame(null); setTabs([]); setAddress(""); setConnected(false); setError("");
+    setFrame(null); setTabs([]); setAddress(""); setConnected(false); setError(""); setBusy(false);
     setControl({ held: false, controlling: false, owned: false }); setPending(false);
     controlNow.current = NO_CONTROL; setTakeStatus("");
     const source = new EventSource(`/api/bots/${encodeURIComponent(bot.id)}/browser/live`);
@@ -106,8 +109,10 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
       if (stopped || !ownsConnection()) return;
       try { handler(JSON.parse((event as MessageEvent).data)); } catch { /* Malformed events are not rendered. */ }
     });
+    listen("waiting", () => { if (!viewer.current) setBusy(true); });
     listen("ready", (data) => {
       if (typeof data.viewerId !== "string" || !data.viewerId) return;
+      setBusy(false);
       const expected = data.viewerId;
       viewer.current = expected;
       const queue = createBrowserInputQueue(async (body) => {
@@ -178,7 +183,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
           setAttempt((value) => value + 1);
         }, delay);
       }
-      setError(message); setConnected(false); setFrame(null); setControl({ held: false, controlling: false, owned: false });
+      setError(message); setBusy(false); setConnected(false); setFrame(null); setControl({ held: false, controlling: false, owned: false });
       controlNow.current = NO_CONTROL; setTakeStatus("");
       // Keep this generation alive: a successful restart closes its stream
       // before the action reply arrives, and must still reconnect afterward.
@@ -265,7 +270,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
       {/* Profiles can't switch while this window holds the browser: opening them hands it back now, not after the idle wait. */}
       <button className={`${button} rounded-xl bg-inset p-2`} title={`Browser profile: ${profileName}`} aria-label="Browser profiles" aria-expanded={showProfiles} onClick={() => { browserControl.current?.handBack(); setShowProfiles(true); }}><UserRound size={16} /></button>
     </div>
-    <form className="flex h-12 items-center gap-1 border-b border-hairline/40 px-2" onSubmit={(e) => { e.preventDefault(); if (commandsReady && address.trim()) command({ type: "navigate", url: /^https?:\/\//i.test(address.trim()) ? address.trim() : `https://${address.trim()}` }); }}>
+    <form className="flex h-12 items-center gap-1 border-b border-hairline/40 px-2" onSubmit={(e) => { e.preventDefault(); const url = resolveAddressBarInput(address); if (commandsReady && url) command({ type: "navigate", url }); else if (address.trim()) setError("Enter a web address or something to search for."); }}>
       <div className="flex shrink-0 items-center">
         <button type="button" className={button} disabled={!commandsReady} aria-label="Back" onClick={() => command({ type: "back" })}><ArrowLeft size={17} /></button>
         <button type="button" className={button} disabled={!commandsReady} aria-label="Forward" onClick={() => command({ type: "forward" })}><ArrowRight size={17} /></button>
@@ -291,7 +296,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
         onReturnToToolbar={() => addressInput.current?.focus()}
         acknowledge={(seq) => { if (generation.current === frame.generation && viewer.current === frame.viewerId) void action({ type: "ack", seq }, frame.viewerId).catch(() => {}); }}
         onDecodeError={() => { if (generation.current === frame.generation && viewer.current === frame.viewerId) setError("A browser frame could not be decoded. Close and reopen the panel to reconnect."); }} />
-        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && heldElsewhere ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{heldElsewhere ? "Live view paused for human control" : reconnecting ? "Reconnecting…" : error ? "Browser disconnected" : "Opening the live browser…"}</span></div>}
+        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && heldElsewhere ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{heldElsewhere ? "Live view paused for human control" : reconnecting ? "Reconnecting…" : error ? "Browser disconnected" : busy ? t("browser.live.botBusy", { name: bot.name }) : "Opening the live browser…"}</span></div>}
       {/* Status only, never a control: it floats over the top of the page,
           readable at any panel width, and every click passes through it. */}
       <div role="status" className="pointer-events-none absolute inset-x-0 top-2 flex justify-center px-3">

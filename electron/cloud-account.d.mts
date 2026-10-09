@@ -61,7 +61,8 @@ export declare function createCloudAccountStore(options: {
   encryption: {
     available(): boolean | Promise<boolean>;
     encrypt(value: string): Buffer | Promise<Buffer>;
-    decrypt(value: Buffer): string | Promise<string>;
+    /** A string, or Electron 43's { shouldReEncrypt, result } (safeStorage.decryptStringAsync). */
+    decrypt(value: Buffer): string | { result: string } | Promise<string | { result: string }>;
   };
 }): CloudAccountStore;
 export interface CloudAccountClient {

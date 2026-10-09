@@ -371,6 +371,44 @@ describe("message-db", () => {
   });
 });
 
+describe("messages_thread_at", () => {
+  beforeEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    mkdirSync(DATA_DIR, { recursive: true });
+  });
+
+  it("plans a thread's latest rows on messages_thread_at", () => {
+    for (let thread = 0; thread < 4; thread += 1) {
+      for (let n = 0; n < 50; n += 1) {
+        insertMessage(`thread-${thread}`, msg(`m-${thread}-${n}`, "hello from the bot", { role: "bot", at: n }));
+      }
+    }
+    closeMessageDb();
+    const raw = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    const planOf = (sql: string) => raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all()
+      .map((row) => String((row as { detail: string }).detail))
+      .join("\n");
+    try {
+      // Same statements as latestSaidByBot and latestMessageAts.
+      const said = planOf(
+        "SELECT thread_id, id, at, head FROM (" +
+          "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head, " +
+          "ROW_NUMBER() OVER (PARTITION BY m.thread_id ORDER BY m.at DESC) AS rn " +
+          "FROM messages m " +
+          "WHERE m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (?, ?) " +
+          "AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)" +
+          ") WHERE rn = 1 ORDER BY at DESC LIMIT ?",
+      );
+      const ats = planOf("SELECT thread_id, MAX(at) AS at FROM messages WHERE thread_id IN (?, ?) GROUP BY thread_id");
+      expect(said).toContain("messages_thread_at");
+      expect(ats).toContain("messages_thread_at");
+    } finally {
+      raw.close();
+    }
+  });
+});
+
 describe("describeMissingFts5", () => {
   it("turns SQLite's bare module error into one that names the fix", () => {
     const described = describeMissingFts5(new Error("no such module: fts5"));

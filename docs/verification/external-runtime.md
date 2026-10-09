@@ -3,7 +3,7 @@
 Run against disposable servers and repository-owned fake engines only:
 
 ```sh
-pnpm exec vitest run server/external-runtime.test.ts server/external-runtime.e2e.test.ts server/external-runtime-busy.e2e.test.ts
+pnpm exec vitest run server/external-runtime.test.ts server/external-runtime.e2e.test.ts server/external-runtime-busy.e2e.test.ts server/external-runtime-timeout.e2e.test.ts
 pnpm exec vitest run server/comms.test.ts server/delegations.test.ts server/routine-delegation.e2e.test.ts server/peer-allowlist.e2e.test.ts server/drivers/agents-proxy.test.ts
 pnpm exec vitest run server/workspace-backup-policy.test.ts server/workspace-backup.test.ts
 ```
@@ -21,6 +21,9 @@ directory and the fake Claude engine. They prove:
   release runs exactly once. Human approval remains required where configured,
   without asking twice after an already-approved ask encounters a busy target.
 - Delegation status is withheld when peer access is revoked.
+- The runtime's handoffs are its own to poll: one that finishes (including an
+  ask that outlived its synchronous wait), or fails or expires before it
+  starts, never starts a turn on the bot's own engine in the pinned thread.
 - Backup export omits credentials, restore preserves destination credentials,
   and archives containing those credential paths are rejected.
 

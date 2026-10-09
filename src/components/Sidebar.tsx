@@ -1,7 +1,7 @@
 import { track } from "@/lib/analytics";
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { approvalCardOutcome } from "./ApprovalCard";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
 import {
   Activity,
@@ -31,7 +31,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api, useStore, formatTime, visibleMessages, currentTaskBot, openThread, type AppState, type Bot, type Group, type InstanceInfo } from "@/state/store";
+import { api, useStore, formatTime, visibleMessages, currentTaskBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
 import { peerLine } from "@/lib/peer-message";
@@ -41,10 +41,12 @@ import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
+import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
 import { useHeldMenuMotion, useMenuMotion } from "./MenuMotion";
 import { lastNonReceipt } from "@/lib/receipts";
 import { activityPreview, botEngine } from "@/lib/failed-turn";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
+import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { FullAccessWarning } from "./FullAccessWarning";
@@ -61,7 +63,7 @@ import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
-import { orderedThreadList, SidebarThreadRow, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
+import { orderedThreadList, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
   loadSectionOrder,
@@ -94,6 +96,7 @@ import {
   placeSection,
   pinnedCircleThreadListVisible,
   sameSectionOrder,
+  sidebarConnectorPreview,
   sidebarGoalRunPreview,
   sidebarLayoutInteractive,
   sidebarSectionCollapsed,
@@ -105,7 +108,7 @@ import {
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import { botListItemPointerIntent } from "@/lib/sidebar-selection";
 import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
-import { SidebarFooterNav } from "./SidebarFooterNav";
+import { SidebarAppsButton, SidebarFooterNav } from "./SidebarFooterNav";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
 import { useCloudOwner } from "./CloudOwner";
@@ -113,7 +116,7 @@ import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { attentionJumpAction, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
@@ -143,14 +146,16 @@ function sectionLabel(id: string): string {
   return key ? t(key) : sidebarSectionLabel(id);
 }
 
-function preview(bot: Bot, instances: InstanceInfo[]): string {
+/** `visible` is the bot's visible branch (visibleMessages), which the row
+ * already works out once per transcript. */
+function preview(bot: Bot, visible: Message[], instances: InstanceInfo[]): string {
   if (bot.activity === "waiting-on-you") return t("sidebar.preview.waiting");
   if (bot.waitingForTeammates) return t("sidebar.preview.waitingOnTeammate");
   if (bot.busy) return t("sidebar.preview.working");
   // the visible branch's tail — bot.messages holds every fork, so its last
   // entry can belong to a version the user switched away from — read past
   // the harness's receipts (digest, compaction) to the reply a person reads
-  const last = lastNonReceipt(visibleMessages(bot));
+  const last = lastNonReceipt(visible);
   if (!last) return "";
   // a settled approval card says what happened, as the card itself does;
   // its title is the question it asked, which nobody is waiting on now
@@ -160,6 +165,7 @@ function preview(bot: Bot, instances: InstanceInfo[]): string {
   // a failed turn reads as the chat row says it, never "error: …"
   if (last.kind === "activity" && last.tool) return activityPreview(last.tool, botEngine(bot, instances));
   if (last.kind === "screen") return t("sidebar.preview.screenFrame");
+  if (last.kind === "connector" && last.connector) return sidebarConnectorPreview(last.connector, t);
   const peer = peerLine(last);
   if (peer) return `${peer.name}: ${peer.body}`;
   return citationPreviewText(last.text ?? "");
@@ -190,7 +196,9 @@ function groupPreview(group: Group, bots: Bot[], instances: InstanceInfo[]): str
     ? activityPreview(last.tool, botEngine(bots.find((bot) => bot.id === last.from?.botId), instances))
     : last.kind === "goal.run" && last.goalRun
       ? sidebarGoalRunPreview(last.goalRun)
-      : (last.text ?? "");
+      : last.kind === "connector" && last.connector
+        ? sidebarConnectorPreview(last.connector, t)
+        : (last.text ?? "");
   const readable = citationPreviewText(text);
   if (last.role === "user") return t("sidebar.preview.you", { text: readable });
   return last.from ? `${last.from.name}: ${readable}` : readable;
@@ -243,8 +251,16 @@ export function GroupListItem({
 }) {
   const { state, dispatch } = useStore();
   const selected = state.activeView === "chat" && state.selectedId === group.id;
-  const [threadsOpen, setThreadsOpen] = useState(selected || Boolean(query));
-  useEffect(() => { if (selected || query) setThreadsOpen(true); }, [selected, query]);
+  // a search opens this room only when it has a matching thread to show,
+  // and clearing it puts the room back as it was (MOCA-293)
+  const [threadsOpen, setThreadsOpen] = useSearchDisclosure(`group:${group.id}`, query ?? "", searchMatchesThreads(query ?? "", group.tasks), selected);
+  const wasSelected = useRef(selected);
+  useEffect(() => {
+    // Search can unmount the selected room. Only a new selection opens it;
+    // remounting must preserve the person's remembered disclosure choice.
+    if (selected && !wasSelected.current) setThreadsOpen(true);
+    wasSelected.current = selected;
+  }, [selected]);
   // one thread is the room itself; the disclosure and the list only earn
   // their place once there is a second thread to show
   const hasThreadList = (group.tasks?.length ?? 1) > 1 || Boolean(query);
@@ -337,13 +353,23 @@ export function GroupThreadList({ group, selected, density = "comfortable", quer
   }));
   const visible = orderedThreadList(visibleSidebarThreads(tasks, group.threadId, query, [], showAll));
   useRevealedThreadRow(state.revealThread, selected ? group.threadId : null);
+  // One set of row actions per room; they read the room as it is when used.
+  const latest = useRef(group);
+  latest.current = group;
+  const groupId = group.id;
+  const actions = useMemo(() => ({
+    onSelect: (task: { threadId: string }) => {
+      if (task.threadId !== latest.current.threadId) dispatch({ type: "switchGroupTask", groupId, threadId: task.threadId });
+      else dispatch({ type: "select", id: groupId });
+    },
+    onRename: (task: { threadId: string }, title: string) => dispatch({ type: "renameGroupTask", groupId, threadId: task.threadId, title }),
+    onDelete: (task: { threadId: string }) => dispatch({ type: "deleteGroupTask", groupId, threadId: task.threadId }),
+    onPin: (task: { threadId: string; title: string }, pinned: boolean) => dispatch({ type: "pinGroupTask", groupId, threadId: task.threadId, pinned, title: task.title }),
+  }), [groupId, dispatch]);
+  const locale = activeLocale();
   return <div className="mb-2 space-y-0.5" role="group" aria-label={t("task.namedList", { name: group.name })}>
     {visible.map((task) => <SidebarThreadRow key={task.threadId} task={task} ownerId={group.id} current={selected && task.threadId === group.threadId} compact={density === "compact"}
-      now={now}
-      onSelect={() => { if (task.threadId !== group.threadId) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: task.threadId }); else dispatch({ type: "select", id: group.id }); }}
-      onRename={(title) => dispatch({ type: "renameGroupTask", groupId: group.id, threadId: task.threadId, title })}
-      onDelete={() => dispatch({ type: "deleteGroupTask", groupId: group.id, threadId: task.threadId })}
-      onPin={(pinned) => dispatch({ type: "pinGroupTask", groupId: group.id, threadId: task.threadId, pinned, title: task.title })} />)}
+      now={stampClock(threadRecency(task), now)} locale={locale} {...actions} />)}
     {!query && !showAll && tasks.length > visible.length && <button type="button" onClick={() => setShowAll(true)} className="pl-6 pr-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
   </div>;
 }
@@ -485,7 +511,7 @@ function RoomContextMenu({
       )}
       <button
         onClick={() => {
-          void navigator.clipboard?.writeText(group.threadId);
+          void copyText(group.threadId);
           onClose();
         }}
         className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
@@ -843,7 +869,7 @@ export function BotContextMenu({
           dispatch({ type: "toggleSettings", open: true });
         }),
         item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
-          void navigator.clipboard?.writeText(bot.threadId);
+          void copyText(bot.threadId);
         }),
       ] : [
         item(
@@ -877,7 +903,7 @@ export function BotContextMenu({
         ),
         divider("d2"),
         item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
-          void navigator.clipboard?.writeText(bot.threadId);
+          void copyText(bot.threadId);
         }),
         divider("d3"),
         item(
@@ -961,16 +987,24 @@ export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; on
   );
 }
 
+// one empty list, so a bot without folders hands its rows the same array
+const NO_FOLDERS: BotProject[] = [];
+
 /** The thread tree under one bot row: project folders, then ungrouped rows.
  * Visibility folds old threads away. Pins stay, then the newest update.
- * Waiting and working stay visible as status, not as a sort key. */
-export function BotThreadList({ bot, selected, density = "comfortable", query = "", hidden = false }: { bot: Bot; selected: boolean; density?: SidebarDensity; query?: string; hidden?: boolean }) {
-  const { state, dispatch } = useStore();
+ * Waiting and working stay visible as status, not as a sort key. It takes
+ * its bot row's props and renders with that row. */
+export function BotThreadList({ bot, selected, density, query, pendingQueued, reveal, locale, generatedTitles, dispatch, activityLabel, hidden = false }: BotRowProps & {
+  /** The live verb for the open thread's row ("Reading a file"), from the
+   * bot's visible tail; without it the row says Working. */
+  activityLabel?: string;
+  hidden?: boolean;
+}) {
   const now = useRelativeNow();
   const tasks = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
     .filter((task) => !task.routineRunId)
-    .map((task) => ({ ...task, queued: Boolean(state.pendingQueued[task.threadId]?.length) }));
-  const projects = bot.projects ?? [];
+    .map((task) => ({ ...task, queued: Boolean(pendingQueued[task.threadId]?.length) }));
+  const projects = bot.projects ?? NO_FOLDERS;
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<string | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ projectId: string; left: number; top: number } | null>(null);
@@ -1005,36 +1039,42 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
     return index < 0 ? Number.POSITIVE_INFINITY : index;
   };
   const orderedProjects = query ? projects : [...projects].sort((a, b) => folderRank(a.id) - folderRank(b.id) || projects.indexOf(a) - projects.indexOf(b));
-  useRevealedThreadRow(state.revealThread, selected ? bot.threadId : null);
-  // the same live verb the chat pane derives from the visible tail
-  // ("Reading a file"), passed to the active thread's row while it works
-  const activeActivityLabel = liveActivityLabel(visibleMessages(bot).at(-1));
-  const generatedTitles = llmThreadTitlesEnabled(state.config);
+  useRevealedThreadRow(reveal, selected ? bot.threadId : null);
+  // One set of row actions per bot; they read the bot as it is when used.
+  const latest = useRef(bot);
+  latest.current = bot;
+  const botId = bot.id;
+  const actions = useMemo(() => ({
+    onSelect: (task: { threadId: string }) => {
+      if (task.threadId !== latest.current.threadId) dispatch({ type: "switchTask", botId, threadId: task.threadId });
+      else dispatch({ type: "select", id: botId });
+    },
+    onRename: (task: { threadId: string }, title: string) => dispatch({ type: "renameTask", botId, threadId: task.threadId, title }),
+    onRegenerateTitle: generatedTitles ? (task: { threadId: string }, onSettled: (ok: boolean) => void) => dispatch({ type: "regenerateTaskTitle", botId, threadId: task.threadId, onSettled }) : undefined,
+    onDelete: (task: { threadId: string }) => dispatch({ type: "deleteTask", botId, threadId: task.threadId }),
+    onMove: (task: { threadId: string }, projectId: string | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { projectId } }),
+    onArchive: (task: { threadId: string }, archivedAt: number | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { archivedAt } }),
+    onPin: (task: { threadId: string }, pinned: boolean) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { pinned } }),
+    onSnooze: (task: { threadId: string }, snoozedUntil: number | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { snoozedUntil } }),
+    onRefreshPermissions: (task: { threadId: string }) => {
+      const current = latest.current;
+      const mode = approvalModeFor(current);
+      const threadMode = approvalModeFor(currentTaskBot(current, task.threadId));
+      if (mode === "full" && threadMode !== "full") {
+        setPermissionRefresh({ threadId: task.threadId, kind: "full" });
+        return;
+      }
+      if (mode === "auto" && current.computer === "local" && threadMode !== "auto") {
+        setPermissionRefresh({ threadId: task.threadId, kind: "local-auto" });
+        return;
+      }
+      dispatch({ type: "refreshTaskPermissions", botId, threadId: task.threadId });
+    },
+  }), [botId, dispatch, generatedTitles]);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
-    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && task.threadId === bot.threadId} compact={density === "compact"} folders={projects} activityLabel={task.threadId === bot.threadId ? activeActivityLabel : undefined}
-      now={now}
-      onSelect={() => { if (task.threadId !== bot.threadId) dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId }); else dispatch({ type: "select", id: bot.id }); }}
-      onRename={(title) => dispatch({ type: "renameTask", botId: bot.id, threadId: task.threadId, title })}
-      onRegenerateTitle={generatedTitles ? (onSettled) => dispatch({ type: "regenerateTaskTitle", botId: bot.id, threadId: task.threadId, onSettled }) : undefined}
-      onDelete={() => dispatch({ type: "deleteTask", botId: bot.id, threadId: task.threadId })}
-      onMove={(projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { projectId } })}
-      onArchive={(archivedAt) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { archivedAt } })}
-      onPin={(pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { pinned } })}
-      onSnooze={(snoozedUntil) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { snoozedUntil } })}
-      onRefreshPermissions={() => {
-        const mode = approvalModeFor(bot);
-        const threadMode = approvalModeFor(thread);
-        if (mode === "full" && threadMode !== "full") {
-          setPermissionRefresh({ threadId: task.threadId, kind: "full" });
-          return;
-        }
-        if (mode === "auto" && bot.computer === "local" && threadMode !== "auto") {
-          setPermissionRefresh({ threadId: task.threadId, kind: "local-auto" });
-          return;
-        }
-        dispatch({ type: "refreshTaskPermissions", botId: bot.id, threadId: task.threadId });
-      }} />;
+    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && task.threadId === bot.threadId} compact={density === "compact"} folders={projects}
+      activityLabel={task.threadId === bot.threadId ? activityLabel : undefined} now={stampClock(threadRecency(task), now)} locale={locale} {...actions} />;
   };
   const ungrouped = visibleTasks.filter((task) => !projects.some((project) => project.id === task.projectId));
   const projectToEdit = projects.find((project) => project.id === editingProject);
@@ -1163,21 +1203,70 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
   );
 }
 
-export function PinnedBotCircle({
-  bot,
-  onMenu,
-}: {
+/** What a bot row shows besides its bot. The sidebar works these out once
+ * per store event (botRowProps) and the row is memoized on them, so an event
+ * re-renders only the rows whose bot, or whose part of these, changed. */
+export interface BotRowProps {
   bot: Bot;
+  selected: boolean;
+  deleting: boolean;
+  /** The selected bot's mascot nudge; null on every other row. */
+  mascotMotion: AppState["mascotMotion"];
+  /** A thread being opened from a chip or #Title link, when it is one of
+   * this bot's; null otherwise. */
+  reveal: AppState["revealThread"];
+  pendingQueued: AppState["pendingQueued"];
+  instances: InstanceInfo[];
+  liveCall: AppState["liveCall"];
+  /** The app language. Rows show catalog strings, so a change re-renders them. */
+  locale: string;
+  generatedTitles: boolean;
+  density: SidebarDensity;
+  /** Quiet rows: name and status only (see sidebar-preferences). */
+  quiet: boolean;
+  query: string;
+  dispatch: Dispatch<Action>;
   onMenu: (menu: MenuState) => void;
-}) {
-  const { state, dispatch } = useStore();
+}
+
+/** One bot row's props from the store state and the sidebar's layout. */
+export function botRowProps(
+  state: AppState,
+  dispatch: Dispatch<Action>,
+  bot: Bot,
+  layout: Pick<BotRowProps, "density" | "quiet" | "query" | "onMenu">,
+): BotRowProps {
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
-  const visible = visibleMessages(bot);
-  const activityTasks = sidebarBotActivityTasks(bot, state.pendingQueued);
+  const reveal = state.revealThread;
+  return {
+    ...layout,
+    bot,
+    selected,
+    deleting: state.deletingBots[bot.id] === true,
+    mascotMotion: selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null,
+    reveal: reveal && (bot.threadId === reveal.threadId || bot.tasks?.some((task) => task.threadId === reveal.threadId)) ? reveal : null,
+    pendingQueued: state.pendingQueued,
+    instances: state.instances,
+    liveCall: state.liveCall,
+    locale: activeLocale(),
+    generatedTitles: llmThreadTitlesEnabled(state.config),
+    dispatch,
+  };
+}
+
+/** The bot's visible branch, worked out again only when its transcript or
+ * active leaf changes, not on every change to the bot. */
+function useVisibleMessages(bot: Bot): Message[] {
+  const { messages, activeLeafId } = bot;
+  return useMemo(() => visibleMessages({ messages, activeLeafId }), [messages, activeLeafId]);
+}
+
+export const PinnedBotCircle = memo(function PinnedBotCircle({ bot, selected, mascotMotion, pendingQueued, dispatch, onMenu }: BotRowProps) {
+  const visible = useVisibleMessages(bot);
+  const activityTasks = sidebarBotActivityTasks(bot, pendingQueued);
   const waiting = bot.activity === "waiting-on-you" || activityTasks.some((task) => task.activity === "waiting-on-you");
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
   const unread = bot.unread || activityTasks.some((task) => task.unread);
-  const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const radius = avatarCropRadius(botAvatarProfile(bot).avatarCrop);
   return (
     <button
@@ -1229,26 +1318,20 @@ export function PinnedBotCircle({
       <span className="w-full truncate text-center text-[11px] leading-4 text-ink">{bot.name}</span>
     </button>
   );
-}
+});
 
 /** The same pinned bots as the circle grid, as normal rows, so their threads
  * and thread menu stay reachable. Not a reorderable section. */
 export function PinnedCircleThreadSection({
   bots,
-  density,
-  quiet,
-  query,
   collapsed,
   onToggle,
-  onMenu,
+  row,
 }: {
   bots: Bot[];
-  density: SidebarDensity;
-  quiet: boolean;
-  query: string;
   collapsed: boolean;
   onToggle: () => void;
-  onMenu: (menu: MenuState) => void;
+  row: (bot: Bot) => BotRowProps;
 }) {
   const name = t("sidebar.section.pinned");
   return (
@@ -1261,16 +1344,7 @@ export function PinnedCircleThreadSection({
         reorderable={false}
         dragging={false}
       />
-      {!collapsed && bots.map((bot) => (
-        <BotListItem
-          key={bot.id}
-          bot={bot}
-          density={density}
-          quiet={quiet}
-          query={query}
-          onMenu={onMenu}
-        />
-      ))}
+      {!collapsed && bots.map((bot) => <BotListItem key={bot.id} {...row(bot)} />)}
     </div>
   );
 }
@@ -1279,16 +1353,12 @@ function PinnedBotRoster({
   bots,
   density,
   circles,
-  quiet,
-  query,
-  onMenu,
+  row,
 }: {
   bots: Bot[];
   density: SidebarDensity;
   circles: boolean;
-  quiet: boolean;
-  query: string;
-  onMenu: (menu: MenuState) => void;
+  row: (bot: Bot) => BotRowProps;
 }) {
   if (circles && density !== "icons") {
     return (
@@ -1297,61 +1367,33 @@ function PinnedBotRoster({
         className="grid gap-1 px-1 pb-1"
         style={{ gridTemplateColumns: "repeat(auto-fill, minmax(84px, 1fr))" }}
       >
-        {bots.map((bot) => (
-          <PinnedBotCircle key={bot.id} bot={bot} onMenu={onMenu} />
-        ))}
+        {bots.map((bot) => <PinnedBotCircle key={bot.id} {...row(bot)} />)}
       </div>
     );
   }
   return (
     <>
-      {bots.map((bot) => (
-        <BotListItem
-          key={bot.id}
-          bot={bot}
-          density={density}
-          quiet={quiet}
-          query={query}
-          onMenu={onMenu}
-        />
-      ))}
+      {bots.map((bot) => <BotListItem key={bot.id} {...row(bot)} />)}
     </>
   );
 }
 
-export function BotListItem({
-  bot,
-  density,
-  quiet = false,
-  query = "",
-  onMenu,
-}: {
-  bot: Bot;
-  density: SidebarDensity;
-  /** Quiet rows: name and status only (see sidebar-preferences). */
-  quiet?: boolean;
-  query?: string;
-  onMenu: (menu: MenuState) => void;
-}) {
-  const { state, dispatch } = useStore();
+export const BotListItem = memo(function BotListItem(props: BotRowProps) {
+  const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, quiet, query, dispatch, onMenu } = props;
   const showThreads = useShowThreads();
   const liveMedia = useLiveMedia();
   const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
   const [renaming, setRenaming] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
-  const selected = state.activeView === "chat" && state.selectedId === bot.id;
-  const [threadsOpen, setThreadsOpen] = useState(Boolean(query));
-  useEffect(() => { if (query && showThreads) setThreadsOpen(true); }, [query, showThreads]);
+  // a search opens this bot only when it has a matching thread or folder to
+  // show, and clearing it puts the bot back as it was (MOCA-293)
+  const [threadsOpen, setThreadsOpen] = useSearchDisclosure(`bot:${bot.id}`, showThreads ? query : "", searchMatchesThreads(query, bot.tasks, bot.projects));
   // a thread opened from a chip or #Title link: unfold this bot so the row
   // it lands on is on screen (BotThreadList scrolls it into view)
-  const reveal = state.revealThread;
-  const revealHere = Boolean(reveal && (bot.threadId === reveal.threadId || bot.tasks?.some((task) => task.threadId === reveal.threadId)));
-  useEffect(() => { if (revealHere && showThreads) setThreadsOpen(true); }, [reveal, revealHere, showThreads]);
-  const deleting = state.deletingBots[bot.id] === true;
+  useEffect(() => { if (reveal && showThreads) setThreadsOpen(true); }, [reveal, showThreads]);
   // one thread is the bot itself; the disclosure only earns its place once
   // there is a list (a second thread or a folder) to open
   const hasThreadList = (bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || (bot.projects?.length ?? 0) > 0 || Boolean(query);
-  const mascotMotion = selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const iconOnly = density === "icons";
   const expanded = showThreads && !iconOnly && threadsOpen && hasThreadList;
   useEffect(() => {
@@ -1359,7 +1401,7 @@ export function BotListItem({
   }, [iconOnly]);
   const avatarSize = iconOnly ? 44 : density === "compact" ? (showThreads ? 26 : 40) : (showThreads ? 32 : 56);
   // the visible branch, so a version switch changes the row with the chat
-  const visible = visibleMessages(bot);
+  const visible = useVisibleMessages(bot);
   const last = visible.at(-1);
   // the role from Bot Settings → Title. A badge or tooltip beside the name
   // (#866, #871) always traded the name's width against the title's; its own
@@ -1377,7 +1419,7 @@ export function BotListItem({
     // another bot was active.
     selected ? "bg-raised/70" : "hover:bg-raised/40",
   );
-  const activityTasks = sidebarBotActivityTasks(bot, state.pendingQueued);
+  const activityTasks = sidebarBotActivityTasks(bot, pendingQueued);
   const waiting = bot.activity === "waiting-on-you" || activityTasks.some((task) => task.activity === "waiting-on-you");
   // Real work in a sibling still outranks an idle coordination wait.
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
@@ -1385,7 +1427,7 @@ export function BotListItem({
   const queued = activityTasks.some((task) => task.queued);
   const unread = botShowsUnread(bot);
   // this window, a phone or another window is on a Live call with the bot
-  const onLiveCall = liveBadgeFor(bot.id, liveMedia, state.liveCall);
+  const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   // quiet rows drop the last-message preview but keep a line that reports
   // something happening now; an idle bot is just its name
   const statusLine = deleting || working || waiting || teammateWait || queued;
@@ -1505,7 +1547,7 @@ export function BotListItem({
                   <span className="sr-only">{t("sidebar.preview.working")}</span>
                 </span>
               ) : (
-                <span className="truncate">{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : preview(bot, state.instances)}</span>
+                <span className="truncate">{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : preview(bot, visible, instances)}</span>
               )}
             </span>
           )}
@@ -1587,12 +1629,16 @@ export function BotListItem({
     </div>
     {/* Keep folder expansion state mounted while the preference is off. The
         hidden list omits its children, including any thread-menu portals. */}
-    {!iconOnly && threadsOpen && hasThreadList && <BotThreadList bot={bot} selected={selected} density={density} hidden={!showThreads} query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
-    {!expanded && <SidebarBotActivity bot={bot} density={density} />}
+    {!iconOnly && threadsOpen && hasThreadList && <BotThreadList {...props} hidden={!showThreads}
+      // the same live verb the chat pane derives from the visible tail
+      // ("Reading a file"), for the open thread's row while it works
+      activityLabel={liveActivityLabel(last)}
+      query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
+    {!expanded && <SidebarBotActivity bot={bot} density={density} pendingQueued={pendingQueued} dispatch={dispatch} />}
     {showThreads && creatingProject && <BotProjectDialog bot={bot} onClose={() => setCreatingProject(false)} />}
     </>
   );
-}
+});
 
 export function ArchivedBotRow({
   bot,
@@ -2064,7 +2110,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         !q ||
         b.name.toLowerCase().includes(q) ||
         (b.title ?? "").toLowerCase().includes(q) ||
-        preview(b, state.instances).toLowerCase().includes(q) ||
+        preview(b, visibleMessages(b), state.instances).toLowerCase().includes(q) ||
         b.tasks?.some((task) => !task.routineRunId && task.title.toLowerCase().includes(q)) ||
         b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );
@@ -2182,6 +2228,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   // of the built-in pinned-bots section, which only ever covered whole bots.
   const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
+  const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, quiet: quietRows, query: q, onMenu: setMenu });
 
   return (
     <aside
@@ -2247,14 +2294,17 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         ) : null}
         {density !== "icons" && (
           // Everything between the lights and the buttons; the switcher's
-          // pill reads this slot's width (container `sidebar-top`). Below
-          // 164px, its 140px cap plus a 24px drag gap, the pill drops its name
-          // for icon + chevron rather than fill the slot up to the lights. On
-          // macOS at 320px the slot is 121px in Advanced, 189px in Simple.
+          // pill reads this slot's width (container `sidebar-top`). Once the
+          // slot can hold a truncated name (96px), a 24px drag gap stays and
+          // the name ellipsizes inside the 140px cap. Narrower than that, the
+          // name hides and the spacer may shrink to nothing. On macOS at
+          // 320px the slot is about 121px in Advanced and 189px in Simple.
           <div data-sidebar-top-slot className="@container/sidebar-top flex min-w-0 flex-1 items-center">
             {/* Empty, so it stays a drag region; it takes the slack, which
-                keeps the switcher beside the buttons. */}
-            <div data-sidebar-top-spacer className="min-w-0 flex-1" />
+                keeps the switcher beside the buttons. The 24px floor applies
+                only while the name is showing, so a 240px sidebar can still
+                fit icon and chevron. */}
+            <div data-sidebar-top-spacer className="min-w-0 flex-1 @min-[96px]/sidebar-top:min-w-6" />
             {/* Gives way first when the row is tight; only the switcher's own
                 button opts out of the drag region. */}
             <div data-sidebar-top-switcher className="flex min-w-0 max-w-[140px] items-center">
@@ -2272,7 +2322,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             type="button"
             onClick={toggleCollapsed}
             aria-label={density === "icons" ? t("sidebar.density.expand") : t("sidebar.density.collapseAria")}
-            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             title={density === "icons" ? t("sidebar.density.expand") : t("sidebar.density.collapse")}
           >
             {density === "icons" ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
@@ -2281,13 +2331,16 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             <button
               type="button"
               onClick={() => setAttentionOpen((o) => !o)}
-              aria-label={t("attention.title")}
-              title={t("attention.title")}
-              className="relative flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+              aria-label={attentionTriggerLabel(attention.length)}
+              title={attentionTriggerLabel(attention.length)}
+              className="relative flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               <Activity size={17} strokeWidth={2} />
               {attention.length > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
+              )}
+              {attentionHasRunningWork(attention) && (
+                <span data-header-activity="" className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-success" aria-hidden="true" />
               )}
             </button>
             {attentionMotion.shown && (
@@ -2305,7 +2358,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                       onClick={() => setAttentionPinned(!attentionPinned)}
                       aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
                       title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                     >
                       {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
                     </button>
@@ -2325,7 +2378,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             ref={importReturnRef}
             onClick={() => setPlusOpen((o) => !o)}
             aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
-            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             title={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
           >
             <Plus size={17} strokeWidth={2} />
@@ -2429,9 +2482,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             bots={pinnedBots}
             density={density}
             circles={pinnedCircles}
-            quiet={quietRows}
-            query={q}
-            onMenu={setMenu}
+            row={botRow}
           />
         </div>
       )}
@@ -2505,13 +2556,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           )}
           {unsectionedChief && (
             <div className="mb-1.5">
-              <BotListItem
-                bot={unsectionedChief}
-                density={density}
-                quiet={quietRows}
-                query={q}
-                onMenu={setMenu}
-              />
+              <BotListItem {...botRow(unsectionedChief)} />
             </div>
           )}
           {sectionIds.map((id, index) => {
@@ -2588,16 +2633,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                   className="mx-3 mb-1 self-start rounded bg-raised/50 px-2 py-0.5 text-[10px] text-ink-secondary hover:text-ink">{t("task.queued")} · {queued.length}</button>}
                 {!collapsed && (
                   <>
-                    {sectionChiefItems.map((bot) => (
-                      <BotListItem
-                        key={bot.id}
-                        bot={bot}
-                        density={density}
-                        quiet={quietRows}
-                        query={q}
-                        onMenu={setMenu}
-                      />
-                    ))}
+                    {sectionChiefItems.map((bot) => <BotListItem key={bot.id} {...botRow(bot)} />)}
                     {sectionGroupItems.map((group) => (
                       <GroupListItem
                         key={group.id}
@@ -2613,20 +2649,9 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                         bots={sectionBotItems}
                         density={density}
                         circles={pinnedCircles}
-                        quiet={quietRows}
-                        query={q}
-                        onMenu={setMenu}
+                        row={botRow}
                       />
-                    ) : sectionBotItems.map((bot) => (
-                      <BotListItem
-                        key={bot.id}
-                        bot={bot}
-                        density={density}
-                        quiet={quietRows}
-                        query={q}
-                        onMenu={setMenu}
-                      />
-                    ))}
+                    ) : sectionBotItems.map((bot) => <BotListItem key={bot.id} {...botRow(bot)} />)}
                     {!remoteClient && sectionName && layoutInteractive && (
                       <button onClick={() => setMoveToTeam(sectionName)} aria-label={t(state.bots.some(bot => !bot.hidden && bot.section?.trim() === sectionName) ? "team.manageBotsIn" : "team.addBotsTo", { name: sectionName })}
                         className="mx-3 my-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">
@@ -2645,12 +2670,9 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           {showPinnedCircleThreads && (
             <PinnedCircleThreadSection
               bots={pinnedBots}
-              density={density}
-              quiet={quietRows}
-              query={q}
               collapsed={pinnedCircleThreadsCollapsed}
               onToggle={() => setPinnedCircleThreadsCollapsed((collapsed) => !collapsed)}
-              onMenu={setMenu}
+              row={botRow}
             />
           )}
         </div>
@@ -2689,14 +2711,19 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             </button>
           </div>
         ) : (
-          // The Tools row and the profile row are two different kinds of
+          // The place rows and the profile row are two different kinds of
           // thing — places to go, versus who you are and what the app is —
-          // so they get clear space between them. A hairline lived here
+          // so they get clear space between them (none when Simple mode has
+          // no place rows and the profile row leads). A hairline lived here
           // briefly and made it worse: full-bleed, it ran within a few pixels
           // of the profile row's rounded hover pill, and the two hover states
-          // read as one crowded block rather than two rows.
-          <div className="mt-3">
-            <SidebarProfileMenu />
+          // read as one crowded block rather than two rows. Apps sits at the
+          // end of the profile row.
+          <div className="flex items-center gap-1 not-first:mt-3">
+            <div className="min-w-0 flex-1">
+              <SidebarProfileMenu />
+            </div>
+            <SidebarAppsButton />
           </div>
         )}
       </div>

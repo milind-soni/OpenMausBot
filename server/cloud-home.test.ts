@@ -5,7 +5,7 @@ import type { IncomingMessage } from "node:http";
 import { afterEach, expect, it } from "vitest";
 import {
   CLOUD_BROWSER_SIGN_IN_MAX_TTL_S, CLOUD_HOME_MARKER, CLOUD_IGNORED_KEYS, CLOUD_PAIRING_MAX_TTL_S, CLOUD_PAIRING_NONCE_MS, CLOUD_PAIRING_SKEW_S, cloudHomeConfiguration, cloudHomeConfigured,
-  boatNotConfiguredMessage, cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
+  cloudHomeHost, cloudHomeOffersPlace, cloudHomePlaceRefusal, cloudPairingSignature, createCloudPairing, firstCloudTurnPatch, prepareCloudHomeVolume,
   withoutIgnoredCloudKeys,
 } from "./cloud-home.ts";
 import { cloudHomeChildEnvironments, codeTrustProblem, passwdIds, spawnWithSecrets } from "./cloud-home-start.ts";
@@ -106,19 +106,13 @@ it("offers the built-in browser and cloud computers, never this computer or a Lo
 
 it("refuses the places it never offers with what is true there, not a setup step", () => {
   const local = cloudHomePlaceRefusal("local")!, vm = cloudHomePlaceRefusal("vm")!;
-  expect(local).toBe("This computer isn't a place on your OMB Cloud: its bots run in the cloud. Set Works on to Auto, Cloud or Browser, or lend your Mac under Settings → OMB Cloud.");
-  expect(vm).toBe("Bots on your OMB Cloud can't use a Local VM: the cloud machine has no container runtime. Set Works on to Auto, Cloud or Browser.");
+  expect(local).toBe("This computer isn't a place on My Cloud. Set Works on to Auto, Cloud computer or Browser, or lend your Mac under Settings → OpenMausBot Cloud.");
+  expect(vm).toBe("Bots on My Cloud can't use a Local VM. Set Works on to Auto, Cloud computer or Browser.");
   for (const text of [local, vm]) {
     expect(text).not.toMatch(/configure|Computer panel|install|set (?:it|one) up/i);
     // A failed turn shows the first 160 characters of its error.
     expect(text.length).toBeLessThanOrEqual(160);
   }
-});
-
-it("suggests the browser, not a Local VM, when Cloud has no Boat account on a Cloud home", () => {
-  expect(boatNotConfiguredMessage(true)).toBe("Cloud Boat is not configured — add a Boat API key or choose Browser");
-  // Every other server keeps its words.
-  expect(boatNotConfiguredMessage(false)).toBe("Cloud Boat is not configured — add a Boat API key or choose Local VM");
 });
 
 // ── the Admin's signed pairing request ───────────────────────────────────────
@@ -215,7 +209,7 @@ it("keeps every window single use and short lived, capping what the Admin asks f
   expect(f.exchange(long.body.code as string).ok).toBe(false);
   const plain = f.mint(f.sign("{}"));
   expect(plain.body.expiresAt).toBe(f.now() + 300_000);
-  expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: "OMB Cloud" } });
+  expect(f.exchange(plain.body.code as string)).toMatchObject({ ok: true, session: { label: "OpenMausBot Cloud" } });
 });
 
 it("opens a browser sign-in only a browser redeems, by credential alone, for at most two minutes", () => {
@@ -353,13 +347,26 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(caddy).toMatch(/^:8080 \{/m);
   const upstreams = [...caddy.matchAll(/reverse_proxy (\S+)/g)].map(match => match[1]);
   expect(new Set(upstreams)).toEqual(new Set(["127.0.0.1:8799", "127.0.0.1:8800"]));
+  // Webhooks reach a Cloud at its own address: only /hooks/* goes to the
+  // receiver (whose /health stays private), the rest to the server.
+  expect(caddy).toMatch(/handle \/hooks\/\* \{\s*reverse_proxy 127\.0\.0\.1:8800 \{/);
+  expect(caddy.match(/127\.0\.0\.1:8800/g)).toHaveLength(1);
+  // ...and only for the Cloud's own name, like everything but the health check.
+  const homeStart = caddy.indexOf("handle @home {");
+  let homeEnd = homeStart + "handle @home {".length;
+  for (let depth = 1; depth > 0; homeEnd++) depth += caddy[homeEnd] === "{" ? 1 : caddy[homeEnd] === "}" ? -1 : 0;
+  expect(caddy.slice(homeStart, homeEnd)).toContain("handle /hooks/* {");
   // every forwarded request is marked as proxied
   expect(caddy.match(/header_up X-Forwarded-For \{client_ip\}/g)).toHaveLength(upstreams.length);
-  // The root supervisor's code is root's: maus owns only the volume.
-  const image = readFileSync(join(import.meta.dirname, "../deploy/fly/Dockerfile"), "utf8");
-  expect(image).toMatch(/chown -R root:root \/app\b/);
-  expect(image).toMatch(/chmod -R go-w \/app\b/);
-  expect(image.indexOf("chmod -R go-w /app")).toBeLessThan(image.indexOf("CMD ["));
+  // The root supervisor's code is root's: maus owns only the volume. The
+  // image's last step refuses to build if anything there is not.
+  const dockerfile = readFileSync(join(import.meta.dirname, "../Dockerfile"), "utf8");
+  const image = dockerfile.slice(dockerfile.indexOf("FROM runtime AS cloud-home"), dockerfile.indexOf("FROM runtime AS server"));
+  const check = image.indexOf('untrusted="$(find /app /usr/local/bin/caddy \\( ! -user root -o ! -type l -perm /022 \\) -print)"');
+  expect(image.slice(check)).toMatch(/^untrusted=.*\n && if \[ -n "\$untrusted" \]; then .*exit 1; fi \\\n/);
+  expect(check).toBeGreaterThan(image.lastIndexOf("COPY "));
+  expect(check).toBeLessThan(image.indexOf("CMD ["));
+  expect(image).toContain("COPY deploy/fly/Caddyfile /app/cloud/Caddyfile");
   const fly = readFileSync(join(import.meta.dirname, "../deploy/fly/fly.toml"), "utf8");
   expect(fly).toMatch(/internal_port = 8080/);
   expect(fly).toMatch(/destination = "\/data"/);
@@ -391,7 +398,7 @@ it("records the first finished bot turn once, on a Cloud home only, and a moved 
   expect(firstCloudTurnPatch({ ...turn, recorded: "2026-09-29T08:00:00.000Z" })).toBeNull();
   expect(firstCloudTurnPatch({ ...turn, ok: false })).toBeNull();
   expect(firstCloudTurnPatch({ ...turn, known: false })).toBeNull();
-  // Move to Cloud restores a Mac's settings onto the Cloud; the onboarding
+  // Copy to My Cloud restores a Mac's settings onto the Cloud; the onboarding
   // record is not among them, so the Cloud's own answer survives, and a Mac's
   // turns never tick the Cloud's step.
   const mac = { language: "en", onboarding: { completedAt: "2026-09-01T00:00:00.000Z", version: 1, firstTurnAt: "2026-08-01T00:00:00.000Z" } };
@@ -436,4 +443,25 @@ writeFileSync(${JSON.stringify(out)}, JSON.stringify({ secrets, env: process.env
   } finally {
     await removeTempDir(dir);
   }
+});
+
+it("captures a child's stdout and stderr when asked, and shares this process's otherwise", async () => {
+  const dir = directory();
+  const script = join(dir, "streams.mjs");
+  writeFileSync(script, `process.stdout.write("stdout marker"); process.stderr.write("stderr marker");`);
+  const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}) };
+  const run = async (capture: boolean) => {
+    const child = spawnWithSecrets(process.execPath, [script], env, { OMB_CLOUD_BOOTSTRAP_SECRET: secret }, undefined, capture);
+    let out = "", err = "";
+    child.stdout?.on("data", (chunk) => { out += chunk; });
+    child.stderr?.on("data", (chunk) => { err += chunk; });
+    await new Promise((resolve) => child.once("close", resolve));
+    return { child, out, err };
+  };
+  const captured = await run(true);
+  expect(captured.out).toContain("stdout marker");
+  expect(captured.err).toContain("stderr marker");
+  const shared = await run(false);
+  expect(shared.child.stdout).toBeNull();
+  expect(shared.child.stderr).toBeNull();
 });

@@ -25,14 +25,20 @@ const DEFAULT_URLS: Record<ProviderKeyKind, string> = {
 
 const MAX_MODELS = 5;
 
-function isLoopback(hostname: string): boolean {
+/** A URL hostname on this machine: the only place a key may go over plain http. */
+export function isLoopback(hostname: string): boolean {
   const host = hostname.replace(/^\[|\]$/g, "");
   return host === "localhost" || host === "127.0.0.1" || host === "::1" || host.startsWith("127.");
 }
 
+/** A provider's base URL: the configured one, or its default. */
+export function providerBaseUrl(provider: ProviderKeyKind, base?: string | null): string {
+  return (base?.trim() || DEFAULT_URLS[provider]).replace(/\/+$/, "");
+}
+
 /** The models endpoint for a provider, from its base URL or the default. */
 export function providerModelsUrl(provider: ProviderKeyKind, base?: string | null): string {
-  const root = (base?.trim() || DEFAULT_URLS[provider]).replace(/\/+$/, "");
+  const root = providerBaseUrl(provider, base);
   if (provider === "anthropic") return root.endsWith("/v1") ? `${root}/models` : `${root}/v1/models`;
   return `${root}/models`;
 }

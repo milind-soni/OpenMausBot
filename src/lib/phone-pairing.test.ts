@@ -66,8 +66,8 @@ describe("Connect your phone in the account menu", () => {
     expect(connectPhoneEntry("computer", access(chatOnly, false))?.target).toBe("computer");
   });
 
-  it("on the person's own Cloud: to your Cloud, for the owner's session", () => {
-    expect(subtitle(connectPhoneEntry("cloud", access(admin)))).toBe("to your Cloud");
+  it("on the person's own Cloud: to My Cloud, for the owner's session", () => {
+    expect(subtitle(connectPhoneEntry("cloud", access(admin)))).toBe("to My Cloud");
     expect(connectPhoneEntry("cloud", access(chatOnly))).toBeNull();
   });
 
@@ -209,14 +209,14 @@ describe("the person's Cloud as a destination on this computer", () => {
   it("joins this computer's line, first, and only on this computer", () => {
     const here = connectPhoneEntry("computer", null);
     expect(phoneDestinations(here, "ready").map((d) => [d.id, d.target, t(d.subtitleKey)])).toEqual([
-      ["cloud", "cloud", "to your Cloud (always on)"],
+      ["cloud", "cloud", "to My Cloud (always on)"],
       ["here", "computer", "to this computer"],
     ]);
-    expect(phoneDestinations(here, "not-ready").map((d) => [d.id, d.noteKey && t(d.noteKey)])).toEqual([["here", "Your Cloud shows here once it is ready."]]);
+    expect(phoneDestinations(here, "not-ready").map((d) => [d.id, d.noteKey && t(d.noteKey)])).toEqual([["here", "My Cloud shows here once it is ready."]]);
     expect(phoneDestinations(here, null).map((d) => [d.id, d.noteKey])).toEqual([["here", undefined]]);
     const cloud = connectPhoneEntry("cloud", access(admin));
     for (const state of ["ready", "not-ready", null] as const) {
-      expect(phoneDestinations(cloud, state).map((d) => [d.id, t(d.subtitleKey), d.noteKey])).toEqual([["here", "to your Cloud", undefined]]);
+      expect(phoneDestinations(cloud, state).map((d) => [d.id, t(d.subtitleKey), d.noteKey])).toEqual([["here", "to My Cloud", undefined]]);
       expect(phoneDestinations(connectPhoneEntry("server", access(admin)), state).map((d) => d.id)).toEqual(["here"]);
       expect(phoneDestinations(null, state)).toEqual([]);
     }

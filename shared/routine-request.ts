@@ -88,6 +88,31 @@ export type RoutineRequestOperation =
   | { action: "run_now"; routineId: string; expectedUpdatedAt: number; forBot?: RoutineRequestTargetBot }
   | { action: "delete"; routineId: string; expectedUpdatedAt: number; forBot?: RoutineRequestTargetBot };
 
+/** A routine as it stood before a change applied without a person, so Undo
+ * can put it back. Room goals keep their room; attachments are not kept, so
+ * a routine that has any is not offered an Undo for its update or delete. */
+export interface RoutineRequestSnapshot extends RoutineRequestDefinition {
+  enabled: boolean;
+  target?: "room-goal";
+  groupId?: string;
+  resultsThreadId?: string;
+}
+
+/** Written on a card whose change applied without a person (the bot's own
+ * routine, or Full access): what the one-line receipt shows, and what its
+ * Undo needs. */
+export interface RoutineRequestUndo {
+  /** The routine's name and schedule as the change left them. */
+  name: string;
+  schedule?: RoutineRequestSchedule;
+  /** The routine's revision right after the change; Undo refuses once it moved. */
+  appliedUpdatedAt?: number;
+  /** The routine before an update or a delete. */
+  before?: RoutineRequestSnapshot;
+  /** On a Cloud home: the routine was the owner's before the change. */
+  ownersBefore?: boolean;
+}
+
 export interface RoutineRequestCardData {
   version: 1;
   /** Also used as the scheduler's idempotency key after confirmation. */
@@ -100,4 +125,5 @@ export interface RoutineRequestCardData {
   /** Written after a successful confirmation. Useful for support/debugging. */
   appliedAt?: number;
   resultId?: string;
+  undo?: RoutineRequestUndo;
 }

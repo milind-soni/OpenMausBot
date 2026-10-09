@@ -116,20 +116,14 @@ export { cloudHomeOffersPlace } from "../shared/cloud-home.ts";
  * the person's, no Local VM), in the words the person reads; undefined for a
  * place it offers. A turn's error shows 160 characters, so each fits. */
 export function cloudHomePlaceRefusal(place: Surface): string | undefined {
-  if (place === "local") return "This computer isn't a place on your OMB Cloud: its bots run in the cloud. Set Works on to Auto, Cloud or Browser, or lend your Mac under Settings → OMB Cloud.";
-  if (place === "vm") return "Bots on your OMB Cloud can't use a Local VM: the cloud machine has no container runtime. Set Works on to Auto, Cloud or Browser.";
+  if (place === "local") return "This computer isn't a place on My Cloud. Set Works on to Auto, Cloud computer or Browser, or lend your Mac under Settings → OpenMausBot Cloud.";
+  if (place === "vm") return "Bots on My Cloud can't use a Local VM. Set Works on to Auto, Cloud computer or Browser.";
   return undefined;
 }
 
-/** What a turn is told when Cloud is chosen but no Boat account is set up (no
- * key of the person's and no included Boat). A Cloud home has no Local VM to
- * suggest instead. */
-export function boatNotConfiguredMessage(cloudHome: boolean): string {
-  return `Cloud Boat is not configured — add a Boat API key or choose ${cloudHome ? "Browser" : "Local VM"}`;
-}
-
-/** The Cloud's setup checklist (docs/cloud-pro.md) has a "try something"
- * step that is done once a bot's turn finishes on the machine itself. The
+/** The Cloud's setup checklist (docs/cloud-pro.md) counts a first job as given,
+ * and a Cloud set up without one as done, once a bot's turn finishes on the
+ * machine itself. The
  * server records when, once, in this Cloud's own onboarding record: that
  * section never travels with Move to Cloud (workspace-backup-policy.ts), so a
  * moved-in history of turns does not count. Null when there is nothing to
@@ -203,7 +197,7 @@ export function createCloudPairing(options: {
       const ttl = Math.min((ttlSeconds as number | undefined) ?? CLOUD_PAIRING_DEFAULT_TTL_S, browser ? CLOUD_BROWSER_SIGN_IN_MAX_TTL_S : CLOUD_PAIRING_MAX_TTL_S);
       const opened = sessions.openPairing({
         scopes: ["admin", "client"],
-        label: typeof label === "string" && label.trim() ? label.trim() : "OMB Cloud",
+        label: typeof label === "string" && label.trim() ? label.trim() : "OpenMausBot Cloud",
         ttlMs: ttl * 1000,
         browser,
         ...(browser ? { owner: owner as string } : {}),

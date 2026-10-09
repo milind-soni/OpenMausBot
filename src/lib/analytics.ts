@@ -5,7 +5,10 @@
 // cards render model output and message previews, so it would leak fragments
 // of private conversations to a third party. Email submissions call
 // identify(), so PostHog's Persons tab doubles as the collected-email list.
-import posthog from "posthog-js";
+// posthog-js is imported on demand by initAnalytics(), not up here: a static
+// import would put ~240 kB into the startup bundle that every launch
+// evaluates before first paint, opted-out installs included.
+import type { PostHog } from "posthog-js";
 
 const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
 
@@ -16,7 +19,12 @@ const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
 // through opt_out_capturing(), which also drops anything already queued.
 const OPT_OUT_KEY = "omb-analytics-opt-out";
 
-let ready = false;
+// Set once init() has run. While the library is still loading, track() and
+// identifyEmail() wait in `pending` and are replayed after app_opened;
+// switching analytics off empties it.
+let client: PostHog | undefined;
+let loading: Promise<void> | undefined;
+let pending: Array<(ph: PostHog) => void> = [];
 
 // The choice as made in THIS process, which outranks storage. Without it a
 // rejected write silently loses an opt-out: the setter would swallow the
@@ -52,36 +60,64 @@ export function setAnalyticsEnabled(enabled: boolean) {
   } catch {
     /* it will not survive a restart, but it holds for this session */
   }
-  switch (optAction(enabled, ready)) {
+  if (!enabled) pending = []; // nothing queued during a load goes out
+  switch (optAction(enabled, client !== undefined)) {
     case "opt-out":
-      posthog.opt_out_capturing(); // also drops whatever is still queued
+      client?.opt_out_capturing(); // also drops whatever is still queued
       break;
     case "opt-in":
-      posthog.opt_in_capturing();
+      client?.opt_in_capturing();
       break;
     case "init":
-      initAnalytics(); // first opt-in of a session that started opted out
+      void initAnalytics(); // first opt-in of a session that started opted out
       break;
     case "none":
       break;
   }
 }
 
-export function initAnalytics() {
-  if (ready || !analyticsEnabled()) return;
+export function initAnalytics(): Promise<void> {
+  if (client || !analyticsEnabled()) return Promise.resolve();
+  // one load however often this is called (StrictMode mounts twice)
+  loading ??= import("posthog-js")
+    .then(({ default: posthog }) => start(posthog))
+    .catch(() => {
+      // The chunk did not load (e.g. a tab holding an index.html from before
+      // an update), or the library threw while starting. Analytics must never
+      // break the app, and no caller awaits this, so it settles quietly and
+      // nothing queued goes out. Switching the setting off and on calls this
+      // again; whether a failed chunk then loads is up to the browser.
+      pending = [];
+    })
+    .finally(() => {
+      loading = undefined;
+    });
+  return loading;
+}
+
+function start(posthog: PostHog) {
+  // switched off while the library loaded: it must not start at all
+  if (!analyticsEnabled()) {
+    pending = [];
+    return;
+  }
   posthog.init(TOKEN, {
     api_host: "https://us.i.posthog.com",
     autocapture: false, // never capture clicked-element text (conversation leak)
     capture_pageview: false, // single-window desktop app — no page routes
     person_profiles: "identified_only",
     persistence: "localStorage",
+    // the app has no survey UI and the project has surveys off, yet the
+    // remote config's `surveys: false` still fetches surveys.js; drop this
+    // if PostHog surveys are ever wanted
+    disable_surveys: true,
   });
   // opt_out_capturing() persists in PostHog's own storage, so after
   // opt-out → restart → opt-in the client would boot opted out and drop
   // every capture below while the switch says on. Clear the stale flag
   // before the first capture of the session.
   if (posthog.has_opted_out_capturing()) posthog.opt_in_capturing();
-  ready = true;
+  client = posthog;
   const platform = navigator.userAgent.includes("Electron") ? "desktop" : "browser";
   // one-time install marker — app_first_open counts installs (the closest
   // truth to "downloads that mattered"; raw download counts live on the
@@ -91,21 +127,31 @@ export function initAnalytics() {
     posthog.capture("app_first_open", { platform });
   }
   posthog.capture("app_opened", { platform });
+  for (const call of pending.splice(0)) call(posthog);
+}
+
+// Calls before initAnalytics() are dropped, as they always were; calls made
+// while the library loads are queued for it.
+function whenReady(call: (ph: PostHog) => void) {
+  if (!analyticsEnabled()) return;
+  if (client) call(client);
+  else if (loading) pending.push(call);
 }
 
 export function track(event: string, props?: Record<string, unknown>) {
-  if (!ready || !analyticsEnabled()) return;
-  posthog.capture(event, props);
+  whenReady((ph) => ph.capture(event, props));
 }
 
-// Checked here as well as in track(): this is the one call that would send a
-// personal identifier, so it must not depend on opt_out_capturing() alone.
+// Gated on analyticsEnabled() like track(): this is the one call that would
+// send a personal identifier, so it must not depend on opt_out_capturing()
+// alone, and one queued during the load is dropped by an opt-out.
 // The address is still stored locally in the profile either way — opting out
 // stops it from being reported, not from being used.
 export function identifyEmail(email: string) {
-  if (!ready || !analyticsEnabled()) return;
-  posthog.identify(email, { email });
-  posthog.capture("email_submitted");
+  whenReady((ph) => {
+    ph.identify(email, { email });
+    ph.capture("email_submitted");
+  });
 }
 
 // first-run email gate state

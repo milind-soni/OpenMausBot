@@ -2,14 +2,20 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Bot } from "@/state/store";
+import { initialState, type Bot } from "@/state/store";
 
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
+// These rows are Advanced mode's: Simple mode keeps one conversation per bot,
+// so its rows have no thread controls (useShowThreads).
+vi.mock("@/lib/interface-mode", async (original) => ({
+  ...await original<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => true,
+}));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotDeleteMenuItem, BotListItem, botConfirmCopy, currentArchivableBot } from "./Sidebar";
+import { BotDeleteMenuItem, BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
 import { endCall } from "@/lib/call";
 import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 
@@ -28,16 +34,7 @@ const bot = (overrides: Partial<Bot> = {}): Bot => ({
 });
 
 function renderRow(candidate: Bot, quiet = false, density: "comfortable" | "icons" = "comfortable") {
-  return renderToStaticMarkup(createElement(
-    StoreProvider,
-    null,
-    createElement(BotListItem, {
-      bot: candidate,
-      density,
-      quiet,
-      onMenu: vi.fn(),
-    }),
-  ));
+  return renderToStaticMarkup(createElement(BotListItem, botRowProps(initialState, vi.fn(), candidate, { density, quiet, query: "", onMenu: vi.fn() })));
 }
 
 afterEach(() => {

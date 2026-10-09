@@ -12,7 +12,7 @@
     "@cloudflare/vitest-plugin": "1.0.0",
     "@types/node": "^26.2.0",
     "typescript": "^5.8.3",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "wrangler": "4.125.0"
   },
   "scripts": {

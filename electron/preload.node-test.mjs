@@ -56,6 +56,13 @@ test("exposes the full local-shell bridge on window.ogb", () => {
   assert.equal(typeof exposed.api.onOpenAppSettings, "function");
 });
 
+test("copyText forwards only the text over the explicit clipboard:write-text channel", async () => {
+  const before = invocations.length;
+  await exposed.api.copyText("hello");
+  assert.deepEqual(invocations.slice(before), [["clipboard:write-text", "hello"]]);
+  assert.equal("ipcRenderer" in exposed.api, false);
+});
+
 test("browser control forwards a separate per-device capability, not the cloud grant", async () => {
   const before = invocations.length;
   await exposed.api.companion.browserControl("phone-1", true);

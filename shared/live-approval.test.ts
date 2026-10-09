@@ -12,11 +12,10 @@ describe("liveCardKind", () => {
     expect(liveCardKind(card({ requestId: "r1", tool: "schedule_routine", routineRequest: {} as OptionCardData["routineRequest"] }))).toBe("review");
     expect(liveCardKind(card({ requestId: "r1" }))).toBe("question");
   });
-  it("sends a default-model or tightening proposal to the screen, though it names a tool", () => {
-    // propose_model and propose_tightening cards carry update_model and
-    // tighten_permissions; a spoken yes must never reach them as an approval
+  it("sends a default-model proposal to the screen, though it names a tool", () => {
+    // propose_model cards carry update_model; a spoken yes must never reach
+    // them as an approval
     expect(liveCardKind(card({ requestId: "r1", tool: "update_model", modelRequest: {} as OptionCardData["modelRequest"] }))).toBe("review");
-    expect(liveCardKind(card({ requestId: "r1", tool: "tighten_permissions", tighteningRequest: {} as OptionCardData["tighteningRequest"] }))).toBe("review");
     expect(liveDecisionRefusal(card({ requestId: "r1", tool: "update_model", modelRequest: {} as OptionCardData["modelRequest"] })))
       .toBe("This request is reviewed on screen.");
   });

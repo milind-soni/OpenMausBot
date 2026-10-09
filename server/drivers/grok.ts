@@ -57,7 +57,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       generateModel: () => "grok-3-mini",
       nativeLog: {
         source: "xai.chat.completions",
-        outgoing: (_turn, messages, model) => ({ model, messages }),
+        outgoing: (_turn, messages, model) => ({ model, messageCount: messages.length }),
         incoming: ({ text, usage }) => ({ text, usage }),
       },
     });

@@ -7,6 +7,15 @@ import { waitForExit } from "./cleanup.ts";
 
 type AgentsIntegration = { command: string; args: string[]; env: Record<string, string> };
 
+// Claude reads its MCP config and system prompt files once, at launch. The
+// harness removes both when the first turn settles, so a process kept warm
+// for later turns must not read them again.
+const launchFiles = new Map<string, string>();
+const readAtLaunch = (path: string) => {
+  if (!launchFiles.has(path)) launchFiles.set(path, readFileSync(path, "utf8"));
+  return launchFiles.get(path)!;
+};
+
 /** `launch` replaces Claude's argv files for another fake engine: the agents
  * server it mounted, its instructions, and extra evidence fields. `progress`
  * streams a plan's `progress` text before the turn waits on its gate, and its
@@ -15,7 +24,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   launch?: { integration: AgentsIntegration; system: string; evidence?: Record<string, unknown> },
   progress?: (text: string) => void): Promise<string> {
   const arg = (flag: string) => argv[argv.indexOf(flag) + 1];
-  const integration = launch?.integration ?? Object.values(JSON.parse(readFileSync(arg("--mcp-config"), "utf8")).mcpServers as Record<string, AgentsIntegration>)
+  const integration = launch?.integration ?? Object.values(JSON.parse(readAtLaunch(arg("--mcp-config"))).mcpServers as Record<string, AgentsIntegration>)
     .find(s => s.env?.OMB_BOT_ID);
   // A depth-capped delegated turn mounts no agents server: answer from the prompt alone.
   if (!integration) {
@@ -40,7 +49,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
     return `Handled without teammate tools: ${taskText}`;
   }
   const botId = integration.env.OMB_BOT_ID;
-  const system = launch?.system ?? readFileSync(arg("--append-system-prompt-file"), "utf8");
+  const system = launch?.system ?? readAtLaunch(arg("--append-system-prompt-file"));
   // Claude snapshots the launch-time system prompt for a session. A retained
   // process or --resume launch receives changed turn-scoped instructions in
   // the user message, so inspect both surfaces just as the model does.

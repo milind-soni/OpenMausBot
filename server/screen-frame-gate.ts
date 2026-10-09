@@ -7,9 +7,7 @@
 //      shell command over computer_exec or a status read does not count,
 //      however the driver happens to spell the tool's name;
 //   2. is the end frame different from the one the transcript already
-//      shows — a boxAgent turn starts as screen work by definition, so this
-//      is what keeps its shell-only replies from re-picturing the same idle
-//      desktop.
+//      shows — this keeps a reply from re-picturing the same idle desktop.
 import { createHash } from "node:crypto";
 
 // Tool-name classification lives in shared/tool-surface.ts so the renderer

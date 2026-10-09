@@ -1,29 +1,67 @@
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { UpdaterState } from "@/lib/updater";
 
 const fixture = vi.hoisted(() => ({ state: { status: "idle" } as UpdaterState }));
-vi.mock("@/lib/updater", () => ({ useUpdaterState: () => fixture.state }));
+// As the real hook: no state without the desktop app's updater bridge.
+vi.mock("@/lib/updater", () => ({ useUpdaterState: () => (window.ogb?.updater ? fixture.state : null) }));
 vi.mock("../lib/brand", () => ({ brand: () => ({ name: "OpenMausBot" }) }));
 import { UpdateBanner } from "./UpdateBanner";
 
 afterEach(() => vi.unstubAllGlobals());
-function render(state: UpdaterState) {
+function render(state: UpdaterState, window: object = { ogb: { updater: {} } }) {
   fixture.state = state;
-  vi.stubGlobal("window", { ogb: { updater: {} } });
+  vi.stubGlobal("window", window);
   return renderToStaticMarkup(createElement(UpdateBanner));
 }
 
+const LOCAL = "http://127.0.0.1:8799";
+const CLOUD = "https://home-7f3k2.fly.dev";
+const OTHER = "https://bots.example.test";
+/** The window.ogb that electron/preload.cjs gives a server's page; `answered`:
+ * whether main answers that page about updates (My Cloud's, not another's). */
+function serverPageBridge(origin: string, answered: boolean) {
+  let bridge: unknown;
+  vm.runInNewContext(readFileSync(new URL("../../electron/preload.cjs", import.meta.url), "utf8"), {
+    process: { platform: "darwin", argv: [`--omb-local-origin=${LOCAL}`] },
+    location: { origin }, navigator: { userActivation: { isActive: false } },
+    TextEncoder, localStorage: { getItem: () => null },
+    require: () => ({
+      webUtils: {},
+      contextBridge: { exposeInMainWorld: (_name: string, value: unknown) => { bridge = value; } },
+      ipcRenderer: {
+        on() {}, removeListener() {}, send() {}, invoke: () => Promise.resolve({ status: "idle" }),
+        sendSync: (channel: string) => channel === "update:offered" && answered,
+      },
+    }),
+  });
+  return bridge;
+}
+
 describe("UpdateBanner", () => {
-  it("cannot restart or retry while macOS is preparing the downloaded bytes", () => {
-    const html = render({ status: "preparing", version: "0.2.0", percent: 100 });
-    expect(html).toContain("Preparing update…");
-    expect(html).toContain("macOS is preparing the update.");
-    expect(html).toContain("disabled=\"\"");
-    expect(html).not.toContain("Restart to update");
-    expect(html).not.toContain("Try again");
-    expect(html).not.toContain("Dismiss");
+  it("shows the ready update and its restart on My Cloud's page", () => {
+    const html = render({ status: "downloaded", version: "0.2.0" }, { location: { origin: CLOUD }, ogb: serverPageBridge(CLOUD, true) });
+    expect(html).toContain("OpenMausBot 0.2.0 is ready");
+    expect(html).toContain("Restart to update");
+    expect(html).toContain("Later");
+  });
+
+  it("is absent from another server's page, which never gets the updater", () => {
+    const ogb = serverPageBridge(OTHER, false) as { updater?: unknown };
+    expect(ogb.updater).toBeUndefined();
+    expect(render({ status: "downloaded", version: "0.2.0" }, { location: { origin: OTHER }, ogb })).toBe("");
+  });
+
+  // Updates download by themselves: nothing to do yet, so nothing to show.
+  it.each([
+    { status: "downloading", version: "0.2.0" },
+    { status: "downloading", version: "0.2.0", percent: 40 },
+    { status: "preparing", version: "0.2.0", percent: 100 },
+  ] as UpdaterState[])("stays quiet while an update downloads by itself: %o", (state) => {
+    expect(render(state)).toBe("");
   });
 
   it("offers restart only after native preparation is complete", () => {

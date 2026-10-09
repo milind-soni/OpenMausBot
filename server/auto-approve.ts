@@ -3,9 +3,11 @@
 // Nothing here decides whether an action is safe. Each approval level is a
 // provider's own permission mode passed straight through (Claude `auto`,
 // Grok `--permission-mode`, Codex `approvalsReviewer`, …), and a request that
-// reaches this process is one the provider left for a person. The only
-// grants the app applies are Full access and the person's exact saved commands.
-// Questions never come through here: a bot's question always reaches a human.
+// reaches this process is one the provider left for a person. The grants the
+// app applies are Full access and the person's exact saved commands. Approve
+// for me also allows a web search, and that is the one action the app itself
+// grants. Questions never come through here: a bot's question always reaches
+// a human.
 
 import { supportsApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import { isOutboundTool } from "../shared/outbound.ts";
@@ -89,16 +91,29 @@ export function delegatedApprovalMode(input: {
 // the permission path in permission-proxy). Approving it there does not
 // produce an answer: the CLI runs the tool with none and the model is told
 // "The user did not answer the questions." — a question silently lost.
-const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user", "omb-ask"]);
+const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user"]);
+
+// A web search is a low-level read. Approve for me allows these names and
+// nothing wider: a bare search, a page fetch, and every other tool stay a
+// prompt. The name is the same shape as a question — one mcp__<server>__
+// prefix removed, then compared case-insensitively.
+const WEB_SEARCH = new Set(["websearch", "web_search", "web-search", "search_web"]);
+
+function bareToolName(tool: string): string {
+  return tool.replace(/^mcp__[^_]+__/, "").toLowerCase();
+}
 
 /** Why a permission request landed where it did — the decision log's "which
- * rule". `full-access` and `command-allowlist` are explicit user grants; `native-approval` is a card
- * the provider's own reviewer (Auto, or Custom's config) left for the person;
- * `explicit-approval-block` is a sandbox widening only Full may answer;
- * `no-grant` is an Ask or Edits card, where asking is the whole point. */
+ * rule". `full-access` and `command-allowlist` are explicit user grants;
+ * `web-search` is the one action Approve for me grants itself;
+ * `native-approval` is a card the provider's own reviewer (Auto, or Custom's
+ * config) left for the person; `explicit-approval-block` is a sandbox
+ * widening only Full may answer; `no-grant` is an Ask or Edits card, where
+ * asking is the whole point. */
 export type AutoVerdictSource =
   | "full-access"
   | "command-allowlist"
+  | "web-search"
   | "native-approval"
   | "explicit-approval-block"
   | "outbound-guard"
@@ -126,7 +141,7 @@ export function autoVerdict(
   // A question is for a person, whatever channel it arrived on — and
   // whatever the mode: even Full has no answer to give, only an approval
   // that would run the tool with none.
-  if (ASKS_A_PERSON.has(tool.replace(/^mcp__[^_]+__/, "").toLowerCase())) {
+  if (ASKS_A_PERSON.has(bareToolName(tool))) {
     return { approve: null, source: "no-grant" };
   }
   // Full's promise is literal: even a sandbox widening is approved. Entering
@@ -136,6 +151,11 @@ export function autoVerdict(
   if (context?.requiresExplicitApproval) return { approve: null, source: "explicit-approval-block" };
   if (isOutboundTool(tool)) return { approve: null, source: "outbound-guard" };
   if (context?.commandAllowed) return { approve: `approved ${tool} (saved command)`, source: "command-allowlist" };
+  // The one action the app itself grants. A fetch of an arbitrary URL is not
+  // a search and stays a prompt, in this mode and every other.
+  if (mode === "auto" && WEB_SEARCH.has(bareToolName(tool))) {
+    return { approve: `approved ${tool} (web search)`, source: "web-search" };
+  }
   if (mode === "auto" || mode === "custom") return { approve: null, source: "native-approval" };
   return { approve: null, source: "no-grant" };
 }

@@ -6,6 +6,8 @@
  * this supervisor uses it as liveness, owns reconnects itself, and carries an
  * explicit replay cursor whenever it replaces the native EventSource.
  */
+import type { ServerFrame } from "../../shared/wire";
+
 export const LIVE_EVENTS_PATH = "/api/events";
 export const LIVE_EVENTS_STALE_MS = 40_000;
 export const LIVE_EVENTS_RETRY_MIN_MS = 500;
@@ -53,18 +55,45 @@ export interface LiveEventsHandlers {
   onSnapshotRequired: () => Promise<boolean>;
   onOpen?: () => void;
   onError?: () => void;
-  screens?: boolean;
   staleMs?: number;
   retryMinMs?: number;
   retryMaxMs?: number;
 }
 
-export function liveEventsUrl(options?: { since?: string | null; screens?: boolean }): string {
+export function liveEventsUrl(options?: { since?: string | null }): string {
   const params = new URLSearchParams();
   if (options?.since) params.set("since", options.since);
-  if (options?.screens === false) params.set("screens", "off");
   const query = params.toString();
   return query ? `${LIVE_EVENTS_PATH}?${query}` : LIVE_EVENTS_PATH;
+}
+
+/**
+ * The app opens one live stream, the store's. Frames the store does not keep
+ * (a computer's live screen, raw runtime events) go from that stream to the
+ * open panel that reads them, instead of re-rendering the whole app or each
+ * panel opening a stream of its own.
+ */
+export interface LiveFrameListener {
+  onFrame: (frame: ServerFrame) => void;
+  /** The stream lost frames it could not replay: reload what you keep. */
+  onMissedFrames?: () => void;
+}
+
+const liveFrameListeners = new Set<LiveFrameListener>();
+
+export function listenLiveFrames(listener: LiveFrameListener): () => void {
+  liveFrameListeners.add(listener);
+  return () => {
+    liveFrameListeners.delete(listener);
+  };
+}
+
+export function publishLiveFrame(frame: ServerFrame): void {
+  for (const listener of liveFrameListeners) listener.onFrame(frame);
+}
+
+export function publishMissedFrames(): void {
+  for (const listener of liveFrameListeners) listener.onMissedFrames?.();
 }
 
 export function isLivePing(frame: Pick<LiveFrame, "kind">): boolean {
@@ -234,7 +263,7 @@ export function openLiveEvents(
     let current: LiveEventSourceLike;
     try {
       current = platform.createEventSource(
-        liveEventsUrl({ since: cursor, screens: handlers.screens }),
+        liveEventsUrl({ since: cursor }),
       );
     } catch {
       handlers.onError?.();

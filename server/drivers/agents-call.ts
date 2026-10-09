@@ -1,11 +1,13 @@
-// Carries out one agents tool: checks the arguments, applies the per-turn
-// guards, calls the harness, and turns the answer into the text the model
-// reads. One core for every front end, so a tool validates, refuses and
-// teaches the same way however it was reached; the stdio MCP proxy
-// (agents-proxy.ts) is the only front end today.
+// Carries out one agents tool: checks the arguments, calls the harness, and
+// turns the answer into the text the model reads. One core for every front
+// end, so a tool validates, refuses and teaches the same way however it was
+// reached; the stdio MCP proxy (agents-proxy.ts) is the only front end today.
 //
 // Nothing here reads the environment or holds state of its own. The caller
-// passes a ToolCallContext, and the per-turn counters live on it.
+// passes a ToolCallContext. Per-turn limits (bots created, threads opened,
+// room posts, checking a delegation made this turn) are the harness's: one
+// proxy can serve many turns of a warm engine, and only the harness knows
+// where a turn begins.
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
 import { parseOptionsCardInput, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { normalizeCronSchedule } from "../../shared/routine-schedule.ts";
@@ -16,18 +18,6 @@ import { catalogProfileFromEnv, SHARED_COMPUTER_TOOL_NAMES, WEEKDAYS } from "./a
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { boundedAgentResult } from "./agents-result.ts";
-
-/** Counters for the guards that refuse without a round trip. One context
- * serves one turn: the harness spawns a proxy per turn, so "this turn" and
- * "this process" are the same thing there. */
-export interface TurnGuards {
-  createdThisTurn: number;
-  roomPostsThisTurn: number;
-  threadsOpenedThisTurn: number;
-  /** Delegations made in this turn: their ids may not be checked or waited
-   * on until a later one. */
-  delegationTaskIdsThisTurn: Set<string>;
-}
 
 export interface ToolCallContext {
   /** The calling bot's id (excluded from list_bots; the sender). */
@@ -40,7 +30,6 @@ export interface ToolCallContext {
   coordinating: boolean;
   sharedComputers: boolean;
   client: HarnessClient;
-  turn: TurnGuards;
 }
 
 export interface ToolCallResult {
@@ -51,7 +40,7 @@ export interface ToolCallResult {
   passthrough?: Json;
 }
 
-/** The context a spawned proxy was given, with a fresh set of turn guards:
+/** The context a spawned proxy was given:
  *   OMB_BOT_ID, OMB_THREAD_ID, OMB_TURN_DEPTH, plus the catalog switches
  *   (agents-catalog.ts) and the harness address and token (agents-client.ts). */
 export function toolCallContextFromEnv(env: NodeJS.ProcessEnv): ToolCallContext {
@@ -64,28 +53,10 @@ export function toolCallContextFromEnv(env: NodeJS.ProcessEnv): ToolCallContext 
     coordinating: profile.coordinating,
     sharedComputers: profile.sharedComputers,
     client: harnessClientFromEnv(env),
-    turn: {
-      createdThisTurn: 0,
-      roomPostsThisTurn: 0,
-      threadsOpenedThisTurn: 0,
-      delegationTaskIdsThisTurn: new Set<string>(),
-    },
   };
 }
 
 const EXTERNAL_STATUS_GUIDANCE = "Use check_delegation or wait_delegation with this task id to retrieve the result; polling is allowed without ending this external runtime.";
-const MAX_CREATED_PER_TURN = 4;
-// Same spirit as MAX_CREATED_PER_TURN above and MAX_QUEUED_PER_THREAD in
-// delegations.ts: one turn's worth of a good idea is a handful, and a turn
-// that wants more than that has stopped reporting and started broadcasting.
-// The harness enforces its own per-room budget regardless; this one exists
-// so the refusal reaches the model without a round trip.
-const MAX_ROOM_POSTS_PER_TURN = 3;
-// A thread is a real turn with its own run. Five in one turn is a plan
-// ("one per pull request"); more than that is a model that has stopped
-// deciding. The harness holds the same ceiling; this copy exists so the
-// refusal reaches the model without a round trip.
-const MAX_THREADS_PER_TURN = 5;
 /** How many entries a memory_update reply names when its write moved some
  * to the archive; the rest are counted. */
 const MOVED_ENTRIES_SHOWN = 5;
@@ -317,7 +288,7 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   const runOn = destination(args.run_on ?? args.runOn);
   const timeoutMinutes = args.timeout_minutes ?? args.timeoutMinutes;
   if (runOn != null && runOn !== "maus" && runOn !== "cloud") {
-    return { fields, error: 'Use run_on="maus" for the bot’s current model and configured computer (including VPS), or run_on="box" only for the bot’s Boat cloud computer. Legacy "cloud" also means Boat.' };
+    return { fields, error: 'Use run_on="maus" for the bot’s current model and configured computer (including VPS), or run_on="box" only for the bot’s cloud computer. Legacy "cloud" also means box.' };
   }
   if (timeoutMinutes != null && (
     typeof timeoutMinutes !== "number" || !Number.isInteger(timeoutMinutes) || timeoutMinutes < 5 || timeoutMinutes > 240
@@ -429,8 +400,7 @@ function recallWhen(at: unknown, dateOnly: boolean): string {
 export async function callTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   // The names this body has always used, so it reads (and diffs) as it did
   // when these were the proxy's module-level constants.
-  const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH, externalRuntime: EXTERNAL_RUNTIME, coordinating: COORDINATING, turn } = context;
-  const { delegationTaskIdsThisTurn } = turn;
+  const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH, externalRuntime: EXTERNAL_RUNTIME, coordinating: COORDINATING } = context;
   const { api, apiResponse } = context.client;
   if (name === "vm_exec") {
     const { ok, body } = await apiResponse("/api/internal/vm-exec", {
@@ -536,15 +506,11 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (botId === context.botId) {
       return { text: "send_to_bot is cross-bot only. Use start_thread to send independent work to yourself.", isError: true };
     }
-    if (turn.threadsOpenedThisTurn >= MAX_THREADS_PER_TURN) {
-      return { text: `You have already opened ${MAX_THREADS_PER_TURN} threads this turn, which is the limit.`, isError: true };
-    }
     const r = await api("/api/internal/threads", { method: "POST", body: JSON.stringify({
       fromBotId: context.botId, fromThreadId: context.threadId, toBotId: botId,
       title, message, depth: context.depth, oneWay: true,
     }) });
     if (r.error) return { text: `Couldn't send to that bot: ${String(r.error)}`, isError: true };
-    turn.threadsOpenedThisTurn += 1;
     const destination = `@${String(r.botName ?? "that bot")} in #${String(r.title ?? title)} [thread id: ${String(r.threadId ?? "")}]`;
     const state = r.approvalRequired === true
       ? `Send to ${destination} is pending approval. The person's approval card appears after this turn ends; dispatch starts once approved.`
@@ -603,18 +569,11 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (!groupId || !message) {
       return { text: "post_to_room needs group_id (from list_rooms) and message.", isError: true };
     }
-    if (turn.roomPostsThisTurn >= MAX_ROOM_POSTS_PER_TURN) {
-      return {
-        text: `You have already posted ${MAX_ROOM_POSTS_PER_TURN} times this turn, which is the limit. Do not retry — finish your turn and say anything further to the user directly.`,
-        isError: true,
-      };
-    }
     const r = await api("/api/internal/post-to-room", {
       method: "POST",
       body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message, attachVoiceNote }),
     });
     if (r.error) return { text: String(r.error), isError: true };
-    turn.roomPostsThisTurn += 1;
     return {
       text: `Posted in ${r.roomName ?? "the room"}${r.attachedVoiceNote ? " with the voice note attached" : ""}. Nobody's turn was started, so expect no reply — tell the user it is posted.`,
     };
@@ -632,7 +591,6 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       // The peer's turn outlived the synchronous wait, so the harness
       // converted the ask into a delegation — the reply is not lost.
       const taskId = String(r.taskId ?? "").trim();
-      if (taskId && !EXTERNAL_RUNTIME) delegationTaskIdsThisTurn.add(taskId);
       const waitedSeconds = Math.max(1, Math.round((Number(r.waitedMs) || 0) / 1000));
       const amount = waitedSeconds < 60 ? waitedSeconds : Math.round(waitedSeconds / 60);
       const unit = waitedSeconds < 60 ? "second" : "minute";
@@ -660,7 +618,6 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       // task id is the asker's claim ticket for the eventual reply.
       const taskId = String(r.taskId ?? "").trim();
       if (taskId) {
-        if (!EXTERNAL_RUNTIME) delegationTaskIdsThisTurn.add(taskId);
         return {
           text: `${r.toBotName ?? "That bot"} is busy right now, so your message was queued as a delegation instead — ${EXTERNAL_RUNTIME ? "it waits for the peer and any required approval" : "it runs after your current turn ends"}. Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status."}${note ? `\n\n${note}` : ""}`,
         };
@@ -691,7 +648,6 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     // bot's claim ticket for the outcome.
     const note = typeof r.message === "string" ? r.message : "Delegation queued.";
     const taskId = typeof r.taskId === "string" ? r.taskId.trim() : "";
-    if (taskId && !EXTERNAL_RUNTIME) delegationTaskIdsThisTurn.add(taskId);
     const suffix = taskId
       ? ` Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Acknowledge the assignment and finish your turn; the result will be delivered to this conversation automatically. Do not check or wait for it in this turn."}`
       : "";
@@ -701,12 +657,6 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     const taskId = String(args.task_id ?? "").trim();
     if (!/^[\w-]{4,64}$/.test(taskId)) {
       return { text: `${name} needs the "task_id" that delegate_bot returned, e.g. {"task_id":"1f0c2f4e-..."}.`, isError: true };
-    }
-    if (!EXTERNAL_RUNTIME && delegationTaskIdsThisTurn.has(taskId)) {
-      return {
-        text: `Task ${taskId} was delegated during this turn. Finish your response now so the other bot can work; its result will be delivered to this conversation automatically. Do not check or wait for a newly delegated task until a later turn.`,
-        isError: true,
-      };
     }
     const timeout = Math.min(Math.max(Math.trunc(Number(args.timeout_seconds) || 60), 1), 240);
     const waitMs = name === "wait_delegation" ? timeout * 1000 : 0;
@@ -785,12 +735,6 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     const title = String(args.title ?? "").trim();
     const message = String(args.message ?? "").trim();
     if (!title || !message) return { text: "start_thread needs title (one short line) and message (the complete first message).", isError: true };
-    if (turn.threadsOpenedThisTurn >= MAX_THREADS_PER_TURN) {
-      return {
-        text: `You have already opened ${MAX_THREADS_PER_TURN} threads this turn, which is the limit. Do not retry — finish your turn and tell the person which threads you still wanted to open, so they can open them or ask you again.`,
-        isError: true,
-      };
-    }
     const toBotId = typeof args.bot_id === "string" ? args.bot_id.trim() : "";
     if (COORDINATING && toBotId && toBotId !== BOT_ID) {
       return { text: "Use coordinate_bots for teammates; start_thread only opens a separate job on yourself.", isError: true };
@@ -803,7 +747,6 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     // A refusal opened nothing. A "failed" state opened the thread and could
     // not start its turn — that one still counts, and still has an id.
     if (r.error && r.state !== "failed") return { text: `Couldn't open that thread: ${String(r.error)}`, isError: true };
-    turn.threadsOpenedThisTurn += 1;
     const threadTitle = String(r.title ?? title);
     const threadId = String(r.threadId ?? "");
     const where = r.self === true ? "on yourself" : `on @${String(r.botName ?? "that bot")}`;
@@ -823,7 +766,6 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     // turn and reports back here, so the id is a claim ticket the model
     // must not cash in this same turn.
     const delegationId = typeof r.delegationId === "string" ? r.delegationId.trim() : "";
-    if (delegationId) delegationTaskIdsThisTurn.add(delegationId);
     const approval = r.approvalRequired === true
       ? " The person must approve this handoff first; their card appears after your turn ends."
       : "";
@@ -855,9 +797,6 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (!botName || !role || !instructions) {
       return { text: "create_bot needs name, role, and instructions.", isError: true };
     }
-    if (turn.createdThisTurn >= MAX_CREATED_PER_TURN) {
-      return { text: `You can create at most ${MAX_CREATED_PER_TURN} bots in one turn. Use the team you have before adding more.`, isError: true };
-    }
     const r = await api(`/api/internal/create-bot`, {
       method: "POST",
       body: JSON.stringify({
@@ -868,9 +807,18 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         instructions,
         ...(args.modelSelection !== undefined ? { modelSelection: args.modelSelection } : {}),
         ...(typeof args.cwd === "string" ? { cwd: args.cwd.trim() } : {}),
+        ...(args.suggestion === true ? { suggestion: true } : {}),
       }),
     });
-    turn.createdThisTurn += 1;
+    // Below Full Access the server shows the person one review card and
+    // creates nothing yet; Full Access applies it in this turn.
+    if (r.state === "pending" && args.suggestion === true) {
+      return { text: `Your suggestion is on one card for the user: ${String(r.title)}. @${botName} has not been created. End this turn; their answer resumes you once. If they choose Not now, do not suggest another specialist in this conversation unless they ask.` };
+    }
+    if (r.state === "pending") {
+      return { text: `One review card is visible: ${String(r.title)}. @${botName} has not been created yet. End this turn; the decision and structured result resume you automatically once. Do not ask again, poll, or repeat this request.` };
+    }
+    if (!r.id) return completedProposalResult(r, `creating @${botName}`) ?? { text: `@${botName} was not created.`, isError: true };
     return {
       text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with ${COORDINATING ? "coordinate_bots" : "delegate_bot"}.`,
     };
@@ -1277,7 +1225,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         return `- ${row.action} ${row.name}`;
       }).join("\n")
       : "(none)";
-    return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user to confirm):\n${pending}` };
+    return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user's decision):\n${pending}` };
   }
   if (name === "skill_manage") {
     if (args.action !== "create" && args.action !== "update") {

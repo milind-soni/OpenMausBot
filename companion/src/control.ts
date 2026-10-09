@@ -16,8 +16,9 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 
 import type { DeviceRegistry } from "./devices.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
-import { lanAddresses, tailnetName, tailscaleAddress } from "./listener.ts";
+import { lanAddresses, lanInterfaces, tailnetName, tailscaleAddress } from "./listener.ts";
 import { defaultHostName } from "./mdns.ts";
+import { publicNetworks } from "./windows-network.ts";
 
 /** What the pairing page needs to render itself and act on what you click. */
 export interface ControlOptions {
@@ -47,6 +48,9 @@ export interface ControlOptions {
   /** Re-read Tailscale after the sidecar has started. People commonly install,
    * sign in, or enable Tailscale while OpenMausBot is already running. */
   refreshTailscale?: () => Promise<void>;
+  /** The adapters Windows has on a Public network (windows-network.ts). Tests
+   * pass their own; the sidecar uses the real check. */
+  publicNetworks?: () => ReadonlySet<string>;
 }
 
 /** The host out of a `Host` header, port removed.
@@ -181,10 +185,19 @@ export function hostCandidates(
  * pairing window is open, and which phones are paired. Recomputed per request
  * rather than cached — addresses change when you join another network. */
 export function companionState(options: ControlOptions) {
-  const addresses = lanAddresses();
+  const interfaces = lanInterfaces();
+  const addresses = interfaces.map((entry) => entry.address);
   const tailscale = tailscaleAddress(addresses);
+  // The address the Wi-Fi QR leads with (companionPairingRoute takes the first
+  // LAN endpoint, which is this one).
+  const lead = interfaces.find((entry) => entry.address !== tailscale) ?? null;
   const name = tailnetName();
   const pairing = options.devices.pairing();
+  // Asked only while a pairing window is open, when a phone is about to dial
+  // this computer: on Windows the answer is a PowerShell process.
+  const publicNetwork = pairing && lead && (options.publicNetworks ?? publicNetworks)().has(lead.name)
+    ? lead.name
+    : null;
   const secretPublicKey = options.secretPublicKey?.() ?? null;
   return {
     // Whoever starts this sidecar as a child process needs to be able to tell
@@ -195,7 +208,10 @@ export function companionState(options: ControlOptions) {
     addresses,
     ...(tailscale ? { tailscale } : {}),
     ...(tailscale && name ? { tailnetName: name } : {}),
-    lan: addresses.find((a) => a !== tailscale) ?? null,
+    lan: lead?.address ?? null,
+    // Windows has the network that address is on down as Public, so its
+    // firewall most likely drops a phone's connection (windows-network.ts).
+    ...(publicNetwork ? { publicNetwork } : {}),
     // The ordered fallback list the pairing QR hands the phone, so it can
     // walk to the next address when the first stops resolving.
     hosts: hostCandidates(addresses, name),

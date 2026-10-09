@@ -12,12 +12,8 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
 }));
 import { useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
-import { BotThreadList } from "./Sidebar";
-import type { Bot } from "@/state/store";
-vi.mock("@/state/store", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/state/store")>(),
-  useStore: () => ({ state: { pendingQueued: {} }, dispatch: vi.fn() }),
-}));
+import { BotThreadList, botRowProps } from "./Sidebar";
+import { initialState, type Bot } from "@/state/store";
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
 type Row = { threadId: string; title: string; snoozedUntil?: number };
@@ -116,7 +112,7 @@ describe("snooze expiry wake-up", () => {
     };
     const render = () => {
       fixture.index = 0; fixture.effects = [];
-      return renderToStaticMarkup(createElement(BotThreadList, { bot, selected: true }));
+      return renderToStaticMarkup(createElement(BotThreadList, { ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", quiet: false, query: "", onMenu: vi.fn() }), selected: true }));
     };
     const hidden = render();
     expect(hidden).toContain("Current chat");

@@ -66,12 +66,12 @@ export function utf8Bytes(value: string): number {
   return encoder.encode(value).length;
 }
 
-// ── shared field helpers (identical to the v1 reader) ─────────────────────
+// ── shared field helpers (the team manifest reader uses these too) ────────
 
-const requiredText = (max: number) =>
+export const requiredText = (max: number) =>
   z.string({ error: "must be text" }).trim().min(1, { message: "is required" }).max(max, { message: "is too long" });
 
-const optionalText = (max: number) =>
+export const optionalText = (max: number) =>
   z
     .union([z.string({ error: "must be text" }), z.null(), z.undefined()])
     .transform((value) => value?.trim() || undefined)

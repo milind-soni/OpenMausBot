@@ -41,7 +41,9 @@ const SERVER_KEY = unique("sk-ant-server");
 // The servers never reach the network.
 const OFFLINE = `data:text/javascript,${encodeURIComponent('globalThis.fetch = async () => new Response("offline fixture", { status: 503 });')}`;
 
-interface Fixture { name: string; host: string; home: string; dataDir: string; base: string; env: NodeJS.ProcessEnv; child?: ChildProcess; log: string; closing: boolean; boots: number }
+interface Fixture { name: string; host: string; home: string; dataDir: string; base: string; env: NodeJS.ProcessEnv; child?: ChildProcess; log: string; closing: boolean; boots: number;
+  /** A relaunch (exit 75) that failed: thrown by the next request to this server, or by teardown, with its cause. */
+  failure?: Error }
 let source: Fixture;
 let cloud: Fixture;
 let server: Fixture;
@@ -60,9 +62,13 @@ async function boot(fixture: Fixture): Promise<void> {
   child.stdout?.on("data", (chunk) => { fixture.log += chunk; });
   child.stderr?.on("data", (chunk) => { fixture.log += chunk; });
   // The server's launcher: start it again when it asks to (server/restart.ts).
-  child.once("exit", (code) => { if (code === RESTART_EXIT_CODE && !fixture.closing && fixture.child === child) void boot(fixture); });
+  // A relaunch is nobody's await, so its failure is kept for the next request (api) or teardown to throw,
+  // never left as an unhandled rejection.
+  child.once("exit", (code) => { if (code === RESTART_EXIT_CODE && !fixture.closing && fixture.child === child) boot(fixture).catch((error: Error) => { fixture.failure = error; }); });
   const deadline = Date.now() + 30_000;
   for (;;) {
+    // Stopped on purpose (a test or teardown) or already replaced: nothing to report.
+    if (fixture.closing || fixture.child !== child) return;
     if (child.exitCode !== null) throw new Error(`the ${fixture.name} server exited:\n${fixture.log}`);
     try {
       const health = await (await fetch(`${fixture.base}/api/health`)).json() as { pid?: number };
@@ -135,6 +141,7 @@ function viaEdge(url: string, init: RequestInit = {}): Promise<Response> {
   });
 }
 async function api(fixture: Fixture, method: string, path: string, options: { body?: unknown; token?: string; cookie?: string; remote?: boolean; raw?: Buffer } = {}) {
+  if (fixture.failure) throw fixture.failure;
   const response = await (options.cookie ? viaEdge : fetch)(`${fixture.base}${path}`, {
     method,
     headers: {
@@ -190,6 +197,9 @@ function mover() {
     pollMs: 150, retryDelaysMs: [100, 300], restartTimeoutMs: 90_000,
   });
 }
+
+/** Why a copy ended as it did (a failed one's error names its step), then the destination's log. */
+const why = (result: { error?: unknown }, fixture: Fixture) => `${JSON.stringify(result.error ?? null)}\n${fixture.log.slice(-2000)}`;
 
 async function newBot(fixture: Fixture, name: string, token?: string) {
   const created = await api(fixture, "POST", "/api/bots", { token, body: { name, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true } });
@@ -266,6 +276,8 @@ afterAll(async () => {
     await waitForExit(fixture.child, { signal: "SIGTERM" });
   }
   for (const directory of [source?.home, cloud?.home, server?.home, scratch]) if (directory) await removeTempDir(directory);
+  const failed = [source, cloud, server].find((fixture) => fixture?.failure);
+  if (failed) throw failed.failure;
 });
 
 it("moves this computer's bots, chats and rooms to an empty Cloud, which keeps its own sign-ins, sessions and switches", async () => {
@@ -275,7 +287,7 @@ it("moves this computer's bots, chats and rooms to an empty Cloud, which keeps i
   const boots = cloud.boots;
 
   const result = await mover().move(cloudHome);
-  expect(result, cloud.log.slice(-2000)).toMatchObject({ phase: "done", action: "move", previous: false, routines: 1, destination: { id: "cloud", origin: ORIGIN, kind: "cloud" } });
+  expect(result, why(result, cloud)).toMatchObject({ phase: "done", action: "move", previous: false, routines: 1, destination: { id: "cloud", origin: ORIGIN, kind: "cloud" } });
   expect(result.moved).toMatchObject({ bots: 2, rooms: 1, chats: 1 });
   expect(cloud.boots).toBe(boots + 1);
 
@@ -345,7 +357,7 @@ it("backs up a Cloud that has work before replacing it; swapping back keeps what
   expect(before.body).toMatchObject({ empty: false, previous: null });
 
   const result = await mover().move(cloudHome);
-  expect(result, cloud.log.slice(-2000)).toMatchObject({ phase: "done", previous: true });
+  expect(result, why(result, cloud)).toMatchObject({ phase: "done", previous: true });
   expect((await botNames(cloud, windowToken)).sort()).toEqual(desktopBots);
   const status = await api(cloud, "GET", "/api/cloud-move", { token: windowToken });
   expect(status.body.previous).toMatchObject({ bots: 3, rooms: 1 });
@@ -353,11 +365,11 @@ it("backs up a Cloud that has work before replacing it; swapping back keeps what
   // Work done on the Cloud after the move is not lost by swapping back.
   await newBot(cloud, "Post-move work", windowToken);
   const swapped = await mover().restorePrevious(cloudHome);
-  expect(swapped, cloud.log.slice(-2000)).toMatchObject({ phase: "done", action: "restore" });
+  expect(swapped, why(swapped, cloud)).toMatchObject({ phase: "done", action: "restore" });
   expect((await botNames(cloud, windowToken)).sort()).toEqual(["Cloud-only bot", ...desktopBots].sort());
   expect((await api(cloud, "GET", "/api/cloud-move", { token: windowToken })).body.previous).toMatchObject({ bots: 3, rooms: 1 });
   const again = await mover().restorePrevious(cloudHome);
-  expect(again, cloud.log.slice(-2000)).toMatchObject({ phase: "done", action: "restore" });
+  expect(again, why(again, cloud)).toMatchObject({ phase: "done", action: "restore" });
   expect((await botNames(cloud, windowToken)).sort()).toEqual(["Post-move work", ...desktopBots].sort());
 
   // One undo point is all that stays: no safety copies, no staged files.
@@ -380,7 +392,7 @@ it("copies this computer to an empty self-hosted server by the same path: the wi
 
   // From the server's own page: an empty server may be filled from there.
   const result = await mover().move(selfHosted, { requireEmpty: true });
-  expect(result, server.log.slice(-2000)).toMatchObject({ phase: "done", action: "move", previous: false, routines: 1, destination: { id: "self", origin: SERVER_ORIGIN, kind: "server" } });
+  expect(result, why(result, server)).toMatchObject({ phase: "done", action: "move", previous: false, routines: 1, destination: { id: "self", origin: SERVER_ORIGIN, kind: "server" } });
   expect(result.moved).toMatchObject({ bots: 2, rooms: 1, chats: 1 });
   // It restarted itself (exit 75) to install the copy.
   expect(server.boots).toBe(boots + 1);
@@ -410,11 +422,11 @@ it("a self-hosted server with work is replaced only from this computer's Setting
   expect((await botNames(server)).sort()).toEqual(["Server-only bot", ...desktopBots].sort());
 
   const result = await mover().move(selfHosted);
-  expect(result, server.log.slice(-2000)).toMatchObject({ phase: "done", previous: true });
+  expect(result, why(result, server)).toMatchObject({ phase: "done", previous: true });
   expect((await botNames(server)).sort()).toEqual(desktopBots);
   expect((await api(server, "GET", "/api/cloud-move", { cookie: serverCookie })).body.previous).toMatchObject({ bots: 3, rooms: 1 });
   const swapped = await mover().restorePrevious(selfHosted);
-  expect(swapped, server.log.slice(-2000)).toMatchObject({ phase: "done", action: "restore" });
+  expect(swapped, why(swapped, server)).toMatchObject({ phase: "done", action: "restore" });
   expect((await botNames(server)).sort()).toEqual(["Server-only bot", ...desktopBots].sort());
   expect(readdirSync(join(server.dataDir, ".backups")).filter((name) => name.startsWith("safety-") || /^[0-9a-f-]{36}$/.test(name) || name === "cloud-previous.next")).toEqual([]);
   expect((await api(server, "GET", "/api/auth/session", { cookie: serverCookie })).body).toMatchObject({ kind: "session" });
@@ -423,14 +435,17 @@ it("a self-hosted server with work is replaced only from this computer's Setting
   // backup takes the first one's place (the Replace panel says so, with its
   // date, before it starts), so Swap back returns what the first copy put there.
   const kept = async () => (await api(server, "GET", "/api/cloud-move", { cookie: serverCookie })).body.previous as { createdAt: string; bots: number };
-  expect(await mover().move(selfHosted), server.log.slice(-2000)).toMatchObject({ phase: "done", previous: true });
+  const firstCopy = await mover().move(selfHosted);
+  expect(firstCopy, why(firstCopy, server)).toMatchObject({ phase: "done", previous: true });
   const first = await kept();
   expect(first).toMatchObject({ bots: 3 });
-  expect(await mover().move(selfHosted), server.log.slice(-2000)).toMatchObject({ phase: "done", previous: true });
+  const secondCopy = await mover().move(selfHosted);
+  expect(secondCopy, why(secondCopy, server)).toMatchObject({ phase: "done", previous: true });
   const second = await kept();
   expect(second).toMatchObject({ bots: 2 });
   expect(second.createdAt > first.createdAt).toBe(true);
-  expect(await mover().restorePrevious(selfHosted), server.log.slice(-2000)).toMatchObject({ phase: "done", action: "restore" });
+  const swappedBack = await mover().restorePrevious(selfHosted);
+  expect(swappedBack, why(swappedBack, server)).toMatchObject({ phase: "done", action: "restore" });
   expect((await botNames(server)).sort()).toEqual(desktopBots);
   // Put the server-only bot back for the next test, as an owner would.
   await newBot(server, "Server-only bot");

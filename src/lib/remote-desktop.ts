@@ -32,9 +32,9 @@ export function remoteScreenshotSource(raw: unknown): string | null {
   return `data:${frame.format === "jpeg" ? "image/jpeg" : "image/png"};base64,${frame.png}`;
 }
 
-/** The two facts of an engine the cloud-computer rule reads. */
+/** The engine fact the cloud-computer rule reads. */
 export function cloudEngineOf(instance: InstanceInfo | undefined): CloudEngine {
-  return { driverKind: instance?.driverKind, computerMcp: instance?.capabilities?.computerMcp };
+  return { computerMcp: instance?.capabilities?.computerMcp };
 }
 
 /** The bot's own engine when it can work on the Boat cloud computer: the
@@ -42,5 +42,5 @@ export function cloudEngineOf(instance: InstanceInfo | undefined): CloudEngine {
  * another engine, so a bot whose engine can't has none. */
 export function boatCapableEngine(instances: readonly InstanceInfo[], selectedId?: string): InstanceInfo | undefined {
   const selected = selectedId ? instances.find(instance => instance.instanceId === selectedId) : undefined;
-  return selected && canWorkOnCloud(cloudEngineOf(selected), "box") ? selected : undefined;
+  return selected && canWorkOnCloud(cloudEngineOf(selected)) ? selected : undefined;
 }

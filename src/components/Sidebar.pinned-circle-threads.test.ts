@@ -2,14 +2,20 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { initialState, StoreProvider, type Bot } from "@/state/store";
+import { initialState, type Bot } from "@/state/store";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 
+// Threads are an Advanced-mode surface: Simple mode keeps one conversation
+// per bot (useShowThreads), so these render as Advanced.
+vi.mock("@/lib/interface-mode", async (original) => ({
+  ...await original<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => true,
+}));
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
 
-import { PinnedBotCircle, PinnedCircleThreadSection } from "./Sidebar";
+import { botRowProps, PinnedBotCircle, PinnedCircleThreadSection } from "./Sidebar";
 
 const bot = (overrides: Partial<Bot> = {}): Bot => ({
   id: "atlas",
@@ -32,38 +38,20 @@ const frame = (markup: string) => {
   return match![0];
 };
 
+const row = (candidate: Bot, selectedId = initialState.selectedId) =>
+  botRowProps({ ...initialState, selectedId, activeView: "chat" }, vi.fn(), candidate, { density: "comfortable", quiet: false, query: "", onMenu: vi.fn() });
+
 function renderCircle(candidate: Bot, selected = false) {
-  const saved = { selectedId: initialState.selectedId, activeView: initialState.activeView };
-  if (selected) {
-    initialState.selectedId = candidate.id;
-    initialState.activeView = "chat";
-  }
-  try {
-    return renderToStaticMarkup(createElement(
-      StoreProvider,
-      null,
-      createElement(PinnedBotCircle, { bot: candidate, onMenu: vi.fn() }),
-    ));
-  } finally {
-    initialState.selectedId = saved.selectedId;
-    initialState.activeView = saved.activeView;
-  }
+  return renderToStaticMarkup(createElement(PinnedBotCircle, row(candidate, selected ? candidate.id : initialState.selectedId)));
 }
 
 function renderThreads(collapsed: boolean, bots: Bot[]) {
-  return renderToStaticMarkup(createElement(
-    StoreProvider,
-    null,
-    createElement(PinnedCircleThreadSection, {
-      bots,
-      density: "comfortable",
-      quiet: false,
-      query: "",
-      collapsed,
-      onToggle: () => {},
-      onMenu: vi.fn(),
-    }),
-  ));
+  return renderToStaticMarkup(createElement(PinnedCircleThreadSection, {
+    bots,
+    collapsed,
+    onToggle: () => {},
+    row: (candidate) => row(candidate),
+  }));
 }
 
 describe("pinned circle frame", () => {

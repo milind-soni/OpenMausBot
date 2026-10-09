@@ -33,8 +33,8 @@ export interface CloudLendingTurn {
   /** Who opened this conversation (and the room it is in), where recorded.
    * Whoever opened it chose its title, so it must be the owner too. */
   starters?: readonly (string | undefined)[];
-  /** The conversation holds a report of work someone else directed (a
-   * routine the owner did not write). */
+  /** The conversation holds words someone else chose: a "post" webhook's
+   * payload, or a report of a routine the owner did not write. */
   reportsFromOthers?: boolean;
   /** Whether a person key is one of the owner's own devices right now. */
   ownerPerson: (person: string | undefined) => boolean;

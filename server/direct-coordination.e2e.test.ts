@@ -8,6 +8,14 @@ import { request } from "../scripts/mcp-server.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 
+/** What a fixture turn was told: the instructions its process was launched
+ * with, and the turn's own message, where a part of them that changed since
+ * arrives when the process was kept warm. */
+const told = (turn: any): string => {
+  const content = turn.prompt?.message?.content;
+  return `${turn.system}\n${typeof content === "string" ? content : JSON.stringify(content ?? "")}`;
+};
+
 /** Run direct Chief/lead/specialist workflows against an isolated scripted
  * server. With OMB_TEST_DESKTOP_OWNER_TOKEN it runs as the desktop app runs
  * it, and every change this test makes carries the app's owner capability. */
@@ -427,6 +435,7 @@ it("returns a nested coordinated result after Claude retries a transient provide
   } finally { await removeTempDir(scratch); }
 }, 45_000);
 
+// The CLI ends between turns here, so each later turn resumes and is refused.
 it("returns nested results after Claude rejects the source's prior resume cursor", () => fixture(async f => {
   const coordination = f.plan[f.chief.id];
   f.plan[f.chief.id] = { reply: "Earlier conversation" };
@@ -441,7 +450,7 @@ it("returns nested results after Claude rejects the source's prior resume cursor
   expect(f.evidence().map((turn: any) => turn.botId)).toEqual([f.chief.id, f.chief.id, f.lead.id, f.specialist.id, f.lead.id, f.chief.id]);
   const transcript = await f.messages(f.chief.activeTaskId);
   expect(transcript.some((message: any) => message.tool?.name?.includes("resume_rejected"))).toBe(true);
-}, { FAKE_CLAUDE_MODE: "dead-session" }), 45_000);
+}, { FAKE_CLAUDE_MODE: "dead-session", FAKE_CLAUDE_EXIT_AFTER_TURN: "1" }), 45_000);
 
 it("uses recipient bot defaults for its new task, never the sender's or its selected old thread's settings", () => fixture(async f => {
   const models = await f.cli("models");
@@ -536,7 +545,7 @@ it.each<[string, NodeJS.ProcessEnv]>([
   await expect.poll(() => chiefTurns().length, { timeout: 15_000 }).toBe(1);
   await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Change of plan: the export also needs a header row.", threadId: f.chief.activeTaskId });
   await expect.poll(() => chiefTurns().length, { timeout: 20_000 }).toBe(2);
-  expect(chiefTurns()[1].system).toContain("send the change to the same teammate with coordinate_bots");
+  expect(told(chiefTurns()[1])).toContain("send the change to the same teammate with coordinate_bots");
   const [running, followUp] = f.nodes().filter((node: any) => node.botId === f.lead.id);
   expect(followUp.threadId).toBe(running.threadId);
   expect(sendReceipts(f, f.chief.id)[1]).toMatchObject({ outcome: "queued", threadId: running.threadId });
@@ -710,9 +719,9 @@ it("runs a message sent while a teammate works, keeps the assignment, and names 
 
   const steered = f.evidence().filter((turn: any) => turn.botId === f.chief.id)[1];
   expect(steered.resumed).toBe(false);
-  expect(steered.system).toContain("Assignments you already sent are still outstanding");
-  expect(steered.system).toContain(assignment.id);
-  expect(steered.system).toContain("Engineering lead");
+  expect(told(steered)).toContain("Assignments you already sent are still outstanding");
+  expect(told(steered)).toContain(assignment.id);
+  expect(told(steered)).toContain("Engineering lead");
   // The teammate was never touched: it finishes and still returns here.
   expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
   expect((await f.wait()).status).toBe("settled");
@@ -750,7 +759,7 @@ it("parks a message behind outstanding teammate work when the bot opts in, then 
   await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.chief.id).length, { timeout: 20_000 }).toBe(3);
   const parked = f.evidence().filter((turn: any) => turn.botId === f.chief.id)[2];
   expect(parked.resumed).toBe(false);
-  expect(parked.system).not.toContain("Assignments you already sent are still outstanding");
+  expect(told(parked)).not.toContain("Assignments you already sent are still outstanding");
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Also make sure the export is UTF-8.")).toBe(true);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Noted; the export is UTF-8 too")).toBe(true);
 }), 60_000);

@@ -90,6 +90,38 @@ describe("Advanced mode in the header menu", () => {
   });
 });
 
+describe("header name", () => {
+  it("renames only from the bot's settings in Simple mode: no pencil, and the whole pill opens them", () => {
+    fixture.advanced = false;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(markup).not.toContain('aria-label="Rename Pepper"');
+    // one button holds the avatar and the name together
+    const pill = markup.match(/<button[^>]*data-chathead-pill="true"[^>]*>([\s\S]*?)<\/button>/);
+    expect(pill?.[0]).toContain('aria-label="Open Pepper&#x27;s profile"');
+    expect(pill?.[1]).toContain(">Pepper</span>");
+    expect(pill?.[0]).toContain("rounded-full");
+    fixture.advanced = true;
+  });
+
+  it("keeps the rename pencil in Advanced mode, inside the same pill as the avatar and name", () => {
+    fixture.advanced = true;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const start = markup.indexOf('<div data-chathead-pill="true"');
+    expect(start).toBeGreaterThan(-1);
+    const pill = markup.slice(start, markup.indexOf("data-chathead-controls"));
+    expect(pill).toContain('aria-label="Open Pepper&#x27;s profile"');
+    expect(pill).toContain("Rename Pepper");
+  });
+
+  it("centres the bot in the header's middle column, with the controls in the last", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const row = markup.match(/data-chathead-row="true" class="([^"]*)"/)?.[1] ?? "";
+    expect(row).toContain("@min-[30rem]/chathead:grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)]");
+    expect(markup).toMatch(/data-chathead-identity="true" class="[^"]*@min-\[30rem\]\/chathead:col-start-2[^"]*justify-self-center/);
+    expect(markup).toMatch(/data-chathead-controls="true" class="[^"]*@min-\[30rem\]\/chathead:col-start-3/);
+  });
+});
+
 describe("glass header", () => {
   it("floats the header over the transcript, which starts below it and scrolls on underneath", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));

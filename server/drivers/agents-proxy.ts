@@ -12,6 +12,7 @@
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
 //   OMB_EXTERNAL_RUNTIME  "1" for a standing process: peer tools and polling only
+//   OMB_CHIEF_OF_STAFF    "1" for a Chief of Staff, the only bot shown the Chief-only tools
 //
 // This file is the stdio front end only. What the tools are and which a turn
 // sees: agents-catalog.ts. What a call does: agents-call.ts. How the harness
@@ -25,7 +26,8 @@ import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 
 const AVAILABLE_TOOLS = availableTools(catalogProfileFromEnv(process.env));
-// One proxy process serves one turn, so its per-turn guards start here.
+// A warm engine keeps this process across its turns; the harness keeps
+// every per-turn limit, so nothing here counts.
 const CONTEXT = toolCallContextFromEnv(process.env);
 
 const send = (msg: Json) => process.stdout.write(JSON.stringify(msg) + "\n");

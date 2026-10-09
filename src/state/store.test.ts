@@ -9,7 +9,6 @@ import {
   initialState,
   liveCallFromFrame,
   loadSnapshotBoundary,
-  messageVersions,
   openNotificationTarget,
   openThread,
   persistBotUpdate,
@@ -28,6 +27,7 @@ import {
   type Message,
   type Action,
 } from "./store";
+import { transcriptLookups } from "@/lib/transcript-derivations";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
 import type { ConnectorToolGrant } from "../../shared/wire";
@@ -55,15 +55,6 @@ describe("partial profile save responses", () => {
     expect(last.config?.profile).toEqual({ name: "New", email: "new@example.invalid", aboutMe: "New biography" });
     expect(reducer(last, { type: "profileSaved", profile: { aboutMe: "" } }).config?.profile)
       .toEqual({ name: "New", email: "new@example.invalid", aboutMe: "" });
-  });
-});
-
-describe("screen frame ownership", () => {
-  it("retains the source thread so a sibling's frame cannot masquerade as the selected screen", () => {
-    const first = reducer(initialState, { type: "screenFrame", botId: "bot", threadId: "vm-thread", png: "vm", mime: "image/png" });
-    const second = reducer(first, { type: "screenFrame", botId: "bot", threadId: "browser-thread", png: "browser", mime: "image/jpeg" });
-    expect(first.screens.bot).toMatchObject({ threadId: "vm-thread", png: "vm" });
-    expect(second.screens.bot).toMatchObject({ threadId: "browser-thread", png: "browser" });
   });
 });
 
@@ -901,6 +892,7 @@ describe("config status frames", () => {
         box: { configured: false },
         vps: { configured: true, sshAlias: "homelab" },
         rooms: { turnTimeoutMinutes: 20 },
+        mcp: { callTimeoutMinutes: 30 },
         threads: { maxConcurrentPerBot: 10 },
         localVm: { mode: "per-bot", maxInstances: 3 },
         opencodeGo: { configured: true },
@@ -914,6 +906,7 @@ describe("config status frames", () => {
       box: { configured: false },
       vps: { configured: true, sshAlias: "homelab" },
       rooms: { turnTimeoutMinutes: 20 },
+      mcp: { callTimeoutMinutes: 30 },
       threads: { maxConcurrentPerBot: 10 },
       localVm: { mode: "per-bot", maxInstances: 3 },
       opencodeGo: { configured: true },
@@ -981,6 +974,7 @@ describe("config status", () => {
     box: { configured: false },
     vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 5 },
+    mcp: { callTimeoutMinutes: 10 },
     localVm: { mode: "shared", maxInstances: 2 },
     features: { skillAuthoring: true },
   });
@@ -1145,7 +1139,7 @@ describe("optimistic sent messages", () => {
       const visible = visibleMessages(edited.bots[0]!);
       expect(visible.map((message) => message.text)).toEqual(["Ready", "second try"]);
       expect(edited.bots[0]?.activeLeafId).toBe("optimistic-edit-1");
-      expect(messageVersions(edited.bots[0]!, question).map((message) => message.id)).toEqual([question.id, "optimistic-edit-1"]);
+      expect(transcriptLookups(edited.bots[0]!.messages, visible).editVersions(question)?.map((message) => message.id)).toEqual([question.id, "optimistic-edit-1"]);
     });
 
     it("hands the swap to the server fork and keeps its reply visible", () => {
@@ -1906,6 +1900,22 @@ describe("scrollback pages", () => {
     expect(landed.loadingOlder).toEqual({});
   });
 
+  it("keeps the open transcript's scrollback answer when a bot frame does not switch it", () => {
+    const open = { ...bot, tasks: [{ threadId: "thread-1", title: "Long", createdAt: 1 }] } as never as Bot;
+    // Another client opened thread-2; its frame carries thread-2's page.
+    const opened = reducer({ ...initialState, bots: [open] }, {
+      type: "botPatched",
+      bot: { ...open, threadId: "thread-2", tasks: [{ threadId: "thread-2", title: "New", createdAt: 2 }, ...open.tasks!], messages: [], hasMore: false } as never,
+    });
+    expect(opened.bots[0]).toMatchObject({ threadId: "thread-1", hasMore: true });
+    expect(opened.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    // A reply with this thread's newest page leaves the scrollback already loaded.
+    const loaded = { ...initialState, bots: [{ ...open, hasMore: false }] };
+    const replied = reducer(loaded, { type: "botPatched", bot: { ...open, messages: [message("m4", 4)], hasMore: true } as never });
+    expect(replied.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    expect(replied.bots[0].hasMore).toBe(false);
+  });
+
   it("answers the scrollback question from a payload that carries a transcript", () => {
     const group = {
       id: "room",
@@ -2193,6 +2203,7 @@ describe("live config frames", () => {
     box: { configured: false },
     vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 10 },
+    mcp: { callTimeoutMinutes: 10 },
     localVm: { mode: "shared", maxInstances: 1 },
   };
 

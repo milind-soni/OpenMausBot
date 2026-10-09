@@ -1,16 +1,23 @@
-// The desktop half of a Live call: microphone, speaker and captions over
-// WebRTC, straight to OpenAI. It lives at app level (not in a chat view), so
-// switching chats keeps the call. Everything else about the call — what the
-// bot is asked, what the voice is told, approvals, idle hang-up — runs on the
-// harness (server/live-call-controller.ts). This module never sends appends:
+// This window's half of a Live call, in the desktop app or a web browser:
+// microphone, speaker and captions over WebRTC, straight to OpenAI. It lives
+// at app level (not in a chat view), so switching chats keeps the call.
+// Everything else about the call — what the bot is asked, what the voice is
+// told, approvals, idle hang-up — runs on the harness
+// (server/live-call-controller.ts). This module never sends appends:
 // its data channel may only send session.close.
 import { useSyncExternalStore } from "react";
 import type { LiveCallState, LiveEndReason } from "../../shared/wire";
 import { api, ApiError } from "@/state/store";
+import { openExternalLink } from "./app-links";
 import { endCall, startCall } from "./call";
+import { desktopCapabilitiesNow } from "./desktop";
 import { t } from "./i18n";
 
 export type LiveMediaPhase = "idle" | "starting" | "live" | "ending" | "ended" | "failed";
+
+/** The one thing a stopped call's notice offers: call again, or open this
+ * page in the web browser (the desktop app refused it the microphone). */
+export type LiveCallAction = "retry" | "open-in-browser";
 
 /** A call is running in this window: the microphone is (or is about to be) open. */
 export function isLiveCallRunning(phase: LiveMediaPhase): boolean {
@@ -33,10 +40,9 @@ export interface LiveMediaState {
   /** the server has no OpenAI key; show the key form */
   needsKey: boolean;
   busyWith: LiveCallState | null;
-  /** a stopped call's notice offers Try again: only where a retry can help
-   * (never for a busy line, a blocked microphone, a window without WebRTC
-   * or a sign-in that ended) */
-  canRetry: boolean;
+  /** a stopped call's one action, only where it can help: never for a busy
+   * line, a window without WebRTC or a sign-in that ended */
+  action: LiveCallAction | null;
   /** this window's Hang up asked for the end, and the computer has not
    * confirmed it yet: the bar says "Hanging up…" and the end is quiet. Any
    * other end (another device hung up, the computer ended the call) keeps
@@ -51,11 +57,17 @@ export interface LiveMediaDeps {
   playRemote(track: MediaStreamTrack): Promise<void> | void;
   stopRemote(): void;
   iceTimeoutMs: number;
+  /** what this window is: the desktop app's own page, a server's page in it, or a browser */
+  capabilities(): DesktopCapabilities;
+  /** whether the desktop app lets this page use the microphone; undefined in
+   * a browser, and from a desktop app older than the answer */
+  pageMicrophone(): Promise<"allowed" | "refused" | undefined>;
+  openInBrowser(url: string): void;
 }
 
 const IDLE: LiveMediaState = {
   phase: "idle", callId: null, botId: null, threadId: null, startedAt: null, muted: false,
-  caption: "", heard: "", notice: null, needsKey: false, busyWith: null, canRetry: false, hangingUp: false,
+  caption: "", heard: "", notice: null, needsKey: false, busyWith: null, action: null, hangingUp: false,
 };
 const CAPTION_CHARS = 240;
 const HEARD_CHARS = 160;
@@ -88,6 +100,15 @@ const defaults: LiveMediaDeps = {
     if (audio) audio.srcObject = null;
   },
   iceTimeoutMs: 10_000,
+  capabilities: desktopCapabilitiesNow,
+  pageMicrophone: async () => {
+    try {
+      return (await globalThis.window?.ogb?.permStatus?.())?.pageMic;
+    } catch {
+      return undefined;
+    }
+  },
+  openInBrowser: (url) => void openExternalLink(url).catch(() => undefined),
 };
 let deps: LiveMediaDeps = defaults;
 
@@ -167,6 +188,34 @@ export function endNotice(reason: LiveEndReason | undefined): { text: string; dr
   }
 }
 
+/** This window is a web browser, with no desktop app around it: the one
+ * rule for who asks for the microphone and which app holds the call. It reads
+ * the desktop capability contract (src/lib/desktop.ts: a window the app does
+ * not answer for is a browser), never the preload bridge (CONTRIBUTING.md). */
+function inWebBrowser(capabilities: DesktopCapabilities): boolean {
+  return capabilities.dictation.reasonCode === "desktop-app-required";
+}
+
+/** Who blocked the microphone, and the one thing that helps. The desktop app
+ * says whether it lets this page use the microphone (`pageMic`): a page it
+ * refused can make the call in a web browser. An older app does not say; it
+ * refused every server's page but a verified Cloud, so a server's page counts
+ * as refused there too. Otherwise the browser (per site) or the computer's
+ * privacy settings blocked it: allow it there, then try again. */
+function micBlocked(capabilities: DesktopCapabilities, pageMic: "allowed" | "refused" | undefined): { notice: string; action: LiveCallAction } {
+  if (pageMic === "refused" || (pageMic === undefined && capabilities.dictation.reasonCode === "remote-server")) {
+    return { notice: t("call.live.micAppRefused"), action: "open-in-browser" };
+  }
+  return { notice: t(inWebBrowser(capabilities) ? "call.live.micBlockedBrowser" : "call.live.micBlocked"), action: "retry" };
+}
+
+/** Which app this window's call says holds the microphone: a web browser,
+ * or the desktop app (its own page, or a server's page in it, such as My
+ * Cloud). The harness reports it to a busy line elsewhere. */
+function liveClient(capabilities: DesktopCapabilities): "desktop" | "web" {
+  return inWebBrowser(capabilities) ? "web" : "desktop";
+}
+
 export async function startLiveCall(target: { botId: string; threadId: string }): Promise<void> {
   if (isLiveCallRunning(state.phase)) return;
   release();
@@ -213,7 +262,7 @@ export async function startLiveCall(target: { botId: string; threadId: string })
     if (!sdp) throw new Error(t("call.live.noOffer"));
     const result = await deps.request<{ call: LiveCallState; transport: { sdp: string } }>("/api/live/session", {
       method: "POST",
-      body: JSON.stringify({ botId: target.botId, threadId: target.threadId, sdp, client: "desktop" }),
+      body: JSON.stringify({ botId: target.botId, threadId: target.threadId, sdp, client: liveClient(deps.capabilities()) }),
       timeoutMs: 35_000,
     });
     if (mine !== generation) {
@@ -247,14 +296,19 @@ export async function startLiveCall(target: { botId: string; threadId: string })
     release();
     if (body?.needsKey) return set({ ...IDLE, needsKey: true, botId: target.botId, threadId: target.threadId });
     if (body?.activeCall) return set({ ...IDLE, phase: "failed", botId: target.botId, threadId: target.threadId, busyWith: body.activeCall, notice: busyText(body.activeCall) });
-    const blocked = error instanceof DOMException && (error.name === "NotAllowedError" || error.name === "NotFoundError");
-    // Trying again cannot help a blocked microphone, a window without
-    // WebRTC or a refused sign-in: each needs a person to change something.
-    const hopeless = blocked || error instanceof LiveUnsupportedError || (error instanceof ApiError && error.status === 401);
-    set({
-      ...IDLE, phase: "failed", botId: target.botId, threadId: target.threadId, canRetry: !hopeless,
-      notice: blocked ? t("call.live.micBlocked") : error instanceof Error ? error.message : String(error),
-    });
+    const failed = { ...IDLE, phase: "failed" as const, botId: target.botId, threadId: target.threadId };
+    // No microphone at all is not a permission: connect one, then try again.
+    if (error instanceof DOMException && error.name === "NotFoundError") return set({ ...failed, notice: t("call.live.micMissing"), action: "retry" });
+    if (error instanceof DOMException && error.name === "NotAllowedError") {
+      const pageMic = await deps.pageMicrophone();
+      // hung up, or called again, while the app was asked
+      if (mine !== generation) return;
+      return set({ ...failed, ...micBlocked(deps.capabilities(), pageMic) });
+    }
+    // Trying again cannot help a window without WebRTC or a refused
+    // sign-in: each needs a person to change something first.
+    const hopeless = error instanceof LiveUnsupportedError || (error instanceof ApiError && error.status === 401);
+    set({ ...failed, action: hopeless ? null : "retry", notice: error instanceof Error ? error.message : String(error) });
   }
 }
 
@@ -314,6 +368,15 @@ export function handleLiveCallKey(event: ChordEvent, isMac: boolean): boolean {
  * or the prompt closed), so it does not open again by itself later. */
 export function dismissKeyPrompt(botId: string): void {
   if (state.needsKey && state.botId === botId) dismissLiveNotice();
+}
+
+/** The stopped call's one action: call this bot again, or open this page in
+ * the web browser, which can give it the microphone. */
+export function takeLiveCallAction(): void {
+  const { action, botId, threadId, phase } = state;
+  if (phase !== "failed") return;
+  if (action === "retry" && botId && threadId) void startLiveCall({ botId, threadId });
+  else if (action === "open-in-browser" && globalThis.location?.href) deps.openInBrowser(globalThis.location.href);
 }
 
 export function dismissLiveNotice(): void {
@@ -410,7 +473,7 @@ function finish(notice: { text: string; dropped: boolean }, detail?: string) {
   const { botId, threadId } = state;
   set({
     ...IDLE, phase: notice.dropped ? "failed" : "ended", botId, threadId,
-    notice: detail?.trim() || notice.text, canRetry: notice.dropped,
+    notice: detail?.trim() || notice.text, action: notice.dropped ? "retry" : null,
   });
   if (!notice.dropped) {
     noticeTimer = setTimeout(dismissLiveNotice, ENDED_NOTICE_MS);

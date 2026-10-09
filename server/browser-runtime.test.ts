@@ -84,6 +84,18 @@ describe("browser takeover gate", () => {
     expect(value.interrupted("s")).toBe(false);
   });
 
+  // A page that would not load used to lock the browser behind "Choose
+  // Restart browser…": the engine had answered, nothing was left running.
+  it("keeps the browser usable after an action the engine answered as failed", async () => {
+    const value = runtime();
+    await expect(value.take("s", "owner")).resolves.toBe(false);
+    const answered = Object.assign(new Error("This page could not be opened."), { settled: true });
+    await expect(value.withHumanAction("s", "owner", async () => { throw answered; })).rejects.toBe(answered);
+    expect(value.interrupted("s")).toBe(false);
+    expect(value.canControl("s", "owner")).toBe(true);
+    await expect(value.withHumanAction("s", "owner", async () => "next page")).resolves.toBe("next page");
+  });
+
   it("release cancels an in-flight take and does not grant control afterwards", async () => {
     const value = runtime();
     const action = deferred();
@@ -278,7 +290,10 @@ describe("server-owned browser MCP runtime", () => {
       await observed;
       // The real daemon detaches from its MCP parent. Transport exit is not
       // proof that a navigation or submission stopped; do not replay it.
-      await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/Restart/);
+      await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).resolves.toMatchObject({
+        isError: true,
+        content: [{ type: "text", text: expect.stringMatching(/Browser panel/) }],
+      });
       await expect(value.take("s", "owner")).rejects.toThrow(/Restart/);
       await value.restart("s", "owner", async () => {});
       await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "back" } }))
@@ -305,6 +320,24 @@ describe("server-owned browser MCP runtime", () => {
     const failure = value.agentRpc("s", spec(), "tools/call", { name: "rpc-timeout" });
     await expect(failure).rejects.toThrow(/request timed out/);
     await expect(failure).rejects.not.toBeInstanceOf(TransportError);
+  });
+
+  it("returns a stuck-engine tool error after a human timeout, then the same session works after Restart", async () => {
+    const value = runtime();
+    await value.agentRpc("s", spec(), "tools/list", {});
+    await value.take("s", "owner");
+    await expect(value.withHumanAction("s", "owner", async () => { throw new Error("navigation timed out"); })).rejects.toThrow(/timed out/);
+    value.release("s", "owner");
+    const refused = await value.agentRpc("s", spec(), "tools/call", { name: "echo" }) as { isError?: boolean; content?: Array<{ text?: string }> };
+    expect(refused.isError).toBe(true);
+    expect(refused.content?.[0]?.text).toMatch(/Browser panel/);
+    expect(refused.content?.[0]?.text).not.toMatch(/disconnected/i);
+    const listed = await value.agentRpc("s", spec(), "tools/list", {}) as { tools: Array<{ name: string }> };
+    expect(listed.tools.map((tool) => tool.name)).toContain("restart_browser");
+    await value.restart("s", "owner", async () => {});
+    expect(value.interrupted("s")).toBe(false);
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "back" } }))
+      .resolves.toMatchObject({ content: [{ text: expect.stringContaining("back") }] });
   });
 
   it("still refuses an agent after a human's own interrupted command, browser alive", async () => {
@@ -338,7 +371,10 @@ describe("server-owned browser MCP runtime", () => {
     const value = runtime({ closeBrowser });
     await value.agentRpc("s", spec(), "tools/list", {});
     await expect(value.agentRpc("s", spec(), "tools/call", { name: "crash" })).rejects.toThrow();
-    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/restart_browser/);
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: expect.stringMatching(/restart_browser/) }],
+    });
     // A new turn lists tools without reaching the engine: the engine's tools
     // from the last list, plus the one way out.
     const listed = await value.agentRpc("s", spec(), "tools/list", {}) as { tools: Array<{ name: string }> };
@@ -358,7 +394,10 @@ describe("server-owned browser MCP runtime", () => {
     await value.agentRpc("s", spec(), "tools/list", {});
     await expect(value.agentRpc("s", spec(), "tools/call", { name: "crash" })).rejects.toThrow();
     await expect(value.agentRpc("s", spec(), "tools/call", { name: "restart_browser" })).rejects.toThrow(/could not be closed/);
-    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/Restart/);
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).resolves.toMatchObject({
+      isError: true,
+      content: [{ text: expect.stringMatching(/Restart/) }],
+    });
     // No agent-owned hold: the person's own Restart button still works.
     expect(value.heldBy("s")).toBeNull();
     await value.restart("s", "person", async () => {});
@@ -375,6 +414,29 @@ describe("server-owned browser MCP runtime", () => {
     const revoked = () => { throw new Error("capability revoked"); };
     await expect(value.agentRpc("s", spec(), "tools/call", { name: "restart_browser" }, revoked)).rejects.toThrow(/revoked/);
     expect(closeBrowser).not.toHaveBeenCalled();
+  });
+
+  it("sizes the browser page once per transport, before the first call that may launch it", async () => {
+    const order: string[] = [];
+    const applyViewport = vi.fn(async () => { order.push("viewport"); return true; });
+    const value = runtime({ applyViewport });
+    await value.agentRpc("s", spec(), "tools/list", {});
+    expect(applyViewport).not.toHaveBeenCalled();
+    const first = await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "first" } }) as { content: Array<{ text: string }> };
+    order.push(first.content[0]!.text);
+    await value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "second" } });
+    expect(applyViewport).toHaveBeenCalledOnce();
+    expect(applyViewport).toHaveBeenCalledWith(spec());
+    expect(order[0]).toBe("viewport");
+    expect(order[1]).toContain("first");
+    await value.close("s");
+    await value.agentRpc("s", spec(), "tools/call", { name: "echo" });
+    expect(applyViewport).toHaveBeenCalledTimes(2);
+  });
+
+  it("still runs the bot's call when sizing the page fails", async () => {
+    const value = runtime({ applyViewport: async () => { throw new Error("engine without viewport"); } });
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "works" } })).resolves.toMatchObject({ content: [{ type: "text" }] });
   });
 
   it("keeps completed MCP refusals distinct from uncertain transport failure", async () => {

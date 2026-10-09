@@ -20,6 +20,12 @@
 //   undefined and our own freshly-bound child would fail the identity match
 //   and be reaped as a "foreign owner" on its very first health answer.
 
+// A healthy child usually binds within a few seconds of fork, and a refused
+// loopback connect costs well under a millisecond, so poll briskly over that
+// window. Slower boots fall back to the old interval, which keeps a boot that
+// never listens to a few hundred probes over the whole budget.
+export const BOOT_PROBE_FAST_INTERVAL_MS = 25;
+export const BOOT_PROBE_FAST_WINDOW_MS = 5_000;
 export const BOOT_PROBE_INTERVAL_MS = 500;
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -59,8 +65,11 @@ export async function pollServerIdentity({
       });
     } catch {
       // Not up yet, or this probe ran into the wall-clock budget — either way
-      // back off to the poll interval, then let the loop condition decide.
-      await sleep(Math.min(BOOT_PROBE_INTERVAL_MS, Math.max(1, deadline - now())));
+      // back off (fast inside the usual boot window, the slow interval after
+      // it), then let the loop condition decide.
+      const intervalMs =
+        now() - startedAt < BOOT_PROBE_FAST_WINDOW_MS ? BOOT_PROBE_FAST_INTERVAL_MS : BOOT_PROBE_INTERVAL_MS;
+      await sleep(Math.min(intervalMs, Math.max(1, deadline - now())));
       continue;
     }
     const body = await res.json().catch(() => null);

@@ -71,7 +71,13 @@ interface Target {
 export function parseSkillSource(input: string): Target | { rawUrl: string } | { error: string } {
   const text = input.trim();
   if (!text) return { error: "paste a GitHub repository, folder, or SKILL.md URL" };
-  if (/^https?:\/\/raw\.githubusercontent\.com\/.+\/SKILL\.md$/i.test(text)) return { rawUrl: text };
+  const raw = text.match(/^(https?):\/\/raw\.githubusercontent\.com\/.+\/SKILL\.md$/i);
+  if (raw) {
+    // Plain http sends the skill URL in the clear; refuse it rather than upgrade it.
+    return raw[1]!.toLowerCase() === "https"
+      ? { rawUrl: text }
+      : { error: "paste an https:// raw.githubusercontent.com link instead of plain http" };
+  }
   const blob = text.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/((?:.*\/)?SKILL\.md)$/i);
   if (blob) {
     return { rawUrl: `https://raw.githubusercontent.com/${blob[1]}/${blob[2]}/${blob[3]}/${blob[4]}` };
@@ -123,8 +129,26 @@ async function fetchListing(url: string, fetcher: typeof fetch): Promise<Content
   return asEntries(CONTENT_LISTING.parse(await response.json()));
 }
 
+// A download_url is remote data from a GitHub listing and a rawUrl is pasted
+// input: pin both to https on the raw host, with no port or credentials, so a
+// tampered response cannot aim server fetches at another host.
+function assertPinnedRawUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`refusing to download ${url} — not a valid URL`);
+  }
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password || parsed.port || parsed.hostname !== "raw.githubusercontent.com") {
+    throw new Error(`refusing to download ${url} — skill files must be https://raw.githubusercontent.com links`);
+  }
+}
+
 async function fetchText(url: string, fetcher: typeof fetch): Promise<string> {
-  const response = await fetcher(url, { headers: { "user-agent": "OpenMausBot-skills" } });
+  assertPinnedRawUrl(url);
+  // The raw host serves files directly, so a redirect is never expected: error
+  // out instead of following it to an arbitrary host.
+  const response = await fetcher(url, { headers: { "user-agent": "OpenMausBot-skills" }, redirect: "error" });
   if (!response.ok) throw new Error(`download failed (${response.status})`);
   const text = await response.text();
   if (Buffer.byteLength(text, "utf8") > MAX_FILE_BYTES) throw new Error("file is larger than the 256KB import cap");

@@ -6,6 +6,7 @@
 // written to the server's hint list first, so a reload lands on the same
 // step.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readAdvancedMode } from "@/lib/interface-mode";
 import { ANCHOR_EFFECTS, currentStep, stepNumber, TOUR_STEPS, withTourFinished, type TourEffect, type TourStep } from "@/lib/guided-tour";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
@@ -89,7 +90,9 @@ export function GuidedTour() {
           dispatch({ type: "togglePlugins", open: false });
           return;
         case "openAutomations":
-          if (!press("nav-automations")) dispatch({ type: "showRoutines" });
+          // Simple mode offers no Routines entry, so the tour does not open
+          // the page either; its step then skips itself.
+          if (!press("nav-automations") && readAdvancedMode()) dispatch({ type: "showRoutines" });
           return;
         case "backToChat":
           dispatch({ type: "showChat" });

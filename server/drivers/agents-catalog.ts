@@ -33,6 +33,10 @@ export interface CatalogProfile {
    * of the person's and no Local VM to offer. */
   cloudHome: boolean;
   memoryEnabled?: boolean;
+  /** The bot is its section's Chief of Staff (bot.chiefOfStaff). Only then
+   * are the Chief-only tools and parameters shown; the server refuses them
+   * to every other bot. */
+  chief: boolean;
   /** Written into start_thread's schema in a coordinating turn. */
   botId: string;
 }
@@ -50,6 +54,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     voiceNotes: env.OMB_VOICE_NOTES === "1",
     cloudHome: env.OMB_CLOUD_HOME === "1",
     memoryEnabled: env.OMB_MEMORY_ENABLED !== "0",
+    chief: env.OMB_CHIEF_OF_STAFF === "1",
     botId: env.OMB_BOT_ID ?? "",
   };
 }
@@ -115,7 +120,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
     starts_at: {
       type: "string",
       description:
-        "Optional for type interval: RFC3339 date-time with an explicit timezone offset that anchors the cadence. Omit to start one interval after the routine is applied (immediately with granted Full Access, otherwise after confirmation).",
+        "Optional for type interval: RFC3339 date-time with an explicit timezone offset that anchors the cadence. Omit to start one interval after the routine is applied.",
     },
     window_start: {
       type: "string",
@@ -166,7 +171,7 @@ const ROUTINE_FIELDS_SCHEMA = {
     type: "string",
     // "box" is Boat's historical run_on destination id (agents wire contract).
     enum: ["maus", "box"],
-    description: "Default maus keeps the bot's selected model and configured computer, INCLUDING a self-hosted VPS. Omit this field for normal schedules. box runs on the bot's Boat cloud computer, same model; it requires Boat setup and is not the generic cloud/VPS option. Legacy cloud values from list_routines mean box, not VPS.",
+    description: "Default maus keeps the bot's selected model and configured computer, INCLUDING a self-hosted VPS. Omit this field for normal schedules. box runs on the bot's cloud computer, same model; it needs cloud computers set up and is not the generic cloud/VPS option. Legacy cloud values from list_routines mean box, not VPS.",
   },
   timeout_minutes: {
     type: "integer",
@@ -181,7 +186,7 @@ const ROUTINE_FIELDS_SCHEMA = {
   },
   continuity: {
     type: "boolean",
-    description: "Opt in to using the latest completed run's bounded report as historical context. Defaults to false; set false in an update to start fresh again. Included in the applied result or pending confirmation.",
+    description: "Opt in to using the latest completed run's bounded report as historical context. Use it for recurring work that builds on last time, such as QA passes, monitoring or follow-ups. Defaults to false; set false in an update to start fresh again. Included in the applied result or pending confirmation.",
   },
   overlap: {
     type: "string",
@@ -190,7 +195,13 @@ const ROUTINE_FIELDS_SCHEMA = {
   },
 } as const;
 
+// propose_profile's one sentence about for_bot_id, which a bot that is not a
+// Chief is not shown (catalogTools), along with the parameter itself.
+const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
 const PROPOSAL_OUTCOME = " Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.";
+/** Routines, skills, profile and model: a bot's change to itself applies at
+ * any level (server/direct-apply.ts). */
+const SELF_CHANGE_OUTCOME = " Read the result: a change to your own routines, skills, profile or model applies immediately, and the person sees it with an Undo; a change for another bot may wait for the person's confirmation. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success without an applied result; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.";
 
 /** Every tool, in the order it is listed. Four peer tools are worded
  * differently for an external runtime, which may poll inside one process. */
@@ -344,7 +355,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
       "Choose where this conversation does computer work. Call with no arguments to inspect actual available choices and the current place. For a task needing computer interaction, select the requested place, or auto to choose a suitable configured computer without asking the user to use menus. OpenMausBot reuses an existing computer first; with a configured provider it can start or provision one when needed. Do not provision for ordinary chat or just to inspect availability. A pending result means end this turn immediately: OpenMausBot updates the conversation selector and resumes the original request with that computer's real tools. Do not use the old tools after requesting a switch, repeat the task, or claim the action is done. This cannot change permissions, override Off, or switch a teammate/routine/channel.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       surface: { type: "string", enum: ["auto", "cloud", "vm", "local", "browser"],
-        description: "auto = suitable configured computer, cloud = remote Boat/VPS, vm = isolated Local VM, local = user's own desktop, browser = built-in browser. Omit to list." },
+        description: "auto = suitable configured computer, cloud = the bot's cloud computer or self-hosted VPS, vm = isolated Local VM, local = user's own desktop, browser = built-in browser. Omit to list." },
     } },
   },
   {
@@ -426,7 +437,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "create_bot",
     description:
-      "Create a specialist bot in your section. Chief of Staff only. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps and automatic approvals start disabled. Assign work through delegate_bot. Maximum four new bots per turn.",
+      "Create a specialist bot in your section. Chief of Staff only. Below Full Access the user approves a card first. instructions become its soul. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps and automatic approvals start disabled. Assign work through delegate_bot. Maximum four new bots per turn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -442,6 +453,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
           maxLength: 1024,
           description: "Absolute path of the folder this specialist's tools read and write in (for example /Users/me/Projects/site). It must already exist. Leave it out for the specialist's private workspace.",
         },
+        suggestion: { type: "boolean", description: "True if the user did not ask for this bot." },
       },
       required: ["name", "role", "instructions"],
     },
@@ -668,7 +680,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "propose_routine",
     description:
-      "Prepare a new routine after the user explicitly asks to schedule recurring or future work. Call list_routines first for relative dates or times so you use its authoritative current time and timezone. Convert calendar requests (monthly dates, last days, nth weekdays) into a validated five-field cron schedule with an explicit IANA timeZone; keep elapsed every-N-minutes work as interval. Never approximate unsupported requests with a different weekly schedule or an AI date-check routine; explain the limitation instead. Resolve ambiguous dates, times, timezone, destination, or instructions with the user first, and always give one-time schedules an explicit RFC3339 offset. If the user asks for the routine to run as ANOTHER bot in your section, call list_bots and pass that bot's id as for_bot_id; each run retains that bot's own permissions." + PROPOSAL_OUTCOME,
+      "Prepare a new routine after the user explicitly asks to schedule recurring or future work. Call list_routines first for relative dates or times so you use its authoritative current time and timezone. Convert calendar requests (monthly dates, last days, nth weekdays) into a validated five-field cron schedule with an explicit IANA timeZone; keep elapsed every-N-minutes work as interval. Never approximate unsupported requests with a different weekly schedule or an AI date-check routine; explain the limitation instead. Resolve ambiguous dates, times, timezone, destination, or instructions with the user first, and always give one-time schedules an explicit RFC3339 offset. If the user asks for the routine to run as ANOTHER bot in your section, call list_bots and pass that bot's id as for_bot_id; each run retains that bot's own permissions." + SELF_CHANGE_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -686,7 +698,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "propose_routine_action",
     description:
-      "Prepare a user-requested change to one of this bot's existing routines. Use list_routines first to get the routine id. If the user asks to change ANOTHER bot's routine and that bot is in your section, call list_bots and pass that bot's id as for_bot_id; the routine keeps its owner and every run keeps that bot's engine and permissions." + PROPOSAL_OUTCOME,
+      "Prepare a user-requested change to one of this bot's existing routines. Use list_routines first to get the routine id. If the user asks to change ANOTHER bot's routine and that bot is in your section, call list_bots and pass that bot's id as for_bot_id; the routine keeps its owner and every run keeps that bot's engine and permissions." + SELF_CHANGE_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -715,7 +727,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "propose_profile",
     description:
-      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), or your alert and voice toggles (notifications, speakReplies). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section." + PROPOSAL_OUTCOME,
+      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), or your alert and voice toggles (notifications, speakReplies). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead." + CHIEF_PROFILE_TARGET + SELF_CHANGE_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -727,7 +739,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
         cwd: {
           type: "string",
           maxLength: 1024,
-          description: "Absolute path of the folder your tools read and write in (for example /Users/me/Projects/site). It must already exist. An empty string means your private workspace.",
+          description: "Absolute path of the folder your tools read and write in (for example /Users/me/Projects/site). It must already exist. An empty string means your private workspace. A new folder waits for the person's confirmation unless this conversation has Full access.",
         },
         notifications: {
           type: "boolean",
@@ -749,7 +761,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "propose_model",
     description:
-      "Submit a user-requested switch of this bot's default engine and model. Use the exact instance and model ids the person named, or for a Chief the ids from the team-setup catalog. The card warns about capabilities the switch gains or loses; existing threads keep their current models." + PROPOSAL_OUTCOME,
+      "Submit a user-requested switch of this bot's default engine and model. Use the exact instance and model ids the person named, or for a Chief the ids from the team-setup catalog. The result warns about capabilities the switch gains or loses; existing threads keep their current models." + SELF_CHANGE_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -794,13 +806,13 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "skills_list",
     description:
-      "List this bot's imported skills (enabled and disabled) and any staged skill writes waiting for the user to confirm. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
+      "List this bot's imported skills (enabled and disabled) and any staged skill writes still waiting for the user's decision. Use this before skill_manage to avoid duplicate names. Listing does not enable anything.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
     name: "skill_manage",
     description:
-      "Submit a new or updated reusable SKILL.md. Never update unless the user explicitly asked to revise that named skill. While review is pending, a create stays inactive and an update leaves the current version unchanged." + PROPOSAL_OUTCOME,
+      "Submit a new or updated reusable SKILL.md. Never update unless the user explicitly asked to revise that named skill. If the result is pending, a create stays inactive and an update leaves the current version unchanged." + SELF_CHANGE_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -912,6 +924,14 @@ export const SHARED_COMPUTER_TOOL_NAMES = new Set(["list_shared_computers", "sha
 // tool whose every call would end in a setup error. The route behind it
 // refuses regardless; this keeps the catalog honest about what can work.
 const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
+// And for a role: every route behind these refuses a bot that is not its
+// section's Chief of Staff, as it does a for_bot_id naming another bot on
+// propose_profile or propose_model. (A routine's for_bot_id is open to any
+// bot that can reach that peer, so it stays.)
+const CHIEF_ONLY_TOOL_NAMES = new Set([
+  "create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread",
+]);
+const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model"]);
 // One teamwork path in room turns; keep all unrelated integrations available.
 // Ordinary direct chats use this same bounded coordinator. Goal-owned turns
 // retain their independent loop and cannot start a second coordinator.
@@ -925,7 +945,7 @@ const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
 const CLOUD_HOME_SURFACE = {
   type: "string", enum: ["auto", "cloud", "browser"],
-  description: "auto = suitable configured computer, cloud = remote Boat/VPS, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",
+  description: "auto = suitable configured computer, cloud = the bot's cloud computer, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",
 };
 
 /** The tools one turn is shown, exactly as tools/list serializes them. */
@@ -952,10 +972,17 @@ function catalogTools(profile: CatalogProfile) {
   const VOICE_READY_TOOLS = profile.voiceNotes
     ? SHAREABLE_TOOLS
     : SHAREABLE_TOOLS.filter((tool) => !VOICE_TOOL_NAMES.has(tool.name));
+  const ROLE_TOOLS = profile.chief
+    ? VOICE_READY_TOOLS
+    : VOICE_READY_TOOLS.filter((tool) => !CHIEF_ONLY_TOOL_NAMES.has(tool.name)).map((tool) => {
+      if (!CHIEF_TARGET_TOOL_NAMES.has(tool.name)) return tool;
+      const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => key !== "for_bot_id"));
+      return { ...tool, description: tool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };
+    });
   return profile.externalRuntime
     ? BOT_SCOPED_TOOLS.filter(tool => EXTERNAL_TOOL_NAMES.has(tool.name))
     : profile.coordinating
-    ? VOICE_READY_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && profile.ownThreadCreation))
+    ? ROLE_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && profile.ownThreadCreation))
       .map(tool => tool.name === "start_thread" ? {
         ...tool,
         description: "Open a separate job on yourself with its own history and run, without switching the person's selected conversation. Use only when the user requests independent jobs (for example one review per pull request). Give a short specific title and complete instructions; you can open at most five per turn. This is not a teammate handoff: use coordinate_bots for teammates and their automatic replies. Self-opened jobs cannot recursively open more jobs. If refused, do not retry; explain what remains.",
@@ -963,5 +990,5 @@ function catalogTools(profile: CatalogProfile) {
           bot_id: { type: "string", enum: [profile.botId], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." },
         } },
       } : tool)
-    : VOICE_READY_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
+    : ROLE_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
 }

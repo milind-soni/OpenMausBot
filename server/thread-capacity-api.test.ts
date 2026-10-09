@@ -1,6 +1,6 @@
 // Real provider processes with independent per-thread gates, under the same
 // disposable-home launcher used by the independent-threads API fixture.
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -233,22 +233,15 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     }
   }, 90_000);
 
-  it("defers a routine behind a busy workspace lease instead of failing it (F-collide)", async () => {
-    // A real spawned subprocess server has no fake-timer hook: the waits
-    // below let its own async admission/compaction settle in wall-clock
-    // time, the same exception the file's other capacity test already
-    // relies on (line ~223 above). tsconfig.server.json targets ES2023,
-    // which has no Promise.withResolvers type, hence the executor form.
-    const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+  it("starts a routine in the bot's project folder while another thread works there", async () => {
     await limit(2);
     const project = mkdtempSync(join(tmpdir(), "omb-collide-"));
     projectDirs.push(project);
-    // Both threads below pin to this one folder (same rule startTurn's cwd
-    // resolution follows for a bot with an explicit project folder), so the
-    // fake CLI's per-thread gate/dump naming (basename of its cwd) collapses
-    // to one shared path for both of them — which is exactly what lets one
-    // write release the other, once it is actually dispatched.
-    const projectGate = join(fixture.info.dataDir, `${basename(project)}.gate`);
+    // Both threads below pin to this one folder (startTurn's cwd resolution
+    // for a bot with an explicit project folder), so the fake CLI's gate/dump
+    // naming (basename of its cwd) collapses to one shared key: the dump is
+    // whichever engine started last, and one gate write finishes both.
+    const key = basename(project);
     let botId: string | undefined;
     let routineId: string | undefined;
     try {
@@ -257,10 +250,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       expect((await api("PATCH", `/api/bots/${botId}`, { cwd: project })).status).toBe(200);
       expect((await send(botId, threadId, "HOLD_THE_FOLDER")).body.queued).toBeUndefined();
       await expect.poll(() => busyThreads(botId!)).toEqual([threadId]);
-      // Let the claim past compaction/skill-setup land before the routine
-      // races it — dump()/gate polling can't key off this thread's own id,
-      // since both turns share one project folder's basename.
-      await wait(1_500);
+      await expect.poll(async () => JSON.stringify((await dump(key)).prompt), { timeout: 15_000 }).toContain("HOLD_THE_FOLDER");
 
       const created = await api("POST", "/api/routines", {
         name: "Workspace collision probe",
@@ -276,25 +266,25 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       const runState = async (id: string) =>
         (await api("GET", "/api/routines")).body.runs.find((run: any) => run.id === id);
 
-      // A free thread slot exists (capacity 2, one busy): admission must not
-      // start this run on slot count alone. Its fresh task would pin to the
-      // exact folder the first thread already holds.
+      // A free thread slot is all the run needs. The folder another thread
+      // works in is no reason to hold it: a bot's threads work there side by
+      // side, like several agent sessions open in one repo.
       const run = (await api("POST", `/api/routines/${routineId}/run`)).body.run;
-      await wait(2_000);
-      const held = await runState(run.id);
-      expect(held?.status).toBe("queued");
-      expect(held?.deferredAt).toEqual(expect.any(Number));
-      expect(held?.error).toBeUndefined();
-
-      // Freeing the folder lets the deferred run start, in its own thread.
-      writeFileSync(projectGate, "finish this isolated turn");
-      await expect.poll(async () => ["running", "completed"].includes((await runState(run.id))?.status), { timeout: 15_000 }).toBe(true);
+      await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("running");
       const dispatched = await runState(run.id);
+      expect(dispatched.deferredAt).toBeUndefined();
+      expect(dispatched.error).toBeUndefined();
       expect(dispatched.threadId).not.toBe(threadId);
+      // …in that same folder, while the first thread is still working there.
+      await expect.poll(async () => JSON.stringify((await dump(key)).prompt), { timeout: 15_000 }).toContain("scheduled digest");
+      expect((await dump(key)).cwd).toBe(realpathSync(project));
+      expect((await busyThreads(botId)).sort()).toEqual([threadId, dispatched.threadId].sort());
+
+      finish(key);
       await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("completed");
     } finally {
       if (botId) {
-        writeFileSync(projectGate, "finish this isolated turn");
+        finish(key);
         await expect.poll(async () => (await busyThreads(botId!)).length, { timeout: 15_000 }).toBe(0);
       }
       if (routineId) await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);

@@ -70,8 +70,6 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
       res.setHeader("content-type", "text/event-stream");
       return res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "Fixture reply" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
     }
-    if (path === "/api/provider-models") return res.end(JSON.stringify({ "claude-code": { models: [{ id: "claude-fable-5" }] } }));
-    if (path === "/me") return res.end(JSON.stringify({ ok: true }));
     // Boat's own runner: the one thing a Hosted desktop turn must never reach.
     if (path.endsWith("/prompt")) {
       prompts++;
@@ -100,7 +98,9 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
   if (!address || typeof address === "string") throw new Error("fixture failed to bind");
   const origin = `http://127.0.0.1:${address.port}`;
   const gate = join(await import("node:os").then(os => os.tmpdir()), `omb-hosted-desktop-gate-${process.pid}-${Date.now()}`);
-  const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate },
+  // Each turn on the cloud computer uses it, as a real model would: its first
+  // computer call is what creates or wakes the Boat.
+  const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate, FAKE_CLAUDE_USES_CLOUD_COMPUTER: "1" },
     undefined, undefined, undefined, undefined, undefined, [], origin).catch(async error => {
     upstream.closeAllConnections(); await new Promise<void>(resolve => upstream.close(() => resolve())); throw error;
   });
@@ -114,7 +114,9 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
     return result.body;
   };
   const control = (args: string[]) => runControlOmb([...args, "--url", fixture.info.url]) as Promise<any>;
+  // The rows a person reads; a turn's digest comes after them.
   const lastRows = async (thread: string) => (await apiOk("GET", `/api/threads/${thread}/messages?limit=30`)).messages
+    .filter((message: any) => message.kind !== "digest")
     .map((message: any) => message.kind === "activity" ? String(message.tool?.name) : `${message.role}:${message.kind}`);
   const task = async (botId: string, threadId: string) =>
     (await apiOk("GET", "/api/bots")).bots.find((bot: any) => bot.id === botId).tasks.find((entry: any) => entry.threadId === threadId);
@@ -217,17 +219,21 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
 
     // A Hosted desktop turn whose new Boat can't be finished, and whose
     // rollback delete isn't confirmed, leaves the Boat fenced for deletion.
-    // Its failure names Works on, and that next action works: an Auto turn
-    // never reads the fenced Boat, so the same conversation answers again.
+    // Its failure says what happened in plain words, with one way on and no
+    // Boat jargon; an Auto turn never reads the fenced Boat, so the same
+    // conversation answers again.
     failNewBoat = true;
     const { bot: fenced } = await control(["new-bot", "--name", "Fenced fixture"]);
     await apiOk("PATCH", `/api/bots/${fenced.id}`, { computer: "cloud" });
     await control(["send", "--bot", fenced.id, "--task", fenced.activeTaskId, "--text", "Use the hosted desktop."]);
     expect((await control(["wait", "--bot", fenced.id, "--task", fenced.activeTaskId, "--timeout", "30"])).status).toBe("failed");
-    expect((await lastRows(fenced.activeTaskId)).at(-1)).toMatch(/^error: box desktop link could not be created.*Set Works on to Auto in this bot's settings to continue\.$/);
+    expect((await lastRows(fenced.activeTaskId)).at(-1)).toBe("error: Fenced fixture's cloud computer didn't start. Try again.");
+    const failedRow = (await apiOk("GET", `/api/threads/${fenced.activeTaskId}/messages?limit=30`)).messages
+      .filter((message: any) => message.kind !== "digest").at(-1);
+    expect(failedRow.tool.place).toEqual({ state: "cc-no-start", params: { bot: "Fenced fixture" }, source: "works-on" });
     await control(["send", "--bot", fenced.id, "--task", fenced.activeTaskId, "--text", "Try the hosted desktop again."]);
     expect((await control(["wait", "--bot", fenced.id, "--task", fenced.activeTaskId, "--timeout", "30"])).status).toBe("failed");
-    expect((await lastRows(fenced.activeTaskId)).at(-1)).toBe("error: this cloud computer is being deleted — wait for it to finish, or retry Delete if it needs attention. Set Works on to Auto in this bot's settings to continue.");
+    expect((await lastRows(fenced.activeTaskId)).at(-1)).toBe("error: Fenced fixture's previous cloud computer is still being removed. Try again.");
     await apiOk("PATCH", `/api/bots/${fenced.id}`, { computer: null });
     const callsBeforeFencedAuto = boatCalls;
     await control(["send", "--bot", fenced.id, "--task", fenced.activeTaskId, "--text", "what is 2+2?"]);
@@ -237,7 +243,7 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
     expect(boxesCreated).toBe(2);
 
     // An engine without computer tools is refused before anything is created,
-    // with the one setting that changes it; that setting unbreaks the bot.
+    // with the one fix (another model); Works on back to Auto also unbreaks it.
     await apiOk("PUT", "/api/config", { openaiCompat: { url: `${origin}/v1`, key: "synthetic-fixture-key", model: "tools-off-model" } });
     await apiOk("PATCH", "/api/instances/openaiCompat", { tools: false });
     const { bot: plain } = await control(["new-bot", "--name", "Tools-off fixture"]);
@@ -245,10 +251,10 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
     await apiOk("PATCH", `/api/bots/${plain.id}`, { computer: "cloud" });
     await control(["send", "--bot", plain.id, "--task", plain.activeTaskId, "--text", "hello"]);
     expect((await control(["wait", "--bot", plain.id, "--task", plain.activeTaskId, "--timeout", "30"])).status).toBe("failed");
-    expect((await lastRows(plain.activeTaskId)).at(-1)).toBe("error: This model can't use a computer. Choose another model, or set Works on to Auto.");
+    expect((await lastRows(plain.activeTaskId)).at(-1)).toBe("error: tools-off-model can't use a computer. Choose a model that can, such as Claude or ChatGPT. Choose another model in Tools-off fixture's settings.");
     expect(boxesCreated).toBe(2);
     expect((await task(plain.id, plain.activeTaskId)).busy).toBe(false);
-    // A cloud routine is refused by the same rule, naming its own control.
+    // A cloud routine is refused by the same rule, with the same fix.
     const { routine } = await apiOk("POST", "/api/routines", { name: "Tools-off cloud", botId: plain.id,
       prompt: "Inspect the cloud desktop.", runOn: "cloud", enabled: false,
       schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
@@ -259,7 +265,7 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
       return routineThread;
     }, { timeout: 15_000 }).not.toBe("");
     expect((await control(["wait", "--bot", plain.id, "--task", routineThread, "--timeout", "30"])).status).toBe("failed");
-    expect((await lastRows(routineThread)).at(-1)).toBe("error: This model can't use a computer. Choose another model, or change where this routine runs.");
+    expect((await lastRows(routineThread)).at(-1)).toBe("error: tools-off-model can't use a computer. Choose a model that can, such as Claude or ChatGPT. Choose another model in Tools-off fixture's settings.");
     expect(boxesCreated).toBe(2);
     await apiOk("PATCH", `/api/bots/${plain.id}`, { computer: null });
     await control(["send", "--bot", plain.id, "--task", plain.activeTaskId, "--text", "hello again"]);

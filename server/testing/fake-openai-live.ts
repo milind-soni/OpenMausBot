@@ -10,6 +10,8 @@ import { pathToFileURL } from "node:url";
 
 export interface FakeLiveSession {
   id: string;
+  /** the API key the session was created with (its bearer) */
+  key: string;
   body: Record<string, unknown>;
   commands: Array<Record<string, unknown>>;
   attached: boolean;
@@ -156,7 +158,7 @@ export async function startFakeOpenAiLive(options: { port?: number; closeOnReque
       }
       let body: Record<string, unknown> = {};
       try { body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>; } catch { /* recorded as {} */ }
-      const session: FakeLiveSession = { id: `sess_fake_${++counter}`, body, commands: [], attached: false, closed: false };
+      const session: FakeLiveSession = { id: `sess_fake_${++counter}`, key: bearer(req), body, commands: [], attached: false, closed: false };
       sessions.push(session);
       wake();
       res.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({

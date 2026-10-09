@@ -84,6 +84,14 @@ describe("Linux DEB sandbox policy", () => {
 });
 
 describe.skipIf(process.platform !== "linux")("Linux DEB upgrade hook", () => {
+  it("skips an unsupported optional policy on legacy hosts without userns restriction", () => {
+    const { appRoot, systemRoot, parser, apparmorDir } = fixture();
+    fs.unlinkSync(path.join(systemRoot, "apparmor_restrict_unprivileged_userns"));
+    fs.writeFileSync(parser, "#!/bin/sh\nexit 42\n", { mode: 0o755 });
+    const result = runHook(appRoot);
+    expect(result.status).toBe(0);
+    expect(fs.existsSync(path.join(apparmorDir, "openmausbot-browser"))).toBe(false);
+  });
   it("repairs legacy directory and executable modes idempotently", () => {
     const { appRoot, resources, cuaRoot, chromiumSandbox, browserRoot, chromeRoot, apparmorDir } = fixture();
 

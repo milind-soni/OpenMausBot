@@ -18,7 +18,6 @@ import {
   openCodeOwnedDirectories,
   openCodeProviderKeysAllowed,
   openMausOwnsWorkingFolder,
-  OPENCODE_PROVIDER_ENV,
   parseOpenCodeModelsOutput,
   preferredOpenCodeModel,
   resetOpenCodeModelCache,
@@ -26,6 +25,7 @@ import {
 } from "./opencode-go.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
 import { cloudHomeConfigured } from "../../cloud-home.ts";
+import { OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import { hostedWorkspaceConfigured } from "../../enterprise.ts";
 import { TASK_WORKSPACES_DIR, workspaceDir } from "../../workspace.ts";
 import type { ModelCatalog, ProviderInstance, SendTurnInput } from "../../contracts.ts";
@@ -346,8 +346,25 @@ describe("OpenCode catalog", () => {
 
   it("points a rejected Zen key at the key OpenMaus saves", () => {
     expect(describeOpenCodeAccountError("invalid_credentials", "opencode/big-pickle")).toContain("Settings → API keys");
+    // one next action, and one a Cloud owner (who has no terminal there) can take
+    for (const model of [undefined, "opencode/big-pickle", "opencode-go/minimax-m3"]) {
+      expect(describeOpenCodeAccountError("invalid_credentials", model)).not.toContain("opencode auth login");
+    }
     expect(describeOpenCodeAccountError("insufficient_funds", "opencode/big-pickle")).toContain("Zen");
     expect(describeOpenCodeAccountError("inactive_subscription", "opencode-go/minimax-m3")).toContain("OpenCode Go subscription");
+  });
+
+  // On a Cloud the owner has no terminal: a key for any other provider is
+  // saved in Settings, under Keys for other OpenCode providers.
+  it("on a Cloud, sends another provider's refused key to Settings, not a terminal", () => {
+    for (const model of ["openrouter/openai/gpt-4o-mini", "venice/llama-3.3-70b", `${"very-long-provider-name".repeat(4)}/model`]) {
+      const cloud = describeOpenCodeAccountError("invalid_credentials", model, { cloudHome: true });
+      expect(cloud).not.toContain("opencode auth login");
+      expect(cloud).toContain("Save it under Keys for other OpenCode providers in Settings → API keys.");
+      expect(cloud.length, model).toBeLessThanOrEqual(160);
+      // on the person's own computer the CLI's sign-in still fixes it
+      expect(describeOpenCodeAccountError("invalid_credentials", model, { cloudHome: false })).toContain("opencode auth login");
+    }
   });
 
   it("passes the person's provider keys through, as the CLI would see them", async () => {
@@ -414,18 +431,55 @@ describe("OpenCode catalog", () => {
     expect(source).toContain("openCodeOrganisationManaged = () => managedPolicy.current() !== null || managedDesktop.enrolled();");
   });
 
-  it("keeps provider keys out on a Cloud home or a managed desktop", async () => {
+  // The policy is about where a key comes from. One riding along in the
+  // server's own environment (the operator's) stays out; one in OpenCode's
+  // instance environment was put there on purpose (config.ts
+  // injectedEnvironment), as claude.ts treats the workspace Anthropic key.
+  it("keeps the server's own provider keys out on a Cloud home or a managed desktop", async () => {
     const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-managed-"));
     setOpenCodeProviderKeyPolicy(() => false);
+    for (const key of OPENCODE_PROVIDER_ENV) vi.stubEnv(key, `operator-${key}`);
     try {
       const dump = join(scratch, "env.json");
       const driver = createOpenCodeDriver(async () => catalog("opencode-go/minimax-m3"));
       const instance = await driver.create({
         instanceId: "opencode-managed",
         displayName: "OpenCode",
+        environment: { OPENCODE_API_KEY: "secret-value", FAKE_ACP_DUMP: dump },
+        enabled: true,
+        config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      await instance.snapshot();
+      const child = JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> };
+      expect(child.env.OPENCODE_API_KEY).toBe("secret-value");
+      for (const key of OPENCODE_PROVIDER_ENV) expect(child.env[key], key).toBeUndefined();
+      await instance.dispose();
+    } finally {
+      vi.unstubAllEnvs();
+      setOpenCodeProviderKeyPolicy(() => !cloudHomeConfigured() && !hostedWorkspaceConfigured());
+      await removeTempDir(scratch);
+    }
+  });
+
+  // On a Cloud the owner has no shell to export a key in: Settings saves it
+  // for OpenCode (config.ts openCodeProviderKeys), and the server hands it
+  // over in the instance environment. Those names go through; every other
+  // provider key the server's own environment holds still does not.
+  it("lets the owner's saved provider keys through on a Cloud home, and only those", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-own-keys-"));
+    setOpenCodeProviderKeyPolicy(() => false);
+    for (const key of OPENCODE_PROVIDER_ENV) vi.stubEnv(key, `operator-${key}`);
+    try {
+      const dump = join(scratch, "env.json");
+      const driver = createOpenCodeDriver(async () => catalog("opencode-go/minimax-m3"));
+      const instance = await driver.create({
+        instanceId: "opencode-own-keys",
+        displayName: "OpenCode",
         environment: {
-          OPENCODE_API_KEY: "secret-value",
-          ...Object.fromEntries(OPENCODE_PROVIDER_ENV.map((key) => [key, `operator-${key}`])),
+          ANTHROPIC_API_KEY: "owner-anthropic",
+          VENICE_API_KEY: "owner-venice",
+          // Saved with the very value the server also holds: still saved.
+          GEMINI_API_KEY: "operator-GEMINI_API_KEY",
           FAKE_ACP_DUMP: dump,
         },
         enabled: true,
@@ -433,12 +487,15 @@ describe("OpenCode catalog", () => {
       });
       await instance.snapshot();
       const child = JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> };
-      expect(child.env.OPENCODE_API_KEY).toBe("secret-value");
-      expect(child.env.OPENAI_API_KEY).toBeUndefined();
-      expect(child.env.ANTHROPIC_API_KEY).toBeUndefined();
-      expect(child.env.GEMINI_API_KEY).toBeUndefined();
+      expect(child.env.ANTHROPIC_API_KEY).toBe("owner-anthropic");
+      expect(child.env.VENICE_API_KEY).toBe("owner-venice");
+      expect(child.env.GEMINI_API_KEY).toBe("operator-GEMINI_API_KEY");
+      for (const key of OPENCODE_PROVIDER_ENV.filter((name) => name !== "ANTHROPIC_API_KEY" && name !== "GEMINI_API_KEY")) {
+        expect(child.env[key], key).toBeUndefined();
+      }
       await instance.dispose();
     } finally {
+      vi.unstubAllEnvs();
       setOpenCodeProviderKeyPolicy(() => !cloudHomeConfigured() && !hostedWorkspaceConfigured());
       await removeTempDir(scratch);
     }
