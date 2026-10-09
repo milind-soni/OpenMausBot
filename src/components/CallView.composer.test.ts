@@ -9,6 +9,9 @@ import type { Bot } from "@/state/store";
 const fixture = vi.hoisted(() => ({
   onCall: null as string | null,
   dictation: true,
+  /** the desktop this page runs in, and whether the page is a server's */
+  host: "darwin" as "darwin" | "win32",
+  serverPage: false,
   config: { tts: { configured: true, ready: true } } as Record<string, unknown> | null,
   bots: [] as unknown[],
   helpShown: false,
@@ -24,7 +27,15 @@ vi.mock("@/state/store", async (importOriginal) => {
 });
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
-  useDesktopCapabilities: () => ({ capabilities: { dictation: fixture.dictation ? { available: true } : { available: false, reasonCode: "unsupported-platform" } }, ready: true }),
+  useDesktopCapabilities: () => ({
+    capabilities: {
+      host: { platform: fixture.host },
+      dictation: fixture.dictation
+        ? { available: true }
+        : { available: false, reasonCode: fixture.serverPage ? "remote-server" : "unsupported-platform" },
+    },
+    ready: true,
+  }),
 }));
 vi.mock("@/lib/call", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/call")>(),
@@ -44,6 +55,7 @@ vi.mock("./MenuMotion", async (importOriginal) => ({
 }));
 
 const { CallButton, CallTargetButton } = await import("./CallView");
+const { configureLiveMedia, liveMedia, resetLiveMedia } = await import("@/lib/live-call-media");
 
 const bot: Bot = {
   id: "pepper", threadId: "t", name: "Pepper", title: "", description: "", color: "green",
@@ -75,6 +87,8 @@ function render(placement: "composer" | "header" = "composer") {
 beforeEach(() => {
   fixture.onCall = null;
   fixture.dictation = true;
+  fixture.host = "darwin";
+  fixture.serverPage = false;
   fixture.config = { tts: { configured: true, ready: true } };
   fixture.bots = [bot];
   fixture.helpShown = false;
@@ -84,7 +98,10 @@ beforeEach(() => {
   fixture.dispatch.mockClear();
   vi.stubGlobal("window", { ogb: { speechStart: () => {} } });
 });
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => {
+  resetLiveMedia();
+  vi.unstubAllGlobals();
+});
 
 describe("composer call button", () => {
   it("is a Send-sized filled circle with a waveform, labelled for the bot", () => {
@@ -129,12 +146,35 @@ describe("composer call button", () => {
     expect(fixture.startCall).not.toHaveBeenCalled();
   });
 
-  it("keeps the same availability rules on devices that cannot call", () => {
+  // A device that can't take turns makes Live calls: the button is the Live
+  // call, never a take-turns call that can't start.
+  it("is a Live call on a device that can't take turns", () => {
     fixture.dictation = false;
-    const { button } = render();
-    expect(button.props["aria-label"]).toBe("Calls currently need macOS");
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>(() => {}));
+    configureLiveMedia({ getUserMedia });
+    const { html, button } = render();
+    expect(button.props["aria-label"]).toBe("Live call with Pepper");
+    expect(html).not.toContain("bg-warning");
     button.props.onClick!();
-    expect(fixture.startCall).not.toHaveBeenCalled();
+    // a Live call: the microphone first, then the call bar; no overlay
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(liveMedia()).toMatchObject({ phase: "starting", botId: "pepper" });
+    expect(fixture.track).toHaveBeenCalledWith("call_started", { driver: "codex", mode: "live" });
+  });
+
+  // A server's page (My Cloud) in either app: the call is Live, with no help
+  // card and no trip to This computer, which would leave the bot.
+  it("is a Live call on a server's page in the Windows app and the Mac app alike", () => {
+    fixture.dictation = false;
+    fixture.serverPage = true;
+    for (const host of ["win32", "darwin"] as const) {
+      fixture.host = host;
+      const { html, button } = render();
+      expect(button.props["aria-label"], host).toBe("Live call with Pepper");
+      expect(html, host).not.toContain("bg-warning");
+      expect(html, host).not.toContain("Call unavailable");
+      expect(html, host).not.toContain("Choose This computer");
+    }
   });
 
   it("leaves the header placement (rooms) as it was", () => {

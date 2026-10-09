@@ -39,6 +39,9 @@ export interface TeamSetupRequest {
   operations: TeamSetupOperation[];
   newTeams: string[];
   deletion?: { botId: string; name: string; expectedRevision: string };
+  /** The Chief suggested this bot without being asked. It always waits on
+   * the card, and a "Not now" answer is remembered in its conversation. */
+  suggestion?: true;
   result?: TeamSetupResult;
   resumed?: boolean;
 }

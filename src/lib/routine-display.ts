@@ -37,3 +37,18 @@ export function routineNextLabel(routine: Routine): string {
   if (!routine.enabled) return routineScheduleState(routine);
   return routine.nextRunAt == null ? t("routines.noNextRun") : t("routines.nextRun", { time: routineDateTime(routine.nextRunAt) });
 }
+
+/** Where a routine runs, in the Computer panel's words. My Cloud is always
+ * on, so its routines run on schedule; a desktop starts them while
+ * OpenMausBot is open there. A Cloud home offers no Local VM or this
+ * computer, so a copied bot's setting reads as My Cloud. */
+export function routineRunsOn({ roomGoal, runOn, computer, cloudHome }: {
+  roomGoal: boolean; runOn?: string; computer?: string | null; cloudHome: boolean;
+}): { label: string; hint: string } {
+  const hint = t(cloudHome ? "routines.runsOn.cloudHomeHint" : "routines.runsOn.localHint");
+  if (roomGoal) return { label: t(cloudHome ? "routines.runsOn.teamCloudHome" : "routines.runsOn.team"), hint };
+  if (runOn === "cloud") return { label: t("routines.runsOn.boat"), hint: t(cloudHome ? "routines.runsOn.boatHintCloudHome" : "routines.runsOn.boatHint") };
+  if (computer === "cloud") return { label: t("routines.runsOn.botCloud"), hint };
+  if (computer === "vm" && !cloudHome) return { label: t("routines.runsOn.botVm"), hint };
+  return { label: t(cloudHome ? "routines.runsOn.cloudHome" : "routines.runsOn.local"), hint };
+}

@@ -132,7 +132,7 @@ async function connectNative(
 ): Promise<ModelCatalog> {
   const cli = typeof rawObject(entry.config).cli === "string" ? rawObject(entry.config).cli as string : choice.cli;
   io.log("Connecting your account…");
-  io.log("Sign-in stays with your provider. Its account limits apply; OMB never asks for your password.");
+  io.log("Sign-in stays with your provider. Its account limits apply; OpenMausBot never asks for your password.");
   let state = await deps.inspect(id, entry);
   if (state.snapshot.state !== "available") {
     if (cli !== choice.cli) throw new Error("Your custom CLI path is unavailable. Fix that path in Settings before running setup again.");
@@ -153,7 +153,7 @@ async function connectNative(
     await deps.runCli(cli, args, entry.environment);
     state = await deps.inspect(id, entry);
     if (state.snapshot.state !== "available" || !state.snapshot.authenticated) {
-      throw new Error("Sign-in was not confirmed. Your OMB settings are unchanged; complete provider sign-in and try again.");
+      throw new Error("Sign-in was not confirmed. Your OpenMausBot settings are unchanged; complete provider sign-in and try again.");
     }
   } else {
     io.log("Existing sign-in found — you do not need to sign in again.");
@@ -288,7 +288,7 @@ export async function runSetup(
     return true;
   } catch (error) {
     if (!(error instanceof SetupCancelled)) throw error;
-    io.log("\nSetup cancelled. No OMB settings were changed. Provider sign-ins or installs already completed are kept.");
+    io.log("\nSetup cancelled. No OpenMausBot settings were changed. Provider sign-ins or installs already completed are kept.");
     return false;
   } finally {
     lease.release();

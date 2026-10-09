@@ -1,7 +1,7 @@
-import { Children, createElement, isValidElement, type KeyboardEvent, type MouseEvent, type ReactElement, type ReactNode } from "react";
+import { Children, createElement, isValidElement, type KeyboardEvent, type MemoExoticComponent, type MouseEvent, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AppState, Bot, Group } from "@/state/store";
+import { initialState, type AppState, type Bot, type Group } from "@/state/store";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
 const fixture = vi.hoisted(() => ({ showThreads: true, state: {} as Partial<AppState>, dispatch: vi.fn() }));
@@ -13,7 +13,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   return { ...original, useStore: () => ({ state: { ...original.initialState, ...fixture.state }, dispatch: fixture.dispatch }) };
 });
 
-import { BotContextMenu, BotListItem, BotThreadList, GroupListItem } from "./Sidebar";
+import { BotContextMenu, BotListItem, BotThreadList, botRowProps, GroupListItem, type BotRowProps } from "./Sidebar";
 import { SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 
 const bot: Bot = {
@@ -31,7 +31,11 @@ const bot: Bot = {
   ],
 };
 const densities: SidebarDensity[] = ["comfortable", "compact", "icons"];
-const rowProps = (density: SidebarDensity) => ({ bot, density, onMenu: vi.fn() });
+// the memoized row's own function, called directly to inspect its tree
+const botRow = (BotListItem as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type;
+// what the sidebar hands a bot row for the fixture's store state
+const rowProps = (density: SidebarDensity, candidate: Bot = bot, query = "") =>
+  botRowProps({ ...initialState, ...fixture.state }, fixture.dispatch, candidate, { density, quiet: false, query, onMenu: vi.fn() });
 
 type ElementProps = { children?: ReactNode; onClick?: (event: MouseEvent) => void; onKeyDown?: (event: KeyboardEvent) => void; [key: string]: unknown };
 function findElement(tree: ReactNode, attribute: string, value: string): ReactElement<ElementProps> | undefined {
@@ -65,7 +69,7 @@ describe("bot-first sidebar", () => {
     fixture.showThreads = enabled;
     for (const avatar of [{}, { avatarUrl: "/api/attachments/portrait.png", avatarCrop: "circle" as const }]) {
       let tree: ReactNode;
-      function Capture() { tree = BotListItem({ ...rowProps(density), bot: { ...bot, ...avatar } }); return tree; }
+      function Capture() { tree = botRow(rowProps(density, { ...bot, ...avatar })); return tree; }
       const markup = renderToStaticMarkup(createElement(Capture));
       const row = findElement(tree, "data-sidebar-bot-row", bot.id)!;
       expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining([...spacing]));
@@ -79,7 +83,7 @@ describe("bot-first sidebar", () => {
     it.each(densities)(`opens the last selected conversation on mouse or keyboard, %s density, threads ${enabled ? "on" : "off"}`, (density) => {
       fixture.showThreads = enabled;
       let tree: ReactNode;
-      function Capture() { tree = BotListItem(rowProps(density)); return tree; }
+      function Capture() { tree = botRow(rowProps(density)); return tree; }
       renderToStaticMarkup(createElement(Capture));
       const row = findElement(tree, "data-sidebar-bot-row", bot.id)!;
       row.props.onClick!({ type: "click", target: {} } as MouseEvent);
@@ -121,11 +125,11 @@ describe("bot-first sidebar", () => {
   });
 
   it("removes child controls and portals from a retained hidden folder list", () => {
-    const markup = renderToStaticMarkup(createElement(BotThreadList, { bot, selected: true, hidden: true }));
+    const markup = renderToStaticMarkup(createElement(BotThreadList, { ...rowProps("comfortable"), selected: true, hidden: true }));
     expect(markup).toContain('hidden=""');
     expect(markup).not.toContain("<button");
     expect(markup).not.toContain("data-sidebar-thread-row");
-    const shown = renderToStaticMarkup(createElement(BotThreadList, { bot, selected: true }));
+    const shown = renderToStaticMarkup(createElement(BotThreadList, { ...rowProps("comfortable"), selected: true }));
     expect(shown).toContain('data-sidebar-folder-row="private-folder"');
     expect(shown).toContain('data-sidebar-thread-row="idle-history"');
   });
@@ -147,9 +151,7 @@ describe("bot-first sidebar", () => {
 
   it("reveals a matching sole thread when searching a bot", () => {
     const single = { ...bot, projects: [], tasks: [bot.tasks![0]], unread: false };
-    const markup = renderToStaticMarkup(createElement(BotListItem, {
-      bot: single, density: "comfortable", query: "last selected", onMenu: vi.fn(),
-    }));
+    const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", single, "last selected")));
     expect(markup).toContain('data-sidebar-thread-row="last-selected"');
   });
 
@@ -202,7 +204,7 @@ describe("activity-only escape hatch", () => {
 
   it("switches directly to the requested work and offers no thread-management actions", () => {
     let tree: ReactNode;
-    function Capture() { tree = SidebarBotActivity({ bot, density: "comfortable" }); return tree; }
+    function Capture() { tree = SidebarBotActivity({ bot, density: "comfortable", pendingQueued: fixture.state.pendingQueued!, dispatch: fixture.dispatch }); return tree; }
     const markup = renderToStaticMarkup(createElement(Capture));
     findElement(tree, "data-sidebar-activity-row", "approval")!.props.onClick!({} as MouseEvent);
     expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: bot.id, threadId: "approval" });
@@ -213,7 +215,7 @@ describe("activity-only escape hatch", () => {
 
   it("removes selected and settled activity but keeps unread completed replies", () => {
     const selected = { ...bot, threadId: "approval", tasks: bot.tasks!.map((task) => task.threadId === "working" ? { ...task, busy: false, activity: "idle" as const } : task) };
-    const markup = renderToStaticMarkup(createElement(SidebarBotActivity, { bot: selected, density: "compact" }));
+    const markup = renderToStaticMarkup(createElement(SidebarBotActivity, { bot: selected, density: "compact", pendingQueued: fixture.state.pendingQueued!, dispatch: fixture.dispatch }));
     expect(markup).not.toContain('data-sidebar-activity-row="approval"');
     expect(markup).not.toContain('data-sidebar-activity-row="working"');
     expect(markup).toContain('data-sidebar-activity-row="unread"');

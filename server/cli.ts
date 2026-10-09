@@ -31,6 +31,7 @@ import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 
+import { phonePairingLink } from "../shared/pairing-link.ts";
 import { parseAllowList } from "./account-signin.ts";
 import { appendAdminAction, flushAdminActivity, sharedSignIn } from "./admin-activity.ts";
 import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts";
@@ -492,15 +493,6 @@ export function pairingBlock(input: {
   return lines.join("\n");
 }
 
-/** The scheme and host of a link, or null if it is not one we can dial. */
-function originOf(link: string): string | null {
-  try {
-    return new URL(link).origin;
-  } catch {
-    return null;
-  }
-}
-
 export function qrToString(text: string): string {
   let out = "";
   qrcode.generate(text, { small: true }, (rendered: string) => {
@@ -517,20 +509,18 @@ async function mintPairing(port: number, options: { label?: string; client?: boo
   if (refusedAsService(status, body)) throw new Error(SERVICE_TRUST_HELP);
   if (status !== 200) throw new Error(`server refused to mint a pairing code: ${typeof body?.error === "string" ? body.error : status}`);
   const url = options.publicUrl ? `${options.publicUrl}/pair#code=${body.code}` : typeof body.url === "string" ? body.url : null;
-  // A server too old to mint a credential simply has no invite: the web link
-  // still works, so an upgrade is never required to pair a browser.
-  // The address the phone will dial. `--public-url` wins, exactly as it does
-  // for the web link above: a server behind someone else's proxy often does
-  // not know its own public name, which is what that flag is for. Gate on the
-  // credential, never on the server's own invite — a server started without
-  // OMB_PUBLIC_URL returns a credential and no invite, and gating on the
-  // invite would throw away a secret the CLI has every part it needs to use.
-  const address = options.publicUrl ?? (typeof body.url === "string" ? originOf(body.url) : null);
-  // A server too old to mint a credential simply has no invite: the web link
-  // still works, so an upgrade is never required to pair a browser.
-  const invite = typeof body.credential === "string" && address
-    ? `openmausbot://pair?address=${encodeURIComponent(address)}&token=${encodeURIComponent(body.credential)}${typeof body.serverName === "string" ? `&name=${encodeURIComponent(body.serverName)}` : ""}`
-    : typeof body.inviteUrl === "string" ? body.inviteUrl : null;
+  // The phone-app invite. This command asks over loopback, so the server
+  // already built it from its own public address with the same builder; it is
+  // printed as it came. `--public-url` wins, exactly as it does for the web
+  // link above: a server behind someone else's proxy often does not know its
+  // own public name, which is what that flag is for. That case gates on the
+  // credential, never on the server's invite — a server started without
+  // OMB_PUBLIC_URL returns a credential and no invite. A server too old to
+  // mint a credential simply has no invite: the web link still works, so an
+  // upgrade is never required to pair a browser.
+  const invite = (options.publicUrl && typeof body.credential === "string"
+    ? phonePairingLink({ address: options.publicUrl, token: body.credential, name: typeof body.serverName === "string" ? body.serverName : undefined })
+    : null) ?? (typeof body.inviteUrl === "string" ? body.inviteUrl : null);
   return pairingBlock({ code: body.code, url, inviteUrl: invite, expiresAt: body.expiresAt, hint: typeof body.hint === "string" ? body.hint : null, phone: options.phone });
 }
 

@@ -1,9 +1,11 @@
 // OAuth sign-in for URL MCP servers, the way MCP clients do it: discover
 // the authorization server from the MCP server's 401, sign in as the app
 // the person registered for this server or else register as a public
-// client when the server allows it, run PKCE through the person's browser
-// with a loopback callback (or a URL pasted from another computer), then
-// keep the tokens fresh.
+// client when the server allows it, run PKCE through the person's browser,
+// then keep the tokens fresh. The browser comes back to a loopback listener
+// on this machine; a browser on another computer (My Cloud, a hosted
+// workspace) comes back to this server's own https address instead, and
+// where it cannot, the person pastes the address the browser ended on.
 // Engines never see this: they get an ordinary Authorization header.
 //
 // The loopback listener and callback checks follow
@@ -26,6 +28,18 @@ export interface McpSignInStatus {
   authorizationUrl: string | null;
   expiresAt: string;
   message?: string;
+  /** The browser returns to a loopback address on this server's machine,
+   * but the person is on another computer: they paste the page it ends on. */
+  pasteBack?: boolean;
+}
+
+/** Where the browser that starts a sign-in is. `remote`: not on this
+ * server's machine, so this machine's loopback is not its loopback.
+ * `origin`: an https address of this server that browser can come back to
+ * (mcpCallbackOrigin). */
+export interface McpSignInBrowser {
+  remote: boolean;
+  origin?: string | null;
 }
 
 export type McpOAuthFailure = "not-oauth" | "no-registration" | "port-busy";
@@ -46,7 +60,10 @@ const DEFAULT_LIFETIME_MS = 5 * 60_000;
  * that lapses mid-way. */
 const REFRESH_MARGIN_MS = 2 * 60_000;
 const REQUEST_TIMEOUT_MS = 10_000;
-const CALLBACK_PATH = "/mcp-oauth/callback";
+/** The callback path, on a loopback listener and on this server's own
+ * https address alike. */
+export const MCP_OAUTH_CALLBACK_PATH = "/mcp-oauth/callback";
+const CALLBACK_PATH = MCP_OAUTH_CALLBACK_PATH;
 /** complete()'s answer for a flow that ended while its code was spent. */
 const DISCARDED = "discarded";
 
@@ -60,7 +77,9 @@ interface Flow {
   redirectUri: string;
   client: ClientAuth;
   meta: McpAuthMetadata;
-  server: Server;
+  /** The loopback listener; null when the browser comes back to this
+   * server's own https address (publicCallback). */
+  server: Server | null;
   consumed: boolean;
   expiry: ReturnType<typeof setTimeout>;
 }
@@ -68,6 +87,7 @@ interface Flow {
 interface StartingFlow {
   owner: string;
   url: string;
+  browser: McpSignInBrowser;
   cancelled: boolean;
   promise: Promise<McpSignInStatus>;
 }
@@ -96,6 +116,32 @@ function preferredPort(url: string): number {
  * app made in advance for it. */
 export function mcpOAuthRedirectUri(url: string): string {
   return `http://127.0.0.1:${preferredPort(url)}${CALLBACK_PATH}`;
+}
+
+/** An exact https origin (no path, no credentials), or null. */
+function httpsOrigin(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password && value.replace(/\/+$/, "") === url.origin ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The https address of this server that a browser on another computer
+ * comes back to after approving a sign-in, or null for the loopback
+ * callback. `browserOrigin` is the origin that browser proved it is using
+ * (its Origin header, equal to the request's own origin); `configured` are
+ * this server's public addresses (a Cloud home's, a hosted workspace's, a
+ * connected domain, OMB_PUBLIC_URL). The browser's own origin wins when it
+ * is one of them or none is set; otherwise the first configured one does,
+ * never a Host header nobody vouched for. */
+export function mcpCallbackOrigin(browserOrigin: string | null, configured: ReadonlyArray<string | null | undefined>): string | null {
+  const known = configured.map(httpsOrigin).filter((origin): origin is string => origin !== null);
+  const proven = httpsOrigin(browserOrigin);
+  if (proven && (known.length === 0 || known.includes(proven))) return proven;
+  return known[0] ?? null;
 }
 
 type TokenAuthMethod = "none" | "client_secret_post" | "client_secret_basic";
@@ -175,6 +221,9 @@ function tokensFrom(body: Record<string, unknown>, previous?: McpOAuthTokens): M
   };
 }
 
+/** The authorization server answered a registration, and said no. */
+class RegistrationRefused extends Error {}
+
 export class McpOAuthManager {
   private readonly store: McpOAuthStore;
   private readonly lifetimeMs: number;
@@ -217,7 +266,7 @@ export class McpOAuthManager {
     this.store.put(name, { ...rest, url, state: "needs-sign-in" });
   }
 
-  start(name: string, url: string, wwwAuthenticate?: string | null, owner = "loopback"): Promise<McpSignInStatus> {
+  start(name: string, url: string, wwwAuthenticate?: string | null, owner = "loopback", browser: McpSignInBrowser = { remote: false }): Promise<McpSignInStatus> {
     const current = this.flows.get(name);
     if (current?.status.phase === "waiting" && !this.isOwnerLive(current.owner)) {
       this.finish(current, "cancelled", "Your session ended. Start again.");
@@ -233,7 +282,7 @@ export class McpOAuthManager {
       }
       return pending.promise;
     }
-    const starting: StartingFlow = { owner, url, cancelled: false, promise: undefined! };
+    const starting: StartingFlow = { owner, url, browser, cancelled: false, promise: undefined! };
     starting.promise = this.begin(name, url, starting, wwwAuthenticate).finally(() => this.starting.delete(name));
     this.starting.set(name, starting);
     return starting.promise;
@@ -281,6 +330,23 @@ export class McpOAuthManager {
     }
     await this.acceptCallback(flow, callback);
     return { ...flow.status };
+  }
+
+  /** The browser came back to this server's own https address. `host` is
+   * the address it asked for (the Host header) and `search` the query it
+   * brought. The flow is the one that redirect URI and state belong to; it
+   * then passes the same one-shot checks as the listener and paste-back.
+   * The scheme is the redirect URI's: a proxy in front of this server may
+   * end TLS, so the request itself cannot say it was https. */
+  async publicCallback(host: string | undefined, search: string): Promise<{ status: number; text: string }> {
+    const state = new URLSearchParams(search).get("state") ?? "";
+    let match: Flow | undefined;
+    for (const flow of this.flows.values()) {
+      const expected = new URL(flow.redirectUri);
+      if (!flow.server && expected.host === host?.trim().toLowerCase() && sameSecret(state, flow.state)) match = flow;
+    }
+    if (!match) return { status: 400, text: "Invalid sign-in callback. Return to OpenMausBot and try again." };
+    return this.answer(match, new URL(`${new URL(match.redirectUri).origin}${CALLBACK_PATH}${search.startsWith("?") ? search : ""}`));
   }
 
   /** Revoke with the server when it offers that (best effort), then forget. */
@@ -396,7 +462,7 @@ export class McpOAuthManager {
     });
     const body = await response.json().catch(() => ({})) as { client_id?: unknown };
     if (!response.ok || typeof body.client_id !== "string" || !body.client_id) {
-      throw new Error("This server would not register OpenMausBot for sign-in. Try again later.");
+      throw new RegistrationRefused("This server would not register OpenMausBot for sign-in. Try again later.");
     }
     return body.client_id;
   }
@@ -407,6 +473,21 @@ export class McpOAuthManager {
     const meta = await discoverMcpAuth(url, wwwAuthenticate ?? await this.challenge(url));
     if (!meta) throw new McpOAuthError("not-oauth", "This server does not offer an OAuth sign-in. Add its token as a header instead.");
     const registered = this.clients(name, url);
+
+    // A browser on another computer comes back to this server's own https
+    // address. Only for a client registered now, for that address: an app
+    // registered in advance keeps the loopback redirect it was given. A
+    // server that refuses the address gets the loopback callback, pasted.
+    if (!registered && starting.browser.remote && starting.browser.origin) {
+      const redirectUri = `${starting.browser.origin}${CALLBACK_PATH}`;
+      let clientId: string | null = null;
+      try {
+        clientId = await this.register(meta, redirectUri);
+      } catch (error) {
+        if (!(error instanceof RegistrationRefused)) throw error;
+      }
+      if (clientId) return { ...this.open(name, url, starting, meta, redirectUri, { id: clientId, method: "none" }, null, meta.scopes).status };
+    }
 
     const server = createServer();
     try {
@@ -426,37 +507,47 @@ export class McpOAuthManager {
         ? { id: registered.clientId, ...(registered.clientSecret ? { secret: registered.clientSecret } : {}), method: tokenAuthMethod(meta, registered.clientSecret) }
         : { id: await this.register(meta, redirectUri), method: "none" };
       const scopes = registered?.scopes?.length ? registered.scopes : meta.scopes;
-      if (starting.cancelled || !this.isOwnerLive(starting.owner)) throw new McpSignInError("Sign-in cancelled because the session or server changed.", 409);
-      const state = randomBytes(32).toString("base64url");
-      const verifier = randomBytes(32).toString("base64url");
-      const authorize = new URL(meta.authorizationEndpoint);
-      authorize.searchParams.set("response_type", "code");
-      authorize.searchParams.set("client_id", client.id);
-      authorize.searchParams.set("redirect_uri", redirectUri);
-      authorize.searchParams.set("state", state);
-      authorize.searchParams.set("code_challenge", createHash("sha256").update(verifier).digest("base64url"));
-      authorize.searchParams.set("code_challenge_method", "S256");
-      authorize.searchParams.set("resource", meta.resource);
-      if (scopes?.length) authorize.searchParams.set("scope", scopes.join(" "));
-
-      const status: McpSignInStatus = {
-        phase: "waiting",
-        flowId: randomUUID(),
-        authorizationUrl: authorize.toString(),
-        expiresAt: new Date(Date.now() + this.lifetimeMs).toISOString(),
-      };
-      const flow: Flow = {
-        owner: starting.owner, name, url, status, state, verifier, redirectUri, client, meta, server, consumed: false,
-        expiry: setTimeout(() => this.finish(flow, "expired", "Sign-in expired. Start again."), this.lifetimeMs),
-      };
-      flow.expiry.unref();
+      const flow = this.open(name, url, starting, meta, redirectUri, client, server, scopes);
       server.on("request", (request, response) => void this.callback(flow, request, response));
-      this.flows.set(name, flow);
-      return { ...status };
+      return { ...flow.status };
     } catch (error) {
       server.close();
       throw error;
     }
+  }
+
+  /** Make the authorize link and keep the flow waiting for its callback. */
+  private open(
+    name: string, url: string, starting: StartingFlow, meta: McpAuthMetadata, redirectUri: string,
+    client: ClientAuth, server: Server | null, scopes: string[] | undefined,
+  ): Flow {
+    if (starting.cancelled || !this.isOwnerLive(starting.owner)) throw new McpSignInError("Sign-in cancelled because the session or server changed.", 409);
+    const state = randomBytes(32).toString("base64url");
+    const verifier = randomBytes(32).toString("base64url");
+    const authorize = new URL(meta.authorizationEndpoint);
+    authorize.searchParams.set("response_type", "code");
+    authorize.searchParams.set("client_id", client.id);
+    authorize.searchParams.set("redirect_uri", redirectUri);
+    authorize.searchParams.set("state", state);
+    authorize.searchParams.set("code_challenge", createHash("sha256").update(verifier).digest("base64url"));
+    authorize.searchParams.set("code_challenge_method", "S256");
+    authorize.searchParams.set("resource", meta.resource);
+    if (scopes?.length) authorize.searchParams.set("scope", scopes.join(" "));
+
+    const status: McpSignInStatus = {
+      phase: "waiting",
+      flowId: randomUUID(),
+      authorizationUrl: authorize.toString(),
+      expiresAt: new Date(Date.now() + this.lifetimeMs).toISOString(),
+      ...(server && starting.browser.remote ? { pasteBack: true } : {}),
+    };
+    const flow: Flow = {
+      owner: starting.owner, name, url, status, state, verifier, redirectUri, client, meta, server, consumed: false,
+      expiry: setTimeout(() => this.finish(flow, "expired", "Sign-in expired. Start again."), this.lifetimeMs),
+    };
+    flow.expiry.unref();
+    this.flows.set(name, flow);
+    return flow;
   }
 
   private async callback(flow: Flow, request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
@@ -475,21 +566,26 @@ export class McpOAuthManager {
       response.writeHead(400).end("Invalid sign-in callback. Return to OpenMausBot and try again.");
       return;
     }
+    const answer = request.method === "GET"
+      ? await this.answer(flow, callback)
+      : { status: 400, text: "Invalid or expired sign-in. Return to OpenMausBot and try again." };
+    response.writeHead(answer.status).end(answer.text);
+  }
+
+  /** Spend a callback the browser brought back, and say how it went in
+   * words fit for a plain page: never the code or the server's own text. */
+  private async answer(flow: Flow, callback: URL): Promise<{ status: number; text: string }> {
     try {
-      if (request.method !== "GET") throw new McpSignInError("Invalid sign-in callback.", 400);
       await this.acceptCallback(flow, callback);
-      if (flow.status.phase === "failed") {
-        response.writeHead(400).end(`${flow.status.message} You can close this tab.`);
-      } else {
-        response.end("Signed in. You can close this tab and return to OpenMausBot.");
-      }
+      return flow.status.phase === "failed"
+        ? { status: 400, text: `${flow.status.message} You can close this tab.` }
+        : { status: 200, text: "Signed in. You can close this tab and return to OpenMausBot." };
     } catch (error) {
-      response.writeHead(error instanceof McpSignInError ? error.status : 400)
-        .end("Invalid or expired sign-in. Return to OpenMausBot and try again.");
+      return { status: error instanceof McpSignInError ? error.status : 400, text: "Invalid or expired sign-in. Return to OpenMausBot and try again." };
     }
   }
 
-  /** Both the listener and authenticated paste-back use the same one-shot checks. */
+  /** The listener, the public callback and authenticated paste-back all use the same one-shot checks. */
   private async acceptCallback(flow: Flow, callback: URL): Promise<void> {
     if (!this.isOwnerLive(flow.owner)) this.finish(flow, "cancelled", "Your session ended. Start again.");
     if (flow.status.phase === "waiting" && !flow.consumed && Date.now() >= Date.parse(flow.status.expiresAt)) {
@@ -560,8 +656,8 @@ export class McpOAuthManager {
   private finish(flow: Flow, phase: McpSignInPhase, message?: string): void {
     if (flow.status.phase !== "waiting") return;
     clearTimeout(flow.expiry);
-    flow.server.close();
-    flow.server.closeIdleConnections();
+    flow.server?.close();
+    flow.server?.closeIdleConnections();
     flow.status = { ...flow.status, phase, authorizationUrl: null, ...(message ? { message } : {}) };
   }
 }

@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Scenario = "lost-response" | "restart-after-5xx" | "in-progress" | "recovered-box";
 
@@ -58,6 +58,7 @@ describe("Boat create idempotency", () => {
   let createCount = 0;
   let failDesktop = false;
   const createKeys: string[] = [];
+  const createBodies: unknown[] = [];
   const renameBodies: unknown[] = [];
   const deletedBoats: string[] = [];
 
@@ -81,7 +82,7 @@ describe("Boat create idempotency", () => {
           createCount += 1;
           const key = String(req.headers["idempotency-key"] ?? "");
           createKeys.push(key);
-          expect(JSON.parse(raw)).toEqual({ ttlSeconds: 8 * 60 * 60, noEnv: true });
+          createBodies.push(JSON.parse(raw));
           if (!acceptedKey) acceptedKey = key;
           if (key !== acceptedKey) {
             res.writeHead(409);
@@ -140,6 +141,7 @@ describe("Boat create idempotency", () => {
     createCount = 0;
     failDesktop = false;
     createKeys.length = 0;
+    createBodies.length = 0;
     renameBodies.length = 0;
     deletedBoats.length = 0;
   });
@@ -149,13 +151,32 @@ describe("Boat create idempotency", () => {
     await new Promise<void>((resolve) => api.close(() => resolve()));
   });
 
+  afterEach(() => {
+    // Every create asks for an empty guest: the bot's own engine drives the
+    // desktop from here, so no AI sign-in or key is ever sent to the Boat.
+    for (const body of createBodies) expect(body).toEqual({ ttlSeconds: 8 * 60 * 60, noEnv: true });
+  });
+
   it("retries a lost response with the same key and renames the recovered Boat", async () => {
     scenario = "lost-response";
     vi.resetModules();
     const { provisionBoat } = await import("./boat.ts");
+    // Keys this OpenMausBot holds stay here; the Boat gets none of them.
+    const held = { OPENAI_API_KEY: process.env.OPENAI_API_KEY, CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN };
+    process.env.OPENAI_API_KEY = "sk-openai-held-here";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "claude-oauth-held-here";
+    let result: Awaited<ReturnType<typeof provisionBoat>>;
+    try {
+      result = await provisionBoat({ box: { token: "box_test" }, anthropic: { key: "sk-ant-workspace" } } as any, "lost-response-bot", "Lost Response");
+    } finally {
+      for (const [name, value] of Object.entries(held)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
 
-    const result = await provisionBoat({ box: { token: "box_test" } } as any, "lost-response-bot", "Lost Response");
-
+    expect(createBodies).toHaveLength(2);
+    expect(JSON.stringify(createBodies)).not.toMatch(/sk-openai-held-here|claude-oauth-held-here|sk-ant-workspace/);
     expect(result.boxId).toBe("bx_23456789");
     expect(createKeys).toHaveLength(2);
     expect(createKeys[0]).toMatch(/^[0-9a-f-]{36}$/);

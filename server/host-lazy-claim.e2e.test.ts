@@ -124,7 +124,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
     writeFileSync(join(data, "config.json"), JSON.stringify({ instances: { claude: {
       driver: "claudeAgent", config: { cli: join(ROOT, "server/testing/fake-claude-cli.ts") },
       environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_DUMP: dumpFile, FAKE_CLAUDE_SLOW_FINISH_GATE: finishFile },
-    }, computer: { driver: "boxAgent", config: { pollMs: 10 } } } }));
+    } } }));
   });
   afterAll(async () => {
     await stop();

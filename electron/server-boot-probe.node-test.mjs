@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { pollServerIdentity } from "./server-boot-probe.mjs";
+import {
+  BOOT_PROBE_FAST_INTERVAL_MS,
+  BOOT_PROBE_FAST_WINDOW_MS,
+  BOOT_PROBE_INTERVAL_MS,
+  pollServerIdentity,
+} from "./server-boot-probe.mjs";
 
 const OUR_BODY = () => ({ app: "openmausbot", pid: 4242, static: true });
 
@@ -184,4 +189,90 @@ test("an answer that arrives while the pid is still unknown is a foreign owner",
     fetchImpl: okFetch(),
   });
   assert.equal(outcome.outcome, "foreign-owner");
+});
+
+// A fake clock that only moves when the probe sleeps or a fetch costs time, so
+// the poll schedule is asserted exactly instead of against a loaded machine.
+function fakeClock() {
+  const clock = { t: 0, sleeps: [] };
+  clock.now = () => clock.t;
+  clock.sleep = async (ms) => {
+    clock.sleeps.push({ at: clock.t, ms });
+    clock.t += ms;
+  };
+  return clock;
+}
+
+test("a server that binds shortly after fork is noticed within one fast poll", async () => {
+  // Typical packaged boot: the child listens a couple hundred ms after fork.
+  // A flat 500 ms back-off only noticed it on the next poll, ~285 ms late.
+  const listensAt = 215;
+  const clock = fakeClock();
+  const fetchImpl = async () => {
+    clock.t += 1;
+    if (clock.t < listensAt) throw new Error("ECONNREFUSED");
+    return { ok: true, status: 200, json: async () => OUR_BODY() };
+  };
+  const outcome = await pollServerIdentity({
+    port: 8799,
+    pid: () => 4242,
+    bootTimeoutMs: 60_000,
+    now: clock.now,
+    sleep: clock.sleep,
+    fetchImpl,
+  });
+  assert.equal(outcome.outcome, "ready");
+  assert.ok(
+    outcome.latencyMs - listensAt <= BOOT_PROBE_FAST_INTERVAL_MS + 1,
+    `noticed ${outcome.latencyMs - listensAt} ms after the server listened`,
+  );
+});
+
+test("polls fast during the usual boot window, then falls back to the slow interval", async () => {
+  const clock = fakeClock();
+  const bootTimeoutMs = BOOT_PROBE_FAST_WINDOW_MS + 3 * BOOT_PROBE_INTERVAL_MS;
+  const outcome = await pollServerIdentity({
+    port: 8799,
+    pid: () => 4242,
+    bootTimeoutMs,
+    now: clock.now,
+    sleep: clock.sleep,
+    fetchImpl: async () => {
+      throw new Error("ECONNREFUSED");
+    },
+  });
+  assert.equal(outcome.outcome, "timeout");
+  const early = clock.sleeps.filter(({ at }) => at < BOOT_PROBE_FAST_WINDOW_MS);
+  const late = clock.sleeps.filter(({ at }) => at >= BOOT_PROBE_FAST_WINDOW_MS);
+  assert.ok(early.length > 0 && early.every(({ ms }) => ms === BOOT_PROBE_FAST_INTERVAL_MS));
+  assert.deepEqual(
+    late.map(({ ms }) => ms),
+    [BOOT_PROBE_INTERVAL_MS, BOOT_PROBE_INTERVAL_MS, BOOT_PROBE_INTERVAL_MS],
+  );
+});
+
+test("each probe's abort timer is the remaining boot budget, not the poll interval", async (t) => {
+  // A slow but healthy /api/health must not be cut off just because polling
+  // got faster: the per-fetch timeout stays tied to the wall-clock deadline.
+  const timeout = t.mock.method(AbortSignal, "timeout");
+  const clock = fakeClock();
+  const bootTimeoutMs = 1_000;
+  const remainingAtFetch = [];
+  const outcome = await pollServerIdentity({
+    port: 8799,
+    pid: () => 4242,
+    bootTimeoutMs,
+    now: clock.now,
+    sleep: clock.sleep,
+    fetchImpl: async () => {
+      remainingAtFetch.push(bootTimeoutMs - clock.t);
+      throw new Error("ECONNREFUSED");
+    },
+  });
+  assert.equal(outcome.outcome, "timeout");
+  assert.ok(remainingAtFetch.length > 1);
+  assert.deepEqual(
+    timeout.mock.calls.map((call) => call.arguments[0]),
+    remainingAtFetch,
+  );
 });

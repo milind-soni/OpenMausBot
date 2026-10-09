@@ -81,6 +81,21 @@ describe("new bot default model selection", () => {
     expect(selectDefaultModelSelection([codex])).toEqual({ instanceId: "codex", model: "codex-default" });
     expect(selectDefaultModelSelection([])).toEqual({ instanceId: "", model: "" });
   });
+
+  // One rule for every server, enrolled or not: an engine that can run a turn
+  // now wins (Claude first), then any available one. A bot moved off a
+  // removed engine gets exactly this choice too (computer-engine-removal.ts).
+  it("prefers an engine that can run a turn now over a signed-out Claude", () => {
+    const signedOut = { ...claude, snapshot: { state: "available", authenticated: false } satisfies ProviderSnapshot };
+    expect(selectDefaultModelSelection([signedOut, codex])).toEqual({ instanceId: "codex", model: "codex-default" });
+    expect(selectDefaultModelSelection([codex, signedOut])).toEqual({ instanceId: "codex", model: "codex-default" });
+    // Nothing can run yet: the first available engine, Claude first.
+    const codexOut = { ...codex, snapshot: { state: "available", authenticated: false } satisfies ProviderSnapshot };
+    expect(selectDefaultModelSelection([codexOut, signedOut])).toEqual({ instanceId: "claude", model: "claude-default" });
+    // A custom endpoint brings its own credential, so its sign-in does not count.
+    const custom = { ...codexOut, instanceId: "router", access: "custom" as const };
+    expect(selectDefaultModelSelection([signedOut, custom])).toEqual({ instanceId: "router", model: "codex-default" });
+  });
 });
 
 describe("new bot default model selection while enrolled in an organisation", () => {
@@ -116,13 +131,12 @@ describe("new bot default model selection while enrolled in an organisation", ()
       .toEqual({ instanceId: "personal-claude", model: "claude-default" });
   });
 
-  it("is exactly today's choice without an enrolment", () => {
+  it("is the same choice as without an enrolment when no Company model exists", () => {
     for (const instances of [[signedOut, codex], [codex, signedOut], [codex], [signedOut], []]) {
       expect(selectDefaultModelSelection(instances, undefined, {})).toEqual(selectDefaultModelSelection(instances));
       expect(selectDefaultModelSelection(instances, undefined, { company, refusal: () => undefined })).toEqual(selectDefaultModelSelection(instances));
     }
-    // Today a signed-out Claude still wins over a signed-in Codex.
-    expect(selectDefaultModelSelection([codex, signedOut], undefined, { company })).toEqual({ instanceId: "personal-claude", model: "claude-default" });
+    expect(selectDefaultModelSelection([codex, signedOut], undefined, { company })).toEqual({ instanceId: "codex", model: "codex-default" });
   });
 
   it("never picks an engine the organisation's policy refuses", () => {
@@ -169,15 +183,25 @@ describe("new bot default model selection wiring in index.ts", () => {
     const managedDesktop = { owns: (instanceId: string) => enrolled && instanceId.startsWith("company.") };
     const defaultSelection = new Function("hostedModels", "cfg", "registry", "managedDesktop", "managedPolicy", "BUILT_IN_DRIVERS", "selectDefaultModelSelection",
       `${code}; return defaultSelection;`)(undefined, { defaultModelSelection: saved }, { describe: async () => instances }, managedDesktop, managedPolicy,
-      [{ driverKind: "claudeAgent", metadata: { displayName: "Claude" } }], selectDefaultModelSelection) as () => Promise<ModelSelection>;
+      [{ driverKind: "claudeAgent", metadata: { displayName: "Claude" } }], selectDefaultModelSelection) as (saved?: ModelSelection | null) => Promise<ModelSelection>;
     return { defaultSelection, close: () => managedPolicy.close() };
   }
 
-  it("passes the enrolment into the choice, and is today's choice without one", async () => {
+  it("passes the enrolment into the choice, and is the plain choice without one", async () => {
+    // Not enrolled, the Company id is an ordinary engine that can run.
     const notEnrolled = server([signedOut, companyClaude]);
-    await expect(notEnrolled.defaultSelection()).resolves.toEqual({ instanceId: "claude", model: "claude-default" });
+    await expect(notEnrolled.defaultSelection()).resolves.toEqual({ instanceId: "company.fixture.anthropic", model: "company-claude" });
+    const nothingReady = server([signedOut]);
+    await expect(nothingReady.defaultSelection()).resolves.toEqual({ instanceId: "claude", model: "claude-default" });
     const enrolled = server([signedOut, companyClaude], { enrolled: true });
     await expect(enrolled.defaultSelection()).resolves.toEqual({ instanceId: "company.fixture.anthropic", model: "company-claude" });
+  });
+
+  it("leaves the saved default out only when asked, for a bot moved off a removed engine", async () => {
+    const saved = server([claude, codex], { saved: { instanceId: "computer", model: "claude-fable-5" } });
+    await expect(saved.defaultSelection()).resolves.toEqual({ instanceId: "", model: "" });
+    await expect(saved.defaultSelection(null)).resolves.toEqual({ instanceId: "claude", model: "claude-default" });
+    saved.close();
   });
 
   it("passes the organisation's policy into the choice", async () => {

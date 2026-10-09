@@ -68,13 +68,13 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     // Native <summary> appears in AX but agent-browser does not assign a ref.
     await evaluate("document.querySelector('summary[aria-label=\"Add to team map\"]').focus(); true");
     await ui("press", "--keys", "Enter");
-    await click("Boat computer");
+    await click("Cloud computer");
     await expect.poll(() => evaluate("document.activeElement?.id")).toBe("canvas-computer-name");
     expect(await snapshot()).toContain("Your Boat plan and usage charges apply");
-    expect(await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Create Boat')?.disabled")).toBe(true);
-    await ui("type", "--ref", await ref("New Boat computer", "textbox"), "--text", "Engineering desktop");
+    expect(await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Create cloud computer')?.disabled")).toBe(true);
+    await ui("type", "--ref", await ref("New cloud computer", "textbox"), "--text", "Engineering desktop");
     expect((await receipts()).calls.every((call: { method: string }) => call.method === "GET")).toBe(true);
-    await click("Create Boat");
+    await click("Create cloud computer");
     await expect.poll(async () => (await computers()).length, { timeout: 30_000 }).toBe(1);
     const machine = (await computers())[0];
     await expect.poll(async () => (await record(machine.id))?.state).toBe("idle");
@@ -153,8 +153,7 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     await expect.poll(snapshot, { timeout: 10_000 }).toContain('log "Conversation with Ben"');
     await click("Bot's computer");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Ben's screen");
-    await expect.poll(snapshot, { timeout: 20_000, interval: 250 }).toContain("Team default");
-    expect(await snapshot()).toContain("Engineering desktop");
+    await expect.poll(snapshot, { timeout: 20_000, interval: 250 }).toContain("Uses Engineering desktop, the cloud computer this team shares.");
     expect(await snapshot()).not.toContain("Choose Cloud");
     await click("Open Team map");
     expect((await receipts()).calls.filter((call: { method: string; path: string }) => call.method === "POST" && call.path === "/boxes")).toHaveLength(1);
@@ -173,16 +172,16 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     await click("Sleep");
     await expect.poll(async () => (await record(machine.id))?.state).toBe("archived");
     await provider("POST", "/__fixture", { refuseCreate: true });
-    await click("New Boat computer");
-    await ui("type", "--ref", await ref("New Boat computer", "textbox"), "--text", "Retry desktop");
-    await click("Create Boat");
+    await click("New cloud computer");
+    await ui("type", "--ref", await ref("New cloud computer", "textbox"), "--text", "Retry desktop");
+    await click("Create cloud computer");
     await expect.poll(snapshot, { timeout: 20_000 }).toContain("Fixture account is rate-limited");
     const retry = (await computers()).find(computer => computer.name === "Retry desktop")!;
     expect(retry).toBeDefined();
     expect(retry.section).toBeNull();
     await provider("POST", "/__fixture", { refuseCreate: false });
     // Reusing the still-open creation form retries the durable request ID.
-    await click("Create Boat");
+    await click("Create cloud computer");
     await expect.poll(async () => (await record(retry.id))?.state, { timeout: 30_000 }).toBe("idle");
     expect(await computers()).toHaveLength(2);
     const providerResult = await receipts();

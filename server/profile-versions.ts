@@ -10,7 +10,6 @@ import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync } from 
 import { join } from "node:path";
 
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestChanges } from "../shared/profile-request.ts";
-import { type TighteningState } from "../shared/tightening-request.ts";
 import { botFolder } from "./bot-folder.ts";
 import { redactSecrets } from "./redact.ts";
 
@@ -111,43 +110,6 @@ export function recordProfileChange(
     const b = before[field];
     const a = after[field];
     if (b !== a) rows.push(rowFor(field, at, actor, via, historyText(b), historyText(a)));
-  }
-  queueHistoryRows(botId, rows);
-}
-
-const onOff = (on: boolean): string => (on ? "on" : "off");
-
-/** Record every authority field that differs between two tightening
- * snapshots. Same file and row shape as profile rows, so the one History
- * section a settings surface shows covers manual edits and confirmed
- * tightening cards alike. The proposing bot is the actor and the card id
- * the via, exactly as profile cards record theirs. */
-export function recordAuthorityChange(
-  botId: string,
-  actor: HistoryActor,
-  via: string,
-  before: TighteningState,
-  after: TighteningState,
-): void {
-  const at = Date.now();
-  const rows: HistoryRow[] = [];
-  const scalars: Array<[field: string, before: string, after: string]> = [
-    ["approvalMode", before.approvalMode, after.approvalMode],
-    ["composio", onOff(before.composio), onOff(after.composio)],
-    ["browser", onOff(before.browser), onOff(after.browser)],
-    ["approvePeerComms", onOff(before.approvePeerComms), onOff(after.approvePeerComms)],
-  ];
-  for (const [field, b, a] of scalars) {
-    if (b !== a) rows.push(rowFor(field, at, actor, via, b, a));
-  }
-  const lists: Array<[field: string, before: readonly string[], after: readonly string[]]> = [
-    ["alwaysAllow", before.alwaysAllow, after.alwaysAllow],
-    ["mcpServers", before.mcpServers, after.mcpServers],
-    ["skills", before.skills, after.skills],
-  ];
-  for (const [field, b, a] of lists) {
-    const joined = (names: readonly string[]): string => names.join(", ");
-    if (joined(b) !== joined(a)) rows.push(rowFor(field, at, actor, via, joined(b), joined(a)));
   }
   queueHistoryRows(botId, rows);
 }

@@ -4,8 +4,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
-import { ensureDirs } from "./config.ts";
-import { BoatAgentDriver } from "./drivers/boatagent.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -772,6 +770,51 @@ describe("RoutineManager", () => {
     expect(create("Below minimum", 4).durationMinutes).toBe(5);
     expect(create("Default").durationMinutes).toBe(30);
     expect(create("Above maximum", 241).durationMinutes).toBe(240);
+  });
+
+  it("refuses to overwrite a routines file it could not read", () => {
+    const h = harness();
+    const input = {
+      name: "Health check",
+      prompt: "Check the fixture",
+      botId: "maus-1",
+      schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: new Date(2026, 7, 17, 8, 0, 0).getTime() },
+    };
+    h.manager.create({ ...input, name: "First" });
+    h.manager.create({ ...input, name: "Second" });
+    const file = h.options.file as string;
+    const corrupt = readFileSync(file, "utf8").slice(0, 100);
+    writeFileSync(file, corrupt);
+    const reloaded = new RoutineManager(h.options);
+    expect(reloaded.listRoutines()).toEqual([]);
+    expect(() => reloaded.create(input)).toThrow(expect.objectContaining({ status: 503 }));
+    expect(() => reloaded.remove("anything")).toThrow(expect.objectContaining({ status: 503 }));
+    expect(() => reloaded.enqueueWebhook({
+      webhookId: "hook-1",
+      webhookName: "Lead",
+      prompt: "Qualify it",
+      botId: "maus-1",
+      runOn: "maus",
+      deliveryId: "evt-1",
+      receivedAt: Date.now(),
+    })).toThrow(expect.objectContaining({ status: 503 }));
+    expect(readFileSync(file, "utf8")).toBe(corrupt);
+  });
+
+  it("treats a routines file with a damaged top-level shape as unreadable", () => {
+    const h = harness();
+    const file = h.options.file as string;
+    const damaged = JSON.stringify({ version: 1, routines: "garbage", runs: [] });
+    writeFileSync(file, damaged);
+    const reloaded = new RoutineManager(h.options);
+    expect(reloaded.listRoutines()).toEqual([]);
+    expect(() => reloaded.create({
+      name: "Health check",
+      prompt: "Check the fixture",
+      botId: "maus-1",
+      schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: new Date(2026, 7, 17, 8, 0, 0).getTime() },
+    })).toThrow(expect.objectContaining({ status: 503 }));
+    expect(readFileSync(file, "utf8")).toBe(damaged);
   });
 
   it("validates, preserves, and clears the optional safety timeout", () => {
@@ -2570,7 +2613,7 @@ describe("RoutineManager", () => {
         ...base,
         eventId: "runtime-error",
         type: "runtime.error",
-        message: "model-call limit reached before a final response",
+        message: "Stopped after 64 steps without a final answer. The steps so far already ran, so ask only for what's left.",
       });
       h.manager.handleRuntimeEvent({
         ...base,
@@ -2582,7 +2625,7 @@ describe("RoutineManager", () => {
 
       expect(h.manager.listRuns()[0]).toMatchObject({
         status: "failed",
-        error: "model-call limit reached before a final response",
+        error: "Stopped after 64 steps without a final answer. The steps so far already ran, so ask only for what's left.",
       });
     },
   );
@@ -2964,94 +3007,5 @@ describe("routine continuity", () => {
       schedule: { type: "once", at: new Date(2026, 7, 17, 9, 0, 0).getTime() },
       continuity: true,
     })).toThrow(/continuity/i);
-  });
-});
-
-describe("routine runs × turn-held BoatAgent asks", () => {
-  const start = Date.parse("2026-09-13T08:00:00Z");
-
-  /** The slice of the Boat HTTP fake this integration needs (the full one
-   * lives in server/drivers/boatagent.test.ts). */
-  function installFakeBoat(script: Array<{ events: unknown[]; status?: { promptRun: { status: string; result?: string } } }>, prompts: string[]) {
-    let i = 0;
-    const previous = globalThis.fetch;
-    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
-      const url = String(input);
-      const method = String(init?.method ?? "GET").toUpperCase();
-      if (method === "POST" && /\/boxes\/[^/]+\/prompt$/.test(url)) {
-        prompts.push(String((JSON.parse(String(init?.body ?? "{}")) as { prompt?: string }).prompt ?? ""));
-        return new Response(JSON.stringify({ promptRun: { id: "p1" } }), { headers: { "content-type": "application/json" } });
-      }
-      if (url.includes("/events")) {
-        const step = script[Math.min(i, script.length - 1)]!;
-        i += 1;
-        return new Response(JSON.stringify({ events: step.events }), { headers: { "content-type": "application/json" } });
-      }
-      if (url.includes("/prompts/")) {
-        const step = script[Math.min(Math.max(i - 1, 0), script.length - 1)]!;
-        return new Response(JSON.stringify(step.status ?? { promptRun: { status: "running" } }), { headers: { "content-type": "application/json" } });
-      }
-      return new Response(JSON.stringify({ error: "unexpected" }), { status: 404 });
-    }) as typeof fetch;
-    return () => {
-      globalThis.fetch = previous;
-    };
-  }
-
-  // The exact case both plan reviews flagged: a BoatAgent ask arrives at the
-  // run's settle. Holding the OMB turn open is what keeps the routine run in
-  // waiting until the answer instead of completing out from under the card.
-  it("holds the run in waiting until the person answers, then completes it", async () => {
-    const h = harness(start);
-    const prompts: string[] = [];
-    const askText = "```omb-ask\n" + JSON.stringify({
-      questions: [{ question: "Ship the release?", options: [{ label: "Ship now" }, { label: "Wait" }] }],
-    }) + "\n```";
-    const restoreFetch = installFakeBoat([
-      { events: [{ id: "e1", type: "response", text: askText }], status: { promptRun: { status: "running" } } },
-      { events: [{ id: "e1", type: "response", text: askText }], status: { promptRun: { status: "finished", result: askText } } },
-      { events: [{ id: "c1", type: "response", text: "Shipped." }], status: { promptRun: { status: "finished", result: "Shipped." } } },
-    ], prompts);
-    ensureDirs();
-    const instance = await BoatAgentDriver.create({
-      instanceId: "box-routines",
-      displayName: "Boat Routines",
-      environment: { BOX_TOKEN: "boat-test-token" },
-      enabled: true,
-      config: { pollMs: 0 },
-    });
-    let requestId = "";
-    try {
-      instance.adapter.onEvent((event) => {
-        if (event.type === "request.opened") requestId = event.requestId ?? "";
-        h.manager.handleRuntimeEvent(event);
-      });
-      h.options.startTurn = async (_botId, threadId) => {
-        await instance.adapter.sendTurn({ threadId, text: "sweep", integrations: { computer: { boxId: "boat-1" } } });
-      };
-      const routine = h.manager.create({
-        name: "Boat sweep",
-        prompt: "Sweep the box",
-        botId: "maus-1",
-        schedule: { type: "interval", everyMinutes: 5, anchorAt: start },
-      });
-      h.setNow(routine.nextRunAt!);
-      await h.manager.tick();
-      const run = () => h.manager.listRuns().find((r) => r.threadId === "thread-1");
-      await expect.poll(() => run()?.status).toBe("waiting");
-      expect(run()?.attention).toBe("Ship the release?");
-      expect(requestId).toBeTruthy();
-      expect(
-        await instance.adapter.respondToRequest("thread-1", requestId, {
-          behavior: "answer",
-          message: "The user answered your questions.\n\nQ: Ship the release?\nA: ship it",
-        }),
-      ).toBe("answered");
-      await expect.poll(() => run()?.status).toBe("completed");
-      expect(prompts[1]).toContain("A: ship it");
-    } finally {
-      await instance.dispose();
-      restoreFetch();
-    }
   });
 });

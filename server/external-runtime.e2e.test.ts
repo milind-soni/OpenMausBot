@@ -232,6 +232,12 @@ describe("a bot's external runtime", () => {
       const receipt = await client.rpc("tools/call", { name: "check_delegation", arguments: { task_id: taskId } });
       expect(receipt.isError).not.toBe(true);
       expect(receipt.content[0].text).toContain("finished task");
+      // The runtime reads its own result; the bot's engine is not woken on
+      // the pinned thread to answer it a second time.
+      await expect.poll(async () => (await botState(runtime.id)).busy, { timeout: 15_000 }).toBeFalsy();
+      const pinned = (await api("GET", `/api/threads/${runtime.threadId}/messages?limit=100`)).body.messages;
+      expect(pinned.filter((message: { role: string; turnId?: string; from?: unknown }) =>
+        message.role === "bot" && message.turnId && !message.from)).toEqual([]);
       evidence.push({ method: "MCP", path: "delegate_bot → check_delegation (same process)", status: 200 });
     } finally {
       await client.close();

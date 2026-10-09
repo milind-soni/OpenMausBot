@@ -9,13 +9,13 @@ import { Check, ChevronDown, Loader2, RefreshCw, TriangleAlert } from "lucide-re
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
-import { ProviderIconPicker } from "./ProviderIconPicker";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
-import { EngineSetup, EngineUpdateNotice, EngineWarningNotice } from "./EngineSetup";
+import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotice, isApiKeyEngine } from "./EngineSetup";
 import { AddClaudeAccount, ClaudeAccountSettings } from "./ClaudeAccountSettings";
-import { AddChatGptAccount, CodexAccountSettings } from "./CodexAccountSettings";
+import { AddProviderAccount, CodexAccountSettings } from "./CodexAccountSettings";
+import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
 import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 
 interface ProbeResult {
@@ -265,21 +265,35 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
   return (
     <EngineCard instance={instance}>
       {policyNote}
-      <ProviderIconPicker instance={instance} />
       {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} unframed />}
+      {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
       {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" />}
       {instance.snapshot.warning && <EngineWarningNotice warning={instance.snapshot.warning} className="mt-3" />}
       {instance.claudeAccount && <ClaudeAccountSettings instance={instance} />}
       {engineReady(instance) && instance.snapshot.authenticated === true && (
-        instance.authentication?.method === "device-code" || instance.authentication?.method === "browser-pkce"
+        (instance.authentication?.method === "device-code" || instance.authentication?.method === "browser-pkce") && deviceSignInProvider(instance.driverKind) === "codex"
           ? <CodexAccountSettings instance={instance} />
+          : instance.authentication?.method === "device-code"
+          ? <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t(DEVICE_SIGN_IN_COPY[deviceSignInProvider(instance.driverKind)].connectedAccount)}</p>
           : instance.authentication?.method === "paste-code" && !instance.claudeAccount && (
             <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t("engineSetup.claude.connectedAccount")}</p>
           )
       )}
       {instance.freeUpSpace && <AntigravityFreeSpace instance={instance} />}
-      <details className="mt-3 rounded-xl border border-hairline/40 px-3 py-2.5">
-        <summary className="cursor-pointer text-[12px] font-medium text-ink-secondary hover:text-ink">{t("engines.library.advanced")}</summary>
+      {instance.driverKind === "antigravityAgent" && (
+        <div className="mt-3 space-y-3">
+          {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
+          <AddProviderAccount antigravityInstanceId={instance.instanceId} />
+        </div>
+      )}
+      {instance.driverKind === "claudeAgent" && instance.access !== "custom" && (
+        <div className="mt-3"><AddClaudeAccount /></div>
+      )}
+      {instance.snapshot.chatgptPlan && !instance.snapshot.authenticationUnavailableReason && (
+        <div className="mt-3"><AddProviderAccount /></div>
+      )}
+      <details className="mt-4 border-t border-hairline/40 pt-3">
+        <summary className="cursor-pointer rounded-md py-1 text-[12px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{t("engines.library.advanced")}</summary>
         <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("engines.footer")}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
           {instance.cli ? (
@@ -353,7 +367,9 @@ export function EnginesSettings() {
   // every KNOWN-driver instance has cliDefault; unknown-driver shadows have
   // neither unless an override was set. Including them keeps a Reset-able row
   // (and a Set CLI… path) for engines the running build doesn't recognize.
-  const rows = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable");
+  // Key engines have no CLI; keep them once their key is saved, or the card
+  // (and the only way back to a mistyped key) vanishes (MOCA-292).
+  const rows = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i));
 
   return (
     <div className="flex min-w-0 flex-col gap-6 pb-2">
@@ -365,10 +381,6 @@ export function EnginesSettings() {
         <RefreshEngines />
       </div>
       <EngineSections instances={rows} renderEngine={(instance) => <EngineRow instance={instance} />} />
-      <div className="space-y-3 border-t border-hairline/40 pt-4">
-        <AddClaudeAccount />
-        {state.instances.some((instance) => instance.snapshot.chatgptPlan && !instance.readOnly && !instance.snapshot.authenticationUnavailableReason) && <AddChatGptAccount />}
-      </div>
     </div>
   );
 }

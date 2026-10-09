@@ -5,6 +5,7 @@ interface InstallationRow {
   composio_user_id: string;
   session_id: string | null;
   disabled_at: number | null;
+  last_seen_at?: number;
 }
 
 interface ComposioSession {
@@ -214,12 +215,69 @@ async function createSession(env: Env, userId: string) {
  *  D1 on every request. */
 const multiAccountUpgradeAttempted = new Set<string>();
 
-async function ensureSession(installation: InstallationRow, env: Env, ctx: ExecutionContext) {
+/** A Session's MCP URL and headers are fixed for its id, so the MCP relay
+ *  reuses one this isolate verified recently instead of re-reading it from
+ *  Composio before every JSON-RPC message. Lookups use the session_id D1
+ *  returned for the request, so a replaced Session never hits a stale entry. */
+const VERIFIED_SESSION_TTL_MS = 5 * 60_000;
+const VERIFIED_SESSION_LIMIT = 1_000;
+const verifiedSessions = new Map<string, { session: ComposioSession; verifiedAt: number }>();
+
+function rememberSession(session: ComposioSession) {
+  verifiedSessions.delete(session.sessionId);
+  verifiedSessions.set(session.sessionId, { session, verifiedAt: Date.now() });
+  // Maps iterate in insertion order, so the oldest entries go first.
+  for (const sessionId of verifiedSessions.keys()) {
+    if (verifiedSessions.size <= VERIFIED_SESSION_LIMIT) break;
+    verifiedSessions.delete(sessionId);
+  }
+}
+
+function forgetSession(sessionId: string) {
+  verifiedSessions.delete(sessionId);
+}
+
+function verifiedSession(sessionId: string | null) {
+  if (!sessionId) return undefined;
+  const entry = verifiedSessions.get(sessionId);
+  if (entry && Date.now() - entry.verifiedAt < VERIFIED_SESSION_TTL_MS) return entry.session;
+  verifiedSessions.delete(sessionId);
+  return undefined;
+}
+
+/** last_seen_at only shows an installation is still in use, and nothing reads
+ *  it more finely, so it is not worth a D1 write on every request. Ten
+ *  minutes is still precise enough for an idle-installation sweep over
+ *  installations_last_seen_idx. */
+const LAST_SEEN_INTERVAL_MS = 10 * 60_000;
+
+function touchLastSeen(installation: InstallationRow, env: Env, ctx: ExecutionContext) {
+  const now = Date.now();
+  if (now - (installation.last_seen_at ?? 0) < LAST_SEEN_INTERVAL_MS) return;
+  installation.last_seen_at = now;
+  ctx.waitUntil(
+    env.DB.prepare("UPDATE installations SET last_seen_at = ? WHERE id = ?")
+      .bind(now, installation.id)
+      .run()
+      .catch((error: Error) => console.error(JSON.stringify({ message: "last-seen update failed", id: installation.id, error: error.message }))),
+  );
+}
+
+async function limitSessionRequests(installation: InstallationRow, env: Env) {
   if (!(await env.SESSION_LIMITER.limit({ key: installation.id })).success) {
     throw new Response(JSON.stringify({ error: "too many connected-app requests" }), { status: 429, headers: JSON_HEADERS });
   }
+}
+
+async function ensureSession(installation: InstallationRow, env: Env, ctx: ExecutionContext) {
+  await limitSessionRequests(installation, env);
+  return verifySession(installation, env, ctx);
+}
+
+async function verifySession(installation: InstallationRow, env: Env, ctx: ExecutionContext) {
   let session = installation.session_id ? await getSession(env, installation.session_id) : null;
   if (session && !session.multiAccountConfigured && multiAccountUpgradeAttempted.has(session.sessionId)) {
+    rememberSession(session);
     return session;
   }
   if (!session?.multiAccountConfigured) {
@@ -231,13 +289,9 @@ async function ensureSession(installation: InstallationRow, env: Env, ctx: Execu
       .bind(session.sessionId, Date.now(), installation.id)
       .run();
   } else {
-    ctx.waitUntil(
-      env.DB.prepare("UPDATE installations SET last_seen_at = ? WHERE id = ?")
-        .bind(Date.now(), installation.id)
-        .run()
-        .catch((error: Error) => console.error(JSON.stringify({ message: "last-seen update failed", id: installation.id, error: error.message }))),
-    );
+    touchLastSeen(installation, env, ctx);
   }
+  rememberSession(session);
   return session;
 }
 
@@ -245,7 +299,7 @@ async function authenticate(request: Request, env: Env) {
   const token = request.headers.get("authorization")?.match(/^Bearer ([0-9a-f]{64})$/)?.[1];
   if (!token) return null;
   const row = await env.DB.prepare(
-    "SELECT id, composio_user_id, session_id, disabled_at FROM installations WHERE token_hash = ?",
+    "SELECT id, composio_user_id, session_id, disabled_at, last_seen_at FROM installations WHERE token_hash = ?",
   ).bind(await sha256(token)).first<InstallationRow>();
   return row && row.disabled_at === null ? row : null;
 }
@@ -271,19 +325,45 @@ async function proxyMcp(request: Request, installation: InstallationRow, env: En
   if (declared > MAX_MCP_BODY) return json({ error: "MCP request is too large" }, 413);
   const body = await request.arrayBuffer();
   if (body.byteLength > MAX_MCP_BODY) return json({ error: "MCP request is too large" }, 413);
-  const session = await ensureSession(installation, env, ctx);
-  const upstreamHeaders = new Headers(session.headers);
-  upstreamHeaders.set("x-api-key", env.COMPOSIO_API_KEY);
-  upstreamHeaders.set("content-type", request.headers.get("content-type") ?? "application/json");
-  upstreamHeaders.set("accept", "application/json, text/event-stream");
+  await limitSessionRequests(installation, env);
+  const reused = verifiedSession(installation.session_id);
+  if (reused) touchLastSeen(installation, env, ctx);
+  let session = reused ?? await verifySession(installation, env, ctx);
   const incomingMcpSession = request.headers.get("mcp-session-id");
-  if (incomingMcpSession) upstreamHeaders.set("mcp-session-id", incomingMcpSession);
-  const response = await fetch(session.url, {
-    method: "POST",
-    headers: upstreamHeaders,
-    body,
-    signal: AbortSignal.timeout(10 * 60_000),
-  });
+  const forward = (target: ComposioSession) => {
+    const upstreamHeaders = new Headers(target.headers);
+    upstreamHeaders.set("x-api-key", env.COMPOSIO_API_KEY);
+    upstreamHeaders.set("content-type", request.headers.get("content-type") ?? "application/json");
+    upstreamHeaders.set("accept", "application/json, text/event-stream");
+    if (incomingMcpSession) upstreamHeaders.set("mcp-session-id", incomingMcpSession);
+    return fetch(target.url, {
+      method: "POST",
+      headers: upstreamHeaders,
+      body,
+      signal: AbortSignal.timeout(10 * 60_000),
+    }).catch((error: unknown) => {
+      forgetSession(target.sessionId);
+      throw error;
+    });
+  };
+  let response = await forward(session);
+  if (reused && !incomingMcpSession && (response.status === 404 || response.status === 410)) {
+    // Composio dropped the Session after this isolate verified it. With no
+    // mcp-session-id (normally an initialize, but also any message the
+    // desktop server sends after losing its transport-session map), the
+    // client has nothing to re-initialize, so do what an uncached request
+    // would: look the Session up again (replacing it if it is gone) and
+    // resend once. A 404 or 410 from the MCP URL means nothing was dispatched.
+    // With an mcp-session-id, the 404 passes through and the client
+    // re-initializes, as before.
+    forgetSession(session.sessionId);
+    await response.body?.cancel();
+    session = await verifySession(installation, env, ctx);
+    response = await forward(session);
+  }
+  // Any upstream failure may mean the Session went bad, so look it up again
+  // on the next message.
+  if (!response.ok) forgetSession(session.sessionId);
   const headers = new Headers({
     "content-type": response.headers.get("content-type") ?? "application/json",
     "cache-control": "no-store",

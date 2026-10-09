@@ -104,9 +104,11 @@ jobs:
           fi
 
   ci:
-    # Ship only a commit whose own `CI` check (ci.yml's gate) passed. The wait
-    # overlaps the platform builds, so a green commit costs no time; a red or
-    # missing verdict stops the release before any draft exists. Main keeps
+    # Ship only a commit whose code passed `CI` (ci.yml's gate, vitest really
+    # run): its own run, a run on a commit with the same tree, or, for a
+    # version-only bump, its parent's (scripts/release-ci.mjs, docs/ci.md).
+    # The wait overlaps the platform builds, so a green commit costs no time;
+    # a red or missing verdict stops the release before any draft exists. Main keeps
     # one CI run going and one waiting, so a burst of merges can replace the
     # release commit's own run: scripts/release-ci.mjs then runs CI on the
     # commit in its own lane (a release-ci/v<version> branch no merge can
@@ -117,7 +119,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:
-      # read CI runs and start CI in the release lane
+      # read CI runs, start CI in the release lane, and re-run jobs that
+      # never got a runner
       actions: write
       # create and delete the release-ci/v<version> branch
       contents: write
@@ -125,7 +128,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/release-ci.mjs
+          sparse-checkout: |
+            scripts/release-ci.mjs
+            scripts/ci-scope.mjs
           sparse-checkout-cone-mode: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -241,15 +246,19 @@ jobs:
           }
           console.log(`ok: ${Object.keys(SPAWNED_PROXIES).length} proxies resolve in ${server}`);
           EOF
-            for bin in "$res/cua-driver" "$res/OpenMausBot Speech.app/Contents/MacOS/speech-helper"; do
-              lipo -archs "$bin" | grep -q "x86_64" || { echo "::error::$bin lacks x86_64"; exit 1; }
-              lipo -archs "$bin" | grep -q "arm64" || { echo "::error::$bin lacks arm64"; exit 1; }
-            done
-            cloudflared="$res/cloudflared/cloudflared"
+            # the speech helper is a nested signed .app and stays universal
+            speech="$res/OpenMausBot Speech.app/Contents/MacOS/speech-helper"
+            lipo -archs "$speech" | grep -q "x86_64" || { echo "::error::$speech lacks x86_64"; exit 1; }
+            lipo -archs "$speech" | grep -q "arm64" || { echo "::error::$speech lacks arm64"; exit 1; }
+            # every other native payload carries only this app's own CPU slice
             expected_arch=x86_64
             case "$app" in *mac-arm64*) expected_arch=arm64 ;; esac
-            test "$(lipo -archs "$cloudflared")" = "$expected_arch" || {
-              echo "::error::$cloudflared is not the expected $expected_arch executable"; exit 1; }
+            cloudflared="$res/cloudflared/cloudflared"
+            for bin in "$res/cua-driver" "$res/cua-sdk/native/libcua_driver_sdk.dylib" \
+              "$res/cua-sdk/native/cua_driver_node_runtime.node" "$res/android-platform-tools/darwin/adb" "$cloudflared"; do
+              test "$(lipo -archs "$bin")" = "$expected_arch" || {
+                echo "::error::$bin is not the expected $expected_arch executable"; exit 1; }
+            done
             if [ "$(uname -m)" = "$expected_arch" ]; then
               "$cloudflared" version | grep -Fq "cloudflared version 2026.8.2 " || {
                 echo "::error::$cloudflared has the wrong version"; exit 1; }
@@ -340,6 +349,7 @@ jobs:
         run: |
           res=release/win-unpacked/resources
           [ -f "$res/server/index.js" ] || { echo "::error::missing server/index.js"; exit 1; }
+          [ -f "$res/server/desktop-entry.mjs" ] || { echo "::error::missing server/desktop-entry.mjs"; exit 1; }
           [ -f "$res/ui/index.html" ] || { echo "::error::missing ui/index.html"; exit 1; }
           [ -f "$res/cloudflared/cloudflared.exe" ] || { echo "::error::missing cloudflared.exe"; exit 1; }
           [ -f "$res/licenses/cloudflared-LICENSE.txt" ] || { echo "::error::missing cloudflared license"; exit 1; }

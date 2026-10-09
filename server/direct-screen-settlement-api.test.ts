@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
+import { withoutTurnClock } from "./testing/turn-clock-text.ts";
 
 describe.skipIf(process.platform === "win32")("direct final-screen settlement", () => {
   let session: VerificationServer;
@@ -41,7 +42,7 @@ describe.skipIf(process.platform === "win32")("direct final-screen settlement", 
     await expect.poll(() => existsSync(join(fixture, "capture.entered")), { timeout: 10_000 }).toBe(true);
     gate("finish.gate");
     await expect.poll(async () => (await api("GET", `/api/threads/${threadId}/messages`)).body.messages
-      .some((message: any) => message.text === "reply to: FIRST_SCREEN"), { timeout: 5_000 }).toBe(true);
+      .some((message: any) => typeof message.text === "string" && withoutTurnClock(message.text) === "reply to: FIRST_SCREEN"), { timeout: 5_000 }).toBe(true);
   };
 
   beforeEach(async () => {
@@ -121,12 +122,28 @@ describe.skipIf(process.platform === "win32")("direct final-screen settlement", 
     gate("capture.gate");
     await expect.poll(async () => (await bot()).busy, { timeout: 15_000 }).toBe(false);
     const messages = (await bot()).messages;
-    expect(messages.some((message: any) => message.text?.includes("reply to: FOLLOWUP_AFTER_SCREEN"))).toBe(true);
+    expect(messages.some((message: any) => typeof message.text === "string" && withoutTurnClock(message.text).includes("reply to: FOLLOWUP_AFTER_SCREEN"))).toBe(true);
     expect(messages.some((message: any) => message.tool?.name?.includes("another thread is working"))).toBe(false);
     const screenIndex = messages.findIndex((message: any) => message.kind === "screen");
     expect(screenIndex).toBeGreaterThanOrEqual(0);
     expect(screenIndex).toBeLessThan(
       messages.findIndex((message: any) => message.text === "FOLLOWUP_AFTER_SCREEN"));
+  }, 30_000);
+
+  it("sends the settled screenshot to live clients without its pixels; the image route serves them", async () => {
+    await beginCapture();
+    gate("capture.gate");
+    const frame = await events.until((candidate) => candidate.kind === "message" &&
+      candidate.threadId === threadId && candidate.message?.kind === "screen", 15_000);
+    expect(frame.message).toMatchObject({ hasImage: true, mime: "image/png" });
+    expect(frame.message.png).toBeUndefined();
+    expect(JSON.stringify(frame)).not.toContain("iVBORw0KGgo");
+    const image = await fetch(`${session.info.url}/api/threads/${threadId}/messages/${frame.message.id}/image`,
+      { headers: { origin: session.info.url } });
+    expect(image.status).toBe(200);
+    expect(image.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await image.arrayBuffer()).toString("base64"))
+      .toBe("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aWQAAAABJRU5ErkJggg==");
   }, 30_000);
 
   it("bounds capture settlement and discards a late frame after the thread is deleted", async () => {

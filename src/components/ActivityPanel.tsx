@@ -17,8 +17,7 @@ import {
   type ActivityRow,
   type ChipTone,
 } from "@/lib/activity";
-import { openLiveEvents } from "@/lib/live-events";
-import type { RuntimeEvent } from "../../shared/runtime-events";
+import { listenLiveFrames } from "@/lib/live-events";
 
 const LIMIT = 300;
 
@@ -36,7 +35,7 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
   const [error, setError] = useState<string | null>(null);
   const loadAbort = useRef<AbortController | null>(null);
 
-  const load = useCallback(async (): Promise<boolean> => {
+  const load = useCallback(async () => {
     loadAbort.current?.abort();
     const controller = new AbortController();
     loadAbort.current = controller;
@@ -46,14 +45,12 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
       // SAFETY: this same-version renderer calls the harness's typed
       // activity endpoint; malformed transport data is handled by catch.
       const next = (await res.json()) as { rows: ActivityRow[] };
-      if (controller.signal.aborted) return false;
+      if (controller.signal.aborted) return;
       setRows(next.rows);
       setError(null);
-      return true;
     } catch (e) {
-      if (controller.signal.aborted) return false;
+      if (controller.signal.aborted) return;
       setError(e instanceof Error ? e.message : String(e));
-      return false;
     } finally {
       if (loadAbort.current === controller) loadAbort.current = null;
     }
@@ -65,26 +62,20 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
     return () => loadAbort.current?.abort();
   }, [load]);
 
-  // Re-read when one of this bot's turns settles, or when a card is
-  // answered: both change what a row says. Own EventSource on purpose,
-  // the same way the inspector does — the store folds runtime events into
-  // chat state and does not re-emit them.
+  // Re-read when one of this bot's turns settles or a card is answered
+  // (both change what a row says), and when the app's live stream lost
+  // frames it could not replay.
   const threadIds = useMemo(
     () => new Set([bot.threadId, ...(bot.tasks ?? []).map((task) => task.threadId)]),
     [bot.threadId, bot.tasks],
   );
   useEffect(() => {
     let settle: ReturnType<typeof setTimeout> | null = null;
-    const stopLive = openLiveEvents({
-      screens: false,
-      onSnapshotRequired: load,
+    const stopLive = listenLiveFrames({
+      onMissedFrames: () => void load(),
       onFrame: (frame) => {
         if (frame.kind !== "runtime") return;
-        const event = frame.event;
-        if (!event || Array.isArray(event) || Object(event) !== event) return;
-        // SAFETY: runtime stream frames are produced from the typed harness
-        // bus; this guard rejects non-object transport corruption.
-        const runtime = event as RuntimeEvent;
+        const runtime = frame.event;
         if (!threadIds.has(runtime.threadId)) return;
         if (
           runtime.type === "turn.completed" ||

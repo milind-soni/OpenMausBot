@@ -14,7 +14,7 @@ const steps: RunStep[] = [
 const TAG = `>${t("chat.verify.verifiedTag")}<`;
 const noop = () => undefined;
 const render = (props: Partial<Parameters<typeof VerifyCard>[0]> = {}) =>
-  renderToStaticMarkup(createElement(VerifyCard, { steps, canSave: true, staged: false, onDismiss: noop, onSave: noop, ...props }));
+  renderToStaticMarkup(createElement(VerifyCard, { steps, canSave: true, skill: null, onDismiss: noop, onSave: noop, ...props }));
 
 describe("VerifyCard", () => {
   it("renders nothing without steps", () => {
@@ -74,9 +74,16 @@ describe("VerifyCard", () => {
   });
 
   it("says the skill is staged instead of offering Save again", () => {
-    const markup = render({ staged: true });
+    const markup = render({ skill: "pending" });
     expect(markup).toContain(t("chat.verify.staged"));
     expect(markup).not.toContain(t("chat.verify.save"));
+    expect(markup).not.toContain(t("chat.verify.saveHint"));
+  });
+
+  it("says the skill is saved once it applied, with no review promised", () => {
+    const markup = render({ skill: "saved" });
+    expect(markup).toContain(t("chat.verify.saved"));
+    expect(markup).not.toContain(t("chat.verify.staged"));
     expect(markup).not.toContain(t("chat.verify.saveHint"));
   });
 

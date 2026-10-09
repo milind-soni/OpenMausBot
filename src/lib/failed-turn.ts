@@ -12,6 +12,13 @@ export { failedTurnCause };
 
 type ActivityTool = NonNullable<Message["tool"]>;
 
+/** Whether this engine is waiting on a sign-in: its setup card is the
+ * sign-in. The one answer a failed turn's row (signedOutEngine) and a place's
+ * "Sign in first" (src/lib/place-view.ts) both read. */
+export function engineSignedOut(engine: InstanceInfo | undefined): boolean {
+  return Boolean(engine?.snapshot) && offersSignIn(engine);
+}
+
 /** The engine a failed turn is waiting on a sign-in for, if any. A
  * signed-out engine's own words are an instruction for a terminal ("Please
  * run /login") nobody here can follow, so while it still reads signed out
@@ -19,7 +26,7 @@ type ActivityTool = NonNullable<Message["tool"]>;
  * Claude update offer is not a sign-in: it replaces the setup card. Anything
  * else keeps the engine's words: they are the most precise cause there is. */
 export function signedOutEngine(tool: ActivityTool, engine: InstanceInfo | undefined): InstanceInfo | undefined {
-  return tool.setup && !tool.claudeUpdate && offersSignIn(engine) ? engine : undefined;
+  return tool.setup && !tool.claudeUpdate && engineSignedOut(engine) ? engine : undefined;
 }
 
 /** The engine a bot's turns run on — what its failed-turn row is about. */

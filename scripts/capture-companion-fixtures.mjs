@@ -4,7 +4,7 @@
 //   node scripts/capture-companion-fixtures.mjs
 //   node scripts/capture-companion-fixtures.mjs --overview-only
 //
-// The fixtures in ios/Tests/CompanionCoreTests/Fixtures are server payloads,
+// The companion apps' fixtures are server payloads,
 // with local fixture paths redacted. Hand-written test JSON
 // tests our idea of the API, and the entire risk in a two-language client is
 // that our idea drifts from the API without anything failing. Re-running this
@@ -22,11 +22,17 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const OUT = join(ROOT, "ios", "Tests", "CompanionCoreTests", "Fixtures");
+// `--out <dir>`: the fixtures directory to write.
+const outFlag = process.argv.indexOf("--out");
+if (outFlag === -1 || !process.argv[outFlag + 1]) {
+  console.error("Usage: node scripts/capture-companion-fixtures.mjs --out <fixtures dir> [--overview-only]");
+  process.exit(2);
+}
+const OUT = resolve(process.argv[outFlag + 1]);
 const overviewOnly = process.argv.includes("--overview-only");
 
 const base = 19100 + Math.floor(Math.random() * 3000);

@@ -9,6 +9,7 @@
 // every client — with one summary line in the log and no words in it.
 //
 // POSIX-gated like the other CLI e2es (the fakes are shebang scripts).
+import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +17,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LIVE_COPY } from "../shared/live-approval.ts";
+import { cloudPairingSignature } from "./cloud-home.ts";
+import { CLOUD_HOME_PLACE } from "./system-prompt.ts";
 import type { LiveCallState } from "../shared/wire.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startFakeOpenAiLive, type FakeOpenAiLive } from "./testing/fake-openai-live.ts";
@@ -142,6 +145,8 @@ posixOnly("Live call e2e", () => {
       expect(call).toMatchObject({ botId: bot.id, threadId: bot.threadId, client: "desktop" });
       // the client's data channel may only hang up
       expect(session.body).toMatchObject({ session: { client: { data_channel: { allowed_client_events: ["session.close"] } } } });
+      // a harness that is not a Cloud home runs on the person's own computer
+      expect((session.body.session as { instructions: string }).instructions).toContain("runs in OpenMausBot on the user's own computer.");
       await live.waitForAttach(session.id);
       await sse.until((frame) => frame.kind === "live.call" && frame.call?.callId === call.callId && frame.call?.status === "live");
 
@@ -172,14 +177,16 @@ posixOnly("Live call e2e", () => {
     }
   }, 40_000);
 
+  // The first call comes from a web browser (a Cloud's page): the second
+  // client is told where it is, not "on this computer".
   it("answers 409 with the running call to a second client", async () => {
     const bot = await createBot();
-    const { call, session } = await startCall(bot.id);
+    const { call, session } = await startCall(bot.id, "web");
     await live.waitForAttach(session.id);
 
     const second = await post("/api/live/session", { botId: bot.id, sdp: SDP, client: "ios" });
     expect(second.status).toBe(409);
-    expect((second.body as { activeCall: LiveCallState }).activeCall).toMatchObject({ callId: call.callId, client: "desktop" });
+    expect((second.body as { activeCall: LiveCallState }).activeCall).toMatchObject({ callId: call.callId, client: "web" });
     // the refused start did not reach OpenAI
     expect(live.sessions.at(-1)).toBe(session);
 
@@ -427,5 +434,145 @@ posixOnly("Live call e2e", () => {
     } finally {
       sse.close();
     }
+  }, 40_000);
+});
+
+// The same call on the person's own Cloud, which no plan gives an OpenAI key:
+// the owner pastes theirs once, the page saves it on the Cloud
+// (`PUT /api/config`; a server's page has no credential bridge), and the next
+// call starts with it. Booted as a Cloud home (OMB_CLOUD_ROLE=home) behind
+// its edge, with only loopback reachable: the fake GPT-Live, never the Admin.
+posixOnly("Live call on the person's Cloud", () => {
+  const HOST = "omb-t-0123456789ab.fly.dev";
+  const secret = randomBytes(32).toString("base64url");
+  const OWNER_KEY = "sk-fake-cloud-owner";
+  let child: ChildProcess;
+  let home = "";
+  let base = "";
+  let output = "";
+  let live: FakeOpenAiLive;
+  let ownerToken = "";
+
+  /** A request through the Cloud's edge, from one of the owner's paired devices. */
+  const request = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+    const res = await fetch(`${base}${path}`, {
+      method,
+      headers: {
+        // what the Caddy edge adds to every request it forwards
+        host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https",
+        ...(ownerToken ? { authorization: `Bearer ${ownerToken}` } : {}),
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+        ...headers,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    // SAFETY: test-only JSON bodies, checked field by field below.
+    return { status: res.status, body: await res.json().catch(() => null) as any };
+  };
+
+  beforeAll(async () => {
+    chmodSync(FAKE_CLAUDE, 0o755);
+    live = await startFakeOpenAiLive();
+    home = mkdtempSync(join(tmpdir(), "omb-live-cloud-"));
+    const dataDir = join(home, ".openmausbot");
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({
+      instances: {
+        // Pin the fleet's other defaults so this never probes an installed CLI.
+        ...Object.fromEntries(["codex", "cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+        claude: { driver: "claudeAgent", config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
+      },
+    }));
+    mkdirSync(join(home, "web"));
+    writeFileSync(join(home, "web", "index.html"), "<!doctype html><title>OpenMausBot</title>");
+    const port = await freePortBlock([0, 1]);
+    base = `http://127.0.0.1:${port}`;
+    // Only loopback answers: the fake GPT-Live. The Admin and OpenAI are offline.
+    const loopbackOnly = `data:text/javascript,${encodeURIComponent(
+      "const real = globalThis.fetch; globalThis.fetch = async (input, init) => new URL(input instanceof Request ? input.url : String(input)).hostname === \"127.0.0.1\" ? real(input, init) : new Response(\"offline fixture\", { status: 503 });",
+    )}`;
+    child = spawn(process.execPath, ["--import", loopbackOnly, join(SERVER_DIR, "index.ts")], {
+      cwd: join(SERVER_DIR, ".."),
+      env: {
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir, OMB_STATIC_DIR: join(home, "web"),
+        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
+        OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
+        OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${HOST}`,
+        // no OMB_OPENAI_LIVE_KEY: no plan includes one
+        OMB_OPENAI_LIVE_URL: live.url,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout!.on("data", (chunk) => (output += chunk));
+    child.stderr!.on("data", (chunk) => (output += chunk));
+    const deadline = Date.now() + 90_000;
+    for (;;) {
+      if (child.exitCode !== null) throw new Error(`the Cloud home exited ${child.exitCode}. output:\n${output}`);
+      try {
+        // a bare local request (the edge's own health check) learns the pid
+        const health = (await (await fetch(`${base}/api/health`)).json()) as { pid?: number };
+        if (health.pid === child.pid) break;
+      } catch {
+        /* not up yet */
+      }
+      if (Date.now() > deadline) throw new Error(`the Cloud home never came up. output:\n${output}`);
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    // One of the owner's devices, paired the way the Admin pairs the app.
+    const pairing = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+    const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
+    const granted = await request("POST", "/api/cloud/pairing", JSON.parse(pairing), {
+      "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce,
+      "x-omb-cloud-signature": `v1=${cloudPairingSignature(secret, timestamp, nonce, pairing)}`,
+    });
+    expect(granted.status, JSON.stringify(granted.body)).toBe(200);
+    const paired = await request("POST", "/api/auth/pair", { code: granted.body.code });
+    expect(paired.status, JSON.stringify(paired.body)).toBe(200);
+    ownerToken = paired.body.token;
+  }, 120_000);
+
+  afterAll(async () => {
+    if (child) await waitForExit(child, { signal: "SIGTERM" });
+    await live?.stop();
+    if (home) await removeTempDir(home);
+  });
+
+  it("saves the owner's OpenAI key on the Cloud, and a Live call starts with it", async () => {
+    const before = await request("GET", "/api/config");
+    expect(before.body).toMatchObject({ cloudHome: true, live: { configured: false } });
+    const created = await request("POST", "/api/bots", { name: "Ada", modelSelection: { instanceId: "claude", model: "claude-fake" } });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const { id: botId, threadId } = created.body.bot as { id: string; threadId: string };
+
+    // No key yet: the Cloud says so (the page then shows the key form), and
+    // nothing reaches GPT-Live.
+    const refused = await request("POST", "/api/live/session", { botId, sdp: SDP, client: "desktop" });
+    expect(refused, JSON.stringify(refused.body)).toMatchObject({ status: 409, body: { needsKey: true } });
+    expect(live.sessions).toHaveLength(0);
+
+    const saved = await request("PUT", "/api/config", { live: { key: OWNER_KEY } });
+    expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+    expect(saved.body).toMatchObject({ cloudHome: true, live: { configured: true } });
+    expect(JSON.stringify(saved.body)).not.toContain(OWNER_KEY);
+
+    const started = await request("POST", "/api/live/session", { botId, sdp: SDP, client: "desktop" });
+    expect(started.status, JSON.stringify(started.body)).toBe(201);
+    expect(started.body).toMatchObject({ call: { botId, threadId }, transport: { type: "webrtc", sdp: expect.any(String) } });
+    // the call reached GPT-Live with the owner's own key, and its sideband attached
+    expect(live.sessions).toHaveLength(1);
+    const [session] = live.sessions;
+    expect(session.key).toBe(OWNER_KEY);
+    // the voice is told it runs on My Cloud, in the bot's own words, never on
+    // the person's own computer (server/index.ts passes cloudHome)
+    const { instructions } = session.body.session as { instructions: string };
+    expect(instructions.split("\n")[0]).toBe(`You are Ada, an AI agent that runs on ${CLOUD_HOME_PLACE}.`);
+    expect(instructions).not.toContain("on the user's own computer");
+    await live.waitForAttach(session.id);
+
+    const ended = await request("POST", "/api/live/call/end", { callId: started.body.call.callId });
+    expect(ended).toMatchObject({ status: 200, body: { call: { status: "ended" } } });
+    expect(JSON.stringify(started.body)).not.toContain(OWNER_KEY);
+    expect(output).not.toContain(OWNER_KEY);
   }, 40_000);
 });

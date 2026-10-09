@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Plus, X } from "lucide-react";
 import { api, useStore, type Bot } from "@/state/store";
 import { BotPickerList } from "./BotPickerList";
-import { NewBotDialog } from "./NewBotDialog";
+import { NewBotDialog } from "./lazy-screens";
 import { t } from "@/lib/i18n";
 
 /** A team may start empty; choosing bots moves their membership, never copies them. */

@@ -14,7 +14,7 @@ it.each([
     .rejects.toThrow(/Boat verification requires/);
 });
 
-it.each([false, true])("registers a computer engine only for an opted-in Boat fixture: %s", async (withBoat) => {
+it.each([false, true])("adds a Boat account only for an opted-in Boat fixture, and never a Boat-run engine: %s", async (withBoat) => {
   const calls: string[] = [];
   const provider = createServer((request, response) => {
     calls.push(`${request.method} ${request.url}`);
@@ -33,12 +33,13 @@ it.each([false, true])("registers a computer engine only for an opted-in Boat fi
     const response = await fetch(`${fixture.info.url}/api/instances`);
     expect(response.ok).toBe(true);
     const { instances } = await response.json() as { instances: Array<{ instanceId: string; driverKind: string }> };
-    expect(instances.filter(instance => instance.driverKind === "boxAgent").map(instance => instance.instanceId)).toEqual(withBoat ? ["computer"] : []);
+    // Bots use a cloud computer as a tool on their own engine; no engine
+    // runs its turns on Boat.
+    expect(instances.filter(instance => instance.driverKind === "boxAgent" || instance.instanceId === "computer")).toEqual([]);
+    expect(config.instances).not.toHaveProperty("computer");
     if (withBoat) {
-      expect(config.instances.computer).toEqual({ driver: "boxAgent" });
       expect(config.box).toEqual({ token: "box_verification_fixture" });
     } else {
-      expect(config.instances).not.toHaveProperty("computer");
       expect(config).not.toHaveProperty("box");
       expect(calls).toEqual([]);
     }

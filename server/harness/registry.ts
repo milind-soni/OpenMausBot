@@ -8,6 +8,7 @@ import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
 import type {
   AnyProviderDriver,
+  EngineAccess,
   InstanceConfigMap,
   InstanceId,
   ProviderAuthenticationStart,
@@ -60,6 +61,9 @@ export class ProviderRegistry {
   /** decoded per-instance `cli` overrides, for describe() — drivers spawn
    * from their own config; this map only reports what was configured */
   private cliByInstance = new Map<InstanceId, string>();
+  /** What describe() last read of each live instance. A turn's start checks
+   * a thread's own engine against it without waiting on that engine's CLI. */
+  private lastSnapshots = new Map<InstanceId, ProviderSnapshot>();
   private driversByKind: Map<string, AnyProviderDriver>;
   /** Where Settings-driven npm installs go; the data directory by default. */
   private readonly enginesBaseDir: string | undefined;
@@ -74,57 +78,93 @@ export class ProviderRegistry {
   }
 
   async load(configs: InstanceConfigMap, decorate?: (instance: ProviderInstance) => ProviderInstance) {
-    for (const [instanceId, entry] of Object.entries(configs)) {
-      // Account edits replace only their own process/session state.
-      await this.dispose(instanceId);
-      const driver = this.driversByKind.get(entry.driver);
-      if (!driver) {
-        this.byId.set(instanceId, {
+    // Create instances concurrently: a driver's create may probe its CLI with
+    // a multi-second timeout, and N slow CLIs must not queue on each other.
+    // Each entry resolves to the RegistryEntry it becomes — a create or
+    // decode failure stays local to its instance, exactly as before.
+    const loaded = await Promise.all(
+      Object.entries(configs).map(async ([instanceId, entry]) => {
+        const ready = await this.createEntry(instanceId, entry, decorate);
+        // Usable as soon as it is ready, not after the slowest CLI.
+        this.byId.set(instanceId, ready);
+        return ready;
+      }),
+    );
+    // Config order, not completion order: entries()/describe() are the UI's
+    // list and must not shuffle when a slow CLI lands last. An entry that a
+    // dispose replaced or removed meanwhile is no longer this load's to place.
+    for (const entry of loaded) {
+      if (this.byId.get(entry.instanceId) !== entry) continue;
+      this.byId.delete(entry.instanceId);
+      this.byId.set(entry.instanceId, entry);
+    }
+  }
+
+  private async createEntry(
+    instanceId: InstanceId,
+    entry: InstanceConfigMap[string],
+    decorate?: (instance: ProviderInstance) => ProviderInstance,
+  ): Promise<RegistryEntry> {
+    // Account edits replace only their own process/session state.
+    await this.dispose(instanceId);
+    const driver = this.driversByKind.get(entry.driver);
+    if (!driver) {
+      return {
+        instanceId,
+        shadow: {
           instanceId,
-          shadow: {
-            instanceId,
-            driverKind: entry.driver,
-            displayName: entry.displayName,
-            cli: cliOfRaw(entry.config),
-            shadow: true,
-            reason: `unknown driver "${entry.driver}" — kept as configured, unavailable here`,
-          },
-        });
-        continue;
-      }
-      try {
-        const config = entry.config === undefined ? driver.defaultConfig() : driver.decodeConfig(entry.config);
-        // Override detection is on the RAW config, never the decoded one:
-        // decodeConfig fills in the driver default ("claude", "codex", …),
-        // so reading `cli` there would flag every instance as overridden.
-        const rawCli = cliOfRaw(entry.config);
-        if (rawCli) this.cliByInstance.set(instanceId, rawCli);
-        const live = await driver.create({
+          driverKind: entry.driver,
+          displayName: entry.displayName,
+          cli: cliOfRaw(entry.config),
+          shadow: true,
+          reason: `unknown driver "${entry.driver}" — kept as configured, unavailable here`,
+        },
+      };
+    }
+    try {
+      const config = entry.config === undefined ? driver.defaultConfig() : driver.decodeConfig(entry.config);
+      // Override detection is on the RAW config, never the decoded one:
+      // decodeConfig fills in the driver default ("claude", "codex", …),
+      // so reading `cli` there would flag every instance as overridden.
+      const rawCli = cliOfRaw(entry.config);
+      if (rawCli) this.cliByInstance.set(instanceId, rawCli);
+      const live = await driver.create({
+        instanceId,
+        displayName: entry.displayName ?? driver.metadata.displayName,
+        environment: entry.environment ?? {},
+        enabled: entry.enabled ?? true,
+        config,
+      });
+      return { instanceId, live: decorate ? decorate(live) : live };
+    } catch (e) {
+      return {
+        instanceId,
+        shadow: {
           instanceId,
+          driverKind: entry.driver,
           displayName: entry.displayName ?? driver.metadata.displayName,
-          environment: entry.environment ?? {},
-          enabled: entry.enabled ?? true,
-          config,
-        });
-        this.byId.set(instanceId, { instanceId, live: decorate ? decorate(live) : live });
-      } catch (e) {
-        this.byId.set(instanceId, {
-          instanceId,
-          shadow: {
-            instanceId,
-            driverKind: entry.driver,
-            displayName: entry.displayName ?? driver.metadata.displayName,
-            cli: cliOfRaw(entry.config),
-            shadow: true,
-            reason: e instanceof Error ? e.message : String(e),
-          },
-        });
-      }
+          cli: cliOfRaw(entry.config),
+          shadow: true,
+          reason: e instanceof Error ? e.message : String(e),
+        },
+      };
     }
   }
 
   get(instanceId: InstanceId): ProviderInstance | null {
     return this.byId.get(instanceId)?.live ?? null;
+  }
+
+  /** The snapshot describe() last read of this live instance; absent before
+   * the first read, or for an instance that is not live. */
+  lastSnapshot(instanceId: InstanceId): ProviderSnapshot | undefined {
+    return this.byId.get(instanceId)?.live ? this.lastSnapshots.get(instanceId) : undefined;
+  }
+
+  /** How the instance's driver is presented and paid for (EngineAccess). */
+  access(instanceId: InstanceId): EngineAccess | undefined {
+    const entry = this.byId.get(instanceId);
+    return entry ? this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind)?.metadata.access ?? "subscription" : undefined;
   }
 
   /** The configured executable for instance-scoped maintenance actions.
@@ -239,6 +279,9 @@ export class ProviderRegistry {
         } catch (e) {
           snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e) };
         }
+        // Only while this is still the live instance: a reload may have
+        // replaced it during the read.
+        if (this.byId.get(inst.instanceId)?.live === inst) this.lastSnapshots.set(inst.instanceId, snapshot);
         return {
           instanceId: inst.instanceId,
           driverKind: inst.driverKind,
@@ -286,12 +329,14 @@ export class ProviderRegistry {
     await Promise.allSettled(this.instances().map((i) => i.dispose()));
     this.byId.clear();
     this.cliByInstance.clear();
+    this.lastSnapshots.clear();
   }
 
   async dispose(instanceId: InstanceId) {
     const entry = this.byId.get(instanceId);
     this.byId.delete(instanceId);
     this.cliByInstance.delete(instanceId);
+    this.lastSnapshots.delete(instanceId);
     await entry?.live?.dispose();
   }
 }

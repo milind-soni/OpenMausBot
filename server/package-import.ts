@@ -86,7 +86,8 @@ export interface PackageImportDeps {
   sections: { writeBrief(section: string, text: string): void };
   /** Store picture bytes as a normal local avatar; returns its avatar URL. */
   images: { save(bytes: Uint8Array, mime: string): string };
-  /** Tell open windows about new records (after the import succeeded). */
+  /** Called once the import has succeeded. The server leaves it unset: the
+   * store's own frames announce new records. Tests use it as a late step. */
   broadcast?: (event: { kind: "bot"; bot: BotRecord } | { kind: "group"; group: GroupRecord }) => void;
   /** The installation's default model: packages never carry one. */
   defaultSelection: () => ModelSelection;

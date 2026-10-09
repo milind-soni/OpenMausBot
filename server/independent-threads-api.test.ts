@@ -386,13 +386,14 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect((await api("POST", `/api/bots/${botId}/messages/${userA.id}/edit`, { threadId: taskB, text: "wrong task" })).status).toBe(404);
     expect((await api("POST", `/api/bots/${botId}/active-branch`, { threadId: taskB, messageId: userA.id })).status).toBe(404);
 
-    // Compatibility: changing the profile model updates only the selected
-    // idle task, not the independently configured sibling.
+    // Changing the profile model moves the selected idle task (A, which
+    // follows the bot) and never the independently configured sibling.
+    await tool("switch_task", { target_type: "bot", target_id: botId, task_id: taskA });
     const legacyModel = models.at(-1)!;
     expect((await api("PATCH", `/api/bots/${botId}`, { modelSelection: { instanceId: "claude", model: legacyModel } })).status).toBe(200);
     const final = await botState(botId);
-    expect(final.tasks.find((task: any) => task.taskId === taskB).modelSelection.model).toBe(legacyModel);
-    expect(final.tasks.find((task: any) => task.taskId === taskA).modelSelection.model).toBe(models[0]);
+    expect(final.tasks.find((task: any) => task.taskId === taskA).modelSelection.model).toBe(legacyModel);
+    expect(final.tasks.find((task: any) => task.taskId === taskB).modelSelection.model).toBe(models[1]);
   }, 45_000);
 
   it("cancels a detached routine on its captured provider after an idle sibling changes the default", async () => {
@@ -418,8 +419,10 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect((await api("POST", `/api/routine-runs/${run.id}/cancel`)).status).toBe(200);
     await expect.poll(async () => (await botState(botId)).tasks.find((task: any) => task.taskId === run.threadId)?.busy,
       { timeout: 10_000 }).toBe(false);
+    // The cancel reached Claude, which ran the turn; the run's thread, with no
+    // model of its own, now follows the bot's new default like the rest.
     const final = await botState(botId);
-    expect(final.tasks.find((task: any) => task.taskId === run.threadId)?.modelSelection.instanceId).toBe("claude");
+    expect(final.tasks.find((task: any) => task.taskId === run.threadId)?.modelSelection.instanceId).toBe("offline-fixture");
     expect(final.tasks.find((task: any) => task.taskId === selectedThread)?.modelSelection.instanceId).toBe("offline-fixture");
     evidence.push({ routineCancelledOnOriginalProvider: true, runId: run.id, taskId: run.threadId });
   }, 30_000);
@@ -451,7 +454,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     evidence.push({ groupDefaultPreservedUntilStop: true, groupId: group.id, selectedTaskId: threadId });
   }, 30_000);
 
-  it("refuses a second engine in the same selected project folder until its owner stops", async () => {
+  it("runs a second engine of the same bot in the selected project folder at the same time", async () => {
     const created = await tool("create_bot", { name: "Shared project fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;
     const taskA = created.bot.activeTaskId;
@@ -463,18 +466,18 @@ describe("independent bot tasks through the isolated control surface", () => {
     const second = await tool("create_task", { target_type: "bot", target_id: botId, title: "Project sibling" });
     const taskB = second.task.taskId;
     await control(["set-model", "--bot", botId, "--task", taskB, "--instance", "claude", "--model", models[1]]);
-    await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_CONFLICT"]);
-    const blocked = await control(["wait", "--bot", botId, "--task", taskB, "--timeout", "10"]);
-    expect(blocked.status).toBe("failed");
-    expect(JSON.stringify(blocked.messages)).toContain("project folder");
-    expect(existsSync(modelFile(models[1], "json"))).toBe(false);
-    expect((await botState(botId)).tasks.find((task: any) => task.taskId === taskA)?.busy).toBe(true);
-
-    await control(["interrupt", "--bot", botId, "--task", taskA]);
-    await control(["wait", "--bot", botId, "--task", taskA, "--timeout", "10"]);
-    await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_NOW_OWNS_FOLDER"]);
+    await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_PARALLEL"]);
+    // Like two Claude Code sessions open in one repo: the second engine starts
+    // in the same folder while the first still works there. The per-turn
+    // snapshot queues per folder on its own (server/checkpoints.ts).
     expect((await dump(models[1])).env.OMB_FIXTURE_CWD).toBe(realpathSync(cwd));
+    const both = await botState(botId);
+    expect(both.tasks.find((task: any) => task.taskId === taskA)?.busy).toBe(true);
+    expect(both.tasks.find((task: any) => task.taskId === taskB)?.busy).toBe(true);
+    expect(JSON.stringify((await control(["messages", "--bot", botId, "--task", taskB])).messages)).not.toContain("project folder");
+    await control(["interrupt", "--bot", botId, "--task", taskA]);
     await control(["interrupt", "--bot", botId, "--task", taskB]);
+    evidence.push({ parallelThreadsInOneProjectFolder: true, botId, taskA, taskB });
   }, 45_000);
 
   it.skipIf(process.platform !== "darwin")("claims the shared computer only on first use and keeps a sibling stop from releasing it", async () => {

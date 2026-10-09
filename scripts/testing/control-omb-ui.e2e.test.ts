@@ -200,7 +200,13 @@ describe("control-omb ui drives the real renderer", () => {
     })()`);
     await click("You");
     await click("Settings");
-    await evaluate(`[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'API keys').click(); true`);
+    // Settings is its own chunk (src/components/lazy-screens.tsx): opened before
+    // the idle prefetch has fetched it, it paints once the chunk arrives.
+    await expect.poll(() => evaluate(`(() => {
+      const tab = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'API keys');
+      tab?.click();
+      return Boolean(tab);
+    })()`), { timeout: 10_000 }).toBe(true);
     // The shared OpenAI-compatible key lives under "Other", open once a key is saved.
     await expect.poll(() => evaluate(`document.querySelector('[data-api-key-row="openaiCompat"]') !== null`), { timeout: 10_000 }).toBe(true);
     await evaluate(`document.querySelector('[data-api-keys-other]').open = true; true`);

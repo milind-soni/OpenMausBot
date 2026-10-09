@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CloudflareAPI, CloudflareAPIError, type CloudflareFetch } from "../src/cloudflare-api";
 import { createAuth } from "../src/auth";
 import { readConfig } from "../src/config";
-import { cleanupEndpointRow } from "../src/endpoints";
+import { cleanupEndpointRow, sweepManagedEndpointCleanup } from "../src/endpoints";
 import { createWorker } from "../src/index";
 
 const BASE_URL = "https://auth.openmausbot.test";
@@ -13,6 +13,7 @@ const CONNECTOR_TOKEN = "eyJhbGciOiJIUzI1NiJ9.test-only-connector-token.signatur
 
 interface CallOptions {
   body?: unknown;
+  env?: Env;
   method?: string;
   rawBody?: string;
   token?: string;
@@ -33,9 +34,59 @@ async function call(worker: TestWorker, path: string, options: CallOptions = {})
     method: options.method ?? "GET",
   });
   const ctx = createExecutionContext();
-  const response = await worker.fetch(request, env, ctx);
+  const response = await worker.fetch(request, options.env ?? env, ctx);
   await waitOnExecutionContext(ctx);
   return response;
+}
+
+const STATEMENT = Symbol("statement");
+
+interface CountedStatement {
+  label: string;
+  statement: D1PreparedStatement;
+}
+
+/** "SELECT installation_endpoints", "UPDATE installations", ... */
+function statementLabel(sql: string): string {
+  const words = sql.trim().split(/\s+/);
+  const verb = words[0]?.toUpperCase() ?? "";
+  const table = verb === "UPDATE" ? words[1] : /\b(?:FROM|INTO)\s+"?(\w+)/i.exec(sql)?.[1];
+  return `${verb} ${table ?? "?"}`;
+}
+
+/** An env whose D1 binding records every round trip it makes. A batch is one
+ * round trip, as in production, where D1 runs it as a single request. */
+function countingD1() {
+  const trips: string[][] = [];
+  const wrap = (statement: D1PreparedStatement, label: string): D1PreparedStatement => new Proxy(statement, {
+    get(target, property) {
+      if (property === STATEMENT) return { label, statement: target } satisfies CountedStatement;
+      if (property === "bind") return (...values: unknown[]) => wrap(target.bind(...values), label);
+      if (property === "first" || property === "all" || property === "run" || property === "raw") {
+        return (...args: unknown[]) => {
+          trips.push([label]);
+          return (target[property] as (...rest: unknown[]) => unknown).apply(target, args);
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const db = new Proxy(env.DB, {
+    get(target, property) {
+      if (property === "prepare") return (sql: string) => wrap(target.prepare(sql), statementLabel(sql));
+      if (property === "batch") {
+        return (statements: D1PreparedStatement[]) => {
+          const counted = statements.map((each) => (each as unknown as Record<symbol, CountedStatement>)[STATEMENT]);
+          trips.push(counted.map((each) => each.label));
+          return target.batch(counted.map((each) => each.statement));
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { env: { ...env, DB: db } as Env, trips };
 }
 
 async function runScheduledCleanup(
@@ -142,6 +193,8 @@ class FakeCloudflare {
   /** Provider error codes returned (HTTP 400) for an operation. */
   readonly providerErrors = new Map<string, number>();
   readonly rateLimited = new Set<string>();
+  /** Retry-After header sent with a rate-limited response, if any. */
+  rateLimitRetryAfter: string | null = null;
   readonly afterHooks = new Map<string, () => void>();
   readonly tunnels = new Map<string, FakeTunnel>();
   dnsTotalCount: number | null = null;
@@ -174,7 +227,10 @@ class FakeCloudflare {
         messages: [],
         result: null,
         success: false,
-      }, { status: 429 });
+      }, {
+        headers: this.rateLimitRetryAfter === null ? {} : { "retry-after": this.rateLimitRetryAfter },
+        status: 429,
+      });
     }
     const providerError = this.providerErrors.get(operation);
     if (providerError !== undefined) {
@@ -448,6 +504,129 @@ describe("Cloudflare API response contracts", () => {
       code: "cf_api_10000",
       status: 500,
     });
+  });
+});
+
+describe("installation check-in round trips", () => {
+  const CHECK_IN = [
+    ["SELECT installation_credentials"],
+    ["UPDATE installation_credentials", "UPDATE installations"],
+  ];
+  const checkIns = (installationId: string) => env.DB.prepare(
+    `SELECT c.last_used_at, i.last_seen_at
+       FROM installation_credentials c JOIN installations i ON i.id = c.installation_id
+      WHERE i.id = ?`,
+  ).bind(installationId).first<{ last_seen_at: number | null; last_used_at: number | null }>();
+
+  it("reads the endpoint in the same D1 batch that records the check-in", async () => {
+    const worker = createWorker(new FakeCloudflare().fetch);
+    const owner = await signIn(worker, "lookup-trips@example.com");
+    const installation = await createInstallation(worker, owner.token, "lookup-trips");
+    const id = installation.installation.id;
+    const counted = countingD1();
+    const lookup = async () => {
+      counted.trips.length = 0;
+      const response = await call(worker, "/v1/installations/self/endpoint", {
+        env: counted.env,
+        token: installation.credential,
+      });
+      return { body: await response.text(), status: response.status, trips: [...counted.trips] };
+    };
+    // The read stays after the writes, so it runs in the same order as before.
+    const trips = [
+      ["SELECT installation_credentials"],
+      ["UPDATE installation_credentials", "UPDATE installations", "SELECT installation_endpoints"],
+    ];
+
+    expect(await lookup()).toEqual({ body: '{"endpoint":null}', status: 200, trips });
+
+    expect((await call(worker, "/v1/installations/self/endpoint", {
+      method: "POST",
+      token: installation.credential,
+    })).status).toBe(200);
+    await env.DB.batch([
+      env.DB.prepare("UPDATE installation_credentials SET last_used_at = 1 WHERE installation_id = ?").bind(id),
+      env.DB.prepare("UPDATE installations SET last_seen_at = 1 WHERE id = ?").bind(id),
+    ]);
+    const ready = await env.DB.prepare(
+      `SELECT hostname, generation, updated_at, last_reconciled_at
+         FROM installation_endpoints WHERE installation_id = ?`,
+    ).bind(id).first<{ generation: number; hostname: string; last_reconciled_at: number; updated_at: number }>();
+    if (!ready) throw new Error("endpoint row missing");
+    const checkedInFrom = Date.now();
+    expect(await lookup()).toEqual({
+      body: JSON.stringify({
+        endpoint: {
+          url: `https://${ready.hostname}`,
+          hostname: ready.hostname,
+          status: "ready",
+          generation: ready.generation,
+          updatedAt: ready.updated_at,
+          lastReconciledAt: ready.last_reconciled_at,
+          lastErrorCode: null,
+        },
+      }),
+      status: 200,
+      trips,
+    });
+    const seen = await checkIns(id);
+    expect(seen?.last_used_at).toBeGreaterThanOrEqual(checkedInFrom);
+    expect(seen?.last_seen_at).toBeGreaterThanOrEqual(checkedInFrom);
+
+    await env.DB.prepare("UPDATE installation_endpoints SET status = 'deleted' WHERE installation_id = ?")
+      .bind(id).run();
+    expect(await lookup()).toEqual({ body: '{"endpoint":null}', status: 200, trips });
+  });
+
+  it("rejects a wrong or revoked credential after one read and records nothing", async () => {
+    const worker = createWorker(new FakeCloudflare().fetch);
+    const owner = await signIn(worker, "lookup-denied@example.com");
+    const installation = await createInstallation(worker, owner.token, "lookup-denied");
+    const id = installation.installation.id;
+    const counted = countingD1();
+    const lookup = async (token: string) => {
+      counted.trips.length = 0;
+      const response = await call(worker, "/v1/installations/self/endpoint", { env: counted.env, token });
+      return { status: response.status, trips: [...counted.trips] };
+    };
+    const before = await checkIns(id);
+
+    // Same lookup ID with a different secret: the row is found, the hash is not.
+    const credential = installation.credential;
+    const wrongSecret = `${credential.slice(0, -1)}${credential.endsWith("A") ? "B" : "A"}`;
+    expect(await lookup(wrongSecret)).toEqual({ status: 401, trips: [["SELECT installation_credentials"]] });
+    expect(await lookup("invalid")).toEqual({ status: 401, trips: [] });
+    expect((await call(worker, `/v1/installations/${id}`, { method: "DELETE", token: owner.token })).status)
+      .toBe(204);
+    expect(await lookup(credential)).toEqual({ status: 401, trips: [["SELECT installation_credentials"]] });
+    expect(await checkIns(id)).toEqual(before);
+  });
+
+  it("leaves the check-in of other installation routes unchanged", async () => {
+    const worker = createWorker(new FakeCloudflare().fetch);
+    const owner = await signIn(worker, "lookup-others@example.com");
+    const installation = await createInstallation(worker, owner.token, "lookup-others");
+    const counted = countingD1();
+
+    expect((await call(worker, "/v1/installations/self", {
+      env: counted.env,
+      token: installation.credential,
+    })).status).toBe(200);
+    expect(counted.trips).toEqual(CHECK_IN);
+
+    expect((await call(worker, "/v1/installations/self/endpoint", {
+      method: "POST",
+      token: installation.credential,
+    })).status).toBe(200);
+    counted.trips.length = 0;
+    expect((await call(worker, "/v1/installations/self/endpoint", {
+      env: counted.env,
+      method: "POST",
+      token: installation.credential,
+    })).status).toBe(200);
+    expect(counted.trips.slice(0, 2)).toEqual(CHECK_IN);
+    // Re-provisioning a ready endpoint keeps its existing round trips.
+    expect(counted.trips).toHaveLength(15);
   });
 });
 
@@ -1694,6 +1873,40 @@ describe("managed endpoint provider capacity", () => {
     vi.restoreAllMocks();
   });
 
+  it("reports a quota rejection and its clearing in /healthz without waiting for the cached copy", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "capacity-health@example.com");
+    const installation = await createInstallation(worker, owner.token, "capacity-health");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    type Health = { capacity: { providerRejectedAt: number | null; status: string } };
+    const health = async () => (await (await call(worker, "/healthz")).json<Health>()).capacity;
+
+    expect(await health()).toMatchObject({ providerRejectedAt: null, status: "unknown" });
+    cloudflare.providerErrors.set("create_tunnel", 1_045);
+    expect((await call(worker, "/v1/installations/self/endpoint", {
+      method: "POST",
+      token: installation.credential,
+    })).status).toBe(503);
+    expect(await health()).toMatchObject({ providerRejectedAt: expect.any(Number), status: "full" });
+
+    // The sweep alone (no scan) frees a resource and clears the rejection.
+    cloudflare.providerErrors.clear();
+    const now = Date.now();
+    const tunnelName = `omb-c-${"f".repeat(32)}`;
+    cloudflare.tunnels.set(tunnelName, { id: "60000000-0000-4000-8000-000000000002", name: tunnelName });
+    await env.DB.prepare(
+      `INSERT INTO installation_endpoints
+        (installation_id, hostname, tunnel_name, status, delete_requested_at, created_at, updated_at)
+       VALUES ('orphan-health', ?, ?, 'deleting', ?, ?, ?)`,
+    ).bind(`c-${"f".repeat(32)}.openmausbot.test`, tunnelName, now, now, now).run();
+    const swept = await sweepManagedEndpointCleanup(env, readConfig(env), cloudflare.fetch, crypto.randomUUID());
+    expect(swept.deleted).toBe(1);
+    expect(await health()).toMatchObject({ providerRejectedAt: null, status: "unknown" });
+    vi.restoreAllMocks();
+  });
+
   it("treats the DNS record quota as capacity and keeps other failures as endpoint_unavailable", async () => {
     const cloudflare = new FakeCloudflare();
     const worker = createWorker(cloudflare.fetch);
@@ -1727,6 +1940,56 @@ describe("managed endpoint provider capacity", () => {
       "SELECT capacity_rejected_at FROM managed_endpoint_capacity WHERE id = 1",
     ).first<{ capacity_rejected_at: number | null }>();
     expect(gate?.capacity_rejected_at).toBeNull();
+    vi.restoreAllMocks();
+  });
+
+  it("reports a Cloudflare API 429 as endpoint_rate_limited with a bounded Retry-After", async () => {
+    const cloudflare = new FakeCloudflare();
+    const worker = createWorker(cloudflare.fetch);
+    const owner = await signIn(worker, "rate-limited@example.com");
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    cloudflare.rateLimited.add("create_tunnel");
+
+    // [Cloudflare's Retry-After, what the desktop is told]
+    const cases: Array<[string | null, string]> = [
+      [null, "60"],
+      ["120", "120"],
+      ["1", "30"],
+      ["3600", "300"],
+      ["Wed, 21 Oct 2026 07:28:00 GMT", "60"],
+    ];
+    for (const [index, [providerRetryAfter, expected]] of cases.entries()) {
+      cloudflare.rateLimitRetryAfter = providerRetryAfter;
+      const installation = await createInstallation(worker, owner.token, `rate-limited-${index}`);
+      const limited = await call(worker, "/v1/installations/self/endpoint", {
+        method: "POST",
+        token: installation.credential,
+      });
+      expect(limited.status).toBe(503);
+      expect(limited.headers.get("retry-after")).toBe(expected);
+      await expect(limited.json()).resolves.toEqual({ error: "endpoint_rate_limited" });
+      expect(await endpointState(installation.installation.id)).toMatchObject({
+        last_error_code: "cf_rate_limited",
+        status: "error",
+      });
+    }
+    expect(loggedJSON(logged, "managed endpoint reconcile failed")[0]).toMatchObject({
+      capacity: false,
+      errorCode: "cf_rate_limited",
+    });
+    // A rate limit is not a quota: it must not close the capacity gate.
+    const gate = await env.DB.prepare(
+      "SELECT capacity_rejected_at FROM managed_endpoint_capacity WHERE id = 1",
+    ).first<{ capacity_rejected_at: number | null }>();
+    expect(gate?.capacity_rejected_at).toBeNull();
+
+    // Once Cloudflare stops pushing back, the next attempt provisions.
+    cloudflare.rateLimited.clear();
+    const recovered = await createInstallation(worker, owner.token, "rate-limited-recovered");
+    expect((await call(worker, "/v1/installations/self/endpoint", {
+      method: "POST",
+      token: recovered.credential,
+    })).status).toBe(200);
     vi.restoreAllMocks();
   });
 

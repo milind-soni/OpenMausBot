@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 
-it("keeps results together while fresh executions, approvals, deletion and unread stay reachable", async () => {
+it("reports every run into the bot's main thread while fresh executions, approvals, deletion and unread stay reachable", async () => {
   const fixture = await launchVerificationServer();
   const evidence: unknown[] = [{ fixture: fixture.info }];
   let broker: Socket | undefined;
@@ -42,8 +42,10 @@ it("keeps results together while fresh executions, approvals, deletion and unrea
       evidence.push(await control(["wait", "--bot", bot.id, "--task", finished.threadId]));
       evidence.push(await control(["messages", "--bot", bot.id, "--task", finished.threadId, "--limit", "10"]));
     }
+    // An editor/API routine reports into the bot's main thread: no new
+    // "· Results" thread, while each run keeps its own execution record.
     const destination = completed[0].resultsThreadId;
-    expect(destination).toBeTruthy();
+    expect(destination).toBe(originalThread);
     expect(completed[1].resultsThreadId).toBe(destination);
     expect(completed[0].threadId).not.toBe(completed[1].threadId);
     const cards = (await messages(destination)).filter((message) => message.kind === "routine.run");
@@ -55,7 +57,8 @@ it("keeps results together while fresh executions, approvals, deletion and unrea
     const currentBot = async () => (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id);
     const savedBot = await currentBot();
     expect(savedBot.threadId).toBe(originalThread);
-    expect(savedBot.tasks.filter((task: any) => !task.routineRunId)).toHaveLength(2);
+    expect(savedBot.tasks.filter((task: any) => !task.routineRunId)).toHaveLength(1);
+    expect(savedBot.tasks.some((task: any) => task.title.endsWith("· Results"))).toBe(false);
     expect(savedBot.tasks.find((task: any) => task.threadId === destination).unread).toBe(true);
     for (const run of completed) expect(savedBot.tasks.find((task: any) => task.threadId === run.threadId))
       .toMatchObject({ routineRunId: run.id, unread: false, autoApprove: false, approvalMode: "ask" });
@@ -69,11 +72,23 @@ it("keeps results together while fresh executions, approvals, deletion and unrea
     const promoted = (await currentBot()).tasks.find((task: any) => task.threadId === completed[0].threadId);
     expect(promoted.routineRunId).toBeUndefined();
     expect(promoted.unread).toBe(true);
-    await api("PATCH", `/api/routines/${routine.id}`, { resultsThreadId: originalThread });
-    expect((await api("PATCH", `/api/routines/${routine.id}`, { name: "Retained destination" })).routine.resultsThreadId).toBe(originalThread);
-    const dedicated = (await api("PATCH", `/api/routines/${routine.id}`, { resultsThreadId: null })).routine.resultsThreadId;
-    expect(dedicated).not.toBe(destination);
-    expect(dedicated).not.toBe(originalThread);
+    // A thread the person chooses keeps winning; null goes back to the main thread.
+    const { task: chosenTask } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Chosen reports" }, 201);
+    const dedicated = chosenTask.threadId as string;
+    await api("PATCH", `/api/routines/${routine.id}`, { resultsThreadId: dedicated });
+    expect((await api("PATCH", `/api/routines/${routine.id}`, { name: "Retained destination" })).routine.resultsThreadId).toBe(dedicated);
+    expect((await api("PATCH", `/api/routines/${routine.id}`, { resultsThreadId: null })).routine.resultsThreadId).toBe(originalThread);
+    // A legacy automatic "<name> · Results" thread is not a choice: the next
+    // run moves to the main thread and the old thread and its reports stay.
+    const { task: legacy } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Retained destination · Results" }, 201);
+    await api("PATCH", `/api/routines/${routine.id}`, { resultsThreadId: legacy.threadId });
+    const { run: moved } = await api("POST", `/api/routines/${routine.id}/run`, undefined, 201);
+    expect(moved.resultsThreadId).toBe(originalThread);
+    await expect.poll(async () => (await runState(moved.id))?.status, { timeout: 15_000 }).toBe("completed");
+    expect((await api("GET", "/api/routines")).routines.find((candidate: any) => candidate.id === routine.id).resultsThreadId).toBe(originalThread);
+    expect((await currentBot()).tasks.some((task: any) => task.threadId === legacy.threadId)).toBe(true);
+    expect((await messages(originalThread)).filter((message) => message.kind === "routine.run")).toHaveLength(3);
+    await api("PATCH", `/api/routines/${routine.id}`, { resultsThreadId: dedicated });
 
     const gate = join(fixture.info.dataDir, "results-finish");
     const wrapper = join(fixture.info.dataDir, "results-slow.mjs");
@@ -112,14 +127,76 @@ it("keeps results together while fresh executions, approvals, deletion and unrea
     await api("POST", `/api/bots/${bot.id}/respond`, { threadId: active.threadId, requestId: approval.card.requestId, behavior: "deny" });
     writeFileSync(gate, "complete the isolated turn");
     await expect.poll(async () => (await runState(pending.id))?.status, { timeout: 15_000 }).toBe("completed");
+    // A deleted destination falls back to the main thread for future runs.
     const { run: replacement } = await api("POST", `/api/routines/${routine.id}/run`, undefined, 201);
-    expect(replacement.resultsThreadId).not.toBe(dedicated);
+    expect(replacement.resultsThreadId).toBe(originalThread);
     await expect.poll(async () => (await runState(replacement.id))?.status, { timeout: 15_000 }).toBe("completed");
     expect((await currentBot()).tasks.some((task: any) => task.threadId === dedicated)).toBe(false);
+    expect((await messages(originalThread)).find((message) => message.routineRun?.runId === replacement.id)?.routineRun)
+      .toMatchObject({ status: "completed", executionThreadId: (await runState(replacement.id)).threadId });
+    expect((await currentBot()).tasks.some((task: any) => task.title.endsWith("· Results") && task.threadId !== legacy.threadId)).toBe(false);
     evidence.push({ cards, final: await api("GET", "/api/routines"), bot: await currentBot(), fallback });
   } finally {
     broker?.destroy();
     const evidencePath = `${fixture.info.logPath}.results.json`;
+    writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
+    console.info(JSON.stringify({ logPath: fixture.info.logPath, evidencePath }));
+    await fixture.close();
+  }
+}, 90_000);
+
+it("reports a routine made in another chat into the bot's main thread, not that chat or a new results thread", async () => {
+  const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
+  const evidence: unknown[] = [{ fixture: fixture.info }];
+  const planPath = join(fixture.info.dataDir, "room-plan.json");
+  const api = async (method: string, path: string, body?: unknown, status = 200) => {
+    const response = await fetch(`${fixture.info.url}${path}`, {
+      method, headers: { "content-type": "application/json", origin: fixture.info.url },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const value = await response.json() as any;
+    expect(response.status, `${method} ${path}: ${JSON.stringify(value)}`).toBe(status);
+    if (method !== "GET") evidence.push({ method, path, body, status: response.status, result: value });
+    return value;
+  };
+  const cli = (...args: string[]) => runControlOmb([...args, "--url", fixture.info.url]) as Promise<any>;
+  const messages = async (id: string) => (await api("GET", `/api/threads/${id}/messages?limit=100`)).messages as any[];
+  try {
+    const { bot } = await cli("new-bot", "--name", "Chat routine fixture");
+    const mainThread = bot.activeTaskId as string;
+    const { task } = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Planning" }, 201);
+    const chat = task.threadId as string;
+    writeFileSync(planPath, JSON.stringify({ [bot.id]: { turns: [
+      { steps: [{ tool: "propose_routine", arguments: {
+        name: "Chat report", instructions: "Report the fixture state; no external services.",
+        schedule: { type: "cron", expression: "0 9 1 * *", timeZone: "UTC" },
+      } }], reply: "The routine is scheduled." },
+      { steps: [], reply: "Fresh chat report" },
+    ] } }));
+    await cli("send", "--bot", bot.id, "--task", chat, "--text", "Report the fixture state monthly.");
+    await cli("wait", "--bot", bot.id, "--task", chat, "--timeout", "20");
+    // The bot's own routine applies at once, as a receipt in that chat.
+    const card = (await messages(chat)).findLast((message) => message.card?.routineRequest)?.card;
+    expect(card).toMatchObject({ answered: "allow", autoApplied: true });
+    const routineId = card.routineRequest.resultId as string;
+    const definition = (await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === routineId);
+    expect(definition.sourceThreadId).toBe(chat);
+
+    const { run } = await api("POST", `/api/routines/${routineId}/run`, undefined, 201);
+    expect(run.resultsThreadId).toBe(mainThread);
+    await expect.poll(async () => (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.id === run.id)?.status, { timeout: 20_000 }).toBe("completed");
+    const finished = (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.id === run.id);
+    expect((await messages(mainThread)).find((message) => message.routineRun?.runId === run.id)?.routineRun)
+      .toMatchObject({ status: "completed", executionThreadId: finished.threadId });
+    expect((await messages(chat)).some((message) => message.kind === "routine.run")).toBe(false);
+    const saved = (await api("GET", "/api/bots")).bots.find((candidate: any) => candidate.id === bot.id);
+    expect(saved.tasks.filter((candidate: any) => !candidate.routineRunId).map((candidate: any) => candidate.threadId).sort())
+      .toEqual([mainThread, chat].sort());
+    expect(saved.tasks.find((candidate: any) => candidate.threadId === mainThread).unread).toBe(true);
+    expect(saved.tasks.find((candidate: any) => candidate.threadId === finished.threadId)).toMatchObject({ routineRunId: run.id });
+    evidence.push({ run: finished, bot: saved, main: await messages(mainThread) });
+  } finally {
+    const evidencePath = `${fixture.info.logPath}.chat-results.json`;
     writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
     console.info(JSON.stringify({ logPath: fixture.info.logPath, evidencePath }));
     await fixture.close();

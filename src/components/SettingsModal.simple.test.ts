@@ -50,6 +50,7 @@ vi.mock("./ApiKeys", () => ({
   ApiKeyRow: marker("apiKey"),
   AnthropicEveryClaudeBot: marker("anthropicEvery"),
   OpenAiCompatUrl: marker("compatUrl"),
+  OpenCodeProviderKeys: marker("opencodeProviderKeys"),
   VpsConnection: marker("vps"),
 }));
 vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: marker("companion") }));
@@ -208,7 +209,7 @@ describe("Settings in Simple mode", () => {
     const html = render();
     expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account", section]);
     expect(currentPage(html)).toBe(section);
-    if (content === "skillAuthoring") expect(html).toContain("Bots may draft skills for your review");
+    if (content === "skillAuthoring") expect(html).toContain("Bots may write their own skills");
     else expect(markers(html)).toContain(content);
   });
 
@@ -253,7 +254,7 @@ describe("the built-in browser switch", () => {
     fixture.section = "experimental";
     const html = render();
     expect(html).not.toContain('aria-label="Enable the built-in browser"');
-    expect(html).toContain("Bots may draft skills for your review");
+    expect(html).toContain("Bots may write their own skills");
     expect(browserSwitch()).toBeUndefined();
   });
 

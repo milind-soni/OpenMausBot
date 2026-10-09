@@ -50,6 +50,7 @@ let askResponse: StubAskResponse = { botName: "Helper", text: "hi from helper" }
 let lastDelegateBody: any = null;
 let lastDelegationUrl: string | null = null;
 let delegationStatusResponse: unknown = { status: "done", toBotName: "Helper", result: "All done." };
+let delegationStatusCode = 200;
 let delegateResponse: unknown = { queued: true, message: "Delegation queued." };
 let lastThreadBody: any = null;
 let threadCalls = 0;
@@ -272,7 +273,7 @@ beforeAll(async () => {
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/delegations/")) {
       lastDelegationUrl = req.url;
-      res.writeHead(200, { "content-type": "application/json" });
+      res.writeHead(delegationStatusCode, { "content-type": "application/json" });
       res.end(JSON.stringify(delegationStatusResponse));
       return;
     }
@@ -458,6 +459,8 @@ beforeAll(async () => {
       OMB_TURN_DEPTH: "0",
       OMB_SKILL_AUTHORING_ENABLED: "1",
       OMB_SHARED_COMPUTERS_ENABLED: "1",
+      // A Chief's turn, so the Chief-only team tools are mounted too.
+      OMB_CHIEF_OF_STAFF: "1",
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -486,10 +489,18 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     for (const tool of new Set(proposalCases.map(entry => entry.tool))) {
       const description = list.result.tools.find((entry: { name: string }) => entry.name === tool).description;
-      expect(description).toContain("granted Full Access may apply the change immediately");
+      // Team setup applies only at Full access; a bot's own routines,
+      // skills and profile apply at any level.
+      if (tool === "propose_team_setup" || tool === "propose_bot_deletion") {
+        expect(description).toContain("granted Full Access may apply the change immediately");
+        expect(description).toContain("Never claim success from the permission mode alone");
+      } else {
+        expect(description).toContain("a change to your own routines, skills, profile or model applies immediately");
+        expect(description).toContain("a change for another bot may wait for the person's confirmation");
+        expect(description).toContain("Never claim success without an applied result");
+      }
       expect(description).toContain("If applied, continue the requested work without another confirmation");
       expect(description).toContain("Only a pending result requires ending the turn");
-      expect(description).toContain("Never claim success from the permission mode alone");
       expect(description).toContain("does not elevate another bot's execution permissions");
     }
     const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
@@ -919,19 +930,13 @@ describe("agents-proxy MCP surface", () => {
     postResponse = { ok: true, messageId: "msg-1", roomName: "Launch" };
   });
 
-  it("stops a turn at three posts and says so without another round trip", async () => {
+  it("counts no posts of its own: a proxy serving several turns leaves the per-turn limit to the harness", async () => {
     const before = postCalls;
-    // one post is already spent by the test above
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < 4; i++) {
       const ok = await callTool("post_to_room", { group_id: "room-launch", message: `update ${i}` });
       expect(ok.result.isError).toBeFalsy();
     }
-    expect(postCalls).toBe(before + 2);
-    const capped = await callTool("post_to_room", { group_id: "room-launch", message: "one more" });
-    expect(capped.result.isError).toBe(true);
-    expect(capped.result.content[0].text).toMatch(/do not retry/i);
-    // the refusal is the proxy's own: the harness was never asked
-    expect(postCalls).toBe(before + 2);
+    expect(postCalls).toBe(before + 4);
   });
 
   it("ask_bot forwards sender + depth and returns the reply", async () => {
@@ -966,13 +971,6 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("delivered to this conversation automatically");
     expect(text).not.toContain("wait_delegation");
     expect(res.result.isError).toBeFalsy();
-
-    lastDelegationUrl = null;
-    const check = await callTool("check_delegation", { task_id: "task-9" });
-    expect(check.result.isError).toBe(true);
-    expect(check.result.content[0].text).toContain("delegated during this turn");
-    expect(check.result.content[0].text).toContain("Finish your response now");
-    expect(lastDelegationUrl).toBeNull();
   });
 
   it.each([[15_000, "15 seconds"], [240_000, "4 minutes"]])("renders a timeout conversion after %s ms with the task id and guidance", async (waitedMs, duration) => {
@@ -986,13 +984,6 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("delivered to this conversation automatically");
     expect(text).not.toContain("wait_delegation");
     expect(res.result.isError).toBeFalsy();
-
-    lastDelegationUrl = null;
-    const wait = await callTool("wait_delegation", { task_id: "task-42", timeout_seconds: 240 });
-    expect(wait.result.isError).toBe(true);
-    expect(wait.result.content[0].text).toContain("delegated during this turn");
-    expect(wait.result.content[0].text).toContain("delivered to this conversation automatically");
-    expect(lastDelegationUrl).toBeNull();
   });
 
   it("surfaces the harness's depth refusal as a tool error", async () => {
@@ -1129,20 +1120,15 @@ describe("agents-proxy MCP surface", () => {
     expect(refused.result.content[0].text).toContain("title must fit on one line");
   });
 
-  it("stops a turn at five opened threads and tells the model not to retry", async () => {
-    // three threads were already opened above (the refusal did not count)
+  it("counts no threads of its own: a proxy serving several turns leaves the per-turn limit to the harness", async () => {
+    // three threads were already opened above
     threadResponse = { threadId: "thread-n", title: "More", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
-    for (let i = 0; i < 2; i++) {
+    const before = threadCalls;
+    for (let i = 0; i < 3; i++) {
       const ok = await callTool("start_thread", { title: `More ${i}`, message: "go" });
       expect(ok.result.isError).toBeFalsy();
     }
-    const before = threadCalls;
-    const capped = await callTool("start_thread", { title: "One more", message: "go" });
-    expect(capped.result.isError).toBe(true);
-    expect(capped.result.content[0].text).toMatch(/do not retry/i);
-    expect(capped.result.content[0].text).toContain("which threads you still wanted to open");
-    // the refusal is the proxy's own: the harness was never asked
-    expect(threadCalls).toBe(before);
+    expect(threadCalls).toBe(before + 3);
   });
 
   it("lets a Chief create a bounded specialist through the harness", async () => {
@@ -1237,7 +1223,7 @@ describe("agents-proxy MCP surface", () => {
     expect(lastCredentialBody).toBeNull();
   });
 
-  it("hands back the task id and rejects sequential same-turn status calls", async () => {
+  it("hands back the task id, and relays the harness's refusal to check it in the same turn", async () => {
     delegateResponse = {
       queued: true,
       taskId: "task-abc123",
@@ -1249,15 +1235,22 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.content[0].text).toContain("Do not check or wait for it in this turn");
     expect(res.result.content[0].text).not.toContain("wait_delegation");
 
-    lastDelegationUrl = null;
-    for (const name of ["check_delegation", "wait_delegation"]) {
-      const status = await callTool(name, { task_id: "task-abc123", timeout_seconds: 240 });
-      expect(status.result.isError).toBe(true);
-      expect(status.result.content[0].text).toContain("delegated during this turn");
-      expect(status.result.content[0].text).toContain("Finish your response now");
-      expect(status.result.content[0].text).toContain("delivered to this conversation automatically");
+    // Which turn made it is the harness's to know: a warm proxy serves many.
+    delegationStatusCode = 409;
+    delegationStatusResponse = { error: "Task task-abc123 was delegated during this turn. Finish your response now so the other bot can work; its result will be delivered to this conversation automatically." };
+    try {
+      for (const name of ["check_delegation", "wait_delegation"]) {
+        lastDelegationUrl = null;
+        const status = await callTool(name, { task_id: "task-abc123", timeout_seconds: 240 });
+        expect(status.result.isError).toBe(true);
+        expect(status.result.content[0].text).toContain("delegated during this turn");
+        expect(status.result.content[0].text).toContain("Finish your response now");
+        expect(lastDelegationUrl).toContain("/api/internal/delegations/task-abc123?");
+      }
+    } finally {
+      delegationStatusCode = 200;
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
     }
-    expect(lastDelegationUrl).toBeNull();
     delegateResponse = { queued: true, message: "Delegation queued." };
   });
 
@@ -2162,9 +2155,10 @@ describe("standing external runtime", () => {
   });
 });
 
-// Opt-in computer sharing is off unless the harness turns it on. A separate
-// child is the only honest check: the tool list is frozen at module load.
-describe("with computer sharing off (the default)", () => {
+// Opt-in computer sharing is off unless the harness turns it on, and so are
+// the Chief-only tools. A separate child is the only honest check: the tool
+// list is frozen at module load.
+describe("with computer sharing off and no Chief of Staff (the defaults)", () => {
   let gated: ChildProcess;
   const gatedPending = new Map<number, (msg: any) => void>();
   let gatedId = 500;
@@ -2188,7 +2182,7 @@ describe("with computer sharing off (the default)", () => {
         OMB_COMMS_TOKEN: TOKEN,
         OMB_TURN_DEPTH: "0",
         OMB_SKILL_AUTHORING_ENABLED: "1",
-        // deliberately no OMB_SHARED_COMPUTERS_ENABLED
+        // deliberately no OMB_SHARED_COMPUTERS_ENABLED or OMB_CHIEF_OF_STAFF
       },
       stdio: ["pipe", "pipe", "inherit"],
     });
@@ -2227,6 +2221,31 @@ describe("with computer sharing off (the default)", () => {
       const refused = await gatedRpc("tools/call", { name, arguments: { computer_id: "x", action: "list_files" } });
       expect(refused.error?.message ?? refused.result?.content?.[0]?.text).toMatch(/unknown tool|turned off/i);
     }
+  });
+
+  it("shows a bot that is not a Chief none of the Chief-only tools or parameters", async () => {
+    type ListedTool = { name: string; description: string; inputSchema: { properties: Record<string, unknown> } };
+    const tools = new Map(((await gatedRpc("tools/list")).result.tools as ListedTool[]).map((tool) => [tool.name, tool]));
+    for (const name of ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"]) {
+      expect(tools.has(name), name).toBe(false);
+    }
+    for (const name of ["propose_profile", "propose_model"]) {
+      expect(tools.get(name)!.inputSchema.properties).not.toHaveProperty("for_bot_id");
+      expect(tools.get(name)!.description).not.toContain("for_bot_id");
+    }
+    // A routine change may still target a reachable section peer.
+    expect(tools.get("propose_routine_action")!.inputSchema.properties).toHaveProperty("for_bot_id");
+  });
+
+  it("refuses a Chief-only tool called by name without reaching the harness", async () => {
+    lastCreateBody = null;
+    lastCreateRoomBody = null;
+    const created = await gatedRpc("tools/call", { name: "create_bot", arguments: { name: "Scout", role: "Ops", instructions: "Work." } });
+    expect(created.error).toMatchObject({ code: -32602, message: "Unknown tool: create_bot" });
+    const room = await gatedRpc("tools/call", { name: "create_room", arguments: { name: "Ops", member_bot_ids: ["bot-helper"] } });
+    expect(room.error).toMatchObject({ code: -32602, message: "Unknown tool: create_room" });
+    expect(lastCreateBody).toBeNull();
+    expect(lastCreateRoomBody).toBeNull();
   });
 });
 

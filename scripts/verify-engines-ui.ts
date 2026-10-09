@@ -95,6 +95,7 @@ try {
         }
         if (path === "/__fixture/connect" && req.method === "POST") {
           instances[4].snapshot.authenticated = !instances[4].snapshot.authenticated;
+          instances[4].snapshot.account = instances[4].snapshot.authenticated ? { email: "google@example.test", method: "login" } : undefined;
           return json({ ok: true });
         }
         if (path === "/__fixture/chatgpt" && req.method === "POST") {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { liveBadgeFor } from "./LiveCallPill";
 import type { LiveMediaState } from "@/lib/live-call-media";
 
-const idle: LiveMediaState = { phase: "idle", callId: null, botId: null, threadId: null, startedAt: null, muted: false, caption: "", heard: "", notice: null, needsKey: false, busyWith: null, canRetry: false, hangingUp: false };
+const idle: LiveMediaState = { phase: "idle", callId: null, botId: null, threadId: null, startedAt: null, muted: false, caption: "", heard: "", notice: null, needsKey: false, busyWith: null, action: null, hangingUp: false };
 
 describe("liveBadgeFor", () => {
   it("marks the bot this window is calling", () => {

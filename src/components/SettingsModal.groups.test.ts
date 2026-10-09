@@ -32,6 +32,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 vi.mock("@/lib/thread-preferences", () => ({
   useShowThreads: () => fixture.showThreads,
+  useShowThreadsChoice: () => fixture.showThreads,
   setShowThreads: fixture.setShowThreads,
 }));
 vi.mock("@/lib/run-card-preferences", () => ({

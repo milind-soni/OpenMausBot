@@ -612,21 +612,16 @@ function main(): void {
   writeFileSync(out, emit(baked))
   console.log(`wrote ${out}`)
 
-  // P1 ruling (task 7): emitted into `ios/Sources/CompanionCore`, not `ios/App` — that is
-  // the package `swift test` actually builds, so a later test over this catalog can run.
-  const swiftOut = fileURLToPath(
-    new URL("../ios/Sources/CompanionCore/MausBodies.swift", import.meta.url)
-  )
-  writeFileSync(swiftOut, emitSwift(baked))
-  console.log(`wrote ${swiftOut}`)
-
-  // The Android app module: its JVM unit tests (Robolectric) can parse the catalog the
-  // way `swift test` can for CompanionCore, so the same drift guard covers it.
-  const kotlinOut = fileURLToPath(
-    new URL("../android/app/src/main/kotlin/com/openmausbot/companion/ui/MausBodies.kt", import.meta.url)
-  )
-  writeFileSync(kotlinOut, emitKotlin(baked))
-  console.log(`wrote ${kotlinOut}`)
+  // The native catalogs are written only when asked for: `--swift <file>` and/or
+  // `--kotlin <file>`.
+  for (const [flag, emitNative] of [["--swift", emitSwift], ["--kotlin", emitKotlin]] as const) {
+    const at = process.argv.indexOf(flag)
+    if (at === -1) continue
+    const nativeOut = process.argv[at + 1]
+    if (!nativeOut) throw new Error(`${flag} needs an output file`)
+    writeFileSync(nativeOut, emitNative(baked))
+    console.log(`wrote ${nativeOut}`)
+  }
 }
 
 try {

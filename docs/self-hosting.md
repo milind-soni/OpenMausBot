@@ -248,6 +248,15 @@ Upgrade with `docker compose pull omb && docker compose up -d` (or
 `git pull && docker compose up -d --build`). State (chats, routines,
 engine logins, paired sessions) is on the `data` volume; back that up.
 
+The published image installs the current Chrome for Testing whenever a new
+Stable ships. A build from source keeps the Chrome (and any `ENGINES`) it
+installed first, because those layers sit beneath the app and stay cached
+across code changes. To pick up the current ones, rebuild with a new tag:
+
+```sh
+docker compose build --build-arg CHROME_CACHE_TAG=$(date +%F) omb && docker compose up -d
+```
+
 ## From source
 
 Requirements: Node 24+, pnpm, and at least one agent CLI installed and
@@ -977,8 +986,9 @@ peers, ask, delegate, and read the status of its own delegations. Opening
 threads, creating bots or rooms, skills, memory and every other internal route
 answer 403. External mode advertises only `list_bots`, `ask_bot`, `delegate_bot`,
 `check_delegation` and `wait_delegation`. It can check a delegation from the
-same long-running process without inventing a turn end. The server still
-enforces peer access and approval settings. An idle source starts dispatch
+same long-running process without inventing a turn end, and a settled handoff
+never wakes the bot's own engine on that thread to answer it again. The server
+still enforces peer access and approval settings. An idle source starts dispatch
 immediately; a busy teammate is queued until available. Regular in-app turns
 keep their existing dispatch timing.
 

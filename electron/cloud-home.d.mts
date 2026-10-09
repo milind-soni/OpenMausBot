@@ -26,6 +26,11 @@ export declare function parseCloudSummary(input: unknown): CloudMachine | null;
 export declare function parseCloudPurchase(input: unknown): CloudPurchase | null;
 export declare function cloudPlanDisk(state: unknown): CloudPlanDisk | null;
 export declare function rememberedCloudHome(previous: RememberedCloudHome | null, state: unknown): RememberedCloudHome | null;
+export declare function myCloudOrigin(known: {
+  account: { homeTarget(): { origin: string } | null; state(): { account?: { id: string } } } | null;
+  remembered: RememberedCloudHome | null;
+  remoteAccess: unknown;
+}): string | null;
 export declare function isCloudHomeEntry(entry: { origin?: string } | null | undefined, known?: { homeOrigin?: string | null; remembered?: RememberedCloudHome | null }): boolean;
 export declare function parsePairingGrant(input: unknown, origin: string, now: number): CloudHomeGrant | null;
 export declare function withCloudHome<T extends { environments: Array<{ id: string; name: string; origin: string }>; activeId: string }>(state: T, machine: CloudMachine | null | undefined, makeId: () => string): T;

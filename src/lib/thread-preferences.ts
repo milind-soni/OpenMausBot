@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 
+import { useAdvancedMode } from "./interface-mode";
+
 export const SHOW_THREADS_KEY = "omb-show-threads";
 
 // Only a renderer preference: no conversation or server configuration belongs
@@ -59,6 +61,15 @@ export function setShowThreads(enabled: boolean): void {
   notify();
 }
 
-export function useShowThreads(): boolean {
+/** The person's own choice in Settings → Appearance, whatever the mode. */
+export function useShowThreadsChoice(): boolean {
   return useSyncExternalStore(subscribe, showThreads, () => true);
+}
+
+/** Whether the sidebar shows threads: the person's choice, in Advanced mode
+ * only. Simple mode keeps one conversation per bot without touching the
+ * stored choice, so switching back to Advanced brings their threads back. */
+export function useShowThreads(): boolean {
+  const chosen = useShowThreadsChoice();
+  return useAdvancedMode() && chosen;
 }

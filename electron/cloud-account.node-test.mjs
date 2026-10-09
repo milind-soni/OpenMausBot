@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCloudAccountClient, createCloudAccountStore, cloudOrigin, CLOUD_ORIGIN } from "./cloud-account.mjs";
@@ -105,6 +105,15 @@ test("a failed check keeps the last verified answer (never a malformed one), say
   f.sessionStatus = 200; f.invalidIdentity = true;
   state = await f.client.refresh(); assert.equal(state.status, "reauth-required"); assert.equal(state.message, "access-ended"); assert.equal(state.entitlement, undefined);
   assert.deepEqual(state.lastPlan, { tier: "max", active: true });
+});
+
+test("a check that fails is asked again after 15 s, 30 s, then each minute", async t => {
+  const f = await fixture(t); await f.connect();
+  f.sessionStatus = 503; await f.client.refresh(); assert.equal(f.delay, 15_000);
+  for (const delay of [30_000, 60_000, 60_000]) { f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); }
+  f.sessionStatus = 200; f.tick(); await until(() => f.timer);
+  f.sessionStatus = 503; f.tick(); await until(() => f.timer);
+  assert.equal(f.delay, 15_000, "an answer starts the count again");
 });
 
 test("a successful re-check never shows anything but the verified plan, and runs well before the answer stops counting", async t => {
@@ -347,6 +356,72 @@ test("Cloud records use separate encrypted atomic storage, not plaintext or save
   await store.write({ token: accessToken }); assert.deepEqual(await store.read(), { token: accessToken });
   assert.ok(!(await readFile(file)).toString().includes(accessToken));
   unlocked = false; await assert.rejects(store.read()); await store.write(null); assert.equal(await store.read(), null);
+});
+
+test("a saved Cloud sign-in is read back after a restart with Electron 43's decrypt shape ({ shouldReEncrypt, result })", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "omb-cloud-electron43-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "cloud-account.bin");
+  // Exactly what safeStorage.decryptStringAsync resolves to in Electron 43, not a bare string.
+  const electron43 = { available: async () => true, encrypt: async value => Buffer.from(value).map(byte => byte ^ 0x55),
+    decrypt: async value => ({ shouldReEncrypt: false, result: Buffer.from(value).map(byte => byte ^ 0x55).toString() }) };
+  await createCloudAccountStore({ file, encryption: electron43 }).write({ token: accessToken });
+  // A new store over the same file stands in for the next app launch.
+  assert.deepEqual(await createCloudAccountStore({ file, encryption: electron43 }).read(), { token: accessToken });
+});
+
+/** Electron 43's safeStorage shape over a one-byte key. `lock.locked` stands in for a locked keychain. */
+const electron43Store = (file, lock = { locked: false }, decrypt) => createCloudAccountStore({ file, encryption: { available: async () => !lock.locked,
+  encrypt: async value => Buffer.from(value).map(byte => byte ^ 0x55),
+  decrypt: decrypt ?? (async value => ({ shouldReEncrypt: false, result: Buffer.from(value).map(byte => byte ^ 0x55).toString() })) } });
+const savedSignIn = f => ({ origin: f.origin, token: accessToken, expiresAt: f.now + 86400_000, device: { id: "fixture-device" }, account: { id: "fixture-account", email: "person@example.test" } });
+
+test("a saved Cloud sign-in that can never be read is removed, and signing in again is the one next step", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "omb-cloud-unreadable-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "cloud-account.bin");
+  for (const decrypt of [
+    // This computer's key no longer opens it (Windows after a reinstall onto a new profile).
+    async () => { throw new Error("Error while decrypting the ciphertext provided to safeStorage.decryptString."); },
+    // It opens to something that is not JSON, or to JSON that is not a sign-in.
+    async () => ({ shouldReEncrypt: false, result: "not json" }),
+    async () => ({ shouldReEncrypt: false, result: JSON.stringify({ token: "not-a-cloud-token" }) }),
+  ]) {
+    const f = await fixture(t, { store: electron43Store(file, undefined, decrypt) });
+    await electron43Store(file).write(savedSignIn(f));
+    assert.deepEqual(await f.client.start(), { status: "signed-out", message: "restore-removed" });
+    await assert.rejects(stat(file), { code: "ENOENT" });
+    assert.equal(f.timer, null, "nothing is read again");
+    assert.equal((await f.client.begin()).status, "connecting");
+  }
+});
+
+test("a locked keychain never removes the saved Cloud sign-in: it is read again, sooner then each minute, until it opens", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "omb-cloud-locked-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "cloud-account.bin"), lock = { locked: false };
+  const f = await fixture(t, { store: electron43Store(file, lock) });
+  await electron43Store(file).write(savedSignIn(f));
+  lock.locked = true;
+  assert.deepEqual(await f.client.start(), { status: "unavailable", message: "restore-failed" });
+  assert.equal(f.delay, 15_000);
+  await assert.rejects(f.client.begin(), /Sign out/);
+  for (const delay of [30_000, 60_000, 60_000]) { f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); }
+  assert.ok((await stat(file)).isFile(), "a locked sign-in is never removed");
+  assert.equal(f.states.filter(state => state.message === "restore-failed").length, 1, "said once, not on every try");
+  lock.locked = false; f.tick();
+  await until(() => f.client.state().status === "connected");
+  assert.equal(f.client.state().account.email, "person@example.test");
+});
+
+test("a decrypt answer in a shape this app does not know is never taken for an unreadable sign-in", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "omb-cloud-shape-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "cloud-account.bin");
+  const f = await fixture(t, { store: electron43Store(file, undefined, async () => ({ shouldReEncrypt: false })) });
+  await electron43Store(file).write(savedSignIn(f));
+  assert.deepEqual(await f.client.start(), { status: "unavailable", message: "restore-failed" });
+  assert.ok((await stat(file)).isFile());
 });
 
 test("cancelling during the encrypted write queues deletion after it and cannot restore the grant", async t => {

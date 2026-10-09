@@ -48,18 +48,26 @@ const render = (members: Bot[], g: Group) => {
 };
 
 describe("GroupView: computer/browser session visibility", () => {
-  it("renders a live screenshot message inline, matching the 1:1 ChatView", () => {
+  it("loads a screenshot message through the image route, matching the 1:1 ChatView", () => {
+    const markup = render([bot()], group({
+      messages: [{ id: "shot", role: "bot", kind: "screen", hasImage: true, mime: "image/png", at: 1, from: { botId: "aleta", name: "Aleta", color: "green" } }] as Message[],
+    }));
+    expect(markup).toContain('src="/api/threads/room-thread/messages/shot/image"');
+  });
+
+  it("loads inline pixels through the image route too, never as a data URL", () => {
     const markup = render([bot()], group({
       messages: [{ id: "shot", role: "bot", kind: "screen", png: "PRIVATE_BASE64_PIXELS", mime: "image/png", at: 1, from: { botId: "aleta", name: "Aleta", color: "green" } }] as Message[],
     }));
-    expect(markup).toContain("data:image/png;base64,PRIVATE_BASE64_PIXELS");
+    expect(markup).toContain('src="/api/threads/room-thread/messages/shot/image"');
+    expect(markup).not.toContain("PRIVATE_BASE64_PIXELS");
   });
 
   it("drops a screen message with no image, same as ChatView", () => {
     const markup = render([bot()], group({
       messages: [{ id: "shot", role: "bot", kind: "screen", at: 1, from: { botId: "aleta", name: "Aleta", color: "green" } }] as Message[],
     }));
-    expect(markup).not.toContain("data:image");
+    expect(markup).not.toContain("/messages/shot/image");
   });
 
   it("marks a busy member working a concrete place (e.g. browser) with that place's icon", () => {

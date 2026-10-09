@@ -78,39 +78,6 @@ revoked capabilities, and exact saved-state cleanup. Native workflow testing
 is still required: a green mocked
 frame test alone does not prove browser input or restoration works.
 
-## Native mobile control
-
-The native checks below never pair a phone or read a real browser profile.
-Swift and Android core tests cover finite streaming/refusal deadlines, bounded
-frame parsing, server-owned control, cancellable actions and coalesced ACKs:
-
-```sh
-cd ios && swift test
-```
-
-From `android/`:
-
-```sh
-./gradlew :core:test :app:testDebugUnitTest --tests '*BrowserControlWiringTest*' :app:assemblePreview
-```
-
-`BrowserControlWiringTest` drives the real Compose screen against a synthetic
-loopback SSE/action server: watch-only, take, a letterboxed center tap at
-640 × 360, typed text, hand-back, background release and the exact viewer's
-release on disposal.
-
-Generate the iOS project and use a fresh disposable simulator as described in
-[iOS thread verification](ios-threads.md), selecting
-`-only-testing:OpenMausCompanionUITests/BrowserControlUITests`. That case uses
-the Debug-only `-browser-preview` URLProtocol fixture to exercise the real
-SwiftUI screen, ownership, touch mapping, soft keyboard, hand-back and release
-when leaving. Keep the result bundle and its screenshot; remove only the
-simulator created for the check.
-
-These fixtures do not prove physical-device gestures, HTTPS/Tailscale pairing,
-or behavior across a real network interruption. No microphone, provider call,
-personal computer control or existing phone is used.
-
 ## One-minute idle and reconnect regression
 
 With an installed Playwright module, the same isolated launcher can run an
@@ -191,6 +158,4 @@ Ctrl-C closes the exact fixture and removes the copied sign-in and browser
 data. VM/cloud transport and turn-bound switching are separately covered by
 `server/group-local-vm.e2e.test.ts`, `server/vps-routing.test.ts` and
 `server/index.test.ts` with
-isolated providers. These are not evidence of real cloud provisioning. The
-Computer engine (Boat's native runner) does not expose the agents selector
-tool, so switching it away from Cloud still requires the composer selector.
+isolated providers. These are not evidence of real cloud provisioning.

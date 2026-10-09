@@ -74,6 +74,8 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
     await ui("screenshot", "--out", screenshot);
     await click("Sent to Engineer");
     await expect.poll(snapshot, { timeout: 15_000 }).toContain("CSV export checked in my separate task");
+    // The request in the teammate's thread names the bot that sent it.
+    expect(await snapshot()).toMatch(/Pepper[\s\S]{0,80}sent a request/);
     const selected = (await api("/api/bots")).bots.find((bot: any) => bot.id === lead.id);
     expect(selected.threadId).toBe(receipt.threadRef.threadId);
     const evidence = { source: parent.messages, receipt, selectedThread: selected.threadId, final: await snapshot(), screenshot };

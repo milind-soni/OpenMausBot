@@ -9,6 +9,7 @@ import type { Message } from "@/state/store";
 import { formatElapsed } from "@/lib/working-time";
 import { t } from "@/lib/i18n";
 import { failedTurnCause } from "../../shared/failed-turn";
+import { localDay } from "@/lib/transcript-derivations";
 
 export type ActivityTranscriptItem =
   | { kind: "message"; message: Message }
@@ -131,7 +132,7 @@ function group(messages: Message[], foldAssistantTurns: boolean): TranscriptItem
         first &&
         (first.role !== message.role ||
           first.from?.botId !== message.from?.botId ||
-          new Date(first.at).toDateString() !== new Date(message.at).toDateString())
+          localDay(first.at) !== localDay(message.at))
       ) {
         flush();
       }

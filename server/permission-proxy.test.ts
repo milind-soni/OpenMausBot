@@ -75,6 +75,7 @@ describe("permission proxy", () => {
   const startProxy = (socketPath: string, env?: NodeJS.ProcessEnv) => {
     proxy = spawn(process.execPath, ["--experimental-strip-types", PROXY, socketPath], { stdio: ["pipe", "pipe", "pipe"], env });
     let out = "";
+    proxy.stdout!.setEncoding("utf8");
     proxy.stdout!.on("data", (chunk) => {
       out += chunk; let nl;
       while ((nl = out.indexOf("\n")) !== -1) {
@@ -95,6 +96,7 @@ describe("permission proxy", () => {
       conns.push(conn);
       let buf = "";
       conn.on("error", () => {});
+      conn.setEncoding("utf8");
       conn.on("data", (chunk) => {
         buf += chunk;
         let nl;
@@ -335,6 +337,26 @@ describe("permission proxy", () => {
       updatedPermissions: [{ type: "addRules", rules: [{ toolName: "Bash" }] }],
     });
   });
+
+  it("hands a large non-ASCII tool input back to the CLI byte for byte", async () => {
+    // About 1.5 MB of three-byte characters: the line reaches the proxy over
+    // many pipe reads, and most read boundaries fall inside a character.
+    // Decoding each read on its own turned those into U+FFFD, and the allow
+    // carried the damaged text back as updatedInput, so the CLI wrote it.
+    const content = "中文ok€".repeat(150_000);
+    answerWith = () => ({ behavior: "allow" });
+    rpc({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "approve", arguments: { tool_name: "Write", input: { file_path: "notes.md", content } } },
+    });
+    const res = await waitFor(2, 20_000);
+    expect(asks[0].input.content === content).toBe(true);
+    const updated = resultJson(res).updatedInput.content as string;
+    expect(updated.includes("\uFFFD")).toBe(false);
+    expect(updated === content).toBe(true);
+  }, 30_000);
 
   it("still asks ask_user as a question and returns the words verbatim", async () => {
     answerWith = () => ({ behavior: "answer", message: "ship it", source: "user" });

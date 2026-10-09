@@ -49,7 +49,7 @@ import { RoutineLogs } from "@/components/routines/RoutineLogs";
 import { ResultsDestination } from "@/components/routines/ResultsDestination";
 import { CronScheduleFields, CronSchedulePreview } from "@/components/routines/CronScheduleFields";
 import { cronChoiceFor, cronDraftFor, cronEditorValue, isCronChoice, type CronChoice } from "@/components/routines/cron-editor";
-import { routineRunLabel, routineRunTime, routineScheduleState } from "@/lib/routine-display";
+import { routineRunLabel, routineRunsOn, routineRunTime, routineScheduleState } from "@/lib/routine-display";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
@@ -376,6 +376,7 @@ export function EventEditor({
   );
   const [intervalTimeoutDefaultApplied, setIntervalTimeoutDefaultApplied] = useState(Boolean(existingRoutine));
   const [overlap, setOverlap] = useState<"skip" | "queue">(existingRoutine?.overlap ?? "skip");
+  const [continuity, setContinuity] = useState(Boolean(existingRoutine?.continuity));
   const [recurrence, setRecurrence] = useState<RecurrenceChoice>(recurrenceFor(schedule, initialAt));
   const [cronDraft, setCronDraft] = useState(() => cronDraftFor(schedule.type === "cron" ? schedule : undefined, initialAt));
   const [cronChanged, setCronChanged] = useState(false);
@@ -415,6 +416,7 @@ export function EventEditor({
   const selectedRoom = rooms.find((group) => group.id === groupId);
   const roomMembers = activeRoomMembers(selectedRoom, state.bots);
   const isRoomGoal = kind === "routine" && routineTarget === "room-goal";
+  const cloudHome = state.config?.cloudHome === true;
   const at = fromLocalDateAndTime(date, startTime, existingRoutine || existingCall ? initialAt : undefined);
   const endAt = at + durationMinutes * 60_000;
   const selectedBots = botIds.flatMap((id) => bots.find((bot) => bot.id === id) ?? []);
@@ -546,6 +548,8 @@ export function EventEditor({
           durationMinutes,
           timeoutMinutes,
           overlap,
+          // Room goals can't carry a report yet, and a one-time run has no next run.
+          continuity: routineTarget === "bot" && recurrence !== "none" && continuity,
           attachments: routineTarget === "room-goal" ? [] : attachments as RoutineContextAttachment[],
           ...(routineTarget === "bot" ? { resultsThreadId } : {}),
         };
@@ -845,6 +849,15 @@ export function EventEditor({
                   </div>
                 </details>
               );
+  const continuityControl = kind === "routine" && !isRoomGoal && recurrence !== "none" && (
+          <label className={cn("flex items-start gap-3 rounded-xl border border-hairline/40 bg-inset/40 px-3.5 py-3", advanced && "ml-8")}>
+            <input type="checkbox" aria-label={t("routines.continuityLabel")} checked={continuity} onChange={(event) => setContinuity(event.target.checked)} className="mt-0.5 accent-accent" />
+            <span>
+              <span className="block text-[12.5px] font-medium text-ink">{t("routines.continuityLabel")}</span>
+              <span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">{t("routines.continuityHelp")}</span>
+            </span>
+          </label>
+        );
   const resultsControl = kind === "routine" && !isRoomGoal && <div className={cn(advanced && "ml-8")}>
             <ResultsDestination bot={bots.find((bot) => bot.id === botIds[0])} value={resultsThreadId} allowCurrent={Boolean(existingRoutine)} onChange={setResultsThreadId} />
           </div>;
@@ -877,12 +890,12 @@ export function EventEditor({
               <div className="min-w-0 flex-1">
                 {isRoomGoal ? (
                   <div className="rounded-xl border border-accent/35 bg-accent/[0.07] p-3">
-                    <div className="text-[12.5px] font-medium text-ink">Runs on this computer</div>
+                    <div className="text-[12.5px] font-medium text-ink">{cloudHome ? "Runs on My Cloud" : "Runs on this computer"}</div>
                     <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">OpenMausBot keeps the group and its member hand-offs together for the full goal.</div>
                   </div>
                 ) : <div className="grid grid-cols-2 gap-2">
                   <button type="button" onClick={() => setRunOn("maus")} className={cn("rounded-xl border p-3 text-left", runOn === "maus" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">Bot’s current setup</div><div className="mt-1 text-[11px] text-ink-secondary">Keeps its model and configured computer, including a self-hosted VPS.</div></button>
-                  <button type="button" disabled={!cloudReady || attachments.length > 0} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">Boat cloud computer</div><div className="mt-1 text-[11px] text-ink-secondary">The bot's own model works on its Boat, not your VPS. OpenMausBot must stay running to launch it.</div></button>
+                  <button type="button" disabled={!cloudReady || attachments.length > 0} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">{t("routines.runsOn.boat")}</div><div className="mt-1 text-[11px] text-ink-secondary">{t(cloudHome ? "routines.runsOn.boatHintCloudHome" : "routines.runsOn.boatHint")}</div></button>
                 </div>}
               </div>
             </div>
@@ -1004,6 +1017,7 @@ export function EventEditor({
             <FileText size={18} className="mt-2.5 shrink-0 text-ink-secondary" />
             <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} placeholder={isRoomGoal ? "What should the team accomplish?" : kind === "routine" ? (advanced ? "Add instructions for the bot" : t("routines.editor.instructionsPlaceholder")) : "Add description or agenda"} className="min-w-0 flex-1 resize-y rounded-xl border border-hairline/50 bg-inset px-3.5 py-3 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent" />
           </div>
+          {continuityControl}
 
           {advanced && attachmentsRow}
 
@@ -1477,8 +1491,9 @@ export function EventDetails({
   const primary = invited[0];
   const executionOwner = isRoomGoal ? goalGroup : primary;
   const canOpenExecution = Boolean(executionThreadId && (executionOwner?.threadId === executionThreadId || executionOwner?.tasks?.some((task) => task.threadId === executionThreadId)));
-  const report = run ?? routine;
-  const resultsThreadId = report?.resultsThreadId ?? report?.sourceThreadId;
+  // A run snapshots where it reported (older runs: the chat that made the
+  // routine). A routine without a chosen thread reports to the main thread.
+  const resultsThreadId = run ? run.resultsThreadId ?? run.sourceThreadId : routine?.resultsThreadId;
   const canOpenResults = resultsThreadId && [...state.bots, ...state.groups].some((owner) => owner.threadId === resultsThreadId || owner.tasks?.some((task) => task.threadId === resultsThreadId));
   const title = call?.name ?? run?.routineName ?? routine?.name ?? "Routine";
   const description = call?.description ?? run?.prompt ?? routine?.prompt ?? "";
@@ -1569,20 +1584,12 @@ export function EventDetails({
       .slice(0, 3)
     : [];
   const runOn = run?.runOn ?? routine?.runOn;
-  const runsOn = isRoomGoal
-    ? { label: t("routines.runsOn.team"), hint: t("routines.runsOn.localHint") }
-    : runOn === "cloud"
-      ? { label: t("routines.runsOn.boat"), hint: t("routines.runsOn.boatHint") }
-      : primary?.computer === "cloud"
-        ? { label: t("routines.runsOn.botCloud"), hint: t("routines.runsOn.localHint") }
-        : primary?.computer === "vm"
-          ? { label: t("routines.runsOn.botVm"), hint: t("routines.runsOn.localHint") }
-          : { label: t("routines.runsOn.local"), hint: t("routines.runsOn.localHint") };
+  const runsOn = routineRunsOn({ roomGoal: isRoomGoal, runOn, computer: primary?.computer, cloudHome: state.config?.cloudHome === true });
   const resultsOwner = resultsThreadId
     ? [...state.bots, ...state.groups].find((owner) => owner.threadId === resultsThreadId || owner.tasks?.some((task) => task.threadId === resultsThreadId))
     : undefined;
   const resultsTitle = !resultsThreadId
-    ? t("routines.results.dedicated")
+    ? t("routines.results.main")
     : resultsOwner?.tasks?.find((task) => task.threadId === resultsThreadId)?.title ?? resultsOwner?.name ?? t("routines.results.missing");
 
   return (

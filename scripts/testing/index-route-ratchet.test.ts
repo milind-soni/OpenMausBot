@@ -6,10 +6,9 @@ import { describe, expect, it } from "vitest";
 const INDEX = readFileSync(new URL("../../server/index.ts", import.meta.url), "utf8");
 
 const EXACT: Record<string, number> = {
-  // 165 since #2212 (POST /api/internal/mcp-servers), whose CI ran before this ratchet merged. Internal harness
-  // routes have no server/routes module yet; moving them out is the follow-up that lowers this.
-  'path === "/': 165,
-  "path.match(": 91,
+  // Internal harness routes have no server/routes module yet; moving them out is the follow-up that lowers this.
+  'path === "/': 159,
+  "path.match(": 88,
   "path.startsWith(": 11,
   ".exec(path)": 18,
   ".test(path)": 1,

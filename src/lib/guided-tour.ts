@@ -58,11 +58,13 @@ export const TOUR_STEPS: TourStep[] = [
   // every step that lives inside something the previous step opened also
   // opens it on enter, so a reload mid-tour rebuilds the scene
   { id: "tour.computer-browser", anchor: "computer-browser", fallbackAnchor: "computer-tabs", skipIfMissing: true, placement: "below", onEnter: "openComputer", onExit: "closeComputer" },
-  { id: "tour.tools", anchor: "tools", placement: "right", onExit: "openTools" },
+  // Simple mode has no place rows (only Apps, beside the profile), so the
+  // places step and the automations pair skip themselves there.
+  { id: "tour.tools", anchor: "tools", skipIfMissing: true, placement: "right", onExit: "openTools" },
   { id: "tour.apps", anchor: "nav-apps", skipIfMissing: true, placement: "right", onEnter: "openTools", onExit: "openApps" },
   { id: "tour.apps-panel", anchor: "apps-panel", placement: "below", onEnter: "openApps", onExit: "closeApps" },
   { id: "tour.automations", anchor: "nav-automations", skipIfMissing: true, placement: "right", onEnter: "openTools", onExit: "openAutomations" },
-  { id: "tour.automations-page", anchor: "automations-page", placement: "below", onEnter: "openAutomations", onExit: "backToChat" },
+  { id: "tour.automations-page", anchor: "automations-page", skipIfMissing: true, placement: "below", onEnter: "openAutomations", onExit: "backToChat" },
   // back where they started: the closing card sits on the chat itself
   { id: "tour.done", anchor: "composer", placement: "above" },
 ];

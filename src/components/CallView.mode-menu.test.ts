@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Bot } from "@/state/store";
 
-const fixture = vi.hoisted(() => ({ liveConfigured: true, liveCall: null as AppState["liveCall"] }));
+const fixture = vi.hoisted(() => ({ liveConfigured: true, liveCall: null as AppState["liveCall"], cloudHome: false }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
@@ -18,6 +18,7 @@ vi.mock("@/state/store", async (importOriginal) => {
         config: {
           tts: { configured: true, ready: true, voice: "v" },
           live: { configured: fixture.liveConfigured, voice: "marin", readTypedReplies: true, idleMinutes: 5 },
+          cloudHome: fixture.cloudHome,
         } as AppState["config"],
       },
       dispatch: vi.fn(),
@@ -77,6 +78,7 @@ function pressPhone(onStart: (mode: CallMode) => void) {
 beforeEach(() => {
   fixture.liveConfigured = true;
   fixture.liveCall = null;
+  fixture.cloudHome = false;
   vi.stubGlobal("window", { ogb: { speechStart: vi.fn(), speechStop: vi.fn(async () => {}) } });
   // the microphone prompt never answers: a Live call stays "starting"
   configureLiveMedia({ getUserMedia: () => new Promise<MediaStream>(() => {}) });
@@ -97,14 +99,20 @@ describe("the call button", () => {
     expect(onStart).toHaveBeenCalledWith("live");
   });
 
-  it("asks for a key instead of calling when Live has none", () => {
+  // The microphone comes first, even with no key: a page that can't have
+  // one says so before anyone pastes a key. The harness's "no key" answer
+  // (needsKey) then opens the key form.
+  it("asks for the microphone before the key when Live has none", () => {
     fixture.liveConfigured = false;
     setCallMode("live");
+    const getUserMedia = vi.fn(() => new Promise<MediaStream>(() => {}));
+    configureLiveMedia({ getUserMedia });
     const onStart = vi.fn();
     pressPhone(onStart);
-    expect(liveMedia().phase).toBe("idle");
-    expect(currentCall()).toBeNull();
-    expect(onStart).not.toHaveBeenCalled();
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(liveMedia()).toMatchObject({ phase: "starting", botId: "atlas", threadId: "thread-atlas" });
+    expect(renderButton()).not.toContain("OpenAI API key");
+    expect(onStart).toHaveBeenCalledWith("live");
   });
 
   it("hangs up this window's Live call", () => {
@@ -149,6 +157,30 @@ describe("the call button", () => {
     }
   });
 
+  // The desktop app decides whether a server's page may use the microphone,
+  // so a block there says what the app answered, not what the server's own
+  // config claims: the app allowed it (the computer blocked it), or refused.
+  it("tells a blocked microphone on a server's page who blocked it, whatever the page's config says", async () => {
+    for (const [pageMic, notice] of [
+      ["allowed", "Allow microphone access for this app in your computer's privacy settings"],
+      ["refused", "Open it in your web browser to make the Live call."],
+    ] as const) {
+      for (const cloudHome of [true, false]) {
+        resetLiveMedia();
+        fixture.cloudHome = cloudHome;
+        configureLiveMedia({
+          getUserMedia: async () => { throw new DOMException("denied", "NotAllowedError"); },
+          capabilities: () => ({ dictation: { available: false, engine: "none", onDevice: false, reasonCode: "remote-server" } }) as DesktopCapabilities,
+          pageMicrophone: async () => pageMic,
+        });
+        setCallMode("live");
+        pressPhone(vi.fn());
+        await vi.waitFor(() => expect(liveMedia().phase).toBe("failed"));
+        expect(liveMedia().notice, `${pageMic} cloudHome=${cloudHome}`).toContain(notice);
+      }
+    }
+  });
+
   it("keeps Take turns as it was: the overlay's call, no Live media", () => {
     setCallMode("turns");
     const onStart = vi.fn();
@@ -176,6 +208,35 @@ describe("the call mode menu", () => {
     expect(items[0]).toMatch(/^ aria-checked="false"/);
     expect(items[1]).toContain(">Live<");
     expect(items[1]).toMatch(/^ aria-checked="true"/);
+  });
+
+  it("says where the OpenAI key stays: this computer, or the person's Cloud", () => {
+    const props = { id: "m", mode: "live" as const, onChoose: vi.fn(), onClose: vi.fn() };
+    expect(renderToStaticMarkup(createElement(CallModeMenu, props))).toContain("The OpenAI key stays on your computer.");
+    const cloud = renderToStaticMarkup(createElement(CallModeMenu, { ...props, cloudHome: true }));
+    expect(cloud).toContain("The OpenAI key stays on My Cloud.");
+    expect(cloud).not.toContain("stays on your computer");
+  });
+
+  // Off the Mac's own page, Take turns stays in the menu so the person sees
+  // it exists, but it can't be picked, and it says where it works.
+  it("shows Take turns disabled with its reason where this page can't take turns", () => {
+    const turnsUnavailable = {
+      label: "Calls where you take turns need the Mac app",
+      reason: "They listen with on-device speech recognition, which only the Mac app has.",
+    };
+    const markup = renderToStaticMarkup(createElement(CallModeMenu, { id: "m", mode: "live", turnsUnavailable, onChoose: vi.fn(), onClose: vi.fn() }));
+    const [turns, live] = markup.split('role="menuitemradio"').slice(1);
+    // aria-disabled, not disabled: the arrow keys still reach it and its reason
+    expect(turns).toMatch(/^ aria-checked="false" aria-disabled="true"/);
+    expect(turns).not.toContain('disabled=""');
+    expect(turns).toContain(">Take turns<");
+    expect(turns).toContain("Calls where you take turns need the Mac app. They listen with on-device speech recognition, which only the Mac app has.");
+    expect(turns).not.toContain("Listening stays on this computer");
+    expect(live).toMatch(/^ aria-checked="true"/);
+    expect(live).not.toMatch(/aria-disabled="true"|disabled=""/);
+    // where it can take turns, both modes can be picked
+    expect(renderToStaticMarkup(createElement(CallModeMenu, { id: "m", mode: "turns", onChoose: vi.fn(), onClose: vi.fn() }))).not.toMatch(/aria-disabled="true"|disabled=""/);
   });
 
   it("reports the chosen mode", () => {

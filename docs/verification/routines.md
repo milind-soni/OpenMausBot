@@ -66,9 +66,9 @@ The final startup JSON includes the server `url`, `previewUrl`, `pepperId`,
 1. In Pepper's source chat, inspect the pending routine card. Confirm it once;
    the card must become settled and exactly one matching routine must appear.
    Reloading must preserve both the routine and the card's settled state.
-   Open that routine, run it, and return to its source chat: its lifecycle
-   receipt must lead to the isolated execution thread, not replace the source
-   conversation.
+   Open that routine and run it. Its lifecycle receipt lands in Pepper's main
+   thread (her oldest open conversation), not the source chat or a new
+   "· Results" thread, and leads to the isolated execution thread.
 2. Open **Automations → Schedule**. Toggle **List / Calendar**. The list must
    show paused and finished schedules as well as active ones; changing views
    must not change a routine or start a run. Filter by Pepper and Miso and
@@ -106,19 +106,26 @@ The final startup JSON includes the server `url`, `previewUrl`, `pepperId`,
    A user follow-up sent in a completed execution makes it an ordinary visible
    thread; marking the older run seen must not hide that conversation again.
 10. In the routine editor, **Post results to** offers visible threads grouped by
-    folder or **Create a dedicated results thread**. Save to Fleet health
+    folder or **The bot's main thread** (the default). Save to Fleet health
     reports, reload, and confirm the selection persists. In quick create,
     **More options** must preserve the chosen destination. Changing the owning
     bot, including via Call/Team goal selectors, must reset a foreign destination.
     Run a new routine twice: both reports use the chosen thread, while Run logs
-    links to two different executions. The dedicated default similarly reuses
-    one results thread for future runs.
+    links to two different executions. The default reports every run into the
+    bot's main thread and never creates a "· Results" thread.
 
-Existing chat-created routines keep reporting to their source conversation
-unless the user chooses another destination. Historical runs keep the destination
-they started with. If that destination is deleted, their execution threads become
-visible so results and approvals remain reachable; future runs can create a new
-results destination. No existing user conversation is silently deleted or filed.
+Every routine reports into its bot's main thread unless the user chooses another
+destination, whether it was made in a chat, the editor or the API, and whether
+a teammate (such as a Chief) asked for it. The main thread is the bot's oldest
+open conversation: the one it was created with until that is deleted or
+archived. A routine still pointing at an automatic "<name> · Results" thread
+from an older version moves to the main thread on its next run; that thread and
+its reports stay. On a Cloud home, a routine written by someone other than the
+owner keeps its own results conversation, opened as theirs. Historical runs keep
+the destination they started with. If that destination is deleted, their
+execution threads become visible so results and approvals remain reachable;
+future runs report into the main thread. No existing user conversation is
+silently deleted or filed.
 
 An unconfirmed proposal is not an active routine. A run marked **Waiting** is
 not necessarily asking the user for approval: its attention text can explain

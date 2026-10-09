@@ -73,6 +73,8 @@ const { SimpleBotPanel, botLibraryItems } = await import("./bot-settings/SimpleB
 const { SoulField } = await import("./SoulField");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
 const { ModelPicker } = await import("./ModelPicker");
+const { ThreadModelsLine } = await import("./ThreadModelsLine");
+const { ModelSection } = await import("./bot-settings/ModelSection");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -343,5 +345,39 @@ describe("the bot settings dialog", () => {
     expect(isSimple(rendered)).toBe(false);
     expect(rendered.html).toContain("Search settings");
     expect(rendered.nodes.some((node) => node.props["data-bot-settings-back"])).toBe(false);
+  });
+});
+
+describe("Switch them too beside the bot's model", () => {
+  const opus = { instanceId: "claude", model: "claude-opus-5-5" };
+  const onOwn = (count: number): Partial<Bot> => ({ tasks: [
+    { threadId: "thread-scout", title: "Follows", createdAt: 1, modelSelection: opus, followsBotModel: true },
+    ...Array.from({ length: count }, (_, index) => ({
+      threadId: `own-${index}`, title: `Own ${index}`, createdAt: 1, modelSelection: { instanceId: "codex", model: "gpt-5.6" }, followsBotModel: false,
+    })),
+  ] });
+
+  it("shows the line and its button under the Simple panel's model only while a thread runs on its own model", () => {
+    expect(panel(makeBot(onOwn(0))).html).not.toContain("use their own model");
+    const { html } = panel(makeBot(onOwn(1)));
+    expect(html).toContain("1 thread uses its own model.");
+    expect(html).toContain("Switch it too");
+    expect(html.indexOf("Default model")).toBeLessThan(html.indexOf("1 thread uses its own model."));
+    expect(html.indexOf("1 thread uses its own model.")).toBeLessThan(html.indexOf("Before Scout acts"));
+  });
+
+  it("shows it in the full Model section too, and its button switches them", () => {
+    fixture.storeState = { settingsOpen: true, botSettingsSection: "model", botSettingsExpandAccordion: true };
+    expect(dialog(makeBot(onOwn(0))).html).not.toContain("data-thread-models");
+    const rendered = dialog(makeBot(onOwn(3)));
+    expect(rendered.html).toContain("3 threads use their own model.");
+    expect(rendered.html).toContain("Switch them too");
+    // A fresh hook record: the section is captured on its own.
+    fixture.values = [];
+    fixture.own = 0;
+    const section = capture(() => ModelSection({ bot: makeBot(onOwn(3)) }));
+    const line = section.nodes.find((node) => node.type === ThreadModelsLine)!;
+    click(capture(() => ThreadModelsLine(line.props as never)).nodes.find((node) => node.props["data-switch-them-too"] !== undefined)!);
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "followBotModel", botId: "scout" });
   });
 });
