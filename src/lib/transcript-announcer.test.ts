@@ -123,6 +123,14 @@ describe("latestReply", () => {
     expect(latestReply(messages, (m) => m.from?.name ?? "Pepper")).toEqual({ id: "c", name: "Eli", text: "Second." });
   });
 
+  it("skips a client-abort sentence and reads the reply before it", () => {
+    const messages = [
+      text("a", "bot", "Here is the plan."),
+      text("b", "bot", "The request was cancelled by the client."),
+    ];
+    expect(latestReply(messages, () => "Pepper")?.id).toBe("a");
+  });
+
   it("skips activity rows and empty text", () => {
     const messages: Message[] = [
       text("a", "bot", "Answer."),

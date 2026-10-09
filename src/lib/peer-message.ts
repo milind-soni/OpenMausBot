@@ -10,7 +10,8 @@
 // this module exists to prevent. The parse is the client twin of
 // server/peer-provenance.ts: the field wins; rows stored before it existed
 // still open with the note, so the note is read as the fallback.
-import type { Message } from "@/state/store";
+// The wire shape, so server code and tests can read peer lines too.
+import type { WireMessage as Message } from "../../shared/wire.ts";
 
 export type PeerDelivery = "ask_bot" | "delegate_bot" | "start_thread" | "coordinate_bots";
 

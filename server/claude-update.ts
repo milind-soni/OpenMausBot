@@ -1,5 +1,8 @@
 import type { ExecFileOptions } from "node:child_process";
+import { dirname } from "node:path";
 
+import { enginesBinDir, installNpmEngine } from "./engine-install.ts";
+import { findCliCandidates } from "./env-path.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 
 type ExecCli = (
@@ -10,6 +13,30 @@ type ExecCli = (
 ) => void;
 
 const FALLBACK = "Run `claude update` in Terminal, then refresh Engines.";
+
+/** Claude Code's npm package: the one ClaudeDriver's install descriptor names. */
+export const CLAUDE_CODE_PACKAGE = "@anthropic-ai/claude-code";
+
+/** True when `cli` runs the copy Settings installed into the app's own npm
+ * prefix (engine-install.ts). That copy shadows every other one on PATH, and
+ * `claude update` cannot update it: Claude's updater reinstalls through the
+ * first npm it finds, which updates some other copy and leaves this one as it
+ * was. A configured path or wrapper is never the app's copy. */
+export function isAppInstalledClaude(cli: string, binDir: string = enginesBinDir()): boolean {
+  const resolved = findCliCandidates(cli)[0];
+  return resolved !== undefined && dirname(resolved) === binDir;
+}
+
+/** How the copy the app installed is updated: the way it was installed. */
+export interface AppCopy {
+  owns: (cli: string) => boolean;
+  reinstall: (cli: string, env: NodeJS.ProcessEnv) => Promise<void>;
+}
+
+const appCopy: AppCopy = {
+  owns: (cli) => isAppInstalledClaude(cli),
+  reinstall: (cli, env) => installNpmEngine(CLAUDE_CODE_PACKAGE, { cli, env }),
+};
 
 function stderrOf(error: unknown): string {
   const stderr = (error as { stderr?: unknown }).stderr;
@@ -55,23 +82,34 @@ function updateFailure(error: unknown, cli: string): Error {
   return new Error(`Claude update failed${detail ? `: ${detail}` : ""}. ${FALLBACK}`);
 }
 
-/** Run Claude Code's own updater, then prove which version is now installed.
- * The caller owns the environment so credentials can be stripped before the
+/** Update the Claude Code that `cli` runs, then prove which version it now
+ * reports: Claude's own updater, or npm for the copy the app installed. The
+ * caller owns the environment so credentials can be stripped before the
  * executable (including a configured wrapper) is launched. */
 export async function updateClaudeCli(
   cli: string,
   env: NodeJS.ProcessEnv,
   execute: ExecCli = execCli,
+  own: AppCopy = appCopy,
 ): Promise<{ version: string }> {
-  try {
-    await run(execute, cli, ["update"], {
-      env,
-      timeout: 180_000,
-      killSignal: "SIGKILL",
-      maxBuffer: 1024 * 1024,
-    });
-  } catch (error) {
-    throw updateFailure(error, cli);
+  if (own.owns(cli)) {
+    try {
+      await own.reinstall(cli, env);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Claude update failed: ${message}`);
+    }
+  } else {
+    try {
+      await run(execute, cli, ["update"], {
+        env,
+        timeout: 180_000,
+        killSignal: "SIGKILL",
+        maxBuffer: 1024 * 1024,
+      });
+    } catch (error) {
+      throw updateFailure(error, cli);
+    }
   }
 
   try {

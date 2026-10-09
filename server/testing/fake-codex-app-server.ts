@@ -288,6 +288,11 @@ const writeDumpAtomic = (path: string, contents: string): void => {
   }
 };
 const dump = () => {
+  // Account probes run in a separate process with the same environment.
+  // Turn-focused fixtures must not lose their transport evidence when a
+  // later account/read overwrites the shared dump. Catalog/identity tests
+  // keep the default behavior so they can still inspect those probes.
+  if (process.env.FAKE_CODEX_DUMP_TURNS_ONLY === "1" && !calls.some(call => call.method === "turn/start")) return;
   if (process.env.FAKE_CODEX_DUMP) {
     writeDumpAtomic(
       process.env.FAKE_CODEX_DUMP,

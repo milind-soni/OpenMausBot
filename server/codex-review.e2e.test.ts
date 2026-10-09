@@ -45,6 +45,7 @@ beforeAll(async () => {
     codex: { driver: "codex", environment: {
       FAKE_CODEX_MODE: "review-events",
       FAKE_CODEX_DUMP: join(home, "codex-dump.json"),
+      FAKE_CODEX_DUMP_TURNS_ONLY: "1",
       FAKE_CODEX_REVIEW_ONCE_FILE: join(home, "review-once"),
       FAKE_CODEX_REVIEW_EVENTS: JSON.stringify([
       { method: "guardianWarning", params: { threadId: "codex-thread-1", message: "Automatic approval review timed out." } },

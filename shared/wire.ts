@@ -161,6 +161,9 @@ export interface WireTask {
   autoApprove?: boolean;
   alwaysAllow?: string[];
   unread?: boolean;
+  /** The newest message on screen the last time the person read this
+   * conversation. The New divider goes after it. */
+  lastReadMessageId?: string;
   /** true after an edit/branch-switch rewound the visible conversation. */
   rewound?: boolean;
   pinnedMessageId?: string;
@@ -684,6 +687,9 @@ export interface WireGroup {
   /** The room's shared instructions. */
   bulletin: string;
   unread: boolean;
+  /** The newest message on screen the last time the person read this
+   * conversation. The New divider goes after it. */
+  lastReadMessageId?: string;
   createdAt: number;
   /** true for auto-created bot-bot channels. */
   dm?: boolean;

@@ -60,6 +60,17 @@ describe("groupActivityRuns", () => {
     }
   });
 
+  it("keeps a stopped turn visible between successful tool runs", () => {
+    const stopped = tool("stopped: Stopped");
+    const messages = [tool("Read"), tool("Edit"), stopped, tool("Bash"), tool("Write")];
+    expect(statusActivity(stopped)).toEqual({ kind: "stopped", text: "Stopped" });
+    for (const group of [groupActivityRuns, groupTranscript]) {
+      const items = group(messages);
+      expect(items.map(item => item.kind)).toEqual(["run", "message", "run"]);
+      expect(items[1]).toEqual({ kind: "message", message: stopped });
+    }
+  });
+
   it("keeps a model notice visible between successful tool runs", () => {
     const notice = tool("notice: OpenCode no longer offers opencode/x, so this conversation uses opencode/big-pickle.");
     const messages = [tool("Read"), tool("Edit"), notice, tool("Bash"), tool("Write")];

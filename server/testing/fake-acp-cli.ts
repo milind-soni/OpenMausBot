@@ -231,9 +231,10 @@ const configOptions = () => {
 // cursor-shaped surface: the session advertises `models.availableModels` with
 // parameterised ids (`default[]`) that differ from the argv `--model` slugs
 // (`auto`). Off unless FAKE_ACP_SESSION_MODELS is set, so every existing mode
-// stays byte-identical. Format: "id|Name,id|Name" — the name is optional.
+// stays byte-identical. Format: "id|Name,id|Name" — the name is optional, and
+// commas inside an id's `[...]` parameters do not split it.
 const acpModels = (process.env.FAKE_ACP_SESSION_MODELS ?? "")
-  .split(",")
+  .split(/,(?![^[]*\])/)
   .filter(Boolean)
   .map((entry) => {
     const [modelId, name] = entry.split("|");
@@ -768,7 +769,8 @@ function handle(msg: any) {
         // an older agent that predates these methods
         return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
       }
-      if (mode === "set-model-invalid-params" && msg.method === "session/set_model") {
+      if (msg.method === "session/set_model" && (mode === "set-model-invalid-params" ||
+          (mode === "set-model-invalid-after-first" && configCalls.some((call) => call.method === "session/set_model")))) {
         // an agent whose ACP model namespace does not contain the id it was
         // sent — Cursor's answer when handed an argv slug like `auto`.
         return out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params" } });

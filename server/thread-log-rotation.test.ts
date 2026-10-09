@@ -101,10 +101,11 @@ describe("thread log rotation", () => {
     expect(readdirSync(EVENTS_DIR)).toEqual([]);
   });
 
-  it("the bus caps its canonical log after appending", () => {
+  it("the bus caps its canonical log after appending", async () => {
     bindThreadLogCapProvider(() => 900);
     const bus = new EventBus();
     for (let i = 0; i < 30; i++) bus.publish(busEvent(i));
+    await bus.flush();
     const file = join(EVENTS_DIR, `${THREAD}.ndjson`);
     const lines = linesOf(EVENTS_DIR);
     expect(statSync(file).size).toBeLessThanOrEqual(900);
