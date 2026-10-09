@@ -146,6 +146,20 @@ export function parseAskQuestions(input: unknown): AskQuestion[] | null {
   return questions.length ? questions : null;
 }
 
+/** The questions on a Codex agent message delivered by its
+ * `request_user_input_async` tool: `{ title, options: string[] | null }`
+ * entries the model posts while it keeps working, so nothing waits on an
+ * answer. Read into the card's shape under the same caps; null unless at
+ * least one question offers an option, because a bare question is already
+ * readable in the message text itself. */
+export function parseAsyncQuestions(entries: unknown): AskQuestion[] | null {
+  if (!Array.isArray(entries)) return null;
+  const questions = parseAskQuestions({
+    questions: entries.map((entry) => (isRecord(entry) ? { question: entry.title, options: entry.options } : null)),
+  });
+  return questions?.some((question) => question.options.length > 0) ? questions : null;
+}
+
 /** The one line the card subtitle and a spoken prompt show. */
 export function askQuestionSummary(questions: readonly AskQuestion[]): string {
   const first = questions[0]?.question ?? "";
@@ -271,6 +285,15 @@ export function formatQuestionAnswers(
  * card. Anything that does not carry the lead-in is shown as it is. */
 export function answerWithoutPreamble(answer: string): string {
   return answer.startsWith(`${ANSWER_PREAMBLE}\n\n`) ? answer.slice(ANSWER_PREAMBLE.length + 2) : answer;
+}
+
+/** An async question's card answer as the person's own chat message: the
+ * card's text without the model-facing lead-in, and for a single question
+ * only what was picked, which is what the person would have typed. */
+export function asyncQuestionReply(answer: string, questions: readonly AskQuestion[]): string {
+  const reply = answerWithoutPreamble(answer.trim()).trim();
+  const only = questions.length === 1 ? questions[0]! : undefined;
+  return (only && questionAnswersByQuestion(reply, [only])[only.question]) || reply;
 }
 
 /**
