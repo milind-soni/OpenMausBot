@@ -45,7 +45,7 @@ function printableString(maxLength: number) {
 }
 
 const printableName = printableString(80);
-const printableVersion = printableString(64);
+export const printableVersion = printableString(64);
 
 const createInstallationSchema = z.strictObject({
   name: printableName,
@@ -377,6 +377,19 @@ export async function requireInstallationAndRead<T>(
   // The UPDATEs return no rows. When a read is batched, its result is last.
   const row = read ? ((results.at(-1)?.results[0] as T | undefined) ?? null) : null;
   return { installation, row };
+}
+
+/** Keeps `app_version` current: registration is not the only time an app
+ * says which release it runs, and endpoint allocation can depend on it. The
+ * caller has already compared it with the stored value. */
+export async function recordReportedAppVersion(
+  env: Env,
+  installationId: string,
+  appVersion: string,
+): Promise<void> {
+  await env.DB.prepare(
+    "UPDATE installations SET app_version = ? WHERE id = ? AND revoked_at IS NULL",
+  ).bind(appVersion, installationId).run();
 }
 
 export async function installationSelf(request: Request, env: Env): Promise<Response> {

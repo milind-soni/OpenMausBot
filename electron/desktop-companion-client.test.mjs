@@ -62,6 +62,13 @@ describe("desktop companion endpoint", () => {
     expect(normalizeDesktopCompanionEndpoint("c-opaque.openmausbot.com")).toBe(
       "https://c-opaque.openmausbot.com",
     );
+    // The control plane's second Cloudflare account gives addresses here.
+    expect(normalizeDesktopCompanionEndpoint("https://c-opaque.mausbot.si")).toBe(
+      "https://c-opaque.mausbot.si",
+    );
+    expect(normalizeDesktopCompanionEndpoint(" C-Opaque.Mausbot.SI/ ")).toBe(
+      "https://c-opaque.mausbot.si",
+    );
     for (const endpoint of [
       "https://unrelated.example.com",
       "http://c-opaque.openmausbot.com",
@@ -73,6 +80,13 @@ describe("desktop companion endpoint", () => {
       "http://user@host.example-tailnet.ts.net",
       "http://host.example-tailnet.ts.net.evil.test",
       "https://c-opaque.openmausbot.com.evil.test",
+      "http://c-opaque.mausbot.si",
+      "https://c-opaque.mausbot.si/path",
+      "https://c-opaque.mausbot.si.evil.test",
+      "https://mausbot.si",
+      "mausbot.si",
+      "https://evilmausbot.si",
+      "https://c-opaque.evilmausbot.si",
     ]) {
       expect(normalizeDesktopCompanionEndpoint(endpoint), endpoint).toBe("");
     }
@@ -82,6 +96,11 @@ describe("desktop companion endpoint", () => {
     const hostedAccess = { ...access, endpoint: "https://c-opaque.openmausbot.com" };
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: hostedAccess })).toEqual(
       hostedAccess,
+    );
+    // A saved pairing with a computer whose address is on mausbot.si loads.
+    const secondDomain = { ...access, endpoint: "https://c-opaque.mausbot.si" };
+    expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: secondDomain })).toEqual(
+      secondDomain,
     );
 
     expect(desktopCompanionAccess({ [DESKTOP_COMPANION_FIELD]: access })).toEqual(access);
@@ -141,6 +160,19 @@ describe("desktop companion pairing", () => {
     expect(paired).toEqual({ ...access, endpoint: "https://c-opaque.openmausbot.com" });
     expect(fetchImpl).toHaveBeenCalledWith(
       "https://c-opaque.openmausbot.com/api/pair",
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    const secondDomain = await pairDesktopCompanion({
+      endpoint: "c-opaque.mausbot.si",
+      code: "654321",
+      deviceName: "Desktop client",
+      requestId: "request-https-02",
+      fetchImpl,
+    });
+    expect(secondDomain).toEqual({ ...access, endpoint: "https://c-opaque.mausbot.si" });
+    expect(fetchImpl).toHaveBeenLastCalledWith(
+      "https://c-opaque.mausbot.si/api/pair",
       expect.objectContaining({ method: "POST" }),
     );
   });

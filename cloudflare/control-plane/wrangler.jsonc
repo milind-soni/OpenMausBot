@@ -19,9 +19,31 @@
     "CLOUDFLARE_ACCOUNT_ID": "0c92969a82eb9e173b013a7e7a02333d",
     "CLOUDFLARE_ZONE_ID": "bae08399bb6f96eb7266c65ac0057eee",
     "COMPANION_HOST_SUFFIX": "openmausbot.com",
-    // Managed endpoint capacity (see README "Tunnel capacity and idle
-    // reclaim"). The limits only drive the 90% usage alert and /healthz;
-    // they never block provisioning on their own.
+    // More Cloudflare accounts for managed endpoints (README "Several
+    // Cloudflare accounts"). Unset: the account above is the only one. A new
+    // endpoint goes to the account with the most room; an endpoint never
+    // leaves the account it was created in, so never edit an entry's
+    // accountId, zoneId or companionHostSuffix once it holds endpoints (add a
+    // new entry instead). The same JSON may be a secret to keep the IDs out of
+    // this file. Each entry's token is the secret named by apiTokenSecret
+    // (wrangler secret put CLOUDFLARE_API_TOKEN_MAUSBOT_SI), never a var.
+    // "CLOUDFLARE_ENDPOINT_ACCOUNTS": [
+    //   {
+    //     "accountId": "<32-hex account ID>",
+    //     "zoneId": "<32-hex zone ID of mausbot.si>",
+    //     "companionHostSuffix": "mausbot.si",
+    //     "apiTokenSecret": "CLOUDFLARE_API_TOKEN_MAUSBOT_SI",
+    //     "tunnelLimit": 1000,
+    //     "dnsRecordLimit": 200,
+    //     "minAppVersion": "<first release that accepts mausbot.si>"
+    //   }
+    // ],
+    // Managed endpoint capacity of the account above (see README "Tunnel
+    // capacity and idle reclaim"): its tunnel quota and its zone's DNS record
+    // quota. They drive the 90% usage alert and /healthz, rank accounts for
+    // new endpoints, and tell a tunnel-quota 429 from a rate limit, so keep
+    // them equal to Cloudflare's real quotas. They never refuse an
+    // allocation on their own.
     "OMB_TUNNEL_LIMIT": "1000",
     "OMB_DNS_RECORD_LIMIT": "1000",
     // "on" marks idle tunnels for cleanup; "observe" only logs candidates.

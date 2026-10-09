@@ -251,6 +251,33 @@ describe("control-plane desktop client", () => {
     });
   });
 
+  it("reports the app's release with an endpoint request only when it is a printable version", async () => {
+    const connectorToken = `eyJ${"x".repeat(80)}`;
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ endpoint: { url: "https://c-opaque.mausbot.si" }, connectorToken }),
+    );
+    const client = createControlPlaneClient({ baseURL: "https://accounts.openmausbot.com", fetchImpl });
+    const sent = () => {
+      const [, init] = fetchImpl.mock.lastCall;
+      return { body: init.body, contentType: init.headers.get("content-type") };
+    };
+
+    await expect(client.ensureEndpoint(INSTALL, { appVersion: " 0.1.104 " })).resolves.toEqual({
+      endpoint: { url: "https://c-opaque.mausbot.si" },
+      connectorToken,
+    });
+    expect(sent()).toEqual({ body: JSON.stringify({ appVersion: "0.1.104" }), contentType: "application/json" });
+
+    // An older caller, or a version the control plane would refuse, sends no
+    // body at all, exactly as before.
+    for (const options of [undefined, {}, { appVersion: "" }, { appVersion: "   " }, { appVersion: "0.1\n.104" },
+      { appVersion: "9".repeat(65) }, { appVersion: 104 }, { appVersion: new String("0.1.104") }]) {
+      await client.ensureEndpoint(INSTALL, options);
+      expect(sent(), JSON.stringify(options)).toEqual({ body: undefined, contentType: null });
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(9);
+  });
+
   it("maps bounded server error codes and hides arbitrary response text", async () => {
     const client = createControlPlaneClient({
       baseURL: "https://accounts.openmausbot.com",

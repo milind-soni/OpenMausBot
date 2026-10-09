@@ -17,8 +17,8 @@
 // `serve` starts the server, waits for it, and prints a pairing link with a
 // QR code: scan it with the phone or open it on a laptop. `--tailscale` asks
 // Tailscale to terminate HTTPS for it and uses the MagicDNS name in the link.
-// `--tunnel` (after `login`) serves at a public https://….openmausbot.com
-// address through a Cloudflare tunnel: no domain, no proxy, no open port.
+// `--tunnel` (after `login`) serves at a public https://c-… address
+// through a Cloudflare tunnel: no domain, no proxy, no open port.
 //
 // This module only exports; openmausbot.ts is the entry that runs main(), so
 // bundling this file into other entries (pair-cli.ts) never runs it twice.
@@ -275,7 +275,7 @@ fleet   many client workspaces on one Linux server, each its own account,
 --tailscale  serve over your tailnet: Tailscale terminates HTTPS and the
              link uses this machine's MagicDNS name (needs Tailscale signed in
              and HTTPS certificates enabled for the tailnet)
---tunnel     serve at a public https://….openmausbot.com address through a
+--tunnel     serve at a public https://c-… address through a
              Cloudflare tunnel: no domain, no proxy, no open port. Run
              \`openmausbot login\` once on this machine first.
 --domain     serve at https://HOST on your own domain: a pinned Caddy is
@@ -852,7 +852,7 @@ async function planTunnel(options: CliOptions, log: (line: string) => void, reco
     // A fleet-started container: the credential is the whole identity.
     log(`tunnel: using the installation credential from ${FLEET_CREDENTIAL_ENV}`);
     try {
-      access = await fleetAccess({ credential });
+      access = await fleetAccess({ credential, version: serverVersion() });
     } catch (error) {
       return { error: `--tunnel: ${message(error)}` };
     }

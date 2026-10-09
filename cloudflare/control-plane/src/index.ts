@@ -12,7 +12,7 @@ import {
   provisionManagedEndpoint,
   sweepManagedEndpointCleanup,
 } from "./endpoints";
-import { capacityHealth, scanTunnelCapacity } from "./tunnel-capacity";
+import { capacityHealth, reportEndpointAccountProblems, scanTunnelCapacity } from "./tunnel-capacity";
 import {
   createInstallation,
   installationSelf,
@@ -219,7 +219,8 @@ export function createWorker(cloudflareFetch: CloudflareFetch = fetch) {
         }
         // The scan only marks idle rows; the sweep below performs every
         // deletion through the ownership-verified path. A failed scan must
-        // never block cleanup that is already queued.
+        // never block cleanup that is already queued. Both act on each
+        // endpoint's own Cloudflare account.
         try {
           await scanTunnelCapacity(env, config, cloudflareFetch, requestId);
         } catch {
@@ -234,6 +235,15 @@ export function createWorker(cloudflareFetch: CloudflareFetch = fetch) {
         } catch {
           console.error(JSON.stringify({
             message: "managed endpoint cleanup sweep failed",
+            requestId,
+            errorCode: "endpoint_internal",
+          }));
+        }
+        try {
+          await reportEndpointAccountProblems(env, config, requestId);
+        } catch {
+          console.error(JSON.stringify({
+            message: "managed endpoint account check failed",
             requestId,
             errorCode: "endpoint_internal",
           }));

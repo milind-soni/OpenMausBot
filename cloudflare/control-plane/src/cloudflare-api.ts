@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { ControlPlaneConfig } from "./config";
+import type { EndpointAccount } from "./config";
 import { tunnelActivity, type TunnelActivity } from "./tunnel-activity";
 
 export const MANAGED_COMPANION_ORIGIN_URL = "http://127.0.0.1:8812";
@@ -173,9 +173,10 @@ function providerErrorCode(value: unknown, status: number): string {
   return `cf_http_${status}`;
 }
 
+/** One account's API: its tunnels, and the DNS records of its one zone. */
 export class CloudflareAPI {
   constructor(
-    private readonly config: ControlPlaneConfig["cloudflare"],
+    private readonly config: Pick<EndpointAccount, "accountId" | "apiToken" | "zoneId">,
     private readonly fetcher: CloudflareFetch,
   ) {}
 
@@ -306,6 +307,11 @@ export class CloudflareAPI {
       });
     }
     return { returned: result.length, skipped, totalCount, tunnels };
+  }
+
+  /** Undeleted tunnels in the whole account: what its tunnel quota counts. */
+  async countTunnels(): Promise<number | null> {
+    return (await this.listTunnelPage(1, 1)).totalCount;
   }
 
   /** Total DNS records in the zone, for the record-quota alert. */

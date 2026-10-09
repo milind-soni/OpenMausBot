@@ -216,13 +216,15 @@ export function fleetCredential(env: NodeJS.ProcessEnv = process.env): string | 
   return value ? value : null;
 }
 
-export async function fleetAccess(options: { credential: string; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch }): Promise<ManagedTunnelAccess> {
+/** `version` is this server's release, reported so the control plane only
+ * gives it an address under a managed domain that release accepts. */
+export async function fleetAccess(options: { credential: string; version?: string; env?: NodeJS.ProcessEnv; fetchImpl?: typeof fetch }): Promise<ManagedTunnelAccess> {
   const env = options.env ?? process.env;
   const controlPlane = resolveCompanionControlPlaneURL({ isPackaged: true, environment: env });
   if (!controlPlane) throw new Error("OMB_CONTROL_PLANE_URL is set but is not an https address");
   const client = createControlPlaneClient({ baseURL: controlPlane, fetchImpl: options.fetchImpl });
   try {
-    const { endpoint, connectorToken } = await client.ensureEndpoint(options.credential);
+    const { endpoint, connectorToken } = await client.ensureEndpoint(options.credential, { appVersion: options.version });
     return { endpoint: endpoint.url, token: connectorToken };
   } catch (error) {
     if (error instanceof ControlPlaneError && error.status === 401) {

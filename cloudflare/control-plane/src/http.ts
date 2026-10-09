@@ -84,17 +84,33 @@ export async function withBoundedRequestBody(request: Request): Promise<Request>
   return new Request(request, { body: bytes.buffer, headers });
 }
 
-export async function readBoundedJSON(request: Request): Promise<JSONValue> {
+function requireJSONMediaType(request: Request): void {
   const mediaType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   if (mediaType !== "application/json") throw new HTTPError(415, "unsupported_media_type");
-  if (!request.body) throw new HTTPError(400, "invalid_request");
+}
 
-  const bytes = await readBoundedBody(request);
+function parseJSONBytes(bytes: Uint8Array): JSONValue {
   try {
     return jsonValueSchema.parse(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
   } catch {
     throw new HTTPError(400, "invalid_request");
   }
+}
+
+export async function readBoundedJSON(request: Request): Promise<JSONValue> {
+  requireJSONMediaType(request);
+  if (!request.body) throw new HTTPError(400, "invalid_request");
+  return parseJSONBytes(await readBoundedBody(request));
+}
+
+/** For a route whose JSON body is optional: no body, or an empty one, is
+ * `undefined` (older clients send none). Anything else must be JSON. */
+export async function readOptionalBoundedJSON(request: Request): Promise<JSONValue | undefined> {
+  if (!request.body) return undefined;
+  const bytes = await readBoundedBody(request);
+  if (bytes.byteLength === 0) return undefined;
+  requireJSONMediaType(request);
+  return parseJSONBytes(bytes);
 }
 
 function appendVary(headers: Headers, name: string) {

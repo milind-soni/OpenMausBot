@@ -21,6 +21,9 @@ export default defineConfig({
           OMB_TUNNEL_RECLAIM: "on",
           TEST_MIGRATIONS: await readD1Migrations(`${root}migrations`),
         },
+        // An empty database for migration tests that need data written by an
+        // older schema before the next migration runs.
+        d1Databases: ["MIGRATION_DB"],
       },
     })),
   ],

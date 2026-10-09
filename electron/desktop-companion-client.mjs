@@ -48,6 +48,12 @@ const cleanLabel = (value, fallback) => {
   return label || fallback;
 };
 
+/** The domains the OpenMausBot control plane gives managed companion
+ * addresses under (`c-<id>.<domain>`), one per Cloudflare account it uses. A
+ * new domain must be listed here, and shipped, before the control plane hands
+ * out addresses under it. */
+const MANAGED_COMPANION_SUFFIXES = [".openmausbot.com", ".mausbot.si"];
+
 /** Pairing tokens may travel through a verified OpenMausBot HTTPS endpoint or
  * an explicit Tailscale MagicDNS name. WireGuard protects cleartext HTTP on
  * the latter; accepting LAN IPs there would silently turn the long-lived
@@ -67,7 +73,8 @@ export function normalizeDesktopCompanionEndpoint(value) {
   const hostname = parsed.hostname.toLowerCase();
   const tailscaleHttp = parsed.protocol === "http:" && hostname.endsWith(".ts.net");
   const managedHttps =
-    parsed.protocol === "https:" && hostname.endsWith(".openmausbot.com");
+    parsed.protocol === "https:" &&
+    MANAGED_COMPANION_SUFFIXES.some((suffix) => hostname.endsWith(suffix));
   if (
     (!tailscaleHttp && !managedHttps) ||
     parsed.username ||

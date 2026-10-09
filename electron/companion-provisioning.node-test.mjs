@@ -93,7 +93,8 @@ test("endpoint failure retains the installation across immediate Retry and resta
         assert.equal(installationCreated, true);
         return reply(response, 429, { error: "credential_rotation_rate_limited" });
       case "POST /v1/installations/self/endpoint":
-        assert.equal(body, null);
+        // The release rides along with every endpoint request.
+        assert.deepEqual(body, { appVersion: identity.appVersion });
         assert.equal(installationCreated, true);
         return endpointReady
           ? reply(response, 200, { endpoint: { url: ENDPOINT }, connectorToken: CONNECTOR_TOKEN })
@@ -222,9 +223,14 @@ test("a reclaimed endpoint is re-provisioned at restart and a full provider retr
   const route = async (request, response) => {
     const key = `${request.method} ${request.url}`;
     calls.push(key);
-    for await (const _chunk of request) {
-      // Drain the body; none of these routes takes one.
-    }
+    let rawBody = "";
+    for await (const chunk of request) rawBody += chunk;
+    // Only the endpoint request carries a body: the app's release.
+    assert.deepEqual(
+      rawBody ? JSON.parse(rawBody) : null,
+      key === "POST /v1/installations/self/endpoint" ? { appVersion: identity.appVersion } : null,
+      `unexpected body for ${key}`,
+    );
     if (request.url.startsWith("/v1/installations/self")) {
       assert.equal(request.headers.authorization, `Bearer ${INSTALLATION_CREDENTIAL}`);
     }

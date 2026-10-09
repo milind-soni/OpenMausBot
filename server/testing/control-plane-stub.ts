@@ -131,9 +131,13 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
       return inst ? send(200, { installation: publicView(inst), credentialExpiresAt: Date.now() + NINETY_DAYS }) : send(401, { error: "unauthorized" });
     }
     if (path === "/v1/installations/self/endpoint") {
-      if (!byCredential()) return send(401, { error: "unauthorized" });
+      const inst = byCredential();
+      if (!inst) return send(401, { error: "unauthorized" });
       if (method === "GET") return send(200, { endpoint: reclaimedUntilProvision ? null : endpoint() });
       if (method === "POST") {
+        // Like the control plane, keep the release an endpoint request reports.
+        const body = await readJson(req);
+        if (typeof body.appVersion === "string") inst.appVersion = body.appVersion;
         if (reclaimedUntilProvision) issuedConnectorToken = reclaimedUntilProvision;
         reclaimedUntilProvision = null;
         return send(200, { endpoint: endpoint(), connectorToken: issuedConnectorToken });

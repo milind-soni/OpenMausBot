@@ -378,7 +378,7 @@ describe("Companion account service", () => {
       currentCredential: INSTALLATION_CREDENTIAL,
       clientInstanceId: UUID,
     }));
-    expect(ensureEndpoint).toHaveBeenNthCalledWith(2, INSTALLATION_CREDENTIAL);
+    expect(ensureEndpoint).toHaveBeenNthCalledWith(2, INSTALLATION_CREDENTIAL, { appVersion: "1.2.3" });
     expect(client.verifyOTP).toHaveBeenCalledOnce();
     expect(client.revokeInstallation).not.toHaveBeenCalled();
     expect(activatePersistedEndpoint).toHaveBeenCalledOnce();
@@ -1203,7 +1203,9 @@ describe("Companion account background recovery", () => {
       await vi.waitFor(() => expect(store.read()[MANAGED_COMPANION_TOKEN_FIELD]).toBe(RECLAIMED_TOKEN));
       expect(client.getEndpoint).toHaveBeenCalledTimes(2);
       expect(client.ensureEndpoint).toHaveBeenCalledOnce();
-      expect(client.ensureEndpoint).toHaveBeenCalledWith(INSTALLATION_CREDENTIAL);
+      // The release rides along, so the control plane knows which managed
+      // domains this installation can be given an address under.
+      expect(client.ensureEndpoint).toHaveBeenCalledWith(INSTALLATION_CREDENTIAL, { appVersion: "1.2.3" });
       expect(store.read()[MANAGED_COMPANION_ENDPOINT_FIELD]).toBe(ENDPOINT);
       await vi.waitFor(() => expect(activatePersistedEndpoint).toHaveBeenCalledOnce());
       expect(client.verifyOTP).not.toHaveBeenCalled();

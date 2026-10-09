@@ -54,7 +54,12 @@ export interface ControlPlaneClient {
     platform: string;
     appVersion?: string;
   }): Promise<{ installation: ControlPlaneInstallation; credential: string; credentialExpiresAt: number | null }>;
-  ensureEndpoint(installationCredential: string): Promise<{ endpoint: ControlPlaneEndpoint; connectorToken: string }>;
+  /** `appVersion`, when printable and at most 64 characters, is sent as the
+   * release this installation runs. */
+  ensureEndpoint(
+    installationCredential: string,
+    options?: { appVersion?: string },
+  ): Promise<{ endpoint: ControlPlaneEndpoint; connectorToken: string }>;
   getEndpoint(installationCredential: string): Promise<{ url: string; status: string } | null>;
   deleteEndpoint(installationCredential: string): Promise<void>;
   revokeInstallation(accountToken: string, installationId: string): Promise<void>;

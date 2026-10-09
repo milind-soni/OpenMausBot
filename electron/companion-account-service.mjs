@@ -547,7 +547,12 @@ export function createCompanionAccountService({
       }
       throw error;
     }
-    const endpoint = await client.ensureEndpoint(installation.credential);
+    // The release decides which managed domains this installation may be
+    // given an address under, so report it with every request, not only at
+    // registration.
+    const endpoint = await client.ensureEndpoint(installation.credential, {
+      appVersion: identity.appVersion,
+    });
     try {
       await updateCredentials((document) =>
         withProvisionedAccount(document, {

@@ -52,6 +52,19 @@ const boundedSecret = (value, maximum = 8_192) =>
     ? value
     : null;
 
+/** The release an app reports with an endpoint request, under the control
+ * plane's rule: printable and at most 64 characters once trimmed. Anything
+ * else is not sent rather than failing the request. */
+const reportableAppVersion = (value) => {
+  const version = stringValue(value)?.trim() ?? "";
+  if (version.length < 1 || version.length > 64) return null;
+  for (const character of version) {
+    const point = character.codePointAt(0);
+    if (point < 32 || point === 127) return null;
+  }
+  return version;
+};
+
 const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1_000;
 
 export class ControlPlaneError extends Error {
@@ -380,16 +393,22 @@ export function createControlPlaneClient({
       };
     },
 
-    async ensureEndpoint(installationCredential) {
+    /** `appVersion` is the release this app runs. The control plane records
+     * it and gives an address under a newer managed domain only to releases
+     * that accept that domain; a control plane that predates it ignores the
+     * body. */
+    async ensureEndpoint(installationCredential, { appVersion } = {}) {
       if (
         typeof installationCredential !== "string" ||
         !INSTALLATION_CREDENTIAL.test(installationCredential)
       ) {
         throw new ControlPlaneError("signed_out", 401);
       }
+      const version = reportableAppVersion(appVersion);
       const { payload } = await request("/v1/installations/self/endpoint", {
         method: "POST",
         token: installationCredential,
+        ...(version === null ? {} : { body: { appVersion: version } }),
       });
       const endpoint = validatedEndpoint(payload.endpoint);
       const connectorToken = boundedSecret(payload.connectorToken, 16_384);

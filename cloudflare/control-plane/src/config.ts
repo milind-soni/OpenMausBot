@@ -23,17 +23,40 @@ export interface CapacityConfig {
   tunnelLimit: number;
 }
 
+/** A Cloudflare account that holds managed endpoints: tunnels in the account,
+ * proxied CNAMEs in one zone of it. An endpoint stays in the account it was
+ * created in for its whole life, so an account's ID, zone, and suffix are
+ * never edited once it holds endpoints. */
+export interface EndpointAccount {
+  /** Lowercase 32-character Cloudflare account ID. */
+  accountId: string;
+  apiToken: string;
+  /** Hostnames are `c-<32 hex>.<suffix>`; the suffix is the zone apex. */
+  companionHostSuffix: string;
+  /** Zone DNS record quota: ranks accounts and drives the usage alert. */
+  dnsRecordLimit: number;
+  /** New endpoints go here only for installations reporting at least this
+   * version (`x.y.z`), or for any installation when null. */
+  minAppVersion: string | null;
+  /** Account tunnel quota: ranks accounts, tells a quota 429 from a rate
+   * limit, and drives the usage alert. */
+  tunnelLimit: number;
+  zoneId: string;
+}
+
 export interface ControlPlaneConfig {
   authBaseURL: string;
   allowedOrigins: ReadonlySet<string>;
   capacity: CapacityConfig;
-  cloudflare: {
-    accountId: string;
-    apiToken: string;
-    companionHostSuffix: string;
-    zoneId: string;
-  };
+  /** The primary account, from CLOUDFLARE_ACCOUNT_ID and friends. */
+  cloudflare: EndpointAccount;
   emailFrom: string;
+  /** Every usable account, primary first, then CLOUDFLARE_ENDPOINT_ACCOUNTS
+   * in order. */
+  endpointAccounts: readonly EndpointAccount[];
+  /** Redacted codes for CLOUDFLARE_ENDPOINT_ACCOUNTS entries that were
+   * ignored (`entry_2_token`, ...). Never values. */
+  endpointAccountIssues: readonly string[];
 }
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -49,6 +72,11 @@ export const MIN_OFFLINE_RECLAIM_DAYS = 7;
 // on Workers Free, whose invocation limit is 50 subrequests (4 x 10 + 2 + 2 = 44).
 export const DEFAULT_CLEANUP_SWEEP_LIMIT = 20;
 export const MAX_CLEANUP_SWEEP_LIMIT = 50;
+/** The primary plus at most three accounts from CLOUDFLARE_ENDPOINT_ACCOUNTS.
+ * Each account adds two Cloudflare reads (a tunnel page and a DNS count) to
+ * every cron run: on Workers Free, 4 cleanup rows x 10 calls + 4 x 2 + two
+ * Cache API deletes is the whole 50-subrequest budget. */
+export const MAX_ENDPOINT_ACCOUNTS = 4;
 
 function boundedIntegerVar(
   value: unknown,
@@ -149,6 +177,106 @@ function hostnameSuffix(value: string): string {
   return value;
 }
 
+// An extra account names the secret that holds its token. The name must look
+// like a Cloudflare token's, so a typo can never send another secret (such as
+// BETTER_AUTH_SECRET) to the Cloudflare API.
+const TOKEN_SECRET_NAME = /^CLOUDFLARE_API_TOKEN(?:_[A-Z0-9]+)*$/;
+const MIN_APP_VERSION = /^[0-9]{1,9}\.[0-9]{1,9}\.[0-9]{1,9}$/;
+const quotaSchema = z.number().int().min(1).max(10_000_000);
+
+const endpointAccountSchema = z.strictObject({
+  accountId: cloudflareResourceIdSchema,
+  zoneId: cloudflareResourceIdSchema,
+  companionHostSuffix: z.string().min(1).max(218),
+  apiTokenSecret: z.string().max(128).regex(TOKEN_SECRET_NAME),
+  tunnelLimit: quotaSchema.optional(),
+  dnsRecordLimit: quotaSchema.optional(),
+  minAppVersion: z.string().regex(MIN_APP_VERSION).optional(),
+});
+
+/**
+ * Optional accounts beyond the primary, from CLOUDFLARE_ENDPOINT_ACCOUNTS: a
+ * JSON array (a wrangler.jsonc JSON var, or the same JSON as a string or a
+ * secret) of
+ * `{ accountId, zoneId, companionHostSuffix, apiTokenSecret, tunnelLimit?,
+ * dnsRecordLimit?, minAppVersion? }`.
+ *
+ * A bad entry never throws: sign-in, recovery, and every endpoint already in
+ * a good account must keep working. It is dropped and reported as a redacted
+ * issue code, and endpoints tied to it refuse to act until it is fixed.
+ */
+export function readEndpointAccounts(
+  env: Partial<Record<string, unknown>>,
+  primary: EndpointAccount,
+): { accounts: EndpointAccount[]; issues: string[] } {
+  const raw = env.CLOUDFLARE_ENDPOINT_ACCOUNTS;
+  if (raw === undefined || raw === null || raw === "") return { accounts: [], issues: [] };
+  let entries: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      entries = JSON.parse(raw);
+    } catch {
+      return { accounts: [], issues: ["accounts_json"] };
+    }
+  }
+  if (!Array.isArray(entries)) return { accounts: [], issues: ["accounts_json"] };
+
+  const accounts: EndpointAccount[] = [];
+  const issues: string[] = [];
+  const used = {
+    accountIds: new Set([primary.accountId]),
+    suffixes: new Set([primary.companionHostSuffix]),
+    zoneIds: new Set([primary.zoneId]),
+  };
+  for (const [index, entry] of entries.entries()) {
+    const label = `entry_${index + 1}`;
+    if (accounts.length >= MAX_ENDPOINT_ACCOUNTS - 1) {
+      issues.push(`${label}_over_limit`);
+      continue;
+    }
+    const parsed = endpointAccountSchema.safeParse(entry);
+    if (!parsed.success) {
+      issues.push(`${label}_shape`);
+      continue;
+    }
+    let companionHostSuffix: string;
+    try {
+      companionHostSuffix = hostnameSuffix(parsed.data.companionHostSuffix);
+    } catch {
+      issues.push(`${label}_suffix`);
+      continue;
+    }
+    const accountId = parsed.data.accountId.toLowerCase();
+    const zoneId = parsed.data.zoneId.toLowerCase();
+    if (
+      used.accountIds.has(accountId)
+      || used.zoneIds.has(zoneId)
+      || used.suffixes.has(companionHostSuffix)
+    ) {
+      issues.push(`${label}_duplicate`);
+      continue;
+    }
+    const apiToken = cloudflareTokenSchema.safeParse(env[parsed.data.apiTokenSecret]);
+    if (!apiToken.success) {
+      issues.push(`${label}_token`);
+      continue;
+    }
+    used.accountIds.add(accountId);
+    used.zoneIds.add(zoneId);
+    used.suffixes.add(companionHostSuffix);
+    accounts.push({
+      accountId,
+      apiToken: apiToken.data,
+      companionHostSuffix,
+      dnsRecordLimit: parsed.data.dnsRecordLimit ?? DEFAULT_DNS_RECORD_LIMIT,
+      minAppVersion: parsed.data.minAppVersion ?? null,
+      tunnelLimit: parsed.data.tunnelLimit ?? DEFAULT_TUNNEL_LIMIT,
+      zoneId,
+    });
+  }
+  return { accounts, issues };
+}
+
 export function readConfig(env: Env): ControlPlaneConfig {
   if (!secretSchema.safeParse(env.BETTER_AUTH_SECRET).success) {
     throw new Error("BETTER_AUTH_SECRET must contain at least 32 characters");
@@ -183,18 +311,26 @@ export function readConfig(env: Env): ControlPlaneConfig {
     throw new Error("COMPANION_HOST_SUFFIX must be a lowercase DNS suffix");
   }
 
-  const capacity = readCapacityConfig(env as unknown as Partial<Record<string, unknown>>);
+  const vars = env as unknown as Partial<Record<string, unknown>>;
+  const capacity = readCapacityConfig(vars);
+  const primary: EndpointAccount = {
+    accountId: env.CLOUDFLARE_ACCOUNT_ID.toLowerCase(),
+    apiToken: env.CLOUDFLARE_API_TOKEN,
+    companionHostSuffix: hostnameSuffix(hostSuffix.data),
+    dnsRecordLimit: capacity.dnsRecordLimit,
+    minAppVersion: null,
+    tunnelLimit: capacity.tunnelLimit,
+    zoneId: env.CLOUDFLARE_ZONE_ID.toLowerCase(),
+  };
+  const extra = readEndpointAccounts(vars, primary);
 
   return {
     authBaseURL,
     allowedOrigins,
     capacity,
-    cloudflare: {
-      accountId: env.CLOUDFLARE_ACCOUNT_ID,
-      apiToken: env.CLOUDFLARE_API_TOKEN,
-      companionHostSuffix: hostnameSuffix(hostSuffix.data),
-      zoneId: env.CLOUDFLARE_ZONE_ID,
-    },
+    cloudflare: primary,
     emailFrom: emailFrom.data,
+    endpointAccounts: [primary, ...extra.accounts],
+    endpointAccountIssues: extra.issues,
   };
 }
