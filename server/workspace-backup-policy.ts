@@ -66,3 +66,12 @@ export function redownloadedOrgLibraryPath(path: string): boolean {
 export function ephemeralWorkspaceTokenPath(path: string): boolean {
   return /^(?:hook-tokens(?:\/|$)|sessions\.json\.open$)/.test(path);
 }
+
+/** A bot's DuckDB database (`bots/<id>/data.duckdb`, its WAL, its spill
+ * directory; server/data/engine.ts). Copying the file while the engine holds
+ * it open is not a consistent snapshot (an unflushed WAL), it can run to
+ * gigabytes, and every table in it came from a source the bot can load
+ * again. The sheet beside it (sheet.json) is backed up. */
+export function liveDataEnginePath(path: string): boolean {
+  return /^bots\/[^/]+\/(?:data\.duckdb(?:\.wal)?$|data-tmp(?:\/|$))/.test(path);
+}
