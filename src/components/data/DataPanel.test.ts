@@ -27,7 +27,7 @@ vi.mock("vega-embed", () => {
   fixture.embedLoaded = true;
   return { default: fixture.embed };
 });
-import { DataPanel } from "./DataPanel";
+import { DataPanel, LIVE_RUN_DELAY_MS } from "./DataPanel";
 
 const bot = { id: "pepper", threadId: "thread-1", name: "Pepper" } as Bot;
 const now = "2026-10-09T10:00:00.000Z";
@@ -58,6 +58,13 @@ const editorValue = () => editorView().state.doc.toString();
 const type = (text: string) => {
   const view = editorView();
   flushSync(() => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } }));
+};
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** Type, then wait out the pause after which the text runs. */
+const typeAndRun = async (text: string) => {
+  type(text);
+  await pause(LIVE_RUN_DELAY_MS + 10);
+  await settle();
 };
 const runRequests = () => fixture.api.mock.calls.filter(([path]) => path.endsWith("/run"));
 const viewedResult = () => fixture.dispatch.mock.calls.filter(([action]) => action.type === "dataView").at(-1)?.[0].view;
@@ -151,7 +158,7 @@ describe("DataPanel", () => {
     fixture.sheets.pepper = sheet([card("orders", {})]);
     render();
     await settle();
-    type("select unfinished");
+    await typeAndRun("select unfinished");
     const previousEditor = editorDom();
     const previousSignal = runRequests()[0]![1].signal as AbortSignal;
     flushSync(() => root.render(createElement(DataPanel, { bot: { ...bot, threadId: "thread-2" } })));
@@ -171,8 +178,7 @@ describe("DataPanel", () => {
     fixture.api.mockImplementation((path: string) => path.endsWith("/run") ? Promise.reject(new Error("Parser Error: incomplete query")) : Promise.resolve(page));
     render();
     await settle();
-    type("select incomplete");
-    await settle();
+    await typeAndRun("select incomplete");
     expect(host.querySelector('[data-testid="data-query-error"]')?.textContent).toBe("Parser Error: incomplete query");
     fixture.sheets.pepper = sheet([card("orders", { sql: "select 42", result: "q_repaired" })]);
     render();
@@ -188,7 +194,7 @@ describe("DataPanel", () => {
     fixture.api.mockImplementation((path: string) => path.endsWith("/run") ? new Promise((_resolve, reject) => { rejectRun = reject; }) : Promise.resolve(page));
     render();
     await settle();
-    type("select incomplete");
+    await typeAndRun("select incomplete");
     const signal = runRequests()[0]![1].signal as AbortSignal;
     expect(signal.aborted).toBe(false);
     fixture.sheets.pepper = sheet([card("orders", { sql: "select 42", result: "q_repaired" })]);
@@ -207,9 +213,10 @@ describe("DataPanel", () => {
     await settle();
     const editor = editorDom();
     const grid = host.querySelector('[role="region"]');
-    type("select unfinished");
+    await typeAndRun("select unfinished");
     editorView().dispatch({ selection: { anchor: 7, head: 10 } });
     const calls = runRequests().length;
+    expect(calls).toBe(1);
     expect(separator().getAttribute("aria-controls")).toBe(dock().id);
     expect(separator().getAttribute("aria-valuenow")).toBe("152");
     expect(separator().getAttribute("aria-valuemin")).toBe("128");
@@ -391,19 +398,25 @@ describe("DataPanel", () => {
     expect(editorValue()).toBe("selec 1");
   });
 
-  it("runs every SQL edit immediately on the existing result, including clearing the input", async () => {
+  it("runs the text once typing pauses, latest text winning, and aborts the run a newer edit replaces", async () => {
     fixture.sheets = { pepper: sheet([card("orders", {})]) };
     render();
     await settle();
-    type("select 42");
+    // Five keystrokes inside the pause: one run, with the final text.
+    for (const text of ["s", "se", "sel", "sele", "select 42"]) type(text);
+    await settle();
+    expect(runRequests()).toHaveLength(0);
+    await pause(LIVE_RUN_DELAY_MS + 10);
+    await settle();
     expect(runRequests()).toHaveLength(1);
     expect(JSON.parse(runRequests()[0]![1].body)).toEqual({ cardId: "orders", sql: "select 42", live: true });
     const firstSignal = runRequests()[0]![1].signal as AbortSignal;
     expect(firstSignal.aborted).toBe(false);
-    type("select 43");
+    // Two edits further apart than the pause: two runs, the first interrupted.
+    await typeAndRun("select 43");
     expect(runRequests()).toHaveLength(2);
     expect(firstSignal.aborted).toBe(true);
-    type("");
+    await typeAndRun("");
     expect(runRequests()).toHaveLength(3);
     expect(JSON.parse(runRequests()[2]![1].body)).toEqual({ cardId: "orders", sql: "", live: true });
     expect(editorValue()).toBe("");
@@ -415,7 +428,7 @@ describe("DataPanel", () => {
     render();
     await settle();
     expect(editorValue()).toBe("select * from orders");
-    type("select * from orders limit 5");
+    await typeAndRun("select * from orders limit 5");
     const signal = runRequests()[0]![1].signal as AbortSignal;
     fixture.sheets = { pepper: sheet([card("old", {}), card("orders", { sql: "select * from orders limit 1", updatedAt: "2026-10-09T12:00:00Z" })]) };
     render();
@@ -494,8 +507,7 @@ describe("DataPanel", () => {
     });
     const error = host.querySelector('[data-testid="data-query-error"]');
     const editor = editorDom();
-    type("select");
-    await settle();
+    await typeAndRun("select");
     expect(JSON.parse(runRequests()[0]![1].body)).toEqual({ cardId: "chart", sql: "select", live: true });
     expect(host.querySelector('[role="alert"]')?.textContent).toBe("Parser Error: incomplete SQL");
     expect(host.querySelector('[role="alert"]')).toBe(error);
@@ -503,8 +515,7 @@ describe("DataPanel", () => {
     expect(host.querySelector('[data-testid="data-chart"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="card-error"]')).toBeNull();
     expect(fixture.embed).toHaveBeenCalledTimes(1);
-    type("");
-    await settle();
+    await typeAndRun("");
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(host.querySelector('[data-testid="data-query-error"]')).toBe(error);
     expect(editorDom()).toBe(editor);
@@ -517,8 +528,8 @@ describe("DataPanel", () => {
     await settle();
     let rejectOld!: (error: Error) => void;
     fixture.api.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectOld = reject; }));
-    type("select incomplete");
-    type("select 1");
+    await typeAndRun("select incomplete");
+    await typeAndRun("select 1");
     rejectOld(new Error("Old query error"));
     await settle();
     expect(host.querySelector('[role="alert"]')).toBeNull();

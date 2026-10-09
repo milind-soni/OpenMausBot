@@ -19,6 +19,10 @@ function queryBounds(panelHeight: number) {
   return { min: Math.min(QUERY_MIN_HEIGHT, max), max };
 }
 const clampHeight = (height: number, bounds: { min: number; max: number }) => Math.max(bounds.min, Math.min(bounds.max, height));
+/** How long typing pauses before the text runs. Each run materialises a
+ * table on the server and interrupts the previous one, so one keystroke
+ * burst should be one query, not one per character; 50 ms still feels live. */
+export const LIVE_RUN_DELAY_MS = 50;
 
 /** One result at a time, following the latest update until History or
  * another result is selected. Older cards remain intact on the sheet. */
@@ -44,6 +48,13 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
   const resizeFrom = useRef<{ pointerId: number; y: number; height: number } | null>(null);
   const bounds = queryBounds(panelHeight);
   const liveRequest = useRef<AbortController | null>(null);
+  // The text waiting out LIVE_RUN_DELAY_MS; a newer keystroke replaces it.
+  const runTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dropPendingRun = () => {
+    if (runTimer.current === null) return;
+    clearTimeout(runTimer.current);
+    runTimer.current = null;
+  };
   const draft = useRef<{ cardId: string; sql?: string; externalRevision?: string } | null>(null);
   const requested = useRef<string | null | undefined>(undefined);
   const previousConnection = useRef(state.connected);
@@ -93,6 +104,9 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
     }
     const botUpdated = externalRevision !== undefined && draft.current?.externalRevision !== externalRevision;
     if (botUpdated) {
+      // The bot's finished edit replaces the shown SQL; text typed against the
+      // old query must not run over it.
+      dropPendingRun();
       liveRequest.current?.abort();
       liveRequest.current = null;
       setRunError(null);
@@ -141,16 +155,22 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
   };
   useEffect(() => {
     setRunError(null);
-    return () => { liveRequest.current?.abort(); };
+    return () => { dropPendingRun(); liveRequest.current?.abort(); };
   }, [card?.id, requestedCard?.requestId]);
 
   const select = (next: typeof selection) => {
     setSelection(next);
   };
-  const run = async (sql: string) => {
+  /** Every keystroke: chat sees the draft at once; the run waits for a pause. */
+  const edit = (sql: string) => {
     if (!card) return;
     draft.current = { cardId: card.id, sql, externalRevision: draft.current?.externalRevision };
     dispatch({ type: "dataView", view: { botId: bot.id, threadId: bot.threadId, cardId: card.id, ...(sql !== card.sql ? { draftSql: sql } : {}) } });
+    dropPendingRun();
+    runTimer.current = setTimeout(() => { runTimer.current = null; void run(sql); }, LIVE_RUN_DELAY_MS);
+  };
+  const run = async (sql: string) => {
+    if (!card) return;
     liveRequest.current?.abort();
     const controller = new AbortController();
     liveRequest.current = controller;
@@ -216,7 +236,7 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
       </div>}
       <div ref={query} id={queryId} style={{ height: hasSql ? queryHeight ?? undefined : undefined }} className="flex min-h-0 shrink-0 flex-col overflow-hidden px-3 py-2" data-testid="data-query">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {hasSql && <SqlEditor key={card.id} sql={card.sql!} externalRevision={externalRevision} readOnly={card.status === "running" && !card.result} onChange={(sql) => void run(sql)} />}
+          {hasSql && <SqlEditor key={card.id} sql={card.sql!} externalRevision={externalRevision} readOnly={card.status === "running" && !card.result} onChange={edit} />}
           <p role={queryError ? "alert" : undefined} title={queryError ?? undefined} className="mt-1 h-4 shrink-0 truncate text-[11.5px] text-danger" data-testid="data-query-error">{queryError}</p>
         </div>
         <div className="shrink-0"><SourcesStrip sources={tables} /></div>
