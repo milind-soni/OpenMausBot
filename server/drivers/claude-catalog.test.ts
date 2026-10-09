@@ -99,11 +99,15 @@ describe("readClaudeModelCatalog", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, "settings.json"),
-      JSON.stringify({ extraModels: [{ id: "claude-sonnet-future-test", label: "Future Claude Sonnet" }, "omlx::local-qwen"] }),
+      JSON.stringify({ extraModels: [
+        { id: "claude-sonnet-future-test", label: "Future Claude Sonnet" },
+        "claude-sonnet-future-test[1m]", "omlx::local-qwen",
+      ] }),
     );
 
     expect(readClaudeModelCatalog({ HOME: home }).options.slice(STATIC_CLAUDE_MODELS.options.length)).toEqual([
       { id: "claude-sonnet-future-test", label: "Future Claude Sonnet" },
+      { id: "claude-sonnet-future-test[1m]", label: "claude-sonnet-future-test[1m]" },
       { id: "omlx::local-qwen", label: "omlx::local-qwen", custom: true },
     ]);
   });

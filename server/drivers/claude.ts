@@ -499,7 +499,7 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
   const extras = [
     ...extrasFromUnknown(settings.availableModels).map((extra) => ({ ...extra, custom: true })),
     ...extrasFromUnknown(settings.customModels).map((extra) => ({ ...extra, custom: true })),
-    ...extrasFromUnknown(settings.extraModels).map((extra) => ({ ...extra, custom: !OFFICIAL_CLAUDE_ID.test(extra.id) })),
+    ...extrasFromUnknown(settings.extraModels).map((extra) => ({ ...extra, custom: !OFFICIAL_CLAUDE_ID.test(extra.id.replace(/\[1m\]$/i, "")) })),
   ];
   const nestedEnv = settings.env && typeof settings.env === "object" ? (settings.env as Record<string, unknown>) : {};
   const envModel = nestedEnv.ANTHROPIC_MODEL ?? env.ANTHROPIC_MODEL;
