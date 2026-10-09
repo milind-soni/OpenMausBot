@@ -7,6 +7,7 @@ import { offersSignIn } from "@/components/EngineSetup";
 import { t } from "@/lib/i18n";
 import type { Bot, InstanceInfo, Message } from "@/state/store";
 import { failedTurnCause } from "../../shared/failed-turn";
+import { isClientCancellation, isStoppedTurnName } from "../../shared/client-cancel";
 
 export { failedTurnCause };
 
@@ -37,7 +38,9 @@ export function botEngine(bot: Bot | undefined, instances: InstanceInfo[]): Inst
 /** One line for a list preview: what a failed turn's row says, minus the
  * "below" a list has no room for; any other activity row its name. */
 export function activityPreview(tool: ActivityTool, engine: InstanceInfo | undefined): string {
+  if (isStoppedTurnName(tool.name)) return t("chat.turnStopped");
   const cause = failedTurnCause(tool.name);
+  if (cause !== null && isClientCancellation(cause)) return t("chat.turnStopped");
   if (cause === null) return tool.name;
   const signedOut = signedOutEngine(tool, engine);
   return signedOut ? t("sidebar.preview.signedOut", { name: signedOut.displayName }) : cause;

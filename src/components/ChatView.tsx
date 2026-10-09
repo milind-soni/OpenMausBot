@@ -57,6 +57,7 @@ import { failedTurnCause, signedOutEngine } from "@/lib/failed-turn";
 import { openPlaceAction, placeRowViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
 import type { PlaceRow } from "../../shared/place-view";
 import { isProviderSafetyBlock, PROVIDER_SAFETY_GUIDANCE, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
+import { isCancelledTranscriptRow } from "../../shared/client-cancel";
 import { BotAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
@@ -109,6 +110,7 @@ import { activeLocale, t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { groupTranscript, isStatusActivity } from "@/lib/activity-runs";
 import { StatusActivityRow } from "@/components/StatusActivityRow";
+import { CancelledTurnRow } from "./CancelledTurnRow";
 import { ActivityRun } from "./ActivityRun";
 import { TurnNarrationRun } from "./TurnNarrationRun";
 import { webhookMessageView } from "@/lib/webhook-message";
@@ -965,6 +967,15 @@ const MessagesList = memo(function MessagesList({
         }
         const m = item.message;
         const row = (() => {
+          // A client abort is a stop, not a failure. Legacy rows still store
+          // the provider's sentence or an error row; both read as this line.
+          if (isCancelledTranscriptRow(m)) {
+            return (
+              <CancelledTurnRow
+                onRetry={m.id === lookups.retryableId && canRetryLast ? onRegenerate : undefined}
+              />
+            );
+          }
           switch (m.kind) {
             case "secret":
               return m.secret ? <SecretRequestCard botId={botId} threadId={threadId} message={m} /> : null;

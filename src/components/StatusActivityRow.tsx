@@ -1,13 +1,16 @@
 import { Info, RefreshCw } from "lucide-react";
 import { statusActivity } from "@/lib/activity-runs";
 import type { Message } from "@/state/store";
+import { CancelledTurnRow } from "./CancelledTurnRow";
 
 /** An engine's own word about this conversation: automatic recovery moved it
  * to another engine, or the engine runs another model than the one saved.
- * Always shown, whatever Settings → Tool calls says. */
+ * Always shown, whatever Settings → Tool calls says. A stopped turn is the
+ * quiet line, not this bordered notice. */
 export function StatusActivityRow({ message }: { message: Message }) {
   const status = statusActivity(message);
   if (!status) return null;
+  if (status.kind === "stopped") return <CancelledTurnRow />;
   const Icon = status.kind === "recovery" ? RefreshCw : Info;
   return (
     <div role="status" className="flex w-fit max-w-full items-start gap-2 rounded-xl border border-hairline/40 bg-panel px-3 py-2 text-[13px] text-ink-secondary">

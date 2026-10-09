@@ -10,7 +10,6 @@ import { applyFont, readFont } from "./lib/fonts";
 import { settleAdvancedModeDefault } from "./lib/interface-mode";
 import { BrowserSignInPage } from "./pair/BrowserSignInPage";
 import { PairPage } from "./pair/PairPage";
-import "katex/dist/katex.min.css";
 import "./styles.css";
 
 // Before the first paint, not inside a component: stamping the skin during

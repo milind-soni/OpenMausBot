@@ -1060,6 +1060,7 @@
   "chat.showRawMarkdown": "Show raw markdown",
   "chat.showRenderedMarkdown": "Show rendered markdown",
   "chat.retry": "Retry",
+  "chat.turnStopped": "Stopped",
   "chat.error.signedOut": "{name} isn't signed in yet. Sign in below, then send your message again.",
   "chat.error.details": "Details",
   "chat.error.dismiss": "Dismiss",

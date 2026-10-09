@@ -61,6 +61,8 @@ describe("failed turn text", () => {
     const limit = "Your Pro plan includes 2 cloud computers at once. Delete one to start another.";
     expect(activityPreview({ name: `error: ${limit}`, ok: false }, engine())).toBe(limit);
     expect(activityPreview({ name: "Bash", ok: true }, engine())).toBe("Bash");
+    expect(activityPreview({ name: "stopped: Stopped", ok: true }, engine())).toBe("Stopped");
+    expect(activityPreview({ name: "error: The request was cancelled by the client.", ok: false }, engine())).toBe("Stopped");
   });
 
   it("finds the engine a bot's turns ran on", () => {

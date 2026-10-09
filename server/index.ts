@@ -29,6 +29,7 @@ import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../shared/computer-contention.ts";
 import { failedTurnTool } from "../shared/failed-turn.ts";
+import { STOPPED_TURN_NAME, assistantTranscript, errorTranscript } from "../shared/client-cancel.ts";
 import { phonePairingLink } from "../shared/pairing-link.ts";
 import { canWorkOnCloud, type CloudEngine } from "../shared/cloud-computer.ts";
 import {
@@ -5513,6 +5514,7 @@ store.onChange((change) => {
       break;
     case "thread.deleted":
       directRequestOwners.delete(change.threadId);
+      stoppedTurns.delete(change.threadId);
       routines?.forgetRoutineRequestReceiptsForThread(change.threadId);
       // A deleted destination must not strand an approval in an internal
       // task. Keep each run's snapshot and expose its execution as fallback.
@@ -6089,6 +6091,11 @@ function requestBehavior(value: unknown): "allow" | "deny" | "answer" | null {
 // the last settled assistant text per thread, so a "finished" notification
 // can carry what the bot actually said
 const lastReply = new Map<string, string>();
+/** Threads whose running turn a client abort ended (the abort sentence as
+ * assistant text or as runtime.error), with that turn's id when known.
+ * turn.completed reads it as a stop, not a failure, whatever stopReason the
+ * provider settles with. */
+const stoppedTurns = new Map<string, string | undefined>();
 /** the model each thread's provider session announced in session.started,
  * so a fallback notice can name the model Auto is unavailable for */
 const sessionModelByThread = new Map<string, string>();
@@ -7636,10 +7643,29 @@ bus.subscribe((event: RuntimeEvent) => {
     return message;
   };
 
-  if (coordinatorVisibleText) {
-    pushMessage({ role: "bot", kind: "text", text: coordinatorVisibleText, turnId: completedTurnId });
-    lastReply.set(event.threadId, coordinatorVisibleText);
-  }
+  // A client abort sometimes arrives as assistant text or as runtime.error.
+  // That is a stop, not a failure: store one stopped row, drop any text the
+  // turn said before it, so neither the digest nor a finished notification
+  // reads a half reply, and mark the turn stopped for turn.completed.
+  // One turn can emit both; the second copy is the same stop.
+  const pushStoppedTurn = (turnId: string | undefined) => {
+    lastReply.delete(event.threadId);
+    stoppedTurns.set(event.threadId, turnId ?? liveTurnByThread.get(event.threadId));
+    const last = store.messagesFor(event.threadId).at(-1);
+    if (last?.kind === "activity" && last.tool?.name === STOPPED_TURN_NAME && last.turnId === turnId) return;
+    pushMessage({ role: "bot", kind: "activity", tool: { name: STOPPED_TURN_NAME, ok: true }, turnId });
+  };
+  const pushAssistantText = (text: string, turnId: string | undefined) => {
+    const spoken = assistantTranscript(text);
+    if (spoken.kind === "stopped") {
+      pushStoppedTurn(turnId);
+      return;
+    }
+    pushMessage({ role: "bot", kind: "text", text: spoken.text, turnId });
+    lastReply.set(event.threadId, spoken.text);
+  };
+
+  if (coordinatorVisibleText) pushAssistantText(coordinatorVisibleText, completedTurnId);
   if (bot) handoffs.onEvent(event);
 
   if (event.turnId) liveTurnByThread.set(event.threadId, event.turnId);
@@ -7650,6 +7676,8 @@ bus.subscribe((event: RuntimeEvent) => {
   switch (event.type) {
     case "turn.started":
       turnStartedAt.set(event.threadId, Date.now());
+      // A stop that never saw its turn.completed must not pass for this turn.
+      stoppedTurns.delete(event.threadId);
       break;
     case "session.started":
       if (bot && event.sessionId && event.providerInstanceId) {
@@ -7659,11 +7687,9 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "item.completed":
       if (event.itemType === "assistant_text") {
-        const text = event.text;
-        pushMessage({ role: "bot", kind: "text", text, turnId: event.turnId });
         // kept so "finished" can say what it finished with, rather than
-        // just that something ended
-        lastReply.set(event.threadId, text);
+        // just that something ended. A client abort stores no reply text.
+        pushAssistantText(event.text, event.turnId);
       } else if (event.itemType === "assistant_image") {
         try {
           const decoded = decodeGeneratedImage(event.data);
@@ -7951,6 +7977,10 @@ bus.subscribe((event: RuntimeEvent) => {
       pushMessage({ role: "bot", kind: "activity", tool: { name: `notice: ${event.message.slice(0, 240)}`, ok: true } });
       break;
     case "runtime.error":
+      if (errorTranscript(event.message).kind === "stopped") {
+        pushStoppedTurn(event.turnId);
+        break;
+      }
       pushMessage({
         role: "bot",
         kind: "activity",
@@ -8045,6 +8075,11 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       const reply = lastReply.get(event.threadId) ?? "";
       lastReply.delete(event.threadId);
+      const stoppedTurnId = stoppedTurns.get(event.threadId);
+      const clientStopped = stoppedTurns.has(event.threadId)
+        && (stoppedTurnId === undefined || completedTurnId === undefined || stoppedTurnId === completedTurnId);
+      stoppedTurns.delete(event.threadId);
+      const stopped = event.stopReason === "interrupted" || clientStopped;
       // A run that broke — not one the person stopped, and not a routine's,
       // which reports through its own failure path — is the Chief's to see.
       // A lazy computer-claim rejection already reported its failure and
@@ -8057,7 +8092,7 @@ bus.subscribe((event: RuntimeEvent) => {
         turnResourceOwners.get(event.threadId)?.lazyClaimFailureReported === true;
       const computerParked = event.stopReason === "exit_before_result" &&
         turnResourceOwners.get(event.threadId)?.computerParkedOn !== undefined;
-      if (!event.ok && event.stopReason !== "interrupted" && !lazyClaimAlreadyReported && !computerParked && !routines?.runForThread(event.threadId)) {
+      if (!event.ok && !stopped && !lazyClaimAlreadyReported && !computerParked && !routines?.runForThread(event.threadId)) {
         const broken = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
         if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: event.stopReason?.trim() || "the run ended without a result" });
       }
@@ -25768,26 +25803,40 @@ const gracefulShutdown = createGracefulShutdown({
     () => flushUsageLedger(DATA_DIR),
     () => flushDecisionLog(DATA_DIR),
     () => flushAdminActivity(DATA_DIR),
+    () => bus.flush(),
     () => closeMessageSearch(),
   ],
   // Cleanup jobs run concurrently. Release only after they settle (or reach
   // the shutdown deadline), immediately before the process exits, so no new
   // server can overlap with a still-mutating old one.
   exit: (code) => {
-    // Streamed text the bus is still merging reaches the log and clients.
-    bus.flush();
-    try { sessions.close(); }
-    catch {
-      // An uncleared marker makes saved account sessions require sign-in on
-      // the next boot; never label failed persistence a clean shutdown.
-      console.error("Session persistence failed during shutdown; account sign-in will be required again.");
-      code = 1;
-    }
-    closeMessageDb();
-    mcpOAuth.dispose();
-    releaseDataDirLeaseAtExit();
-    // Every launcher in this repo starts the server again on this code (server/restart.ts).
-    process.exit(restartRequested && code === 0 ? RESTART_EXIT_CODE : code);
+    let finished = false;
+    const finish = (exitCode: number) => {
+      if (finished) return;
+      finished = true;
+      try { sessions.close(); }
+      catch {
+        // An uncleared marker makes saved account sessions require sign-in on
+        // the next boot; never label failed persistence a clean shutdown.
+        console.error("Session persistence failed during shutdown; account sign-in will be required again.");
+        exitCode = 1;
+      }
+      closeMessageDb();
+      mcpOAuth.dispose();
+      releaseDataDirLeaseAtExit();
+      // Every launcher in this repo starts the server again on this code (server/restart.ts).
+      process.exit(restartRequested && exitCode === 0 ? RESTART_EXIT_CODE : exitCode);
+    };
+    // Streamed text still merging, and any canonical lines queued after the
+    // cleanup flush, reach disk before exit. A stuck append cannot hold the
+    // process: the cleanup deadline already elapsed, so this wait is short.
+    void bus.flushWithin(1_000).then((done) => {
+      if (!done) console.error("bus: the canonical event log did not finish writing at exit; the newest thread history may be incomplete.");
+      finish(code);
+    }, (error: unknown) => {
+      console.error("bus: canonical event log flush failed; the newest thread history may be incomplete.", error);
+      finish(code);
+    });
   },
 });
 
