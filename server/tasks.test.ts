@@ -8,7 +8,6 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { withDataContext } from "../shared/data-context.ts";
 
 let home: string;
 
@@ -110,16 +109,13 @@ describe("tasks", () => {
     expect(store.titleTaskFromFirstMessage(bot.id, "a second message", task.threadId)).toBeNull();
   });
 
-  it("names a task from the person's words without the hidden Data envelope", async () => {
+  it("names a task from the first line as typed; nothing in the words is stripped", async () => {
     const { store, titleFromMessage } = await freshStore();
     const bot = store.createBot();
     const task = store.createTask(bot.id)!;
-    const recipient = { botId: bot.id, threadId: task.threadId };
-    const sent = withDataContext("Compare monthly sales\nKeep the chart", { ...recipient, cardId: "c_1", draftSql: "SELECT private_draft" }, recipient);
-    expect(store.titleTaskFromFirstMessage(bot.id, sent, task.threadId)?.title).toBe("Compare monthly sales");
-    const malformed = "<data-context>{bad}</data-context>";
-    expect(titleFromMessage(`${malformed}\nKeep this visible`)).toBe(malformed);
-    expect(sent).toContain("SELECT private_draft");
+    expect(store.titleTaskFromFirstMessage(bot.id, "Compare monthly sales\nKeep the chart", task.threadId)?.title).toBe("Compare monthly sales");
+    const typed = "<data-context>{bad}</data-context>";
+    expect(titleFromMessage(`${typed}\nKeep this visible`)).toBe(typed);
   });
 
   it("cannot be re-armed by restoring the sentinel title after the first attempt", async () => {

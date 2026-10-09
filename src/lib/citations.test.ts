@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { composeMessage, isAttachment, withDataContext } from "./composer-attachments";
+import { composeMessage, isAttachment } from "./composer-attachments";
 import {
   citationAttachment,
   citationFallback,
@@ -58,17 +58,13 @@ describe("selected-text citations", () => {
     expect(isAttachment({ ...citation, quote: "" })).toBe(false);
   });
 
-  it("hides generated Data context from previews without losing citation or thread references", () => {
-    const recipient = { botId: "bot-1", threadId: "thread-1" };
-    const view = { ...recipient, cardId: "c_1", draftSql: "SELECT private_draft" };
+  it("previews the words as typed, with citations folded in and nothing hidden", () => {
     const citation = citationAttachment(source, createCitationTextSelector("quoted text", 0, 11)!, "Check this");
     const text = "Compare [earlier task](omb://thread/bot-1/thread-2)";
-    const plain = withDataContext(text, view, recipient);
-    expect(citationPreviewText(plain)).toBe(text);
-    expect(citationPreviewText(withDataContext(composeMessage(text, [citation]), view, recipient))).toBe(`${text} quoted text — Check this`);
-    const example = `\`\`\`xml\n${plain}\n\`\`\``;
-    expect(citationPreviewText(example)).toBe(example);
-    expect(citationPreviewText("<data-context>{bad}</data-context>\nDo not hide this")).toBe("<data-context>{bad}</data-context>\nDo not hide this");
+    expect(citationPreviewText(text)).toBe(text);
+    expect(citationPreviewText(composeMessage(text, [citation]))).toBe(`${text} quoted text — Check this`);
+    const typed = '<data-context>{"cardId":"c_1"}</data-context>\nDo not hide this';
+    expect(citationPreviewText(typed)).toBe(typed);
   });
 
   it("does not parse a serialized citation nested inside quoted or comment content", () => {

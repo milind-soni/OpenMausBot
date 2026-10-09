@@ -1,7 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { withDataContext } from "@/lib/composer-attachments";
 
 import {
   QueuedComposerMessages,
@@ -47,12 +46,11 @@ describe("double-Enter steer gesture", () => {
 });
 
 describe("QueuedComposerMessages", () => {
-  it("hides a queued Data reference while keeping the person's words", () => {
-    const text = withDataContext("Only show last month", { botId: "b", threadId: "t", cardId: "c_1" }, { botId: "b", threadId: "t" });
+  it("shows a queued message's words exactly as typed, with nothing hidden", () => {
+    const text = '<data-context>{"cardId":"c_1"}</data-context>\nOnly show last month';
     const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, { items: [{ queueId: "q", text }], onCancel: () => undefined }));
     expect(markup).toContain("Only show last month");
-    expect(markup).not.toContain("data-context");
-    expect(markup).not.toContain("data_describe");
+    expect(markup).toContain("&lt;data-context&gt;");
   });
   it("explains a capacity wait without offering to interrupt another thread", () => {
     const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, {

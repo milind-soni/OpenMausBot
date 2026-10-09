@@ -43,8 +43,7 @@ import {
   clipboardHasImages,
   clipboardImageFiles,
   composeMessage,
-  withDataContext,
-  withoutDataContext,
+  dataContextFor,
   composerShouldRefocus,
   composerTakesFocusOnOpen,
   imageAttachmentFromFile,
@@ -463,7 +462,7 @@ export function Composer({
     if (!queued) return;
     const targetDraftId = draftId;
     const onCancelled = () => {
-      const cited = splitTranscriptCitations(withoutDataContext(queued.text));
+      const cited = splitTranscriptCitations(queued.text);
       if (cited.display) prependComposerDraft(targetDraftId, cited.display);
       appendDraftAttachments(targetDraftId, cited.citations);
       if (targetDraftId !== draftIdRef.current) return;
@@ -622,11 +621,11 @@ export function Composer({
     // stays machine-readable in the stored send and the model's context
     const composed = composeMessage(serializeThreadRefs(effectiveText, threads, currentBotId), attachments);
     if (!composed) return;
-    const body = restoredRequestText(draftId) ?? withDataContext(
-      composed,
-      state.computerOpen ? state.dataView : null,
-      !group && bot ? { botId: bot.id, threadId } : undefined,
-    );
+    const body = restoredRequestText(draftId) ?? composed;
+    // The viewed Data result travels as its own field of the send, never in
+    // the words: only for this bot's own thread, and never ahead of an
+    // opening command the server parses first.
+    const dataContext = dataContextFor(body, state.computerOpen ? state.dataView : null, !group && bot ? { botId: bot.id, threadId } : undefined);
     const sentDraft: ComposerDraftSnapshot = {
       draftId,
       revision: draftRevision(draftId),
@@ -659,6 +658,7 @@ export function Composer({
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
+        dataContext,
         onError: () => restoreDraft(sentDraft),
       });
       track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy && !canSteer });

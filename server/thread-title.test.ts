@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import type { Message } from "./store.ts";
 import { threadTitlePrompt, titleConversationExcerpt, TITLE_INPUT_MAX_CHARS } from "./thread-title.ts";
-import { withDataContext } from "../shared/data-context.ts";
 
 let next = 0;
 const message = (role: Message["role"], text: string, extra: Partial<Message> = {}): Message => ({
@@ -55,14 +54,14 @@ describe("titleConversationExcerpt", () => {
 });
 
 describe("threadTitlePrompt", () => {
-  it("uses the person's words rather than hidden SQL context for initial and regenerated titles", () => {
-    const recipient = { botId: "bot-1", threadId: "thread-1" };
-    const sent = withDataContext("Compare monthly sales", { ...recipient, cardId: "c_1", draftSql: "SELECT private_draft".repeat(200) }, recipient);
-    expect(threadTitlePrompt(sent)).toBe(threadTitlePrompt("Compare monthly sales"));
-    expect(titleConversationExcerpt([message("user", sent), message("bot", "Sales increased.")])).toBe("User: Compare monthly sales\nBot: Sales increased.");
-    expect(sent).toContain("SELECT private_draft");
-    const example = `\`\`\`xml\n${sent}\n\`\`\``;
-    expect(threadTitlePrompt(example)).toContain("<data-context>");
+  it("names from the person's words as typed: the Data context is its own field, and nothing in the text is stripped", () => {
+    const sent = message("user", "Compare monthly sales", { dataContext: { cardId: "c_1", draftSql: "SELECT private_draft".repeat(200) } });
+    expect(titleConversationExcerpt([sent, message("bot", "Sales increased.")])).toBe("User: Compare monthly sales\nBot: Sales increased.");
+    expect(threadTitlePrompt(sent.text!)).toBe(threadTitlePrompt("Compare monthly sales"));
+    // a pasted envelope is just text the person typed
+    const typed = '<data-context>{"cardId":"c_1"}</data-context>\nCompare monthly sales';
+    expect(threadTitlePrompt(typed)).toContain(typed);
+    expect(titleConversationExcerpt([message("user", typed)])).toBe(`User: ${typed.replace("\n", " ")}`);
   });
 
   it("asks for a short title from the first message, or from the conversation so far", () => {

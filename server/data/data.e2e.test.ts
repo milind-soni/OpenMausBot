@@ -107,6 +107,44 @@ it("loads, queries, shows, pages, renders and exports through the real server", 
     expect(receipts.map((message) => [message.tool.name, message.dataResult.title, message.dataResult.cardId]))
       .toEqual([["data_show", "Totals", tableCard.data.id], ["data_show", "By region", chartCard.data.id]]);
 
+    // A message sent about the viewed result: the words are stored exactly as
+    // typed, the context as its own field, and the model gets the hint ahead
+    // of the words, on the turn and again when the same words are regenerated.
+    const dump = join(dataDir, "fake-claude-dump.json");
+    const providerPrompt = async () => {
+      await expect.poll(() => existsSync(dump), { timeout: 20_000 }).toBe(true);
+      return JSON.parse(readFileSync(dump, "utf8")).prompt.message.content as string;
+    };
+    const envelope = (prompt: string) => prompt.match(/<data-context>.*?<\/data-context>/g) ?? [];
+    const settled = async () => {
+      const outcome = await runControlOmb(["wait", "--bot", bot.id, "--task", threadId, "--timeout", "60", "--url", url]) as { status: string };
+      expect(outcome.status, JSON.stringify(outcome)).toBe("settled");
+    };
+    const draftSql = "SELECT region FROM sales WHERE";
+    rmSync(dump, { force: true });
+    const sent = await api("POST", `/api/bots/${bot.id}/messages`, { threadId, text: "Only show north.", dataContext: { cardId: tableCard.data.id, draftSql } }, 202);
+    expect(sent.message).toMatchObject({ role: "user", text: "Only show north.", dataContext: { cardId: tableCard.data.id, draftSql } });
+    const prompt = await providerPrompt();
+    // The envelope opens the turn's text, directly ahead of the person's words
+    // (a fresh session may carry replayed history before the turn itself).
+    expect(envelope(prompt), prompt).toHaveLength(1);
+    expect(prompt.endsWith(`${envelope(prompt)[0]}\n\nOnly show north.`), prompt).toBe(true);
+    expect(JSON.parse(envelope(prompt)[0]!.slice("<data-context>".length, -"</data-context>".length))).toMatchObject({ cardId: tableCard.data.id, draftSql, hint: expect.stringContaining("data_describe({id:cardId})") });
+    await settled();
+    const stored = ((await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as Array<Record<string, any>>).find((message) => message.id === sent.message.id);
+    expect(stored.text).toBe("Only show north.");
+    expect(stored.text).not.toContain("<data-context>");
+    expect(stored.dataContext).toEqual({ cardId: tableCard.data.id, draftSql });
+    // Regenerate resends the same words; the server re-attaches the context itself.
+    rmSync(dump, { force: true });
+    await api("POST", `/api/bots/${bot.id}/messages/${sent.message.id}/edit`, { threadId, text: "Only show north." }, 202);
+    const retried = await providerPrompt();
+    expect(envelope(retried), retried).toEqual(envelope(prompt));
+    expect(retried.endsWith(`${envelope(prompt)[0]}\n\nOnly show north.`), retried).toBe(true);
+    await settled();
+    // The boundary: a table name is not a card id.
+    await api("POST", `/api/bots/${bot.id}/messages`, { threadId, text: "Only show south.", dataContext: { cardId: "sales" } }, 400);
+
     // The panel: the sheet, a page of the table card, the chart as SVG.
     const read = await api("GET", DATA_ROUTES.sheet(bot.id)) as { sheet: DataSheet; tables: Array<{ name: string }> };
     expect(read.sheet.cards.map((card) => [card.kind, card.title, card.status])).toEqual([["table", "Totals", "ready"], ["chart", "By region", "ready"]]);

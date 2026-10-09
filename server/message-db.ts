@@ -228,6 +228,8 @@ export interface FollowupPayload {
   prompt?: string;
   replyToId?: string;
   sendId?: string;
+  /** The Data result the words were sent about; the drained line keeps it. */
+  dataContext?: Message["dataContext"];
   reason?: SteerQueueReason;
   unattended?: boolean;
   peerAsk?: Message["peerAsk"];

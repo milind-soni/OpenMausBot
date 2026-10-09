@@ -284,6 +284,8 @@ import {
   restoreAsideMessages,
 } from "./aside-queue.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
+import { parseDataContext, type DataContext } from "./data-context.ts";
+import { promptWithDataContext } from "../shared/data-context.ts";
 import { admit, DRAIN_COALESCE_MAX_ITEMS } from "./admission.ts";
 import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DELEGATION_TTL_MS, DelegationWakeBudget, discardDelegations, drainDelegations, expireStaleDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
 import {
@@ -2245,6 +2247,7 @@ const computerSelectionTurns = new Map<string, {
   botId: string;
   source: Message;
   text: string;
+  dataContext?: DataContext;
   mounted?: Surface;
   selected?: Surface;
   previousSurface?: Surface;
@@ -7430,7 +7433,7 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     // machine's record, so a later Works on change may sweep it.
     store.patchTask(bot.id, threadId, { surface, surfaceSource: "auto" });
     const text = `The computer selection is now ${surfaceLabel(surface)}. Continue the user's original request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
-    void startTurn(bot.id, text, { threadId, userMessage: selection.source, computerSelectionContinuation: true }).catch(error => {
+    void startTurn(bot.id, text, { threadId, userMessage: selection.source, computerSelectionContinuation: true, dataContext: selection.dataContext }).catch(error => {
       if (store.taskByThread(bot.id, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity",
         tool: { name: `Could not continue on ${surfaceLabel(surface)}: ${error instanceof Error ? error.message : String(error)}`, ok: false } });
     });
@@ -9215,7 +9218,7 @@ function drainAsideLane() {
 
 /** Keep a person's words off the transcript until a direct-thread slot is
  * available. Reuse the existing cancellable, idempotent composer queue. */
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call") {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", dataContext?: DataContext) {
   const decision = admit("direct", {}, {
     // A room turn holds the bot exactly like the sibling opened-thread queue
     // below: the drain's own block check waits it out, so the words queue
@@ -9229,15 +9232,16 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
+      dataContext,
       reason: decision.reason,
-      prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+      prompt: promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
       sender,
       trigger,
       via,
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, dataContext });
   return { ok: true as const, threadId, message };
 }
 
@@ -9289,13 +9293,16 @@ async function acceptDirectSend(
     sender?: ResolvedSender;
     trigger: UsageTrigger;
     via?: "call";
+    /** The Data result the person was viewing (shared/data-context.ts):
+     * recorded on the message, and put in front of the words the model gets. */
+    dataContext?: DataContext;
     /** A person is proven present (a paired session, or the desktop's owner
      * capability): steering their words in clears the unattended mark. */
     personPresent: boolean;
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, personPresent } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, dataContext, personPresent } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -9357,7 +9364,7 @@ async function acceptDirectSend(
         // the second check carries that fact to the type system.
         if (busyAdmission.action === "steer" && instance?.adapter.steer) {
           steered = await instance.adapter
-            .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
+            .steer(threadId, promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"))
             .catch((): SteerOutcome => "indeterminate");
         }
         // steer() is awaited adapter work. The turn can settle, the task can
@@ -9392,6 +9399,7 @@ async function acceptDirectSend(
             text,
             replyToId: replyTo?.id,
             sendId,
+            ...(dataContext ? { dataContext } : {}),
             steered: true,
             sender,
             ...(via ? { via } : {}),
@@ -9401,19 +9409,20 @@ async function acceptDirectSend(
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via);
+          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, dataContext);
         }
         const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
           sendId,
-          prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
+          dataContext,
+          prompt: promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
           sender,
           trigger,
           via,
         });
         return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
-      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via);
+      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, dataContext);
     },
   );
 }
@@ -9777,6 +9786,11 @@ async function startTurn(
     /** An external interface relayed the words through the guarded send
      * route (Message.relayed): nobody typed them in a client here. */
     relayed?: boolean;
+    /** The Data result the person was viewing: stored on the user line, and
+     * its hint goes in front of the provider text for this turn and for
+     * every retry of it (edit/regenerate, backup engine, computer
+     * selection), never into the stored words. */
+    dataContext?: DataContext;
     onDispatchError?: (message: string) => void;
     /** Summarize this conversation without asking the agent to do more work. */
     compactOnly?: boolean;
@@ -9881,7 +9895,7 @@ async function startTurn(
   // path-reading drivers retain the attachment tag as their compatibility route.
   const resolvedImages = extractTurnImages(text);
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
-  const providerText = usesNativeImageInput ? resolvedImages.text : text;
+  const providerText = promptWithDataContext(usesNativeImageInput ? resolvedImages.text : text, opts?.dataContext);
   const turnImages = usesNativeImageInput ? resolvedImages.images : [];
   const commsDepth = opts?.commsDepth ?? 0;
   // Classify the turn where the peer paths' depth actually arrives: by the
@@ -9937,7 +9951,7 @@ async function startTurn(
   // an edit hands us its already-branched user message; a plain send appends
   let userMessage = opts?.userMessage;
   if (opts?.editedMessageId) {
-    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId, opts.sender);
+    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId, opts.sender, opts.dataContext);
     if (!edited) throw Object.assign(new Error("only a user text message can be edited"), { status: 400 });
     store.patchTask(bot.id, threadId, { rewound: true });
     userMessage = edited;
@@ -9951,6 +9965,7 @@ async function startTurn(
           text,
           replyToId: opts?.replyTo?.id,
           sendId: opts?.sendId,
+          ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}),
           peerAsk: opts?.peerAsk,
           sender: opts?.sender,
           ...(opts?.via ? { via: opts.via } : {}),
@@ -10012,7 +10027,7 @@ async function startTurn(
   if (!opts?.computerSelectionContinuation && !opts?.cardContinuation && !opts?.automationSource && !opts?.unattended &&
       !opts?.commsDepth && !opts?.coordination && !inheritedTeamComputer(bot) && bot.computer !== "off" && agentsMounted) {
     const source = store.activePath(threadId).findLast(message => message.id === userMessage?.id && message.role === "user" && !message.peerAsk);
-    if (source) computerSelectionTurns.set(threadId, { generation: dispatchClaimId, botId: bot.id, source, text });
+    if (source) computerSelectionTurns.set(threadId, { generation: dispatchClaimId, botId: bot.id, source, text, dataContext: opts?.dataContext });
   }
   store.setTaskActivity(bot.id, threadId, "working");
   // Watch from admission, not dispatch: a turn can wedge in setup — context
@@ -22810,6 +22825,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (refused) return json(res, refused.status, refused.body);
       const sendId = parseSendId(body.sendId);
       const replyTo = resolveReplyTarget(threadId, body.replyToId);
+      const dataContext = parseDataContext(body.dataContext);
       const sender = messageSender(auth);
       const guardedStart = guarded
         ? async (currentAtStart: BotRecord): Promise<DirectSendReceipt> => {
@@ -22836,13 +22852,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }
             // Stored as relayed: a worker's line for someone else, which a
             // Live call on this thread must not read back as typed there.
-            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender, trigger, relayed: true });
+            const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender, trigger, relayed: true, dataContext });
             return { ok: true as const, threadId, message };
           }
         : undefined;
       try {
         const receipt = await acceptDirectSend({
-          botId: bot.id, threadId, text, sendId, replyTo, sender, trigger,
+          botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext,
           // A person steering a webhook turn is present, and auto mode may
           // follow them again. But this route is also reachable from the
           // bot's own shell on a headless server (loopback is the owner
@@ -22922,6 +22938,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           text: item.text,
           replyToId: item.replyToId,
           sendId: item.sendId,
+          ...(item.dataContext ? { dataContext: item.dataContext } : {}),
           queueId: item.messageId,
           peerAsk: item.peerAsk,
           steered: true,
@@ -23016,9 +23033,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // startTurn admits the rerun before branching. A shared-resource or
       // concurrency-limit refusal must leave the original transcript intact.
       const replyTo = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
+      // Regenerate resends the same words: the rerun gets the Data context
+      // the message was sent with, so the model sees what it saw. Changed
+      // words take the context the client sends now, if any.
+      const dataContext = parseDataContext(body.dataContext) ?? (text === source.text ? source.dataContext : undefined);
       // On a Cloud home an edit is its author's line, so the owner's own edit
       // keeps their conversation theirs for lending (server/cloud-lending.ts).
-      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth),
+      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId, trigger: usageTriggerFor(auth), dataContext,
         ...(CLOUD_HOME ? { sender: messageSender(auth) } : {}) });
       return json(res, 202, { ok: true, message });
     }

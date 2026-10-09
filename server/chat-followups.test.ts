@@ -31,6 +31,7 @@ describe("durable accepted follow-ups", () => {
     const text = 'inspect this\n\n<attached-image path="/fixture/picture.png" name="picture.png" />';
     const first = queueSteeredMessage("bot", "thread", text, {
       prompt: `Reply context\n${text}`, replyToId: "reply", sendId: "first", reason: "capacity", unattended: true,
+      dataContext: { cardId: "c_1", draftSql: "select 1" },
       sender: { name: "ada@example.test" }, trigger: { kind: "user", email: "ada@example.test", label: "Ada's laptop" },
     });
     const second = queueSteeredMessage("bot", "thread", "then summarize", { sendId: "second" });
@@ -61,8 +62,9 @@ describe("durable accepted follow-ups", () => {
       ["message-0"], true,
       { trigger: { kind: "user", email: "ada@example.test", label: "Ada's laptop" }, sender: { name: "ada@example.test" }, peerAsk: undefined },
     ]);
+    // the drained line records the Data context its words were sent about, outside the words
     expect(store.messages).toEqual([
-      expect.objectContaining({ text, replyToId: "reply", sendId: "first", queueId: first.id }),
+      expect.objectContaining({ text, replyToId: "reply", sendId: "first", queueId: first.id, dataContext: { cardId: "c_1", draftSql: "select 1" } }),
     ]);
     // let the first turn's durable row settle before the next drain reads it
     await Promise.resolve();
@@ -79,6 +81,7 @@ describe("durable accepted follow-ups", () => {
       expect.objectContaining({ text, replyToId: "reply", sendId: "first", queueId: first.id }),
       expect.objectContaining({ text: "then summarize", sendId: "second", queueId: second.id }),
     ]);
+    expect(store.messages[1]).not.toHaveProperty("dataContext");
     await Promise.resolve();
     expect(journal.chatFollowups().map((row) => row.id)).toEqual([cancelled.id]);
     expect(journal.cancelledChatFollowup("bot", "bot", "thread", "cancelled")).toBe(true);
