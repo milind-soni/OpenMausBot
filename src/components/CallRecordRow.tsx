@@ -30,21 +30,25 @@ function lineState(line: CallRecordLine, busy: boolean): LineState {
   return line.card.answered === "allow" ? "done" : "stopped";
 }
 
-/** What a step's glyph shows, in words for a reader who cannot see it. A step
- * nobody knows the outcome of says nothing. An approval says its outcome in
- * its own text ("Allowed: run a command"), so only a step needs this. */
-const STEP_STATUS = {
-  done: "chat.callRecord.stepDone",
-  stopped: "chat.callRecord.stepFailed",
-  open: "chat.callRecord.stepRunning",
-} as const;
+/** What a step's glyph shows, in words for a reader who cannot see it: the
+ * words the tool chip's own details use, which are translated. A step nobody
+ * knows the outcome of says nothing. An approval says its outcome in its own
+ * text ("Allowed: run a command"), so only a step needs this. */
+function stepStatus(state: LineState): string | null {
+  if (state === "done") return t("toolDetail.completed");
+  if (state === "stopped") return t("toolDetail.failed");
+  if (state === "open") return t("toolDetail.running");
+  return null;
+}
 
 function lineText(line: CallRecordLine): string {
   if (line.kind === "step") return activityStepLabel(line.tool);
-  const text = t("chat.callRecord.approval", {
-    outcome: approvalCardOutcome(line.card) ?? t("chat.callRecord.waiting"),
-    action: toolLabel(line.card.tool),
-  });
+  // The card says an expired proposal needs asking for again. A record sums
+  // up what happened, it gives no instruction, so it says only that it expired.
+  const outcome = line.card.expired === true
+    ? t("chat.callRecord.expired")
+    : approvalCardOutcome(line.card) ?? t("chat.callRecord.waiting");
+  const text = t("chat.callRecord.approval", { outcome, action: toolLabel(line.card.tool) });
   return line.card.answeredBy?.via === "call" ? `${text} · ${t("approval.status.byVoice")}` : text;
 }
 
@@ -67,8 +71,11 @@ export function CallRecordRow({ message, transcript, botName, busy }: {
   if (!call) return null;
   const title = call.title?.trim() || t("chat.callRecord.title", { name: botName });
   const duration = formatCallDuration(call.seconds);
+  // A labelled group, not a <section>: a section with a name is a landmark,
+  // and every call in a chat would add one to the page's landmark list.
   return (
-    <section
+    <div
+      role="group"
       data-testid="call-record"
       aria-label={t("chat.callRecord.label", { title, duration })}
       title={new Date(call.endedAt).toLocaleString()}
@@ -80,9 +87,10 @@ export function CallRecordRow({ message, transcript, botName, busy }: {
         <span className="shrink-0 tabular-nums">{`· ${duration}`}</span>
       </div>
       {lines.length > 0 && (
-        <ul className="flex flex-col gap-0.5 text-[12.5px]">
+        <ul className="flex max-w-full min-w-0 flex-col gap-0.5 text-[12.5px]">
           {lines.map((line) => {
             const state = lineState(line, busy);
+            const status = line.kind === "step" ? stepStatus(state) : null;
             return (
               <li key={line.id} className="flex items-center gap-1.5">
                 <span className="shrink-0" aria-hidden="true">
@@ -98,13 +106,13 @@ export function CallRecordRow({ message, transcript, botName, busy }: {
                 </span>
                 <span className="min-w-0 truncate">
                   {lineText(line)}
-                  {line.kind === "step" && state !== "neutral" && <span className="sr-only">{` (${t(STEP_STATUS[state])})`}</span>}
+                  {status && <span className="sr-only">{` (${status})`}</span>}
                 </span>
               </li>
             );
           })}
         </ul>
       )}
-    </section>
+    </div>
   );
 }

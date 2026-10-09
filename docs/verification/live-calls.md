@@ -89,7 +89,7 @@ curl -s "http://127.0.0.1:PORT/api/threads/THREAD_ID/messages?limit=20"
 `call` holds `callId`, `botId`, `client`, `startedAt`, `endedAt`, `seconds: 42`
 (the fake reports 42 s of usage, whatever the wall clock) and `endReason`, and
 no `title`, because nothing was asked; and the snapshot's transcript has
-`region "Live call: Call with Pepper, 0:42"`. Stop the fixture with Ctrl-C.
+`group "Live call: Call with Pepper, 0:42"`. Stop the fixture with Ctrl-C.
 
 ## Gotchas
 
@@ -123,10 +123,12 @@ no `title`, because nothing was asked; and the snapshot's transcript has
   Windows is not exercised.
 - Phone builds read the same wire fields and, when they do not know the kind,
   the row's text; their own record is verified in SupaMaus/mausbot-mobile.
-- Approval lines in a record ("Allowed", "Denied", "by voice") and a hang-up
-  while a turn is still working are covered by `src/lib/call-record.test.ts` and
-  `src/components/CallRecordRow.test.ts`, and a spoken yes by the e2e's approval
-  test. The fixture run below does not draw them.
+- Approval lines in a record ("Allowed", "Denied", "Expired", "by voice"), a
+  hang-up while a turn is still working, and a step that never reported how it
+  went (running only while the chat works) are covered by
+  `src/lib/call-record.test.ts` and `src/components/CallRecordRow.test.ts`, and
+  a spoken yes by the e2e's approval test. The fixture run below does not draw
+  them.
 
 ## Last exercised
 
@@ -166,3 +168,10 @@ repository, that called `startFakeOpenAiLive` and `emit` the way the e2e does.
 - `pnpm exec vitest run server/live-call.e2e.test.ts server/chat-followups-restart.test.ts`:
   2 files, 18 tests passed in 258 s with the machine's load average above 150.
   The 13 unit files in the second and third commands above: 404 passed.
+- Since that run the final fix wave changed what the renderer draws. These are
+  pinned by `src/components/CallRecordRow.test.ts` and were not driven in the
+  fixture again: the record is a `group`, so the snapshot lists
+  `group "Live call: …"` where this run saw `region`; the words a screen reader
+  hears after a step are the tool chip's own ("Running a command (Completed)",
+  where this run saw "(Done)"); and a step the harness never settled reads as
+  running only while the chat works, and as a dash after.
