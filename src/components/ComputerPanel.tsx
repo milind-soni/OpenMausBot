@@ -11,7 +11,7 @@ import { canWorkOnCloud } from "../../shared/cloud-computer";
 // An inherited team Boat is shown as a shared resource, managed from Team map;
 // it must never fall back to this host or become a private Cloud selection.
 import { Switch } from "./SettingsPrimitives";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { waitForLocalVmReady } from "@/lib/local-vm-readiness";
 import {
@@ -20,6 +20,7 @@ import {
   Box,
   Check,
   Cloud,
+  Database,
   FolderOpen,
   Sparkles,
   Globe,
@@ -51,6 +52,9 @@ import { RoutinesSection } from "./bot-settings/RoutinesSection";
 import { routineRunLabel, routineRunTone } from "@/lib/routine-display";
 import { AndroidDevicePanel, useAndroidUsbDevices } from "./AndroidDevicePanel";
 import { BrowserPanel } from "./BrowserPanel";
+// The Data tab's code (and, behind it, vega-embed and CodeMirror) loads the
+// first time the tab opens, never with the app.
+const DataPanel = lazy(() => import("./data/DataPanel").then((module) => ({ default: module.DataPanel })));
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
 import { LocalScreenPreview } from "./LocalScreenPreview";
@@ -1462,6 +1466,15 @@ export function ComputerPanel({
               {placeLive && livePlace === "browser" && <span className="size-1.5 animate-pulse rounded-full bg-success" role="img" aria-label={t("place.live")} data-testid="browser-tab-live" />}
             </button>
             )}
+            <button
+              type="button"
+              data-tour="computer-data"
+              onClick={() => selectPanelView("data")}
+              aria-pressed={panelView === "data"}
+              className={tabClass(panelView === "data")}
+            >
+              <Database size={13} /> {t("computer.tab.data")}
+            </button>
             {!advanced && (
             <button
               type="button"
@@ -1513,6 +1526,12 @@ export function ComputerPanel({
               </div>
             )}
           </div>
+        </div>
+      ) : panelView === "data" ? (
+        <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
+          <Suspense fallback={<div className="flex flex-1 items-center justify-center text-[13px] text-ink-secondary" role="status">{t("data.loading")}</div>}>
+            <DataPanel key={bot.id} bot={bot} />
+          </Suspense>
         </div>
       ) : panelView === "files" ? (
         <ComputerFilesPane bot={bot} />

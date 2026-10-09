@@ -31,4 +31,11 @@ describe("computer panel view persistence", () => {
     expect(readComputerPanelView("scout", storage)).toBe("routines");
     expect(readComputerPanelView("other", storage)).toBe("computer");
   });
+
+  it("round-trips the Data tab", () => {
+    const values = new Map<string, string>();
+    const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+    writeComputerPanelView("scout", "data", storage);
+    expect(readComputerPanelView("scout", storage)).toBe("data");
+  });
 });
