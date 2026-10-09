@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Message } from "@/state/store";
-import { callRecordLines } from "./call-record";
+import { callRecordIsPartial, callRecordLines } from "./call-record";
 
 let at = 0;
 const msg = (id: string, fields: Partial<Message>): Message => ({ id, role: "bot", kind: "text", at: ++at, ...fields }) as Message;
@@ -214,5 +214,31 @@ describe("callRecordLines", () => {
     ];
     expect(ids(intoAnEarlierCallsTurn, "c1")).toEqual(["step:s1", "step:s2"]);
     expect(ids(intoAnEarlierCallsTurn, "c2")).toEqual([]);
+  });
+});
+
+// The chat loads the newest page of a long conversation and the rest on
+// request. A call's work is read from what is loaded, so a call that began
+// before the oldest loaded message may have lines in the part not loaded yet.
+describe("callRecordIsPartial", () => {
+  const call = { startedAt: 1_000 };
+  const loaded = (...times: number[]) => times.map((time, index) => msg(`l${index}`, { at: time }));
+
+  it("is false when nothing older is left to load, however the call began", () => {
+    expect(callRecordIsPartial(loaded(5_000, 6_000), call, false)).toBe(false);
+  });
+
+  it("is true when older messages remain and the oldest one loaded came after the call began", () => {
+    expect(callRecordIsPartial(loaded(5_000, 6_000), call, true)).toBe(true);
+  });
+
+  it("is false when the loaded messages reach back before the call began, though older ones remain", () => {
+    expect(callRecordIsPartial(loaded(400, 5_000, 6_000), call, true)).toBe(false);
+    // a message at the very moment the call began is the oldest line it could hold
+    expect(callRecordIsPartial(loaded(1_000, 5_000), call, true)).toBe(false);
+  });
+
+  it("is false for a transcript with nothing in it", () => {
+    expect(callRecordIsPartial([], call, true)).toBe(false);
   });
 });

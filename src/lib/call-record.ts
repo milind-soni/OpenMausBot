@@ -44,3 +44,12 @@ export function callRecordLines(transcript: readonly Message[], callId: string):
   }
   return lines;
 }
+
+/** Whether a call's record may be missing lines because older messages are
+ * not loaded: some remain on the server (`hasMore`), and the oldest message
+ * loaded came after the call began, so a spoken request of the call, and the
+ * work it started, may sit before it. Loading earlier messages settles it. */
+export function callRecordIsPartial(transcript: readonly Message[], call: { startedAt: number }, hasMore: boolean): boolean {
+  const oldest = transcript[0];
+  return hasMore && oldest !== undefined && oldest.at > call.startedAt;
+}

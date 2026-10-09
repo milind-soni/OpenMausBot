@@ -132,3 +132,33 @@ describe("a call's record at the end of a chat that is still working", () => {
     expect(markup).toContain("thinking-shimmer");
   });
 });
+
+// The chat holds the newest page of a long conversation. A call that began
+// before the oldest message loaded may have lines in the part not loaded yet,
+// and its record says so while older messages remain.
+describe("a call's record in a chat whose older messages are not all loaded", () => {
+  const spoken = message("m1", "run the tests", { via: "call", callId: "c1" });
+  const step = message("a1", "", { role: "bot", kind: "activity", requestMessageId: "m1", tool: { name: "Bash", spoken: "running the tests", ok: true, itemId: "item-a1" } });
+  const recordFrom = (startedAt: number) => message("r1", "Call with Pepper · 4:10", {
+    role: "bot",
+    kind: "call",
+    call: { callId: "c1", botId: "bot", client: "ios", startedAt, endedAt: 1_700_000_000_000, seconds: 250, endReason: "hung-up" },
+  });
+  const draw = (hasMore: boolean, startedAt: number) =>
+    renderToStaticMarkup(createElement(ChatView, { bot: { ...bot([spoken, step, recordFrom(startedAt)]), hasMore } }));
+  const began = 1_700_000_000_000 - 250_000; // before every loaded message
+
+  it("says its lines may be incomplete when the call began before the oldest loaded message", () => {
+    const markup = draw(true, began);
+    expect(markup).toContain('data-testid="call-record"');
+    expect(markup).toContain("Some of this call may be in earlier messages");
+  });
+
+  it("says nothing once the whole conversation is loaded", () => {
+    expect(draw(false, began)).not.toContain("Some of this call may be in earlier messages");
+  });
+
+  it("says nothing for a call that began within the loaded messages", () => {
+    expect(draw(true, 1_700_000_000_000 + 1_000)).not.toContain("Some of this call may be in earlier messages");
+  });
+});

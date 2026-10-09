@@ -266,9 +266,11 @@ Added 2026-10-06 (the harness half of SupaMaus/mausbot-mobile
   spoken requests started (see **The call id and the call row**). A step
   that never reports how it went (its turn was stopped or lost) shows the
   working dots only while the chat is working, and a neutral dash once it
-  is not. The "via call" lines stay inline. Like a work digest, the row is a
-  receipt: the sidebar preview, Retry, the working line and the mascot's mood
-  read past it.
+  is not. The record reads what is loaded: while older messages remain on the
+  server and the oldest one loaded is later than the call's start, it adds
+  that some of the call may be in earlier messages. The "via call" lines
+  stay inline. Like a work digest, the row is a receipt: the sidebar
+  preview, Retry, the working line and the mascot's mood read past it.
 - The window checks its own sign-in when its event stream drops during a
   call, and when OpenAI closes the call without an end frame: a `401` hangs
   up at once with the signed-out reason (a revoked browser sign-in has its

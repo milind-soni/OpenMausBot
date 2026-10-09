@@ -124,11 +124,12 @@ no `title`, because nothing was asked; and the snapshot's transcript has
 - Phone builds read the same wire fields and, when they do not know the kind,
   the row's text; their own record is verified in SupaMaus/mausbot-mobile.
 - Approval lines in a record ("Allowed", "Denied", "Expired", "by voice"), a
-  hang-up while a turn is still working, and a step that never reported how it
-  went (running only while the chat works) are covered by
-  `src/lib/call-record.test.ts` and `src/components/CallRecordRow.test.ts`, and
-  a spoken yes by the e2e's approval test. The fixture run below does not draw
-  them.
+  hang-up while a turn is still working, a step that never reported how it went
+  (running only while the chat works) and a call that began before the loaded
+  page (the record says some of it may be in earlier messages) are covered by
+  `src/lib/call-record.test.ts`, `src/components/CallRecordRow.test.ts` and
+  `src/components/ChatView.via-call.test.ts`, and a spoken yes by the e2e's
+  approval test. The fixture run below does not draw them.
 
 ## Last exercised
 

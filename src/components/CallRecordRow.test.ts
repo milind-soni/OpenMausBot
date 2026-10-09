@@ -28,8 +28,8 @@ const transcript: Message[] = [
   msg("m2", { role: "user", text: "thanks" }),
   step("a2", "m2", { name: "Read", spoken: "reading a file", ok: true }),
 ];
-const draw = (message: Message, messages: Message[] = transcript, busy = false) =>
-  renderToStaticMarkup(createElement(CallRecordRow, { message, transcript: [...messages, message], botName: "Pepper", busy }));
+const draw = (message: Message, messages: Message[] = transcript, { busy = false, hasMore = false } = {}) =>
+  renderToStaticMarkup(createElement(CallRecordRow, { message, transcript: [...messages, message], botName: "Pepper", busy, hasMore }));
 /** What each line reads as: its markup's text. The glyphs carry none. */
 const lineTexts = (markup: string) => [...markup.matchAll(/<li\b[^>]*>(.*?)<\/li>/g)].map(([, inner]) => inner!.replace(/<[^>]+>/g, ""));
 
@@ -73,7 +73,7 @@ describe("CallRecordRow", () => {
       step("a3", "m1", { name: "Read", spoken: "reading a file" }),
       msg("o1", { kind: "options", requestMessageId: "m1", card: { title: "Approval needed", subtitle: "rm -rf build", options: ["Allow", "Deny"], requestId: "r1", tool: "Bash", answered: "deny" } }),
     ];
-    const markup = draw(row(), work, true);
+    const markup = draw(row(), work, { busy: true });
     expect(lineTexts(markup)).toEqual([
       "Searching the web (Completed)",
       "Running the tests (Failed)",
@@ -93,7 +93,7 @@ describe("CallRecordRow", () => {
       step("a3", "m1", { name: "Read", spoken: "reading a file" }),
     ];
     setLocale("zh");
-    expect(lineTexts(draw(row(), work, true))).toEqual([
+    expect(lineTexts(draw(row(), work, { busy: true }))).toEqual([
       "Searching the web (已完成)",
       "Running the tests (失败)",
       "Reading a file (运行中)",
@@ -117,6 +117,28 @@ describe("CallRecordRow", () => {
     expect(lineTexts(draw(row(), work))).toEqual(["Expired: run a command"]);
   });
 
+  describe("a call that began before the messages loaded so far", () => {
+    // the transcript's oldest message is `at`, the call began 102 s before it
+    const hint = "Some of this call may be in earlier messages";
+
+    it("says its lines may be incomplete, and how to see them, when older messages remain", () => {
+      const markup = draw(row(), transcript, { hasMore: true });
+      expect(markup).toContain(hint);
+      expect(markup).toContain("Load earlier messages");
+      // the lines it does have are still drawn
+      expect(markup).toContain("Searching the web");
+    });
+
+    it("says nothing once everything is loaded", () => {
+      expect(draw(row(), transcript, { hasMore: false })).not.toContain(hint);
+    });
+
+    it("says nothing when the loaded messages reach back to before the call, though older ones remain", () => {
+      const reachingBack = [msg("m0", { role: "user", text: "typed long before", at: at - 200_000 }), ...transcript];
+      expect(draw(row(), reachingBack, { hasMore: true })).not.toContain(hint);
+    });
+  });
+
   describe("a step that never reported how it went", () => {
     // a turn that was stopped, killed or lost leaves its running step like this
     const work: Message[] = [
@@ -125,13 +147,13 @@ describe("CallRecordRow", () => {
     ];
 
     it("reads as running, with the working dots, while its chat is busy", () => {
-      const markup = draw(row(), work, true);
+      const markup = draw(row(), work, { busy: true });
       expect(lineTexts(markup)).toEqual(["Reading a file (Running)"]);
       expect(markup).toContain("animate-status-pulse");
     });
 
     it("is neutral once its chat is not: no dots and no announcement of running, a dash instead", () => {
-      const markup = draw(row(), work, false);
+      const markup = draw(row(), work, { busy: false });
       expect(lineTexts(markup)).toEqual(["Reading a file"]);
       expect(markup).not.toContain("animate-status-pulse");
       expect(markup).not.toContain("Running");
@@ -145,7 +167,7 @@ describe("CallRecordRow", () => {
         step("a2", "m1", { name: "Bash", spoken: "running the tests", ok: false }),
       ];
       for (const busy of [true, false]) {
-        expect(lineTexts(draw(row(), settled, busy))).toEqual(["Searching the web (Completed)", "Running the tests (Failed)"]);
+        expect(lineTexts(draw(row(), settled, { busy }))).toEqual(["Searching the web (Completed)", "Running the tests (Failed)"]);
       }
     });
   });

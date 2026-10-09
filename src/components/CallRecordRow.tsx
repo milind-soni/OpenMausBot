@@ -7,7 +7,7 @@ import { useMemo } from "react";
 import { AudioLines, Check, Minus, X } from "lucide-react";
 
 import { formatCallDuration } from "../../shared/live-call";
-import { callRecordLines, type CallRecordLine } from "@/lib/call-record";
+import { callRecordIsPartial, callRecordLines, type CallRecordLine } from "@/lib/call-record";
 import { t } from "@/lib/i18n";
 import { activityStepLabel } from "@/lib/live-activity";
 import type { Message } from "@/state/store";
@@ -52,7 +52,7 @@ function lineText(line: CallRecordLine): string {
   return line.card.answeredBy?.via === "call" ? `${text} · ${t("approval.status.byVoice")}` : text;
 }
 
-export function CallRecordRow({ message, transcript, botName, busy }: {
+export function CallRecordRow({ message, transcript, botName, busy, hasMore }: {
   message: Message;
   /** The chat's active branch. The call's lines come from all of it, also
    * from steps that landed after this row (a turn still running at hang-up). */
@@ -61,6 +61,8 @@ export function CallRecordRow({ message, transcript, botName, busy }: {
   /** The chat is working on something now: only then does a step that never
    * reported how it went read as running. */
   busy: boolean;
+  /** Older messages remain on the server, beyond what the transcript holds. */
+  hasMore: boolean;
 }) {
   const call = message.call;
   const callId = call?.callId;
@@ -71,6 +73,7 @@ export function CallRecordRow({ message, transcript, botName, busy }: {
   if (!call) return null;
   const title = call.title?.trim() || t("chat.callRecord.title", { name: botName });
   const duration = formatCallDuration(call.seconds);
+  const partial = callRecordIsPartial(transcript, call, hasMore);
   // A labelled group, not a <section>: a section with a name is a landmark,
   // and every call in a chat would add one to the page's landmark list.
   return (
@@ -113,6 +116,7 @@ export function CallRecordRow({ message, transcript, botName, busy }: {
           })}
         </ul>
       )}
+      {partial && <p className="max-w-full text-center text-[12px] text-ink-tertiary">{t("chat.callRecord.partial")}</p>}
     </div>
   );
 }

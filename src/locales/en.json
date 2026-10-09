@@ -1053,6 +1053,7 @@
   "chat.callRecord.approval": "{outcome}: {action}",
   "chat.callRecord.waiting": "Waiting",
   "chat.callRecord.expired": "Expired",
+  "chat.callRecord.partial": "Some of this call may be in earlier messages. Load earlier messages to see all of it.",
   "chat.showFull": "Show full message",
   "chat.showLess": "Show less",
   "chat.generatedImage": "Generated image",

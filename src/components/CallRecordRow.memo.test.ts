@@ -38,7 +38,7 @@ describe("CallRecordRow's lines", () => {
   const host = document.createElement("div");
   const root = createRoot(host);
   const draw = (message: Message, list: readonly Message[], botName = "Pepper") =>
-    flushSync(() => root.render(createElement(CallRecordRow, { message, transcript: list, botName, busy: false })));
+    flushSync(() => root.render(createElement(CallRecordRow, { message, transcript: list, botName, busy: false, hasMore: false })));
   beforeEach(() => {
     vi.mocked(callRecordLines).mockClear();
   });
