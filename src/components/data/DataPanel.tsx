@@ -5,7 +5,7 @@ import { api, useStore, type Bot } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { useColorScheme } from "@/lib/color-scheme";
 import { SourcesStrip } from "./SourcesStrip";
-import { DataCard } from "./DataCard";
+import { DataCard, RunningStatus } from "./DataCard";
 import { DataResultFooter } from "./DataGrid";
 import { SqlEditor } from "./SqlEditor";
 import { cardsLatestFirst } from "./data-format";
@@ -19,6 +19,11 @@ function queryBounds(panelHeight: number) {
   return { min: Math.min(QUERY_MIN_HEIGHT, max), max };
 }
 const clampHeight = (height: number, bounds: { min: number; max: number }) => Math.max(bounds.min, Math.min(bounds.max, height));
+/** How long typing pauses before the text runs. Each run materialises a
+ * table on the server and interrupts the previous one, so one keystroke
+ * burst should be one query, not one per character; 50 ms still feels live. */
+export const LIVE_RUN_DELAY_MS = 50;
+const reason = (cause: unknown) => cause instanceof Error ? cause.message : String(cause);
 
 /** One result at a time, following the latest update until History or
  * another result is selected. Older cards remain intact on the sheet. */
@@ -33,7 +38,11 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
   const theme = useColorScheme();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  // A run of this box's text is on the wire (first run or live edit).
+  const [running, setRunning] = useState(false);
   const [selection, setSelection] = useState<{ cardId: string } | null>(() => requestedCard ? { cardId: requestedCard.id } : null);
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
   const [fullscreen, setFullscreen] = useState(false);
   const [fullscreenError, setFullscreenError] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
@@ -43,8 +52,19 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
   const [queryHeight, setQueryHeight] = useState<number | null>(null);
   const resizeFrom = useRef<{ pointerId: number; y: number; height: number } | null>(null);
   const bounds = queryBounds(panelHeight);
-  const liveRequest = useRef<AbortController | null>(null);
-  const draft = useRef<{ cardId: string; sql?: string; externalRevision?: string } | null>(null);
+  // The run on the wire. Only a live edit can be dropped at once: the server
+  // keeps the old result. A first run owns its card's status, so the next
+  // run supersedes it on the server instead of aborting it into "failed".
+  const liveRequest = useRef<{ controller: AbortController; live: boolean } | null>(null);
+  // The text waiting out LIVE_RUN_DELAY_MS; a newer keystroke replaces it.
+  const runTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // A first run with no card yet. Text typed before its card arrives waits
+  // here instead of making a second card.
+  const creating = useRef<{ pending: string | null } | null>(null);
+  // The person's text since the box last took a result's SQL; null = none.
+  const typed = useRef<string | null>(null);
+  // The SQL the box last took from a result; a new revision makes it take `sql`.
+  const [shown, setShown] = useState({ sql: "", revision: 0 });
   const requested = useRef<string | null | undefined>(undefined);
   const previousConnection = useRef(state.connected);
   const requestKey = requestedCard ? JSON.stringify([requestedCard.id, requestedCard.requestId]) : null;
@@ -81,40 +101,125 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
   const tables = sheet?.tables ?? sheet?.sources ?? [];
   const selectedCard = selection ? cards.find((card) => card.id === selection.cardId) : null;
   const card = selection ? selectedCard ?? null : cards[0] ?? null;
-  const hasSql = card?.sql !== undefined && card.kind !== "text";
-  const externalRevision = card?.by === "bot" && card.status === "ready" ? card.result ?? card.updatedAt : undefined;
+  // The result the SQL box edits. A text result or an empty sheet has none,
+  // so the box starts empty and its first run makes a new card.
+  const target = card && card.sql !== undefined && card.kind !== "text" ? card : null;
+  const targetRef = useRef(target);
+  targetRef.current = target;
+  const shownSql = target?.sql ?? "";
+  const externalRevision = target?.by === "bot" && target.status === "ready" ? target.result ?? target.updatedAt : undefined;
   const unavailable = sheet && selection && !selectedCard;
-  useEffect(() => () => { draft.current = null; dispatch({ type: "dataView", view: null }); }, [bot.id, bot.threadId, dispatch]);
-  useEffect(() => {
-    if (!card || !hasSql) {
-      draft.current = null;
-      dispatch({ type: "dataView", view: null });
+  const selectionKey = selection?.cardId ?? null;
+
+  const dropPendingRun = () => {
+    if (runTimer.current === null) return;
+    clearTimeout(runTimer.current);
+    runTimer.current = null;
+  };
+  const forgetRun = () => {
+    if (liveRequest.current?.live) liveRequest.current.controller.abort();
+    liveRequest.current = null;
+    setRunning(false);
+  };
+  const run = async (sql: string) => {
+    const target = targetRef.current;
+    if (!target && creating.current) {
+      creating.current.pending = sql;
       return;
     }
-    const botUpdated = externalRevision !== undefined && draft.current?.externalRevision !== externalRevision;
-    if (botUpdated) {
-      liveRequest.current?.abort();
-      liveRequest.current = null;
-      setRunError(null);
+    forgetRun();
+    const controller = new AbortController();
+    // A result to keep if the new query fails; a card still on its first run has none.
+    const live = Boolean(target?.result);
+    liveRequest.current = { controller, live };
+    setRunning(true);
+    setRunError(null);
+    if (!target) creating.current = { pending: null };
+    const request: DataRunRequest = target ? { cardId: target.id, sql, ...(live ? { live: true } : {}) } : { sql };
+    try {
+      const body = await api<{ card?: { id: string }; result?: { id: string } } | undefined>(DATA_ROUTES.run(bot.id), { method: "POST", body: JSON.stringify(request), signal: controller.signal });
+      // A new card made while History held another result: show it.
+      const id = body?.card?.id ?? body?.result?.id;
+      if (!target && id && liveRequest.current?.controller === controller && selectionRef.current) setSelection({ cardId: id });
+    } catch (cause) {
+      const current = liveRequest.current?.controller === controller;
+      if (!target && (current || controller.signal.aborted)) {
+        // No card came of it (refused or cancelled): the text typed meanwhile is the next first run.
+        const pending = creating.current?.pending ?? null;
+        creating.current = null;
+        if (pending !== null && current) {
+          void run(pending);
+          return;
+        }
+      }
+      if (current && sql.trim()) setRunError(reason(cause));
+    } finally {
+      if (liveRequest.current?.controller === controller) {
+        liveRequest.current = null;
+        setRunning(false);
+      }
     }
-    if (draft.current?.cardId !== card.id || botUpdated) {
-      draft.current = { cardId: card.id, externalRevision };
+  };
+  /** Every keystroke: chat sees the draft at once; the run waits for a pause. */
+  const edit = (sql: string) => {
+    typed.current = sql;
+    const target = targetRef.current;
+    if (target) dispatch({ type: "dataView", view: { botId: bot.id, threadId: bot.threadId, cardId: target.id, ...(sql !== target.sql ? { draftSql: sql } : {}) } });
+    dropPendingRun();
+    runTimer.current = setTimeout(() => { runTimer.current = null; void run(sql); }, LIVE_RUN_DELAY_MS);
+  };
+  /** Stops this box's run and, for a card, asks the server to stop its query. */
+  const cancel = () => {
+    const target = targetRef.current;
+    dropPendingRun();
+    liveRequest.current?.controller.abort();
+    liveRequest.current = null;
+    setRunning(false);
+    if (!target) return;
+    api(DATA_ROUTES.cancel(bot.id), { method: "POST", body: JSON.stringify({ cardId: target.id }) }).catch((cause) => setRunError(reason(cause)));
+  };
+
+  useEffect(() => () => { dropPendingRun(); forgetRun(); dispatch({ type: "dataView", view: null }); }, [bot.id, bot.threadId, dispatch]);
+  const last = useRef<{ selection: string | null; targetId: string | null; external: string | undefined } | null>(null);
+  useEffect(() => {
+    const previous = last.current;
+    const targetId = target?.id ?? null;
+    last.current = { selection: selectionKey, targetId, external: externalRevision };
+    // The card this box's first run made: keep the typing, run what waited.
+    const own = creating.current !== null && target?.by === "person";
+    if (own) {
+      const pending = creating.current!.pending;
+      creating.current = null;
+      if (pending !== null) void run(pending);
     }
-    const sql = draft.current.sql;
-    dispatch({ type: "dataView", view: { botId: bot.id, threadId: bot.threadId, cardId: card.id, ...(sql !== undefined && sql !== card.sql ? { draftSql: sql } : {}) } });
-  }, [bot.id, bot.threadId, card?.id, card?.sql, externalRevision, hasSql, dispatch]);
+    const botUpdated = externalRevision !== undefined && previous?.external !== externalRevision;
+    const switched = previous === null || (!own && (previous.selection !== selectionKey || previous.targetId !== targetId));
+    if (!switched && !botUpdated) return;
+    // Another result, or the bot's finished edit of this one: the box takes
+    // its SQL, and text typed against the old query must not run over it.
+    dropPendingRun();
+    forgetRun();
+    setRunError(null);
+    typed.current = null;
+    setShown((current) => ({ sql: shownSql, revision: current.revision + 1 }));
+  }, [selectionKey, target?.id, target?.by, externalRevision, shownSql]);
+  useEffect(() => {
+    dispatch({ type: "dataView", view: target
+      ? { botId: bot.id, threadId: bot.threadId, cardId: target.id, ...(typed.current !== null && typed.current !== target.sql ? { draftSql: typed.current } : {}) }
+      : null });
+  }, [bot.id, bot.threadId, target?.id, target?.sql, shown.revision, dispatch]);
   useEffect(() => {
     if (!panel.current) return;
     const read = () => {
       const height = panel.current?.offsetHeight ?? 0;
       setPanelHeight(height);
-      if (hasSql) setQueryHeight((current) => clampHeight(current ?? query.current?.offsetHeight ?? QUERY_MIN_HEIGHT, queryBounds(height)));
+      setQueryHeight((current) => clampHeight(current ?? query.current?.offsetHeight ?? QUERY_MIN_HEIGHT, queryBounds(height)));
     };
     read();
     const observer = new ResizeObserver(read);
     observer.observe(panel.current);
     return () => observer.disconnect();
-  }, [hasSql]);
+  }, []);
   const startResize = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0 || resizeFrom.current) return;
     event.preventDefault();
@@ -139,28 +244,9 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
     event.preventDefault();
     setQueryHeight((current) => clampHeight((current ?? query.current?.offsetHeight ?? QUERY_MIN_HEIGHT) + delta, bounds));
   };
-  useEffect(() => {
-    setRunError(null);
-    return () => { liveRequest.current?.abort(); };
-  }, [card?.id, requestedCard?.requestId]);
 
   const select = (next: typeof selection) => {
     setSelection(next);
-  };
-  const run = async (sql: string) => {
-    if (!card) return;
-    draft.current = { cardId: card.id, sql, externalRevision: draft.current?.externalRevision };
-    dispatch({ type: "dataView", view: { botId: bot.id, threadId: bot.threadId, cardId: card.id, ...(sql !== card.sql ? { draftSql: sql } : {}) } });
-    liveRequest.current?.abort();
-    const controller = new AbortController();
-    liveRequest.current = controller;
-    setRunError(null);
-    const request: DataRunRequest = { cardId: card.id, sql, live: true };
-    try {
-      await api(DATA_ROUTES.run(bot.id), { method: "POST", body: JSON.stringify(request), signal: controller.signal });
-    } catch (cause) {
-      if (!controller.signal.aborted && liveRequest.current === controller && sql.trim()) setRunError(cause instanceof Error ? cause.message : String(cause));
-    }
   };
   const empty = sheet && cards.length === 0 && !selection;
   const control = "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-inset hover:text-ink";
@@ -204,19 +290,19 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
             <p className="text-[13px] text-ink-secondary">{t("data.empty")}</p>
           </div>
         )}
-        {card && <DataCard key={card.id} bot={bot} card={card} theme={theme} controls={controls} />}
-        {!card && <div className="mt-auto"><DataResultFooter controls={controls} /></div>}
+        {card && <DataCard key={card.id} bot={bot} card={card} theme={theme} controls={controls} running={running} onCancel={cancel} />}
+        {!card && <div className="mt-auto"><DataResultFooter controls={<>{running && <RunningStatus onCancel={cancel} />}{controls}</>} /></div>}
       </div>
-      {hasSql && <div role="separator" aria-orientation="horizontal" aria-label={t("data.editor.resize")} aria-controls={queryId}
+      <div role="separator" aria-orientation="horizontal" aria-label={t("data.editor.resize")} aria-controls={queryId}
         aria-valuemin={bounds.min} aria-valuemax={bounds.max} aria-valuenow={queryHeight ?? undefined} tabIndex={0}
         onPointerDown={startResize} onPointerMove={moveResize} onPointerUp={endResize} onPointerCancel={endResize}
         onLostPointerCapture={() => { resizeFrom.current = null; }} onKeyDown={resizeByKey} data-testid="data-query-resize"
         className="group flex h-1.5 shrink-0 cursor-row-resize touch-none items-center justify-center border-t border-hairline/40 hover:bg-accent/10 focus-visible:bg-accent/10 focus-visible:outline-none">
         <span className="h-0.5 w-8 rounded-full bg-hairline group-hover:bg-accent/60 group-focus-visible:bg-accent/60" />
-      </div>}
-      <div ref={query} id={queryId} style={{ height: hasSql ? queryHeight ?? undefined : undefined }} className="flex min-h-0 shrink-0 flex-col overflow-hidden px-3 py-2" data-testid="data-query">
+      </div>
+      <div ref={query} id={queryId} style={{ height: queryHeight ?? undefined }} className="flex min-h-0 shrink-0 flex-col overflow-hidden px-3 py-2" data-testid="data-query">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {hasSql && <SqlEditor key={card.id} sql={card.sql!} externalRevision={externalRevision} readOnly={card.status === "running" && !card.result} onChange={(sql) => void run(sql)} />}
+          <SqlEditor sql={shown.sql} externalRevision={String(shown.revision)} onChange={edit} />
           <p role={queryError ? "alert" : undefined} title={queryError ?? undefined} className="mt-1 h-4 shrink-0 truncate text-[11.5px] text-danger" data-testid="data-query-error">{queryError}</p>
         </div>
         <div className="shrink-0"><SourcesStrip sources={tables} /></div>

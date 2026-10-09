@@ -431,17 +431,21 @@ export function ComputerPanel({
   };
 
   const previousPanelTarget = useRef<string | null>(null);
+  // What the tab follows: the conversation and the place it works in. Not
+  // the model (connectionKey carries it for the viewer's own reconnects; a
+  // model change must leave the Data, Files or Routines tab alone) and not
+  // Auto resolving its surface, which is why this holds the chosen place.
+  const panelTargetKey = `${profileBot.id}:${profileBot.threadId}:${livePlace}:${profileBot.cloudBackend ?? "box"}`;
   useEffect(() => {
     // Restore a manually chosen tab on reopen. After a real thread/place
     // change, follow that target once; busy/tool events never steal the tab.
     const previous = previousPanelTarget.current;
-    // Auto resolving its surface is not a new user-selected destination.
-    if (previous === connectionKey && (explicitPanelView.current || !(bot.computer === "browser" && browserEnabled))) return;
-    if (previous !== connectionKey) explicitPanelView.current = false;
-    previousPanelTarget.current = connectionKey;
+    if (previous === panelTargetKey && (explicitPanelView.current || !(bot.computer === "browser" && browserEnabled))) return;
+    if (previous !== panelTargetKey) explicitPanelView.current = false;
+    previousPanelTarget.current = panelTargetKey;
     setPanelView(bot.computer === "browser" && browserEnabled ? "browser"
       : previous === null ? readComputerPanelView(bot.id) : "computer");
-  }, [connectionKey, bot.id, bot.computer, browserEnabled]);
+  }, [panelTargetKey, bot.id, bot.computer, browserEnabled]);
 
   useEffect(() => {
     if (!requestedDataResult || requestedDataResult.consumed) return;

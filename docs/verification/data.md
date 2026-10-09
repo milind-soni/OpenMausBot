@@ -38,13 +38,17 @@ its footer; chart results also put **Chart**/**Table** there. **History** select
 an earlier result, and **Latest result** resumes following arriving results. A prefilled
 SQL box stays in a bottom dock, with plain table names and row counts nearby.
 CodeMirror colours SQL keywords (including DuckDB clauses), strings and numbers
-without adding an editor toolbar, Run button or typing delay.
+without adding an editor toolbar or Run button.
 Drag the separator above SQL up or down to resize it, or focus the separator
 and use the arrow keys. The result fills the remaining space above it; resizing
 keeps the draft and does not execute SQL. **Enter fullscreen** expands the
 same workspace, and **Exit fullscreen** restores its panel width and query. Every edit
-updates the selected result immediately, without a Run button; an incomplete
-or invalid query keeps the last good preview visible. Chart results can
+updates the selected result once typing pauses for 50 ms (one burst of
+keystrokes is one query), without a Run button; an incomplete
+or invalid query keeps the last good preview visible, and **Cancel** in the
+footer stops a run that is taking long. The SQL box is there even before a bot
+has shown anything: on an empty sheet (or a text result) its first run makes
+the card. Chart results can
 switch between **Chart** and **Table** without mounting the rest of history.
 
 ## Automated renderer regression

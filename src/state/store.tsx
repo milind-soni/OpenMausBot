@@ -14,7 +14,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import type { BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, LiveSettings, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
-import { DATA_ROUTES, type DataCard, type DataRunRequest, type DataSheet } from "../../shared/data-surface";
+import { DATA_ROUTES, type DataSheet } from "../../shared/data-surface";
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
@@ -1298,11 +1298,6 @@ export type Action =
   | { type: "dataSheet"; sheet: DataSheet }
   | { type: "dataView"; view: AppState["dataView"] }
   | { type: "loadDataSheet"; botId: string; onError?: (message: string) => void }
-  /** The person's SQL, as a new card or (with `cardId`) over an existing one. */
-  | { type: "runDataSql"; botId: string; request: DataRunRequest; onError?: (message: string) => void }
-  | { type: "cancelDataCard"; botId: string; cardId: string; onError?: (message: string) => void }
-  | { type: "patchDataCard"; botId: string; cardId: string; patch: Partial<Pick<DataCard, "title" | "pinned">>; onError?: (message: string) => void }
-  | { type: "deleteDataCard"; botId: string; cardId: string; onError?: (message: string) => void }
   | { type: "modelVariantRuntime"; event: RuntimeEvent }
   | { type: "setModel"; botId: string; selection: ModelSelection; threadId?: string; updateBotDefault?: boolean; resetApprovalToAsk?: boolean }
   | { type: "interrupt"; botId: string; threadId?: string; onError?: () => void }
@@ -2162,9 +2157,10 @@ export function reducer(state: AppState, action: Action): AppState {
       return state.unreadDivider?.threadId === action.threadId ? { ...state, unreadDivider: null } : state;
     case "openDataResult": {
       if (!state.bots.some((bot) => bot.id === action.botId)) return state;
-      return { ...state, selectedId: action.botId, activeView: "chat", computerOpen: true,
-        settingsOpen: false, inspectorOpen: false, activityOpen: false, appSettingsOpen: false,
-        dataResultFocus: { botId: action.botId, id: action.cardId, requestId: (state.dataResultFocus?.requestId ?? 0) + 1, consumed: false } };
+      // The same path as clicking the bot, so unread and the read cursor
+      // settle the way `select` does; then the Computer panel opens on it.
+      const selected = reducer(reducer(state, { type: "select", id: action.botId }), { type: "toggleComputer", open: true });
+      return { ...selected, dataResultFocus: { botId: action.botId, id: action.cardId, requestId: (state.dataResultFocus?.requestId ?? 0) + 1, consumed: false } };
     }
     case "dataResultFocusConsumed":
       return state.dataResultFocus?.requestId === action.requestId
@@ -2526,10 +2522,6 @@ export function reducer(state: AppState, action: Action): AppState {
     case "refreshTaskPermissions":
     case "followBotModel":
     case "loadDataSheet":
-    case "runDataSql":
-    case "cancelDataCard":
-    case "patchDataCard":
-    case "deleteDataCard":
       return state;
     case "dataSheet":
       return { ...state, dataSheets: { ...state.dataSheets, [action.sheet.botId]: action.sheet } };
@@ -3211,29 +3203,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "cancelRoutineRun":
           api(`/api/routine-runs/${action.runId}/cancel`, { method: "POST" }).catch(showError);
           break;
-        // The Data tab. Run, cancel, patch and delete answer through the
-        // server's `data` frame (the whole sheet), not through their replies,
-        // so every window sees the same cards. A panel-local onError keeps a
-        // server without the surface from raising the app-wide error line.
+        // The Data tab's sheet. The panel runs and cancels SQL itself (it
+        // owns the request to abort); those answer through the server's
+        // `data` frame (the whole sheet), so every window sees the same
+        // cards. A panel-local onError keeps a server without the surface
+        // from raising the app-wide error line.
         case "loadDataSheet":
           api(DATA_ROUTES.sheet(action.botId))
             .then((body) => rawDispatch({ type: "dataSheet", sheet: dataSheetFromResponse(body, action.botId) }))
-            .catch((error) => (action.onError ?? showError)(error instanceof Error ? error.message : String(error)));
-          break;
-        case "runDataSql":
-          api(DATA_ROUTES.run(action.botId), { method: "POST", body: JSON.stringify(action.request) })
-            .catch((error) => (action.onError ?? showError)(error instanceof Error ? error.message : String(error)));
-          break;
-        case "cancelDataCard":
-          api(DATA_ROUTES.cancel(action.botId), { method: "POST", body: JSON.stringify({ cardId: action.cardId }) })
-            .catch((error) => (action.onError ?? showError)(error instanceof Error ? error.message : String(error)));
-          break;
-        case "patchDataCard":
-          api(DATA_ROUTES.card(action.botId, action.cardId), { method: "PATCH", body: JSON.stringify(action.patch) })
-            .catch((error) => (action.onError ?? showError)(error instanceof Error ? error.message : String(error)));
-          break;
-        case "deleteDataCard":
-          api(DATA_ROUTES.card(action.botId, action.cardId), { method: "DELETE" })
             .catch((error) => (action.onError ?? showError)(error instanceof Error ? error.message : String(error)));
           break;
         case "markRoutineRunSeen":
@@ -3549,13 +3526,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             () => {},
           );
           break;
+        case "openDataResult":
         case "select": {
-          const bot = stateRef.current.bots.find((b) => b.id === action.id);
-          const group = stateRef.current.groups.find((g) => g.id === action.id);
+          const id = action.type === "select" ? action.id : action.botId;
+          const bot = stateRef.current.bots.find((b) => b.id === id);
+          const group = stateRef.current.groups.find((g) => g.id === id);
           if (bot?.unread) {
-            api(`/api/bots/${action.id}/read`, { method: "POST", body: JSON.stringify({ threadId: bot.threadId }) }).catch(() => {});
+            api(`/api/bots/${id}/read`, { method: "POST", body: JSON.stringify({ threadId: bot.threadId }) }).catch(() => {});
           } else if (group?.unread) {
-            api(`/api/groups/${action.id}/read`, { method: "POST" }).catch(() => {});
+            api(`/api/groups/${id}/read`, { method: "POST" }).catch(() => {});
           }
           break;
         }

@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from "react";
 import { ChevronDown, Download, Loader2 } from "lucide-react";
 import { DATA_ROUTES, type DataCard as DataCardModel, type DataColumn, type DataExportFormat, type DataExportRequest, type DataReduction } from "../../../shared/data-surface";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, type Bot } from "@/state/store";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { cn } from "@/lib/cn";
@@ -17,6 +17,17 @@ export interface DataCardProps {
   card: DataCardModel;
   theme: ColorScheme;
   controls?: ReactNode;
+  /** The panel's own run of this card's SQL is on the wire; the card itself stays "ready". */
+  running?: boolean;
+  onCancel: () => void;
+}
+
+/** The one spinner-and-Cancel for a card's first run and for a live edit. */
+export function RunningStatus({ onCancel }: { onCancel: () => void }) {
+  return <span className="flex items-center gap-2 text-[11.5px] text-ink-secondary" role="status">
+    <Loader2 size={13} className="animate-spin" aria-hidden="true" />{t("data.card.running")}
+    <button type="button" onClick={onCancel} className="rounded-md border border-hairline/60 px-2 py-0.5 text-ink hover:bg-inset">{t("data.card.cancel")}</button>
+  </span>;
 }
 
 /** How the server shrank the rows before charting, in the person's words. */
@@ -77,8 +88,7 @@ export function ExportMenu({ formats, busy, onExport, onCopyMarkdown }: { format
 }
 
 /** The one selected result, with only display and export controls. */
-export function DataCard({ bot, card, theme, controls }: DataCardProps) {
-  const { dispatch } = useStore();
+export function DataCard({ bot, card, theme, controls, running, onCancel }: DataCardProps) {
   const grid = useRef<DataGridHandle | null>(null);
   const [view, setView] = useState<"chart" | "table">("chart");
   // One identity per card: the grid's paging keys off it.
@@ -89,16 +99,12 @@ export function DataCard({ bot, card, theme, controls }: DataCardProps) {
     ? t("data.card.reduction", { output: formatCount(card.reduction.outputRows), input: formatCount(card.reduction.inputRows), method: t(REDUCTION_KEYS[card.reduction.method]) })
     : null;
 
-  const status = card.status === "running"
-    ? <span className="flex items-center gap-2 text-[11.5px] text-ink-secondary" role="status">
-        <Loader2 size={13} className="animate-spin" aria-hidden="true" />{t("data.card.running")}
-        <button type="button" onClick={() => dispatch({ type: "cancelDataCard", botId: bot.id, cardId: card.id })} className="rounded-md border border-hairline/60 px-2 py-0.5 text-ink hover:bg-inset">{t("data.card.cancel")}</button>
-      </span>
-    : card.status === "ready" && typeof card.rowCount === "number"
-      ? <span role="status">{t(card.truncated ? "data.card.rowsTruncated" : "data.grid.count", { count: formatCount(card.rowCount), columns: columns.length })}</span>
-      : null;
+  const status = card.status === "ready" && typeof card.rowCount === "number"
+    ? <span role="status">{t(card.truncated ? "data.card.rowsTruncated" : "data.grid.count", { count: formatCount(card.rowCount), columns: columns.length })}</span>
+    : null;
 
   const actions = <>
+    {(card.status === "running" || running) && <RunningStatus onCancel={onCancel} />}
     {card.status === "ready" && card.kind === "chart" && card.vegaLite && (
       <div className="flex items-center rounded-lg border border-hairline/50 p-0.5">
         {(["chart", "table"] as const).map((mode) => (
