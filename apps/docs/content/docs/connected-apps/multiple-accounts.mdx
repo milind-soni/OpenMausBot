@@ -6,18 +6,22 @@ icon: UsersRound
 
 OpenMausBot supports several labeled accounts for the same toolkit. This is useful for two Gmail inboxes, several Slack workspaces, or separate personal and work services.
 
-## Add another account
+## Add an account
 
 1. Open **Connected apps**.
-2. Find an already connected toolkit.
-3. Choose **Add account**.
+2. Find the toolkit you want to connect.
+3. Choose **Connect** (or **Add account** if you already have one).
 4. Enter a unique label such as `work`, `personal`, or the workspace name.
 5. Complete authorization in your browser.
 
-When more than one account could execute a tool, the Composio session requires explicit account selection. A new authorization does not silently become the default for the old one.
+OpenMausBot asks for a label on every new account, including the first, so the Connected tab shows your chosen name instead of a generated id. When more than one account could execute a tool, the Composio session requires explicit account selection. A new authorization does not silently become the default for the old one.
 
 ## Disconnect safely
 
 Each connected account appears separately with its alias and status. Disconnect removes only the chosen account and leaves the others active.
 
 OpenMausBot caps each toolkit at five usable accounts. If a provider or Composio project policy prevents another authorization, use a separate OpenMausBot installation or configuration rather than reauthorizing over a working account.
+
+## Grants apply to tools, not accounts
+
+Per-bot tool grants say which tools a bot may call on a service; they do not pick an account. When several accounts could run a tool, the bot still selects one explicitly, and a grant covers every account of that service on the installation. To keep one bot away from a specific account, put that account in a separate installation or configuration.

@@ -1,0 +1,143 @@
+{
+  "before": [
+    {
+      "dir": null,
+      "direction": "ltr",
+      "height": 80,
+      "tag": "DIV",
+      "textAlign": "start",
+      "unicodeBidi": "isolate",
+      "width": 540
+    },
+    {
+      "dir": "auto",
+      "direction": "rtl",
+      "height": 80,
+      "tag": "TEXTAREA",
+      "textAlign": "start",
+      "unicodeBidi": "plaintext",
+      "width": 540
+    }
+  ],
+  "after": [
+    {
+      "dir": "auto",
+      "direction": "rtl",
+      "height": 80,
+      "tag": "DIV",
+      "textAlign": "start",
+      "unicodeBidi": "plaintext",
+      "width": 540
+    },
+    {
+      "dir": "auto",
+      "direction": "rtl",
+      "height": 80,
+      "tag": "TEXTAREA",
+      "textAlign": "start",
+      "unicodeBidi": "plaintext",
+      "width": 540
+    }
+  ],
+  "cases": [
+    {
+      "editor": [
+        {
+          "bidi": "plaintext",
+          "direction": "ltr",
+          "height": 80,
+          "scrollHeight": 80,
+          "width": 540
+        },
+        {
+          "bidi": "plaintext",
+          "direction": "ltr",
+          "height": 80,
+          "scrollHeight": 80,
+          "width": 540
+        }
+      ],
+      "mentions": [
+        {
+          "color": "#D94B52",
+          "text": "@Juniper",
+          "x": 194.75,
+          "y": 665.2000122070312
+        },
+        {
+          "color": "#377FE6",
+          "text": "@Atlas",
+          "x": 592.1749877929688,
+          "y": 689.2000122070312
+        },
+        {
+          "color": "#E78531",
+          "text": "@調査担当",
+          "x": 562.6875,
+          "y": 713.2000122070312
+        }
+      ],
+      "text": "English @Juniper first\nمرحبا @Atlas ثانيا\nשלום @調査担当 תודה"
+    },
+    {
+      "editor": [
+        {
+          "bidi": "plaintext",
+          "direction": "rtl",
+          "height": 56,
+          "scrollHeight": 56,
+          "width": 540
+        },
+        {
+          "bidi": "plaintext",
+          "direction": "rtl",
+          "height": 56,
+          "scrollHeight": 56,
+          "width": 540
+        }
+      ],
+      "mentions": [
+        {
+          "color": "#377FE6",
+          "text": "@Atlas",
+          "x": 592.1749877929688,
+          "y": 689.2000122070312
+        },
+        {
+          "color": "#D94B52",
+          "text": "@Juniper",
+          "x": 194.75,
+          "y": 713.2000122070312
+        }
+      ],
+      "text": "مرحبا @Atlas\nEnglish @Juniper"
+    },
+    {
+      "editor": [
+        {
+          "bidi": "plaintext",
+          "direction": "ltr",
+          "height": 32,
+          "scrollHeight": 32,
+          "width": 540
+        },
+        {
+          "bidi": "plaintext",
+          "direction": "ltr",
+          "height": 32,
+          "scrollHeight": 32,
+          "width": 540
+        }
+      ],
+      "mentions": [
+        {
+          "color": "#D94B52",
+          "text": "@Juniper",
+          "x": 403.3999938964844,
+          "y": 713.2000122070312
+        }
+      ],
+      "text": "@Ghost @調査担当者 @everyone調査 @Juniper"
+    }
+  ]
+}

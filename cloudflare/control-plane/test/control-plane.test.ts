@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
+import { applyD1Migrations, createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 
 import { createAuth } from "../src/auth";
@@ -47,11 +47,75 @@ async function call(path: string, options: CallOptions = {}) {
   return response;
 }
 
-async function signIn(email: string) {
+// Counts D1 round trips the way production pays for them: one per statement
+// call and one per batch. Each call is recorded a macrotask late, so a query
+// queued with ctx.waitUntil as the response returns is counted after it.
+function tracedDB(queries: string[], failOn?: RegExp): D1Database {
+  const statements = new WeakMap<object, { statement: D1PreparedStatement; sql: string }>();
+  async function roundTrip<T>(sql: string, run: () => Promise<T>): Promise<T> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    queries.push(sql.replace(/\s+/g, " ").trim());
+    if (failOn?.test(sql)) throw new Error("D1_ERROR: injected failure");
+    return run();
+  }
+  function wrap(statement: D1PreparedStatement, sql: string): D1PreparedStatement {
+    const traced = {
+      bind: (...values: unknown[]) => wrap(statement.bind(...values), sql),
+      all: () => roundTrip(sql, () => statement.all()),
+      run: () => roundTrip(sql, () => statement.run()),
+      first: (column?: string) => roundTrip(sql, () => (
+        column === undefined ? statement.first() : statement.first(column)
+      )),
+    } as unknown as D1PreparedStatement;
+    statements.set(traced, { statement, sql });
+    return traced;
+  }
+  return {
+    prepare: (sql: string) => wrap(env.DB.prepare(sql), sql),
+    batch: (batch: D1PreparedStatement[]) => {
+      const entries = batch.map((traced) => {
+        const entry = statements.get(traced);
+        if (!entry) throw new Error("batch received an untraced statement");
+        return entry;
+      });
+      return roundTrip(
+        `batch: ${entries.map((entry) => entry.sql).join("; ")}`,
+        () => env.DB.batch(entries.map((entry) => entry.statement)),
+      );
+    },
+    // Better Auth only checks that this exists to pick its D1 dialect.
+    exec: (sql: string) => env.DB.exec(sql),
+  } as unknown as D1Database;
+}
+
+async function tracedCall(
+  path: string,
+  body: unknown,
+  options: { ip?: string; failOn?: RegExp } = {},
+) {
+  const queries: string[] = [];
+  const request = new Request(`${BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "cf-connecting-ip": options.ip ?? "198.51.100.200" },
+    body: JSON.stringify(body),
+  });
+  const ctx = createExecutionContext();
+  const response = await worker.fetch(request, { ...env, DB: tracedDB(queries, options.failOn) }, ctx);
+  const beforeResponse = [...queries];
+  await waitOnExecutionContext(ctx);
+  return { response, beforeResponse, afterResponse: queries.slice(beforeResponse.length) };
+}
+
+async function mintOTP(email: string) {
   const ctx = createExecutionContext();
   const auth = createAuth(env, ctx, readConfig(env), crypto.randomUUID());
   const otp = await auth.api.createVerificationOTP({ body: { email, type: "sign-in" } });
   await waitOnExecutionContext(ctx);
+  return otp;
+}
+
+async function signIn(email: string) {
+  const otp = await mintOTP(email);
   const response = await call("/api/auth/sign-in/email-otp", {
     method: "POST",
     body: { email, otp, name: email.split("@", 1)[0] },
@@ -132,15 +196,174 @@ describe("control-plane migrations and health", () => {
     expect(endpointColumns.results.map((column) => column.name)).toEqual(expect.arrayContaining([
       "cleanup_attempts",
       "last_cleanup_attempt_at",
+      "provider_account",
+      "reclaim_requested_at",
     ]));
+    // The one-row table from 0006 stays (an older Worker still writes it) but
+    // capacity now lives per account.
+    const capacityRows = await env.DB.prepare("SELECT id, scan_page FROM managed_endpoint_capacity")
+      .all<{ id: number; scan_page: number }>();
+    expect(capacityRows.results).toEqual([{ id: 1, scan_page: 1 }]);
+    const accountIndex = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'installation_endpoints' AND name = ?",
+    ).bind("installation_endpoints_account_status_idx").first<{ name: string }>();
+    expect(accountIndex?.name).toBe("installation_endpoints_account_status_idx");
+  });
+
+  it("ties every existing endpoint to the original account and carries its capacity state over", async () => {
+    const db = env.MIGRATION_DB;
+    const accounts = env.TEST_MIGRATIONS.findIndex((migration) => migration.name.startsWith("0007_"));
+    expect(accounts).toBeGreaterThan(0);
+    await applyD1Migrations(db, env.TEST_MIGRATIONS.slice(0, accounts));
+    // What a Worker from before 0007 left behind.
+    await db.batch([
+      db.prepare(
+        `INSERT INTO installation_endpoints
+          (installation_id, hostname, tunnel_name, tunnel_id, dns_record_id, status,
+           last_reconciled_at, created_at, updated_at)
+         VALUES ('before-0007', ?, ?, '10000000-0000-4000-8000-000000000001', 'dns-1', 'ready', 5, 1, 5)`,
+      ).bind(`c-${"a".repeat(32)}.openmausbot.com`, `omb-c-${"a".repeat(32)}`),
+      db.prepare(
+        `UPDATE managed_endpoint_capacity
+            SET scan_page = 7, tunnel_count = 1000, dns_record_count = 990, reclaim_pending = 3,
+                checked_at = 123, capacity_rejected_at = 456, capacity_rejected_code = 'cf_api_1045',
+                updated_at = 789
+          WHERE id = 1`,
+      ),
+    ]);
+
+    await applyD1Migrations(db, env.TEST_MIGRATIONS);
+
+    expect(await db.prepare(
+      "SELECT provider_account, hostname, status FROM installation_endpoints WHERE installation_id = 'before-0007'",
+    ).first()).toEqual({
+      provider_account: env.CLOUDFLARE_ACCOUNT_ID,
+      hostname: `c-${"a".repeat(32)}.openmausbot.com`,
+      status: "ready",
+    });
+    // A Worker that predates the column keeps inserting into the same account.
+    await db.prepare(
+      `INSERT INTO installation_endpoints (installation_id, hostname, tunnel_name, status, created_at, updated_at)
+       VALUES ('older-worker', ?, ?, 'pending', 1, 1)`,
+    ).bind(`c-${"b".repeat(32)}.openmausbot.com`, `omb-c-${"b".repeat(32)}`).run();
+    expect(await db.prepare(
+      "SELECT provider_account FROM installation_endpoints WHERE installation_id = 'older-worker'",
+    ).first()).toEqual({ provider_account: env.CLOUDFLARE_ACCOUNT_ID });
+    await expect(db.prepare(
+      `INSERT INTO installation_endpoints
+        (installation_id, provider_account, hostname, tunnel_name, status, created_at, updated_at)
+       VALUES ('bad-account', 'short', 'c-x.example', 'omb-c-x', 'pending', 1, 1)`,
+    ).run()).rejects.toThrow(/CHECK/);
+    expect(await db.prepare("SELECT * FROM managed_endpoint_account_capacity").all().then((rows) => rows.results))
+      .toEqual([{
+        provider_account: env.CLOUDFLARE_ACCOUNT_ID,
+        scan_page: 7,
+        tunnel_count: 1000,
+        dns_record_count: 990,
+        reclaim_pending: 3,
+        dormant_endpoints: 0,
+        checked_at: 123,
+        capacity_rejected_at: 456,
+        capacity_rejected_code: "cf_api_1045",
+        updated_at: 789,
+      }]);
   });
 
   it("serves a no-store health response without CORS wildcards", async () => {
     const response = await call("/healthz");
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ ok: true, service: "openmausbot-control-plane" });
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      service: "openmausbot-control-plane",
+      capacity: {
+        status: "unknown",
+        checkedAt: null,
+        tunnels: { used: null, limit: 1000 },
+        dnsRecords: { used: null, limit: 1000 },
+        providerRejectedAt: null,
+        reclaim: { mode: "on", pending: 0 },
+      },
+    });
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("answers repeated health checks from one capacity read per data center", async () => {
+    const prepare = vi.spyOn(env.DB, "prepare");
+    const first = await call("/healthz");
+    const second = await call("/healthz");
+    await expect(second.json()).resolves.toEqual(await first.json());
+    expect(prepare).toHaveBeenCalledTimes(1);
+    // The public response stays uncached; only the internal copy expires on
+    // its own, which bounds how far the report can trail D1.
+    expect(second.headers.get("cache-control")).toBe("no-store");
+    const cache = await caches.open("healthz-capacity");
+    const copy = await cache.match(new URL("/__internal/healthz-capacity-row/v2", env.BETTER_AUTH_URL));
+    expect(copy?.headers.get("cache-control")).toBe("max-age=120");
+    prepare.mockRestore();
+  });
+
+  it("reads capacity from D1 when the data-center cache is unavailable", async () => {
+    await env.DB.prepare(
+      `INSERT INTO managed_endpoint_account_capacity (provider_account, tunnel_count, checked_at, updated_at)
+       VALUES (?, 950, ?, 0)`,
+    ).bind(env.CLOUDFLARE_ACCOUNT_ID, Date.now()).run();
+    const unavailable = () => Promise.reject(new Error("cache unavailable"));
+    const brokenCache = { delete: unavailable, match: unavailable, put: unavailable } as unknown as Cache;
+    const open = vi.spyOn(caches, "open")
+      .mockImplementationOnce(unavailable)
+      .mockResolvedValueOnce(brokenCache);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await call("/healthz");
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        ok: true,
+        capacity: { status: "high", tunnels: { used: 950, limit: 1000 } },
+      });
+    }
+    expect(open).toHaveBeenCalledTimes(2);
+    open.mockRestore();
+  });
+
+  it("validates capacity tuning variables and keeps safe defaults when they are absent", () => {
+    const base = { ...env } as Record<string, unknown>;
+    for (const name of [
+      "OMB_TUNNEL_LIMIT",
+      "OMB_DNS_RECORD_LIMIT",
+      "OMB_TUNNEL_RECLAIM",
+      "OMB_TUNNEL_OFFLINE_RECLAIM_DAYS",
+      "OMB_CLEANUP_SWEEP_LIMIT",
+    ]) {
+      Reflect.deleteProperty(base, name);
+    }
+    expect(readConfig(base as unknown as Env).capacity).toEqual({
+      cleanupSweepLimit: 20,
+      dnsRecordLimit: 1000,
+      offlineReclaimMs: 21 * 24 * 60 * 60 * 1_000,
+      reclaimMode: "observe",
+      tunnelLimit: 1000,
+    });
+    const withVars = (vars: Record<string, string>) => ({ ...base, ...vars }) as unknown as Env;
+    expect(readConfig(withVars({
+      OMB_TUNNEL_LIMIT: "2500",
+      OMB_TUNNEL_RECLAIM: "observe",
+      OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: "30",
+      OMB_CLEANUP_SWEEP_LIMIT: "4",
+    })).capacity).toMatchObject({
+      cleanupSweepLimit: 4,
+      offlineReclaimMs: 30 * 24 * 60 * 60 * 1_000,
+      reclaimMode: "observe",
+      tunnelLimit: 2500,
+    });
+    // Reclaim can never be configured to treat a tunnel offline for less than
+    // a week as idle, and the sweep cannot outgrow its subrequest budget. A bad
+    // value falls back to the default instead of taking sign-in down, and a bad
+    // reclaim mode only observes.
+    expect(readConfig(withVars({ OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: "6" })).capacity.offlineReclaimMs).toBe(21 * 24 * 60 * 60 * 1_000);
+    expect(readConfig(withVars({ OMB_CLEANUP_SWEEP_LIMIT: "51" })).capacity.cleanupSweepLimit).toBe(20);
+    expect(readConfig(withVars({ OMB_TUNNEL_LIMIT: "1e3" })).capacity.tunnelLimit).toBe(1000);
+    expect(readConfig(withVars({ OMB_TUNNEL_RECLAIM: "yes" })).capacity.reclaimMode).toBe("observe");
+    expect(readConfig(withVars({ OMB_TUNNEL_RECLAIM: "on" })).capacity.reclaimMode).toBe("on");
   });
 
   it("reports an unhealthy deployment without exposing invalid configuration", async () => {
@@ -154,6 +377,11 @@ describe("control-plane migrations and health", () => {
       CLOUDFLARE_ZONE_ID: env.CLOUDFLARE_ZONE_ID,
       COMPANION_HOST_SUFFIX: env.COMPANION_HOST_SUFFIX,
       CLOUDFLARE_API_TOKEN: env.CLOUDFLARE_API_TOKEN,
+      OMB_TUNNEL_LIMIT: env.OMB_TUNNEL_LIMIT,
+      OMB_DNS_RECORD_LIMIT: env.OMB_DNS_RECORD_LIMIT,
+      OMB_TUNNEL_RECLAIM: env.OMB_TUNNEL_RECLAIM,
+      OMB_TUNNEL_OFFLINE_RECLAIM_DAYS: env.OMB_TUNNEL_OFFLINE_RECLAIM_DAYS,
+      OMB_CLEANUP_SWEEP_LIMIT: env.OMB_CLEANUP_SWEEP_LIMIT,
       BETTER_AUTH_SECRET: "too-short",
     };
     const request = new Request(`${BASE_URL}/healthz`);
@@ -359,6 +587,110 @@ describe("Better Auth email OTP and bearer boundary", () => {
 
     const account = await signIn("auth-boundary@example.com");
     expect((await call("/v1/installations/self", { token: account.token })).status).toBe(401);
+  });
+});
+
+// Production pays a cross-region round trip to the D1 primary for every query
+// on these paths, so the budgets below are latency budgets.
+describe("email OTP D1 round trips", () => {
+  const SEND_PATH = "/api/auth/email-otp/send-verification-otp";
+  const SIGN_IN_PATH = "/api/auth/sign-in/email-otp";
+  const EXPIRED_SWEEP = /delete from "verification" where "verification"\."expiresAt" </i;
+
+  async function verificationIdentifiers() {
+    const rows = await env.DB.prepare('SELECT identifier FROM "verification" ORDER BY identifier')
+      .all<{ identifier: string }>();
+    return rows.results.map((row) => row.identifier);
+  }
+
+  it("sends a code in at most five round trips with one for the recipient limit", async () => {
+    const { response, beforeResponse } = await tracedCall(SEND_PATH, {
+      email: "round-trips@example.com",
+      type: "sign-in",
+    });
+    expect(response.status).toBe(200);
+    expect(beforeResponse.filter((sql) => sql.includes("otp_recipient_rate_limits"))).toHaveLength(1);
+    expect(beforeResponse.length).toBeLessThanOrEqual(5);
+  });
+
+  it("keeps the 24-hour recipient retention sweep", async () => {
+    const stale = Date.now() - 25 * 60 * 60 * 1_000;
+    await env.DB.prepare(
+      `INSERT INTO otp_recipient_rate_limits (recipient_key, window_started_at, attempts, updated_at)
+       VALUES (?, ?, 3, ?)`,
+    ).bind("0".repeat(64), stale, stale).run();
+
+    const response = await call(SEND_PATH, {
+      method: "POST",
+      body: { email: "retention@example.com", type: "sign-in" },
+    });
+    expect(response.status).toBe(200);
+    const rows = await env.DB.prepare("SELECT recipient_key, attempts FROM otp_recipient_rate_limits")
+      .all<{ recipient_key: string; attempts: number }>();
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results[0]?.recipient_key).not.toBe("0".repeat(64));
+    expect(rows.results[0]?.attempts).toBe(1);
+  });
+
+  it("signs in within eight round trips and sweeps expired codes after responding", async () => {
+    const email = "round-trips-known@example.com";
+    await signIn(email);
+    const otp = await mintOTP(email);
+    await mintOTP("abandoned@example.com");
+    await env.DB.prepare('UPDATE "verification" SET "expiresAt" = ? WHERE "identifier" = ?')
+      .bind(new Date(Date.now() - 60_000).toISOString(), "sign-in-otp-abandoned@example.com").run();
+    await mintOTP("pending@example.com");
+
+    const { response, beforeResponse, afterResponse } = await tracedCall(SIGN_IN_PATH, {
+      email,
+      otp,
+      name: "Known",
+    });
+    expect(response.status).toBe(200);
+    expect(beforeResponse.some((sql) => EXPIRED_SWEEP.test(sql))).toBe(false);
+    expect(beforeResponse.length).toBeLessThanOrEqual(8);
+    expect(afterResponse.filter((sql) => EXPIRED_SWEEP.test(sql))).toHaveLength(1);
+    // Only the expired row goes; a live code for another address survives.
+    expect(await verificationIdentifiers()).toEqual(["sign-in-otp-pending@example.com"]);
+  });
+
+  it("keeps sign-in working when the expired-code sweep fails and logs no credentials", async () => {
+    const email = "sweep-failure@example.com";
+    const otp = await mintOTP(email);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { response, afterResponse } = await tracedCall(
+      SIGN_IN_PATH,
+      { email, otp, name: "Sweep" },
+      { failOn: EXPIRED_SWEEP },
+    );
+    const logged = error.mock.calls.flat().join(" ");
+    error.mockRestore();
+
+    expect(response.status).toBe(200);
+    expect(afterResponse.filter((sql) => EXPIRED_SWEEP.test(sql))).toHaveLength(1);
+    expect(logged).toContain("expired verification sweep failed");
+    expect(logged).toContain(response.headers.get("x-request-id"));
+    expect(logged).not.toContain(email);
+    expect(logged).not.toContain(otp);
+    expect(logged).not.toContain("injected failure");
+  });
+
+  it("does not sweep for rate-limited sign-ins", async () => {
+    const ip = "198.51.100.201";
+    const body = { email: "limited-sign-in@example.com", otp: "00000000", name: "Limited" };
+    for (let index = 0; index < 10; index += 1) {
+      const response = await call(SIGN_IN_PATH, {
+        method: "POST",
+        headers: { "cf-connecting-ip": ip },
+        body,
+      });
+      expect(response.status).toBe(400);
+    }
+
+    const { response, beforeResponse, afterResponse } = await tracedCall(SIGN_IN_PATH, body, { ip });
+    expect(response.status).toBe(429);
+    expect(beforeResponse.some((sql) => EXPIRED_SWEEP.test(sql))).toBe(false);
+    expect(afterResponse).toEqual([]);
   });
 });
 

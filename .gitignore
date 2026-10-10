@@ -12,6 +12,7 @@ dist-server
 *.tsbuildinfo
 electron/resources/speech-helper
 electron/resources/OpenMausBot Speech.app
+# stale helper from the removed Teach a skill recorder
 electron/resources/OpenMausBot Recorder.app
 release
 .omb-scratch
@@ -24,3 +25,18 @@ cloudflare/control-plane/worker-configuration.d.ts
 .claude/worktrees/
 .vercel/
 .pi/
+
+# Release signing material. The signing keys for the mobile stores belong to the
+# maintainer and never enter this repository; these patterns are the second line
+# of defence behind that rule, repo-wide rather than per-platform, because a key
+# gets dropped wherever the terminal happened to be.
+*.jks
+*.keystore
+*.p12
+
+# per-tenant deploy settings (see deploy/.env.example)
+deploy/.env
+deploy/podman/.env
+deploy/podman/.env.*
+!deploy/podman/.env.example
+/.env

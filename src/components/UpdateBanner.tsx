@@ -1,11 +1,13 @@
 // Auto-update popup — a small card floating bottom-left, driven by the
-// preload's updater bridge. Renders nothing in the browser/dev (no bridge)
-// and while idle/checking; appears only when actionable: an update to
-// download, a download in progress, a restart to apply, or an error.
+// preload's updater bridge (this computer's page and the person's own Cloud
+// page). Renders nothing in the browser/dev (no bridge). Updates download by
+// themselves, so it stays away while one checks, downloads or prepares, and
+// appears only when there is something to do: a restart to apply (always the
+// person's click), a hand-off to finish, or a failure.
 import { useEffect, useState } from "react";
-import { ArrowDownToLine, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
+import { Loader2, PackageOpen, RefreshCw, Sparkles, X } from "lucide-react";
 import { useUpdaterState } from "@/lib/updater";
-import { cn } from "@/lib/cn";
+import { brand } from "../lib/brand";
 
 // The one action button in the card. Disabled drops the accent fill for the
 // flat raised grey — the "I heard you" the click needs while the main process
@@ -26,49 +28,63 @@ function friendlyError(message?: string): string {
   return message.split("\n")[0].slice(0, 140);
 }
 
-export function UpdateBanner() {
+type UpdateBannerProps = {
+  /** The sidebar is in view, so its round update button (UpdateIndicator)
+   * already offers the ready update and its restart. The popup then keeps
+   * to what that button does not cover: a hand-off to finish or a failure. */
+  sidebarIndicator?: boolean;
+};
+
+export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
   const s = useUpdaterState();
-  // dismissal is per status+version, so the popup returns for the next
-  // update (and when an available one finishes downloading)
+  // dismissal is per status+version, so the popup returns for the next update
   const [dismissed, setDismissed] = useState<string | null>(null);
   // A click has to go renderer → main → broadcast before the real status
   // arrives. Latch the pressed button as busy on the same frame so it greys
   // out immediately; the incoming status clears the latch.
-  const [pending, setPending] = useState<"download" | "install" | "check" | null>(null);
+  const [pending, setPending] = useState<"install" | "check" | null>(null);
   const status = s?.status;
   useEffect(() => setPending(null), [status]);
 
-  if (!s || s.status === "idle" || s.status === "checking") return null;
+  if (!s || s.status === "idle" || s.status === "checking" || s.status === "downloading" || s.status === "preparing") return null;
+  if (sidebarIndicator && (s.status === "downloaded" || s.status === "installing")) return null;
   const key = `${s.status}:${s.version ?? ""}`;
   if (dismissed === key) return null;
   const updater = window.ogb!.updater!;
 
-  // while busy the card owns the moment: no dismissing, no second click
+  // while it restarts the card owns the moment: no dismissing, no second click
   const installing = s.status === "installing";
-  const busy = s.status === "downloading" || installing;
+  // Ubuntu system packages can't be swapped under a running app, so the
+  // command is copied and a terminal opens; the user finishes there.
+  // Nothing restarts, and the card has to stop promising that it will.
+  const handoff = s.installMode === "handoff";
 
   const title =
-    s.status === "available"
-      ? `OpenMausBot ${s.version} is available`
-      : s.status === "downloading"
-        ? `Downloading ${s.version ?? "update"}…`
-        : s.status === "downloaded"
-          ? `${s.version} is ready`
-          : installing
-            ? "Restarting to update…"
-            : "Update check failed";
+    s.status === "downloaded"
+      ? // named: on My Cloud's page it is this app that restarts, not the Cloud
+        `${brand().name} ${s.version} is ready`
+      : installing
+        ? handoff
+          ? "Opening a terminal…"
+          : "Restarting to update…"
+        : s.status === "handed-off"
+          ? "Finish in a terminal"
+          : "Update failed";
   const subtitle =
-    s.status === "available"
-      ? "A newer version is ready to download."
-      : s.status === "downloading"
-        ? // no percent yet means the transfer hasn't reported in — don't imply 0
-          s.percent == null
-          ? "Starting download…"
-          : `${Math.round(s.percent)}%`
-        : s.status === "downloaded"
-          ? "Restart to finish updating."
-          : installing
-            ? "OpenMausBot will reopen in a moment."
+    s.status === "downloaded"
+      ? handoff
+        ? "Copy the install command and open a terminal."
+        : "Restart to finish updating."
+      : installing
+        ? handoff
+          ? "Copying the command…"
+          : s.message || `${brand().name} will reopen in a moment.`
+        : s.status === "handed-off"
+          ? s.terminalOpened
+            ? "Command copied — paste it in the terminal that opened."
+            : "Command copied — paste it in a terminal to finish."
+          : s.retryable === false
+            ? `${friendlyError(s.message?.split(" Quit and reopen ")[0])} Quit and reopen ${brand().name} before trying the update again.`
             : friendlyError(s.message);
 
   return (
@@ -79,11 +95,11 @@ export function UpdateBanner() {
         </span>
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-semibold text-ink">{title}</div>
-          <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary" title={subtitle}>
+          <div className="mt-0.5 text-[12.5px] text-ink-secondary" title={subtitle}>
             {subtitle}
           </div>
         </div>
-        {!busy && (
+        {!installing && (
           <button
             onClick={() => setDismissed(key)}
             className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
@@ -94,18 +110,10 @@ export function UpdateBanner() {
         )}
       </div>
 
-      {s.status === "downloading" && (
-        <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-control">
-          <div
-            className={cn(
-              "h-full rounded-full bg-accent transition-[width]",
-              // before the first progress report, a sliver that breathes beats
-              // a zero-width bar that looks stalled
-              s.percent == null && "w-1/4 animate-pulse",
-            )}
-            style={s.percent == null ? undefined : { width: `${Math.min(100, Math.max(0, s.percent))}%` }}
-          />
-        </div>
+      {s.status === "handed-off" && s.command && (
+        <code className="mt-2.5 block overflow-x-auto rounded-lg bg-control px-2 py-1.5 font-mono text-[11.5px] whitespace-pre text-ink-secondary">
+          {s.command}
+        </code>
       )}
 
       {installing && (
@@ -114,33 +122,13 @@ export function UpdateBanner() {
             disabled
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control py-1.5 text-[13px] font-medium text-ink-secondary"
           >
-            <Loader2 size={13} className="animate-spin" /> Restarting…
+            <Loader2 size={13} className="animate-spin" /> {handoff ? "Opening…" : "Restarting…"}
           </button>
         </div>
       )}
 
-      {!busy && (
+      {!installing && (
         <div className="mt-2.5 flex gap-2">
-          {s.status === "available" && (
-            <button
-              onClick={() => {
-                setPending("download");
-                void updater.download();
-              }}
-              disabled={pending !== null}
-              className={primaryAction}
-            >
-              {pending === "download" ? (
-                <>
-                  <Loader2 size={13} className="animate-spin" /> Starting…
-                </>
-              ) : (
-                <>
-                  <ArrowDownToLine size={13} /> Download
-                </>
-              )}
-            </button>
-          )}
           {s.status === "downloaded" && (
             <button
               onClick={() => {
@@ -152,7 +140,11 @@ export function UpdateBanner() {
             >
               {pending === "install" ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" /> Restarting…
+                  <Loader2 size={13} className="animate-spin" /> {handoff ? "Opening…" : "Restarting…"}
+                </>
+              ) : handoff ? (
+                <>
+                  <PackageOpen size={13} /> Install
                 </>
               ) : (
                 <>
@@ -161,7 +153,7 @@ export function UpdateBanner() {
               )}
             </button>
           )}
-          {s.status === "error" && (
+          {s.status === "error" && s.retryable !== false && (
             <button
               onClick={() => {
                 setPending("check");
@@ -184,7 +176,8 @@ export function UpdateBanner() {
             disabled={pending !== null}
             className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent"
           >
-            Later
+            {/* after a hand-off there is nothing left to postpone */}
+            {s.status === "handed-off" || s.retryable === false ? "Dismiss" : "Later"}
           </button>
         </div>
       )}

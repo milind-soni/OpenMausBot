@@ -93,6 +93,7 @@ describe("control-plane desktop client", () => {
     });
     expect(fetchImpl.mock.calls[0][0]).toBe("https://accounts.openmausbot.com/healthz");
     expect(fetchImpl.mock.calls[0][1].redirect).toBe("error");
+    expect(fetchImpl.mock.calls[0][1].headers.get("origin")).toBeNull();
     expect(timeoutSignal).toHaveBeenNthCalledWith(1, 3_000);
   });
 
@@ -118,6 +119,31 @@ describe("control-plane desktop client", () => {
       user: { id: "user-1", email: "ada@example.com" },
     });
     expect(JSON.stringify(fetchImpl.mock.calls)).not.toContain("raw-database-token-must-not-be-used");
+  });
+
+  it("identifies native Better Auth mutations with the trusted control-plane origin", async () => {
+    const fetchImpl = vi.fn(async (_url, init) => {
+      // Undici adds Fetch Metadata after our request wrapper hands off the
+      // init object. Model Better Auth 1.7's form-CSRF decision here: a
+      // browser-shaped request without a trusted Origin is forbidden.
+      const wireHeaders = new Headers(init.headers);
+      wireHeaders.set("sec-fetch-mode", "cors");
+      if (wireHeaders.has("sec-fetch-mode") && wireHeaders.get("origin") !== "https://accounts.openmausbot.com") {
+        return jsonResponse({ error: "forbidden" }, { status: 403 });
+      }
+      return jsonResponse({ success: true });
+    });
+    const client = createControlPlaneClient({
+      baseURL: "https://accounts.openmausbot.com",
+      fetchImpl,
+    });
+
+    await expect(client.requestOTP("ada@example.com")).resolves.toEqual({
+      email: "ada@example.com",
+    });
+    expect(fetchImpl.mock.calls[0][1].headers.get("origin")).toBe(
+      "https://accounts.openmausbot.com",
+    );
   });
 
   it("keeps a valid installation credential without rotating it", async () => {
@@ -225,6 +251,33 @@ describe("control-plane desktop client", () => {
     });
   });
 
+  it("reports the app's release with an endpoint request only when it is a printable version", async () => {
+    const connectorToken = `eyJ${"x".repeat(80)}`;
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ endpoint: { url: "https://c-opaque.mausbot.si" }, connectorToken }),
+    );
+    const client = createControlPlaneClient({ baseURL: "https://accounts.openmausbot.com", fetchImpl });
+    const sent = () => {
+      const [, init] = fetchImpl.mock.lastCall;
+      return { body: init.body, contentType: init.headers.get("content-type") };
+    };
+
+    await expect(client.ensureEndpoint(INSTALL, { appVersion: " 0.1.104 " })).resolves.toEqual({
+      endpoint: { url: "https://c-opaque.mausbot.si" },
+      connectorToken,
+    });
+    expect(sent()).toEqual({ body: JSON.stringify({ appVersion: "0.1.104" }), contentType: "application/json" });
+
+    // An older caller, or a version the control plane would refuse, sends no
+    // body at all, exactly as before.
+    for (const options of [undefined, {}, { appVersion: "" }, { appVersion: "   " }, { appVersion: "0.1\n.104" },
+      { appVersion: "9".repeat(65) }, { appVersion: 104 }, { appVersion: new String("0.1.104") }]) {
+      await client.ensureEndpoint(INSTALL, options);
+      expect(sent(), JSON.stringify(options)).toEqual({ body: undefined, contentType: null });
+    }
+    expect(fetchImpl).toHaveBeenCalledTimes(9);
+  });
+
   it("maps bounded server error codes and hides arbitrary response text", async () => {
     const client = createControlPlaneClient({
       baseURL: "https://accounts.openmausbot.com",
@@ -284,5 +337,62 @@ describe("control-plane desktop client", () => {
     expect(() => createControlPlaneClient({ baseURL: "http://remote.example" })).toThrow(
       ControlPlaneError,
     );
+  });
+
+  it("reads the endpoint without a connector token and maps a removed endpoint to null", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ endpoint: null }))
+      .mockResolvedValueOnce(jsonResponse({
+        endpoint: { url: "https://c-opaque.openmausbot.com", hostname: "c-opaque.openmausbot.com", status: "deleting" },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        endpoint: { url: "https://c-opaque.openmausbot.com", status: "renamed-by-a-future-server" },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ endpoint: { url: "http://c-opaque.openmausbot.com" } }));
+    const client = createControlPlaneClient({ baseURL: "https://accounts.openmausbot.com", fetchImpl });
+
+    await expect(client.getEndpoint(INSTALL)).resolves.toBeNull();
+    await expect(client.getEndpoint(INSTALL)).resolves.toEqual({
+      url: "https://c-opaque.openmausbot.com",
+      status: "deleting",
+    });
+    await expect(client.getEndpoint(INSTALL)).resolves.toEqual({
+      url: "https://c-opaque.openmausbot.com",
+      status: "unknown",
+    });
+    await expect(client.getEndpoint(INSTALL)).rejects.toMatchObject({ code: "invalid_response" });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe("https://accounts.openmausbot.com/v1/installations/self/endpoint");
+    expect(init.method).toBe("GET");
+    expect(init.headers.get("authorization")).toBe(`Bearer ${INSTALL}`);
+    await expect(client.getEndpoint(ACCOUNT)).rejects.toMatchObject({ code: "signed_out", status: 401 });
+  });
+
+  it("carries a capacity error code and the server's Retry-After delay", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "endpoint_capacity" }, {
+        status: 503,
+        headers: { "retry-after": "600", "x-request-id": "44444444-4444-4444-8444-444444444444" },
+      }))
+      .mockResolvedValueOnce(jsonResponse({ error: "endpoint_capacity" }, {
+        status: 503,
+        headers: { "retry-after": "Wed, 21 Oct 2026 07:28:00 GMT" },
+      }));
+    const client = createControlPlaneClient({ baseURL: "https://accounts.openmausbot.com", fetchImpl });
+
+    const first = await client.ensureEndpoint(INSTALL).catch((error) => error);
+    expect(first).toBeInstanceOf(ControlPlaneError);
+    expect(first).toMatchObject({
+      code: "endpoint_capacity",
+      status: 503,
+      retryAfterMs: 600_000,
+      requestId: "44444444-4444-4444-8444-444444444444",
+    });
+    await expect(client.ensureEndpoint(INSTALL)).rejects.toMatchObject({
+      code: "endpoint_capacity",
+      retryAfterMs: 0,
+    });
   });
 });

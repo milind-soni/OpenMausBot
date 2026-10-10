@@ -1,0 +1,63 @@
+name: ${COMPOSE_PROJECT_NAME:-openmausbot}
+services:
+  omb:
+    init: true
+    build:
+      context: ./deploy/local
+      args:
+        BASE_IMAGE: ${OMB_BASE_IMAGE:-ghcr.io/milind-soni/openmausbot:latest}
+        ENGINES: ${ENGINES-@anthropic-ai/claude-code @openai/codex}
+    image: ${OMB_LOCAL_IMAGE:-openmausbot-local:latest}
+    restart: unless-stopped
+    volumes:
+      - data:/data
+    ports:
+      - "${OMB_BIND_ADDRESS:-127.0.0.1}:${OMB_HTTP_PORT:-8080}:80"
+    environment:
+      OMB_PORT: "8799"
+      OMB_WEBHOOK_PORT: "8800"
+      OMB_PUBLIC_URL: ${OMB_PUBLIC_URL:-http://localhost:${OMB_HTTP_PORT:-8080}}
+      OMB_WEBHOOK_PUBLIC_URL: ${OMB_WEBHOOK_PUBLIC_URL:-${OMB_PUBLIC_URL:-http://localhost:${OMB_HTTP_PORT:-8080}}}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8799/api/health', { signal: AbortSignal.timeout(4000) }).then(async r => { if (!r.ok || !(await r.text()).includes('openmausbot')) process.exit(1); }).catch(() => process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+  caddy:
+    image: ${CADDY_IMAGE:-caddy:2}
+    restart: unless-stopped
+    network_mode: service:omb
+    environment:
+      OMB_HTTPS_HOST: ${OMB_HTTPS_HOST:-}
+      OMB_BIND_ADDRESS: ${OMB_BIND_ADDRESS:-127.0.0.1}
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        export OMB_UPSTREAM_SCHEME=http
+        if [ -n "$$OMB_HTTPS_HOST" ] && [ "$$OMB_BIND_ADDRESS" != "127.0.0.1" ]; then
+          echo "OMB_HTTPS_HOST requires OMB_BIND_ADDRESS=127.0.0.1; forward HTTPS through a trusted local proxy." >&2
+          exit 1
+        fi
+        if [ -n "$$OMB_HTTPS_HOST" ]; then
+          export OMB_UPSTREAM_SCHEME=https
+        fi
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    depends_on:
+      omb:
+        condition: service_healthy
+    volumes:
+      - ./deploy/local/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  data:
+    external: ${OMB_DATA_EXTERNAL:-false}
+    name: ${OMB_DATA_VOLUME:-${COMPOSE_PROJECT_NAME:-openmausbot}_data}
+  caddy_data:
+  caddy_config:

@@ -114,10 +114,10 @@ export function rememberCompanionKeepAwake(keepAwake) {
 /** Ask the sidecar's own control server, which is the same API the standalone
  * page uses. Short timeout: this is loopback, and a spinner in Settings that
  * never resolves is worse than an error. */
-async function control(method, urlPath, body) {
+async function control(method, urlPath, body, { timeoutMs = 4_000 } = {}) {
   const options = {
     method,
-    signal: AbortSignal.timeout(4000),
+    signal: AbortSignal.timeout(timeoutMs),
   };
   if (body !== undefined) {
     options.body = JSON.stringify(body);
@@ -187,7 +187,7 @@ export function stopCompanion() {
 }
 
 /** startCompanion's body, run inside the transition queue. */
-async function start({ resourcesPath, harnessPort, hostedUrl = null, log }) {
+async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = null, secretPublicKey = null, log }) {
   if (proc) return companionState();
   lastError = null;
   const resolved = entryPoint(resourcesPath);
@@ -223,8 +223,12 @@ async function start({ resourcesPath, harnessPort, hostedUrl = null, log }) {
   const childEnvironment = { ...process.env };
   delete childEnvironment.OMB_COMPANION_HOSTED_URL;
   delete childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN;
+  delete childEnvironment.OMB_PHONE_SECRET_PUBLIC_KEY;
   if (hostedUrl) childEnvironment.OMB_COMPANION_HOSTED_URL = hostedUrl;
   childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN = allocatedOrigin.socketPath;
+  if (/^[A-Za-z0-9_-]{87}$/.test(String(secretPublicKey ?? ""))) {
+    childEnvironment.OMB_PHONE_SECRET_PUBLIC_KEY = secretPublicKey;
+  }
 
   let child;
   try {
@@ -245,6 +249,15 @@ async function start({ resourcesPath, harnessPort, hostedUrl = null, log }) {
     lastError = "the companion process could not be started";
     return companionState();
   }
+  child.once("spawn", () => {
+    // Never expose this capability in argv, environment, logs or the renderer.
+    try {
+      child.postMessage({ type: "openmausbot:companion-mutation-token", token: mutationToken });
+    } catch {
+      log?.("companion authorization could not be initialized");
+      child.kill();
+    }
+  });
   child.stdout?.on("data", (d) => log?.(`[companion] ${String(d).trimEnd()}`));
   child.stderr?.on("data", (d) => log?.(`[companion err] ${String(d).trimEnd()}`));
 
@@ -362,7 +375,14 @@ export function setCompanionHostedUrl(endpoint) {
 export async function companionState() {
   const keepAwake = companionKeepAwakeAtRest();
   if (!proc) {
-    const state = { enabled: false, keepAwake, port: COMPANION_PORT, devices: [], pairing: null };
+    const state = {
+      enabled: false,
+      keepAwake,
+      port: COMPANION_PORT,
+      devices: [],
+      connectedDeviceIds: [],
+      pairing: null,
+    };
     if (lastError) state.error = lastError;
     return state;
   }
@@ -371,15 +391,68 @@ export async function companionState() {
     return { enabled: true, keepAwake, ...state };
   } catch {
     // running but unreachable: report it rather than claiming health
-    return { enabled: true, keepAwake, port: COMPANION_PORT, devices: [], pairing: null, error: "the companion is not responding" };
+    return {
+      enabled: true,
+      keepAwake,
+      port: COMPANION_PORT,
+      devices: [],
+      connectedDeviceIds: [],
+      pairing: null,
+      error: "the companion is not responding",
+    };
   }
 }
 
-/** Open or close a pairing window on the running sidecar. */
-export async function companionPairing(open) {
+/** Re-read Tailscale without restarting the sidecar or dropping connected
+ * phones. Tailscale may be installed, signed in, or enabled after OpenMausBot
+ * starts, so startup-only detection makes an otherwise healthy route look
+ * permanently unavailable. */
+export async function companionRefreshTailscale() {
   if (!proc) return companionState();
-  await control(open ? "POST" : "DELETE", "/pairing").catch(() => {});
-  return companionState();
+  try {
+    // The CLI hunt is itself bounded to five seconds. Give the loopback call
+    // enough room to receive that bounded answer instead of aborting first.
+    const state = await control("POST", "/tailscale/refresh", undefined, { timeoutMs: 6_000 });
+    return {
+      enabled: true,
+      keepAwake: companionKeepAwakeAtRest(),
+      ...state,
+    };
+  } catch {
+    const state = await companionState();
+    return {
+      ...state,
+      error: state.error ?? "Tailscale could not be checked.",
+    };
+  }
+}
+
+/** Open or close a pairing window on the running sidecar. A conditional close
+ * cannot erase a newer code created after the renderer began cancelling. */
+export async function companionPairing(open, expectedToken) {
+  if (!proc) return companionState();
+  const conditionalClose = !open && expectedToken !== undefined;
+  const candidate = String(expectedToken ?? "");
+  const token = /^omb_pair_[A-Za-z0-9_-]{43}$/.test(candidate)
+    ? candidate
+    : "invalid-pairing-token";
+  const path = conditionalClose
+    ? `/pairing?expectedToken=${encodeURIComponent(token)}`
+    : "/pairing";
+  try {
+    const state = await control(open ? "POST" : "DELETE", path);
+    return {
+      enabled: true,
+      keepAwake: companionKeepAwakeAtRest(),
+      ...state,
+    };
+  } catch {
+    const state = await companionState();
+    return {
+      ...state,
+      error: state.error ?? "Phone pairing could not be updated.",
+    };
+  }
 }
 
 /** Unpair one device. Ignores an id the renderer should not have sent. */
@@ -396,5 +469,13 @@ export async function companionCloudDesktopAccess(deviceId, allowed) {
   if (!proc) return companionState();
   if (!/^[\w-]{1,64}$/.test(String(deviceId ?? ""))) return companionState();
   await control(allowed ? "POST" : "DELETE", `/devices/${deviceId}/cloud-desktop`).catch(() => {});
+  return companionState();
+}
+
+/** Browser access is its own per-device grant, never inherited from VM access. */
+export async function companionBrowserControlAccess(deviceId, allowed) {
+  if (!proc) return companionState();
+  if (!/^[\w-]{1,64}$/.test(String(deviceId ?? ""))) return companionState();
+  await control(allowed ? "POST" : "DELETE", `/devices/${deviceId}/browser-control`);
   return companionState();
 }

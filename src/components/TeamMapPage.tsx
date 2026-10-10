@@ -1,67 +1,39 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ArrowRight, BookOpen, Crown, Loader2, Network, Radio, RefreshCw, Save, X } from "lucide-react";
+import { ArrowRight, BookOpen, Box, Loader2, Monitor, Network, Plus, Save, Users, X } from "lucide-react";
 
-import { MausAvatar } from "./Avatar";
-import { api, formatTime, useStore, type Bot } from "@/state/store";
-import { normalizeState } from "@/lib/mascot";
+import { api, formatTime, openThread, useStore, type Bot } from "@/state/store";
 import {
   EMPTY_TEAM_MAP_SNAPSHOT,
   buildTeamMapEdges,
   buildTeamMapSections,
-  teamMapStatus,
+  teamMapBotCount,
   type TeamMapEdge,
   type TeamMapSnapshot,
 } from "@/lib/team-map";
 import { cn } from "@/lib/cn";
-
-const statusTone = {
-  success: "bg-success",
-  warning: "bg-warning",
-  danger: "bg-danger",
-  idle: "bg-ink-secondary/35",
-} as const;
-
-function BotNode({ bot, chief = false }: { bot: Bot; chief?: boolean }) {
-  const { dispatch } = useStore();
-  const status = teamMapStatus(bot);
-  return (
-    <button
-      onClick={() => dispatch({ type: "select", id: bot.id })}
-      className="group relative flex min-w-0 items-center gap-3 rounded-xl border border-hairline/50 bg-card px-3 py-3 text-left shadow-sm transition hover:border-accent/35 hover:bg-raised/50"
-    >
-      <MausAvatar
-        color={bot.color}
-        state={normalizeState(bot.mascotExpression) ?? "idle"}
-        size={34}
-        motion="none"
-        motionKey={0}
-        animated={false}
-      />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate text-[13.5px] font-semibold text-ink">{bot.name}</span>
-          {chief && <Crown size={12} className="shrink-0 text-warning" aria-label="Chief of Staff" />}
-        </span>
-        <span className="block truncate text-[11.5px] text-ink-secondary">{bot.title || bot.modelSelection.model}</span>
-      </span>
-      <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-ink-secondary">
-        <span className={cn("size-1.5 rounded-full", statusTone[status.tone], status.label === "Working" && "animate-pulse")} />
-        {status.label}
-      </span>
-    </button>
-  );
-}
+import { useCaptionChrome } from "@/components/DesktopCapabilities";
+import { placeOffered } from "@/lib/place";
+import { TeamCanvas } from "./TeamCanvas";
+import { TeamDialog } from "./TeamDialog";
+import { TeamMemoryDialog } from "./TeamMemoryDialog";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { t } from "@/lib/i18n";
+import { CanvasComputers } from "./CanvasComputers";
+import type { TeamComputer } from "../../shared/team-computer";
 
 function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const source = bots.find((bot) => bot.id === edge.sourceBotId);
   const target = bots.find((bot) => bot.id === edge.targetBotId);
   if (!source || !target) return null;
   const live = edge.state !== "connected";
   return (
     <button
-      onClick={() => dispatch({ type: "select", id: edge.groupId ?? target.id })}
+      onClick={() => {
+        if (!edge.groupId && edge.threadId) openThread(dispatch, { botId: target.id, threadId: edge.threadId }, state);
+        else dispatch({ type: "select", id: edge.groupId ?? target.id });
+      }}
       className="flex w-full items-center gap-3 rounded-xl border border-hairline/40 bg-card px-3 py-2.5 text-left transition hover:bg-raised/50"
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -115,7 +87,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
 
   const requestClose = useCallback(() => {
     if (savingRef.current) return;
-    if (dirtyRef.current && !window.confirm("Discard unsaved changes to this shared context?")) return;
+    if (dirtyRef.current && !window.confirm(t("team.instructionsDiscard"))) return;
     onCloseRef.current();
   }, []);
 
@@ -218,17 +190,17 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
             <div className="flex items-center gap-2">
               <BookOpen size={19} className="text-accent" />
               <h2 id="section-context-title" className="text-[20px] font-semibold tracking-[-0.01em] text-ink">
-                {label} shared context
+                {t("team.instructionsTitle", { name: label })}
               </h2>
             </div>
             <p className="mt-1.5 max-w-[520px] text-[12.5px] leading-relaxed text-ink-secondary">
-              A team brief shown to every bot in this section at the start of each turn. Only you can edit it.
+              {t("team.instructionsHint")}
             </p>
           </div>
           <button
             onClick={requestClose}
             disabled={saving}
-            aria-label="Close shared context"
+            aria-label={t("team.instructionsClose")}
             className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
           >
             <X size={19} />
@@ -238,7 +210,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 sm:px-8">
           {loading ? (
             <div className="flex min-h-[260px] items-center justify-center text-ink-secondary">
-              <Loader2 size={20} className="animate-spin" aria-label="Loading shared context" />
+              <Loader2 size={20} className="animate-spin" aria-label={t("team.instructionsLoading")} />
             </div>
           ) : (
             <>
@@ -247,8 +219,8 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
                 value={text}
                 onChange={(event) => setText(event.target.value)}
                 placeholder={"Goals\n- Ship the Windows onboarding refresh\n\nDecisions\n- Keep customer data local\n\nPreferences\n- Use concise weekly updates"}
-                aria-label={`${label} shared context`}
-                className="min-h-[280px] w-full resize-y rounded-xl border border-hairline/60 bg-inset px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-secondary/55 focus:border-accent/50"
+                aria-label={t("team.instructionsTitle", { name: label })}
+                className="min-h-[280px] w-full resize-y rounded-xl border border-hairline/60 bg-inset px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/50"
               />
               <div className="mt-2 flex items-start justify-between gap-4 text-[11.5px] text-ink-secondary">
                 <span>
@@ -274,7 +246,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
             className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Save context
+            {t("team.instructionsSave")}
           </button>
         </footer>
       </div>
@@ -284,24 +256,39 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
 }
 
 export function TeamMapPage() {
-  const { state } = useStore();
+  const { state, dispatch } = useStore();
+  const { dragProps } = useCaptionChrome();
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   const [snapshot, setSnapshot] = useState<TeamMapSnapshot>(EMPTY_TEAM_MAP_SNAPSHOT);
-  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [contextEditor, setContextEditor] = useState<{ section: string; label: string } | null>(null);
+  const [memoryEditor, setMemoryEditor] = useState<{ section: string; label: string } | null>(null);
+  const [teamEditor, setTeamEditor] = useState<{ section?: string; rename?: boolean } | null>(null);
+  const [deletingTeam, setDeletingTeam] = useState<string | null>(null);
+  const [computersOpen, setComputersOpen] = useState(false);
+  const [createComputerRequest, setCreateComputerRequest] = useState(0);
+  const [computers, setComputers] = useState<TeamComputer[]>([]);
+  const [computerDrop, setComputerDrop] = useState<{ id: string; section: string } | null>(null);
+  const clearComputerDrop = useCallback(() => setComputerDrop(null), []);
+  const [pendingMove, setPendingMove] = useState<{ bot: Bot; destination: string; resolve: (moved: boolean) => void } | null>(null);
+  const pendingMoveRef = useRef(pendingMove);
+  pendingMoveRef.current = pendingMove;
+  useEffect(() => () => pendingMoveRef.current?.resolve(false), []);
   const bots = useMemo(() => state.bots.filter((bot) => !bot.hidden), [state.bots]);
-  const sections = useMemo(() => buildTeamMapSections(bots), [bots]);
+  const sections = useMemo(() => {
+    const names = [...new Set([...(state.sections ?? []), ...state.groups.flatMap((group) => group.section ? [group.section] : [])])];
+    const order = (key: string) => key === "" ? -1 : names.includes(key) ? names.indexOf(key) : names.length;
+    return buildTeamMapSections(bots, names).sort((a, b) => order(a.key) - order(b.key));
+  }, [bots, state.sections, state.groups]);
   const edges = useMemo(() => buildTeamMapEdges(bots, snapshot), [bots, snapshot]);
 
-  const refresh = useCallback(async (showSpinner = false) => {
-    if (showSpinner) setRefreshing(true);
+  const refresh = useCallback(async () => {
     try {
       setSnapshot(await api("/api/team-map"));
-      setError(null);
+      setRefreshError(null);
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : String(requestError));
-    } finally {
-      if (showSpinner) setRefreshing(false);
+      setRefreshError(requestError instanceof Error ? requestError.message : String(requestError));
     }
   }, []);
 
@@ -313,100 +300,80 @@ export function TeamMapPage() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const working = bots.filter((bot) => bot.busy || bot.activity === "working").length;
-  const waiting = bots.filter((bot) => bot.activity === "waiting-on-you").length;
+  const moveBot = async (bot: Bot, destination: string) => {
+    setError(null);
+    try {
+      const result: { sections: string[]; bots: Bot[] } = await api("/api/sidebar-sections", {
+        method: "POST", body: JSON.stringify({ name: destination, botIds: [bot.id] }),
+      });
+      dispatch({ type: "sections", sections: result.sections });
+      for (const patched of result.bots) dispatch({ type: "botPatched", bot: patched });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      throw cause;
+    }
+  };
+
+  const requestMove = (bot: Bot, destination: string) => new Promise<boolean>((resolve) => {
+    pendingMoveRef.current?.resolve(false);
+    setPendingMove({ bot, destination, resolve });
+  });
+  const cancelMove = useCallback(() => {
+    pendingMoveRef.current?.resolve(false);
+    setPendingMove(null);
+  }, []);
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-app text-ink">
-      <header className="flex shrink-0 items-center justify-between border-b border-hairline/40 px-7 py-5 max-md:pl-12">
+      <header {...dragProps} className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline/40 px-6 py-4 max-md:pl-12">
         <div>
           <div className="flex items-center gap-2.5">
-            <Network size={20} className="text-accent" />
-            <h1 className="text-[18px] font-semibold">Team map</h1>
-            <span className="flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-[10.5px] font-medium text-success">
-              <Radio size={10} /> Live
-            </span>
+            <Network size={18} className="text-ink-secondary" />
+            <h1 className="text-[17px] font-semibold">Team map</h1>
+            <span className="ml-1 text-[11px] text-ink-secondary">{teamMapBotCount(bots.length)}</span>
           </div>
-          <p className="mt-1 text-[12.5px] text-ink-secondary">
-            See every section, who is working, and where tasks are moving.
-          </p>
+          <p className="mt-1 text-[12px] text-ink-secondary">{t("canvas.description")}</p>
         </div>
-        <button
-          onClick={() => void refresh(true)}
-          disabled={refreshing}
-          className="rounded-lg border border-hairline/50 bg-card p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
-          aria-label="Refresh team map"
-          title="Refresh"
-        >
-          <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
-        </button>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
-        <div className="mb-5 grid max-w-[620px] grid-cols-3 gap-2">
-          {[
-            [bots.length, "Bots"],
-            [working, "Working"],
-            [waiting, "Waiting on you"],
-          ].map(([value, label]) => (
-            <div key={label} className="rounded-xl border border-hairline/40 bg-panel px-3.5 py-3">
-              <div className="text-[18px] font-semibold tabular-nums text-ink">{value}</div>
-              <div className="text-[11.5px] text-ink-secondary">{label}</div>
+        {!remoteClient && <div className="flex items-center gap-2">
+          <button onClick={() => setComputersOpen((value) => !value)} aria-label="Computers" aria-expanded={computersOpen} className="rounded-lg p-2 text-ink-secondary hover:bg-control hover:text-ink"><Monitor size={17} /></button>
+          <details className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute("open"); }} onKeyDown={(event) => {
+            if (event.key === "Escape") { event.currentTarget.removeAttribute("open"); event.currentTarget.querySelector("summary")?.focus(); }
+          }}>
+            <summary aria-label="Add to team map" className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-hairline/60 bg-panel px-3 py-2 text-[12px] font-medium hover:bg-control [&::-webkit-details-marker]:hidden"><Plus size={14} /> Add</summary>
+            <div className="absolute right-0 top-full z-40 mt-2 w-52 rounded-xl border border-hairline/60 bg-panel p-1.5 shadow-xl" onClick={(event) => {
+              const details = event.currentTarget.closest("details"); details?.querySelector("summary")?.focus(); details?.removeAttribute("open");
+            }}>
+              <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => setTeamEditor({})}><Users size={14} />{t("team.create")}</button>
+              <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => { setComputersOpen(true); setCreateComputerRequest((value) => value + 1); }}><Box size={14} />Cloud computer</button>
+              {/* An OMB Cloud home has no Local VM (shared/cloud-home.ts). */}
+              {placeOffered("vm", state.config) && <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => dispatch({ type: "toggleAppSettings", section: "computer", open: true })}><Monitor size={14} />Local VM…</button>}
             </div>
-          ))}
-        </div>
-
-        {error && <div className="mb-4 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
-
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-4">
-          {sections.map((section) => (
-            <section key={section.key || "__general__"} className="rounded-2xl border border-hairline/50 bg-panel p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">{section.name}</h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setContextEditor({ section: section.key, label: section.name })}
-                    className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[10.5px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
-                    aria-label={`Edit ${section.name} shared context`}
-                    title="Shared context"
-                  >
-                    <BookOpen size={11} /> Context
-                  </button>
-                  <span className="text-[11px] tabular-nums text-ink-secondary">{section.chiefs.length + section.members.length}</span>
-                </div>
-              </div>
-              <div className="space-y-2">
-                {section.chiefs.map((bot) => <BotNode key={bot.id} bot={bot} chief />)}
-                {section.chiefs.length > 0 && section.members.length > 0 && (
-                  <div className="ml-5 h-3 w-px bg-hairline" aria-hidden />
-                )}
-                {section.members.length > 0 && (
-                  <div className={cn("space-y-2", section.chiefs.length > 0 && "border-l border-hairline/60 pl-3")}>
-                    {section.members.map((bot) => <BotNode key={bot.id} bot={bot} />)}
-                  </div>
-                )}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        <section className="mt-6 max-w-[900px]">
-          <div className="mb-2.5 flex items-center justify-between">
-            <h2 className="text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">Agent handoffs</h2>
-            <span className="text-[11px] text-ink-secondary">Running and queued first</span>
-          </div>
-          <div className="space-y-2">
-            {edges.slice(0, 12).map((edge) => (
-              <EdgeRow key={`${edge.sourceBotId}:${edge.targetBotId}`} edge={edge} bots={bots} />
-            ))}
-            {edges.length === 0 && (
-              <div className="rounded-xl border border-dashed border-hairline bg-panel px-4 py-6 text-center text-[12.5px] text-ink-secondary">
-                No bot-to-bot handoffs yet. Ask a Chief of Staff to delegate a task and it will appear here live.
-              </div>
-            )}
-          </div>
-        </section>
+          </details>
+        </div>}
+      </header>
+      {(error || refreshError) && <div role="alert" className="flex shrink-0 items-center justify-between gap-3 border-b border-danger/20 bg-danger/10 px-6 py-2 text-[12px] text-danger">
+        {error || refreshError}
+        <button aria-label={t("common.close")} className="rounded p-1 hover:bg-danger/10" onClick={() => { setError(null); setRefreshError(null); }}><X size={14} /></button>
+      </div>}
+      <div className="relative flex min-h-0 flex-1">
+      <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove}
+        connectedBotIds={state.settingsOpen ? edges.flatMap((edge) => edge.sourceBotId === state.selectedId ? [edge.targetBotId] : edge.targetBotId === state.selectedId ? [edge.sourceBotId] : []) : []}
+        onComputer={(bot) => dispatch({ type: "toggleSettings", botId: bot.id, section: "access", open: true })}
+        teamComputers={Object.fromEntries(computers.filter((computer) => computer.section !== null).map((computer) => [computer.section!, { name: computer.name, state: computer.state }]))}
+        onTeamComputer={() => setComputersOpen(true)}
+        onComputerDrop={(id, section) => { if (!remoteClient) { setComputersOpen(true); setComputerDrop({ id, section }); } }}
+        onInstructions={(section, label) => setContextEditor({ section, label })}
+        onMemory={(section, label) => setMemoryEditor({ section, label })}
+        onEditTeam={(section, rename) => setTeamEditor({ section, rename })}
+        onDeleteTeam={setDeletingTeam}
+        isEmpty={(key) => ![...state.bots, ...state.groups].some((record) => record.section?.trim() === key)} />
+      {!remoteClient && <CanvasComputers open={computersOpen} createRequest={createComputerRequest} drop={computerDrop} sections={sections}
+        onClose={() => setComputersOpen(false)} onDropHandled={clearComputerDrop} onChange={setComputers} />}
       </div>
+      {edges.length > 0 && <details className="shrink-0 border-t border-hairline/40 bg-panel px-6 py-3">
+        <summary className="cursor-pointer text-[12px] text-ink-secondary">{t("canvas.handoffs")} · {edges.length}</summary>
+        <div className="mt-3 max-h-48 space-y-2 overflow-y-auto">{edges.slice(0, 12).map((edge) => <EdgeRow key={`${edge.sourceBotId}:${edge.targetBotId}`} edge={edge} bots={bots} />)}</div>
+      </details>}
       {contextEditor && (
         <SectionContextDialog
           section={contextEditor.section}
@@ -414,6 +381,26 @@ export function TeamMapPage() {
           onClose={() => setContextEditor(null)}
         />
       )}
+      {teamEditor && <TeamDialog {...teamEditor} onClose={() => setTeamEditor(null)} />}
+      {memoryEditor && <TeamMemoryDialog key={memoryEditor.section} {...memoryEditor} onClose={() => setMemoryEditor(null)} />}
+      <ConfirmDialog open={pendingMove !== null} tone="neutral" title={`Move ${pendingMove?.bot.name ?? "bot"} to ${pendingMove?.destination || "General"}?`}
+        body="This changes the bot's home team and shared instructions, not just its position. Its conversations and model stay with it. To arrange visually, drag within the same team."
+        confirmLabel="Move bot" onCancel={cancelMove} onConfirm={() => {
+          const move = pendingMoveRef.current;
+          if (!move) return;
+          setPendingMove(null);
+          void moveBot(move.bot, move.destination).then(() => move.resolve(true), () => move.resolve(false));
+        }} />
+      <ConfirmDialog open={deletingTeam !== null} title={t("team.deleteTitle", { name: deletingTeam ?? "" })}
+        body={t("team.deleteKeepBotsDescription")}
+        confirmLabel={t("team.delete")} onCancel={() => setDeletingTeam(null)} onConfirm={() => {
+          const name = deletingTeam;
+          setDeletingTeam(null);
+          if (!name) return;
+          void api(`/api/sidebar-sections?section=${encodeURIComponent(name)}`, { method: "DELETE" })
+            .then(({ sections: names }) => dispatch({ type: "sections", sections: names }))
+            .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+        }} />
     </main>
   );
 }

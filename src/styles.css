@@ -1,5 +1,58 @@
 @import "tailwindcss";
 
+/* Phones and tablets have no hover, and Tailwind only applies `hover:` and
+   `group-hover:` under `@media (hover: hover)`. A control revealed on hover
+   (`opacity-0 group-hover:opacity-100`) is therefore invisible there. Pair
+   every such reveal with `touch:` so it stays visible on touch screens; mouse
+   users see no change. src/components/touch-actions.test.ts enforces it. */
+@custom-variant touch {
+  @media (hover: none), (pointer: coarse) {
+    @slot;
+  }
+}
+
+/* Inline mentions keep the surrounding font metrics, including in the
+   textarea mirror. No padding/border/font-weight changes that shift the caret. */
+.mention-highlight {
+  --mention-color: var(--color-ink-secondary);
+
+  color: color-mix(in srgb, var(--mention-color) 30%, var(--color-ink));
+  background: color-mix(in srgb, var(--mention-color) 24%, var(--color-inset));
+  border-radius: 3px;
+  text-decoration: underline;
+  text-decoration-color: var(--mention-color);
+  text-underline-offset: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+::highlight(search-result-text) {
+  color: var(--color-ink);
+  background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+.mention-editor-mirror {
+  /* Match the native textarea's direction independently for each paragraph. */
+  unicode-bidi: plaintext;
+  padding: 4px;
+  font-size: 15px;
+  line-height: 24px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--color-ink);
+}
+.mention-editor textarea {
+  position: relative;
+  color: transparent;
+  caret-color: var(--color-ink);
+}
+.mention-editor textarea::selection {
+  color: var(--color-ink);
+  background: var(--color-raised-hover);
+}
+@media (forced-colors: active) {
+  .mention-editor-mirror { display: none; }
+  .mention-editor textarea { color: CanvasText; caret-color: CanvasText; }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    SKINS
 
@@ -21,18 +74,57 @@
    rendered values rather than reading the hex. `scripts/check-skin-contrast.mjs`
    re-runs that check.
    ───────────────────────────────────────────────────────────────────────── */
+.table-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 6px;
+  color: var(--color-ink-secondary);
+  cursor: pointer;
+}
+.table-action:hover, .table-action[aria-pressed="true"] { background: var(--color-raised); color: var(--color-ink); }
+.table-action:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+@media (pointer: coarse) { .table-action { min-width: 40px; min-height: 40px; } }
+/* inside a 28px file pill under a reply, the table preview is a 24px circle */
+.file-chip .table-action { width: 24px; height: 24px; min-width: 24px; min-height: 24px; border-radius: 9999px; }
+
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-workspace-in: workspace-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-pop-out: pop-out 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
   --animate-caret: caret-blink 1s step-end infinite;
   --animate-msg-in: msg-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-shimmer: shimmer 2s linear infinite;
+  --animate-status-pulse: status-pulse 1.6s steps(2, jump-none) infinite;
+  /* onboarding: a block of copy or a row arriving in a beat; `.stagger`
+     spaces siblings out. Rare, first-time motion, so it may run past the
+     300ms UI ceiling. */
+  --animate-rise: rise 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* onboarding: a spotlight card or a first-sight hint scaling in from its
+     anchor. Never from zero; nothing appears from nothing. */
+  --animate-spot-in: spot-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* onboarding: a surface reacting once to an event (a routine firing) */
+  --animate-ripple: ripple 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* onboarding: a bolt travelling from a webhook address to the bot */
+  --animate-bolt: bolt 0.9s cubic-bezier(0.77, 0, 0.175, 1) infinite;
 
   /* Defaults = Midnight. Kept here so the app is never unstyled. */
   --color-app: #070707;
   --color-panel: #111111;
   --color-raised: #2f2f2f;
   --color-raised-hover: #3d3d3d;
+  /* the composer pill. Every skin but Daylight paints it in `raised`; there
+     it is the page colour with a hairline ring, so it needs a tone (and a
+     ring, transparent everywhere else) of its own. */
+  --color-composer: #2f2f2f;
+  --color-composer-ring: transparent;
+  /* popover and right-click menus. Same story as the composer: every skin
+     but Daylight paints them in `card`, which there is the bot's bubble and
+     a shade too grey for a menu. */
+  --color-menu: #262626;
   --color-card: #262626;
   --color-inset: #191919;
   /* a control ON a card. The dark skins take their `raised` value, so this
@@ -42,6 +134,13 @@
   --color-hairline: #333333;
   --color-ink: #fcfcfc;
   --color-ink-secondary: #fcfcfc99;
+  /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
+     be `text-ink-secondary/70`, which fades an ink already tuned close to
+     AA and landed at 2.2–4:1. Each skin sets this to the quietest ink that
+     still clears 4.5:1 on every text surface, raised-hover included; on the
+     light skins that leaves little room below the secondary ink, so there
+     size carries the hierarchy. Measured by pnpm check:contrast. */
+  --color-ink-tertiary: #fcfcfc90;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
   /* the ring a keyboard user follows; sits on the accent so focus reads as
@@ -60,10 +159,15 @@
 /* Tokens that no utility generates — declared outside `@theme` so Tailwind
    can't tree-shake them away, and so a skin can redefine them freely. */
 :root {
+  --code-color-scheme: dark;
   /* ink carried by a filled accent / danger surface (see the rule at the
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
   --color-danger-ink: #ffffff;
+  /* ink carried by the user's own bubble. A hex rather than the ink token so
+     the contrast check can measure it; every dark skin repeats its ink here. */
+  --color-bubble-user-ink: #fcfcfc;
+  --color-success-ink: #072114;
   --color-scrollbar: #3d3d3d;
   /* second speed line of the mascot — contrasts against the app ground */
   --color-maus-line: #fcfcfc;
@@ -80,24 +184,31 @@
    they carry. Atelier and Foundry fix this via --color-accent-ink.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="midnight"] {
+  --code-color-scheme: dark;
   --color-app: #070707;
   --color-panel: #111111;
   --color-raised: #2f2f2f;
   --color-raised-hover: #3d3d3d;
+  --color-composer: #2f2f2f;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #262626;
+  --color-menu: #262626;    /* = card: unchanged */
   --color-inset: #191919;
   --color-control: #2f2f2f;       /* = raised: Midnight is unchanged */
   --color-hairline: #333333;
   --color-ink: #fcfcfc;
   --color-ink-secondary: #fcfcfc99;
+  --color-ink-tertiary: #fcfcfc90;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
   --color-accent-text: #7fc0ff;
   --color-accent-ink: #ffffff;
   --color-bubble-user: #5a5a5a;
+  --color-bubble-user-ink: #fcfcfc;   /* = ink: unchanged */
   --color-success: #38d591;
   --color-danger: #ff5667;
   --color-danger-ink: #ffffff;
+  --color-success-ink: #072114;
   --color-warning: #ff9800;
   --color-scrollbar: #3d3d3d;
   --color-maus-line: #fcfcfc;
@@ -118,11 +229,15 @@
    value is named next to each, so the drift stays auditable.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="atelier"] {
+  --code-color-scheme: light;
   --color-app: #f5f1eb;           /* outermost ground */
   --color-panel: #fbf8f2;         /* sidebar */
   --color-raised: #ffffff;        /* content — raised means lighter here */
   --color-raised-hover: #f2e9dc;  /* warm beige doubles as the hover fill */
+  --color-composer: #ffffff;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #ffffff;
+  --color-menu: #ffffff;    /* = card: unchanged */
   --color-inset: #f5f1eb;         /* inset surfaces pick the rail tone back up */
   --color-control: #ece4d6;       /* raised is white here and so is a card, so
                                      a control needs its own tone: 1.26:1 on a
@@ -131,6 +246,7 @@
 
   --color-ink: #1a1a18;           /* 17.4:1 on white */
   --color-ink-secondary: #6b6559; /* #8b8578 was 3.67:1 → 5.78:1 */
+  --color-ink-tertiary: #6d685c;
 
   /* Two accent tones: the fill carries white, the text stands on white. */
   --color-accent: #a05f25;        /* #b06a2c darkened → 5.05:1 */
@@ -139,10 +255,12 @@
   --color-focus: #96551f;         /* the ring rides the accent, not Grok blue */
   --color-accent-ink: #ffffff;
   --color-bubble-user: #f2e9dc;   /* your own messages in the badge beige */
+  --color-bubble-user-ink: #1a1a18;   /* = ink: unchanged */
 
   --color-success: #3f6b47;
   --color-danger: #a33a32;
   --color-danger-ink: #ffffff;
+  --color-success-ink: #ffffff;
   --color-warning: #7a5f31;       /* darkened → 4.98:1 */
   --color-scrollbar: #c9c0ae;
   --color-maus-line: #6b6559;
@@ -172,17 +290,22 @@
    8px — because sheet metal doesn't round the way paper does.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="foundry"] {
+  --code-color-scheme: dark;
   --color-app: #100e0b;           /* deepest ground, warm black */
   --color-panel: #171410;         /* sidebar */
   --color-raised: #262019;        /* raised means warmer, not just lighter */
   --color-raised-hover: #322b21;
+  --color-composer: #262019;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #1e1a14;
+  --color-menu: #1e1a14;    /* = card: unchanged */
   --color-inset: #0b0a08;         /* inset sinks below the ground */
   --color-control: #262019;       /* = raised: Foundry is unchanged */
   --color-hairline: #3d3529;      /* visible on purpose — this UI has edges */
 
   --color-ink: #f4efe4;           /* warm off-white, never pure #fff */
   --color-ink-secondary: #b0a696; /* 6.7:1 on raised, 5.9:1 on hover */
+  --color-ink-tertiary: #9c9384;
 
   /* Brass. Bright fill, dark lettering — the inversion described above. */
   --color-accent: #d99a3e;
@@ -191,10 +314,12 @@
   --color-focus: #e0a44c;         /* the ring rides the accent, not Grok blue */
   --color-accent-ink: #1c150c;    /* 7.4:1 on the brass fill */
   --color-bubble-user: #2a2318;   /* your own messages, one step out of the card */
+  --color-bubble-user-ink: #f4efe4;   /* = ink: unchanged */
 
   --color-success: #57b078;
   --color-danger: #e0685e;        /* a lamp, not a paint chip */
   --color-danger-ink: #1c0d0b;
+  --color-success-ink: #1c150c;
   --color-warning: #dfa441;
   --color-scrollbar: #3d3529;
   --color-maus-line: #b0a696;
@@ -220,6 +345,7 @@
    round more than paper does, and far more than sheet metal.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="lagoon"] {
+  --code-color-scheme: light;
   /* The tint is the point, so it is carried by the surfaces, not by a button:
      the ground sits 13 points of green-blue above its red channel, roughly
      three times Atelier's cream cast, which is what makes the skin read as
@@ -229,7 +355,10 @@
   --color-panel: #ecf4f3;
   --color-raised: #ffffff;
   --color-raised-hover: #cfe4e1;
+  --color-composer: #ffffff;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #ffffff;
+  --color-menu: #ffffff;    /* = card: unchanged */
   --color-inset: #d5e8e5;
   --color-control: #c3dcd9;       /* Lagoon's surfaces climb white → panel →
                                      app → inset → hover in small steps, so a
@@ -242,6 +371,7 @@
   --color-ink: #14201f;           /* dark petrol; a neutral black would read
                                      as a foreign object on a tinted ground */
   --color-ink-secondary: #4d5c5b; /* 7.0:1 on white, 5.8:1 on the ground */
+  --color-ink-tertiary: #566564;
 
   --color-accent: #11736d;        /* deep teal, carries white at 5.68:1 */
   --color-accent-border: #14807a;
@@ -249,10 +379,12 @@
   --color-focus: #0d5f5a;         /* the ring rides the accent, not Grok blue */
   --color-accent-ink: #ffffff;
   --color-bubble-user: #cfe4e1;
+  --color-bubble-user-ink: #14201f;   /* = ink: unchanged */
 
   --color-success: #2f6b4f;
   --color-danger: #a8382f;
   --color-danger-ink: #ffffff;
+  --color-success-ink: #ffffff;
   --color-warning: #7a5a2a;
   --color-scrollbar: #a6b8b6;
   --color-maus-line: #4d5c5b;
@@ -263,18 +395,616 @@
   --radius-xl: 14px;
 }
 
+/* ── Graphite ─────────────────────────────────────────────────────────────
+   Neutral charcoal for people who want a dark workspace without Midnight's
+   near-black contrast or Foundry's warmth. Steel blue stays deliberately
+   desaturated: it marks actions and focus without making the chrome glow.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="graphite"] {
+  --code-color-scheme: dark;
+  --color-app: #111214;
+  --color-panel: #181a1d;
+  --color-raised: #2a2d32;
+  --color-raised-hover: #353941;
+  --color-composer: #2a2d32;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
+  --color-card: #22252a;
+  --color-menu: #22252a;    /* = card: unchanged */
+  --color-inset: #0d0e10;
+  --color-control: #2a2d32;
+  --color-hairline: #3b4048;
+
+  --color-ink: #f2f4f7;
+  --color-ink-secondary: #b3b8c2;
+  --color-ink-tertiary: #9fa4ad;
+
+  --color-accent: #4f75a2;
+  --color-accent-border: #698fbb;
+  --color-accent-text: #8fb4df;
+  --color-focus: #8fb4df;
+  --color-accent-ink: #ffffff;
+  --color-bubble-user: #30343a;
+  --color-bubble-user-ink: #f2f4f7;   /* = ink: unchanged */
+
+  --color-success: #63b58a;
+  --color-danger: #dd6b73;
+  --color-danger-ink: #1e0b0e;
+  --color-success-ink: #101a14;
+  --color-warning: #d3a150;
+  --color-scrollbar: #464b54;
+  --color-maus-line: #b3b8c2;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 6px;
+  --radius-xl: 10px;
+}
+
+/* ── Linen ────────────────────────────────────────────────────────────────
+   A neutral daylight skin: less cream than Atelier and less blue-green than
+   Lagoon. Navy is used as ink rather than decoration, keeping the workspace
+   crisp and familiar instead of colourful.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="linen"] {
+  --code-color-scheme: light;
+  --color-app: #eceff3;
+  --color-panel: #f5f6f8;
+  --color-raised: #ffffff;
+  --color-raised-hover: #e1e6ed;
+  --color-composer: #ffffff;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
+  --color-card: #ffffff;
+  --color-menu: #ffffff;    /* = card: unchanged */
+  --color-inset: #e6e9ee;
+  --color-control: #d3d9e1;
+  --color-hairline: #b4bbc5;
+
+  --color-ink: #1d2229;
+  --color-ink-secondary: #59616c;
+  --color-ink-tertiary: #5f6671;
+
+  --color-accent: #355f8a;
+  --color-accent-border: #4978a6;
+  --color-accent-text: #2c5680;
+  --color-focus: #2c5680;
+  --color-accent-ink: #ffffff;
+  --color-bubble-user: #e1e6ed;
+  --color-bubble-user-ink: #1d2229;   /* = ink: unchanged */
+
+  --color-success: #2f704f;
+  --color-danger: #a83d48;
+  --color-danger-ink: #ffffff;
+  --color-success-ink: #ffffff;
+  --color-warning: #765b2b;
+  --color-scrollbar: #aeb6c0;
+  --color-maus-line: #59616c;
+
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, sans-serif;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+}
+
+/* ── Dusk ─────────────────────────────────────────────────────────────────
+   A restrained plum-dark alternative. The violet lives in the neutrals as
+   much as the accent, so the skin feels cohesive rather than neon or themed.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="dusk"] {
+  --code-color-scheme: dark;
+  --color-app: #121014;
+  --color-panel: #19161c;
+  --color-raised: #2b2630;
+  --color-raised-hover: #37303d;
+  --color-composer: #2b2630;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
+  --color-card: #231f27;
+  --color-menu: #231f27;    /* = card: unchanged */
+  --color-inset: #0d0b0f;
+  --color-control: #2b2630;
+  --color-hairline: #403847;
+
+  --color-ink: #f4eff6;
+  --color-ink-secondary: #b9afbd;
+  --color-ink-tertiary: #a199a5;
+
+  --color-accent: #765683;
+  --color-accent-border: #9670a3;
+  --color-accent-text: #c49bd2;
+  --color-focus: #c49bd2;
+  --color-accent-ink: #ffffff;
+  --color-bubble-user: #332b38;
+  --color-bubble-user-ink: #f4eff6;   /* = ink: unchanged */
+
+  --color-success: #6fad83;
+  --color-danger: #db727a;
+  --color-danger-ink: #210c10;
+  --color-success-ink: #101812;
+  --color-warning: #d0a35d;
+  --color-scrollbar: #4a414f;
+  --color-maus-line: #b9afbd;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+}
+
+/* ── Daylight ─────────────────────────────────────────────────────────────
+   Midnight's twin. Midnight was pixel-sampled from the upstream app's dark
+   theme; this is the same sampling of its light one, so the two are the only
+   skins here that copy a palette rather than compose one.
+
+   Its structural quirk is the user's own bubble: near-black on a near-white
+   page, the one place a light skin carries inverted ink. That is what
+   --color-bubble-user-ink exists for — see the rule at the bottom of the
+   file. Everything else is a short ladder of greys: page #fcfcfc, sidebar
+   #f7f7f7, selected row #e1e1e1.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="daylight"] {
+  --code-color-scheme: light;
+  --color-app: #fcfcfc;           /* the thread */
+  --color-panel: #f7f7f7;         /* sidebar, one step down from the thread */
+  --color-raised: #e1e1e1;
+  --color-raised-hover: #d7d7d7;  /* the selected row */
+  --color-card: #eeeeee;          /* what a bot says */
+  --color-inset: #e6e6e6;         /* the search field */
+  --color-control: #dedede;       /* a chip on a card */
+  /* Sampled at #efefef, which is what the eye reads on the divider — but a
+     hairline that faint fails this repo's own gate (1.5:1 against the page)
+     and every border is drawn at /40 on top of that. #d0d0d0 is the lightest
+     grey that still passes; see scripts/check-skin-contrast.mjs. */
+  --color-hairline: #d0d0d0;
+
+  --color-ink: #0d0d0d;
+  --color-ink-secondary: #575757;
+  --color-ink-tertiary: #5c5c5c;
+
+  /* The upstream blue is #1084fe, which carries white at 3.1:1 — fine for the
+     unread dot it is mostly used for, not for a filled button's label. The
+     fill is darkened until white clears AA; the dot keeps reading as blue. */
+  --color-accent: #0b62c4;
+  --color-accent-border: #1084fe;
+  --color-accent-text: #0b5cb8;
+  --color-focus: #0b62c4;
+  --color-accent-ink: #ffffff;
+  /* The composer is the page with a ring around it, not a grey slab —
+     the one surface where this skin departs from `raised`. */
+  --color-composer: #fcfcfc;
+  --color-composer-ring: #e4e4e4;
+  --color-menu: #fcfcfc;          /* menus sit on the page tone, not the bubble */
+  --color-bubble-user: #070707;   /* your own messages, inverted */
+  --color-bubble-user-ink: #fcfcfc;
+
+  --color-success: #1f7a4d;
+  --color-danger: #c02b3a;
+  --color-danger-ink: #ffffff;
+  --color-success-ink: #ffffff;
+  --color-warning: #8a5a00;
+  --color-scrollbar: #c4c4c4;
+  --color-maus-line: #5f5f5f;
+
+  --font-sans: "Inter", -apple-system, blinkmacsystemfont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 8px;
+  --radius-xl: 14px;
+}
+
+/* ── Meadow ───────────────────────────────────────────────────────────────
+   The MausBot brand look: a white page, a sidebar washed in the faintest
+   green, mint for the selected row and a calm green accent. Like Daylight,
+   your own bubble is the one dark surface (green-black), so it gets the same
+   @scope treatment further down. The brand green #1f8a52 carries white at
+   only 4.3:1, so the filled accent is one step deeper; the brand green stays
+   as the accent border.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="meadow"] {
+  --code-color-scheme: light;
+  --color-app: #ffffff;           /* the thread */
+  --color-panel: #f6f8f6;         /* sidebar */
+  --color-raised: #e9eeea;
+  --color-raised-hover: #d6efdf;  /* the selected row, mint */
+  --color-card: #f1f5f2;          /* what a bot says */
+  --color-inset: #e7ece8;         /* the search field */
+  --color-control: #dce3de;       /* a chip on a card */
+  --color-hairline: #c9d3cc;
+
+  --color-ink: #0f1a13;
+  --color-ink-secondary: #4d5a52;
+  --color-ink-tertiary: #4f5c54;
+
+  --color-accent: #1a7a48;
+  --color-accent-border: #1f8a52;
+  --color-accent-text: #176b3f;
+  --color-focus: #1a7a48;
+  --color-accent-ink: #ffffff;
+  --color-composer: #ffffff;
+  --color-composer-ring: #e3e9e4;
+  --color-menu: #ffffff;
+  --color-bubble-user: #0f1a13;   /* your own messages, inverted */
+  --color-bubble-user-ink: #ffffff;
+
+  --color-success: #1a7a48;
+  --color-danger: #c02b3a;
+  --color-danger-ink: #ffffff;
+  --color-success-ink: #ffffff;
+  --color-warning: #8a5a00;
+  --color-scrollbar: #c3cdc6;
+  --color-maus-line: #5a675f;
+
+  --font-sans: "Inter", -apple-system, blinkmacsystemfont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 10px;
+  --radius-xl: 16px;
+}
+
+/* Shiki emits both palettes so cached blocks follow the nearest skin without
+   re-tokenizing. Scope the scheme to code; native controls keep their styling. */
+.chat-md .shiki {
+  color-scheme: var(--code-color-scheme);
+}
+
+/* Keep KaTeX's formula layout intact, but scroll long formulas inside the
+   bubble instead of letting them overflow it. */
+.chat-md .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.chat-md :not(.katex-display) > .katex {
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+  vertical-align: middle;
+}
+
+/* Plain-text message bodies (user turns, webhook tasks, error fallbacks) are
+   written in whatever language the person used, which is independent of the
+   UI language. `plaintext` resolves direction per line from its own first
+   strong character, so a pasted block that mixes an Arabic sentence with an
+   English stack trace lays each line out correctly instead of letting the
+   first line decide for all of them — which is what a single dir="auto"
+   would do. `start` then follows that per-line direction. */
+.chat-text {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
 html,
 body,
 #root {
   height: 100%;
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+   FONTS
+   An optional interface-font override, independent of the skin (see
+   src/lib/fonts.ts). `:root[data-font]` outranks the skins' `[data-skin]`
+   blocks, so the choice holds on every skin. No attribute = the skin's font.
+   Poppins is used when installed on the system; otherwise the stack falls
+   back to the system UI font.
+   ──────────────────────────────────────────────────────────────────────── */
+:root[data-font="system"] {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+:root[data-font="inter"] {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", Roboto, sans-serif;
+}
+:root[data-font="poppins"] {
+  --font-sans: "Poppins", system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+}
+:root[data-font="serif"] {
+  --font-sans: "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
+}
+
 body {
   background-color: var(--color-app);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+  /* Greyscale smoothing (`antialiased`) draws macOS stems lighter than the
+     system UI, which is the washed-out look on a Retina display. The window
+     background is opaque, so the default smoothing can stay. */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   overflow: hidden;
+}
+
+/* Shared action rhythm. Existing skin tokens supply the colors and radius;
+   use utilities for placement and the control scale below for size, rather
+   than inventing another button size. */
+@layer components {
+  .ui-button,
+  .ui-icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    min-height: 2rem;
+    border-radius: var(--radius-lg, 0.5rem);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.25rem;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+  .ui-button {
+    /* 4px + 20px line + 4px + a 1px border each side = 30px, so the 32px
+       min-height decides the box and the label sits on its center. */
+    padding: 0.25rem 0.75rem;
+    border: 1px solid var(--color-hairline);
+    background: var(--color-control);
+    color: var(--color-ink);
+  }
+  .ui-icon-button {
+    width: 2rem;
+    padding: 0.375rem;
+    color: var(--color-ink-secondary);
+  }
+  /* Control scale. `.ui-button` is the 32px default; the size classes step
+     it down for dense rows and inline actions. Every step keeps weight 500
+     and a line box equal to its text height plus leading, so the label sits
+     on the box center. Radii reuse the skin tokens: rounded-lg for buttons,
+     full for pills and chips. */
+  .ui-button-md {
+    min-height: 1.75rem;
+    gap: 0.375rem;
+    padding: 0.125rem 0.625rem;
+    font-size: 13px;
+    line-height: 1.25rem;
+  }
+  .ui-button-sm {
+    min-height: 1.5rem;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    font-size: 12px;
+    line-height: 1rem;
+  }
+  .ui-button-primary {
+    border-color: transparent;
+    background: var(--color-accent);
+    color: var(--color-accent-ink);
+  }
+  .ui-button-primary:enabled:hover,
+  a.ui-button-primary:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-ink);
+    filter: brightness(1.1);
+  }
+  /* A pill-shaped action in the transcript: run and conversation chips,
+     "load earlier", the failed-turn Retry. Same 28px as `.ui-button-md`. */
+  .ui-pill {
+    display: inline-flex;
+    max-width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 1.75rem;
+    padding: 0.125rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--color-hairline) 40%, transparent);
+    border-radius: 9999px;
+    background: var(--color-panel);
+    color: var(--color-ink-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.25rem;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+  button.ui-pill:enabled:hover,
+  a.ui-pill:hover {
+    background: var(--color-raised);
+    color: var(--color-ink);
+  }
+  button.ui-pill:disabled { opacity: 0.6; }
+  /* A static label: a digest, a count, a status. */
+  .ui-chip {
+    display: inline-flex;
+    max-width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 1.375rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1rem;
+  }
+  /* Inline code inside prose. Sized off the surrounding text so it reads at
+     the same optical size in a 15px bubble or a 13px note. It stays an
+     inline box, not inline-flex, so a long path can still wrap mid-line;
+     an inline background already centers on the glyphs, and `clone` keeps
+     the padding on every wrapped piece. */
+  .ui-code-chip {
+    padding: 0.125em 0.3em;
+    border-radius: 0.25rem;
+    background: var(--color-inset);
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    line-height: 1;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+  /* One row of a popover menu: 36px, 14px, icon then label. */
+  .ui-menu-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 2.25rem;
+    padding: 0.5rem 0.875rem;
+    text-align: left;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.25rem;
+  }
+  .ui-menu-row:enabled:hover { background: color-mix(in srgb, var(--color-raised) 70%, transparent); }
+  .ui-menu-row:disabled { opacity: 0.6; }
+  .ui-button:enabled:hover,
+  .ui-icon-button:enabled:hover {
+    background: var(--color-raised-hover);
+    color: var(--color-ink);
+  }
+  .ui-button:enabled:active,
+  .ui-icon-button:enabled:active {
+    background: var(--color-raised);
+  }
+  .ui-button:disabled,
+  .ui-icon-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ui-button,
+    .ui-icon-button,
+    .ui-pill { transition: none; }
+  }
+}
+
+/* Liquid glass: the surface for centred pop-ups (Settings, Apps, Triggers).
+   Every value is derived from the active skin's own tokens, so each of the
+   nine skins gets a glass of its own colour and no skin block changes. The
+   app behind stays visible, blurred, through a light scrim. Unlayered so a
+   leftover `bg-panel` on the same element cannot win. */
+.glass-surface {
+  background: color-mix(in srgb, var(--color-menu) 62%, transparent);
+  -webkit-backdrop-filter: blur(28px) saturate(170%);
+  backdrop-filter: blur(28px) saturate(170%);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 16%, transparent),
+    inset 0 0 0 1px color-mix(in srgb, white 4%, transparent),
+    0 24px 64px -12px color-mix(in srgb, black 45%, transparent),
+    0 2px 8px color-mix(in srgb, black 12%, transparent);
+}
+/* Where a glass pop-up sits: inside the window less a safe area. The top
+   inset clears the macOS traffic lights and the Windows caption buttons
+   (--glass-popup-top, set from lib/glass-popup.ts); 24px elsewhere. The pane
+   is min(1040px, 100% - 48px) wide and min(760px, 100% - top - 24px) tall:
+   the padding takes the insets off, so 100% here is what is left. */
+.glass-popup-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--glass-popup-top, 24px) 24px 24px;
+}
+.glass-popup {
+  width: min(1040px, 100%);
+  height: min(760px, 100%);
+  min-height: 0;
+}
+/* Cards and rails sitting on the glass: a second, thinner pane. */
+.glass-card {
+  background: color-mix(in srgb, var(--color-card) 60%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
+}
+/* Existing pages dropped onto glass (every Settings page) keep their markup;
+   their solid cards turn into the same thinner pane. */
+.glass-surface .bg-card {
+  background-color: color-mix(in srgb, var(--color-card) 60%, transparent);
+}
+.glass-rail {
+  background: color-mix(in srgb, var(--color-app) 22%, transparent);
+}
+/* Behind a glass pop-up: dim a little and blur, never black out. */
+.glass-scrim {
+  background: color-mix(in srgb, black 28%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-surface {
+    background: var(--color-menu);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .glass-card,
+  .glass-surface .bg-card { background: var(--color-card); }
+  .glass-rail { background: var(--color-app); }
+  .glass-scrim {
+    background: color-mix(in srgb, black 50%, transparent);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (forced-colors: active) {
+  .glass-surface,
+  .glass-card {
+    background: Canvas;
+    border-color: CanvasText;
+  }
+}
+
+/* Glass bars (GlassScrollFrame): the sidebar's head and foot and the chat
+   header float over their scroller, which runs on underneath them. The glass
+   is a layer behind the bar's own controls: the tint of the surface the bar
+   sits on, so at rest the bar reads as that surface, over a blur of whatever
+   scrolls beneath. A top bar's inner edge fades out across --glass-edge, so
+   content melts into the glass instead of meeting a hard line. A bottom bar
+   can be one short row (Simple mode's profile row), where a fade inside it
+   left a half-sharp strip of text showing above the row: its glass is solid
+   to the bar's edge and reaches --glass-reach past it instead, fading there,
+   and the list gets that much more room at its end so a resting row is never
+   blurred. The layer is a pseudo-element, so the bar itself never becomes a
+   containing block for the fixed-position menus it opens. */
+[data-glass-frame] {
+  --glass-reach: 24px;
+}
+[data-glass-frame]:has(> [data-glass-bar="bottom"]) {
+  --glass-bottom-reach: var(--glass-reach);
+}
+.glass-bar {
+  --glass-edge: 20px;
+  isolation: isolate;
+}
+.glass-bar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--glass-tint, var(--color-panel)) 55%, transparent);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+.glass-bar[data-glass-bar="top"]::before {
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--glass-edge)), transparent);
+}
+.glass-bar[data-glass-bar="bottom"]::before {
+  top: calc(-1 * var(--glass-reach, 0px));
+  mask-image: linear-gradient(to top, black calc(100% - var(--glass-reach, 0px)), transparent);
+}
+/* The frame publishes its bars' heights. Rows rest clear of the glass,
+   keyboard focus scrolls them clear, and the scrollbar runs only between the
+   bars (a bar over it would swallow the drag). */
+.glass-scroller {
+  scroll-padding-top: var(--glass-top, 0px);
+  scroll-padding-bottom: calc(var(--glass-bottom, 0px) + var(--glass-bottom-reach, 0px));
+}
+.glass-scroller::-webkit-scrollbar-track {
+  margin-top: var(--glass-top, 0px);
+  margin-bottom: var(--glass-bottom, 0px);
+}
+.glass-scroller-content {
+  padding-top: var(--glass-top, 0px);
+  padding-bottom: calc(var(--glass-bottom, 0px) + var(--glass-bottom-reach, 0px));
+}
+@media (prefers-reduced-transparency: reduce) {
+  .glass-bar::before {
+    background: var(--glass-tint, var(--color-panel));
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+@media (forced-colors: active) {
+  .glass-bar::before {
+    background: Canvas;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
 }
 
 /* Keep focus visible after components clear the browser outline. These
@@ -287,11 +1017,25 @@ body {
 /* Text fields already sit in a bordered card (the composer pill especially).
    Chromium treats a pointer click as :focus-visible on inputs, so the
    global ring above becomes a sharp blue rectangle inside the rounded
-   chrome. Fields keep their own focus:border-*; buttons still use the
-   :focus-visible ring. */
-:is(input, textarea, select):focus,
-:is(input, textarea, select):focus-visible {
+   chrome. Buttons still use the :focus-visible ring. Checkboxes, radios,
+   sliders, colour wells and file pickers are not text fields: they have no
+   border to repaint, so they keep the ring, or a keyboard user tabbing onto
+   one sees nothing. */
+:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), textarea, select):focus,
+:is(input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"]), textarea, select):focus-visible {
   outline: none;
+}
+
+/* In its place a field shows focus on its own border, in the ring's colour.
+   Unlayered, so it wins over the resting `border-hairline/40` every field
+   carries as well as over a faint per-file `focus:border-*`. --color-focus
+   clears 3:1 on every field surface (pnpm check:contrast). A borderless
+   field, such as the composer or a find bar, has no border to paint and is
+   left as it was; its rounded wrapper takes `focus-within:border-focus`.
+   A field reporting an error (aria-invalid) keeps its danger border, so the
+   red does not vanish while the user is fixing it. */
+:is(input, textarea, select):focus-visible:not([aria-invalid="true"]) {
+  border-color: var(--color-focus);
 }
 
 ::selection {
@@ -299,17 +1043,32 @@ body {
   color: var(--color-ink);
 }
 
+/* Scrollbars: a slim pill in each skin's own --color-scrollbar, never a
+   full-height slab. At rest it is a 2px line, enough to say "this scrolls";
+   with the pointer on it (anywhere across the 8px gutter, since the
+   transparent border is part of the thumb) or while dragged it widens to a
+   6px pill and darkens, as macOS and Windows 11 scrollbars do. The gutter
+   never changes width, so nothing reflows, and the track stays clear, so no
+   gray rail runs down a panel. (Widening on hover of the scrolling area
+   instead, via `*:hover::-webkit-scrollbar-thumb`, does not repaint in
+   Chromium, so it is not used.) */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-scrollbar);
-  border-radius: 4px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: var(--color-scrollbar);
 }
+::-webkit-scrollbar-thumb:vertical { min-height: 40px; }
+::-webkit-scrollbar-thumb:horizontal { min-width: 40px; }
 /* the thumb was inert — it never acknowledged the pointer */
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-raised-hover);
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  border-width: 1px;
+  background-color: color-mix(in srgb, var(--color-scrollbar) 55%, var(--color-ink));
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -322,9 +1081,17 @@ body {
   from { transform: translateX(28px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
+@keyframes workspace-in {
+  from { opacity: 0.92; }
+  to { opacity: 1; }
+}
 @keyframes pop-in {
   from { transform: scale(0.96) translateY(6px); opacity: 0; }
   to { transform: scale(1) translateY(0); opacity: 1; }
+}
+@keyframes pop-out {
+  from { transform: scale(1) translateY(0); opacity: 1; }
+  to { transform: scale(0.96) translateY(6px); opacity: 0; }
 }
 /* streaming caret: a true typing blink (step, not fade) */
 @keyframes caret-blink {
@@ -336,6 +1103,142 @@ body {
   from { transform: translateY(4px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+/* mascot arrives at the tail */
+@keyframes turn-mascot-in {
+  from { opacity: 0; transform: scale(0.82); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes turn-mascot-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.88); }
+}
+/* the reply grows up from the mascot, staying on the left edge */
+@keyframes turn-answer-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.84);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.turn-mascot-in {
+  transform-origin: 18px 18px;
+  animation: turn-mascot-in 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.turn-mascot-out {
+  transform-origin: 18px 18px;
+  animation: turn-mascot-out 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.turn-answer {
+  transform-origin: 18px 100%;
+  animation: turn-answer-in 0.48s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes rise {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+/* thinking dots in the onboarding chat scenes */
+@keyframes dot-bob {
+  0%, 60%, 100% { transform: none; opacity: 0.5; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+@keyframes ripple {
+  from { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-accent) 55%, transparent); }
+  to { box-shadow: 0 0 0 14px color-mix(in oklab, var(--color-accent) 0%, transparent); }
+}
+@keyframes bolt {
+  0% { transform: translateX(-4px) scale(0.9); opacity: 0.2; }
+  40% { transform: translateX(6px) scale(1.05); opacity: 1; }
+  100% { transform: translateX(22px) scale(0.85); opacity: 0; }
+}
+@keyframes spot-in {
+  from { transform: scale(0.94); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+/* Siblings of a `.stagger` group arrive 40ms apart. Each child sets `--i`
+   (its index) inline; the delay is decorative and never blocks input. */
+.stagger > * {
+  animation-delay: calc(var(--stagger, 40ms) * var(--i, 0));
+}
+/* The welcome tour morphs one card between beats with the View Transitions
+   API: the card, the mascot and the title keep their names, so the browser
+   moves and resizes them instead of cross-fading two cards. Everything
+   else cross-fades under the new beat, which rises in on its own. */
+.welcome-card { view-transition-name: welcome-card; }
+.welcome-maus { view-transition-name: welcome-maus; }
+.welcome-title { view-transition-name: welcome-title; }
+::view-transition-group(welcome-card),
+::view-transition-group(welcome-maus),
+::view-transition-group(welcome-title) {
+  animation-duration: 0.42s;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.28s;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* Cloud setup (CloudEngineSignIn, CloudSetup) shares the welcome flow's
+   rare, first-time motion. A step's details open on grid rows, the one
+   height animation allowed because an accordion has no transform
+   equivalent. A finished step's check lands with a small overshoot, then
+   its tick draws in. */
+.step-open {
+  display: grid;
+  animation: step-open 0.3s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+.step-open > * {
+  min-height: 0;
+  overflow: clip;
+  overflow-clip-margin: 10px;
+}
+@keyframes step-open {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to { grid-template-rows: 1fr; opacity: 1; }
+}
+.check-in { animation: check-in 0.42s cubic-bezier(0.23, 1, 0.32, 1) both; }
+@keyframes check-in {
+  0% { transform: scale(0.85); opacity: 0; }
+  60% { transform: scale(1.08); opacity: 1; }
+  100% { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) .check-in path {
+    stroke-dasharray: 24;
+    stroke-dashoffset: 24;
+    animation: check-draw 0.3s 0.14s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+  }
+}
+@keyframes check-draw {
+  to { stroke-dashoffset: 0; }
+}
+/* Cloud intent (CloudIntent.tsx): the first-job box, the job waiting above
+   the sign-in, and the chat's composer are one element across each change,
+   so the box rises into the sign-in and then settles into the composer. The
+   composer takes the name only while that hand-off runs. */
+html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: cloud-intent; }
+::view-transition-group(cloud-intent) {
+  animation-duration: 0.5s;
+  animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+}
+/* Cloud setup progress: each segment fills left to right on clip-path, so
+   its rounded ends stay round. A segment that fills (on arrival, or when a
+   step finishes) waits for the step's check to land, and on arrival each
+   waits for the one before it. Emptying is the transition, and is quick. */
+.progress-fill {
+  clip-path: inset(0 100% 0 0 round 999px);
+  transition: clip-path 0.2s cubic-bezier(0.23, 1, 0.32, 1), background-color 0.3s ease;
+}
+.progress-fill[data-filled] {
+  clip-path: inset(0 0 0 0 round 999px);
+  animation: progress-fill 0.55s cubic-bezier(0.23, 1, 0.32, 1) backwards;
+  animation-delay: calc(0.2s + var(--i, 0) * 0.09s);
+}
+@keyframes progress-fill {
+  from { clip-path: inset(0 100% 0 0 round 999px); }
+}
 /* "Thinking…" label sheen while the model reasons */
 @keyframes shimmer {
   from { background-position: 200% 50%; }
@@ -345,18 +1248,63 @@ body {
   0%, 100% { opacity: 0.45; }
   50% { opacity: 1; }
 }
+/* Long-lived activity dots: steps() + holds draw a handful of compositor
+   frames per cycle instead of one per vsync. Indicators that run for
+   minutes must not continuously repaint; stagger via animation-delay. */
+@keyframes status-pulse {
+  0%, 100% { opacity: 0.25; }
+  30% { opacity: 1; }
+  60% { opacity: 0.25; }
+}
 .thinking-shimmer {
   background: linear-gradient(90deg, var(--color-ink-secondary) 40%, var(--color-ink) 50%, var(--color-ink-secondary) 60%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  /* background-clip:text only paints glyphs inside the background box. A
+     tight line box (leading-none) is shorter than ascenders, descenders and
+     arabic marks, so they were cut. Pad the box past the glyphs and pull the
+     margins back so the layout doesn't move. */
+  padding: 0.35em 0.12em;
+  margin: -0.35em -0.12em;
 }
+/* rotating presence phrase: the old phrase fades out where the new one
+   fades in, in the same grid cell */
+@keyframes turn-phrase-in {
+  from { opacity: 0; }
+}
+@keyframes turn-phrase-out {
+  to { opacity: 0; }
+}
+.turn-phrase-in { animation: shimmer 2s linear infinite, turn-phrase-in 0.32s ease-out both; }
+.turn-phrase-out { animation: shimmer 2s linear infinite, turn-phrase-out 0.32s ease-in both; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
-  .animate-caret, .animate-msg-in, .animate-shimmer { animation: none; }
+  .animate-caret, .animate-msg-in, .animate-shimmer, .animate-pop-in, .animate-pop-out { animation: none; }
+  .animate-status-pulse { animation: none; opacity: 0.6; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
+  .turn-phrase-in { animation: none; }
+  .turn-phrase-out { display: none; }
+  .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
+  .animate-rise, .animate-spot-in { animation: none; }
+  .animate-ripple, .animate-bolt { animation: none; }
+  .step-open, .check-in, .progress-fill { animation: none; transition: none; }
   /* The drawer still moves, it just arrives instantly. */
   aside { transition: none; }
+}
+/* The onboarding preview page flips this to show the reduced variant
+   without touching system settings; the welcome flow also reads it to skip
+   its view transitions. Mirrors the media block above for its own classes. */
+:root[data-reduced-motion="true"] .animate-rise,
+:root[data-reduced-motion="true"] .animate-spot-in,
+:root[data-reduced-motion="true"] .animate-pop-in,
+:root[data-reduced-motion="true"] .animate-pop-out,
+:root[data-reduced-motion="true"] .step-open,
+:root[data-reduced-motion="true"] .check-in,
+:root[data-reduced-motion="true"] .progress-fill,
+:root[data-reduced-motion="true"] .welcome-card * {
+  animation: none !important;
+  transition: none !important;
 }
 
 /* SupaMaus vector motion. The fast horizontal compression is the edge-on
@@ -843,7 +1791,7 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Filled accent / danger surfaces
+   Filled accent / danger / success surfaces
 
    Components hardcode `text-white` on these fills (~20 call sites). That works
    only as long as every skin's accent is dark enough to carry white — which
@@ -858,6 +1806,65 @@ body {
 .bg-danger {
   color: var(--color-danger-ink);
 }
+.bg-success {
+  color: var(--color-success-ink);
+}
+/* Same mechanism, one skin deeper: Daylight paints the user's own bubble in
+   near-black on a near-white page, and the `text-ink` the composer and the
+   thread hardcode would be black on black. */
+.bg-bubble-user {
+  color: var(--color-bubble-user-ink);
+}
+
+/* Daylight's inverted bubble is a dark surface, including its editor,
+   quoted replies and attachment controls. Keep their normal semantic tokens
+   together; overriding only the parent's color leaves explicit child ink dark.
+   Stop at a nested skin so the picker previews retain their own palettes. */
+@scope ([data-skin="daylight"]) to ([data-skin]) {
+  .bg-bubble-user {
+    --color-ink: #fcfcfc;
+    --color-ink-secondary: #c4c4c4;
+    --color-ink-tertiary: #aaaaaa;
+    --color-panel: #111111;
+    --color-inset: #191919;
+    --color-raised: #2f2f2f;
+    --color-raised-hover: #3d3d3d;
+    --color-control: #2f2f2f;
+    --color-hairline: #666666;
+    --color-accent: #7fc0ff;
+    --color-accent-text: #7fc0ff;
+    --color-accent-ink: #070707;
+    --color-focus: #7fc0ff;
+    --color-danger: #ff7788;
+    --color-danger-ink: #070707;
+    --color-success: #63b58a;
+    --color-success-ink: #070707;
+  }
+}
+
+/* Meadow's own bubble is green-black on white: the same inverted context as
+   Daylight's, tuned to the green ink. */
+@scope ([data-skin="meadow"]) to ([data-skin]) {
+  .bg-bubble-user {
+    --color-ink: #ffffff;
+    --color-ink-secondary: #c3d6ca;
+    --color-ink-tertiary: #a9bfb1;
+    --color-panel: #142219;
+    --color-inset: #1b2b21;
+    --color-raised: #2a3b30;
+    --color-raised-hover: #35493c;
+    --color-control: #2a3b30;
+    --color-hairline: #5f7266;
+    --color-accent: #7fdca8;
+    --color-accent-text: #7fdca8;
+    --color-accent-ink: #0f1a13;
+    --color-focus: #7fdca8;
+    --color-danger: #ff7788;
+    --color-danger-ink: #0f1a13;
+    --color-success: #7fdca8;
+    --color-success-ink: #0f1a13;
+  }
+}
 
 /* Disabled buttons.
    Upstream fades them with `disabled:opacity-40`. On a dark ground that holds:
@@ -870,4 +1877,118 @@ button:disabled.bg-danger {
   background-color: var(--color-raised-hover);
   color: var(--color-ink-secondary);
   opacity: 1;
+}
+
+/* Sidebar items are clickable and should say so on hover. Tailwind v4's
+   preflight stopped giving buttons a pointer cursor, so bot rows, section
+   headers, and menu entries hovered like static text. Scoped to the sidebar
+   (and its portalled context menu) rather than every button in the app;
+   disabled or busy controls keep the default cursor. */
+[data-sidebar] :is(button, [role="button"]):not(:disabled, [aria-busy="true"]) {
+  cursor: pointer;
+}
+::highlight(omb-citation-source) {
+  background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+/* Wide-gamut displays. The sRGB values above stay the fallback.
+   On Display P3 the same hue is a little more chromatic, with lightness
+   held, so the skin reads less dull without moving the neutrals. */
+@media (color-gamut: p3) {
+  :is([data-skin="midnight"]) {
+    --color-accent: color(display-p3 0.2062 0.5041 0.9917);
+    --color-accent-border: color(display-p3 0.3457 0.6136 0.9909);
+    --color-accent-text: color(display-p3 0.5417 0.7465 0.9948);
+    --color-success: color(display-p3 0.3728 0.8349 0.5737);
+    --color-danger: color(display-p3 0.9587 0.3424 0.3958);
+    --color-warning: color(display-p3 0.9705 0.5992 0.0744);
+  }
+  :is([data-skin="atelier"]) {
+    --color-accent: color(display-p3 0.6084 0.3747 0.1500);
+    --color-accent-border: color(display-p3 0.6696 0.4180 0.1773);
+    --color-accent-text: color(display-p3 0.5695 0.3354 0.1264);
+    --color-focus: color(display-p3 0.5695 0.3354 0.1264);
+    --color-success: color(display-p3 0.2751 0.4198 0.2805);
+    --color-danger: color(display-p3 0.6130 0.2306 0.1920);
+    --color-warning: color(display-p3 0.4699 0.3740 0.1945);
+  }
+  :is([data-skin="foundry"]) {
+    --color-accent: color(display-p3 0.8317 0.6065 0.2525);
+    --color-accent-border: color(display-p3 0.8928 0.7007 0.3733);
+    --color-accent-text: color(display-p3 0.8598 0.6457 0.3048);
+    --color-focus: color(display-p3 0.8598 0.6457 0.3048);
+    --color-success: color(display-p3 0.4046 0.6902 0.4742);
+    --color-danger: color(display-p3 0.8455 0.4114 0.3635);
+    --color-warning: color(display-p3 0.8564 0.6457 0.2655);
+  }
+  :is([data-skin="lagoon"]) {
+    --color-accent: color(display-p3 0.1708 0.4496 0.4300);
+    --color-accent-border: color(display-p3 0.1933 0.5005 0.4813);
+    --color-accent-text: color(display-p3 0.1370 0.3714 0.3551);
+    --color-focus: color(display-p3 0.1370 0.3714 0.3551);
+    --color-success: color(display-p3 0.2280 0.4194 0.3117);
+    --color-danger: color(display-p3 0.6315 0.2229 0.1802);
+    --color-warning: color(display-p3 0.4684 0.3544 0.1678);
+  }
+  :is([data-skin="graphite"]) {
+    --color-accent: color(display-p3 0.3280 0.4543 0.6408);
+    --color-accent-border: color(display-p3 0.4292 0.5567 0.7384);
+    --color-accent-text: color(display-p3 0.5770 0.7021 0.8792);
+    --color-focus: color(display-p3 0.5770 0.7021 0.8792);
+    --color-success: color(display-p3 0.4428 0.7097 0.5438);
+    --color-danger: color(display-p3 0.8343 0.4228 0.4455);
+    --color-warning: color(display-p3 0.8118 0.6338 0.3191);
+  }
+  :is([data-skin="linen"]) {
+    --color-accent: color(display-p3 0.2306 0.3679 0.5469);
+    --color-accent-border: color(display-p3 0.3109 0.4658 0.6570);
+    --color-accent-text: color(display-p3 0.1963 0.3325 0.5077);
+    --color-focus: color(display-p3 0.1963 0.3325 0.5077);
+    --color-success: color(display-p3 0.2332 0.4391 0.3120);
+    --color-danger: color(display-p3 0.6315 0.2423 0.2772);
+    --color-warning: color(display-p3 0.4543 0.3583 0.1717);
+  }
+  :is([data-skin="dusk"]) {
+    --color-accent: color(display-p3 0.4495 0.3350 0.5154);
+    --color-accent-border: color(display-p3 0.5725 0.4369 0.6409);
+    --color-accent-text: color(display-p3 0.7511 0.6056 0.8251);
+    --color-focus: color(display-p3 0.7511 0.6056 0.8251);
+    --color-success: color(display-p3 0.4731 0.6785 0.5159);
+    --color-danger: color(display-p3 0.8279 0.4499 0.4734);
+    --color-warning: color(display-p3 0.8014 0.6416 0.3675);
+  }
+  :is([data-skin="daylight"]) {
+    --color-accent: color(display-p3 0.1269 0.3689 0.7837);
+    --color-accent-border: color(display-p3 0.2062 0.5041 0.9917);
+    --color-accent-text: color(display-p3 0.1193 0.3464 0.7357);
+    --color-focus: color(display-p3 0.1269 0.3689 0.7837);
+    --color-success: color(display-p3 0.2075 0.4783 0.3054);
+    --color-danger: color(display-p3 0.7202 0.1738 0.2207);
+    --color-warning: color(display-p3 0.5270 0.3546 0.0278);
+  }
+  :is([data-skin="meadow"]) {
+    --color-accent: color(display-p3 0.1985 0.4783 0.2864);
+    --color-accent-border: color(display-p3 0.2288 0.5411 0.3261);
+    --color-accent-text: color(display-p3 0.1731 0.4195 0.2506);
+    --color-focus: color(display-p3 0.1985 0.4783 0.2864);
+    --color-success: color(display-p3 0.1985 0.4783 0.2864);
+    --color-danger: color(display-p3 0.7202 0.1738 0.2207);
+    --color-warning: color(display-p3 0.5270 0.3546 0.0278);
+  }
+}
+
+/* Window drag regions. A header marked by useCaptionChrome().dragProps is
+   the window's title bar on macOS and frameless Windows; every control in it
+   opts back out so it stays clickable, and so do menus and dialogs, which
+   may overlap a header from a portal later in the DOM (Blink resolves
+   regions in DOM order, so a later no-drag cuts into an earlier drag). The
+   property inherits, so a select's or input's wrapper is cut out too: its
+   chevron or icon overlay would otherwise drag over the field. A modal's
+   full-window backdrop is cut out with its dialog, so a press on it over a
+   header still closes the dialog instead of moving the window. */
+[data-window-drag] :has(> :is(select, input)),
+[data-window-drag] :is(button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [role="switch"], [role="checkbox"], [role="radio"], [role="combobox"], [role="slider"], [role="separator"], [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])),
+:is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="tooltip"]),
+.fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])) {
+  -webkit-app-region: no-drag;
 }

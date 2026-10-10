@@ -15,12 +15,18 @@
 // <userData>/cua-connection.json for the harness server to hand to drivers.
 
 import { app, ipcMain } from "electron";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { createRequire } from "node:module";
+import { promisify } from "node:util";
+import { setTimeout as delay } from "node:timers/promises";
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import localOriginModule from "./local-origin.cjs";
+
+// Local control answers only the local server's UI (electron/local-origin.cjs).
+const { localOnly } = localOriginModule;
 
 const require = createRequire(import.meta.url);
 const { createCuaConnectionStore } = require("./cua-connection.cjs");
@@ -43,9 +49,20 @@ const STANDALONE_SOCKET = path.join(
 );
 const HOST_BUNDLE_ID = "com.openmausbot.app";
 const CUA_ENV = { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" };
+const execFileAsync = promisify(execFile);
 process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED ??= "0";
 
+// Where cua-driver installs itself on Windows: under the user profile, with
+// the packages directory holding the versioned releases. The installer's own
+// directory is kept as a fallback for machines where the layout differs.
+const WIN_INSTALLED_DRIVERS = [
+  path.join(app.getPath("home"), ".cua-driver", "packages", "current", "cua-driver.exe"),
+  path.join(app.getPath("home"), "AppData", "Local", "Programs", "CuaDriver", "cua-driver.exe"),
+];
 let embeddedHost = null; // EmbeddedCuaDriverHost | null
+let startupAbort = null;
+let lifecycleGeneration = 0;
+let macRetry = null;
 let linuxRuntime = null;
 let linuxBundleStage = null;
 let stateListener = () => {};
@@ -110,58 +127,95 @@ function persistAndNotify(next) {
   return connection;
 }
 
+export function resolveWindowsDriver() {
+  for (const candidate of WIN_INSTALLED_DRIVERS) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 export function resolveDriverBinary() {
   if (process.env.CUA_DRIVER_PATH) return process.env.CUA_DRIVER_PATH;
   if (app.isPackaged) {
-    const bundled = path.join(process.resourcesPath, "cua-driver");
+    const bundled = path.join(process.resourcesPath, "cua-driver" + (process.platform === "win32" ? ".exe" : ""));
     if (fs.existsSync(bundled)) return bundled;
   }
-  if (fs.existsSync(INSTALLED_DRIVER)) return INSTALLED_DRIVER;
+  if (process.platform === "darwin" && fs.existsSync(INSTALLED_DRIVER)) return INSTALLED_DRIVER;
+  if (process.platform === "win32") {
+    const staged = path.join(app.getAppPath(), "dist-native", "cua-win32-x64", "cua-driver.exe");
+    return fs.existsSync(staged) ? staged : resolveWindowsDriver();
+  }
   return null;
+}
+
+export function resolveEmbeddedDriverBinary(binary) {
+  if (process.platform !== "win32" || !app.isPackaged || process.env.CUA_DRIVER_PATH ||
+      binary !== path.join(process.resourcesPath, "cua-driver.exe")) return binary;
+  const background = path.join(process.resourcesPath, "cua-driver-background.exe");
+  if (!fs.existsSync(background)) throw new Error("Packaged background CUA driver is missing; reinstall OpenMausBot");
+  return background;
 }
 
 function socketAlive(sockPath) {
   return new Promise((resolve) => {
     if (!fs.existsSync(sockPath)) return resolve(false);
     const s = net.createConnection(sockPath);
+    let timer;
     const done = (ok) => {
+      clearTimeout(timer);
       s.destroy();
       resolve(ok);
     };
     s.once("connect", () => done(true));
     s.once("error", () => done(false));
-    setTimeout(() => done(false), 1500).unref();
+    timer = setTimeout(() => done(false), 1500);
+    timer.unref();
   });
 }
 
 async function loadEmbeddedSdk() {
   if (!app.isPackaged) {
+    if (process.platform === "win32") return import("@trycua/cua-driver/embedded");
     const [embedded, permissions] = await Promise.all([
       import("@trycua/cua-driver/embedded"),
       import("@trycua/cua-driver/electron"),
     ]);
     return { ...embedded, ...permissions };
   }
+  const isWindows = process.platform === "win32";
   process.env.OPENMAUSBOT_CUA_SDK_LIBRARY = path.join(
     process.resourcesPath,
     "cua-sdk",
     "native",
-    "libcua_driver_sdk.dylib",
+    isWindows ? "cua_driver_sdk.dll" : "libcua_driver_sdk.dylib",
   );
   return import(pathToFileURL(path.join(process.resourcesPath, "cua-sdk", "cua-sdk.mjs")).href);
 }
 
-async function attachStandalone() {
+async function attachStandalone(signal) {
+  // Windows must stay on the owned embedded host, never an unrelated daemon.
+  if (process.platform !== "darwin") return null;
   const driver = fs.existsSync(INSTALLED_DRIVER) ? INSTALLED_DRIVER : null;
   if (!driver) return null;
   if (!(await socketAlive(STANDALONE_SOCKET))) {
+    signal.throwIfAborted();
     // Launch CuaDriver.app through LaunchServices so Accessibility /
     // Screen Recording stay on com.trycua.driver — the identity this
     // machine already granted — instead of the freshly signed OpenMausBot.
-    spawnSync("open", ["-a", "CuaDriver"], { timeout: 8000 });
+    const launch = execFileAsync("/usr/bin/open", ["-a", "CuaDriver"], {
+      timeout: 8_000, killSignal: "SIGKILL", maxBuffer: 8_192,
+    });
+    // execFile's AbortSignal path can send TERM independently of its timeout
+    // killSignal. Stop must also bound a launcher that ignores TERM.
+    const abort = () => launch.child.kill("SIGKILL");
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    try { await launch; }
+    finally { signal.removeEventListener("abort", abort); }
     for (let i = 0; i < 25; i++) {
+      signal.throwIfAborted();
       if (await socketAlive(STANDALONE_SOCKET)) break;
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      await delay(200, undefined, { signal });
     }
   }
   if (!(await socketAlive(STANDALONE_SOCKET))) return null;
@@ -174,24 +228,29 @@ async function attachStandalone() {
   };
 }
 
-async function startEmbedded(binary) {
+async function startEmbedded(binary, signal) {
   // Import from the staged Resources tree in production. The app intentionally
   // excludes general node_modules, so a bare package import only works in dev.
   const sdk = await loadEmbeddedSdk();
+  signal.throwIfAborted();
   // CUA's embedding contract requires grants before the child daemon starts;
   // these SDK calls execute in Electron main so macOS attributes them to
   // OpenMausBot rather than to a terminal or helper process.
-  const permissionStatus = sdk.requestMacOSPermissions();
-  if (!sdk.hasRequiredMacOSPermissions(permissionStatus)) {
-    const missing = [
-      !permissionStatus.accessibility && "Accessibility",
-      !permissionStatus.screenRecording && "Screen Recording",
-    ].filter(Boolean).join(" and ");
-    throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart OpenMausBot`);
+  if (process.platform === "darwin") {
+    const permissionStatus = sdk.requestMacOSPermissions();
+    if (!sdk.hasRequiredMacOSPermissions(permissionStatus)) {
+      const missing = [
+        !permissionStatus.accessibility && "Accessibility",
+        !permissionStatus.screenRecording && "Screen Recording",
+      ].filter(Boolean).join(" and ");
+      throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart OpenMausBot`);
+    }
   }
-  const host = new sdk.EmbeddedCuaDriverHost(binary, HOST_BUNDLE_ID);
+  // The native SDK owns the child lifecycle but exposes no windowsHide option.
+  const host = new sdk.EmbeddedCuaDriverHost(resolveEmbeddedDriverBinary(binary), HOST_BUNDLE_ID);
   try {
-    const conn = await host.start();
+    const conn = await host.start({ signal });
+    signal.throwIfAborted();
     embeddedHost = host;
     return {
       mode: "embedded",
@@ -213,6 +272,10 @@ async function startEmbedded(binary) {
 
 export async function startCua() {
   if (process.platform === "linux") return ensureLinuxRuntime().initialize();
+  lifecycleGeneration++;
+  startupAbort?.abort();
+  startupAbort = new AbortController();
+  const { signal } = startupAbort;
   const binary = resolveDriverBinary();
   if (!binary) {
     return persistAndNotify({
@@ -222,14 +285,23 @@ export async function startCua() {
   }
 
   const wantEmbedded =
-    app.isPackaged || process.env.OPENMAUSBOT_CUA_EMBEDDED === "1";
+    process.platform === "win32" || app.isPackaged || process.env.OPENMAUSBOT_CUA_EMBEDDED === "1";
   let nextConnection;
 
   if (wantEmbedded) {
     try {
-      nextConnection = await startEmbedded(binary);
+      nextConnection = await startEmbedded(binary, signal);
     } catch (err) {
-      nextConnection = await attachStandalone();
+      signal.throwIfAborted();
+      try {
+        nextConnection = await attachStandalone(signal);
+      } catch (standaloneError) {
+        signal.throwIfAborted();
+        nextConnection = {
+          mode: "unavailable",
+          reason: `embedded host failed: ${err?.message ?? err}; standalone launch failed: ${standaloneError?.message ?? standaloneError}`,
+        };
+      }
       if (!nextConnection) {
         nextConnection = {
           mode: "unavailable",
@@ -237,8 +309,10 @@ export async function startCua() {
         };
       }
     }
-  } else if (await socketAlive(STANDALONE_SOCKET)) {
-    // Dev machine with CuaDriver.app's daemon already running.
+  } else if (process.platform === "darwin" && (await socketAlive(STANDALONE_SOCKET))) {
+    // Dev machine with the platform CuaDriver daemon already running. Windows
+    // is deliberately excluded: there the shared pipe belongs to whatever
+    // driver the user happens to have, so it is never adopted implicitly.
     nextConnection = {
       mode: "standalone",
       socketPath: STANDALONE_SOCKET,
@@ -254,17 +328,20 @@ export async function startCua() {
     };
   }
 
+  signal.throwIfAborted();
   return persistAndNotify(nextConnection);
 }
 
-export function cuaPermissionsStatus() {
+export async function cuaPermissionsStatus() {
   const binary = resolveDriverBinary();
   if (!binary) return { available: false };
-  const out = spawnSync(binary, ["permissions", "status", "--json"], {
+  const out = await execFileAsync(binary, ["permissions", "status", "--json"], {
     encoding: "utf8",
     timeout: 5000,
+    killSignal: "SIGKILL",
+    maxBuffer: 65_536,
     env: { ...process.env, ...CUA_ENV },
-  });
+  }).catch((error) => ({ stdout: error.stdout }));
   try {
     return { available: true, ...JSON.parse(out.stdout) };
   } catch {
@@ -273,6 +350,9 @@ export function cuaPermissionsStatus() {
 }
 
 export async function stopCua() {
+  lifecycleGeneration++;
+  startupAbort?.abort();
+  startupAbort = null;
   if (linuxRuntime) {
     await linuxRuntime.shutdown();
     if (linuxBundleStage) {
@@ -281,29 +361,30 @@ export async function stopCua() {
     }
     return;
   }
-  if (embeddedHost) {
+  const host = embeddedHost;
+  embeddedHost = null;
+  if (host) {
     try {
-      await embeddedHost.stop();
-      embeddedHost.uniffiDestroy?.();
+      await host.stop();
+      host.uniffiDestroy?.();
     } catch {
       // daemon holds a parent-liveness pipe; host death closes it anyway
     }
-    embeddedHost = null;
   }
-  if (connectionStore.get()) {
+  if (!startupAbort && connectionStore.get()) {
     persistAndNotify({ mode: "unavailable", reason: "desktop-host-stopped" });
   }
 }
 
 export function registerCuaIpc() {
-  ipcMain.handle("cua:connection", () => connectionStore.get());
-  ipcMain.handle("cua:permissions", () => cuaPermissionsStatus());
-  ipcMain.handle("cua:linux-status", () =>
+  ipcMain.handle("cua:connection", localOnly("cua:connection", () => connectionStore.get()));
+  ipcMain.handle("cua:permissions", localOnly("cua:permissions", () => cuaPermissionsStatus()));
+  ipcMain.handle("cua:linux-status", localOnly("cua:linux-status", () =>
     process.platform === "linux"
       ? ensureLinuxRuntime().getStatus()
       : { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" },
-  );
-  ipcMain.handle("cua:linux-enable", async () => {
+  ));
+  ipcMain.handle("cua:linux-enable", localOnly("cua:linux-enable", async () => {
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }
@@ -313,8 +394,8 @@ export function registerCuaIpc() {
       console.error("[cua] Linux enable failed:", error);
     }
     return ensureLinuxRuntime().getStatus();
-  });
-  ipcMain.handle("cua:linux-disable", async () => {
+  }));
+  ipcMain.handle("cua:linux-disable", localOnly("cua:linux-disable", async () => {
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
     }
@@ -324,28 +405,37 @@ export function registerCuaIpc() {
       console.error("[cua] Linux disable failed:", error);
     }
     return ensureLinuxRuntime().getStatus();
-  });
-  ipcMain.handle("cua:linux-retry", async () => {
-    if (process.platform === "darwin") {
-      try {
-        await stopCua();
-        const connection = await startCua();
-        const ready = connection?.mode === "embedded" || connection?.mode === "standalone";
-        return {
-          enabled: ready,
-          status: ready ? "ready" : "error",
-          reasonCode: ready ? undefined : "permissions-required",
-          message: connection?.reason,
-        };
-      } catch (error) {
-        console.error("[cua] macOS retry failed:", error);
-        return {
-          enabled: false,
-          status: "error",
-          reasonCode: "permissions-required",
-          message: error instanceof Error ? error.message : String(error),
-        };
-      }
+  }));
+  ipcMain.handle("cua:linux-retry", localOnly("cua:linux-retry", async () => {
+    if (process.platform === "darwin" || process.platform === "win32") {
+      // Concurrent IPC requests share the whole stop/start sequence. A later
+      // explicit Stop (including quit) or startup cancels its delayed restart.
+      const platformLabel = process.platform === "darwin" ? "macOS" : "Windows";
+      macRetry ??= (async () => {
+        try {
+          const stopping = stopCua();
+          const generation = lifecycleGeneration;
+          await stopping;
+          if (generation !== lifecycleGeneration) throw new Error("Computer use restart cancelled");
+          const connection = await startCua();
+          const ready = connection?.mode === "embedded" || connection?.mode === "standalone";
+          return {
+            enabled: ready,
+            status: ready ? "ready" : "error",
+            reasonCode: ready ? undefined : "permissions-required",
+            message: connection?.reason,
+          };
+        } catch (error) {
+          console.error(`[cua] ${platformLabel} retry failed:`, error);
+          return {
+            enabled: false,
+            status: "error",
+            reasonCode: "permissions-required",
+            message: error instanceof Error ? error.message : String(error),
+          };
+        }
+      })().finally(() => { macRetry = null; });
+      return macRetry;
     }
     if (process.platform !== "linux") {
       return { enabled: false, status: "unavailable", reasonCode: "unsupported-platform" };
@@ -356,5 +446,5 @@ export function registerCuaIpc() {
       console.error("[cua] Linux retry failed:", error);
     }
     return ensureLinuxRuntime().getStatus();
-  });
+  }));
 }

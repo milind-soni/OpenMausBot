@@ -26,6 +26,14 @@ A `401 Unauthorized` response from `api.openai.com` means the launched Codex pro
 - Confirm a custom wrapper forwards the model argument and preserves the provider's expected environment.
 - Try the provider CLI directly with the same model to separate an account problem from an OpenMausBot integration problem.
 
+## Codex sandbox mismatch
+
+OpenMausBot preserves Codex's resolved network and writable-folder settings when
+starting a turn. If Codex returns no resolved sandbox or a different mode from
+the one requested, the turn stops before sending your message. Check the native
+Codex sandbox setup and selected access mode, then retry. OpenMausBot does not
+silently replace that policy with broader access.
+
 ## Windows notes
 
 Use a real `.exe`, `.cmd`, or resolvable command path in the engine override. If a CLI was installed in WSL, the Windows desktop app cannot treat that Linux binary as a native Windows executable without an explicit bridge or wrapper.

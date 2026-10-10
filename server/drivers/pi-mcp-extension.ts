@@ -11,10 +11,12 @@
 // frame per line (no MCP SDK, no Content-Length framing) — see
 // server/mcp-bridge.ts and server/drivers/agents-proxy.ts. This client matches
 // that exactly.
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type TObjectOptions, type TSchema, type TSchemaOptions } from "typebox";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { allowsTool, canUseMcpServer, parseToolScope, type ToolIdentity } from "../../shared/tool-scope.ts";
+import { CALL_TOOL, directoryCallTarget, isDirectoryTool } from "../mcp-directory.ts";
+import { REMOTE_MCP_STARTUP_MS } from "../mcp-http.ts";
 
 interface McpServerDef {
   command: string;
@@ -23,10 +25,16 @@ interface McpServerDef {
   /** "local-computer" marks the user's real host desktop: every tool on such
    * a server is gated behind a permission card before it executes. */
   scope?: string;
+  /** A URL server behind the remote proxy's tool directory: a big catalog
+   * arrives as search_tools, describe_tool and call_tool (mcp-directory.ts). */
+  directory?: boolean;
 }
 
 interface McpConfig {
   mcpServers?: Record<string, McpServerDef>;
+  toolScope?: unknown;
+  scopeReadyPath?: string;
+  approvalMode?: string;
 }
 
 interface McpTool {
@@ -35,38 +43,106 @@ interface McpTool {
   inputSchema?: unknown;
 }
 
+interface McpTextContent {
+  type: "text";
+  text: unknown;
+}
+
+interface McpImageContent {
+  type: "image";
+  data: unknown;
+  mimeType: unknown;
+}
+
+type PiToolContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+
+interface PiToolContext {
+  ui: {
+    confirm(title: string, message: string): Promise<boolean>;
+  };
+}
+
+interface PiToolDefinition {
+  name: string;
+  label: string;
+  description: string;
+  parameters: TSchema;
+  execute(
+    toolCallId: string,
+    params: unknown,
+    signal: AbortSignal | undefined,
+    onUpdate: unknown,
+    context: PiToolContext,
+  ): Promise<{ content: PiToolContent[]; details: Record<string, never> }>;
+}
+
+/** Structural slice of Pi 0.84's ExtensionAPI used by this standalone file.
+ * Keeping it local avoids bundling Pi into OpenMausBot; the extension is
+ * loaded by the user's installed Pi, which supplies the real implementation. */
+interface PiExtensionApi {
+  registerTool(definition: PiToolDefinition): void;
+  on(event: string, handler: (event?: Record<string, unknown>, context?: { abort?(): void }) => unknown): void;
+  getActiveTools?(): string[];
+  setActiveTools?(names: string[]): void;
+}
+
+const MCP_STARTUP_TIMEOUT_MS = 8_000;
+const MCP_TOOL_TIMEOUT_MS = 10 * 60_000;
+const MCP_MAX_LIST_PAGES = 100;
+const MCP_MAX_FRAME_BYTES = 32 * 1024 * 1024;
+const TOOL_OUTPUT_MAX_BYTES = 50 * 1024;
+const TOOL_OUTPUT_MAX_LINES = 2_000;
+const TOOL_NAME_MAX_LENGTH = 64;
+
 /** A minimal stdio JSON-RPC 2.0 MCP client, matched to OpenMausBot's
  * newline-delimited house protocol. */
-class StdioMcp {
+export class StdioMcp {
   private child: ChildProcessWithoutNullStreams;
   private buf = "";
   private nextId = 1;
+  private disposed = false;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  /** A searched URL server answers over the internet: initialize and its
+   * whole tools/list share one longer budget. Others keep 8 s for each. */
+  private readonly remote: boolean;
+  private listDeadline: number | undefined;
 
   constructor(def: McpServerDef) {
+    this.remote = def.directory === true;
     this.child = spawn(def.command, def.args ?? [], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...(def.env ?? {}) },
+      env: { ...process.env, ...def.env },
     });
     this.child.stderr.on("data", () => {
       /* best-effort drain so a chatty server never blocks */
     });
     this.child.stdout.setEncoding("utf8");
     this.child.stdout.on("data", (chunk: string) => this.onData(chunk));
-    this.child.on("error", (err) => this.failAll(err));
+    this.child.on("error", (err) => this.closeWithError(err));
     // A server that starts and then dies emits `exit`, never `error`; without
     // settling on it, an in-flight init/listTools would hang the extension
     // load for the whole turn.
-    this.child.on("exit", (code) => this.failAll(new Error(`MCP server exited (code ${code ?? "?"})`)));
+    this.child.on("exit", (code) => this.closeWithError(new Error(`MCP server exited (code ${code ?? "?"})`)));
     // A write to a dead child errors asynchronously on the stream; an
     // unhandled stream error would kill the pi process (the same hazard
     // spawnCli documents for driver-spawned children in procs.ts).
-    this.child.stdin.on("error", () => this.failAll(new Error("MCP server stdin closed")));
+    this.child.stdin.on("error", () => this.closeWithError(new Error("MCP server stdin closed")));
   }
 
   private failAll(err: Error): void {
     for (const [, p] of this.pending) p.reject(err);
     this.pending.clear();
+  }
+
+  private closeWithError(err: Error): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.failAll(err);
+    try {
+      this.child.kill();
+    } catch {
+      /* already gone */
+    }
   }
 
   private onData(chunk: string): void {
@@ -76,84 +152,168 @@ class StdioMcp {
       const line = this.buf.slice(0, nl).trim();
       this.buf = this.buf.slice(nl + 1);
       if (!line) continue;
-      let msg: { id?: unknown; error?: { message?: string }; result?: unknown };
+      if (Buffer.byteLength(line, "utf8") > MCP_MAX_FRAME_BYTES) {
+        this.closeWithError(new Error(`MCP frame exceeded ${MCP_MAX_FRAME_BYTES} bytes`));
+        return;
+      }
+      let msg: { id?: unknown; method?: unknown; error?: { message?: string }; result?: unknown };
       try {
         msg = JSON.parse(line);
       } catch {
         continue;
       }
-      if (msg.id !== undefined && this.pending.has(msg.id as number)) {
-        const p = this.pending.get(msg.id as number)!;
-        this.pending.delete(msg.id as number);
+      if (typeof msg.id === "number" && this.pending.has(msg.id)) {
+        const p = this.pending.get(msg.id)!;
+        this.pending.delete(msg.id);
         if (msg.error) p.reject(new Error(msg.error.message ?? "MCP error"));
         else p.resolve(msg.result);
+        continue;
       }
-      // Server notifications/requests (e.g. notifications/tools/list_changed)
-      // carry no id and are intentionally ignored for this single-shot mount.
+      // This minimal client does not implement server→client requests. Reply
+      // explicitly instead of leaving a conforming server waiting forever.
+      if (msg.id !== undefined && typeof msg.method === "string") {
+        try {
+          this.write({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "Client method not supported" } });
+        } catch (err) {
+          this.closeWithError(err instanceof Error ? err : new Error(String(err)));
+          return;
+        }
+      }
+      // Notifications (e.g. notifications/tools/list_changed) are intentionally
+      // ignored for this single-shot mount.
+    }
+    if (Buffer.byteLength(this.buf, "utf8") > MCP_MAX_FRAME_BYTES) {
+      this.closeWithError(new Error(`MCP frame exceeded ${MCP_MAX_FRAME_BYTES} bytes without a newline`));
     }
   }
 
-  private call(method: string, params?: unknown, timeoutMs = 30_000): Promise<unknown> {
+  private write(frame: unknown): void {
+    if (this.disposed || this.child.stdin.destroyed || !this.child.stdin.writable) {
+      throw new Error("MCP server stdin is closed");
+    }
+    this.child.stdin.write(JSON.stringify(frame) + "\n");
+  }
+
+  private call(method: string, params: unknown, timeoutMs: number, signal?: AbortSignal): Promise<unknown> {
+    if (this.disposed) return Promise.reject(new Error("MCP client is closed"));
+    if (signal?.aborted) return Promise.reject(new Error(`MCP ${method} aborted`));
+
     const id = this.nextId++;
     return new Promise<unknown>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        fn();
+      };
+      const cancel = (reason: string) => {
         this.pending.delete(id);
-        reject(new Error(`MCP ${method} timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
+        try {
+          this.notify("notifications/cancelled", { requestId: id, reason });
+        } catch {
+          /* the transport may already be gone */
+        }
+        settle(() => reject(new Error(reason)));
+      };
+      const onAbort = () => cancel(`MCP ${method} aborted`);
+      const timer = setTimeout(() => cancel(`MCP ${method} timed out after ${timeoutMs}ms`), timeoutMs);
       timer.unref?.();
+      signal?.addEventListener("abort", onAbort, { once: true });
       this.pending.set(id, {
-        resolve: (v) => (clearTimeout(timer), resolve(v)),
-        reject: (e) => (clearTimeout(timer), reject(e)),
+        resolve: (value) => settle(() => resolve(value)),
+        reject: (err) => settle(() => reject(err)),
       });
       try {
-        this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+        this.write({ jsonrpc: "2.0", id, method, params });
       } catch (err) {
-        clearTimeout(timer);
         this.pending.delete(id);
-        reject(err instanceof Error ? err : new Error(String(err)));
+        settle(() => reject(err instanceof Error ? err : new Error(String(err))));
       }
     });
   }
 
   private notify(method: string, params?: unknown): void {
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, params }) + "\n");
+    this.write({ jsonrpc: "2.0", method, params });
   }
 
   async init(): Promise<void> {
-    await this.call("initialize", {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: { name: "openmausbot-pi", version: "1" },
-    });
+    const budget = this.remote ? REMOTE_MCP_STARTUP_MS : MCP_STARTUP_TIMEOUT_MS;
+    this.listDeadline = this.remote ? Date.now() + budget : undefined;
+    await this.call(
+      "initialize",
+      {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "openmausbot-pi", version: "1" },
+      },
+      budget,
+    );
     this.notify("notifications/initialized");
   }
 
   async listTools(): Promise<McpTool[]> {
-    const res = (await this.call("tools/list", {})) as { tools?: McpTool[] } | undefined;
-    return res?.tools ?? [];
+    const tools: McpTool[] = [];
+    const seenCursors = new Set<string>();
+    const deadline = this.listDeadline ?? Date.now() + MCP_STARTUP_TIMEOUT_MS;
+    let cursor: string | undefined;
+    for (let page = 0; page < MCP_MAX_LIST_PAGES; page += 1) {
+      const remainingMs = Math.max(1, deadline - Date.now());
+      const res = (await this.call(
+        "tools/list",
+        cursor ? { cursor } : {},
+        remainingMs,
+      )) as { tools?: unknown; nextCursor?: unknown } | undefined;
+      if (!Array.isArray(res?.tools)) throw new Error("MCP tools/list returned no tools array");
+      tools.push(...(res.tools as McpTool[]));
+      if (typeof res.nextCursor !== "string" || !res.nextCursor) return tools;
+      if (seenCursors.has(res.nextCursor)) throw new Error("MCP tools/list repeated a pagination cursor");
+      seenCursors.add(res.nextCursor);
+      cursor = res.nextCursor;
+    }
+    throw new Error(`MCP tools/list exceeded ${MCP_MAX_LIST_PAGES} pages`);
   }
 
-  /** tools/call → pi text result. Non-text content (screenshots, etc.) is
-   * folded into a marker so the agent still gets the structured state the
-   * proxies return alongside it. */
-  async callTool(name: string, args: unknown): Promise<{ text: string; isError: boolean }> {
-    const res = (await this.call("tools/call", { name, arguments: args ?? {} })) as
-      | { content?: unknown[]; isError?: boolean }
-      | undefined;
-    const content = Array.isArray(res?.content) ? res.content : [];
-    const text = content
-      .filter((c): c is { type: "text"; text: unknown } => (c as { type?: string })?.type === "text")
+  /** tools/call → Pi content, preserving screenshots and bounding text so a
+   * remote server cannot flood the model context. */
+  async callTool(name: string, args: unknown, signal?: AbortSignal): Promise<{ content: PiToolContent[]; isError: boolean }> {
+    const res = (await this.call(
+      "tools/call",
+      { name, arguments: args ?? {} },
+      MCP_TOOL_TIMEOUT_MS,
+      signal,
+    )) as { content?: unknown; isError?: boolean } | undefined;
+    const rawContent = Array.isArray(res?.content) ? res.content : [];
+    const text = rawContent
+      .filter((c): c is McpTextContent => Boolean(c) && (c as { type?: unknown }).type === "text")
       .map((c) => String(c.text ?? ""))
       .join("\n");
-    const other = content.filter((c) => (c as { type?: string })?.type !== "text");
-    const note = other.length ? `\n[${other.length} non-text content item(s) omitted]` : "";
+    const images = rawContent
+      .filter(
+        (c): c is McpImageContent =>
+          Boolean(c) &&
+          (c as { type?: unknown }).type === "image" &&
+          typeof (c as McpImageContent).data === "string" &&
+          typeof (c as McpImageContent).mimeType === "string",
+      )
+      .map((c) => ({ type: "image" as const, data: String(c.data), mimeType: String(c.mimeType) }));
+    const unsupported = rawContent.length - rawContent.filter((c) => (c as { type?: unknown })?.type === "text").length - images.length;
+    let boundedText = truncateToolText(text || (images.length ? "" : "(empty result)"));
+    if (unsupported > 0) boundedText += `${boundedText ? "\n" : ""}[${unsupported} unsupported MCP content item(s) omitted]`;
     return {
-      text: (text || "(empty result)") + note,
+      content: [...(boundedText ? [{ type: "text" as const, text: boundedText }] : []), ...images],
       isError: Boolean(res?.isError),
     };
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.failAll(new Error("MCP client disposed"));
     try {
       this.child.kill();
     } catch {
@@ -162,53 +322,188 @@ class StdioMcp {
   }
 }
 
-/** Best-effort JSON Schema → typebox for the common MCP tool shapes.
- * Anything unrecognized degrades to a permissive record rather than failing
- * the mount: a tool that works loosely beats one that never registers. */
-function toTypebox(schema: unknown): unknown {
-  if (!schema || typeof schema !== "object") return Type.Record(Type.String(), Type.Any());
-  const s = schema as {
-    type?: string;
-    enum?: unknown[];
-    anyOf?: unknown;
-    oneOf?: unknown;
-    allOf?: unknown;
-    items?: unknown;
-    properties?: Record<string, unknown>;
-    required?: string[];
-  };
-  if (Array.isArray(s.enum)) {
-    const lits = s.enum.filter((v) => ["string", "number", "boolean"].includes(typeof v));
-    if (lits.length === s.enum.length && lits.length > 0) {
-      return Type.Union(lits.map((v) => Type.Literal(v as string | number | boolean)));
-    }
-    return Type.Any();
+interface JsonSchema {
+  type?: string | string[];
+  title?: unknown;
+  description?: unknown;
+  default?: unknown;
+  const?: unknown;
+  enum?: unknown[];
+  nullable?: unknown;
+  anyOf?: unknown[];
+  oneOf?: unknown[];
+  allOf?: unknown[];
+  items?: unknown | unknown[];
+  prefixItems?: unknown[];
+  properties?: Record<string, unknown>;
+  required?: unknown;
+  additionalProperties?: unknown;
+  minimum?: unknown;
+  maximum?: unknown;
+  exclusiveMinimum?: unknown;
+  exclusiveMaximum?: unknown;
+  multipleOf?: unknown;
+  minLength?: unknown;
+  maxLength?: unknown;
+  pattern?: unknown;
+  format?: unknown;
+  minItems?: unknown;
+  maxItems?: unknown;
+  uniqueItems?: unknown;
+  minProperties?: unknown;
+  maxProperties?: unknown;
+}
+
+const SCHEMA_OPTION_KEYS = [
+  "title",
+  "description",
+  "default",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "minLength",
+  "maxLength",
+  "pattern",
+  "format",
+  "minItems",
+  "maxItems",
+  "uniqueItems",
+  "minProperties",
+  "maxProperties",
+] as const;
+
+function schemaOptions(schema: JsonSchema): TSchemaOptions {
+  const options: TSchemaOptions = {};
+  for (const key of SCHEMA_OPTION_KEYS) {
+    const value = schema[key];
+    if (value !== undefined) Reflect.set(options, key, value);
   }
-  if (s.anyOf || s.oneOf || s.allOf) return Type.Any();
-  switch (s.type) {
+  return options;
+}
+
+function isSchemaObject(value: unknown): value is JsonSchema {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function primitiveLiteral(value: unknown): TSchema | null {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return Type.Literal(value);
+  }
+  if (value === null) return Type.Null();
+  return null;
+}
+
+function withNullable(schema: TSchema, nullable: unknown): TSchema {
+  return nullable === true ? Type.Union([schema, Type.Null()]) : schema;
+}
+
+function collectObjectShape(schema: JsonSchema): { properties: Record<string, unknown>; required: Set<string> } {
+  const properties: Record<string, unknown> = {};
+  const required = new Set<string>();
+
+  const visit = (candidate: unknown, mode: "root" | "all" | "choice") => {
+    if (!isSchemaObject(candidate)) return;
+    for (const branch of candidate.allOf ?? []) visit(branch, mode === "choice" ? "choice" : "all");
+    for (const branch of [...(candidate.anyOf ?? []), ...(candidate.oneOf ?? [])]) visit(branch, "choice");
+    for (const [key, value] of Object.entries(candidate.properties ?? {})) {
+      // The root declaration is authoritative; branch-only properties are
+      // still retained so the model knows which arguments exist.
+      if (mode === "root" || properties[key] === undefined) properties[key] = value;
+    }
+    if (mode !== "choice" && Array.isArray(candidate.required)) {
+      for (const key of candidate.required) if (typeof key === "string") required.add(key);
+    }
+  };
+
+  visit(schema, "root");
+  return { properties, required };
+}
+
+function objectSchema(schema: JsonSchema, root = false): TSchema {
+  const { properties, required } = collectObjectShape(schema);
+  const converted: Record<string, TSchema> = {};
+  for (const [key, value] of Object.entries(properties)) {
+    const nested = nestedTypebox(value);
+    converted[key] = required.has(key) ? nested : Type.Optional(nested);
+  }
+  const options: TObjectOptions = schemaOptions(schema);
+  if (typeof schema.additionalProperties === "boolean") {
+    options.additionalProperties = schema.additionalProperties;
+  } else if (isSchemaObject(schema.additionalProperties)) {
+    options.additionalProperties = nestedTypebox(schema.additionalProperties);
+  }
+  const object = Type.Object(converted, options);
+  return root ? object : withNullable(object, schema.nullable);
+}
+
+function nestedTypebox(schema: unknown): TSchema {
+  if (!isSchemaObject(schema)) return Type.Any();
+  const options = schemaOptions(schema);
+
+  const literal = primitiveLiteral(schema.const);
+  if (literal) return withNullable(literal, schema.nullable);
+
+  if (Array.isArray(schema.enum) && schema.enum.length > 0) {
+    if (schema.enum.every((value) => typeof value === "string")) {
+      // `{type:"string", enum:[...]}` works across Google/OpenAI/Anthropic;
+      // Type.Union(Type.Literal(...)) does not work with Google's tool API.
+      return withNullable(Type.String({ ...options, enum: schema.enum }), schema.nullable);
+    }
+    const literals = schema.enum.map(primitiveLiteral).filter((value): value is TSchema => value !== null);
+    if (literals.length === schema.enum.length) {
+      const union = literals.length === 1 ? literals[0] : Type.Union(literals, options);
+      return withNullable(union, schema.nullable);
+    }
+  }
+
+  if (Array.isArray(schema.type)) {
+    const variants = schema.type.map((type) => nestedTypebox({ ...schema, type, nullable: false }));
+    return variants.length === 1 ? variants[0] : Type.Union(variants, options);
+  }
+
+  if (schema.type === "object" || schema.properties) return objectSchema(schema);
+
+  const choice = schema.anyOf ?? schema.oneOf;
+  if (Array.isArray(choice) && choice.length > 0) {
+    const variants = choice.map(nestedTypebox);
+    return withNullable(variants.length === 1 ? variants[0] : Type.Union(variants, options), schema.nullable);
+  }
+  if (Array.isArray(schema.allOf) && schema.allOf.length > 0) {
+    const variants = schema.allOf.map(nestedTypebox);
+    return withNullable(variants.length === 1 ? variants[0] : Type.Intersect(variants, options), schema.nullable);
+  }
+
+  switch (schema.type) {
     case "string":
-      return Type.String();
+      return withNullable(Type.String(options), schema.nullable);
     case "number":
-      return Type.Number();
+      return withNullable(Type.Number(options), schema.nullable);
     case "integer":
-      return Type.Integer();
+      return withNullable(Type.Integer(options), schema.nullable);
     case "boolean":
-      return Type.Boolean();
+      return withNullable(Type.Boolean(options), schema.nullable);
     case "null":
       return Type.Null();
-    case "array":
-      return Type.Array(s.items ? toTypebox(s.items) : Type.Any());
-    case "object": {
-      const props: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(s.properties ?? {})) {
-        const required = Array.isArray(s.required) && s.required.includes(k);
-        props[k] = required ? toTypebox(v) : Type.Optional(toTypebox(v));
-      }
-      return Type.Object(props);
+    case "array": {
+      const tupleItems = schema.prefixItems ?? (Array.isArray(schema.items) ? schema.items : undefined);
+      const value = tupleItems
+        ? Type.Tuple(tupleItems.map(nestedTypebox), options)
+        : Type.Array(schema.items ? nestedTypebox(schema.items) : Type.Any(), options);
+      return withNullable(value, schema.nullable);
     }
     default:
-      return Type.Record(Type.String(), Type.Any());
+      return Type.Any();
   }
+}
+
+/** Best-effort JSON Schema → TypeBox. MCP tool parameters must always expose
+ * an object at the root; Pi/provider tool serialization rejects a root schema
+ * without `type: "object"`. Nested schemas retain unions, nullability and
+ * constraints instead of being incorrectly rewritten as objects. */
+export function toTypebox(schema: unknown): TSchema {
+  return objectSchema(isSchemaObject(schema) ? schema : {}, true);
 }
 
 /** pi tool names are lowercase snake identifiers; MCP tool names are not
@@ -216,7 +511,36 @@ function toTypebox(schema: unknown): unknown {
  * with the server so two servers can never collide. */
 function sanitizeToolName(server: string, tool: string): string {
   const raw = `${server}_${tool}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "");
-  return raw.slice(0, 64) || `mcp_tool`;
+  return raw.slice(0, TOOL_NAME_MAX_LENGTH) || "mcp_tool";
+}
+
+export function allocateToolName(server: string, tool: string, used: Set<string>): string {
+  const base = sanitizeToolName(server, tool);
+  let candidate = base;
+  for (let suffixNumber = 2; used.has(candidate); suffixNumber += 1) {
+    const suffix = `_${suffixNumber}`;
+    candidate = `${base.slice(0, Math.max(1, TOOL_NAME_MAX_LENGTH - suffix.length))}${suffix}`;
+  }
+  return candidate;
+}
+
+export function truncateToolText(text: string): string {
+  const lines = text.split("\n");
+  const lineLimited = lines.slice(0, TOOL_OUTPUT_MAX_LINES).join("\n");
+  const bytes = Buffer.from(lineLimited, "utf8");
+  let byteEnd = Math.min(bytes.length, TOOL_OUTPUT_MAX_BYTES);
+  // Avoid returning a replacement character when the byte limit lands in the
+  // middle of a UTF-8 code point.
+  while (byteEnd > 0 && byteEnd < bytes.length && (bytes[byteEnd] & 0xc0) === 0x80) byteEnd -= 1;
+  const content = bytes.subarray(0, byteEnd).toString("utf8");
+  const truncatedByLines = lines.length > TOOL_OUTPUT_MAX_LINES;
+  const truncatedByBytes = bytes.length > TOOL_OUTPUT_MAX_BYTES;
+  if (!truncatedByLines && !truncatedByBytes) return content;
+  const reasons = [
+    ...(truncatedByLines ? [`${TOOL_OUTPUT_MAX_LINES}-line limit`] : []),
+    ...(truncatedByBytes ? [`${TOOL_OUTPUT_MAX_BYTES / 1024}KB limit`] : []),
+  ];
+  return `${content}\n\n[MCP output truncated: ${reasons.join(" and ")}. Refine the request for less output.]`;
 }
 
 /** A short human-readable line for the permission card's detail. */
@@ -229,7 +553,7 @@ function summarizeParams(params: unknown): string {
   }
 }
 
-export default async function (pi: ExtensionAPI): Promise<void> {
+export default async function (pi: PiExtensionApi): Promise<void> {
   const configPath = process.env.OMB_MCP_CONFIG;
   if (!configPath) return;
 
@@ -237,57 +561,168 @@ export default async function (pi: ExtensionAPI): Promise<void> {
   try {
     config = JSON.parse(readFileSync(configPath, "utf8")) as McpConfig;
   } catch {
-    return;
+    throw new Error("OpenMausBot Pi MCP configuration could not be read");
   }
+  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("OpenMausBot Pi MCP configuration is invalid");
+  const parsed = parseToolScope(config.toolScope);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const scope = parsed.scope;
+  if (scope !== undefined && (typeof pi.getActiveTools !== "function" || typeof pi.setActiveTools !== "function")) throw new Error("Pi tool selection enforcement APIs are unavailable");
 
   const used = new Set<string>();
+  const identities = new Map<string, ToolIdentity>();
+  /** Registered directory tools and their server. The proxy narrowed their
+   * catalog to the selection; call_tool's target is checked when it runs. */
+  const directoryTools = new Map<string, string>();
+  let enforcementFailed = false;
   const clients: StdioMcp[] = [];
+  const serverEntries = Object.entries(config.mcpServers ?? {}).filter(([name]) => scope === undefined || canUseMcpServer(scope, name));
 
-  for (const [serverName, def] of Object.entries(config.mcpServers ?? {})) {
-    if (!def || typeof def.command !== "string") continue;
-    const gated = def.scope === "local-computer";
-    let client: StdioMcp | undefined;
-    try {
-      client = new StdioMcp(def);
-      await client.init();
-      const tools = await client.listTools();
-      for (const tool of tools) {
-        let name = sanitizeToolName(serverName, tool.name);
-        while (used.has(name)) name = `${name}_2`;
-        used.add(name);
+  if (scope !== undefined) {
+    const allowed = (name: string) => directoryTools.has(name)
+      ? canUseMcpServer(scope, directoryTools.get(name)!)
+      : allowsTool(scope, identities.get(name) ?? { kind: "native", name });
+    const intersect = () => {
+      if (enforcementFailed) throw new Error("Pi tool selection enforcement is unavailable");
+      try {
+        const active = pi.getActiveTools!();
+        if (!Array.isArray(active) || active.some((name) => typeof name !== "string")) throw new Error("Pi tool selection enforcement returned an invalid catalog");
+        const requested = new Set(active.filter(allowed));
+        pi.setActiveTools!([...requested]);
+        const selected = pi.getActiveTools!();
+        if (!Array.isArray(selected) || selected.some((name) => !requested.has(name))) throw new Error("Pi tool selection enforcement did not apply the active-tool restriction");
+        if (config.scopeReadyPath) writeFileSync(config.scopeReadyPath, JSON.stringify({ ok: true, toolScope: scope }), { mode: 0o600 });
+        return selected;
+      } catch (error) {
+        enforcementFailed = true;
+        if (config.scopeReadyPath) {
+          try { writeFileSync(config.scopeReadyPath, JSON.stringify({ ok: false }), { mode: 0o600 }); } catch { /* A failed receipt cannot grant access. */ }
+        }
+        throw error;
+      }
+    };
+    for (const event of ["session_start", "session_switch", "model_select", "before_agent_start", "context"]) pi.on(event, () => { intersect(); });
+    pi.on("tool_call", (event) => !enforcementFailed && typeof event?.toolName === "string" && allowed(event.toolName) ? undefined : { block: true, reason: "Tool selection excludes this tool" });
+    // Providers serialize tools before this hook. Filter that final payload as
+    // well, so late package activation cannot restore withheld declarations.
+    pi.on("before_provider_request", (event, context) => {
+      let selected = new Set<string>();
+      try { selected = new Set(intersect()); } catch {
+        // Pi catches hook errors. Keep the returned payload empty even when
+        // abort is unavailable, and block every subsequent execution.
+        try { context?.abort?.(); } catch { /* The deny-all payload still applies. */ }
+      }
+      const declared = (name: string) => selected.has(name) && allowed(name);
+      const payload = event?.payload;
+      if (!payload || typeof payload !== "object") return payload;
+      const body = payload as { tools?: unknown[] };
+      if (Array.isArray(body.tools)) body.tools = body.tools.flatMap((value) => {
+        if (!value || typeof value !== "object") return [];
+        const tool = value as { name?: string; function?: { name?: string }; functionDeclarations?: Array<{ name?: string }> };
+        if (Array.isArray(tool.functionDeclarations)) {
+          const functionDeclarations = tool.functionDeclarations.filter((declaration) => typeof declaration.name === "string" && declared(declaration.name));
+          return functionDeclarations.length ? [{ ...tool, functionDeclarations }] : [];
+        }
+        const name = tool.function?.name ?? tool.name;
+        return typeof name === "string" && declared(name) ? [tool] : [];
+      });
+      return payload;
+    });
+  }
+
+  // Mount independent servers concurrently so one slow integration cannot
+  // consume the startup timeout once per server. Registration remains in
+  // config order below for deterministic tool names and collision suffixes.
+  const mounts = await Promise.all(
+    serverEntries.map(async ([serverName, def]) => {
+      if (!def || typeof def.command !== "string" || !def.command.trim()) return { serverName };
+      let client: StdioMcp | undefined;
+      try {
+        client = new StdioMcp(def);
+        await client.init();
+        return { serverName, def, client, tools: await client.listTools() };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`[openmausbot-pi-mcp] ${serverName}: ${message}\n`);
+        client?.dispose();
+        return { serverName };
+      }
+    }),
+  );
+
+  for (const mount of mounts) {
+    if (!mount.client || !mount.def || !mount.tools) continue;
+    const { serverName, def, client, tools } = mount;
+    const gated = def.scope === "local-computer" || (def.scope === "custom" && config.approvalMode !== "full");
+    let registered = 0;
+
+    for (const tool of tools) {
+      if (!tool || typeof tool.name !== "string" || !tool.name.trim()) {
+        process.stderr.write(`[openmausbot-pi-mcp] ${serverName}: skipped a tool with no valid name\n`);
+        continue;
+      }
+      const toolName = tool.name;
+      const identity: ToolIdentity = { kind: "mcp", server: serverName, name: toolName };
+      const directoryTool = def.directory === true && isDirectoryTool(toolName);
+      if (scope !== undefined && !directoryTool && !allowsTool(scope, identity)) continue;
+      const name = allocateToolName(serverName, toolName, used);
+      try {
+        const parameters = toTypebox(tool.inputSchema);
         pi.registerTool({
           name,
-          label: `${serverName}:${tool.name}`,
-          description: tool.description ?? `${tool.name} (MCP tool from ${serverName})`,
-          parameters: toTypebox(tool.inputSchema),
-          async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+          label: `${serverName}:${toolName}`,
+          description: typeof tool.description === "string" ? tool.description : `${toolName} (MCP tool from ${serverName})`,
+          parameters,
+          async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+            // The upstream tool this call runs: call_tool's target on a
+            // searched server, nothing for its catalog reads.
+            const target = directoryTool ? directoryCallTarget(toolName, params) : toolName;
+            if (scope !== undefined && (enforcementFailed
+              || (target !== undefined && !allowsTool(scope, { kind: "mcp", server: serverName, name: target })))) {
+              throw new Error("Tool selection excludes this tool");
+            }
             // Host tools ask first, using pi's native permission card
             // (ctx.ui.confirm → extension_ui_request → Allow/Deny card). This
             // mirrors ACP's session/request_permission and Codex's elicitation.
-            if (gated) {
-              const detail = summarizeParams(params);
+            // Searching a catalog runs no tool, so it asks nothing.
+            if (gated && target !== undefined) {
+              const shown = target;
+              const detail = summarizeParams(directoryTool && toolName === CALL_TOOL ? (params as { arguments?: unknown } | undefined)?.arguments : params);
               const allowed = await ctx.ui.confirm(
-                `Allow ${tool.name} on your computer?`,
-                detail || `Run ${serverName}:${tool.name}`,
+                def.scope === "local-computer" ? `Allow ${shown} on your computer?` : `Allow ${serverName}:${shown}?`,
+                detail || `Run ${serverName}:${shown}`,
               );
               if (!allowed) {
                 return { content: [{ type: "text", text: "Blocked by the user." }], details: {} };
               }
             }
-            const res = await client.callTool(tool.name, params);
-            const text = res.isError ? `(tool returned an error)\n${res.text}` : res.text;
-            return { content: [{ type: "text", text }], details: {} };
+            const res = await client.callTool(toolName, params, signal);
+            if (res.isError) {
+              const message = res.content
+                .filter((item): item is { type: "text"; text: string } => item.type === "text")
+                .map((item) => item.text)
+                .join("\n");
+              // Pi marks a custom tool as failed only when execute throws;
+              // returning error-looking text incorrectly produces isError=false.
+              throw new Error(message || `MCP tool ${serverName}:${toolName} returned an error`);
+            }
+            return { content: res.content, details: {} };
           },
         });
+        used.add(name);
+        identities.set(name, identity);
+        if (directoryTool) directoryTools.set(name, serverName);
+        registered += 1;
+      } catch (err) {
+        // One malformed tool must not dispose the client behind tools that
+        // were already registered from the same server.
+        const message = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`[openmausbot-pi-mcp] ${serverName}:${toolName}: ${message}\n`);
       }
-      clients.push(client);
-    } catch (err) {
-      // A server that fails to initialize must not take the whole turn down:
-      // skip its tools and let the agent work with whatever else mounted.
-      const message = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`[openmausbot-pi-mcp] ${serverName}: ${message}\n`);
-      client?.dispose();
     }
+
+    if (registered > 0) clients.push(client);
+    else client.dispose();
   }
 
   pi.on("session_shutdown", () => {

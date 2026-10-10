@@ -1,0 +1,57 @@
+// A request spoken on a Live call is an ordinary user message with a small
+// "via call" line under it; typed messages have none.
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterAll, describe, expect, it, vi } from "vitest";
+import type { Bot, InstanceInfo, Message } from "@/state/store";
+
+vi.hoisted(() => {
+  vi.stubGlobal("window", {});
+  vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+});
+vi.mock("@/state/store", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/state/store")>();
+  return { ...original, useStore: () => ({
+    state: { ...original.initialState, instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test" } as InstanceInfo] },
+    dispatch: vi.fn(),
+  }) };
+});
+vi.mock("./DesktopCapabilities", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./DesktopCapabilities")>(),
+  useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "other" }, localComputer: { available: false, reasonCode: "cua-driver-unavailable", message: "" } }, ready: true }),
+}));
+vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+// the thread controls are not what this test is about
+vi.mock("./ModelPicker", () => ({ ModelPicker: () => createElement("span") }));
+vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: () => createElement("span") }));
+
+const { ChatView } = await import("./ChatView");
+afterAll(() => vi.unstubAllGlobals());
+
+const message = (id: string, text: string, extra: Partial<Message> = {}): Message =>
+  ({ id, role: "user", kind: "text", text, at: 1_700_000_000_000, ...extra }) as Message;
+
+const bot = (messages: Message[]): Bot => ({
+  id: "bot", threadId: "t1", name: "Pepper", title: "", description: "", color: "green",
+  notifications: true, unread: false, busy: false, messages,
+  modelSelection: { instanceId: "test", model: "m" },
+});
+
+describe("via call label", () => {
+  it("marks a request spoken on a Live call, and only that one", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, {
+      bot: bot([message("m1", "typed words"), message("m2", "spoken words", { via: "call" })]),
+    }));
+    expect(markup).toContain("typed words");
+    expect(markup).toContain("spoken words");
+    expect(markup.match(/>via call</g)).toHaveLength(1);
+    // the label follows the spoken request, not the typed one
+    expect(markup.indexOf(">via call<")).toBeGreaterThan(markup.indexOf("spoken words"));
+  });
+
+  it("shows no label without a call", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: bot([message("m1", "typed words")]) }));
+    expect(markup).toContain("typed words");
+    expect(markup).not.toContain("via call");
+  });
+});

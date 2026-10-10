@@ -1,5 +1,6 @@
 import { z } from "zod";
-import type { ControlPlaneConfig } from "./config";
+import type { EndpointAccount } from "./config";
+import { tunnelActivity, type TunnelActivity } from "./tunnel-activity";
 
 export const MANAGED_COMPANION_ORIGIN_URL = "http://127.0.0.1:8812";
 
@@ -7,12 +8,43 @@ const API_BASE = "https://api.cloudflare.com/client/v4/";
 const API_TIMEOUT_MS = 5_000;
 const MAX_RESPONSE_BYTES = 512 * 1024;
 
+const timestampSchema = z.string().max(64).nullable().optional();
+
+// Connection-state fields are optional so an older or trimmed provider
+// response still parses; a missing field can only make a tunnel look active.
+const tunnelActivityFields = {
+  status: z.string().max(32).nullable().optional(),
+  created_at: timestampSchema,
+  conns_active_at: timestampSchema,
+  conns_inactive_at: timestampSchema,
+  connections: z.array(z.unknown()).max(1_000).nullable().optional(),
+};
+
 const tunnelSchema = z.object({
   id: z.uuid(),
   name: z.string().min(1).max(256),
   config_src: z.literal("cloudflare"),
   deleted_at: z.string().nullable().optional(),
+  ...tunnelActivityFields,
 });
+
+// The account-wide scan also sees tunnels that other services own, including
+// locally configured ones. Each item is parsed on its own so one unfamiliar
+// tunnel cannot hide the rest of the page.
+const scannedTunnelSchema = z.object({
+  id: z.uuid(),
+  name: z.string().min(1).max(256),
+  config_src: z.string().max(32).nullable().optional(),
+  deleted_at: z.string().nullable().optional(),
+  ...tunnelActivityFields,
+});
+
+const resultInfoSchema = z.object({
+  count: z.number().int().min(0).optional(),
+  page: z.number().int().min(0).optional(),
+  per_page: z.number().int().min(0).optional(),
+  total_count: z.number().int().min(0).optional(),
+}).optional();
 
 const dnsRecordSchema = z.object({
   id: z.string().min(1).max(64),
@@ -48,8 +80,20 @@ export type CloudflareFetch = (
 ) => Promise<Response>;
 
 export interface CloudflareTunnel {
+  /** Connection state, when the provider returned it. */
+  activity?: TunnelActivity;
   id: string;
   name: string;
+}
+
+export interface CloudflareTunnelPage {
+  /** Items in this page that did not match the expected tunnel shape. */
+  skipped: number;
+  /** Raw number of items the provider returned in this page. */
+  returned: number;
+  /** Account-wide count for the query, when the provider reported one. */
+  totalCount: number | null;
+  tunnels: Array<CloudflareTunnel & { activity: TunnelActivity; managedConfig: boolean }>;
 }
 
 export interface CloudflareDNSRecord {
@@ -64,6 +108,8 @@ export class CloudflareAPIError extends Error {
   constructor(
     public readonly code: string,
     public readonly status: number | null = null,
+    /** Cloudflare's Retry-After (delay-seconds form only) on a 429, else null. */
+    public readonly retryAfterSeconds: number | null = null,
   ) {
     super(code);
     this.name = "CloudflareAPIError";
@@ -127,9 +173,10 @@ function providerErrorCode(value: unknown, status: number): string {
   return `cf_http_${status}`;
 }
 
+/** One account's API: its tunnels, and the DNS records of its one zone. */
 export class CloudflareAPI {
   constructor(
-    private readonly config: ControlPlaneConfig["cloudflare"],
+    private readonly config: Pick<EndpointAccount, "accountId" | "apiToken" | "zoneId">,
     private readonly fetcher: CloudflareFetch,
   ) {}
 
@@ -138,6 +185,14 @@ export class CloudflareAPI {
     schema: z.ZodType<T>,
     init: { acceptResultOnlySuccess?: boolean; body?: unknown; method?: string } = {},
   ): Promise<T> {
+    return (await this.requestEnvelope(path, schema, init)).result;
+  }
+
+  private async requestEnvelope<T>(
+    path: string,
+    schema: z.ZodType<T>,
+    init: { acceptResultOnlySuccess?: boolean; body?: unknown; method?: string } = {},
+  ): Promise<{ result: T; totalCount: number | null }> {
     const headers = new Headers({
       accept: "application/json",
       authorization: `Bearer ${this.config.apiToken}`,
@@ -150,7 +205,11 @@ export class CloudflareAPI {
 
     let response: Response;
     try {
-      response = await this.fetcher(new URL(path, API_BASE), {
+      // Calling a stored global fetch as `this.fetcher(...)` rebinds its
+      // receiver to this API instance. Workers rejects that with an illegal
+      // invocation, so detach the function before invoking it.
+      const fetcher = this.fetcher;
+      response = await fetcher(new URL(path, API_BASE), {
         body,
         headers,
         method: init.method ?? "GET",
@@ -165,6 +224,18 @@ export class CloudflareAPI {
         throw new CloudflareAPIError("cf_timeout");
       }
       throw new CloudflareAPIError("cf_network");
+    }
+
+    if (response.status === 429) {
+      // Cloudflare API limits are per user token and shared by every request
+      // this Worker makes. A distinct code lets the cron stop early.
+      const retryAfter = response.headers.get("retry-after")?.trim() ?? "";
+      await response.body?.cancel();
+      throw new CloudflareAPIError(
+        "cf_rate_limited",
+        429,
+        /^[0-9]{1,6}$/.test(retryAfter) ? Number(retryAfter) : null,
+      );
     }
 
     const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
@@ -202,7 +273,55 @@ export class CloudflareAPI {
     }
     const result = schema.safeParse(value.result);
     if (!result.success) throw new CloudflareAPIError("cf_invalid_response");
-    return result.data;
+    const info = "result_info" in value ? resultInfoSchema.safeParse(value.result_info) : null;
+    const totalCount = info?.success ? info.data?.total_count ?? null : null;
+    return { result: result.data, totalCount };
+  }
+
+  /** One page of the account's undeleted tunnels, with connection state. The
+   * query is deliberately unfiltered by name so its total is the account-wide
+   * count that the provider quota applies to. */
+  async listTunnelPage(page: number, perPage: number): Promise<CloudflareTunnelPage> {
+    const query = new URLSearchParams({
+      is_deleted: "false",
+      page: String(page),
+      per_page: String(perPage),
+    });
+    const { result, totalCount } = await this.requestEnvelope(
+      `accounts/${encodeURIComponent(this.config.accountId)}/cfd_tunnel?${query}`,
+      z.array(z.unknown()).max(1_000),
+    );
+    const tunnels: CloudflareTunnelPage["tunnels"] = [];
+    let skipped = 0;
+    for (const item of result) {
+      const parsed = scannedTunnelSchema.safeParse(item);
+      if (!parsed.success || parsed.data.deleted_at != null) {
+        skipped += 1;
+        continue;
+      }
+      tunnels.push({
+        activity: tunnelActivity(parsed.data),
+        id: parsed.data.id,
+        managedConfig: parsed.data.config_src === "cloudflare",
+        name: parsed.data.name,
+      });
+    }
+    return { returned: result.length, skipped, totalCount, tunnels };
+  }
+
+  /** Undeleted tunnels in the whole account: what its tunnel quota counts. */
+  async countTunnels(): Promise<number | null> {
+    return (await this.listTunnelPage(1, 1)).totalCount;
+  }
+
+  /** Total DNS records in the zone, for the record-quota alert. */
+  async countDNSRecords(): Promise<number | null> {
+    const query = new URLSearchParams({ page: "1", per_page: "1" });
+    const { totalCount } = await this.requestEnvelope(
+      `zones/${encodeURIComponent(this.config.zoneId)}/dns_records?${query}`,
+      z.array(z.unknown()).max(1),
+    );
+    return totalCount;
   }
 
   async listTunnels(name: string): Promise<CloudflareTunnel[]> {
@@ -223,7 +342,7 @@ export class CloudflareAPI {
       );
       if (tunnel.id !== tunnelId) throw new CloudflareAPIError("cf_invalid_response");
       if (tunnel.deleted_at != null) return null;
-      return { id: tunnel.id, name: tunnel.name };
+      return { activity: tunnelActivity(tunnel), id: tunnel.id, name: tunnel.name };
     } catch (error) {
       if (isNotFound(error)) return null;
       throw error;

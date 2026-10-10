@@ -43,7 +43,7 @@ describe("composer paste attachments", () => {
   it("keeps unusual file paths inside the attachment attribute", () => {
     const file = fileAttachment("report.txt", '/tmp/a"&<>\t\n\r.txt', 42);
     expect(composeMessage("", [file])).toBe(
-      '<attached-file path="/tmp/a&quot;&amp;&lt;&gt;&#9;&#10;&#13;.txt" />',
+      '<attached-file path="/tmp/a&quot;&amp;&lt;&gt;&#9;&#10;&#13;.txt" name="report.txt" />',
     );
   });
 

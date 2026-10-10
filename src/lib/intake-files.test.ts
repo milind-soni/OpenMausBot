@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { intakeFiles, type Attachment } from "./composer-attachments";
 
@@ -20,6 +20,22 @@ const upload = async (f: Fake): Promise<Attachment> => ({
 const onDisk = (f: Fake) => `/Users/me/${f.name}`;
 
 describe("intakeFiles", () => {
+  it("uploads a browser audio drop instead of requiring a Finder path", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      path: "/private/attachments/note.ogg", name: "Voice note.ogg", bytes: 4,
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+    const getPath = vi.fn(() => "");
+    try {
+      const out = await intakeFiles([new File(["OggS"], "Voice note.opus", { type: "audio/ogg" })], {
+        allowImages: true, getPath, uploadImage: async () => null,
+      });
+      expect(out.attachments).toEqual([expect.objectContaining({ kind: "file", path: "/private/attachments/note.ogg" })]);
+      expect(out.notice).toBeNull();
+      expect(getPath).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+    }
+  });
   it("uploads images and keeps ordinary files as paths", async () => {
     const out = await intakeFiles([file("shot.png", "image/png"), file("notes.txt", "text/plain")], {
       allowImages: true,
@@ -31,6 +47,40 @@ describe("intakeFiles", () => {
       ["file", "notes.txt"],
     ]);
     expect(out.notice).toBeNull();
+  });
+
+  it("uses a private uploaded path for supported documents", async () => {
+    const out = await intakeFiles([file("notes.pdf", "application/pdf")], {
+      allowImages: true,
+      getPath: onDisk,
+      uploadImage: upload,
+      uploadFile: async (value) => ({
+        kind: "file",
+        id: "private-file",
+        name: value.name,
+        path: "/private/attachments/id.pdf",
+        size: value.size,
+      }),
+    });
+
+    expect(out.attachments).toEqual([expect.objectContaining({
+      kind: "file",
+      name: "notes.pdf",
+      path: "/private/attachments/id.pdf",
+    })]);
+    expect(out.notice).toBeNull();
+  });
+
+  it("does not fall back to an arbitrary disk path when a private upload fails", async () => {
+    const out = await intakeFiles([file("notes.pdf", "application/pdf")], {
+      allowImages: true,
+      getPath: onDisk,
+      uploadImage: upload,
+      uploadFile: async () => { throw new Error("private store is full"); },
+    });
+
+    expect(out.attachments).toEqual([]);
+    expect(out.notice).toContain("notes.pdf: private store is full");
   });
 
   it("treats an image as an ordinary file when the engine cannot read one", async () => {
@@ -53,6 +103,7 @@ describe("intakeFiles", () => {
     });
     expect(out.attachments).toHaveLength(0);
     expect(out.notice).toMatch(/ghost\.bin/);
+    expect(out.notice).not.toMatch(/Finder|Save it first/);
   });
 
   it("reports an upload that failed without losing the files that worked", async () => {

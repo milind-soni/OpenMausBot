@@ -1,0 +1,265 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  parseThreadRefUrl,
+  remarkThreadRefs,
+  resolveThreadRefAddress,
+  resolveThreadRefs,
+  serializeThreadRefs,
+  splitThreadRefsForDisplay,
+  threadRefUrl,
+  threadTokenFromPaste,
+  threadTokenSpacing,
+  type ThreadRefCandidate,
+} from "./thread-refs";
+
+const scout = (threadId: string, title: string, activeAt?: number): ThreadRefCandidate =>
+  ({ botId: "scout", botName: "Scout", threadId, title, activeAt });
+const ada = (threadId: string, title: string, activeAt?: number): ThreadRefCandidate =>
+  ({ botId: "ada", botName: "Ada", threadId, title, activeAt });
+
+const threads = [scout("qa", "QA PR 245"), scout("short", "QA"), ada("release", "Release notes"), ada("num", "123")];
+const linked = (text: string, list = threads, current?: string) =>
+  resolveThreadRefs(text, list, current).filter((span) => span.ref).map((span) => `${span.text}->${span.ref?.threadId}`);
+
+describe("resolveThreadRefs", () => {
+  it("links a known title and keeps the surrounding text as plain runs", () => {
+    expect(resolveThreadRefs("Done in #Release notes today", threads)).toEqual([
+      { text: "Done in " },
+      { text: "#Release notes", ref: { botId: "ada", botName: "Ada", threadId: "release", title: "Release notes", ambiguous: false } },
+      { text: " today" },
+    ]);
+  });
+
+  it("prefers the longest known title after the #, so a spaced title beats its own prefix", () => {
+    // "QA" is listed before "QA PR 245" on purpose: only longest-first ordering gets this right
+    const list = [scout("short", "QA"), scout("qa", "QA PR 245")];
+    expect(linked("Opened #QA PR 245 for you", list)).toEqual(["#QA PR 245->qa"]);
+    expect(linked("Just #QA here", list)).toEqual(["#QA->short"]);
+  });
+
+  it("never links an issue-style number, even when a thread is titled with that number", () => {
+    expect(linked("See #123 and #4567", threads)).toEqual([]);
+    expect(resolveThreadRefs("See #123", threads)).toEqual([{ text: "See #123" }]);
+  });
+
+  it("only links at a word start and only up to a word boundary", () => {
+    expect(linked("C#QA PR 245", threads)).toEqual([]);
+    expect(linked("&#QA PR 245", threads)).toEqual([]);
+    expect(linked("##QA PR 245", threads)).toEqual([]);
+    expect(linked("#QA PR 2456 is different", [scout("qa", "QA PR 245")])).toEqual([]);
+    // with the shorter "QA" also known, that text still links the longest title that fits
+    expect(linked("#QA PR 2456 is different", threads)).toEqual(["#QA->short"]);
+    expect(linked("(#QA PR 245) and '#QA PR 245'.", threads)).toEqual(["#QA PR 245->qa", "#QA PR 245->qa"]);
+    expect(linked("#QA PR 245", threads)).toEqual(["#QA PR 245->qa"]);
+  });
+
+  it("matches case-insensitively but keeps the person's spelling", () => {
+    expect(resolveThreadRefs("look at #qa pr 245", threads)).toEqual([
+      { text: "look at " },
+      { text: "#qa pr 245", ref: expect.objectContaining({ threadId: "qa", title: "QA PR 245" }) },
+    ]);
+  });
+
+  it("ignores a heading marker, a lone #, and unknown titles", () => {
+    expect(linked("# QA PR 245", threads)).toEqual([]);
+    expect(linked("ends with #", threads)).toEqual([]);
+    expect(linked("#Nothing like this", threads)).toEqual([]);
+    expect(resolveThreadRefs("", threads)).toEqual([{ text: "" }]);
+    expect(resolveThreadRefs("no refs", [])).toEqual([{ text: "no refs" }]);
+  });
+
+  it("links several mentions in one line", () => {
+    expect(linked("#QA PR 245 then #Release notes", threads)).toEqual(["#QA PR 245->qa", "#Release notes->release"]);
+  });
+
+  it("prefers the current bot's thread when two share a title", () => {
+    const shared = [ada("ada-qa", "QA PR 245", 9), scout("scout-qa", "QA PR 245", 1)];
+    expect(resolveThreadRefs("#QA PR 245", shared, "scout")[0]?.ref).toMatchObject({ threadId: "scout-qa", ambiguous: false });
+    expect(resolveThreadRefs("#QA PR 245", shared, "ada")[0]?.ref).toMatchObject({ threadId: "ada-qa", ambiguous: false });
+  });
+
+  it("then prefers the most recently active, and otherwise flags the first as ambiguous", () => {
+    const stamped = [ada("older", "QA PR 245", 1), scout("newer", "QA PR 245", 2)];
+    expect(resolveThreadRefs("#QA PR 245", stamped, "nobody")[0]?.ref).toMatchObject({ threadId: "newer", ambiguous: false });
+    const unstamped = [ada("first", "QA PR 245"), scout("second", "QA PR 245")];
+    expect(resolveThreadRefs("#QA PR 245", unstamped)[0]?.ref).toMatchObject({ threadId: "first", botName: "Ada", ambiguous: true });
+  });
+
+  it("skips blank titles and duplicate thread records", () => {
+    const list = [scout("blank", "   "), scout("qa", "QA PR 245"), scout("qa", "QA PR 245")];
+    expect(resolveThreadRefs("#QA PR 245", list)[0]?.ref).toMatchObject({ threadId: "qa", ambiguous: false });
+  });
+});
+
+describe("remarkThreadRefs", () => {
+  type Node = { type: string; value?: string; children?: Node[]; data?: Record<string, unknown> };
+  const text = (value: string): Node => ({ type: "text", value });
+
+  it("splits a paragraph's text into plain and thread-link nodes", () => {
+    const tree: Node = { type: "root", children: [{ type: "paragraph", children: [text("See #QA PR 245 now")] }] };
+    remarkThreadRefs(threads)()(tree);
+    const nodes = tree.children?.[0]?.children ?? [];
+    expect(nodes.map((node) => node.type)).toEqual(["text", "threadRef", "text"]);
+    expect(nodes[1]).toMatchObject({
+      data: { hName: "span", hProperties: { "data-thread-id": "qa", "data-thread-bot": "scout", "data-thread-title": "QA PR 245", "data-thread-ambiguous": "false" } },
+      children: [{ type: "text", value: "#QA PR 245" }],
+    });
+  });
+
+  it("leaves link text and code alone", () => {
+    const tree: Node = { type: "root", children: [{ type: "paragraph", children: [
+      { type: "link", children: [text("#QA PR 245")] },
+      { type: "inlineCode", value: "#QA PR 245" },
+    ] }] };
+    remarkThreadRefs(threads)()(tree);
+    expect(tree.children?.[0]?.children?.map((node) => node.type)).toEqual(["link", "inlineCode"]);
+    expect(tree.children?.[0]?.children?.[0]?.children?.[0]).toEqual(text("#QA PR 245"));
+  });
+});
+
+describe("canonical thread links", () => {
+  const uuid = "8b1b1d62-9d3c-4a1e-9f2a-3c5d7e9b1a04";
+  const uuidThreads = [scout(uuid, "QA PR 245"), ada("0f0e0d0c-0b0a-4909-8807-060504030201", "Release notes")];
+
+  it("copies and parses one spelling, and rejects near-misses", () => {
+    const link = threadRefUrl({ botId: "scout", threadId: uuid });
+    expect(link).toBe(`openmausbot://thread/${uuid}?bot=scout`);
+    // the paste path accepts exactly what copy emits
+    expect(parseThreadRefUrl(link)).toEqual({ threadId: uuid, botId: "scout" });
+    expect(parseThreadRefUrl(`openmausbot://thread/${uuid}`)).toEqual({ threadId: uuid });
+    for (const miss of [
+      `openmausbot://thread/${uuid}/extra?bot=scout`,
+      `openmausbot://thread/${uuid}?bot=scout&x=1`,
+      `openmausbot://thread/${uuid}?bot=`,
+      `omb://thread/${uuid}?bot=scout`,
+      "https://thread/" + uuid,
+    ]) {
+      expect(parseThreadRefUrl(miss)).toBeNull();
+    }
+  });
+
+  it("turns a pasted link or raw UUID into the title token, and leaves unknown ids plain", () => {
+    const link = threadRefUrl({ botId: "scout", threadId: uuid });
+    expect(threadTokenFromPaste(link, uuidThreads)).toEqual({ token: "#QA PR 245", ref: expect.objectContaining({ threadId: uuid, botId: "scout" }) });
+    // the markdown shape a sent message carries pastes back the same way
+    expect(threadTokenFromPaste(`[QA PR 245](${link})`, uuidThreads)?.token).toBe("#QA PR 245");
+    expect(threadTokenFromPaste(uuid, uuidThreads)?.ref).toMatchObject({ threadId: uuid });
+    // unknown or not-a-reference pastes stay ordinary text
+    expect(threadTokenFromPaste("openmausbot://thread/" + crypto.randomUUID(), uuidThreads)).toBeNull();
+    expect(threadTokenFromPaste("not a uuid", uuidThreads)).toBeNull();
+    expect(threadTokenFromPaste("see " + uuid, uuidThreads)).toBeNull();
+  });
+
+  it("sends resolvable titles as canonical markdown and passes everything else through", () => {
+    const link = threadRefUrl({ botId: "ada", threadId: "release" });
+    expect(serializeThreadRefs("Done in #Release notes today", threads)).toBe(`Done in [Release notes](${link}) today`);
+    // an existing canonical link is kept verbatim, live or dead, and an
+    // unknown title stays the plain text the person typed
+    const sent = `Already [Release notes](${link}) and [Gone](openmausbot://thread/dead?bot=ada)`;
+    expect(serializeThreadRefs(sent + " plus #Nothing", threads)).toBe(sent + " plus #Nothing");
+    // brackets in a title survive the round trip
+    const bracketed = [scout("b", "QA [PR] 245")];
+    expect(serializeThreadRefs("see #QA [PR] 245", bracketed)).toBe("see [QA \\[PR\\] 245](openmausbot://thread/b?bot=scout)");
+  });
+
+  it("displays canonical links as title chips and dead links as raw text", () => {
+    const link = threadRefUrl({ botId: "ada", threadId: "release" });
+    expect(splitThreadRefsForDisplay(`See [Release notes](${link}) and #QA PR 245`, threads)).toEqual([
+      { text: "See " },
+      { text: "Release notes", ref: expect.objectContaining({ threadId: "release" }) },
+      { text: " and " },
+      { text: "#QA PR 245", ref: expect.objectContaining({ threadId: "qa" }) },
+    ]);
+    expect(splitThreadRefsForDisplay("[Gone](openmausbot://thread/dead?bot=ada)", threads))
+      .toEqual([{ text: "[Gone](openmausbot://thread/dead?bot=ada)" }]);
+  });
+
+  it("resolves an address by its own bot first, then the mention preferences", () => {
+    // one thread id visible under two bots: the link's ?bot pins the owner
+    // regardless of who is open
+    const shared = [ada("qa", "QA PR 245", 1), scout("qa", "QA PR 245", 9)];
+    expect(resolveThreadRefAddress(shared, { threadId: "qa", botId: "ada" }, "scout"))
+      .toMatchObject({ botId: "ada", ambiguous: false });
+    // without one, the same pick a #Title mention uses applies
+    expect(resolveThreadRefAddress(shared, { threadId: "qa" }, "ada")).toMatchObject({ botId: "ada", ambiguous: false });
+    expect(resolveThreadRefAddress(shared, { threadId: "qa" }, "nobody")).toMatchObject({ botId: "scout", ambiguous: false });
+    const unstamped = [ada("qa", "QA PR 245"), scout("qa", "QA PR 245")];
+    expect(resolveThreadRefAddress(unstamped, { threadId: "qa" }, "nobody"))
+      .toMatchObject({ botId: "ada", botName: "Ada", ambiguous: true });
+    // an id with exactly one owner resolves there no matter who is open
+    expect(resolveThreadRefAddress([ada("ada-qa", "QA PR 245")], { threadId: "ada-qa" }, "scout"))
+      .toMatchObject({ botId: "ada", ambiguous: false });
+    expect(resolveThreadRefAddress([], { threadId: "nope" })).toBeNull();
+  });
+
+  it("spaces a pasted token away from chars the resolver refuses as word starts", () => {
+    expect(threadTokenSpacing("C#", 2, 2)).toEqual({ lead: " ", trail: "" });
+    expect(threadTokenSpacing("QA &", 4, 4)).toEqual({ lead: " ", trail: "" });
+    expect(threadTokenSpacing("see ", 4, 4)).toEqual({ lead: "", trail: "" });
+    expect(threadTokenSpacing("plain", 5, 5)).toEqual({ lead: " ", trail: "" });
+    // # and & only block a word start, so they never need a trail space
+    expect(threadTokenSpacing("#QA", 1, 1)).toEqual({ lead: " ", trail: " " });
+    expect(threadTokenSpacing("QA next", 0, 0)).toEqual({ lead: "", trail: " " });
+    expect(threadTokenSpacing("x &", 3, 3)).toEqual({ lead: " ", trail: "" });
+  });
+
+  it("keeps a pinned link to an invisible owner dead even when another bot shares the id", () => {
+    const shared = [scout("qa", "QA PR 245", 9)];
+    const address = { threadId: "qa", botId: "ada" };
+    expect(resolveThreadRefAddress(shared, address, "scout")).toBeNull();
+    const link = threadRefUrl(address);
+    expect(splitThreadRefsForDisplay(`See [QA PR 245](${link})`, shared, "scout"))
+      .toEqual([{ text: "See " }, { text: `[QA PR 245](${link})` }]);
+    expect(threadTokenFromPaste(link, shared, "scout")).toBeNull();
+  });
+
+  it("protects ordinary link labels and code spans when serializing titles", () => {
+    // a #Title inside another link's label must not nest links
+    expect(serializeThreadRefs("[see #Release notes](https://example.test/a)", threads))
+      .toBe("[see #Release notes](https://example.test/a)");
+    // inline and fenced code are quotes, not prose
+    expect(serializeThreadRefs("run `#Release notes` now", threads)).toBe("run `#Release notes` now");
+    expect(serializeThreadRefs("```\n#Release notes\n```", threads)).toBe("```\n#Release notes\n```");
+    // a plain run right next to a protected span still links
+    const link = threadRefUrl({ botId: "ada", threadId: "release" });
+    expect(serializeThreadRefs("#Release notes and `#Release notes`", threads))
+      .toBe(`[Release notes](${link}) and \`#Release notes\``);
+  });
+
+  it("leaves quoted titles as text on display too", () => {
+    expect(splitThreadRefsForDisplay("run `#Release notes` now", threads))
+      .toEqual([{ text: "run " }, { text: "`#Release notes`" }, { text: " now" }]);
+  });
+
+  it("protects balanced-paren, titled, and angle-bracket link destinations", () => {
+    const forms = [
+      "[see #Release notes](https://example.test/a_(b))",
+      "[see #Release notes](https://example.test/a_(b_(c))_(d))",
+      "[see #Release notes](https://example.test/a \"Official\")",
+      "[see #Release notes](https://example.test/a (Official))",
+      "[see #Release notes](<https://example.test/a b>)",
+    ];
+    for (const form of forms) {
+      expect(serializeThreadRefs(form, threads)).toBe(form);
+      expect(splitThreadRefsForDisplay(form, threads)).toEqual([{ text: form }]);
+    }
+  });
+
+  it("treats an unterminated inline link as a plain run instead of hanging", () => {
+    // a truncated paste must fall back to plain text on both the send and
+    // display paths — vitest's 5s timeout turns a scanner hang into a failure
+    const truncated = [
+      "[a](x,",
+      "[a](",
+      "[a](<x>",
+      "[a](x \"t\"",
+      "[see this](https://en.wikipedia.org/wiki/Foo_(bar)",
+    ];
+    for (const form of truncated) {
+      expect(serializeThreadRefs(form, threads)).toBe(form);
+      expect(splitThreadRefsForDisplay(form, threads)).toEqual([{ text: form }]);
+    }
+  });
+
+});

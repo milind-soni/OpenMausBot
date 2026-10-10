@@ -33,11 +33,18 @@ pnpm dev:desktop   # Electron shell (macOS/Ubuntu; keep server + Vite running)
 pnpm typecheck     # app + server
 pnpm test          # vitest suite (server unit + driver contract + API smoke)
 pnpm test:watch    # same, in watch mode
+pnpm exec vitest run --shard=1/4   # one CI shard, exactly the files CI ran in it
 pnpm check:electron # syntax-check the plain JS Electron entrypoints
 
 pnpm package:mac   # DMG + ZIP; requires Swift/Xcode tools
 pnpm package:linux # Ubuntu x64 .deb + AppImage; no Swift required
 ```
+
+`pnpm dev:desktop` downloads and verifies the pinned Cloudflare Tunnel connector for the current
+platform and architecture before Electron starts. Later launches re-verify and reuse the staged
+binary. Packaging continues to use `pnpm build:cloudflared`, which stages every architecture the
+host's desktop package build requires. To stage only the current development target without
+launching Electron, run `node scripts/prepare-cloudflared.mjs --current`.
 
 For Ubuntu installation and real desktop checks, see [`docs/linux-desktop.md`](docs/linux-desktop.md).
 
@@ -55,7 +62,7 @@ and produces one release artifact containing:
 
 Before publishing, confirm that `package.json` has the release version and dispatch the workflow against the same
 commit used for the other platforms. Attach all five Ubuntu files to the matching release in the separate
-[`openmausbot-releases`](https://github.com/milind-soni/openmausbot-releases) repository. Then verify the checksum
+[OpenMausBot releases](https://github.com/milind-soni/OpenMausBot/releases). Then verify the checksum
 file and install the `.deb` plus launch the AppImage in a clean Ubuntu 24.04 x86_64 GNOME environment. Never combine
 packages built from different commits under one version.
 
@@ -112,6 +119,78 @@ The SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately small. A
    failed spawn as a failed turn — never a hang, never a crash.
 5. Bring a contract test following the fake-CLI pattern (scripted fake process + `recordEvents`).
 
+## Agent-facing control CLIs
+
+Before claiming a server or conversation change works, use the isolated flow
+in [`docs/verification/README.md`](docs/verification/README.md). For new CLIs
+intended for automation:
+
+- Reuse an existing MCP or API operation; keep the CLI to argument parsing and
+  result formatting.
+- Mutating commands require an explicit target or an isolated launcher. Never
+  silently target the user's live app.
+- Return JSON for success and failure, use non-zero exit codes for failure, and
+  provide `--help`.
+- Errors name the failed action and the next valid step.
+- Commands that delete or overwrite data provide `--dry-run`; test that it
+  leaves state unchanged.
+- Prefer task-level subcommands and add one smoke test for the main workflow.
+
+The verification feature map is intentionally incomplete. Add an entry only
+when the shared control surface can exercise it and a permanent test proves it.
+
+## MCP tool schemas
+
+Tool `inputSchema`s travel through every engine's own MCP-to-provider conversion before a model
+sees them, and those converters are lossy: composition keywords get flattened, dropped, or pruned
+by size-compaction passes (codex only began preserving `oneOf` in mid-2026; others simplify
+harder). A model that never saw your schema's branches guesses shapes forever — that is exactly
+how chat routine proposals failed in the field hours after 0.1.38 shipped (#544).
+
+- **Never use `oneOf`, `anyOf`, `allOf`, `const`, or `format` in a tool `inputSchema`.** Advertise
+  one flat object; put per-variant rules in `description`s. `enum` on plain strings is fine.
+- **Coerce before you reject.** Models stringify nested objects, shorten enum values, and vary
+  case. If an input has one obvious meaning, accept it and normalize on the wire.
+- **Errors must teach.** When you refuse an input, the message states the supported shapes with a
+  literal example the model can copy. "Invalid discriminator value" burns a turn; an example
+  fixes the next call.
+- A schema test should assert the tool surface stays flat
+  (see `server/drivers/agents-proxy.test.ts` — it regexp-guards the serialized schema).
+- The agents tools live in `server/drivers/agents-catalog.ts`, and their serialized `tools/list`
+  is pinned byte for byte and size-budgeted by `server/drivers/agents-catalog-wire.test.ts`.
+  After changing one on purpose, run that file once with `UPDATE_AGENTS_CATALOG_GOLDENS=1`,
+  review the golden diff, and move its `BUDGET_BASELINE` by hand.
+
+## Adding a language
+
+The renderer's strings live in JSON catalogs under `src/locales/`. English
+(`src/locales/en.json`) is the source of truth (typing still flows from it). A
+language is one file plus a one-line registration, exactly like a provider
+driver:
+
+1. Copy `src/locales/en.json` to `src/locales/<code>.json`. Filenames use a
+   lowercase BCP-47 tag (`de.json`, `pt-br.json`). Translate the values; keys
+   you leave out fall back to English, so partial community packs are fine.
+2. Register it in `src/locales/index.ts`.
+3. Run `pnpm i18n:check`, then select the language in **Settings → General**.
+
+An authenticated local Claude CLI can produce a first draft; it never runs in
+CI and its output still needs human review:
+
+```sh
+# Uses the locally logged-in Claude CLI
+node scripts/generate-locale.mjs it "Italian"
+```
+
+The helper runs the model without repository access, custom instructions, or
+write-capable tools. It accepts only one complete JSON object and tracks the
+English source hash for each reviewed translation. See
+[`docs/localization.md`](docs/localization.md) for the workflow and safety rules.
+
+Only a slice of the UI is extracted so far. Move strings into the catalog
+with `t("…")` as you touch components — never in big sweeps, which conflict
+with everything.
+
 ## Platform rules
 
 - The harness (`server/`) must stay portable Node. Anything macOS-only (TCC, Swift helpers,
@@ -151,9 +230,57 @@ API keys are write-only: they land in `~/.openmausbot/config.json` via `PUT /api
 only ever reports `configured` booleans. Keep it that way — no logging keys, no echoing them in
 responses or events, no baking them into argv where another local process could read them.
 
+## Downstream forks and release ownership
+
+Changes prepared in a downstream fork should keep provenance in the pull request, not add
+fork-specific branding or ownership claims to the upstream source tree. Record the exact upstream
+commit used as the comparison base, the head branch, and the checks run after the final rebase.
+
+Fork maintainers own the binaries and update channels they publish. Before distributing a fork,
+review the application name and identifiers, signing configuration, update metadata, and every
+`electron-builder` publish target. Never upload fork artifacts or update metadata to the official
+OpenMausBot release repository, and never change the upstream publish target in a feature PR unless
+that release migration was explicitly agreed with the maintainer.
+
+An upstream PR should contain only the portable product change. Keep local build paths, account
+names, credentials, private endpoints, machine-specific configuration, and fork-only release notes
+out of its commits and screenshots.
+
+## Contribution licensing
+
+- No DCO sign-off is required. Submit only code you wrote or have the right
+  to contribute under the applicable project license.
+- Changes under `enterprise/` (source-available, see [LICENSING.md](LICENSING.md))
+  need the [CLA](CLA.md), signed once by commenting on the pull request
+  when the bot asks. Changes outside `enterprise/` do not require a CLA.
+- `enterprise/`, the cloud seam and the licensing files have code owners; a
+  maintainer review is required there.
+
+## CI, in one glance
+
+Every PR runs the same checks, each as its own job so a failure names itself.
+The quick static job runs first; only after it passes do the expensive test and
+build jobs enter the runner queue. This saves capacity on submissions with type,
+lint or build errors, without skipping any checks on mergeable PRs. The required
+gates still fail if preflight fails or a required test job is skipped. It adds
+the preflight duration to an otherwise idle runner pool; it does not cure a
+GitHub-wide scheduling backlog.
+
+- **typecheck + lint** — typecheck, lint, locale catalogs (`pnpm i18n:check`), Electron syntax check, production UI build. Once, on Ubuntu; none of it is platform-specific.
+- **vitest (os, shard n/4)** — the suite split into four shards per platform: Ubuntu and Windows on a PR; macOS as well on main, in the merge queue and on manual runs (macOS runners are scarce and only a couple of tests are macOS-only). The suite runs its files serially on purpose (fake CLIs and a real harness server), so the whole suite takes about 70 minutes of Windows runner time and 50 of Ubuntu. The shards split it by each file's recorded CI time rather than by file count ([docs/ci.md](docs/ci.md#vitest-shards)). To reproduce a shard's failure locally, run the same `pnpm exec vitest run --shard=n/4`. Failures also appear as annotations on the PR.
+- **packaged server smoke (os)** — the server bundle copied out of the repo and started with no `node_modules` in reach.
+- **Windows CUA host smoke**, **macOS smokes (packaged server + Electron)** — real Electron utility processes against disposable homes; never the live app.
+- **CI** — the one check the branch rules require. It only aggregates the jobs above; if it is red, the failing job is named in its log.
+
+A `pre-push` hook installed by `pnpm install` runs lint, typecheck and the locale check before a push (about a minute). `git push --no-verify` skips it once; `OMB_SKIP_HOOKS=1` skips it for a session.
+
+Provider fakes under `server/testing/fake-*.ts` must stay dependency-free: they run as bare subprocesses and at least one is copied out of the repo by a test, so a relative import from the repo dies at link time. `server/testing/fakes-self-contained.test.ts` enforces it.
+
 ## Before you open the PR
 
 - [ ] `pnpm typecheck` and `pnpm test` pass
+- [ ] `pnpm lint` passes
+- [ ] Locale changes pass `pnpm i18n:check` and have been reviewed by a speaker
 - [ ] `pnpm check:electron` passes for desktop-shell changes
 - [ ] Ubuntu packaging changes pass `pnpm package:linux` and `node scripts/verify-linux-package.mjs`
 - [ ] New server behavior has a test; driver changes keep the contract tests green

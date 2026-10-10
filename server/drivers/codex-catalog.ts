@@ -8,12 +8,18 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 
 import type { ModelCatalog } from "../contracts.ts";
+import { qualifiedModelLabel } from "../contracts.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
+import { codexHome } from "./codex-identity.ts";
 import { mergeLocalInject } from "./local-inject.ts";
 
 export const STATIC_CODEX_MODELS: ModelCatalog = {
   default: "gpt-5.6-sol",
   options: [
+    // Only used when live discovery fails; these rows do not establish account access.
+    { id: "gpt-6-astra", label: "GPT-6 Astra (availability unverified)" },
+    { id: "gpt-6-sol", label: "GPT-6 Sol (availability unverified)" },
+    { id: "gpt-6-luna", label: "GPT-6 Luna (availability unverified)" },
     { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
     { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
     { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
@@ -171,11 +177,6 @@ export function readCodexAppServerModelCatalog(
   });
 }
 
-export function codexHome(env: Record<string, string | undefined>): string {
-  if (env.CODEX_HOME) return env.CODEX_HOME;
-  return join(env.HOME || env.USERPROFILE || homedir(), ".codex");
-}
-
 function unquote(raw: string): string {
   let value = raw.trim();
   const hash = value.indexOf(" #");
@@ -276,7 +277,10 @@ function niceLabel(model: string, provider: string, known: Map<string, CodexProv
   const encoded = encodeCodexSelection(provider, model);
   if (named.has(encoded)) return named.get(encoded)!;
   const host = providerName(provider, known);
-  return host === provider ? model : `${model} (${host})`;
+  return qualifiedModelLabel(model, host, {
+    redundantWhen: () => host === provider,
+    decorate: (facet) => ` (${facet})`,
+  });
 }
 
 function collectCatalogNames(home: string): Map<string, string> {
@@ -360,7 +364,10 @@ export async function readCodexModelCatalog(
   cli?: string,
 ): Promise<ModelCatalog> {
   const official = (cli ? await readCodexAppServerModelCatalog(cli, env) : null) ?? STATIC_CODEX_MODELS;
+  // Match the identity boundary: an explicitly relative CODEX_HOME or user
+  // home must not load a catalog from a different directory.
   const home = codexHome(env);
+  if (!home) return mergeLocalInject(official, env, fetchImpl);
   const mainText = readText(join(home, "config.toml"));
   if (!mainText) return mergeLocalInject(official, env, fetchImpl);
 

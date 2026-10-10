@@ -98,3 +98,93 @@ describe("Speaker lifecycle", () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:voice-test");
   });
 });
+
+describe("external voice claims", () => {
+  beforeEach(() => {
+    FakeAudio.latest = null;
+    vi.restoreAllMocks();
+    vi.stubGlobal("Audio", FakeAudio);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:voice-test");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  });
+
+  it("a new claim pauses the previous holder, and a stale release cannot clear the newer claim", () => {
+    const speaker = new Speaker();
+    const first = vi.fn();
+    const releaseFirst = speaker.claimExternalVoice(first);
+    const second = vi.fn();
+
+    speaker.claimExternalVoice(second);
+
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
+    releaseFirst();
+    speaker.stop();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it("a stale release cannot clear a newer claim that reuses the same callback", () => {
+    const speaker = new Speaker();
+    const pause = vi.fn();
+    const releaseFirst = speaker.claimExternalVoice(pause);
+
+    speaker.claimExternalVoice(pause);
+
+    expect(pause).toHaveBeenCalledTimes(1);
+    releaseFirst();
+    speaker.stop();
+    expect(pause).toHaveBeenCalledTimes(2);
+  });
+
+  it("starting an utterance pauses the holder — call mode takes the voice", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith("/prepare")
+          ? json({ ready: true, utterances: ["Incoming."] })
+          : new Response(new Blob(["mp3"]), { status: 200 }),
+      ),
+    );
+    const speaker = new Speaker();
+    const pause = vi.fn();
+    speaker.claimExternalVoice(pause);
+
+    const speaking = speaker.speak("Incoming.");
+
+    expect(pause).toHaveBeenCalledTimes(1);
+    speaker.stop();
+    await speaking;
+  });
+
+  it("claiming during an utterance stops the utterance — a note takes the voice", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith("/prepare")
+          ? json({ ready: true, utterances: ["Talking."] })
+          : new Response(new Blob(["mp3"]), { status: 200 }),
+      ),
+    );
+    const speaker = new Speaker();
+    const speaking = speaker.speak("Talking.");
+    await vi.waitFor(() => expect(FakeAudio.latest).not.toBeNull());
+
+    speaker.claimExternalVoice(vi.fn());
+
+    await expect(speaking).resolves.toBeUndefined();
+    expect(FakeAudio.latest!.pause).toHaveBeenCalled();
+    expect(speaker.state).toEqual({ status: "idle" });
+  });
+
+  it("release clears the claim, and releasing twice is safe", () => {
+    const speaker = new Speaker();
+    const pause = vi.fn();
+    const release = speaker.claimExternalVoice(pause);
+
+    release();
+    release();
+    speaker.stop();
+
+    expect(pause).not.toHaveBeenCalled();
+  });
+});

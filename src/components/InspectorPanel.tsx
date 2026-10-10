@@ -1,9 +1,11 @@
 // The raw event inspector: what a thread's turns actually looked like on
 // the wire, for the moment a bot misbehaves and the chat view can't say
-// why. Two lenses over the same thread:
+// why. Three lenses over the same thread:
 //
+//   Run log — readable, redacted activity from the visible conversation.
 //   Events — the harness's normalized RuntimeEvent stream: turns, tool
-//            items, requests, token usage, errors. Follows live over SSE.
+//            items, requests, token usage, errors. Follows the app's live
+//            stream.
 //   Raw    — the provider's own protocol messages, verbatim (the native
 //            tee). Read from disk; refreshed when a turn settles.
 //
@@ -11,23 +13,32 @@
 // under ~/.openmausbot (server/harness/bus.ts, server/drivers/native.ts).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bug, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
-import { useStore, type Bot } from "@/state/store";
+import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { formatTime, toRows, type InspectorEntry, type InspectorPage, type InspectorRow } from "@/lib/inspector";
-import type { RuntimeEvent } from "../../server/contracts.ts";
+import { listenLiveFrames } from "@/lib/live-events";
+import type { RuntimeEvent } from "../../shared/runtime-events";
+import { RunLog } from "./RunLog";
+import { timelineEvents } from "@/lib/taskTimeline";
+import { t } from "@/lib/i18n";
 
-type Lens = "events" | "raw";
+type Lens = "run" | "events" | "raw";
 
 export function InspectorPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
+  // Docked flush under the Windows caption corner: drop the header 16px.
+  const { padClass, dragProps } = useCaptionChrome();
   const threadId = bot.threadId;
-  const [lens, setLens] = useState<Lens>("events");
+  const [lens, setLens] = useState<Lens>("run");
+  const activity = useMemo(() => timelineEvents(visibleMessages(bot)), [bot]);
   const [page, setPage] = useState<InspectorPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const loadAbort = useRef<AbortController | null>(null);
+  const managedRefresh = useRef<() => void>(() => {});
 
   const load = useCallback(async () => {
     loadAbort.current?.abort();
@@ -36,6 +47,8 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     try {
       const res = await fetch(`/api/threads/${threadId}/events?limit=400`, { signal: controller.signal });
       if (!res.ok) throw new Error(`${res.status}`);
+      // SAFETY: this same-version renderer calls the harness's typed
+      // inspector endpoint; malformed transport data is handled by catch.
       const next = (await res.json()) as InspectorPage;
       if (controller.signal.aborted) return;
       setPage(next);
@@ -57,34 +70,72 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
     return () => loadAbort.current?.abort();
   }, [load]);
 
-  // live: append this thread's runtime events as they stream, and re-read
-  // the disk when a turn settles so the native tee (not on the SSE) catches
-  // up. Own EventSource on purpose: the store folds runtime events into
-  // chat state and does not re-emit them.
+  // live: append this thread's runtime events as the app's stream carries
+  // them, and re-read the disk when a turn settles so the native tee (not on
+  // the stream) catches up.
   useEffect(() => {
-    const es = new EventSource("/api/events?screens=off");
+    let alive = true;
     let settle: ReturnType<typeof setTimeout> | null = null;
-    es.onmessage = (raw) => {
-      let frame: { kind?: string; event?: RuntimeEvent };
-      try {
-        frame = JSON.parse(raw.data);
-      } catch {
-        return;
-      }
-      if (frame.kind !== "runtime" || !frame.event || frame.event.threadId !== threadId) return;
-      const event = frame.event;
+    let refreshGeneration = 0;
+    let refreshing = false;
+    const pendingRuntime: RuntimeEvent[] = [];
+
+    const appendRuntime = (runtime: RuntimeEvent) => {
       setPage((prev) => {
-        const entry: InspectorEntry = { kind: "runtime", at: event.createdAt, data: event };
+        // A disk refresh and replay can overlap. eventId is canonical, so a
+        // replayed entry already present in the snapshot is an exact no-op.
+        if (
+          prev?.entries.some(
+            (entry) => entry.kind === "runtime" && entry.data.eventId === runtime.eventId,
+          )
+        ) {
+          return prev;
+        }
+        const entry: InspectorEntry = { kind: "runtime", at: runtime.createdAt, data: runtime };
         if (!prev) return { entries: [entry], total: { runtime: 1, native: 0 } };
         return { entries: [...prev.entries, entry], total: { ...prev.total, runtime: prev.total.runtime + 1 } };
       });
-      if (event.type === "turn.completed" || event.type === "runtime.error") {
-        if (settle) clearTimeout(settle);
-        settle = setTimeout(() => void load(), 400);
-      }
     };
+
+    const flushPendingRuntime = () => {
+      for (const runtime of pendingRuntime.splice(0)) appendRuntime(runtime);
+    };
+
+    const refresh = async () => {
+      const generation = ++refreshGeneration;
+      refreshing = true;
+      await load();
+      // A later refresh aborts the earlier fetch. Only its completion owns
+      // the buffered live tail, otherwise the earlier finally can flush
+      // frames immediately before the newer snapshot overwrites them.
+      if (!alive || generation !== refreshGeneration) return;
+      refreshing = false;
+      // A failed reload keeps the previous page, so frames buffered during
+      // it still belong there; after a good one, eventId drops repeats.
+      flushPendingRuntime();
+    };
+    const requestRefresh = () => void refresh();
+    managedRefresh.current = requestRefresh;
+
+    // A gap the stream could not replay is on disk: reload it.
+    const stopLive = listenLiveFrames({
+      onMissedFrames: requestRefresh,
+      onFrame: (frame) => {
+        if (frame.kind !== "runtime") return;
+        const runtime = frame.event;
+        if (runtime.threadId !== threadId) return;
+        if (refreshing) pendingRuntime.push(runtime);
+        else appendRuntime(runtime);
+        if (runtime.type === "turn.completed" || runtime.type === "runtime.error") {
+          if (settle) clearTimeout(settle);
+          settle = setTimeout(requestRefresh, 400);
+        }
+      },
+    });
     return () => {
-      es.close();
+      alive = false;
+      if (managedRefresh.current === requestRefresh) managedRefresh.current = () => {};
+      stopLive();
       if (settle) clearTimeout(settle);
     };
   }, [threadId, load]);
@@ -118,8 +169,8 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const total = lens === "raw" ? (page?.total.native ?? 0) : (page?.total.runtime ?? 0);
 
   return (
-    <aside className="animate-panel-in flex h-full w-[460px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
-      <div className="flex items-center justify-between px-4 py-3">
+    <aside aria-label="Inspector" className="animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel md:static md:z-auto md:w-[min(460px,45vw)] md:shrink-0">
+      <div {...dragProps} className={cn("flex items-center justify-between px-4 py-3", padClass)}>
         <span className="flex items-center gap-2 text-[15px] font-semibold text-ink">
           <Bug size={16} className="text-ink-secondary" /> Inspector
         </span>
@@ -134,29 +185,46 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
       </div>
 
       <div className="flex items-center gap-2 border-b border-hairline/40 px-4 pb-3">
-        <div className="flex rounded-lg bg-inset p-0.5">
-          {(["events", "raw"] as const).map((l) => (
+        <div role="tablist" aria-label={t("inspector.views")} className="flex rounded-lg bg-inset p-0.5" onKeyDown={(event) => {
+          const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+          const current = tabs.indexOf(document.activeElement as HTMLButtonElement);
+          const next = event.key === "ArrowRight" ? (current + 1) % tabs.length
+            : event.key === "ArrowLeft" ? (current + tabs.length - 1) % tabs.length
+              : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+          if (next < 0) return;
+          event.preventDefault();
+          tabs[next].focus();
+          tabs[next].click();
+        }}>
+          {(["run", "events", "raw"] as const).map((l) => (
             <button
               key={l}
+              type="button"
+              role="tab"
+              id={`inspector-tab-${l}`}
+              aria-selected={lens === l}
+              aria-controls={`inspector-panel-${l}`}
+              tabIndex={lens === l ? 0 : -1}
               onClick={() => setLens(l)}
               className={cn(
                 "rounded-md px-2.5 py-1 text-[12px] font-medium capitalize",
                 lens === l ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
               )}
             >
-              {l}
+              {l === "run" ? t("inspector.run.title") : l}
             </button>
           ))}
         </div>
-        <span className="ml-auto text-[11px] text-ink-secondary">
+        {lens !== "run" && <span className="ml-auto text-[11px] text-ink-secondary">
           {page ? (shown < total ? `last ${shown} of ${total}` : `${shown} entries`) : "loading…"}
-        </span>
-        <button onClick={() => void load()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title="Reload from disk">
+        </span>}
+        {lens !== "run" && <button onClick={() => managedRefresh.current()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title="Reload from disk">
           <RefreshCw size={14} />
-        </button>
+        </button>}
       </div>
 
-      <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto font-mono text-[11.5px]">
+      <div role="tabpanel" id={`inspector-panel-${lens}`} aria-labelledby={`inspector-tab-${lens}`} tabIndex={0} className="flex min-h-0 flex-1 flex-col outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60">
+      {lens === "run" ? <RunLog key={threadId} events={activity} /> : <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto font-mono text-[11.5px]">
         {error && <div className="px-4 py-3 text-danger">couldn't load: {error}</div>}
         {page && rows.length === 0 && !error && (
           <div className="px-4 py-6 text-ink-secondary">
@@ -166,6 +234,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         {rows.map((row) => (
           <Row key={row.key} row={row} open={expanded.has(row.key)} onToggle={() => toggle(row.key)} />
         ))}
+      </div>}
       </div>
     </aside>
   );

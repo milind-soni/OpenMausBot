@@ -2,6 +2,10 @@ import { z } from "zod";
 
 import { schemaIssue, type JsonValue } from "./schema.ts";
 import type { MausColor } from "./store.ts";
+import { botMascotBody, type MascotBodyId } from "../shared/mascot-bodies.ts";
+import { takeImportName } from "../shared/import-name.ts";
+import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import { optionalText, requiredText } from "../shared/package-format.ts";
 
 export const TEAM_MANIFEST_FORMAT = "openmaus.team" as const;
 export const TEAM_MANIFEST_VERSION = 2 as const;
@@ -21,21 +25,21 @@ const COLORS = [
   "coral",
 ] as const satisfies readonly MausColor[];
 
-const requiredText = (max: number) =>
-  z.string({ error: "must be text" }).trim().min(1, { message: "is required" }).max(max, { message: "is too long" });
-
-const optionalText = (max: number) =>
-  z
-    .union([z.string({ error: "must be text" }), z.null(), z.undefined()])
-    .transform((value) => value?.trim() || undefined)
-    .refine((value) => value === undefined || value.length <= max, { message: "is too long" })
-    .optional();
-
-const responderSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("member"), member: requiredText(64) }),
-  z.object({ kind: z.literal("everyone") }),
-  z.object({ kind: z.literal("mentions") }),
-]);
+const RESPONDER_KINDS = new Set(["member", "everyone", "mentions", "auto"]);
+/** A responder kind from a newer release reads as "no responder": the room
+ * is created with the default lead, never refused. */
+const responderSchema = z.preprocess(
+  (value) => {
+    const kind = value && typeof value === "object" ? (value as { kind?: unknown }).kind : undefined;
+    return typeof kind === "string" && !RESPONDER_KINDS.has(kind) ? { kind: "mentions" } : value;
+  },
+  z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("member"), member: requiredText(64) }),
+    z.object({ kind: z.literal("everyone") }),
+    z.object({ kind: z.literal("mentions") }),
+    z.object({ kind: z.literal("auto"), member: requiredText(64).optional() }),
+  ]),
+);
 
 const memberSchema = z.object({
   key: requiredText(64).regex(/^[a-z0-9][a-z0-9_-]*$/, {
@@ -44,9 +48,13 @@ const memberSchema = z.object({
   name: requiredText(100),
   title: optionalText(200),
   description: optionalText(4_000),
+  soul: z.string().refine((value) => Buffer.byteLength(value, "utf8") <= BOT_PROFILE_LIMITS.soul, {
+    error: "standing instructions must be at most 24000 bytes",
+  }).optional(),
   appearance: z.object({
     color: z.enum(COLORS, { error: "is not supported" }),
     mascotExpression: optionalText(80),
+    mascotBody: optionalText(40),
   }),
 });
 
@@ -86,16 +94,19 @@ export interface TeamManifestMember {
   name: string;
   title: string;
   description: string;
+  soul?: string;
   appearance: {
     color: MausColor;
     mascotExpression?: string;
+    mascotBody?: string;
   };
 }
 
 export type TeamManifestResponder =
   | { kind: "member"; member: string }
   | { kind: "everyone" }
-  | { kind: "mentions" };
+  | { kind: "mentions" }
+  | { kind: "auto"; member?: string };
 
 export interface TeamManifestRoom {
   name: string;
@@ -132,8 +143,10 @@ interface ExportableBot {
   name: string;
   title: string;
   description: string;
+  soul?: string;
   color: MausColor;
   mascotExpression?: string | null;
+  mascotBody?: string | null;
 }
 
 interface ExportableTeam {
@@ -160,11 +173,13 @@ export function parseTeamManifest(value: TeamManifestInput): ParsedTeamManifest 
     seenKeys.add(member.key);
     const appearance: TeamManifestMember["appearance"] = { color: member.appearance.color };
     if (member.appearance.mascotExpression) appearance.mascotExpression = member.appearance.mascotExpression;
+    if (member.appearance.mascotBody) appearance.mascotBody = member.appearance.mascotBody;
     return {
       key: member.key,
       name: member.name,
       title: member.title ?? "",
       description: member.description ?? "",
+      ...(member.soul !== undefined ? { soul: member.soul } : {}),
       appearance,
     };
   });
@@ -181,7 +196,8 @@ export function parseTeamManifest(value: TeamManifestInput): ParsedTeamManifest 
 
   if (parsed.data.version === LEGACY_TEAM_MANIFEST_VERSION) {
     const defaultResponder = parsed.data.team.room.defaultResponder;
-    if (defaultResponder.kind === "member" && !seenKeys.has(defaultResponder.member)) {
+    if ((defaultResponder.kind === "member" || defaultResponder.kind === "auto") && defaultResponder.member !== undefined &&
+      !seenKeys.has(defaultResponder.member)) {
       throw new Error(`Unknown default responder: ${defaultResponder.member}`);
     }
     result.team.room = {
@@ -199,11 +215,11 @@ export interface ImportedMemberProfile {
   name: string;
   title: string;
   description: string;
+  soul?: string;
   color: MausColor;
   mascotExpression?: string;
+  mascotBody?: MascotBodyId;
 }
-
-const MAX_MEMBER_NAME = 100;
 
 /** Everything an untrusted manifest may seed into a brand-new bot — and
  * nothing else.
@@ -216,14 +232,15 @@ const MAX_MEMBER_NAME = 100;
  *
  * 1. Allowlist, not blocklist. The returned object is built field by field
  *    from the parsed member, so every privilege-bearing BotRecord field —
- *    autoApprove, alwaysAllow, chiefOfStaff, approvePeerComms, composio,
- *    computer, cloudBackend, cwd — is structurally absent, whatever the
+ *    approvalMode, autoApprove, alwaysAllow, chiefOfStaff, approvePeerComms, composio,
+ *    connectorTools, computer, cloudBackend, cwd — is structurally absent, whatever the
  *    file claimed. parseTeamManifest already drops unknown member keys;
  *    this keeps the guarantee even if the schema grows a field later,
  *    because nothing new can reach a bot record without someone
  *    consciously widening this return type. The caller must still force
- *    composio: false on the created record — that is the one privilege
- *    where *absence* means allowed, so leaving it unset is not safe.
+ *    composio: false (and connectorTools: {}) on the created record —
+ *    composio is the one privilege where *absence* means allowed, so
+ *    leaving it unset is not safe.
  *
  * 2. No name captures. Display names are identity wherever bots address
  *    each other — @mention resolution in rooms, the Chief of Staff roster,
@@ -240,20 +257,21 @@ export function importedMemberProfile(
   member: TeamManifestMember,
   takenNames: Set<string>,
 ): ImportedMemberProfile {
-  const base = member.name.trim();
-  let name = base;
-  for (let n = 2; takenNames.has(name.toLowerCase()); n++) {
-    const tag = ` ${n}`;
-    name = `${base.slice(0, MAX_MEMBER_NAME - tag.length).trimEnd()}${tag}`;
-  }
-  takenNames.add(name.toLowerCase());
+  const name = takeImportName(member.name, takenNames);
   const profile: ImportedMemberProfile = {
     name,
     title: member.title,
     description: member.description,
+    ...(member.soul !== undefined ? { soul: member.soul } : {}),
     color: member.appearance.color,
   };
   if (member.appearance.mascotExpression) profile.mascotExpression = member.appearance.mascotExpression;
+  // The manifest carries the body as free text (parseTeamManifest only
+  // bounds its length); an untrusted or stale value must never reach a
+  // BotRecord unvalidated, so it is safe-parsed here — the one point where
+  // an imported member becomes bot fields — falling back to the default
+  // body rather than rejecting the whole import over a cosmetic field.
+  if (member.appearance.mascotBody) profile.mascotBody = botMascotBody(member.appearance.mascotBody);
   return profile;
 }
 
@@ -283,11 +301,13 @@ export function createTeamManifest(team: ExportableTeam, bots: ExportableBot[]):
     const key = memberKey(bot.name, index, usedKeys);
     const appearance: TeamManifestMember["appearance"] = { color: bot.color };
     if (bot.mascotExpression) appearance.mascotExpression = bot.mascotExpression;
+    if (bot.mascotBody) appearance.mascotBody = bot.mascotBody;
     return {
       key,
       name: bot.name,
       title: bot.title,
       description: bot.description,
+      ...(bot.soul !== undefined ? { soul: bot.soul } : {}),
       appearance,
     };
   });

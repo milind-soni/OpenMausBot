@@ -1,7 +1,8 @@
 // Desktop notifications, driven by the harness's {kind:"notify"} frames.
 // The server decides *whether* something is worth an interruption (it owns
 // the per-bot toggle); this only decides how to show it here.
-import type { Notification } from "../../server/notify.ts";
+import type { Notification } from "../../shared/notification";
+import { notificationSoundsEnabled } from "./notification-preferences";
 
 export type NotifyFrame = Notification;
 
@@ -29,16 +30,20 @@ export function buildNotificationOptions(bot: NotificationBotIdentity): Notifica
   return { tag: `openmausbot:${bot.id}`, icon: bot.avatarUrl ?? undefined };
 }
 
-/** Show one, unless the app is already in front of the user — a banner over
- * the window you are looking at is noise, and the chat itself already shows
- * the card. */
+/** Show one unless the exact destination conversation is already visible.
+ * A focused app may still be showing another task (routine runs are detached),
+ * so window focus alone is not proof that the actionable card can be seen. */
 export function showNotification(
   frame: NotifyFrame,
   onOpen: (target: NotificationTarget) => void,
   avatarUrl?: string | null,
+  visibleThreadId?: string | null,
 ) {
   if (typeof Notification === "undefined") return;
-  if (document.hasFocus()) return;
+  // A spend notice is the workspace's news, not the thread's: it shows even
+  // over the conversation whose turn crossed the line.
+  const spend = frame.kind === "spend";
+  if (!spend && document.hasFocus() && visibleThreadId === frame.threadId) return;
 
   const open = () => {
     window.focus();
@@ -49,6 +54,11 @@ export function showNotification(
     const options: NotificationOptions = {
       body: frame.body,
       ...buildNotificationOptions({ id: frame.botId, avatarUrl }),
+      // its own stack, so a bot's next "finished" never replaces it
+      ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
+      // The banner still lands; only the platform's alert sound is held
+      // back, which is what a person on a call with the bot asked for.
+      ...(notificationSoundsEnabled() ? {} : { silent: true }),
     };
     new Notification(frame.title, options).onclick = open;
   }

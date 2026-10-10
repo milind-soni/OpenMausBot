@@ -23,6 +23,7 @@ import { createServer } from "node:http";
 
 import { createAddressWatcher } from "./advertise-watch.ts";
 import { createControlServer, hostCandidates } from "./control.ts";
+import { createConnectedDeviceTracker } from "./connected-devices.ts";
 import { DeviceRegistry } from "./devices.ts";
 import { companionEndpointCandidates, hostedCompanionUrl } from "./endpoints.ts";
 import { lanAddresses, refreshTailnetName, tailnetName, tailscaleAddress } from "./listener.ts";
@@ -34,8 +35,25 @@ import {
   MdnsResponder,
   type ServiceInfo,
 } from "./mdns.ts";
+import { notifyDeviceRevoked } from "./harness-notice.ts";
 import { createProxyHandler } from "./proxy.ts";
 import { companionOriginSocket, listenCompanionOrigin } from "./origin.ts";
+import { normalizedPhoneSecretPublicKey } from "./phone-secret-key.ts";
+
+// Only Electron supplies this port. Standalone sidecars retain the existing
+// unguarded local-server path; Electron children fail closed until initialized.
+const parentPort = (process as NodeJS.Process & {
+  parentPort?: { on(event: "message", listener: (event: { data?: unknown }) => void): void };
+}).parentPort;
+let mutationToken: string | null = null;
+parentPort?.on("message", ({ data }) => {
+  if (!data || typeof data !== "object") return;
+  const message = data as Record<string, unknown>;
+  if (message.type !== "openmausbot:companion-mutation-token") return;
+  if (typeof message.token === "string" && /^[A-Za-z0-9_-]{43}$/.test(message.token)) {
+    mutationToken = message.token;
+  }
+});
 
 /** A port from the environment, or the default. Anything that is not a whole
  * number in range is the default — a typo'd port must not become port 0. */
@@ -51,6 +69,9 @@ const CONTROL_PORT = num(process.env.OMB_CONTROL_PORT, 8811);
 const SERVICE_TYPE = "_openmausbot._tcp";
 let hostedUrl = hostedCompanionUrl(process.env.OMB_COMPANION_HOSTED_URL);
 const PRIVATE_ORIGIN = companionOriginSocket(process.env.OMB_COMPANION_INTERNAL_ORIGIN);
+const SECRET_PUBLIC_KEY = normalizedPhoneSecretPublicKey(
+  process.env.OMB_PHONE_SECRET_PUBLIC_KEY ?? "",
+);
 
 /** Ports the harness takes for itself, and what it uses each for.
  *
@@ -131,8 +152,10 @@ const service = (): ServiceInfo => ({
   txt: ["v=1", `name=${clampBytes(machineName(), 200)}`],
 });
 
+const connectedDevices = createConnectedDeviceTracker();
 const proxy = createProxyHandler({
     harnessPort: HARNESS_PORT,
+    mutationToken: parentPort ? () => mutationToken : undefined,
     // `authenticate` also stamps lastSeenAt, which is what makes the control
     // page able to say when a phone was last heard from.
     authenticate: (token) => devices.authenticate(token),
@@ -143,18 +166,39 @@ const proxy = createProxyHandler({
     // list has to be right.
     hosts: () => hostCandidates(),
     endpoints: () => companionEndpointCandidates(COMPANION_PORT, undefined, undefined, hostedUrl),
+    connected: connectedDevices.open,
   });
 const companion = createServer(proxy);
+// `createServer(proxy)` handles ordinary HTTP only. noVNC switches its
+// connection to WebSocket, so every server exposing this proxy must also
+// forward Node's separate `upgrade` event to the viewer relay.
+companion.on("upgrade", proxy.upgrade);
 const managedOrigin = PRIVATE_ORIGIN ? createServer(proxy) : null;
+managedOrigin?.on("upgrade", proxy.upgrade);
 
 const control = createControlServer({
   devices,
   companionPort: COMPANION_PORT,
+  secretPublicKey: () => SECRET_PUBLIC_KEY,
   hostedUrl: () => hostedUrl,
   setHostedUrl: (next) => {
     hostedUrl = next;
   },
   discovery: () => ({ advertising: mdns.advertising, name: service().name }),
+  connectedDeviceIds: connectedDevices.ids,
+  disconnectDevice: (deviceId) => {
+    connectedDevices.disconnect(deviceId);
+    proxy.disconnectDevice(deviceId);
+  },
+  // The harness hears a phone as this computer, so only we can tell it the
+  // phone lost its access: a Live call that phone holds ends now, not at its
+  // idle hang-up. Under the desktop app the notice needs the relay token; a
+  // sidecar still waiting for it has no call to protect yet either.
+  revoked: (deviceId) => {
+    if (parentPort && !mutationToken) return;
+    void notifyDeviceRevoked({ harnessPort: HARNESS_PORT, deviceId, mutationToken: mutationToken ?? undefined });
+  },
+  refreshTailscale: () => refreshTailnetName(),
 });
 
 /** Bind a server, turning a bind failure into a sentence rather than a stack

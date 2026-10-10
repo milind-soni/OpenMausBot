@@ -1,8 +1,11 @@
-import { existsSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   readSectionContext,
+  readSections,
+  ensureSections,
+  changeEmptySection,
   sectionContextKey,
   sectionContextLabel,
   sectionContextSystemPrompt,
@@ -55,5 +58,29 @@ describe("section context", () => {
 
     writeFileSync(SECTION_CONTEXTS_FILE, "not json");
     expect(readSectionContext("Work")).toBeNull();
+    expect(() => ensureSections(["New"])).toThrow("left unchanged");
+    expect(readFileSync(SECTION_CONTEXTS_FILE, "utf8")).toBe("not json");
+  });
+
+  it("retains empty teams and migrates legacy shared instructions", () => {
+    writeFileSync(SECTION_CONTEXTS_FILE, JSON.stringify({ version: 1, contexts: { Legacy: { text: "Keep this", updatedAt: 1 } } }));
+    expect(readSections()).toEqual(["Legacy"]);
+    ensureSections([" Empty ", "Legacy", "", undefined]);
+    expect(readSections()).toEqual(["Legacy", "Empty"]);
+    writeSectionContext("Legacy", "");
+    expect(readSections()).toEqual(["Legacy", "Empty"]);
+    expect(readSectionContext("Legacy")).toBeNull();
+  });
+
+  it("renames and deletes empty team instructions without affecting other teams", () => {
+    writeSectionContext("Draft", "Exact briefing", 7);
+    writeSectionContext("Other", "Keep this", 8);
+    changeEmptySection("Draft", "__proto__");
+    expect(readSectionContext("__proto__")).toEqual({ text: "Exact briefing", updatedAt: 7 });
+    expect(readSectionContext("Draft")).toBeNull();
+    expect(() => changeEmptySection("__proto__", "Other")).toThrow("already exists");
+    changeEmptySection("__proto__", null);
+    expect(readSections()).toEqual(["Other"]);
+    expect(readSectionContext("Other")?.text).toBe("Keep this");
   });
 });

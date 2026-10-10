@@ -1,7 +1,10 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { shouldHideOnboardingCard } from "./OptionCard";
-import type { Message } from "@/state/store";
+import { OptionCard, canDismissOptionCard, shouldHideOnboardingCard } from "./OptionCard";
+import { t } from "@/lib/i18n";
+import { StoreProvider, type Message } from "@/state/store";
 
 const msg = (partial: Partial<Message> & Pick<Message, "id" | "kind">): Message => ({
   role: "bot",
@@ -63,5 +66,61 @@ describe("shouldHideOnboardingCard", () => {
       },
     });
     expect(shouldHideOnboardingCard(question, [user, question])).toBe(false);
+  });
+});
+
+describe("OptionCard", () => {
+  it("names its icon-only dismiss button", () => {
+    const card = msg({ id: "quiz", kind: "options", card: { title: "Pick one", subtitle: "", options: ["A thing"] } });
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(OptionCard, { botId: "atlas", message: card })));
+    expect(markup).toContain(`aria-label="${t("onboarding.card.dismiss")}"`);
+    expect(markup).toContain('<input dir="auto"');
+  });
+
+  const render = (card: Message["card"]) => renderToStaticMarkup(
+    createElement(StoreProvider, null, createElement(OptionCard, { botId: "atlas", message: msg({ id: "ask", kind: "options", card }) })),
+  );
+
+  it("waits in the shared ask card with its title in the accent ink", () => {
+    const markup = render({ title: "Pick a region", subtitle: "Where should the bucket live?", options: ["us-east-1", "eu-west-1"], requestId: "r1" });
+    expect(markup).toContain('data-ask-card="pending"');
+    expect(markup).toContain("text-accent-text");
+    expect(markup).toContain("Pick a region");
+    expect(markup).toContain("eu-west-1");
+  });
+
+  it("folds an answered live ask into one line with what was picked", () => {
+    const markup = render({ title: "Pick a region", subtitle: "Where?", options: ["us-east-1", "eu-west-1"], requestId: "r1", answered: "eu-west-1" });
+    expect(markup).toContain('data-ask-card="settled"');
+    expect(markup).toContain("eu-west-1");
+    expect(markup).not.toContain("us-east-1");
+    expect(markup).not.toContain("<input");
+  });
+
+  it("says a live ask nobody answered was closed, not answered", () => {
+    const markup = render({ title: "Pick a region", subtitle: "Where?", options: ["us-east-1"], requestId: "r1", answered: "unavailable" });
+    expect(markup).toContain(t("question.status.closed"));
+    expect(markup).not.toContain(t("question.status.answered"));
+  });
+});
+
+describe("canDismissOptionCard", () => {
+  it("does not let an unresolved live question be silently dismissed", () => {
+    expect(canDismissOptionCard({
+      title: "Your bot has a question",
+      subtitle: "which file?",
+      options: [],
+      requestId: "req-1",
+      requestType: "question",
+    })).toBe(false);
+  });
+
+  it("keeps approval and settled-card dismissal behavior", () => {
+    expect(canDismissOptionCard({
+      title: "Approval needed", subtitle: "run command", options: ["Allow", "Deny"], requestId: "req-2", tool: "Bash",
+    })).toBe(true);
+    expect(canDismissOptionCard({
+      title: "Question", subtitle: "answered", options: [], requestId: "req-3", requestType: "question", answered: "answer",
+    })).toBe(true);
   });
 });

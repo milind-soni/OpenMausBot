@@ -35,7 +35,17 @@ export async function openBlankTerminal(platform = process.platform, run = execF
     );
   }
   if (platform === "win32") {
-    return launch("powershell.exe", ["-NoExit"], { windowsHide: false }, run);
+    // Launched directly, PowerShell's stdin and stdout are pipes to this app,
+    // and from the windowless app it gets no visible window: the app reports
+    // a terminal nobody can see or type into. A hidden PowerShell hands the
+    // real one to Start-Process, which gives it a console window of its own.
+    // The command is fixed text.
+    return launch(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", "Start-Process powershell.exe"],
+      { windowsHide: true },
+      run,
+    );
   }
   if (platform === "linux") {
     for (const terminal of ["x-terminal-emulator", "gnome-terminal", "konsole", "xterm"]) {

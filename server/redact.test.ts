@@ -9,6 +9,14 @@ import { redactSecrets } from "./redact.ts";
 const flat = (value: unknown) => JSON.stringify(value);
 
 describe("redactSecrets", () => {
+  it("omits private MCP descriptors even when a credential uses an ordinary header name", () => {
+    const descriptor = JSON.stringify({ url: "https://example.test/mcp", headers: { "x-tenant": "private-synthetic-value" } });
+    const record = `OMB_REMOTE_MCP_CONFIG_${"0".repeat(64)}`;
+    const logged = redactSecrets({ params: { mcpServers: [{ env: [{ name: "OMB_GATE_UPSTREAM", value: descriptor }] }] }, env: { OMB_REMOTE_MCP_SERVER: descriptor, [record]: JSON.stringify({ OMB_REMOTE_MCP_SERVER: descriptor }) } });
+    expect(flat(logged)).not.toContain("private-synthetic-value");
+    expect(flat(logged)).toContain("OMB_GATE_UPSTREAM");
+    expect(flat(logged)).toContain(record);
+  });
   it("masks the tokens in an ACP session/new, keeping the shape", () => {
     const sessionNew = {
       jsonrpc: "2.0",
@@ -31,7 +39,7 @@ describe("redactSecrets", () => {
             command: "/usr/bin/node",
             args: ["/app/computer-proxy.js"],
             env: [
-              { name: "OGB_BOX_ID", value: "box-9" },
+              { name: "OGB_BOX_ID", value: "boat-9" },
               { name: "OGB_BOX_TOKEN", value: "box_live_abcdefghijklmnop" },
             ],
           },
@@ -48,7 +56,7 @@ describe("redactSecrets", () => {
     expect(out).toContain("OMB_COMMS_TOKEN");
     expect(out).toContain("OGB_BOX_TOKEN");
     expect(out).toContain("bot-123");
-    expect(out).toContain("box-9");
+    expect(out).toContain("boat-9");
     expect(out).toContain("/app/agents-proxy.js");
     // and it says how long the value was, which is what you debug with
     expect(out).toContain("«redacted 24 chars»");
@@ -72,6 +80,35 @@ describe("redactSecrets", () => {
     expect(out).toContain("app.composio.dev");
     expect(out).toContain("ELECTRON_RUN_AS_NODE");
     expect(out).toContain('"1"'); // a non-secret value is untouched
+  });
+
+  it("still content-redacts an ACP env entry whose name is not secret-shaped", () => {
+    // A credential can land under an ordinary-looking variable name (a
+    // custom env var, a feature flag someone repurposed) — the ACP
+    // {name,value} shortcut must not skip the content pass just because
+    // the NAME alone doesn't scream "secret".
+    const alpha = "abcdefghijklmnopqrstuvwxyz0123456789";
+    const leaked = `sk-ant-api03-${alpha}`;
+    const sessionNew = {
+      params: {
+        mcpServers: [
+          {
+            name: "custom",
+            env: [
+              { name: "SESSION_CONFIG", value: leaked },
+              { name: "FEATURE_FLAG", value: "enabled" },
+            ],
+          },
+        ],
+      },
+    };
+
+    const out = flat(redactSecrets(sessionNew));
+    expect(out).not.toContain(leaked);
+    expect(out).toContain("SESSION_CONFIG");
+    expect(out).toContain("FEATURE_FLAG");
+    expect(out).toContain("enabled");
+    expect(out).toMatch(/«redacted \d+ chars»/);
   });
 
   it("leaves ordinary protocol traffic alone", () => {
@@ -121,11 +158,32 @@ describe("redactSecretsInText", () => {
       [`aws ${"AKIA" + "IOSFODNN7EXAMPLE"} and more`, /IOSFODNN7EXAMPLE/],
       [`google ${"AIza" + "SyA-"}${alpha.slice(0, 32)}`, /AIza/],
       [`npm ${"npm" + "_"}${alpha}`, /npm_[a-z]/],
+      [`xai ${"xai-"}${alpha}`, /xai-/],
+      [`groq ${"gsk_"}${alpha}ABCD`, /gsk_/],
+      [`huggingface ${"hf_"}${alpha}`, /hf_/],
     ];
     for (const [input, leak] of cases) {
       const out = redactSecretsInText(input);
       expect(out, input).not.toMatch(leak);
       expect(out).toMatch(/«redacted \d+ chars»/);
+    }
+  });
+
+  it.each([
+    ["xai-", 20],
+    ["gsk_", 40],
+    ["hf_", 30],
+  ] as const)("bounds %s masking without changing ordinary text", (prefix, minimum) => {
+    const key = prefix + "a".repeat(minimum);
+    const longer = key + "AB12";
+    const text = `before "${key}", ${longer}; after ✓`;
+    const expected = `before "«redacted ${key.length} chars»", «redacted ${longer.length} chars»; after ✓`;
+
+    expect(redactSecretsInText(text)).toBe(expected);
+    expect(redactSecretsInText(expected)).toBe(expected);
+    expect(redactSecrets({ note: text })).toEqual({ note: expected });
+    for (const ordinary of [prefix + "a".repeat(minimum - 1), `example_${key}`, `${prefix}example`]) {
+      expect(redactSecretsInText(ordinary)).toBe(ordinary);
     }
   });
 
@@ -139,11 +197,53 @@ describe("redactSecretsInText", () => {
     expect(redactSecretsInText('curl -H "Authorization: Bearer abc.def-ghi_jkl123456789"')).toBe('curl -H "Authorization: Bearer «redacted 24 chars»"');
   });
 
+  it("is byte-for-byte idempotent for PEM blocks", () => {
+    const privateKeyBody = "c3VwZXItc2VjcmV0LXByaXZhdGUta2V5LWJ5dGVz";
+    const pem = [
+      "-----BEGIN PRIVATE KEY-----",
+      privateKeyBody,
+      "-----END PRIVATE KEY-----",
+    ].join("\n");
+    const once = redactSecretsInText(`before\n${pem}\nafter`);
+
+    expect(redactSecretsInText(once)).toBe(once);
+    expect(once).toContain(`«redacted ${privateKeyBody.length} chars»`);
+  });
+
   it("masks the value of a secret-shaped key=value or key: value, keeping the key", () => {
     expect(redactSecretsInText("export DATABASE_PASSWORD=hunter2hunter2")).toBe("export DATABASE_PASSWORD=«redacted 14 chars»");
     expect(redactSecretsInText('{"api_key": "abcd1234efgh5678"}')).toBe('{"api_key": "«redacted 16 chars»"}');
     expect(redactSecretsInText("client_secret: 'zzzz-yyyy-xxxx-1'")).toBe("client_secret: '«redacted 16 chars»'");
     expect(redactSecretsInText("--token=abc123def456")).toBe("--token=«redacted 12 chars»");
+  });
+
+  it("masks an assignment to any name ending in KEY, whatever the value looks like", () => {
+    expect(redactSecretsInText(`OPENAI_API_KEY=sk-${"a".repeat(20)} pnpm test`)).toBe("OPENAI_API_KEY=«redacted 23 chars» pnpm test");
+    expect(redactSecretsInText("X_KEY=value pnpm control:omb doctor")).toBe("X_KEY=«redacted 5 chars» pnpm control:omb doctor");
+    expect(redactSecretsInText("export xai-key='abc.def'")).toBe("export xai-key='«redacted 7 chars»'");
+  });
+
+  it("masks the password in a URL's userinfo, keeping the user and the host", () => {
+    expect(redactSecretsInText("psql postgres://maus:s3cret@db.internal:5432/app")).toBe("psql postgres://maus:«redacted 6 chars»@db.internal:5432/app");
+    expect(redactSecretsInText("curl https://user:p%40ss@host/path")).toBe("curl https://user:«redacted 6 chars»@host/path");
+  });
+
+  it("masks the value of a secret-naming flag, in both spellings", () => {
+    expect(redactSecretsInText("gh auth login --token abc123")).toBe("gh auth login --token «redacted 6 chars»");
+    expect(redactSecretsInText("tool --password=hunter2 --api-key 'k1' --secret s")).toBe("tool --password=«redacted 7 chars» --api-key '«redacted 2 chars»' --secret «redacted 1 chars»");
+    // a flag followed by another flag has no value to mask
+    expect(redactSecretsInText("tool --token --verbose")).toBe("tool --token --verbose");
+  });
+
+  it("does not mask ordinary words near those rules", () => {
+    for (const s of [
+      "hotkey=cmd+k keyboard=qwerty monkey=business",
+      "https://host:8080/path and user@host",
+      "git log --tokens-are-not-a-flag --passwords",
+      "the key: patience",
+    ]) {
+      expect(redactSecretsInText(s), s).toBe(s);
+    }
   });
 
   it("leaves ordinary text, code, hashes and URLs alone", () => {
@@ -164,5 +264,15 @@ describe("redactSecretsInText", () => {
     const out = redactSecrets({ command: "curl -H 'Authorization: Bearer abcdefghijklmnop'", note: "fine" }) as Record<string, string>;
     expect(out.command).toContain("«redacted");
     expect(out.note).toBe("fine");
+  });
+
+  it("is idempotent for structurally identified credentials", () => {
+    const input = {
+      apiKey: "abcdefgh12345678",
+      env: [{ name: "OMB_COMMS_TOKEN", value: "abcdefghijklmnop" }],
+    };
+    const once = redactSecrets(input);
+
+    expect(redactSecrets(once)).toEqual(once);
   });
 });

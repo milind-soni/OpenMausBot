@@ -6,23 +6,23 @@
 // a bot that *finished* is worth one if you asked for it; everything else a
 // bot does while it works is not.
 //
+// A turn that dies before it starts is the first case, not the last: the
+// bot is not working, and the fix is usually a setting only a person can
+// change, so a retry cannot clear it. A routine failure already buzzed;
+// this makes an interactive turn behave the same way.
+// A routine parked behind a busy target earns one notice after half an
+// hour: from outside the schedule looks broken, and only a person can
+// decide whether the busy work or the routine matters more.
+//
 // Delivery is a separate concern. The harness emits a frame; whoever is
 // listening decides what to do with it — desktop and paired-phone local
 // notifications today, and closed-app APNs delivery once a relay exists.
 
-export type NotifyKind = "approval" | "question" | "done" | "routine-failed" | "takeover";
+import type { Notification, NotifyKind } from "../shared/notification.ts";
 
-export interface Notification {
-  kind: NotifyKind;
-  botId: string;
-  botName: string;
-  threadId: string;
-  title: string;
-  body: string;
-  /** The bot's stored profile image, when it has one; clients show it as
-   * the OS notification's icon so every banner carries its bot's face. */
-  avatarUrl?: string;
-}
+// The notification wire shape lives in shared/notification.ts now (part of
+// the wire model); re-exported here so existing importers keep working.
+export type { Notification, NotifyKind } from "../shared/notification.ts";
 
 /** One line, short enough for a lock screen, with the newlines and code
  * fences of a model's answer flattened out of it. */
@@ -38,6 +38,39 @@ export interface NotifyBot {
   notifications?: boolean;
 }
 
+/** The room a bot is holding while it works, as this module needs it. */
+export interface NotifyRoom {
+  id: string;
+  name: string;
+  threadId: string;
+  busyBotId?: string | null;
+}
+
+/** Where a "blocked on you" notification has to open. A bot speaking in a
+ * room is not reachable in its own 1:1 thread — the turn, its screen and the
+ * card all live in the room — so the room wins while it owns that bot. A
+ * room it merely belongs to, or one another member is speaking in, is not
+ * where this bot is: those fall back to its own thread. */
+export function blockedTarget(
+  bot: NotifyBot,
+  room?: NotifyRoom | null,
+): { threadId: string; group?: { id: string; name: string } } {
+  if (!room || room.busyBotId !== bot.id) return { threadId: bot.threadId };
+  return { threadId: room.threadId, group: { id: room.id, name: room.name } };
+}
+
+/** A workspace spend notice (server/spend.ts decides when). It opens the
+ * thread whose turn crossed the line, so clicking it lands somewhere real,
+ * but it is the workspace's news, not that bot's: the bot's notification
+ * toggle does not silence it. */
+export function buildSpendNotification(
+  bot: Pick<NotifyBot, "id" | "name">,
+  threadId: string,
+  text: { title: string; body: string },
+): Notification {
+  return { kind: "spend", botId: bot.id, botName: bot.name, threadId, title: text.title, body: summarize(text.body, 200) };
+}
+
 /** Build the frame for one event, or null when it should stay quiet.
  *
  * Kept pure and separate from the event fold so the policy — which is the
@@ -47,7 +80,7 @@ export function buildNotification(
   bot: NotifyBot,
   threadId: string,
   detail: string,
-  extra?: { avatarUrl?: string },
+  extra?: { avatarUrl?: string; group?: { id: string; name: string } },
 ): Notification | null {
   // The toggle means what it says: off is off, including for approvals.
   // A bot whose notifications you turned off can still block waiting for
@@ -55,20 +88,35 @@ export function buildNotification(
   if (bot.notifications === false) return null;
 
   const body = summarize(detail);
+  // A bot working in a room is not "Scout" to whoever reads the banner — it
+  // is Scout, in that room. Name the room or the notification reads as if it
+  // came from the 1:1 thread it will not open.
+  const who = extra?.group ? `${bot.name} in ${extra.group.name}` : bot.name;
   const title =
     kind === "approval"
-      ? `${bot.name} needs approval`
+      ? `${who} needs approval`
       : kind === "question"
-        ? `${bot.name} has a question`
+        ? `${who} has a question`
         : kind === "takeover"
-          ? `${bot.name} needs your hands`
+          ? `${who} needs your hands`
           : kind === "routine-failed"
-            ? `${bot.name}'s routine failed`
-            : `${bot.name} finished`;
+            ? `${who}'s routine failed`
+            : kind === "routine-deferred"
+              ? `${who}'s routine is waiting`
+            : kind === "turn-failed"
+              ? `${who} couldn't start`
+              : kind === "incident"
+                ? `${who} hit a problem`
+                : kind === "delegation-settled"
+                  ? `${who} resumed with results`
+                  : `${who} finished`;
 
   // A "finished" with nothing to say is not worth a notification — the
   // badge in the sidebar already carries that much.
   if (kind === "done" && !body) return null;
 
-  return { kind, botId: bot.id, botName: bot.name, threadId, title, body, ...extra };
+  const notification: Notification = { kind, botId: bot.id, botName: bot.name, threadId, title, body };
+  if (extra?.avatarUrl) notification.avatarUrl = extra.avatarUrl;
+  if (extra?.group) notification.groupId = extra.group.id;
+  return notification;
 }

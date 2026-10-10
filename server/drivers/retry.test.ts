@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import { BACKOFF_BASE_MS, RETRY_MAX_ATTEMPTS, classifyError, computeBackoff } from "./retry.ts";
 
 describe("classifyError", () => {
+  it("does not retry a provider safety block even inside a 503 or rate-limit error", () => {
+    for (const text of ["HTTP 503: blocked by our safety systems", "429: safety monitoring paused this task"]) {
+      expect(classifyError({ text })).toEqual({ transient: false, reason: "provider_safety" });
+      expect(classifyError({ exitCode: 1, stderr: text })).toEqual({ transient: false, reason: "provider_safety" });
+    }
+    expect(classifyError({ text: "503: checking deployment safety" }).reason).toBe("server_error");
+  });
   it("calls provider rate limits transient", () => {
     expect(classifyError(new Error("xAI HTTP 429: Too Many Requests"))).toEqual({
       transient: true,
@@ -96,6 +103,28 @@ describe("computeBackoff", () => {
       const base = BACKOFF_BASE_MS[Math.min(attempt, BACKOFF_BASE_MS.length - 1)];
       expect(low).toBeGreaterThanOrEqual(base * 0.75);
       expect(high).toBeLessThanOrEqual(base * 1.25 + 1);
+    }
+  });
+});
+
+describe("classifyError — usage limits", () => {
+  it("keeps a generic short-lived 429 transient in both transport shapes", () => {
+    const text = "HTTP 429: rate limit reached; retry after 1s";
+    expect(classifyError({ text })).toEqual({ transient: true, reason: "rate_limited" });
+    expect(classifyError({ exitCode: 1, stderr: text })).toEqual({ transient: true, reason: "rate_limited" });
+    expect(classifyError({ exitCode: 1, stderr: "API Error: 429 Rate limit reached: weekly limit reached" })).toEqual({ transient: false, reason: "quota" });
+  });
+  // A subscription's usage limit is not a 429 to retry through: the window
+  // is hours away. It is terminal for this engine, and the harness may
+  // carry the task to another account or engine instead.
+  it("calls a subscription usage limit a quota problem, not a retry", () => {
+    for (const text of [
+      "You've hit your usage limit for this session. Try again at 7pm.",
+      "Usage limit reached for Claude Max",
+      "Rate limit reached: weekly limit reached",
+      "You are out of credits",
+    ]) {
+      expect(classifyError({ text }), text).toEqual({ transient: false, reason: "quota" });
     }
   });
 });

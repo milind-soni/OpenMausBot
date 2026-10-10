@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "about": "Expected results of parsePackageDocument(fixture, { trust: \"file\" }). sha256 is over canonicalJson of the parsed document. Regenerate only with a deliberate format change; Admin tests read this file from the pinned runtime.",
+  "fixtures": {
+    "full-team.v2.json": {
+      "sha256": "d80e4e49382b88ae41b09ef7c49a699c6b07cf198f76ab1cf10c5b15e5f4981a",
+      "keys": [
+        "agents:lead",
+        "agents:scout",
+        "agents:writer",
+        "rooms:desk",
+        "routines:daily-digest",
+        "routines:weekly-review",
+        "skills:pricing-policy",
+        "skills:research-brief",
+        "skills:objection-handling",
+        "presets:support",
+        "connections:crm",
+        "playbooks:qualify"
+      ],
+      "summary": {
+        "kind": "team",
+        "name": "Sales desk",
+        "tagline": "Qualify leads, research prospects and write outreach.",
+        "counts": {
+          "bots": 3,
+          "skills": 3,
+          "presets": 1,
+          "rooms": 1,
+          "routines": 2,
+          "connections": 1,
+          "playbooks": 1
+        },
+        "botNames": [
+          "Morgan",
+          "Scout",
+          "Quill"
+        ],
+        "skillNames": [
+          "pricing-policy",
+          "research-brief",
+          "objection-handling"
+        ],
+        "presetNames": [
+          "Support agent"
+        ],
+        "connectionLabels": [
+          "CRM"
+        ],
+        "apps": [
+          "HubSpot"
+        ]
+      },
+      "secretFindings": [],
+      "downgrade": {
+        "dropped": [
+          "package.notes",
+          "team.brief",
+          "skills[objection-handling]",
+          "presets[support]",
+          "connections[crm]",
+          "agents[lead].appearance.avatar",
+          "agents[lead].approval",
+          "agents[lead].connections",
+          "agents[lead].seed",
+          "agents[scout].connections",
+          "agents[writer].approval",
+          "routines[daily-digest].continuity",
+          "routines[weekly-review]"
+        ]
+      }
+    },
+    "library-only.v2.json": {
+      "sha256": "3627d78686da829e3f6c447d572b80d2ab3f564a23a76332dd1224f092fd47e8",
+      "keys": [
+        "skills:objection-handling",
+        "skills:follow-up",
+        "presets:support"
+      ],
+      "summary": {
+        "kind": "library",
+        "name": "Sales skills",
+        "tagline": "Skills and a preset bot for any sales team.",
+        "counts": {
+          "bots": 0,
+          "skills": 2,
+          "presets": 1,
+          "rooms": 0,
+          "routines": 0,
+          "connections": 0,
+          "playbooks": 0
+        },
+        "botNames": [],
+        "skillNames": [
+          "objection-handling",
+          "follow-up"
+        ],
+        "presetNames": [
+          "Support agent"
+        ],
+        "connectionLabels": [],
+        "apps": []
+      },
+      "secretFindings": [],
+      "downgrade": {
+        "error": "Packages without bots cannot be opened by older versions of OpenMausBot."
+      }
+    },
+    "legacy-team.v1.json": {
+      "sha256": "7a4de2ba915592a1a98fc87c196d83f75011a33dead7b8f076a44d8d1bd5e791",
+      "keys": [
+        "agents:scout",
+        "agents:editor",
+        "rooms:signals",
+        "routines:morning-signals",
+        "skills:source-check",
+        "playbooks:signal-check"
+      ],
+      "summary": {
+        "kind": "team",
+        "name": "Signal Desk",
+        "tagline": "Find and explain the signal.",
+        "counts": {
+          "bots": 2,
+          "skills": 1,
+          "presets": 0,
+          "rooms": 1,
+          "routines": 1,
+          "connections": 0,
+          "playbooks": 1
+        },
+        "botNames": [
+          "Package Scout",
+          "Package Editor"
+        ],
+        "skillNames": [
+          "source-check"
+        ],
+        "presetNames": [],
+        "connectionLabels": [],
+        "apps": [
+          "Reddit"
+        ]
+      },
+      "secretFindings": [],
+      "downgrade": {
+        "dropped": []
+      }
+    },
+    "legacy-botmrr.v1.md": {
+      "sha256": "7a4de2ba915592a1a98fc87c196d83f75011a33dead7b8f076a44d8d1bd5e791",
+      "keys": [
+        "agents:scout",
+        "agents:editor",
+        "rooms:signals",
+        "routines:morning-signals",
+        "skills:source-check",
+        "playbooks:signal-check"
+      ],
+      "summary": {
+        "kind": "team",
+        "name": "Signal Desk",
+        "tagline": "Find and explain the signal.",
+        "counts": {
+          "bots": 2,
+          "skills": 1,
+          "presets": 0,
+          "rooms": 1,
+          "routines": 1,
+          "connections": 0,
+          "playbooks": 1
+        },
+        "botNames": [
+          "Package Scout",
+          "Package Editor"
+        ],
+        "skillNames": [
+          "source-check"
+        ],
+        "presetNames": [],
+        "connectionLabels": [],
+        "apps": [
+          "Reddit"
+        ]
+      },
+      "secretFindings": [],
+      "downgrade": {
+        "dropped": []
+      }
+    },
+    "secret-in-soul.v2.json": {
+      "sha256": "e0da69aad73684e74176e833c053cc590bac76795e58888d5770a81afefc0b64",
+      "keys": [
+        "agents:scout"
+      ],
+      "summary": {
+        "kind": "team",
+        "name": "Leaky desk",
+        "tagline": "A team whose instructions contain a key.",
+        "counts": {
+          "bots": 1,
+          "skills": 0,
+          "presets": 0,
+          "rooms": 0,
+          "routines": 0,
+          "connections": 0,
+          "playbooks": 0
+        },
+        "botNames": [
+          "Scout"
+        ],
+        "skillNames": [],
+        "presetNames": [],
+        "connectionLabels": [],
+        "apps": []
+      },
+      "secretFindings": [
+        "agents[scout].soul"
+      ],
+      "downgrade": {
+        "dropped": []
+      }
+    },
+    "newer.v3.json": {
+      "error": {
+        "code": "newer_version",
+        "message": "This file was made by a newer OpenMausBot. Update the app, then import it again."
+      }
+    }
+  }
+}

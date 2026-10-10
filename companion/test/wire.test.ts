@@ -172,3 +172,26 @@ describe("createSseScrubber", () => {
     expect(createSseScrubber()('data: {"a":1,"resumeCursors":{}}\r\r')).toBe('data: {"a":1}\r\r');
   });
 });
+
+describe("the SSE event ceiling", () => {
+  it("bounds complete events and counts multibyte text as bytes", () => {
+    const payload = "é".repeat(MAX_SSE_EVENT_BYTES / 2 + 1);
+    expect(() => createSseScrubber()(`data: ${payload}\n\n`)).toThrow(/exceeded/);
+    expect(() => createSseScrubber()(`data: ${payload}`)).toThrow(/exceeded/);
+  });
+  it("clears the largest frame the harness will emit", () => {
+    // browser-live caps a frame at 3 MiB of base64 and a paired phone may now
+    // ask for that stream. A ceiling under it would end the connection on the
+    // first large frame rather than forward it.
+    expect(MAX_SSE_EVENT_BYTES).toBeGreaterThan(3 * 1024 * 1024);
+  });
+
+  it("forwards an event larger than the old 1 MiB limit", () => {
+    const scrub = createSseScrubber();
+    const payload = "a".repeat(1_500_000);
+
+    const out = scrub(`event: frame\ndata: {"data":"${payload}"}\n\n`);
+
+    expect(out).toContain(payload);
+  });
+});

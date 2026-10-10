@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Monitor, RotateCcw, Square } from "lucide-react";
 
 import { requestScreenPreview, stopScreenPreview } from "@/lib/screen-preview";
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 
 type PreviewPhase =
@@ -13,12 +15,14 @@ type PreviewPhase =
   | "unavailable"
   | "error";
 
-const phaseCopy: Record<Exclude<PreviewPhase, "requesting" | "streaming">, string> = {
-  idle: "Start a private, view-only preview when you need it.",
-  cancelled: "Screen selection was cancelled. Nothing is being shared.",
-  ended: "Screen sharing ended. Nothing is being shared.",
-  unavailable: "Screen preview isn't available in this desktop session.",
-  error: "Couldn't start screen preview.",
+// Keys, not sentences: the current message lives in state, so it has to
+// survive a language switch.
+const phaseCopy: Record<Exclude<PreviewPhase, "requesting" | "streaming">, LocaleKey> = {
+  idle: "computer.screen.idle",
+  cancelled: "computer.screen.cancelled",
+  ended: "computer.screen.ended",
+  unavailable: "computer.screen.unavailable",
+  error: "computer.screen.error",
 };
 
 export function LocalScreenPreview() {
@@ -27,12 +31,12 @@ export function LocalScreenPreview() {
   const isLinux = capabilities.host.platform === "linux";
   const [phase, setPhase] = useState<PreviewPhase>("idle");
   const [message, setMessage] = useState(phaseCopy.idle);
-  const [sourceLabel, setSourceLabel] = useState("Selected screen");
+  const [sourceLabel, setSourceLabel] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const requestId = useRef(0);
 
-  const releaseStream = useCallback((nextPhase: PreviewPhase, nextMessage: string) => {
+  const releaseStream = useCallback((nextPhase: PreviewPhase, nextMessage: LocaleKey) => {
     requestId.current += 1;
     const stream = streamRef.current;
     streamRef.current = null;
@@ -63,7 +67,7 @@ export function LocalScreenPreview() {
       return;
     }
 
-    releaseStream("requesting", "Waiting for screen selection…");
+    releaseStream("requesting", "computer.screen.waiting");
     const currentRequest = requestId.current;
     const result = await requestScreenPreview({
       beginIntent: () => window.ogb!.beginScreenPreviewIntent(),
@@ -76,14 +80,14 @@ export function LocalScreenPreview() {
     }
     if (!result.ok) {
       setPhase(result.phase);
-      setMessage(result.message);
+      setMessage(result.messageKey);
       return;
     }
 
     const stream = result.stream;
     const videoTrack = stream.getVideoTracks()[0];
     streamRef.current = stream;
-    setSourceLabel(videoTrack.label || "Selected screen");
+    setSourceLabel(videoTrack.label);
     videoTrack.addEventListener(
       "ended",
       () => {
@@ -94,7 +98,7 @@ export function LocalScreenPreview() {
     );
     const video = videoRef.current;
     if (!video) {
-      releaseStream("error", "Couldn't display screen preview.");
+      releaseStream("error", "computer.screen.displayFailed");
       return;
     }
     video.srcObject = stream;
@@ -102,18 +106,17 @@ export function LocalScreenPreview() {
       await video.play();
     } catch {
       if (currentRequest === requestId.current && streamRef.current === stream) {
-        releaseStream("error", "Couldn't display screen preview.");
+        releaseStream("error", "computer.screen.displayFailed");
       }
       return;
     }
     if (currentRequest !== requestId.current || streamRef.current !== stream) return;
     setPhase("streaming");
-    setMessage(
-      "Preview active. Previewing does not grant local control; local actions still require approval.",
-    );
+    setMessage("computer.screen.active");
   };
 
   if (!isLinux) return null;
+  const screenLabel = sourceLabel || t("computer.screen.selected");
   const retry =
     phase === "cancelled" || phase === "ended" || phase === "unavailable" || phase === "error";
 
@@ -122,14 +125,14 @@ export function LocalScreenPreview() {
       <div className="flex items-start justify-between gap-3">
         <div>
           <div id="local-preview-title" className="text-[15px] font-medium text-ink">
-            Preview this computer
+            {t("computer.screen.title")}
           </div>
           <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            Preview only — starting a preview does not grant local control.
+            {t("computer.screen.subtitle")}
           </div>
         </div>
         <span className="shrink-0 rounded-full bg-raised px-2 py-1 text-[10px] font-medium text-ink-secondary">
-          Preview only
+          {t("computer.screen.badge")}
         </span>
       </div>
 
@@ -139,7 +142,7 @@ export function LocalScreenPreview() {
           autoPlay
           muted
           playsInline
-          aria-label="Live preview of the selected screen"
+          aria-label={t("computer.screen.videoAria")}
           className={phase === "streaming" ? "h-full w-full object-contain" : "hidden"}
         />
         {phase !== "streaming" && (
@@ -151,10 +154,8 @@ export function LocalScreenPreview() {
             )}
             <span className="text-[12px]" aria-live="polite">
               {!ready
-                ? "Checking screen preview…"
-                : preview.available
-                  ? message
-                  : phaseCopy.unavailable}
+                ? t("computer.screen.checking")
+                : t(preview.available ? message : phaseCopy.unavailable)}
             </span>
           </div>
         )}
@@ -162,11 +163,11 @@ export function LocalScreenPreview() {
 
       {phase === "streaming" && (
         <div className="mt-2 flex items-center justify-between gap-3 text-[11px] text-ink-secondary">
-          <span className="truncate" title={sourceLabel}>
-            {preview.interaction === "portal-picker" ? sourceLabel : "This computer"}
+          <span className="truncate" title={screenLabel}>
+            {preview.interaction === "portal-picker" ? screenLabel : t("vm.dest.local")}
           </span>
           <span className="flex items-center gap-1.5 text-success">
-            <span className="h-1.5 w-1.5 rounded-full bg-success" /> Sharing
+            <span className="h-1.5 w-1.5 rounded-full bg-success" /> {t("computer.screen.sharing")}
           </span>
         </div>
       )}
@@ -191,14 +192,14 @@ export function LocalScreenPreview() {
           <Monitor size={14} />
         )}
         {phase === "requesting"
-          ? "Choose a screen…"
+          ? t("computer.screen.choosing")
           : phase === "streaming"
-            ? "Stop preview"
+            ? t("computer.screen.stop")
             : retry
-              ? "Try again"
+              ? t("computer.linux.tryAgain")
               : preview.interaction === "portal-picker"
-                ? "Choose a screen"
-                : "Start preview"}
+                ? t("computer.screen.choose")
+                : t("computer.screen.start")}
       </button>
     </section>
   );

@@ -2,6 +2,10 @@
 // this narrow surface (window.ogb), never Node or ipcRenderer itself.
 const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
+// Sandboxed preloads receive Electron's restricted `require`, which cannot
+// load sibling CommonJS files. Keep this tiny predicate inline here; main's
+const desktopRemoteClient = process.argv.includes("--openmausbot-remote-client");
+
 let pendingPackageInstallUrl = null;
 const packageInstallListeners = new Set();
 ipcRenderer.on("package:install", (_event, url) => {
@@ -10,14 +14,97 @@ ipcRenderer.on("package:install", (_event, url) => {
   for (const listener of packageInstallListeners) listener(url);
 });
 
-contextBridge.exposeInMainWorld("ogb", {
+// Main can finish loading the document before React subscribes. Retain only
+// the fixed actions (Organisation, the openmausbot://cloud link, plain
+// Settings → OpenMausBot Cloud from the lending menu-bar item, and the Add a
+// Cloud dialog from the server menu, plain or reached through Show me how),
+// never a destination supplied by a renderer.
+const FIXED_SETTINGS_ACTIONS = new Set(["organization", "cloud", "cloud-settings", "cloud-add", "cloud-add-howto"]);
+let pendingSettingsAction = null;
+const appSettingsListeners = new Set();
+ipcRenderer.on("app:open-settings", (_event, section) => {
+  const fixedSection = FIXED_SETTINGS_ACTIONS.has(section) ? section : undefined;
+  if (fixedSection && !appSettingsListeners.size) pendingSettingsAction = fixedSection;
+  if (!appSettingsListeners.size) return;
+  pendingSettingsAction = null;
+  for (const listener of appSettingsListeners) listener(fixedSection);
+});
+
+// The bridge is built once, then exposed in full only to the local server's
+// UI. A remote server's page (Server menu) gets the safe subset: nothing that
+// captures this screen, touches this computer's files or logins, or runs
+// helpers here. Main enforces the same rule on the sensitive channels.
+const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
+const isLocalPage = !localOrigin || location.origin === localOrigin;
+// cloudMove: main answers a remote page about that page's own server only,
+// while it is this window's active server (Copy this computer here's card and
+// its Settings → Backups); its Copy opens this computer's Settings on that
+// server's copy, except on the person's own verified Cloud. cloudLending and
+// cloudPlan: only that verified Cloud (its setup checklist, its plan line).
+/** A saved server's id, forwarded only from this computer's own page. */
+const savedServer = id => isLocalPage && typeof id === "string" && /^[\w-]{1,64}$/.test(id) ? [id] : [];
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan"]);
+// updater: this app's updates, so the person sees "Restart to update" on My
+// Cloud too; a remote page restarts only on a click. Main says, once as the
+// page loads, whether it answers this page: pages built before it answered My
+// Cloud read the bridge alone as "You're up to date", so no other server's
+// page gets it. Main always answers, false on any doubt.
+function updaterOffered() {
+  try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
+}
+const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : [])]);
+
+// Sandboxed preload cannot import TS or sibling modules. Keep this list in
+// parity with shared/workspace-backup-client.ts (covered by the preload test).
+// Only main can request a fresh snapshot; there is no renderer-callable method.
+const COMPANY_BACKUP_CLIENT_KEYS = [
+  "omb-drafts", "omb-draft-attachments", "omb-draft-send-ids", "omb-draft-channel-modes",
+  "omb-skin", "omb-show-threads", "omb-show-run-card", "omb-send-key", "openmausbot.sidebarDensity",
+  "openmausbot.sidebarCollapsedSections.v1", "openmausbot.sidebarSectionOrder.v1",
+  "omb-analytics-opt-out", "openmausbot.remote-voice.v1",
+];
+if (isLocalPage && !desktopRemoteClient && process.argv.includes("--omb-company-desktop=1")) {
+  ipcRenderer.on("company-backups:collect-client-state", (_event, request) => {
+    if (!request || typeof request.requestId !== "string" || !/^[a-f0-9-]{36}$/.test(request.requestId)) return;
+    try {
+      // Check the origin again; a later navigation must not export remote data.
+      if (!localOrigin || location.origin !== localOrigin) throw new Error("Not the local workspace");
+      const clientState = {};
+      for (const key of COMPANY_BACKUP_CLIENT_KEYS) {
+        const value = localStorage.getItem(key);
+        if (value !== null) clientState[key] = value;
+      }
+      if (new TextEncoder().encode(JSON.stringify(clientState)).byteLength > 2 * 1024 ** 2) throw new Error("Browser state too large");
+      ipcRenderer.send("company-backups:client-state", { requestId: request.requestId, clientState });
+    } catch {
+      ipcRenderer.send("company-backups:client-state", { requestId: request.requestId, unavailable: true });
+    }
+  });
+}
+
+const bridge = {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
+  // Safe even on a cloud page: the user chooses in a native menu owned by
+  // Electron. No direct switching, saved-list reads, host files or secrets.
+  workspaces: {
+    state: () => ipcRenderer.invoke("workspaces:state"),
+    // `from: "howto"` only says the Show me how tip opened it; nothing else passes.
+    menu: (options) => ipcRenderer.invoke("workspaces:menu", ...(options?.from === "howto" ? ["howto"] : [])),
+  },
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
   onCapabilitiesChanged: (cb) => {
     const handler = (_event, capabilities) => cb(capabilities);
     ipcRenderer.on("desktop:capabilities-changed", handler);
     return () => ipcRenderer.removeListener("desktop:capabilities-changed", handler);
+  },
+  /** Pair this desktop app to another OpenMausBot host. The bearer remains in
+   * the main process and is never returned over this bridge. */
+  remoteClient: {
+    active: desktopRemoteClient,
+    state: () => ipcRenderer.invoke("desktop-remote:state"),
+    pair: (endpoint, code) => ipcRenderer.invoke("desktop-remote:pair", endpoint, code),
+    disconnect: () => ipcRenderer.invoke("desktop-remote:disconnect"),
   },
   /** The companion sidecar: the one part of this app that listens off the
    * machine, so it runs as its own process and is off until switched on.
@@ -28,9 +115,17 @@ contextBridge.exposeInMainWorld("ogb", {
     start: () => ipcRenderer.invoke("companion:start"),
     stop: () => ipcRenderer.invoke("companion:stop"),
     keepAwake: (enabled) => ipcRenderer.invoke("companion:keep-awake", enabled),
-    pairing: (open) => ipcRenderer.invoke("companion:pairing", open),
+    refreshTailscale: () => ipcRenderer.invoke("companion:refresh-tailscale"),
+    pairing: (open, expectedToken) => ipcRenderer.invoke("companion:pairing", open, expectedToken),
     cloudDesktop: (deviceId, allowed) => ipcRenderer.invoke("companion:cloud-desktop", deviceId, allowed),
+    browserControl: (deviceId, allowed) => ipcRenderer.invoke("companion:browser-control", deviceId, allowed),
     revoke: (deviceId) => ipcRenderer.invoke("companion:revoke", deviceId),
+  },
+  /** Keep this computer awake for scheduled routines. The hold itself lives
+   * in the main process; the page reads its state and flips the toggle. */
+  routines: {
+    wakeState: () => ipcRenderer.invoke("routines:wake-state"),
+    keepAwake: (enabled) => ipcRenderer.invoke("routines:keep-awake", enabled),
   },
   /** Optional account-backed HTTPS access for Companion. Secrets stay in the
    * main process; the renderer sees only status and narrow user actions. */
@@ -40,6 +135,12 @@ contextBridge.exposeInMainWorld("ogb", {
     verifyCode: (email, code) => ipcRenderer.invoke("companion-account:verify-code", email, code),
     retry: () => ipcRenderer.invoke("companion-account:retry"),
     signOut: () => ipcRenderer.invoke("companion-account:sign-out"),
+  },
+  /** Full/Custom and transitions out of Custom are deliberately unavailable
+   * through the loopback API. The local renderer applies those changes over
+   * the embedded server's private utilityProcess port. */
+  approvals: {
+    setMode: (botId, mode, options) => ipcRenderer.invoke("approvals:set-trusted-mode", botId, mode, options),
   },
   localControl: {
     status: () => ipcRenderer.invoke("cua:linux-status"),
@@ -71,28 +172,17 @@ contextBridge.exposeInMainWorld("ogb", {
     ipcRenderer.on("speech:end", handler);
     return () => ipcRenderer.removeListener("speech:end", handler);
   },
-  /** A local-first demonstration recorder. Global events stay in main; the
-   * renderer receives only the privacy-filtered event stream. */
-  skillRecorder: {
-    permissions: () => ipcRenderer.invoke("skill-recorder:permissions"),
-    start: () => ipcRenderer.invoke("skill-recorder:start"),
-    stop: () => ipcRenderer.invoke("skill-recorder:stop"),
-    save: (payload) => ipcRenderer.invoke("skill-recorder:save", payload),
-    onEvent: (cb) => {
-      const handler = (_event, value) => cb(value);
-      ipcRenderer.on("skill-recorder:event", handler);
-      return () => ipcRenderer.removeListener("skill-recorder:event", handler);
-    },
-    onEnd: (cb) => {
-      const handler = (_event, value) => cb(value);
-      ipcRenderer.on("skill-recorder:end", handler);
-      return () => ipcRenderer.removeListener("skill-recorder:end", handler);
-    },
-  },
-  transcription: {
-    status: () => ipcRenderer.invoke("assemblyai:status"),
-    setKey: (value) => ipcRenderer.invoke("assemblyai:set-key", value),
-    streamingToken: () => ipcRenderer.invoke("assemblyai:streaming-token"),
+  /** The app menu's Preferences… item; local shell only (the remote-safe
+   * subset never sees it). */
+  onOpenAppSettings: (cb) => {
+    appSettingsListeners.add(cb);
+    queueMicrotask(() => {
+      const section = pendingSettingsAction;
+      if (!section || !appSettingsListeners.size) return;
+      pendingSettingsAction = null;
+      for (const listener of appSettingsListeners) listener(section);
+    });
+    return () => appSettingsListeners.delete(cb);
   },
   /** Absolute path of a dropped File — Electron 32 removed File.path, and
    * only the preload can ask. "" when the drag carried no file on disk. */
@@ -111,13 +201,34 @@ contextBridge.exposeInMainWorld("ogb", {
   permRequestMic: () => ipcRenderer.invoke("perm:request-mic"),
   /** Opens System Settings on the given privacy pane: mic|screen|speech. */
   permOpenSettings: (pane) => ipcRenderer.invoke("perm:open-settings", pane),
+  /** Relaunch the local desktop app through its normal shutdown cleanup. */
+  relaunch: () => ipcRenderer.invoke("desktop:relaunch"),
 
   /** Copies an engine install command and opens a blank terminal. Resolves
    * false if no terminal could be launched; the clipboard still has it. */
   openInstallTerminal: (command) => ipcRenderer.invoke("engine:open-terminal", command),
+  /** Writes plain text to the system clipboard; the copy button's fallback
+   * when the web Clipboard API is rejected. Resolves false on failure. */
+  copyText: (text) => ipcRenderer.invoke("clipboard:write-text", text),
   /** Open a web link in the default browser. Unlike renderer window.open,
    * this remains reliable after an asynchronous API request. */
   openExternal: (url) => ipcRenderer.invoke("desktop:open-external", url),
+  /** Tell the window which skin the page wears, so the native chrome the
+   * renderer cannot paint (the Windows caption-button overlay) matches. */
+  applySkin: (skin) => ipcRenderer.invoke("desktop:skin", skin),
+  /** The renderer-drawn Windows caption buttons: minimize / restore /
+   * maximize / close, plus live maximize state so the glyph can flip. */
+  windowControls: {
+    minimize: () => ipcRenderer.invoke("window:minimize"),
+    toggleMaximize: () => ipcRenderer.invoke("window:toggle-maximize"),
+    close: () => ipcRenderer.invoke("window:close"),
+    state: () => ipcRenderer.invoke("window:state"),
+    onMaximizedChanged: (cb) => {
+      const handler = (_event, maximized) => cb(maximized);
+      ipcRenderer.on("window:maximized-changed", handler);
+      return () => ipcRenderer.removeListener("window:maximized-changed", handler);
+    },
+  },
   /** A reviewed BotMRR package opened through openmausbot://install. */
   onPackageInstall: (cb) => {
     packageInstallListeners.add(cb);
@@ -137,22 +248,48 @@ contextBridge.exposeInMainWorld("ogb", {
       return () => ipcRenderer.removeListener("desktop-viewer:state", handler);
     },
   },
+  /** Two sandboxed Local VM viewers embedded in the owning app window. */
+  desktopWorkspace: {
+    open: (input) => ipcRenderer.invoke("desktop-workspace:open", input),
+    layout: (items) => ipcRenderer.invoke("desktop-workspace:layout", items),
+    setInteractive: (contextId) => ipcRenderer.invoke("desktop-workspace:set-interactive", contextId),
+    close: (contextId) => ipcRenderer.invoke("desktop-workspace:close", contextId),
+    onState: (cb) => {
+      const handler = (_event, state) => cb(state);
+      ipcRenderer.on("desktop-workspace:state", handler);
+      return () => ipcRenderer.removeListener("desktop-workspace:state", handler);
+    },
+  },
   /** Native folder picker for a bot's working folder; null when cancelled. */
   pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
   /** Writes the redacted diagnostics report to a user-chosen file; resolves
    * the path, or null when the save dialog was cancelled. */
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
+  /** Ask where to save a bot-created file (inside ~/.openmausbot), copy it
+   * there and reveal it. Returns the chosen path, or null if the user
+   * cancelled the dialog. The chat bubble shows the
+   * rejection text verbatim, so strip the "Error invoking remote method"
+   * wrapper ipcRenderer adds around a main-process throw. */
+  saveFile: (filePath) =>
+    ipcRenderer.invoke("desktop:save-file", filePath).catch((error) => {
+      const message = String(error?.message ?? error);
+      throw new Error(message.replace(/^Error invoking remote method '[^']*':\s*(?:Error:\s*)?/, ""));
+    }),
+  /** Point the file manager at a file a bot linked outside its workspace,
+   * without opening it. Resolves "shown", "missing" or "invalid". */
+  revealInFolder: (filePath) => ipcRenderer.invoke("desktop:reveal-file", filePath),
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
 
-  /** In-app auto-update. State object:
-   *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",
+  /** In-app auto-update. Updates download by themselves; install is the
+   *  person's "Restart to update". State object:
+   *  { status: "idle"|"checking"|"downloading"|"preparing"|"downloaded"|"installing"|"handed-off"|"error",
    *    version?, percent?, message? }. onState fires immediately with the
    *    current state, then on every transition. Dormant in dev (no bridge). */
   updater: {
     check: () => ipcRenderer.invoke("update:check"),
-    download: () => ipcRenderer.invoke("update:download"),
-    install: () => ipcRenderer.invoke("update:install"),
+    install: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("update:install") : Promise.reject(new Error("Choose Restart to update.")),
     onState: (cb) => {
       ipcRenderer
         .invoke("update:get-state")
@@ -163,4 +300,129 @@ contextBridge.exposeInMainWorld("ogb", {
       return () => ipcRenderer.removeListener("update:state", handler);
     },
   },
-});
+
+  /** Saved servers and the active one (Server menu). Switching, adding and
+   * forgetting are local-only: a remote page may read the list but not change
+   * where this window goes. */
+  environments: {
+    state: () => ipcRenderer.invoke("environments:state"),
+    switch: (id) => ipcRenderer.invoke("environments:switch", id),
+    addFromLink: (link, name) => ipcRenderer.invoke("environments:add-from-link", link, name),
+    forget: (id) => ipcRenderer.invoke("environments:forget", id),
+    /** Settings → Servers, on a saved server's Computer access panel, or
+     * ("copy") its Copy this computer here panel. */
+    onOpenSettings: (cb) => {
+      const handler = (_event, computerId, panel) => cb(computerId, panel === "copy" ? "copy" : undefined);
+      ipcRenderer.on("workspaces:open-settings", handler);
+      return () => ipcRenderer.removeListener("workspaces:open-settings", handler);
+    },
+  },
+  cloudAccount: process.argv.includes("--omb-company-desktop=1") ? {
+    state: () => ipcRenderer.invoke("cloud-account:state"),
+    begin: () => ipcRenderer.invoke("cloud-account:begin"),
+    signInAgain: () => ipcRenderer.invoke("cloud-account:signInAgain"),
+    reopen: () => ipcRenderer.invoke("cloud-account:reopen"),
+    cancel: () => ipcRenderer.invoke("cloud-account:cancel"),
+    refresh: () => ipcRenderer.invoke("cloud-account:refresh"),
+    signOut: () => ipcRenderer.invoke("cloud-account:signOut"),
+    openDashboard: () => ipcRenderer.invoke("cloud-account:openDashboard"),
+    // What this person may buy now; no arguments.
+    offer: () => ipcRenderer.invoke("cloud-account:offer"),
+    // A checkout for one of the offer's plans, opened by main in the browser; main checks both.
+    checkout: (plan, source) => ipcRenderer.invoke("cloud-account:checkout", String(plan), String(source)),
+    connectHome: () => ipcRenderer.invoke("cloud-account:connectHome"),
+    connectHomeForPhone: () => ipcRenderer.invoke("cloud-account:connectHomeForPhone"),
+    onState: cb => {
+      const handler = (_event, state) => cb(state);
+      ipcRenderer.on("cloud-account:state-changed", handler);
+      return () => ipcRenderer.removeListener("cloud-account:state-changed", handler);
+    },
+    // "Let my Cloud use this Mac": main decides the Cloud; no argument names it.
+    lending: {
+      state: () => ipcRenderer.invoke("lending:state"),
+      chooseFolder: () => ipcRenderer.invoke("lending:folder"),
+      save: input => ipcRenderer.invoke("lending:save", input),
+      stop: () => ipcRenderer.invoke("lending:stop"),
+    },
+  } : undefined,
+  /** Copy this computer here: this computer's workspace to a server the
+   * person added (their Cloud included). Only this computer's own page names
+   * where (a saved server's id, or "cloud"); a server's page names nothing,
+   * main answers it about itself, and its Copy (only from the person's own
+   * click) opens this computer's Settings on that copy, or, on the verified
+   * Cloud, starts it. */
+  cloudMove: process.argv.includes("--omb-company-desktop=1") ? {
+    state: id => ipcRenderer.invoke("cloud-move:state", ...savedServer(id)),
+    start: id => isLocalPage ? ipcRenderer.invoke("cloud-move:start", ...savedServer(id))
+      : navigator.userActivation?.isActive === true ? ipcRenderer.invoke("cloud-move:start") : Promise.reject(new Error("Choose Copy to start copying.")),
+    cancel: () => ipcRenderer.invoke("cloud-move:cancel"),
+    restorePrevious: id => ipcRenderer.invoke("cloud-move:restore-previous", ...savedServer(id)),
+    dismiss: id => ipcRenderer.invoke("cloud-move:dismiss", ...savedServer(id)),
+    onState: cb => {
+      const handler = (_event, state) => cb(state);
+      ipcRenderer.on("cloud-move:state-changed", handler);
+      return () => ipcRenderer.removeListener("cloud-move:state-changed", handler);
+    },
+  } : undefined,
+  /** The Cloud's setup checklist: "Let your Cloud use this Mac" opens the
+   * lending switch in this app's own Settings → OMB Cloud. No arguments; it
+   * shows the switch and changes nothing. */
+  cloudLending: process.argv.includes("--omb-company-desktop=1") ? {
+    open: () => ipcRenderer.invoke("cloud-lending:open"),
+  } : undefined,
+  /** The plan, read only, in Settings on the person's own Cloud: its name and
+   * whether it is active, Manage (the Plan page in the browser) and
+   * back to this computer. No arguments; a remote page acts only on a click.
+   * Also the free trial's popup, on this computer's page and the Cloud's:
+   * noticeSeen says the notice due now was shown (main knows which). */
+  cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
+    state: () => ipcRenderer.invoke("cloud-plan:state"),
+    manage: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-plan:manage") : Promise.reject(new Error("Choose Manage to open your Plan page.")),
+    useThisComputer: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-plan:local") : Promise.reject(new Error("Choose Use this computer to switch.")),
+    noticeSeen: () => ipcRenderer.invoke("cloud-plan:notice-seen"),
+  } : undefined,
+  organization: process.argv.includes("--omb-company-desktop=1") ? {
+    settingsOpened: () => ipcRenderer.invoke("organization:settings-opened"),
+    state: () => ipcRenderer.invoke("organization:state"),
+    begin: input => ipcRenderer.invoke("organization:begin", input),
+    reopen: () => ipcRenderer.invoke("organization:reopen"),
+    cancelEnrollment: () => ipcRenderer.invoke("organization:cancel"),
+    refresh: () => ipcRenderer.invoke("organization:refresh"),
+    disconnect: () => ipcRenderer.invoke("organization:disconnect"),
+    onState: cb => {
+      const handler = (_event, state) => cb(state);
+      ipcRenderer.on("organization:state-changed", handler);
+      return () => ipcRenderer.removeListener("organization:state-changed", handler);
+    },
+  } : undefined,
+  companyBackups: process.argv.includes("--omb-company-desktop=1") ? {
+    state: () => ipcRenderer.invoke("company-backups:state"),
+    list: () => ipcRenderer.invoke("company-backups:list"),
+    create: input => ipcRenderer.invoke("company-backups:create", input),
+    configureSchedule: input => ipcRenderer.invoke("company-backups:configure-schedule", input),
+    prepareRestore: input => ipcRenderer.invoke("company-backups:preview", input),
+    restore: input => ipcRenderer.invoke("company-backups:restore", input),
+    delete: input => ipcRenderer.invoke("company-backups:delete", input),
+    cancel: () => ipcRenderer.invoke("company-backups:cancel"),
+    onState: cb => {
+      const handler = (_event, state) => cb(state);
+      ipcRenderer.on("company-backups:state-changed", handler);
+      return () => ipcRenderer.removeListener("company-backups:state-changed", handler);
+    },
+  } : undefined,
+  computerSharing: {
+    state: id => ipcRenderer.invoke("sharing:state", id),
+    chooseFolder: () => ipcRenderer.invoke("sharing:folder"),
+    save: (id, grant) => ipcRenderer.invoke("sharing:save", id, grant),
+    revoke: id => ipcRenderer.invoke("sharing:revoke", id),
+    activity: id => ipcRenderer.invoke("sharing:activity", id),
+  },
+  confirm: message => ipcRenderer.invoke("dialog:confirm", message),
+};
+
+contextBridge.exposeInMainWorld(
+  "ogb",
+  isLocalPage ? bridge : Object.fromEntries(Object.entries(bridge).filter(([key]) => remoteKeys.has(key))),
+);

@@ -9,7 +9,7 @@ of Linux desktop on your own server instead of this machine, see [byo-vps.md](by
 - The native Electron window and embedded OpenMausBot server on GNOME Xorg and GNOME Wayland.
 - Local Claude, Codex, Grok, Gemini, and other configured agent CLIs.
 - Chat, streaming turns, approvals, bot-to-bot communication, and local data storage.
-- Composio connected apps and Box cloud computers.
+- Composio connected apps and Boat cloud computers.
 - External documentation and OAuth links in the default browser.
 - An explicit, view-only local screen preview on GNOME Xorg and GNOME Wayland. The Wayland path uses the
   native portal chooser and keeps the selected PipeWire stream open until the user stops sharing.
@@ -32,12 +32,12 @@ CUA supply-chain work is tracked in [issue #113](https://github.com/milind-soni/
 
 Choose one Ubuntu 24.04 x86_64 package from the latest release:
 
-- [Debian package (`OpenMausBot-amd64.deb`)](https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot-amd64.deb) — recommended; APT installs its desktop dependencies.
-- [Portable AppImage (`OpenMausBot.AppImage`)](https://github.com/milind-soni/openmausbot-releases/releases/latest/download/OpenMausBot.AppImage) — does not install system files.
-- [SHA-256 checksums](https://github.com/milind-soni/openmausbot-releases/releases/latest/download/SHA256SUMS-ubuntu-x64.txt)
+- [Debian package (`OpenMausBot-amd64.deb`)](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) — recommended; APT installs its desktop dependencies and configures the bundled bot browser's sandbox.
+- [Portable AppImage (`OpenMausBot.AppImage`)](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) — does not install system files.
+- [SHA-256 checksums](https://github.com/milind-soni/OpenMausBot/releases/latest/download/SHA256SUMS-ubuntu-x64.txt)
 
 Versioned packages and previous releases remain available on the
-[releases page](https://github.com/milind-soni/openmausbot-releases/releases).
+[releases page](https://github.com/milind-soni/OpenMausBot/releases).
 
 ## Build packages
 
@@ -84,6 +84,19 @@ chmod +x release/OpenMausBot-*-x86_64.AppImage
 ```
 
 For a downloaded release AppImage, use `OpenMausBot.AppImage` in place of the versioned path above.
+
+### Bundled bot browser on Ubuntu 24.04
+
+The desktop packages include the browser engine and browser runtime; no separate browser download is needed.
+Use the **`.deb` package** for browser-ready installation on Ubuntu 24.04. Its installer secures the browser's
+package-owned files and loads an AppArmor rule for that exact executable. The browser sandbox stays enabled,
+and the machine-wide user-namespace restriction is unchanged. Upgrades refresh the same rule; uninstalling
+the package removes it. Enabling a bot's browser and approving its actions remain explicit choices.
+
+An AppImage is portable and cannot install privileged system policy. On hosts restricting unprivileged
+user namespaces, its bundled browser can still report `No usable sandbox`. Install the `.deb` instead;
+do not add `--no-sandbox`, disable AppArmor globally, or allowlist arbitrary executables under your home
+directory. See [Chromium's explanation of the Ubuntu restriction](https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md).
 
 Application data remains local in `~/.openmausbot`. Electron browser data and window state use the normal XDG
 configuration directory (`~/.config/openmausbot` unless the environment overrides it).
@@ -227,7 +240,7 @@ considered for automatic discovery.
 
 ### A bot needs computer tools
 
-Choose **Cloud box** and add a Box token in App Settings, or use Local VM. Linux **This computer** remains disabled
+Choose **Cloud** (Boat) and add a Boat token in App Settings, or use Local VM. Linux **This computer** remains disabled
 on Wayland. On Xorg, enable it from the **Local control** card first.
 
 ### Local control is not ready

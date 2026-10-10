@@ -2,17 +2,93 @@
 // the official pane has no Qwen Cloud catalog; live local hosts land in
 // Custom and are written into ~/.qwen/settings.json modelProviders.
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { qualifiedModelLabel } from "../../contracts.ts";
+import { harnessHome } from "../../env-path.ts";
+import { parseQwenLogLine } from "./quiet-status.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
-function qwenHome(env: Record<string, string | undefined>): string {
-  return join(env.HOME || env.USERPROFILE || homedir(), ".qwen");
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+type QwenRoute = { id: string; model: string; label: string; provider: string; protocol: string; baseUrl?: string; envKey?: string };
+const PROTOCOLS = new Set(["openai", "anthropic", "gemini", "vertex-ai"]);
+
+function readQwenRoutes(env: Record<string, string | undefined>): QwenRoute[] {
+  let settings: unknown;
+  try {
+    settings = JSON.parse(readFileSync(join(harnessHome("qwen", env), "settings.json"), "utf8")) as unknown;
+  } catch {
+    return [];
+  }
+  if (!isRecord(settings) || !isRecord(settings.modelProviders)) return [];
+
+  const routes: QwenRoute[] = [];
+  const seen = new Set<string>();
+  const mappings = isRecord(settings.providerProtocol) ? settings.providerProtocol : {};
+  for (const [provider, rows] of Object.entries(settings.modelProviders)) {
+    const protocol = Object.hasOwn(mappings, provider) ? mappings[provider] : provider;
+    if (typeof protocol !== "string" || !PROTOCOLS.has(protocol) || !Array.isArray(rows)) continue;
+    for (const row of rows) {
+      if (!isRecord(row) || typeof row.id !== "string") continue;
+      const model = row.id;
+      if (!model.trim()) continue;
+      if (row.baseUrl !== undefined && typeof row.baseUrl !== "string") continue;
+      const baseUrl = typeof row.baseUrl === "string" && row.baseUrl ? row.baseUrl : undefined;
+      if (baseUrl) {
+        try { new URL(baseUrl); }
+        catch { throw new Error("A Qwen model has an invalid endpoint. Fix its baseUrl in Qwen settings and refresh models."); }
+      }
+      const identity = JSON.stringify([protocol, model, baseUrl ?? null]);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      if (row.imageOnly === true || row.voiceOnly === true || row.fastOnly === true) continue;
+      routes.push({ id: `${model}(${protocol})`, model, provider, protocol, baseUrl,
+        label: typeof row.name === "string" && row.name ? row.name : model,
+        envKey: typeof row.envKey === "string" ? row.envKey : undefined });
+    }
+  }
+  // Qwen's ACP route identity, from QwenLM/qwen-code acpModelUtils.ts
+  // (Copyright 2025 Qwen Team, Apache-2.0). Never publish endpoints or env keys.
+  const counts = new Map<string, number>();
+  for (const route of routes) counts.set(route.id, (counts.get(route.id) ?? 0) + 1);
+  for (const route of routes) {
+    if (counts.get(route.id) === 1) continue;
+    const endpoint = route.baseUrl ?? (route.protocol === "openai" ? "https://api.openai.com/v1" : "");
+    let publicEndpoint: string | null = null;
+    if (endpoint) {
+      try {
+        const url = new URL(endpoint);
+        url.username = ""; url.password = ""; url.search = ""; url.hash = "";
+        publicEndpoint = url.href;
+      } catch { throw new Error("A Qwen model has an invalid endpoint. Fix its baseUrl in Qwen settings and refresh models."); }
+    }
+    const identity = [route.id, route.label, route.envKey ?? null, route.baseUrl === undefined, publicEndpoint];
+    route.id = `qwen-route:v1:${createHash("sha256").update(JSON.stringify(identity)).digest("base64url").slice(0, 16)}`;
+  }
+  if (new Set(routes.map((route) => route.id)).size !== routes.length) {
+    throw new Error("Qwen has indistinguishable model routes. Give them distinct names, envKey values, or public endpoints in Qwen settings.");
+  }
+  return routes;
+}
+
+/** Public metadata only. Use Qwen's provider-qualified ACP selectors, not raw model IDs. */
+export function readQwenModelCatalog(env: Record<string, string | undefined> = process.env): ModelCatalog {
+  const options = readQwenRoutes(env).map(({ id, model, label, provider }) => ({
+    id,
+    label: qualifiedModelLabel(model, label, {
+      redundantWhen: (id, name) => name.toLocaleLowerCase().endsWith(id.toLocaleLowerCase()),
+    }),
+    custom: true as const, provider,
+  }));
+  return { default: options[0]?.id ?? "", options };
 }
 
 function envKeyFor(hostId: string): string {
@@ -29,7 +105,7 @@ export function ensureQwenInjectModel(
   const host = localHost(inject.host);
   if (!host) return modelId;
 
-  const dir = qwenHome(env);
+  const dir = harnessHome("qwen", env);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "settings.json");
   let settings: Record<string, unknown> = {};
@@ -81,8 +157,62 @@ export function ensureQwenInjectModel(
 }
 
 async function resolveModels(env: Record<string, string | undefined>): Promise<ModelCatalog> {
-  const catalog = await mergeLocalInject(EMPTY, env);
-  return { default: catalog.options[0]?.id ?? "", options: catalog.options };
+  const catalog = await mergeLocalInject(readQwenModelCatalog(env), env);
+  const routes = readQwenRoutes(env);
+  const replacements = new Map<string, string>();
+  for (const option of catalog.options) {
+    const injected = decodeInjectId(option.id);
+    if (!injected) continue;
+    const endpoint = localHost(injected.host)?.baseUrl;
+    for (const route of routes) {
+      if (route.protocol === "openai" && route.model === injected.model && route.baseUrl === endpoint) {
+        replacements.set(route.id, option.id);
+      }
+    }
+  }
+  const options = catalog.options.filter((option) => !replacements.has(option.id));
+  const preferred = replacements.get(catalog.default) ?? catalog.default;
+  return { default: options.some((option) => option.id === preferred) ? preferred : options[0]?.id ?? "", options };
+}
+
+export function resolveQwenTurnModel(model: string | undefined, env: Record<string, string | undefined>): string | undefined {
+  if (!model) return model;
+  const injected = decodeInjectId(model);
+  if (injected) ensureQwenInjectModel(model, env);
+  const routes = readQwenRoutes(env);
+  if (injected) {
+    const route = routes.find((row) => row.protocol === "openai" && row.model === injected.model
+      && row.baseUrl === localHost(injected.host)?.baseUrl);
+    if (!route) throw new Error("Qwen could not configure this local model. Refresh models and select it again.");
+    return route.id;
+  }
+  if (routes.some((route) => route.id === model)) return model;
+  const matches = routes.filter((route) => route.model === model);
+  if (matches.length > 1) throw new Error("This Qwen model has multiple providers. Refresh models and select the intended provider again.");
+  if (!matches.length) throw new Error("This Qwen model is no longer configured. Refresh models and select it again.");
+  return matches[0].id;
+}
+
+/** Where Qwen Code 0.24 writes a session's debug log: `<runtime dir>/debug/<session id>.txt`,
+ * the runtime dir being QWEN_RUNTIME_DIR, else QWEN_HOME, else ~/.qwen. */
+export function qwenDebugLogPath(env: Record<string, string | undefined>, sessionId: string): string | null {
+  const off = ["", "0", "false", "off", "no"].includes((env.QWEN_DEBUG_LOG_FILE ?? "").trim().toLowerCase());
+  if (off || !/^[\w-]{1,128}$/.test(sessionId)) return null;
+  const base = env.QWEN_RUNTIME_DIR || env.QWEN_HOME || harnessHome("qwen", env);
+  return join(base, "debug", `${sessionId}.txt`);
+}
+
+/** Qwen Code's own approval ladder, passed through (qwen --help, 0.24):
+ * `--approval-mode default` asks, `auto-edit` approves file edits, `auto`
+ * runs Qwen's LLM classifier that approves safe actions and blocks risky
+ * ones, and `--yolo` approves everything. Ask sends nothing, so an older
+ * CLI without the flag keeps working at the level it always had; the ACP
+ * client still answers residual permission asks itself under Full. */
+export function qwenApprovalArgs(fullAuto: boolean, approvalMode: string | undefined): string[] {
+  if (fullAuto) return ["--yolo"];
+  if (approvalMode === "auto") return ["--approval-mode", "auto"];
+  if (approvalMode === "edits") return ["--approval-mode", "auto-edit"];
+  return [];
 }
 
 const support: AcpSupport = {
@@ -91,7 +221,7 @@ const support: AcpSupport = {
   access: "custom",
   models: EMPTY,
   resolveModels,
-  resolveTurnModel: (model, env) => (model ? ensureQwenInjectModel(model, env) : model),
+  resolveTurnModel: resolveQwenTurnModel,
   defaultCli: "qwen",
   nativeSource: "qwen.acp",
   loginNote: "Qwen Code CLI is not installed",
@@ -103,11 +233,24 @@ const support: AcpSupport = {
     },
     docsUrl: "https://qwenlm.github.io/qwen-code-docs/en/users/overview/",
   },
-  spawnArgs: (_config, turn) => ["--acp", ...(turn.model ? ["-m", turn.model] : [])],
+  // A raw -m only changes the model within the saved provider. ACP switches
+  // the complete route and confirms it before any prompt leaves OMB.
+  spawnArgs: (config, turn) => ["--acp", ...qwenApprovalArgs(config.fullAuto, turn.approvalMode)],
+  // Qwen's live session/load returns its cached MCP clients, ignoring fresh
+  // credentials. Cold-load the same conversation when those inputs change.
+  restartOnMcpChange: true,
+  selectModel: { configId: "model" },
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: () => true,
   buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
+  // Qwen says nothing over ACP while it retries a rate limit or compresses
+  // its history, but its debug log does. Turn the log on (unless the person
+  // turned it off) and read it while a prompt is quiet.
+  transformEnv: (env) => {
+    if (env.QWEN_DEBUG_LOG_FILE === undefined) env.QWEN_DEBUG_LOG_FILE = "1";
+  },
+  statusLog: { path: qwenDebugLogPath, parse: parseQwenLogLine },
 };
 
 export const QwenAgentDriver = createAcpDriver(support);

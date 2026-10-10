@@ -8,10 +8,8 @@ import { applyDroidLocalAuthEnv, DroidAgentDriver, ensureDroidInjectModel } from
 import { ensureGrokInjectSlug, GrokAgentDriver } from "./acp/grok.ts";
 import { applyKimiLocalModelEnv, ensureKimiInjectAlias, KimiAgentDriver } from "./acp/kimi.ts";
 import { ensureOpenCodeInjectModel } from "./acp/opencode-go.ts";
-import { AntigravityDriver } from "./antigravity.ts";
 
 const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");
-const FAKE_AGY = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-agy-cli.ts");
 import { recordEvents } from "../testing/events.ts";
 import { ensureHermesInjectProvider } from "./acp/hermes.ts";
 import { ensureQwenInjectModel } from "./acp/qwen.ts";
@@ -333,7 +331,7 @@ describe("ensureGrokInjectSlug", () => {
     const instance = await GrokAgentDriver.create({
       instanceId: "grok-omlx-argv",
       displayName: "Grok",
-      environment: { HOME: home, FAKE_ACP_DUMP: dump },
+      environment: { HOME: home, USERPROFILE: home, FAKE_ACP_DUMP: dump },
       enabled: true,
       config: { cli: FAKE_ACP, fullAuto: false },
     });
@@ -987,7 +985,7 @@ describe("ensureQwenInjectModel", () => {
 });
 
 describe("live Custom lists on every local CLI harness", () => {
-  it("merges probed host models onto Kimi, Droid, and Antigravity", async () => {
+  it("merges probed host models onto Kimi and Droid", async () => {
     const previous = globalThis.fetch;
     globalThis.fetch = (async (url: string | URL) => {
       if (String(url).includes(":8080")) {
@@ -1016,15 +1014,6 @@ describe("live Custom lists on every local CLI harness", () => {
           environment,
           enabled: true,
           config: { cli: FAKE_ACP, fullAuto: false },
-        }),
-      );
-      instances.push(
-        await AntigravityDriver.create({
-          instanceId: "agy",
-          displayName: "Antigravity",
-          environment,
-          enabled: true,
-          config: { cli: FAKE_AGY, fullAuto: true },
         }),
       );
       for (const instance of instances) {

@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { build } from "esbuild";
 import { resolveCuaMacArches } from "./cua-mac-arches.mjs";
+import { LIPO_ARCH, writeThinMachO } from "./mac-thin.mjs";
 
 if (process.platform !== "darwin") throw new Error("prepare-cua is macOS-only");
 
@@ -24,9 +25,9 @@ const dependencyRoot = join(sdkRoot, "..", "..");
 const sdkPackage = JSON.parse(await readFile(join(sdkRoot, "package.json"), "utf8"));
 const expectedVersion = String(sdkPackage.version);
 const release = {
-  version: "0.20.0",
-  file: "cua-driver-rs-0.20.0-darwin-universal-binary.tar.gz",
-  sha256: "07a88ea2c28a9ead66b2d9f6f93fab4b1189a1f7c704d2cd7b6d12c30eee9984",
+  version: "0.28.2",
+  file: "cua-driver-rs-0.28.2-darwin-universal-binary.tar.gz",
+  sha256: "386db225a3080714a0f9f935525e61efaf46709587ef8b94dd2df81aeb2f6daa",
 };
 if (expectedVersion !== release.version) {
   throw new Error(
@@ -103,16 +104,17 @@ if (!details.isFile() || (details.mode & 0o111) === 0) {
 
 // The mac app ships for two architectures, each with its own staging dir that
 // electron-builder selects via ${arch} in extraResources. The driver
-// executable is the official universal binary (same bytes in both dirs, and
-// asserted universal below so a future non-universal pin fails loudly here,
-// not on a user's Intel Mac); the SDK's dylib/.node are genuinely per-arch,
-// pulled from the two darwin native packages that pnpm installs because of
-// supportedArchitectures in package.json.
+// executable is the official universal binary (asserted universal below so a
+// future non-universal pin fails loudly here, not on a user's Intel Mac). The
+// SDK's dylib/.node come from the two darwin native packages that pnpm
+// installs because of supportedArchitectures in pnpm-workspace.yaml, but both
+// packages ship the same universal files. Each staging dir gets only its own
+// arch's slice of all three: a single-arch app can never run the other one.
 const MAC_ARCHES = resolveCuaMacArches(process.env);
 
 const { stdout: archList } = await run("/usr/bin/lipo", ["-archs", binary]);
 for (const arch of MAC_ARCHES) {
-  const lipoName = arch === "x64" ? "x86_64" : arch;
+  const lipoName = LIPO_ARCH[arch];
   if (!archList.trim().split(/\s+/).includes(lipoName)) {
     throw new Error(`cua-driver at ${binary} is not universal: has [${archList.trim()}], needs ${lipoName}`);
   }
@@ -122,7 +124,7 @@ for (const arch of MAC_ARCHES) {
   const archStage = join(stage, arch);
   await rm(archStage, { recursive: true, force: true });
   await mkdir(archStage, { recursive: true });
-  await copyFile(binary, join(archStage, "cua-driver"));
+  await writeThinMachO(binary, join(archStage, "cua-driver"), LIPO_ARCH[arch]);
   await chmod(join(archStage, "cua-driver"), 0o755);
   // A binary copied out of CuaDriver.app retains a bundle-relative signature
   // whose Info.plist no longer exists at the new path. Give the staged file a
@@ -134,14 +136,12 @@ for (const arch of MAC_ARCHES) {
   const nativePackage = join(dependencyRoot, "@trycua", `cua-driver-darwin-${arch}`);
   if (!existsSync(nativePackage)) {
     throw new Error(
-      `required CUA darwin-${arch} native package is missing — is pnpm.supportedArchitectures.cpu set in package.json?`,
+      `required CUA darwin-${arch} native package is missing — is supportedArchitectures.cpu set in pnpm-workspace.yaml?`,
     );
   }
   await mkdir(nativeDir, { recursive: true });
-  await Promise.all([
-    copyFile(join(realpathSync(nativePackage), "libcua_driver_sdk.dylib"), join(nativeDir, "libcua_driver_sdk.dylib")),
-    copyFile(join(realpathSync(nativePackage), "cua_driver_node_runtime.node"), join(nativeDir, "cua_driver_node_runtime.node")),
-  ]);
+  await Promise.all(["libcua_driver_sdk.dylib", "cua_driver_node_runtime.node"].map((name) =>
+    writeThinMachO(join(realpathSync(nativePackage), name), join(nativeDir, name), LIPO_ARCH[arch])));
 }
 
 // Bundle the JS side into one ESM file so electron-builder's intentional

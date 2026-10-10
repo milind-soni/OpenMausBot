@@ -133,12 +133,6 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
 
       // turn 1 settles on the original branch
       expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "original question" })).status).toBe(202);
-      const afterSend = await getBot(created.id);
-      const quiz = afterSend.messages.find(
-        (m: { kind: string; card?: { requestId?: string; dismissed?: boolean } }) =>
-          m.kind === "options" && !m.card?.requestId,
-      );
-      expect(quiz?.card?.dismissed).toBe(true);
       await waitFor(async () => {
         const b = await getBot(created.id);
         return !b.busy && b.messages.some((m: Msg) => m.role === "bot" && m.kind === "text" && m.text?.includes("fake acp"));
@@ -149,7 +143,17 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
       const originalLeaf = bot.activeLeafId;
 
       // edit → fork + a fresh turn on the new branch
-      expect((await api("POST", `/api/bots/${created.id}/messages/${original.id}/edit`, { text: "edited question" })).status).toBe(202);
+      const editBody = { text: "edited question", sendId: "edit-retry-0000000001" };
+      const firstEdit = await api("POST", `/api/bots/${created.id}/messages/${original.id}/edit`, editBody);
+      expect(firstEdit.status).toBe(202);
+      expect(firstEdit.body.message.sendId).toBe("edit-retry-0000000001");
+      // a network retry of the same edit answers with the same fork, even
+      // while that fork's own turn is still running, and never forks again
+      const retried = await api("POST", `/api/bots/${created.id}/messages/${original.id}/edit`, editBody);
+      expect(retried.status).toBe(202);
+      expect(retried.body.message.id).toBe(firstEdit.body.message.id);
+      const reused = await api("POST", `/api/bots/${created.id}/messages/${original.id}/edit`, { text: "something else", sendId: "edit-retry-0000000001" });
+      expect(reused.status).toBe(409);
       await waitFor(async () => {
         const b = await getBot(created.id);
         const edited = b.messages.find((m: Msg) => m.role === "user" && m.text === "edited question");
@@ -162,6 +166,7 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
       bot = await getBot(created.id);
       const edited: Msg = bot.messages.find((m: Msg) => m.role === "user" && m.text === "edited question");
       expect(edited.parentId).toBe(original.parentId); // sibling versions
+      expect(bot.messages.filter((m: Msg) => m.role === "user" && m.text === "edited question")).toHaveLength(1);
 
       // the visible path carries only the edited branch…
       const path = activePath(bot.messages, bot.activeLeafId);

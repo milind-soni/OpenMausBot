@@ -2,7 +2,7 @@
 // Reads the skin blocks out of src/styles.css and measures every text/surface
 // pair the components actually produce. Run it after touching a palette:
 //
-//   node scripts/check-skin-contrast.mjs
+//   pnpm check:contrast
 //
 // It parses the CSS rather than taking a second copy of the values, so the
 // check can never pass against a palette that is no longer the shipped one.
@@ -46,9 +46,11 @@ function parseSkins(source) {
   return skins;
 }
 
-function parseHex(hex) {
-  const h = hex.replace("#", "").trim();
-  const full = h.length === 3 ? [...h].map((c) => c + c).join("") : h;
+function parseHex(value) {
+  const match = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(value.trim());
+  if (!match) return null;
+  const h = match[1];
+  const full = h.length <= 4 ? Array.from(h, (c) => c + c).join("") : h;
   return {
     r: parseInt(full.slice(0, 2), 16),
     g: parseInt(full.slice(2, 4), 16),
@@ -78,7 +80,9 @@ function luminance({ r, g, b }) {
 
 function contrast(fgHex, bgHex) {
   const bg = parseHex(bgHex);
-  const fg = flatten(parseHex(fgHex), bg);
+  const parsedFg = parseHex(fgHex);
+  if (!parsedFg || !bg || bg.a !== 1) return null;
+  const fg = flatten(parsedFg, bg);
   const [hi, lo] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
   return (hi + 0.05) / (lo + 0.05);
 }
@@ -86,13 +90,19 @@ function contrast(fgHex, bgHex) {
 // Pairs taken from what the components render, not from what looks plausible:
 // body copy sits on all five surfaces, the filled accent/danger buttons carry
 // their own ink token, and the status colours are used as text on cards.
-const SURFACES = ["--color-app", "--color-panel", "--color-raised", "--color-raised-hover", "--color-card", "--color-inset"];
+const SURFACES = ["--color-app", "--color-panel", "--color-raised", "--color-raised-hover", "--color-card", "--color-inset", "--color-composer", "--color-menu"];
 const PAIRS = [
   ...SURFACES.map((s) => ["--color-ink", s, 4.5]),
   ...SURFACES.map((s) => ["--color-ink-secondary", s, 4.5]),
-  ["--color-ink", "--color-bubble-user", 4.5],
+  // Quiet text (timestamps, hints, placeholders) has its own token rather
+  // than an opacity on the secondary ink: `text-ink-secondary/70` measured
+  // 2.6:1 on Linen and was never checked here. It is body-size text, so it
+  // is held to the same 4.5:1 on the same surfaces.
+  ...SURFACES.map((s) => ["--color-ink-tertiary", s, 4.5]),
+  ["--color-bubble-user-ink", "--color-bubble-user", 4.5],
   ["--color-accent-ink", "--color-accent", 4.5],
   ["--color-danger-ink", "--color-danger", 4.5],
+  ["--color-success-ink", "--color-success", 4.5],
   ["--color-accent-text", "--color-app", 4.5],
   ["--color-accent-text", "--color-panel", 4.5],
   ["--color-accent-text", "--color-card", 4.5],
@@ -110,6 +120,12 @@ const PAIRS = [
   ["--color-focus", "--color-app", 3],
   ["--color-focus", "--color-panel", 3],
   ["--color-focus", "--color-card", 3],
+  // A focused text field paints its own border in the ring colour (the
+  // browser outline is off for fields), so the ring also has to clear the
+  // fills the fields themselves use.
+  ["--color-focus", "--color-inset", 3],
+  ["--color-focus", "--color-raised", 3],
+  ["--color-focus", "--color-control", 3],
   // Surface against surface. Text contrast alone will not catch a skin that
   // gives two surfaces the same value: Atelier and Lagoon both defined
   // `raised` as the pure white they use for a card, so every chip, hover fill
@@ -132,14 +148,19 @@ const PAIRS = [
 ];
 
 const skins = parseSkins(css);
-// Midnight is shipped as a faithful copy of upstream, contrast gaps included;
-// it is reported but not allowed to fail the run.
-const ADVISORY = new Set(["midnight"]);
+// Midnight faithfully keeps two upstream contrast gaps. They may improve, but
+// must not get worse; every other below-target pair is a regression.
+const BASELINE_FLOORS = new Map([
+  ["midnight|--color-accent-ink|--color-accent", 3.65],
+  ["midnight|--color-danger-ink|--color-danger", 3.10],
+]);
+const BASELINE_DRIFT = 0.01;
 
 let failed = false;
 for (const [id, tokens] of skins) {
   const problems = [];
   const missing = [];
+  const unmeasurable = [];
   let measured = 0;
   for (const [fg, bg, min] of PAIRS) {
     // A pair we cannot measure is reported, never silently skipped: an
@@ -148,24 +169,75 @@ for (const [id, tokens] of skins) {
       missing.push(!tokens[fg] ? fg : bg);
       continue;
     }
-    measured++;
     const ratio = contrast(tokens[fg], tokens[bg]);
+    if (ratio === null) {
+      unmeasurable.push({ fg, bg, fgValue: tokens[fg], bgValue: tokens[bg] });
+      continue;
+    }
+    measured++;
     if (ratio < min) problems.push({ fg, bg, ratio, min });
   }
-  const advisory = ADVISORY.has(id);
+  let skinFailed = missing.length > 0 || unmeasurable.length > 0;
   if (missing.length) {
     console.log(`✗ ${id} — undefined token(s): ${[...new Set(missing)].join(", ")}`);
-    if (!advisory) failed = true;
+  }
+  for (const { fg, bg, fgValue, bgValue } of unmeasurable) {
+    console.log(`✗ ${id} — cannot measure ${fg} on ${bg} (${fgValue} on ${bgValue})`);
   }
   if (problems.length === 0) {
-    if (!missing.length) console.log(`✓ ${id} — ${measured} pairs, none below target`);
+    if (!skinFailed) console.log(`✓ ${id} — ${measured} pairs, none below target`);
+    if (skinFailed) failed = true;
     continue;
   }
-  console.log(`${advisory ? "~" : "✗"} ${id}${advisory ? " (advisory — upstream copy)" : ""}`);
-  for (const { fg, bg, ratio, min } of problems) {
-    console.log(`    ${fg} on ${bg}: ${ratio.toFixed(2)}:1 (needs ${min}:1)`);
+  for (const { fg, bg, ratio } of problems) {
+    const floor = BASELINE_FLOORS.get(`${id}|${fg}|${bg}`);
+    if (floor === undefined || ratio < floor - BASELINE_DRIFT) skinFailed = true;
   }
-  if (!advisory) failed = true;
+  console.log(`${skinFailed ? "✗" : "~"} ${id}${skinFailed ? "" : " (known upstream gaps)"}`);
+  for (const { fg, bg, ratio, min } of problems) {
+    const floor = BASELINE_FLOORS.get(`${id}|${fg}|${bg}`);
+    const baseline = floor === undefined ? "" : `; baseline ${floor.toFixed(2)}:1`;
+    console.log(`    ${fg} on ${bg}: ${ratio.toFixed(2)}:1 (needs ${min}:1${baseline})`);
+  }
+  if (skinFailed) failed = true;
+}
+
+// The inverted bubbles (Daylight's ink-black, Meadow's green-black) have
+// their own inherited context: the editor, labels, quotes and file chips
+// explicitly use these tokens, not parent color.
+for (const skinId of ["daylight", "meadow"]) {
+  const scope = css.match(new RegExp(`@scope \\(\\[data-skin="${skinId}"\\]\\) to \\(\\[data-skin\\]\\)\\s*\\{\\s*\\.bg-bubble-user\\s*\\{([^}]*)\\}`))?.[1];
+  if (!scope) {
+    failed = true;
+    console.log(`✗ ${skinId} bubble — no @scope block for the inverted bubble`);
+    continue;
+  }
+  const bubble = { ...skins.get(skinId), ...declarations(scope) };
+  let bubbleFailed = false;
+  for (const [fg, bg] of [
+    ["--color-ink", "--color-bubble-user"],
+    ["--color-ink-secondary", "--color-bubble-user"],
+    ["--color-ink", "--color-raised"],
+    ["--color-ink-secondary", "--color-raised-hover"],
+    ["--color-ink-secondary", "--color-inset"],
+    ["--color-ink-tertiary", "--color-bubble-user"],
+    ["--color-ink-tertiary", "--color-raised-hover"],
+    ["--color-ink-tertiary", "--color-inset"],
+    ["--color-accent", "--color-inset"],
+    ["--color-accent-text", "--color-bubble-user"],
+    ["--color-ink", "--color-control"],
+    ["--color-accent-ink", "--color-accent"],
+    ["--color-danger-ink", "--color-danger"],
+    ["--color-success-ink", "--color-success"],
+  ]) {
+    const ratio = contrast(bubble[fg] ?? "", bubble[bg] ?? "");
+    if (ratio === null || ratio < 4.5) {
+      failed = true;
+      bubbleFailed = true;
+      console.log(`✗ ${skinId} bubble — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
+    }
+  }
+  if (!bubbleFailed) console.log(`✓ ${skinId} bubble — editor, controls and paired fills above 4.5:1`);
 }
 
 process.exit(failed ? 1 : 0);

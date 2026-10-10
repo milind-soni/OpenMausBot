@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 export interface TeamMapBot {
   id: string;
   name: string;
@@ -5,12 +7,12 @@ export interface TeamMapBot {
   section?: string;
   chiefOfStaff?: boolean;
   busy?: boolean;
-  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
+  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
 }
 
 export interface TeamMapSnapshot {
   collaborations: Array<{ groupId: string; botIds: [string, string]; lastAt: number }>;
-  queued: Array<{ sourceBotId: string; targetBotId: string; reason?: string }>;
+  queued: Array<{ sourceBotId: string; targetBotId: string; reason?: string; threadId?: string; groupId?: string }>;
   running: Array<{ sourceBotId: string; targetBotId: string; threadId: string; groupId?: string }>;
 }
 
@@ -28,6 +30,8 @@ export type TeamMapEdge = {
   state: "running" | "queued" | "connected";
   reason?: string;
   groupId?: string;
+  /** The thread doing the work, when the server named one. */
+  threadId?: string;
   lastAt?: number;
 };
 
@@ -42,12 +46,16 @@ export const EMPTY_TEAM_MAP_SNAPSHOT: TeamMapSnapshot = {
   running: [],
 };
 
-export function buildTeamMapSections<T extends TeamMapBot>(bots: T[]): TeamMapSection<T>[] {
+export function buildTeamMapSections<T extends TeamMapBot>(bots: T[], names: string[] = []): TeamMapSection<T>[] {
   const sections = new Map<string, T[]>();
   for (const bot of bots) {
     if (bot.hidden) continue;
     const key = bot.section?.trim() || "";
     sections.set(key, [...(sections.get(key) ?? []), bot]);
+  }
+  for (const name of names) {
+    const key = name.trim();
+    if (key && !sections.has(key)) sections.set(key, []);
   }
   return [...sections].map(([key, sectionBots]) => ({
     key,
@@ -81,6 +89,8 @@ export function buildTeamMapEdges(bots: TeamMapBot[], snapshot: TeamMapSnapshot)
       targetBotId: delegation.targetBotId,
       state: "queued",
       reason: delegation.reason,
+      groupId: delegation.groupId,
+      threadId: delegation.threadId,
     });
   }
   for (const delegation of snapshot.running) {
@@ -90,6 +100,7 @@ export function buildTeamMapEdges(bots: TeamMapBot[], snapshot: TeamMapSnapshot)
       targetBotId: delegation.targetBotId,
       state: "running",
       groupId: delegation.groupId,
+      threadId: delegation.threadId,
     });
   }
   return [...edges.values()].sort((a, b) => {
@@ -103,4 +114,9 @@ export function teamMapStatus(bot: TeamMapBot): TeamMapStatus {
   if (bot.activity === "dead" || bot.activity === "no-signal") return { label: "No signal", tone: "danger" };
   if (bot.busy || bot.activity === "working") return { label: "Working", tone: "success" };
   return { label: "Ready", tone: "idle" };
+}
+
+/** The header's bot count: "1 bot", else "{count} bots". */
+export function teamMapBotCount(count: number): string {
+  return count === 1 ? t("canvas.botCountOne") : t("canvas.botCount", { count });
 }

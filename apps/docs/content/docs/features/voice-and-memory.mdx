@@ -6,15 +6,69 @@ icon: AudioLines
 
 ## Spoken replies
 
-Add an ElevenLabs key in App Settings, choose a voice, and use the speaker control on a response. Auto-speak can read new replies as they arrive.
+Pick a voice engine in App Settings, choose a voice, and use the speaker control on a response. Auto-speak can read new replies as they arrive. Four engines are available:
+
+- **ElevenLabs** — cloud voices, needs an API key.
+- **Fish Audio** — cloud voices from the Fish Audio library, needs its own API key.
+- **Built-in Mac voices** — the voices already installed on macOS, no key.
+- **Chatterbox (local)** — an open-source, MIT-licensed engine reached through an OpenAI-compatible server you configure. With a server on your own machine there is no cloud call; the address can also point at any HTTP(S) server you choose.
 
 The harness rewrites code-heavy Markdown into speech-friendly text before synthesis. Keys remain on the harness and never reach the renderer.
 
+### Fish Audio
+
+1. Create a key in [Fish Audio API Keys](https://fish.audio/app/api-keys/).
+2. In an agent profile, choose **Fish Audio**, paste the key, and save it.
+3. Pick one of the voices returned by your Fish Audio account, then use **Try** before enabling spoken replies.
+
+Fish Audio and ElevenLabs keys are stored separately, so switching engines does not replace the other provider's credential. The picker combines popular public voices with voices owned by your Fish Audio account. Only use a voice when you have permission to do so.
+
+### Chatterbox (local)
+
+OpenMausBot speaks through any OpenAI-compatible server that runs [Chatterbox](https://github.com/resemble-ai/chatterbox) behind `POST /v1/audio/speech` — for example LocalAI with a Chatterbox model installed, or a small wrapper service around `pip install chatterbox-tts`.
+
+1. Start your Chatterbox server locally and note its address, for example `http://127.0.0.1:4123`.
+2. In App Settings, pick **Chatterbox (local)** as the voice engine, paste the server address, and set the model id your server expects (the default is `chatterbox-turbo`).
+3. Pick a voice. Voice ids come from the server's `/v1/models` listing when it has one, or `/v1/audio/voices` when it doesn't; otherwise a **Default** entry uses the server's built-in voice.
+
+There is no API key. OpenMausBot sends the text to the configured server address, so synthesis stays on your machine only when that server is local. Per-agent voice overrides work the same as with the other engines, and a dead or unreachable server is reported as a clear error instead of a hang.
+
+## Voice notes
+
+An agent can send a voice note: a short spoken message it writes itself, synthesized with the configured voice engine and attached to its reply when the turn ends. The same text becomes the note's visible caption and transcript, so the conversation stays readable — and searchable — without playing anything. Notes are limited to 1000 characters, and the same limit is enforced again at synthesis.
+
+A note posted to a shared room works the same way: the agent records the note, then attaches it to its room post, where the room members can play it inline.
+
+Voice notes can be turned off per agent. The switch sits with the voice settings in the agent profile; while it is off, the agent is not offered the voice-note tool at all, even with a voice configured.
+
+The audio itself is an mp3 file in the attachments directory on your computer, with a generated name and owner-only permissions. It counts against the same 512 MiB attachment quota as images and documents.
+
 ## Call mode
 
-On macOS, call mode combines native on-device speech recognition with the configured ElevenLabs voice. It is deliberately half-duplex: the microphone pauses while the bot speaks to prevent the app from transcribing its own audio.
+On macOS, call mode combines native on-device speech recognition with the configured voice. It is deliberately half-duplex: the microphone pauses while the bot speaks to prevent the app from transcribing its own audio.
 
 Tool progress and approval requests can be narrated during a call so long-running work does not sound disconnected.
+
+### Take turns or Live
+
+On the desktop, the call button starts the kind of call you picked last; the arrow next to it picks **Take turns** or **Live** and starts that call.
+
+- **Take turns** is the call described above: on-device listening, the bot's own voice, one side talks at a time. It needs the macOS app on This computer.
+- **Live** runs the conversation through [OpenAI GPT-Live](https://developers.openai.com/api/docs/guides/live). You can talk over it and interrupt at any time. It works on the desktop, iPhone and Android.
+
+A Live call keeps the chat open: a call bar above the composer shows the call time and a caption of what the voice says, with a settings gear, **Mute** and **Hang up**. On the desktop, Cmd+Shift+M mutes or unmutes and Cmd+Shift+H hangs up (Ctrl+Shift+M and Ctrl+Shift+H on Windows and Linux).
+
+The voice speaks as the bot, in the first person, but the bot does the work: each request goes to it as a normal message, marked "via call", with the bot's own engine, tools, memory and approvals, and the voice reads the answer back. The voice's own words appear only as captions and are not saved. While the bot works, the voice gets a quiet status note every 30 seconds, so it can say the bot is still busy instead of guessing; if a turn ends without an answer, it says the result is in the chat.
+
+A permission request, such as running a command, can be answered with a clear spoken yes or no, decided by OpenMausBot, not by the voice model; the card stays on screen too, and a card decided on the call is marked "by voice" there and in the decision log. On a Live call the microphone stays open while the voice speaks, so "okay", "sure" or "fine" on their own do not count as a yes, and words heard while the voice itself was talking are left out; say "yes" or "no". A bot's changes to itself, such as a new skill or a routine, apply without a card and can be undone on screen; proposals that change another bot or the team, such as a team setup, are decided on screen only, and when the bot waits for you to connect an app or enter a credential, the voice tells you to do it in the chat (never to say a credential aloud).
+
+A message typed during a call is answered by the bot, and the voice reads that answer once. With **Read replies to typed messages** off (under the gear), messages you type during a call and the bot's answers to them are not sent to OpenAI, with two exceptions. The voice still hears what the bot asks of you while it works on a typed message: an approval or a question (you can answer those on the call), a proposal, and a request to connect an app or enter a credential. And an answer that also covers something you said aloud is read out: lines that waited in the queue together get one answer.
+
+A Live call hangs up after 5 minutes in which nobody speaks and the bot is not working (the gear changes the minutes). It drops if its audio does not connect within 20 seconds, and on a phone it ends when you switch away from the app or lock the phone. It also ends at once when the phone that started it is unpaired, or the sign-in that started it is signed out or revoked. Voice notes do not play while you are on a Live call.
+
+Live calls need an OpenAI API key from a project with GPT-Live access; MausBot Cloud plans don't include one. The first Live call asks for it. On This computer the key stays in the operating-system credential store; on My Cloud it is saved there. Phones never receive it. OpenAI bills Live audio at about $0.05 per minute; the bot's own work is billed as usual. Live calls work in any desktop build with a microphone (no on-device dictation needed), and are for one bot at a time. Room calls always take turns.
+
+**What a Live call sends to OpenAI.** A Live call sends your voice to OpenAI, along with the chat's recent messages, the bot's answers and the details of any approval it asks for. The OpenAI key stays where you saved it: on your computer, or on My Cloud. The desktop says this where you choose Live and where you set it up; a phone says it once, before its first Live call, with **Start call** and **Cancel**. In detail: the chat's last eight text messages when the call starts (so "and the other one?" makes sense), every answer the bot gives on the call's chat (an answer to typed messages only while **Read replies to typed messages** is on, or when it also answers something you said), what a permission card asks (for example the command it wants to run), question options and proposal titles, the name of the app or credential a card waits for, the names of the bot's steps (never their arguments), and the bot's name, title and description.
 
 ## Dictation
 

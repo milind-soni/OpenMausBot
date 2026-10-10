@@ -1,0 +1,28 @@
+{
+  "id": "live-open-ended-judge",
+  "title": "Live smoke: an open-ended prompt gets a useful reply (judged)",
+  "behavior": "Against a real model, a specialist bot answers one open-ended question with a substantive reply, graded by the versioned open-ended judge prompt rather than pinned text.",
+  "bots": [
+    {
+      "key": "writer",
+      "name": "Writer"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "send",
+      "bot": "writer",
+      "text": "In two or three sentences, name one concrete practice that keeps a team's prompts reviewable and versioned, and explain why it works."
+    },
+    {
+      "kind": "waitForTurns",
+      "bot": "writer",
+      "count": 1
+    }
+  ],
+  "invariants": [
+    { "kind": "sendNotQueued", "bot": "writer" },
+    { "kind": "botReplied", "bot": "writer", "thread": "active" }
+  ],
+  "judged": { "prompt": "open-ended-v1" }
+}

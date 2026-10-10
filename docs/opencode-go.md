@@ -9,17 +9,35 @@ same runtime as the other ACP engines.
 
 1. Install the official CLI using the
    [OpenCode installation guide](https://opencode.ai/docs/).
-2. Connect the providers you want in the OpenCode app, or run
-   `opencode auth login`.
+2. Connect the providers you want in the OpenCode app, run
+   `opencode auth login`, or save the provider's key in OpenMausBot under
+   Settings → API keys → **Keys for other OpenCode providers**. On an OMB
+   Cloud, which has no terminal, save the key there.
 3. Restart OpenMausBot. It reuses OpenCode's existing connections and model
    configuration automatically.
 
+For OpenRouter, Fireworks AI, DeepSeek, Cline or your own provider, see
+[Other model providers](../apps/docs/content/docs/providers/model-providers.mdx).
+
 OpenCode includes anonymous free models. A Zen, Go, OpenRouter, or other
 provider connection expands the catalog according to the installed CLI. An
-OpenCode API key can optionally be stored under Settings → Connections. It is
+OpenCode API key can optionally be stored under Settings → API keys. It is
 write-only and injected as `OPENCODE_API_KEY` only into the OpenCode child
 process; it is not sent to the renderer, logs, analytics, snapshots, error
 messages, or command arguments.
+
+Keys for OpenCode's other providers go under **Keys for other OpenCode
+providers** in the same place, each under the environment name OpenCode reads
+it from: `VENICE_API_KEY` for Venice, `GROQ_API_KEY` for Groq, and so on. This
+works on the desktop and on My Cloud, where there is no terminal to export
+them in. Each key is write-only (Settings shows its name, never the key), is
+kept in the server's own config, and is passed only to the OpenCode process;
+saving one reloads the engines, so OpenCode lists that provider's models
+straight away. On a Cloud, a hosted team or an organization's desktop,
+OpenCode still never reads provider keys from the server's own environment;
+the keys saved here are the exception. Names OpenMausBot keeps for itself
+(`OPENCODE_*`, `OMB_*`, and the keys it saves for other engines, such as
+`XAI_API_KEY`) are refused, and up to 20 keys can be saved.
 
 OpenMausBot does not copy or rewrite `auth.json`. The OpenCode CLI remains the
 owner of provider authentication, and the same Zen or Go connection used by

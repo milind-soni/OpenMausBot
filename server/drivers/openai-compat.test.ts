@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordEvents } from "../testing/events.ts";
+import { buildTurnContext, NATIVELY_REPLAYING_DRIVER_KINDS } from "../turn-context.ts";
+import { instanceConfigs } from "../config.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
 describe("OpenAICompatDriver", () => {
@@ -22,7 +24,8 @@ describe("OpenAICompatDriver", () => {
 
   it("registers with the openai-compat kind and a display name", () => {
     expect(OpenAICompatDriver.driverKind).toBe("openai-compat");
-    expect(OpenAICompatDriver.metadata.displayName).toMatch(/OpenRouter|Groq/);
+    expect(OpenAICompatDriver.metadata.displayName).toBe("Other (OpenAI-compatible)");
+    expect(OpenAICompatDriver.metadata.access).toBe("api");
   });
 
   it("falls back to the OpenRouter endpoint by default", () => {
@@ -40,6 +43,65 @@ describe("OpenAICompatDriver", () => {
     expect(cfg.apiKeyEnv).toBe("GROQ_KEY");
   });
 
+  it("allows an isolated connection to disable an inherited OpenRouter provider pin", () => {
+    const before = process.env.OPENAI_COMPAT_PROVIDER;
+    process.env.OPENAI_COMPAT_PROVIDER = "fixture-upstream";
+    try {
+      expect(OpenAICompatDriver.decodeConfig({}).provider).toBe("fixture-upstream");
+      expect(OpenAICompatDriver.decodeConfig({ provider: "" }).provider).toBeUndefined();
+      expect(OpenAICompatDriver.decodeConfig({ provider: "another-upstream" }).provider).toBe("another-upstream");
+    } finally {
+      if (before === undefined) delete process.env.OPENAI_COMPAT_PROVIDER;
+      else process.env.OPENAI_COMPAT_PROVIDER = before;
+    }
+  });
+
+  it("keeps a provider's own instance off the workspace key, URL and model", async () => {
+    process.env.OPENAI_COMPAT_API_KEY = "workspace-key";
+    process.env.OPENAI_COMPAT_URL = "https://openrouter.ai/api/v1";
+    const before = process.env.OPENAI_COMPAT_MODEL;
+    process.env.OPENAI_COMPAT_MODEL = "meta-llama/llama-3.3-70b-instruct";
+    try {
+      const config = OpenAICompatDriver.decodeConfig({ url: "https://api.openai.com/v1", apiKeyEnv: "OMB_OPENAI_API_KEY", catalog: "openai" });
+      expect(config).toMatchObject({ url: "https://api.openai.com/v1", catalog: "openai" });
+      expect(config.model).toBeUndefined();
+      const inst = await OpenAICompatDriver.create({
+        instanceId: "openai", displayName: "OpenAI", enabled: true, config,
+        environment: { OPENAI_COMPAT_API_KEY: "workspace-key" },
+      });
+      // No OpenAI key: unavailable, never the workspace key against OpenAI.
+      expect((await inst.snapshot()).state).toBe("unavailable");
+      expect(inst.models.default).toBe("gpt-5");
+      await inst.dispose();
+      // A custom key variable still falls back, as it always has.
+      expect(OpenAICompatDriver.decodeConfig({ apiKeyEnv: "GROQ_KEY" }).model).toBe("meta-llama/llama-3.3-70b-instruct");
+    } finally {
+      if (before === undefined) delete process.env.OPENAI_COMPAT_MODEL;
+      else process.env.OPENAI_COMPAT_MODEL = before;
+    }
+  });
+
+  it("lists only OpenAI's chat models, newest first", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [
+      { id: "gpt-4.1", created: 1 },
+      { id: "text-embedding-3-large", created: 9 },
+      { id: "gpt-5", created: 3 },
+      { id: "gpt-4o-realtime-preview", created: 8 },
+      { id: "dall-e-3", created: 7 },
+      { id: "o3", created: 2 },
+      { id: "gpt-5-codex", created: 6 },
+    ] }), { status: 200 })));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "openai", displayName: "OpenAI", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.openai.com/v1", apiKeyEnv: "OMB_OPENAI_API_KEY", catalog: "openai" }),
+      environment: { OMB_OPENAI_API_KEY: "sk-fixture" },
+    });
+    await vi.waitFor(() => expect(inst.models.options.map((option) => option.id)).toEqual(["gpt-5", "o3", "gpt-4.1"]));
+    // A provider's own list is its official catalog, not custom models.
+    expect(inst.models.options.every((option) => !option.custom)).toBe(true);
+    await inst.dispose();
+  });
+
   it("reports unavailable without an API key", async () => {
     const inst = await OpenAICompatDriver.create({
       instanceId: "test-1",
@@ -52,6 +114,96 @@ describe("OpenAICompatDriver", () => {
     expect(snap.state).toBe("unavailable");
     await inst.dispose();
   });
+
+  // The setup card used to show a config.json sentence as an "Open install
+  // in Terminal" command. The key is saved in the app.
+  it("sends setup to Settings → API keys instead of a terminal", async () => {
+    expect(OpenAICompatDriver.install?.command).toBeUndefined();
+    expect(OpenAICompatDriver.install?.settings).toBe("connections");
+    expect(OpenAICompatDriver.install?.signInCommand).toContain("Settings → API keys");
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-setup", displayName: "Router", enabled: true,
+      config: { url: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENAI_COMPAT_API_KEY" }, environment: {},
+    });
+    const snap = await inst.snapshot();
+    expect(snap).toMatchObject({ state: "unavailable", reason: expect.stringContaining("Settings → API keys") });
+    expect(JSON.stringify(snap)).not.toContain("config.json");
+    await inst.dispose();
+  });
+
+  // Security: before, a hand-edited instance with its own URL and no key of
+  // its own received the workspace key and sent it to that host
+  // (verified: GET https://third-party.example.test/v1/models with
+  // "Bearer sk-or-WORKSPACE").
+  // An instance naming its own key variable reads only that variable, not
+  // the server's OPENAI_COMPAT_API_KEY either.
+  it.each([
+    ["its own URL", { url: "https://third-party.example.test/v1" }, ["WORKSPACE"]],
+    ["its own key variable", { url: "https://third-party.example.test/v1", apiKeyEnv: "THIRD_PARTY_KEY" }, ["WORKSPACE", "OPERATOR"]],
+  ])("sends the workspace key nowhere near an instance with %s", async (_label, config, absent) => {
+    process.env.OPENAI_COMPAT_API_KEY = "sk-or-OPERATOR";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      seen.push(JSON.stringify(init?.headers ?? {}));
+      return new Response('{"data":[]}', { headers: { "content-type": "application/json" } });
+    }));
+    const map = instanceConfigs({
+      openaiCompat: { key: "sk-or-WORKSPACE" },
+      instances: { claude: { driver: "claudeAgent" }, router: { driver: "openai-compat", config } },
+    });
+    const entry = map.router!;
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "router", displayName: "Router", enabled: true,
+      config: OpenAICompatDriver.decodeConfig(entry.config), environment: entry.environment as Record<string, string>,
+    });
+    await inst.refreshModels?.();
+    await inst.snapshot();
+    for (const secret of absent) expect(JSON.stringify(seen)).not.toContain(secret);
+    await inst.dispose();
+  });
+
+  it("rejects remote HTTP computer use before starting tools or a completion request", async () => {
+    const request = vi.fn(async (_url: string | URL | Request) => new Response('{"data":[]}', { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", request);
+    const inst = await OpenAICompatDriver.create({ instanceId: "cleartext", displayName: "Fixture", enabled: true,
+      config: { url: "http://remote.example.test/v1", apiKeyEnv: "FIXTURE_KEY" }, environment: { FIXTURE_KEY: "synthetic" } });
+    try {
+      await expect(inst.adapter.sendTurn({ threadId: "cleartext", text: "Inspect the screen", model: "fixture",
+        integrations: { localComputer: { command: "must-not-start", args: [], env: {} } } })).rejects.toThrow("require HTTPS");
+      expect(request.mock.calls.some(call => String(call[0]).includes("chat/completions"))).toBe(false);
+    } finally { await inst.dispose(); }
+  });
+  it("smoke: offers ask_user and returns the person's reply verbatim", async () => {
+    const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
+      + JSON.stringify(JSON.stringify({ questions: [{ question: "Ship the fixture?", options: [{ label: "Yes" }, { label: "No" }] }] }))
+      + '}}]}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const finalBody = 'data: {"choices":[{"index":0,"delta":{"content":"done"}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      bodies.push(String(init?.body));
+      return new Response(bodies.length === 1 ? askBody : finalBody, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "compat-ask", displayName: "Compat", enabled: true,
+      config: { url: "https://api.example.com/v1", apiKeyEnv: "OPENAI_COMPAT_API_KEY" },
+      environment: { OPENAI_COMPAT_API_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+    await inst.adapter.sendTurn({ threadId: "thread", text: "hi", model: "vendor/model" });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "question", tool: "ask_user", choices: ["Yes", "No"] });
+    const reply = "The user answered your questions.\n\nQ: Ship the fixture?\nA: Yes";
+    expect(await inst.adapter.respondToRequest("thread", opened.requestId!, { behavior: "answer", message: reply })).toBe("answered");
+    const completed = await recorder.until((event) => event.type === "turn.completed");
+    expect(completed).toMatchObject({ ok: true });
+    expect(bodies[0]).toContain('"ask_user"');
+    expect(JSON.parse(JSON.parse(bodies[1]!).messages.at(-1).content).result).toBe(reply);
+    recorder.stop();
+    await inst.dispose();
+  }, 20_000);
 
   it("exposes a refreshed model catalog", async () => {
     vi.stubGlobal(
@@ -78,17 +230,21 @@ describe("OpenAICompatDriver", () => {
 
     await inst.refreshModels?.();
 
+    // Every option carries `custom: true`: this engine advertises
+    // `access: "custom"`, and the picker renders only custom-flagged options
+    // for such engines — an unflagged one is invisible in its own picker.
     expect(inst.models).toEqual({
       default: "vendor/model-a",
       options: [
-        { id: "vendor/model-a", label: "Model A" },
-        { id: "vendor/model-b", label: "vendor/model-b" },
+        { id: "vendor/model-a", label: "Model A", custom: true },
+        { id: "vendor/model-b", label: "vendor/model-b", custom: true },
       ],
     });
     await inst.dispose();
   });
 
-  it("includes streamed token totals in turn.completed", async () => {
+  it("includes streamed token totals and bounds the cancellable stream", async () => {
+    const anySignal = vi.spyOn(AbortSignal, "any");
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL | Request) => {
@@ -115,7 +271,796 @@ describe("OpenAICompatDriver", () => {
     const completed = await recorder.until((event) => event.type === "turn.completed");
 
     expect(completed).toMatchObject({ ok: true, usage: { input: 12, output: 3 } });
+    expect(anySignal).toHaveBeenCalledTimes(1);
     recorder.stop();
     await inst.dispose();
   });
+
+  it("streams reasoning separately and completes only actual assistant text", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith("/models")) {
+          return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        }
+        return new Response(
+          'data: {"choices":[{"delta":{"reasoning_content":"thinking"}}]}\n' +
+            'data: {"choices":[{"delta":{"content":"answer"}}]}\n' +
+            "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-reasoning-stream",
+      displayName: "Reasoning",
+      enabled: true,
+      config: { url: "https://example.test/v1", apiKeyEnv: "TEST_KEY" },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({ threadId: "reasoning-thread", text: "question", model: "vendor/model" });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    expect(recorder.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "content.delta", streamKind: "reasoning_text", delta: "thinking" }),
+      expect.objectContaining({ type: "content.delta", streamKind: "assistant_text", delta: "answer" }),
+      expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: "answer" }),
+    ]));
+    expect(recorder.events).not.toContainEqual(
+      expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: "thinking" }),
+    );
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("uses reasoning as a helper-model fallback when normal content is whitespace", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith("/models")) {
+          return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: "  ", reasoning_content: "usable result" } }],
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-reasoning-helper",
+      displayName: "Reasoning helper",
+      enabled: true,
+      config: { url: "https://example.test/v1", apiKeyEnv: "TEST_KEY" },
+      environment: { TEST_KEY: "secret" },
+    });
+
+    await expect(inst.generateText?.("question")).resolves.toBe("usable result");
+    await inst.dispose();
+  });
+
+  it("falls back to reasoning_content when content is empty (streaming)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        if (String(input).endsWith("/models")) {
+          return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        }
+        return new Response(
+          'data: {"choices":[{"delta":{"reasoning_content":"thinking through the problem"}}]}\n' +
+            'data: {"choices":[{"delta":{"content":""}}]}\n' +
+            'data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":5}}\n' +
+            "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-reasoning-fallback-stream",
+      displayName: "Reasoning Fallback",
+      enabled: true,
+      config: { url: "https://example.test/v1", apiKeyEnv: "TEST_KEY" },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({ threadId: "thread-rf", text: "prompt", model: "vendor/model" });
+    const item = await recorder.until((e) => e.type === "item.completed");
+    const completed = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(item).toMatchObject({
+      type: "item.completed",
+      itemType: "assistant_text",
+      text: "thinking through the problem",
+    });
+    expect(completed).toMatchObject({ ok: true, usage: { input: 10, output: 5 } });
+
+    const deltas = recorder.events.filter((e) => e.type === "content.delta");
+    expect(deltas.some((d: any) => d.streamKind === "reasoning_text" && d.delta === "thinking through the problem")).toBe(true);
+
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("decodes a default model and provider from config", () => {
+    const cfg = OpenAICompatDriver.decodeConfig({
+      model: "deepseek/deepseek-v4-flash-0731",
+      provider: "fireworks",
+    });
+    expect(cfg.model).toBe("deepseek/deepseek-v4-flash-0731");
+    expect(cfg.provider).toBe("fireworks");
+  });
+
+  it("seeds the picker with the configured default model", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200 })),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-default-model",
+      displayName: "Default model",
+      enabled: true,
+      config: {
+        url: "https://openrouter.ai/api/v1",
+        apiKeyEnv: "TEST_KEY",
+        model: "deepseek/deepseek-v4-flash-0731",
+      },
+      environment: { TEST_KEY: "secret" },
+    });
+    expect(inst.models.default).toBe("deepseek/deepseek-v4-flash-0731");
+    expect(inst.models.options.some((o) => o.id === "deepseek/deepseek-v4-flash-0731")).toBe(true);
+    await inst.dispose();
+  });
+
+  it("pins the OpenRouter upstream provider in the request body", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-provider-route",
+      displayName: "Provider route",
+      enabled: true,
+      config: {
+        url: "https://openrouter.ai/api/v1",
+        apiKeyEnv: "TEST_KEY",
+        provider: "fireworks",
+      },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({
+      threadId: "thread-p",
+      text: "prompt",
+      model: "deepseek/deepseek-v4-flash-0731",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(sentBody?.model).toBe("deepseek/deepseek-v4-flash-0731");
+    expect(sentBody?.provider).toEqual({ order: ["fireworks"], allow_fallbacks: false });
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("U24 retest: requests stream_options.include_usage on a streamed turn, like minimax.ts does", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' +
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    // Local OpenAI-compatible servers (oMLX in particular) only emit a usage
+    // object in the stream when the client explicitly requests it via
+    // stream_options.include_usage -- without it every streamed turn against
+    // such a server gets no token-usage accounting at all.
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-include-usage",
+      displayName: "Include usage",
+      enabled: true,
+      config: { url: "http://host.lima.internal:9090/v1", apiKeyEnv: "TEST_KEY" },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({ threadId: "thread-u24", text: "prompt" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(sentBody?.stream).toBe(true);
+    expect(sentBody?.stream_options).toEqual({ include_usage: true });
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("does not double the transcript when the thread was rewound", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"ok"}}]}\n' +
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const transcript = [
+      { role: "user" as const, text: "u25-sentinel-first-message" },
+      { role: "assistant" as const, text: "u25-sentinel-first-reply" },
+    ];
+    // Mirrors server/index.ts's real call: buildTurnContext only inlines the
+    // transcript into turnText when the driver is NOT in
+    // NATIVELY_REPLAYING_DRIVER_KINDS. openai-compat's runtime already
+    // replays via SendTurnInput.transcript (messagesFor() in
+    // openai-chat.ts), so both must not fire for the same turn.
+    const { turnText } = buildTurnContext({
+      text: "second message",
+      transcript,
+      rewound: true,
+      fresh: false,
+      externallyUpdated: false,
+      replaysNatively: NATIVELY_REPLAYING_DRIVER_KINDS.includes("openai-compat"),
+    });
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-u25",
+      displayName: "U25",
+      enabled: true,
+      config: { url: "http://host.lima.internal:9090/v1", apiKeyEnv: "TEST_KEY" },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    // index.ts ALSO passes the raw transcript on SendTurnInput, which
+    // messagesFor() in openai-chat.ts turns into its own chat messages. Both
+    // would land in the same outgoing request if replaysNatively were wrong.
+    await inst.adapter.sendTurn({ threadId: "thread-u25", text: turnText, transcript });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const serialized = JSON.stringify(sentBody?.messages);
+    const occurrences = serialized.split("u25-sentinel-first-message").length - 1;
+    expect(occurrences).toBe(1);
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("keeps the system message to the stable half and carries the volatile half in the newest user message", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-prompt-split",
+      displayName: "Prompt split",
+      enabled: true,
+      config: { url: "http://localhost:9/v1", apiKeyEnv: "TEST_KEY" },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({
+      threadId: "thread-prompt-split",
+      text: "hello",
+      system: "Standing rules.\n\nMemory: likes quiet hours.",
+      systemStable: "Standing rules.",
+      systemVolatile: "Memory: likes quiet hours.",
+      transcript: [
+        { role: "user" as const, text: "earlier" },
+        { role: "assistant" as const, text: "answer" },
+      ],
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    // The resent prefix (system + transcript) must stay byte-identical when
+    // the volatile half changes, so only the stable half may sit in the
+    // system message. The volatile half rides the newest user message
+    // whenever the replayed history does not already carry it.
+    const messages: any[] = sentBody?.messages ?? [];
+    expect(messages[0]).toEqual({ role: "system", content: "Standing rules." });
+    expect(messages.slice(1, 3)).toEqual([
+      { role: "user", content: "earlier" },
+      { role: "assistant", content: "answer" },
+    ]);
+    expect(messages.at(-1)).toEqual({
+      role: "user",
+      content: "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: likes quiet hours.\n\nhello",
+    });
+
+    // A turn without the split keeps the legacy single-block shape.
+    await inst.adapter.sendTurn({
+      threadId: "thread-prompt-split-legacy",
+      text: "bare",
+      system: "Whole block.",
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "thread-prompt-split-legacy");
+    const legacy: any[] = sentBody?.messages ?? [];
+    expect(legacy[0]).toEqual({ role: "system", content: "Whole block." });
+    expect(legacy.at(-1)).toEqual({ role: "user", content: "bare" });
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  describe("replays what each earlier user message actually carried", () => {
+    const NOTE = "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\n";
+    // index.ts stamps the turn text (clock, recall) but stores only what the
+    // person typed, which is what later turns get back as transcript.
+    const clock = (minute: string) => `Current time when this message was sent: Friday, 2026-10-09 18:${minute} UTC (UTC+00:00).\n\n`;
+
+    const fixture = async () => {
+      const bodies: any[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+          if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+          bodies.push(JSON.parse(String(init?.body)));
+          return new Response(
+            'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          );
+        }),
+      );
+      const inst = await OpenAICompatDriver.create({
+        instanceId: "test-replay-notes",
+        displayName: "Replay notes",
+        enabled: true,
+        config: { url: "http://localhost:9/v1", apiKeyEnv: "TEST_KEY" },
+        environment: { TEST_KEY: "secret" },
+      });
+      const recorder = recordEvents(inst.adapter);
+      let turns = 0;
+      const send = async (input: { text: string; volatile: string; transcript: Array<{ role: "user" | "assistant"; text: string }>; threadId?: string; mentionTurn?: boolean; recalled?: string }) => {
+        const threadId = input.threadId ?? "thread-replay";
+        const settled = ++turns;
+        await inst.adapter.sendTurn({
+          threadId,
+          text: input.text,
+          system: `Standing rules.\n\n${input.volatile}`,
+          systemStable: "Standing rules.",
+          systemVolatile: input.volatile,
+          transcript: input.transcript,
+          ...(input.mentionTurn ? { mentionTurn: true } : {}),
+          ...(input.recalled ? { recalled: input.recalled } : {}),
+        });
+        await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId &&
+          recorder.events.filter((x) => x.type === "turn.completed").length >= settled);
+        return bodies.at(-1)!.messages as any[];
+      };
+      return { send, done: async () => { recorder.stop(); await inst.dispose(); } };
+    };
+
+    it("keeps the previous request a byte-identical prefix when the volatile half is unchanged", async () => {
+      const { send, done } = await fixture();
+      const first = await send({ text: clock("00") + "hello", volatile: "Memory: likes tea.", transcript: [] });
+      const second = await send({
+        text: clock("01") + "next",
+        volatile: "Memory: likes tea.",
+        transcript: [{ role: "user", text: "hello" }, { role: "assistant", text: "hi" }],
+      });
+      expect(second.slice(0, first.length)).toEqual(first);
+      expect(first.at(-1)).toEqual({ role: "user", content: NOTE + "Memory: likes tea.\n\n" + clock("00") + "hello" });
+      // The note is still in the replayed history, so it is not repeated.
+      expect(second.slice(first.length)).toEqual([
+        { role: "assistant", content: "hi" },
+        { role: "user", content: clock("01") + "next" },
+      ]);
+      await done();
+    });
+
+    it("keeps the prefix and appends the new note when the volatile half changes", async () => {
+      const { send, done } = await fixture();
+      const first = await send({ text: clock("00") + "hello", volatile: "Memory: likes tea.", transcript: [] });
+      const second = await send({
+        text: clock("01") + "next",
+        volatile: "Memory: likes coffee.",
+        transcript: [{ role: "user", text: "hello" }, { role: "assistant", text: "hi" }],
+      });
+      expect(second.slice(0, first.length)).toEqual(first);
+      expect(second.at(-1)).toEqual({ role: "user", content: NOTE + "Memory: likes coffee.\n\n" + clock("01") + "next" });
+      // Clearing the volatile half announces it instead of going silent.
+      const third = await send({
+        text: "again",
+        volatile: "",
+        transcript: [
+          { role: "user", text: "hello" }, { role: "assistant", text: "hi" },
+          { role: "user", text: "next" }, { role: "assistant", text: "hi" },
+        ],
+      });
+      expect(third.slice(0, second.length)).toEqual(second);
+      expect(third.at(-1)).toEqual({
+        role: "user",
+        content: "The OpenMausBot context notes from earlier in this conversation have been cleared; the standing instructions still apply.\n\nagain",
+      });
+      await done();
+    });
+
+    it("re-delivers the note once the message that carried it leaves the replayed window", async () => {
+      const { send, done } = await fixture();
+      await send({ text: "hello", volatile: "Memory: likes tea.", transcript: [] });
+      await send({ text: "next", volatile: "Memory: likes tea.", transcript: [{ role: "user", text: "hello" }, { role: "assistant", text: "hi" }] });
+      const trimmed = await send({
+        text: "third",
+        volatile: "Memory: likes tea.",
+        transcript: [
+          { role: "assistant", text: "[2 earlier messages omitted from this context; full history remains in the app.]" },
+          { role: "user", text: "next" }, { role: "assistant", text: "hi" },
+        ],
+      });
+      expect(trimmed.slice(1, -1)).toEqual([
+        { role: "assistant", content: "[2 earlier messages omitted from this context; full history remains in the app.]" },
+        { role: "user", content: "next" },
+        { role: "assistant", content: "hi" },
+      ]);
+      expect(trimmed.at(-1)).toEqual({ role: "user", content: NOTE + "Memory: likes tea.\n\nthird" });
+      await done();
+    });
+
+    it("leaves automatic recall out of the replay and keeps the added bytes bounded", async () => {
+      const { send, done } = await fixture();
+      const transcript: Array<{ role: "user" | "assistant"; text: string }> = [];
+      const bytes = (messages: any[]) => Buffer.byteLength(JSON.stringify(messages));
+      let previous: any[] = [];
+      for (let turn = 0; turn < 20; turn++) {
+        const minute = String(turn).padStart(2, "0");
+        const recalled = `<recalled turn="${turn}">\n${"r".repeat(6000)}\n</recalled>`;
+        const typed = `message ${turn}`;
+        const messages = await send({
+          text: `${clock(minute)}${recalled}\n\n${typed}`,
+          recalled,
+          // a volatile half that changes every turn puts a fresh note on each one
+          volatile: `Recent work: ${"w".repeat(2000)} ${turn}`,
+          transcript: [...transcript],
+        });
+        expect(messages.at(-1).content).toContain(recalled);
+        // Everything before the previous user message is resent unchanged;
+        // that message itself is replayed without the recall it carried.
+        if (turn > 0) expect(messages.slice(0, previous.length - 1)).toEqual(previous.slice(0, -1));
+        for (const message of messages.slice(1, -1)) expect(message.content).not.toContain("<recalled");
+        const stored = [{ role: "system", content: "Standing rules." }, ...transcript.map((m) => ({ role: m.role, content: m.text }))];
+        expect(bytes(messages.slice(0, -1)) - bytes(stored)).toBeLessThanOrEqual(24_000 + 2_000);
+        previous = messages;
+        transcript.push({ role: "user", text: typed }, { role: "assistant", text: "hi" });
+      }
+      await done();
+    });
+
+    it("does not lend a record to a later identical message it did not send", async () => {
+      const { send, done } = await fixture();
+      await send({ text: clock("00") + "continue", volatile: "Memory: likes tea.", transcript: [] });
+      // A second "continue" went to another engine, which this runtime never saw.
+      const messages = await send({
+        text: clock("05") + "next",
+        volatile: "Memory: likes tea.",
+        transcript: [
+          { role: "user", text: "continue" }, { role: "assistant", text: "hi" },
+          { role: "user", text: "continue" }, { role: "assistant", text: "done" },
+        ],
+      });
+      expect(messages.slice(1, -1)).toEqual([
+        { role: "user", content: NOTE + "Memory: likes tea.\n\n" + clock("00") + "continue" },
+        { role: "assistant", content: "hi" },
+        { role: "user", content: "continue" },
+        { role: "assistant", content: "done" },
+      ]);
+      await done();
+    });
+
+    it("still delivers the note on a mention turn and on a thread it has not seen", async () => {
+      const { send, done } = await fixture();
+      await send({ text: "hello", volatile: "Tagged: @Testy", transcript: [] });
+      const mention = await send({
+        text: "@Testy again",
+        volatile: "Tagged: @Testy",
+        transcript: [{ role: "user", text: "hello" }, { role: "assistant", text: "hi" }],
+        mentionTurn: true,
+      });
+      expect(mention.at(-1)).toEqual({ role: "user", content: NOTE + "Tagged: @Testy\n\n@Testy again" });
+      // A thread rebuilt after a restart has no record: its transcript goes
+      // out as stored and the newest message carries the note, as before.
+      const unseen = await send({
+        threadId: "thread-unseen",
+        text: "later",
+        volatile: "Memory: likes tea.",
+        transcript: [{ role: "user", text: "hello" }, { role: "assistant", text: "hi" }],
+      });
+      expect(unseen.slice(1)).toEqual([
+        { role: "user", content: "hello" },
+        { role: "assistant", content: "hi" },
+        { role: "user", content: NOTE + "Memory: likes tea.\n\nlater" },
+      ]);
+      await done();
+    });
+  });
+
+  it("omits provider routing on non-OpenRouter endpoints even when configured", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-groq-no-provider",
+      displayName: "Groq strict",
+      enabled: true,
+      config: {
+        url: "https://api.groq.com/openai/v1",
+        apiKeyEnv: "TEST_KEY",
+        provider: "fireworks",
+      },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({ threadId: "thread-g", text: "prompt", model: "vendor/model" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    // Strict OpenAI-compatible endpoints (Groq et al.) reject unknown
+    // top-level fields — `provider` is OpenRouter-only routing.
+    expect(sentBody).not.toBeNull();
+    expect("provider" in sentBody).toBe(false);
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("does not treat a lookalike host as OpenRouter", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-lookalike",
+      displayName: "Lookalike host",
+      enabled: true,
+      config: {
+        // hostname is NOT openrouter.ai — substring matching on the whole
+        // URL would be fooled by a lookalike domain or a path segment
+        url: "https://notopenrouter.ai/api/v1",
+        apiKeyEnv: "TEST_KEY",
+        provider: "fireworks",
+      },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({ threadId: "thread-l", text: "prompt", model: "vendor/model" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(sentBody).not.toBeNull();
+    expect("provider" in sentBody).toBe(false);
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("pins the provider on an OpenRouter subdomain", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-subdomain",
+      displayName: "OpenRouter subdomain",
+      enabled: true,
+      config: {
+        url: "https://gateway.openrouter.ai/api/v1",
+        apiKeyEnv: "TEST_KEY",
+        provider: "fireworks",
+      },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({ threadId: "thread-s", text: "prompt", model: "vendor/model" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(sentBody?.provider).toEqual({ order: ["fireworks"], allow_fallbacks: false });
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("aborts when the idle period elapses between stream chunks", async () => {
+    vi.useFakeTimers();
+    try {
+      let controller: ReadableStreamDefaultController<Uint8Array>;
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+      });
+
+      const encoder = new TextEncoder();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+          if (String(input).endsWith("/models")) {
+            return new Response(JSON.stringify({ data: [] }), { status: 200 });
+          }
+          init?.signal?.addEventListener("abort", () => {
+            try {
+              controller.error(init.signal?.reason ?? new DOMException("Aborted", "AbortError"));
+            } catch {}
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          });
+        }),
+      );
+
+      const inst = await OpenAICompatDriver.create({
+        instanceId: "test-idle-timeout-fail",
+        displayName: "Idle Timeout Fail",
+        enabled: true,
+        config: { url: "https://example.test/v1", apiKeyEnv: "TEST_KEY" },
+        environment: { TEST_KEY: "secret" },
+      });
+      const recorder = recordEvents(inst.adapter);
+
+      await inst.adapter.sendTurn({ threadId: "thread-idle-fail", text: "prompt", model: "vendor/model" });
+
+      // First chunk arrives immediately
+      controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"part 1"}}]}\n\n'));
+
+      // Advance clock past idle timeout without any new chunks
+      await vi.advanceTimersByTimeAsync(185_000);
+
+      const completed = await recorder.until((e) => e.type === "turn.completed");
+      // A provider that stops delivering chunks failed; the person did not press Stop.
+      expect(completed).toMatchObject({ ok: false, stopReason: "error" });
+
+      recorder.stop();
+      await inst.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not abort after 120s if the stream continues receiving active chunks (renewable idle timeout)", async () => {
+    vi.useFakeTimers();
+    try {
+      let controller: ReadableStreamDefaultController<Uint8Array>;
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+      });
+
+      const encoder = new TextEncoder();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+          if (String(input).endsWith("/models")) {
+            return new Response(JSON.stringify({ data: [] }), { status: 200 });
+          }
+          init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+          return new Response(stream, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          });
+        }),
+      );
+
+      const inst = await OpenAICompatDriver.create({
+        instanceId: "test-idle-timeout-renew",
+        displayName: "Idle Timeout Renew",
+        enabled: true,
+        config: { url: "https://example.test/v1", apiKeyEnv: "TEST_KEY" },
+        environment: { TEST_KEY: "secret" },
+      });
+      const recorder = recordEvents(inst.adapter);
+
+      await inst.adapter.sendTurn({ threadId: "thread-idle-renew", text: "prompt", model: "vendor/model" });
+
+      // Chunk 1 at t=0s
+      controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"start "}}]}\n\n'));
+      await vi.advanceTimersByTimeAsync(100_000);
+
+      // Chunk 2 at t=100s (resets idle timer)
+      controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"middle "}}]}\n\n'));
+      await vi.advanceTimersByTimeAsync(100_000);
+
+      // Chunk 3 at t=200s (resets idle timer)
+      controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"end"}}]}\n\n'));
+      await vi.advanceTimersByTimeAsync(100_000);
+
+      // Total 300s exceeds both the old 120s limit and the new 180s idle limit.
+      controller!.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller!.close();
+
+      const completed = await recorder.until((e) => e.type === "turn.completed");
+      expect(completed).toMatchObject({ ok: true });
+
+      const item = recorder.events.find((e) => e.type === "item.completed");
+      expect(item).toMatchObject({ text: "start middle end" });
+      expect(vi.getTimerCount()).toBe(0);
+
+      recorder.stop();
+      await inst.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("omits provider routing when none is configured", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }));
+      sentBody = JSON.parse(String(init?.body));
+      return new Response('data: {"choices":[{"delta":{"content":"hi"}}]}\ndata: [DONE]\n');
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-no-provider", displayName: "No provider", enabled: true,
+      config: { url: "https://openrouter.ai/api/v1", apiKeyEnv: "TEST_KEY" }, environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+    try {
+      await inst.adapter.sendTurn({ threadId: "thread-np", text: "prompt", model: "vendor/model" });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(sentBody).not.toBeNull();
+      expect(sentBody).not.toHaveProperty("provider");
+    } finally {
+      recorder.stop();
+      await inst.dispose();
+    }
+  });
+});
+
+
+it("openai-compat preserves an explicit tools-off connection and rejects ambiguous flags", () => {
+  expect(OpenAICompatDriver.decodeConfig({})).not.toHaveProperty("tools");
+  expect(OpenAICompatDriver.decodeConfig({ tools: false })).toMatchObject({ tools: false });
+  expect(OpenAICompatDriver.decodeConfig({ tools: true })).toMatchObject({ tools: true });
+  expect(() => OpenAICompatDriver.decodeConfig({ tools: "false" })).toThrow("tools must be a boolean");
 });

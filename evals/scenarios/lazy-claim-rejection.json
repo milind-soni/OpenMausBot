@@ -1,0 +1,33 @@
+{
+  "id": "lazy-claim-rejection",
+  "title": "A rejected lazy claim ends its turn with one terminal error and stays fail-closed",
+  "behavior": "When the Local VM dies between dispatch and the first screen call, the fired lazy claim rejects: the firing call is refused honestly instead of as contention, exactly one terminal computer-unavailable error activity lands, the turn ends with the bot idle rather than busy behind a refusing gate, and a later screen call fails because teardown revoked the bridge capability.",
+  "issue": 1369,
+  "world": "localVm",
+  "gates": ["autoTurn"],
+  "bots": [
+    {
+      "key": "auto",
+      "name": "Rejected claim Auto",
+      "browser": false,
+      "turns": [
+        { "gate": "autoTurn", "reply": "Screenshot taken and reviewed" }
+      ]
+    }
+  ],
+  "steps": [
+    { "kind": "send", "bot": "auto", "text": "Use the VM when it is ready." },
+    { "kind": "waitForBusy", "bot": "auto", "busy": true, "timeoutMs": 20000 },
+    { "kind": "captureComputer", "bot": "auto" },
+    { "kind": "setVmState", "state": { "failed": true } },
+    { "kind": "pollComputerGate", "bot": "auto", "saveAs": "firstScreenCall" },
+    { "kind": "waitForBusy", "bot": "auto", "busy": false, "timeoutMs": 20000 },
+    { "kind": "pollComputerGate", "bot": "auto", "saveAs": "laterScreenCall" }
+  ],
+  "assertions": [
+    { "kind": "gateAnswer", "of": "firstScreenCall", "held": true, "blockedReasonIncludes": "This turn could not claim the Local VM (", "blockedReasonOmits": "Another thread" },
+    { "kind": "activityCount", "bot": "auto", "prefix": "error: computer unavailable", "count": 1 },
+    { "kind": "noActivityPrefix", "bot": "auto", "prefix": "Waiting for its turn" },
+    { "kind": "gateAnswer", "of": "laterScreenCall", "httpStatus": 401 }
+  ]
+}

@@ -16,9 +16,9 @@
 // options set over the wire (session/set_model, session/set_mode), which is
 // why both live in configureSession() below and NOT in spawnArgs.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { userHome } from "../../env-path.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -37,7 +37,7 @@ import { createAcpDriver, type AcpSupport } from "./core.ts";
 const AUTH_FILES = ["auth.v2.file", "auth.v2.loginkeychain", "auth.v2.keyring"];
 
 function authFilePaths(env: Record<string, string | undefined>) {
-  const home = env.FACTORY_HOME_OVERRIDE || env.HOME || homedir();
+  const home = env.FACTORY_HOME_OVERRIDE || userHome(env);
   return AUTH_FILES.map((name) => join(home, ".factory", name));
 }
 
@@ -68,10 +68,6 @@ export function droidInjectId(host: string, model: string): string {
   return `${INJECT_ID_PREFIX}${safe}`;
 }
 
-function factoryHome(env: Record<string, string | undefined>): string {
-  return env.FACTORY_HOME_OVERRIDE || env.HOME || env.USERPROFILE || homedir();
-}
-
 /** Upsert a BYOK custom model so session/set_model can reach the local host. */
 export function ensureDroidInjectModel(
   modelId: string,
@@ -83,7 +79,7 @@ export function ensureDroidInjectModel(
   if (!host) return modelId;
 
   const id = droidInjectId(inject.host, inject.model);
-  const dir = join(factoryHome(env), ".factory");
+  const dir = join(env.FACTORY_HOME_OVERRIDE || userHome(env), ".factory");
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "settings.json");
   let settings: FactorySettings & Record<string, unknown> = {};
@@ -137,7 +133,7 @@ export function applyDroidLocalAuthEnv(
 }
 
 function readSettings(env: Record<string, string | undefined>): FactorySettings {
-  return JSON.parse(readFileSync(join(factoryHome(env), ".factory", "settings.json"), "utf8")) as FactorySettings;
+  return JSON.parse(readFileSync(join(env.FACTORY_HOME_OVERRIDE || userHome(env), ".factory", "settings.json"), "utf8")) as FactorySettings;
 }
 
 async function resolveModels(env: Record<string, string | undefined>) {

@@ -1,0 +1,26 @@
+name: Stop CI for closed PRs
+
+# GitHub keeps running a PR's checks after the PR is merged or closed, and a
+# burst of merges used to leave dozens of dead runs holding the account's
+# five macOS runners. Joining ci.yml's concurrency group for this PR with
+# cancel-in-progress stops whatever CI run the PR still has.
+on:
+  pull_request:
+    types: [closed]
+
+permissions: {}
+
+concurrency:
+  # Must match ci.yml's group for pull_request events. Named by the PR's
+  # number: for a merged PR github.ref is the base branch, and a ref-named
+  # group cancelled main's own CI run on every merge.
+  group: ci-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  stop:
+    name: stop this PR's CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "PR closed; its CI run (if any) was cancelled."

@@ -1,0 +1,16 @@
+:80 {
+	map {host} {upstream_scheme} {
+		{$OMB_HTTPS_HOST:https-disabled.invalid} {$OMB_UPSTREAM_SCHEME:http}
+		default http
+	}
+	encode zstd gzip
+	handle /hooks/* {
+		reverse_proxy 127.0.0.1:8800
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8799 {
+			header_up X-Forwarded-Proto {upstream_scheme}
+			flush_interval -1
+		}
+	}
+}

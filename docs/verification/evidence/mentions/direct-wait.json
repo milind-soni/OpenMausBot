@@ -1,0 +1,72 @@
+{
+  "status": "settled",
+  "targetType": "bot",
+  "targetId": "c0a6c8fb-aa36-4d71-b090-aecf4627a161",
+  "taskId": "bd67bdb2-ae4a-40fc-9b1b-13148eb222de",
+  "target": {
+    "id": "c0a6c8fb-aa36-4d71-b090-aecf4627a161",
+    "name": "Atlas",
+    "title": "",
+    "description": "",
+    "section": null,
+    "chiefOfStaff": false,
+    "modelSelection": {
+      "instanceId": "claude",
+      "model": "claude-sonnet-5"
+    },
+    "busy": false,
+    "activity": "idle",
+    "unread": true,
+    "activeTaskId": "bd67bdb2-ae4a-40fc-9b1b-13148eb222de",
+    "tasks": [
+      {
+        "taskId": "bd67bdb2-ae4a-40fc-9b1b-13148eb222de",
+        "title": "@Juniper Check this direct message.",
+        "createdAt": 1788788644009,
+        "active": true,
+        "usage": {
+          "input": 12,
+          "output": 5,
+          "cachedInput": 2,
+          "costUsd": 0.01,
+          "turns": 1
+        }
+      }
+    ]
+  },
+  "messages": [
+    {
+      "id": "6af8ffb7-9e22-4c03-bd1b-1aa7f216d650",
+      "at": 1788788644020,
+      "role": "bot",
+      "kind": "text",
+      "text": "Hi, I'm Atlas. What would you like me to do?"
+    },
+    {
+      "id": "1c09653e-1e2a-44e1-acfa-f56661a70637",
+      "at": 1788789106360,
+      "role": "user",
+      "kind": "text",
+      "text": "@Juniper Check this direct message."
+    },
+    {
+      "id": "ad1f2254-256c-4ef0-9969-8c23a6b14e51",
+      "at": 1788789106571,
+      "role": "bot",
+      "kind": "text",
+      "text": "hello from fake claude"
+    },
+    {
+      "id": "a96217dd-7425-4cc6-8f6b-9a2d7698b2e1",
+      "at": 1788789106573,
+      "role": "bot",
+      "kind": "activity",
+      "tool": {
+        "name": "Bash",
+        "ok": true,
+        "spoken": "running a command"
+      }
+    }
+  ],
+  "hasMore": false
+}

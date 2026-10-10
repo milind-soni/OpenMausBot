@@ -7,8 +7,8 @@ protocols:
     schemes: [openmausbot]
 
 # In-app auto-update reads latest-mac.yml + the .zip (macOS) or latest.yml +
-# the NSIS .exe (Windows) from this PUBLIC releases repo (separate from the
-# source repo). Public → no token on users' machines. Baked into
+# the NSIS .exe (Windows) from the PUBLIC releases in this source repo.
+# Public → no token on users' machines. Baked into
 # app-update.yml; both metadata files are emitted here even with
 # --publish never, and must be uploaded to the GitHub release alongside the
 # artifacts — a release missing latest.yml leaves every Windows install
@@ -16,7 +16,7 @@ protocols:
 publish:
   - provider: github
     owner: milind-soni
-    repo: openmausbot-releases
+    repo: OpenMausBot
 
 directories:
   buildResources: build
@@ -38,6 +38,8 @@ files:
   - "!electron/resources/speech-helper.swift"
   - "!electron/resources/speech-helper-Info.plist"
   - "!electron/resources/OpenMausBot Speech.app/**"
+  # The Teach a skill recorder is gone, but a machine that once ran
+  # `pnpm build:recorder` may still hold its helper build; never ship it.
   - "!electron/resources/recorder-helper"
   - "!electron/resources/recorder-helper.swift"
   - "!electron/resources/recorder-helper-Info.plist"
@@ -60,6 +62,15 @@ extraResources:
     to: licenses/cloudflared-LICENSE.txt
   - from: third_party/cloudflared/README.md
     to: licenses/cloudflared-README.md
+  - from: third_party/hpke-js/core-LICENSE.txt
+    to: licenses/hpke-core-LICENSE.txt
+  - from: third_party/hpke-js/common-LICENSE.txt
+    to: licenses/hpke-common-LICENSE.txt
+  # The model provider catalog: models.dev data and OpenCode's refresh logic.
+  - from: third_party/models-dev/LICENSE
+    to: licenses/models-dev-LICENSE.txt
+  - from: third_party/opencode/LICENSE
+    to: licenses/opencode-LICENSE.txt
   - from: dist
     to: ui
   - from: dist-server
@@ -75,7 +86,7 @@ extraResources:
 
 mac:
   # Two single-arch artifacts rather than one universal binary: the app is
-  # ~177 MB per arch, and universal would make every user download both halves.
+  # architecture-specific, and universal would make users download both halves.
   # electron-updater picks by filename (arm64-marked files on Apple silicon,
   # unmarked ones on Intel), so latest-mac.yml must list all four files.
   target:
@@ -93,8 +104,6 @@ mac:
   extraResources:
     - from: electron/resources/OpenMausBot Speech.app
       to: OpenMausBot Speech.app
-    - from: electron/resources/OpenMausBot Recorder.app
-      to: OpenMausBot Recorder.app
     # CUA must live outside ASAR. prepare-cua stages the signed executable and
     # a self-contained JS/native SDK bundle selected for macOS arm64.
     # ${arch} resolves per built arch — each bundle carries its own natives
@@ -104,6 +113,15 @@ mac:
       to: cua-sdk
     - from: dist-native/cloudflared/darwin-${arch}/cloudflared
       to: cloudflared/cloudflared
+    - from: dist-native/browser/darwin-${arch}
+      to: browser-engine
+    # The Data engine's native modules (DuckDB, resvg; server/data/engine.ts)
+    # as a node_modules tree the server requires at runtime; prepare-duckdb
+    # stages this arch's slice. The copy names the node_modules directory
+    # itself: electron-builder's resource filter drops a root-level
+    # node_modules entry of any tree it copies (app-builder-lib util/filter).
+    - from: dist-native/duckdb/darwin-${arch}/node_modules
+      to: duckdb/node_modules
   extendInfo:
     NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
     NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
@@ -130,6 +148,17 @@ win:
   extraResources:
     - from: dist-native/cloudflared/win32-x64/cloudflared.exe
       to: cloudflared/cloudflared.exe
+    - from: dist-native/browser/win32-x64
+      to: browser-engine
+    - from: dist-native/duckdb/win32-x64/node_modules
+      to: duckdb/node_modules
+    # CUA driver and SDK for Windows — must live outside ASAR for native modules
+    - from: dist-native/cua-win32-x64/cua-driver.exe
+      to: cua-driver.exe
+    - from: dist-native/cua-win32-x64/cua-driver-background.exe
+      to: cua-driver-background.exe
+    - from: dist-native/cua-win32-x64/cua-sdk
+      to: cua-sdk
   # No signing config yet (would go under win.signtoolOptions or
   # win.azureSignOptions — eb 26 nests it, there is no top-level
   # win.certificateFile). The installer is unsigned, so SmartScreen shows
@@ -172,6 +201,12 @@ linux:
       to: cua-linux-x64
     - from: dist-native/cloudflared/linux-x64/cloudflared
       to: cloudflared/cloudflared
+    - from: dist-native/browser/linux-x64
+      to: browser-engine
+    - from: dist-native/duckdb/linux-x64/node_modules
+      to: duckdb/node_modules
+    - from: build/linux-openmausbot-browser.apparmor
+      to: openmausbot-browser.apparmor
   desktop:
     entry:
       Name: OpenMausBot
@@ -181,9 +216,13 @@ linux:
 deb:
   packageCategory: utils
   priority: optional
+  # Add the narrow browser policy's parser without replacing Electron's
+  # default shared-library dependencies.
+  fpm: ["--depends", "apparmor"]
   # dpkg can preserve legacy directory modes during an upgrade. This
   # idempotent hook repairs only the exact package-owned CUA path.
   afterInstall: build/linux-after-install.sh
+  afterRemove: build/linux-after-remove.sh
 
 # Static AppImage runtime: Ubuntu 24.04 can launch it without legacy FUSE 2.
 toolsets:

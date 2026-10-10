@@ -1,0 +1,275 @@
+# Verifying OpenMausBot
+
+OpenMausBot has one development control surface: `pnpm control:omb`. It is a
+thin command-line adapter over `scripts/mcp-server.ts`, so verification uses
+the same URL validation, task pinning, bounded transcripts, wait states, and
+redaction as external MCP clients.
+
+## Launch
+
+Start a fixture in one terminal:
+
+```sh
+node --experimental-strip-types scripts/control-omb.ts launch
+```
+
+Run the foreground launcher directly rather than through `pnpm`; this ensures
+it receives Ctrl-C and can stop its child before removing the temporary data.
+
+It gives the child a temporary data directory and home, chooses a free
+harness/webhook port pair, installs only the repository's fake engine, prints
+the URL, PID, data directory, and persistent log path, then stays attached to
+that exact child. The parent shell and the user's OpenMausBot data are
+untouched. Only `FAKE_CLAUDE_*` variables cross from the launcher's
+environment into that child, so a recipe can script the fake engine's mode,
+replies and tool calls without writing a wrapper CLI. Live calls add one
+exception: `OMB_OPENAI_LIVE_URL` crosses when it is a loopback
+`http://127.0.0.1:PORT` (the fake GPT-Live that
+`node --experimental-strip-types server/testing/fake-openai-live.ts` prints),
+and `OMB_OPENAI_LIVE_KEY` crosses only with it, so that key can only ever
+reach the fake.
+
+Pass the printed URL explicitly from a second terminal:
+
+```sh
+pnpm control:omb doctor --url http://127.0.0.1:PORT
+```
+
+Mutating commands refuse silent port discovery. This prevents a verification
+recipe from sending messages to the user's running app by accident.
+
+## Drive
+
+Use only mapped, tested commands:
+
+- [Chat turns](chat-turns.md)
+- [Conversation context compaction](context-compaction.md)
+- [Work summaries and engine hooks](digests.md)
+- [OpenAI-compatible structured tools](openai-tools.md)
+- [Per-bot tool selection and local-model checks](tool-selection.md)
+- [OpenCode model variants through ACP](opencode-variants.md)
+- [Bot setup, model scope, and file continuity](bot-continuity.md)
+- [Reviewed Chief team setup and scoped deletion](team-setup.md)
+- [Profile proposal and credential-card lifecycle](proposal-cards.md)
+- [Full Access without duplicate approvals](full-access.md)
+- [Exact command allowlist UI and saved rules](command-allowlist.md)
+- [Peer approval denial, expiry, and cancellation](peer-approvals.md)
+- [Waiting for an occupied desktop](computer-wait.md)
+- [Chat UI, driven headlessly](chat-ui.md)
+- [Welcome flow and guided tour](onboarding.md)
+- [Channels](channels.md)
+- [In-chat team coordination](room-coordination.md)
+- [Chief access to additional teams](team-access.md)
+- [Engines and Doctor](engines.md)
+- [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
+- [Codex bot instructions](codex-instructions.md)
+- [Codex browser routing and native search](codex-browser-routing.md)
+- [Codex helper event isolation](codex-helpers.md)
+- [Qwen model route selection](qwen-models.md)
+- [Team backups](team-backups.md)
+- [Sharing a whole team](team-sharing.md)
+- [The organization library](org-library.md)
+- [Preset bots](presets.md)
+- [Teams and shared instructions](teams.md)
+- [Full workspace backups](workspace-backups.md)
+- [Optional company cloud backups](company-backups.md)
+- [Organization library: the desktop channel](desktop-library.md)
+- [Fleet: many workspaces on one server](fleet.md)
+- [Workspaces screen and the fleet agent](workspaces.md)
+- [Hosted workspace sign-in and revocation](hosted-workspaces.md)
+- [Shared-workspace trust: loopback, card answerers, decision log](shared-workspace-trust.md)
+- [Shared-workspace governance: bot visibility and admin activity](shared-workspace-governance.md)
+- [Usage ledger](usage-ledger.md)
+- [Bounded built-in tool results](tool-results.md)
+- [Memory: recall, upkeep and the tidy-up](memory-layer.md)
+- [Spend cap and sell prices](spend-cap.md)
+- [Enterprise layer loading and license expiry](enterprise-license.md)
+
+`control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
+renderer in a headless Chrome by accessible name, so composer sends, transcript
+rows, tool chips and server feature flags are provable from the command line.
+Other renderer-only behavior—Settings, sidebar drag-and-drop, the VM modal, the
+built-in browser panel, and updater UI—is still not proven by the harness. Use
+the relevant Electron/package smoke test and state that limitation. Add a map
+entry only after the shared control surface can really drive it.
+
+The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
+paste-back, MCP tools and logout cancellation through the real settings panel
+and a synthetic OAuth provider in a disposable workspace.
+
+The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
+consent, discovery failures, reconnect and disconnect using that same registry
+and a synthetic provider, without accessing a real Whop account.
+
+The [Connected Apps OAuth fixture](connected-apps-oauth.md) checks blocked-popup
+recovery, safe authorization links and abandoned-account retries through real
+renderer components and isolated HTTP routes.
+
+The [desktop server connection smoke](desktop-server-connection.md) mounts the
+real Settings connection component in disposable Electron windows.
+
+The [loading screen and tray smoke](startup-tray.md) checks the startup close
+button, hidden handoff, tray restore, and Quit in a disposable Electron profile.
+
+The [optional organization connection smoke](organization-settings.md) checks
+the real Settings panel and production desktop client against a synthetic
+Admin server, including cancellation, revocation and unchanged normal startup.
+
+The [personal Cloud account smoke](cloud-account.md) checks optional browser
+sign-in, server-verified Pro status and sign-out in a disposable Electron profile.
+
+The [embedded server recovery smoke](desktop-server-recovery.md) crashes real
+Electron-owned fixture servers, verifies bounded recovery and private access,
+and proves quit cancels recovery without replaying an interrupted fixture turn.
+
+The [Tailscale discovery fixture](tailscale.md) checks standalone macOS CLI mode
+and HTTP tailnet endpoint refresh without touching a real Tailscale installation.
+
+The [external runtimes recipe](external-runtime.md) proves a bot's standing
+comms capability from `external-runtimes.json` against a disposable server and
+the fake engine: scope, on-demand token reads, and immediate delegation drain.
+
+The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
+against an isolated server for image decoding, loading, and recovery UI checks.
+
+The [VPS recovery fixtures](vps-recovery.md) reproduce preview/startup contention
+and Docker-over-SSH timeout cleanup without contacting a real server.
+
+The [live browser fixture](browser-live.md) mounts the real Browser panel with
+an explicitly selected native engine and Chrome in a disposable home, covering
+watching, takeover, input, and profile switching.
+
+The [Local VM resume fixture](local-vm-resume.md) checks idle stop, restart
+recovery, guarded resume and the stopped-to-ready Computer panel flow.
+
+The [local computer launch regression](local-computer-launch.md) starts the
+host CUA gate through real Electron in a disposable home, without opening the
+desktop app or controlling the user's computer.
+
+The [remote desktop viewer fixture](desktop-viewer.md) checks the bundled
+noVNC page, authenticated WebSocket proxy, desktop input, reconnect and logout
+against an isolated server, synthetic desktop and VPS SSH forward.
+
+The [bot settings fixture](bot-settings.md) checks profile saves, standing
+instructions, history restore, skill/memory refresh, and stale-response isolation.
+
+The [hosted Slack management fixture](hosted-slack-management.md) checks the
+agent settings link to Admin: hosted-only availability, the member-readable
+route module, and stale-response isolation.
+
+The [chat and settings polish fixture](chat-polish.md) exercises attachment
+galleries, opt-in video playback, persisted tool details, and responsive settings
+through the real renderer in an isolated fake-engine workspace.
+
+The [rich tables fixture](rich-tables.md) checks Markdown tables and message-scoped
+CSV/TSV previews, large-file virtualization, sorting, search, export and keyboard
+interaction in a disposable workspace.
+
+The [recent files fixture](computer-files.md) mounts the Files panel with synthetic
+digest rows and real message-scoped downloads from a disposable workspace.
+
+The [Data viewer fixture](data.md) checks real DuckDB loading, querying, export,
+restart persistence, result history and the full renderer's 100,000-row grid
+in a disposable workspace with synthetic data.
+
+The [people invitation fixture](people.md) checks hosted workspace sign-in,
+roles and device revocation through the real HTTP API with a stubbed email
+service. It does not drive the People settings UI through `control-omb`.
+
+The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
+default focus, keyboard wrapping and focus return against two disposable bots.
+
+The [sidebar attention geometry fixture](sidebar-attention.md) measures the
+Active Threads popover's width and inset at each expanded sidebar density in a
+headless Electron window, including the compact-density case where the menu
+used to cross the window's left edge and lose its title.
+
+The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
+keyless local generation, saved-key handling, and safe errors with a local fake API.
+
+The [independent threads fixture](threads.md) checks nested sidebar navigation,
+per-thread models, simultaneous direct conversations and thread-scoped Stop.
+
+The [mobile generated-image checks](mobile-generated-images.md) cover native image
+attachments and message-scoped download authorization using isolated fixtures.
+
+The [guarded external messages fixture](guarded-messages.md) checks atomic
+branch and approval preconditions, retry receipts, and refusal to queue or
+steer messages from external interfaces. It also verifies bounded request
+lineage snapshots, Chief continuations and exact-execution Stop without
+interrupting a newer request.
+
+The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
+and per-line direction in sent turns, with code pinned left-to-right.
+
+The [routines fixture](routines.md) checks confirmed proposals, manual and
+scheduled runs, central run logs, List/Calendar views, and bot-scoped routines
+using the real renderer and an isolated fake-engine server.
+
+The [interval restrictions recipe](interval-restrictions.md) checks weekday and
+time-window limits on scheduled routines in that same disposable fixture.
+
+The [server settings recipe](server-settings.md) checks browser provider sign-in
+with an offline CLI and custom-domain validation without touching live accounts.
+
+The [engine library fixture](engines-ui.md) checks onboarding and Settings cards,
+responsive layouts, theme contrast, and status refreshes without losing drafts.
+
+The [Claude account recipe](claude-account.md) checks sign-out, cancellation and
+retry against an offline Claude CLI confined to a disposable home.
+
+The [provider recovery recipe](provider-recovery.md) verifies real Grok image
+transport and Claude authentication against loopback APIs, plus scoped thread
+approvals and provider safety errors in an isolated desktop UI.
+
+The [automatic recovery fixture](automatic-recovery.md) checks opt-in, one-shot
+backup model dispatch after proven pre-prompt ACP failures, preserving the
+conversation, approval level and Stop/new-message precedence.
+
+The [skill approval lifecycle recipe](skill-approval-lifecycle.md) checks Deny,
+missing staged records and active-thread deletion in two isolated app windows,
+including the surviving conversation and sending again without deleting the bot.
+
+The [Codex account recipe](codex-account.md) checks account switching against an
+offline Codex CLI whose identity is synthetic and whose credential directory is empty.
+
+The [ChatGPT plan recipe](chatgpt-plan.md) checks the separate official OAuth
+flow, credential rotation, account ownership, and native Responses routing.
+
+The [mention fixture](mentions.md) checks candidate selection, composer highlighting,
+sent mentions, multiline scrolling and responsive wrapping in real chat views.
+
+The [Group and Goal Local VM recipe](group-local-vm.md) checks per-speaker
+desktop routing, cancellation, and computer authority cleanup.
+
+## Evidence
+
+The [persistence responsiveness benchmark](persistence-performance.md) measures
+synthetic message/log bursts and history scans, with isolated chat, visibility
+and packaged-worker checks. It is not a production capacity qualification.
+
+The [backup responsiveness benchmark](backup-responsiveness.md) compares in-process
+and worker exports using synthetic data, with isolated backup workflow checks.
+
+The [Japanese desktop font recipe](japanese-desktop.md) checks real Firefox and
+XFCE glyph rendering in disposable managed desktops, including fresh recreation.
+
+The optional [Podman full-stack acceptance recipe](podman-self-hosting.md)
+checks the Compose deployment with a fresh home, fake engine, and two desktops.
+It includes workspace ownership, persistence, and proxy authentication checks.
+
+The [Podman Firefox sandbox recipe](podman-firefox.md) checks the capability set a
+managed desktop keeps so Firefox can start, with before/after acceptance evidence.
+
+The [Hetzner launch record](hetzner-launch-2026-09-07.md) is a dated self-hosting
+run on a disposable VPS: what passed, what was corrected, and what it does not prove.
+
+Keep the JSON from `wait` and `messages`, the exact command sequence, and the
+fixture's printed log path. Evidence must show both the action and the resulting
+state. A green unit test alone does not prove a user workflow.
+
+## Cleanup
+
+Interrupt the `launch` process with Ctrl-C. It stops the exact child it owns and
+removes only its temporary data directory. The server log remains at the
+printed path. Never kill processes by name and never delete a broad temp root.

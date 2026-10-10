@@ -1,34 +1,58 @@
 import { z } from "zod";
 
-import { botAvatarCropSchema, botAvatarUrlSchema } from "../shared/bot-avatar.ts";
-import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import {
+  AVATAR_ZOOM_MAX,
+  AVATAR_ZOOM_MIN,
+  BOT_AVATAR_CROPS,
+  botAvatarCropSchema,
+  botAvatarUrlSchema,
+} from "../shared/bot-avatar.ts";
+import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "../shared/bot-profile.ts";
+import { MASCOT_BODY_IDS, mascotBodySchema } from "../shared/mascot-bodies.ts";
 
 import type { BotRecord } from "./store.ts";
+
+// Shared with the package format, which checks the same rule on names it
+// carries; re-exported under its historical path.
+export { fitsOnOneLine } from "../shared/bot-profile.ts";
 
 export const BOT_PROFILE_PATCH_FIELDS = [
   "name",
   "title",
   "description",
+  "soul",
   "notifications",
   "avatarUrl",
   "avatarCrop",
+  "avatarZoom",
+  "avatarFocusX",
+  "avatarFocusY",
+  "mascotBody",
   "voice",
   "speakReplies",
 ] as const;
 
-const profilePatchSchema = z.object({
+export const profilePatchSchema = z.object({
   name: z
     .string({ error: "name must be a string" })
     .max(BOT_PROFILE_LIMITS.name, { error: "name must be at most 100 characters" })
     .refine((value) => Boolean(value.trim()), { error: "name must not be empty" })
+    .refine(fitsOnOneLine, { error: "name must fit on one line" })
     .optional(),
   title: z
     .string({ error: "title must be a string" })
     .max(BOT_PROFILE_LIMITS.title, { error: "title must be at most 200 characters" })
+    .refine(fitsOnOneLine, { error: "title must fit on one line" })
     .optional(),
   description: z
     .string({ error: "description must be a string" })
     .max(BOT_PROFILE_LIMITS.description, { error: "description must be at most 4000 characters" })
+    .optional(),
+  soul: z
+    .string({ error: "soul must be a string" })
+    .refine((value) => Buffer.byteLength(value, "utf8") <= BOT_PROFILE_LIMITS.soul, {
+      error: "standing instructions must be at most 24000 bytes",
+    })
     .optional(),
   notifications: z.boolean({ error: "notifications must be true or false" }).optional(),
   avatarUrl: z
@@ -37,6 +61,10 @@ const profilePatchSchema = z.object({
     })
     .optional(),
   avatarCrop: botAvatarCropSchema.optional(),
+  avatarZoom: z.number({ error: "avatarZoom must be a number from 1 to 3" }).finite().min(AVATAR_ZOOM_MIN).max(AVATAR_ZOOM_MAX).optional(),
+  avatarFocusX: z.number({ error: "avatarFocusX must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
+  avatarFocusY: z.number({ error: "avatarFocusY must be a number from 0 to 1" }).finite().min(0).max(1).optional(),
+  mascotBody: mascotBodySchema.optional(),
   voice: z
     .string({ error: "voice must be a string" })
     .max(BOT_PROFILE_LIMITS.voice, { error: "voice must be at most 200 characters" })
@@ -49,7 +77,19 @@ export type BotProfilePatchInput = z.input<typeof profilePatchSchema>;
 export type BotProfilePatch = Partial<
   Pick<
     BotRecord,
-    "name" | "title" | "description" | "notifications" | "avatarUrl" | "avatarCrop" | "voice" | "speakReplies"
+    | "name"
+    | "title"
+    | "description"
+    | "soul"
+    | "notifications"
+    | "avatarUrl"
+    | "avatarCrop"
+    | "avatarZoom"
+    | "avatarFocusX"
+    | "avatarFocusY"
+    | "mascotBody"
+    | "voice"
+    | "speakReplies"
   >
 >;
 
@@ -75,7 +115,12 @@ export function parseBotProfilePatch(input: BotProfilePatchInput, strict = false
     }
     const issue = parsed.error.issues[0];
     if (issue?.path[0] === "avatarCrop") {
-      return { ok: false, error: "avatarCrop must be mascot, circle, rounded, or square" };
+      const options = `${BOT_AVATAR_CROPS.slice(0, -1).join(", ")}, or ${BOT_AVATAR_CROPS.at(-1)}`;
+      return { ok: false, error: `avatarCrop must be ${options}` };
+    }
+    if (issue?.path[0] === "mascotBody") {
+      const options = `${MASCOT_BODY_IDS.slice(0, -1).join(", ")}, or ${MASCOT_BODY_IDS.at(-1)}`;
+      return { ok: false, error: `mascotBody must be ${options}` };
     }
     return { ok: false, error: issue?.message ?? "invalid profile patch" };
   }

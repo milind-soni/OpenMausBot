@@ -3,11 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-function runBridge(
-  entrypoint: string,
-  args: string[],
-  env: { OMB_CONTROL_URL?: string; OMB_CONTROL_TOKEN?: string },
-) {
+function runBridge(entrypoint: string, args: string[]) {
   return new Promise<{ code: number | null; stderr: string }>((resolve, reject) => {
     const childEnv: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: "1" };
     delete childEnv.OMB_CONTROL_URL;
@@ -15,7 +11,7 @@ function runBridge(
     const child = spawn(
       process.execPath,
       [fileURLToPath(new URL(`./${entrypoint}`, import.meta.url)), ...args],
-      { env: { ...childEnv, ...env }, stdio: ["pipe", "ignore", "pipe"] },
+      { env: childEnv, stdio: ["pipe", "ignore", "pipe"] },
     );
     let stderr = "";
     child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
@@ -27,25 +23,12 @@ function runBridge(
 }
 
 describe("Existing VM MCP bridge", () => {
-  it.each([
-    {
-      entrypoint: "existing-vm-mcp.ts",
-      args: ["test-vm"],
-      label: "Existing VM",
+  it.each(["bad;alias", "-test-vm", ""])(
+    "rejects an invalid SSH alias without starting the bridge: %j",
+    async (alias) => {
+      const result = await runBridge("existing-vm-mcp.ts", [alias]);
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain("invalid Existing VM SSH connection");
     },
-    {
-      entrypoint: "container-mcp.ts",
-      args: ["docker", "openmausbot-computer", "/run/user/1000/openmausbot-cua.sock"],
-      label: "Local VM",
-    },
-    {
-      entrypoint: "vps-container-mcp.ts",
-      args: ["test-vps", "openmausbot-computer"],
-      label: "VPS",
-    },
-  ])("rejects partial control configuration for $label", async ({ entrypoint, args, label }) => {
-    const result = await runBridge(entrypoint, args, { OMB_CONTROL_URL: "http://127.0.0.1:1/control" });
-    expect(result.code).toBe(2);
-    expect(result.stderr).toContain(`incomplete ${label} control configuration`);
-  });
+  );
 });

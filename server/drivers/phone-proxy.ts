@@ -9,8 +9,13 @@ import { homedir } from "node:os";
 type Json = Record<string, unknown>;
 type Device = { serial: string; state: string; model: string; connection: "usb" | "network" | "emulator" };
 type UiNode = { text: string; description: string; id: string; className: string; bounds: [number, number, number, number] };
+type ClaimOutcome = { ok: true } | { ok: false; message: string };
 
 const MAX_ADB_OUTPUT = 16 * 1024 * 1024;
+// Mirrors the shared-computer blockedReason shape: name the holder's
+// situation, say the call did not happen, and tell the model what beats a
+// blind retry once the phone frees up.
+const PHONE_BUSY_TEXT = "Another thread is using the phone. This call was not performed. Pause phone work until that thread finishes, then read the screen again before acting.";
 const PACKAGE = /^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/;
 const COMPONENT = /^([A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+)\/\S+$/;
 const SAFE_TEXT = /^[A-Za-z0-9 _.,@-]+$/;
@@ -244,6 +249,44 @@ const TOOLS = [
 type ToolResult = { content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>; isError?: boolean };
 const textResult = (text: string, isError = false): ToolResult => ({ content: [{ type: "text", text }], ...(isError ? { isError: true } : {}) });
 
+// The harness reserves the physical phone for one turn at a time, but only
+// from the first real tool call (issue #1663): trigger-term matching decides
+// whether these tools are mounted, never who holds the device. Revalidate
+// every call: retained MCP processes can outlive their turn, whose claim and
+// capability are released at settlement. Reclaiming for the same live owner
+// is idempotent; a blocked caller can retry once the holding turn settles.
+export function createPhoneClaim(
+  env: NodeJS.ProcessEnv = process.env,
+  fetchImpl: typeof fetch = fetch,
+): () => Promise<ClaimOutcome> {
+  const url = env.OMB_HARNESS_URL?.trim();
+  const token = env.OMB_PHONE_TOKEN?.trim();
+  if (!url || !token) {
+    // Spawned outside the harness (development, direct debugging): no
+    // exclusivity to enforce, exactly the behavior this proxy always had.
+    return async () => ({ ok: true });
+  }
+  return async () => {
+    try {
+      const response = await fetchImpl(new URL("/api/internal/phone/claim", url), {
+        method: "POST",
+        redirect: "error",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.ok) return { ok: true };
+      if (response.status === 409) return { ok: false, message: PHONE_BUSY_TEXT };
+      if (response.status === 401 || response.status === 403) {
+        return { ok: false, message: "This turn no longer has phone access. Start a new turn to use the phone." };
+      }
+      return { ok: false, message: "OpenMausBot could not reserve the phone for this call. This call was not performed; try again, or start a new turn if it keeps failing." };
+    } catch {
+      return { ok: false, message: "OpenMausBot could not be reached to reserve the phone. This call was not performed; try again." };
+    }
+  };
+}
+
 async function callTool(name: string, args: Json): Promise<ToolResult> {
   if (name === "status") {
     const adb = resolveAdbPath();
@@ -327,7 +370,7 @@ const send = (message: Json) => process.stdout.write(`${JSON.stringify(message)}
 const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
 const rpcError = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
 
-async function handle(message: Json) {
+async function handle(message: Json, ensureClaim: () => Promise<ClaimOutcome>) {
   const id = message.id;
   const method = message.method;
   const params = (message.params ?? {}) as Json;
@@ -338,6 +381,8 @@ async function handle(message: Json) {
   if (method === "tools/call") {
     const name = String(params.name ?? "");
     if (!TOOLS.some((tool) => tool.name === name)) return rpcError(id, -32602, `Unknown tool: ${name}`);
+    const claim = await ensureClaim();
+    if (!claim.ok) return ok(id, textResult(claim.message, true));
     try {
       return ok(id, await callTool(name, (params.arguments ?? {}) as Json));
     } catch (error) {
@@ -348,11 +393,12 @@ async function handle(message: Json) {
 }
 
 if (process.argv[1] && existsSync(process.argv[1]) && /phone-proxy\.(?:ts|js)$/.test(process.argv[1])) {
+  const ensureClaim = createPhoneClaim();
   const lines = createInterface({ input: process.stdin, terminal: false });
   lines.on("line", (line) => {
     try {
       const message = JSON.parse(line) as Json;
-      void handle(message).catch((error) => rpcError(message.id, -32603, error instanceof Error ? error.message : String(error)));
+      void handle(message, ensureClaim).catch((error) => rpcError(message.id, -32603, error instanceof Error ? error.message : String(error)));
     } catch {}
   });
 }

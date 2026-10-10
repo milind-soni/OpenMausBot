@@ -125,6 +125,11 @@ posixOnly("authorization decisions are logged", () => {
             environment: { FAKE_ACP_MODE: "permission" },
             config: { cli: FAKE_CLI, fullAuto: false },
           },
+          grokq: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "question" },
+            config: { cli: FAKE_CLI, fullAuto: false },
+          },
         },
       }),
     );
@@ -158,20 +163,26 @@ posixOnly("authorization decisions are logged", () => {
   });
 
   it(
-    "a rule-matched auto-approval writes a row naming the rule",
+    "an Auto bot's card is logged as the provider's own request",
     async () => {
-      const bot = await makePermissionBot({ name: "Granted", alwaysAllow: ["shell:echo"] });
+      // Auto passes the provider's mode through; a request that still
+      // reaches the harness is the reviewer's to leave, and the row says so.
+      const bot = await makePermissionBot({ name: "Granted", autoApprove: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
 
-      const row = await waitForDecision((r) => r.decision === "auto-approved" && r.botId === bot.id);
-      expect(row, "the auto-approval never reached the decision log").not.toBeNull();
-      expect(row!.source).toBe("always-allow");
-      expect(row!.rule).toBe("shell:echo");
+      const card = await waitForBotCard(bot.id);
+      expect(card, "no approval card ever appeared").not.toBeNull();
+      const row = await waitForDecision((r) => r.decision === "card-shown" && r.botId === bot.id);
+      expect(row, "the card never reached the decision log").not.toBeNull();
+      expect(row!.source).toBe("native-approval");
+      expect(row!.rule).toBeUndefined();
       expect(row!.tool).toBe("shell");
       expect(row!.summary).toBe("echo hi");
       expect(row!.botName).toBe("Granted");
       expect(row!.threadId).toBeTruthy();
       expect(row!.requestId).toBeTruthy();
+      expect(card.card.held).toBe("The provider requires your approval for this action.");
+      expect(card.card.allowSession).toBe(true);
     },
     60_000,
   );
@@ -225,12 +236,49 @@ posixOnly("authorization decisions are logged", () => {
   );
 
   it(
-    "an unattended block writes the row that says a grant was withheld",
+    "a question card carries its questions and logs the row without an origin",
     async () => {
-      // Auto mode on AND the exact key granted: an attended turn would sail
-      // straight through, so the only thing carding this one is the
-      // unattended block — which is precisely what the row must say.
-      const bot = await makePermissionBot({ name: "Nightshift", autoApprove: true, alwaysAllow: ["shell:echo"] });
+      // the same fake ACP CLI in question mode: the request is an ask, not a
+      // permission, so the card must arrive structured and the row must say
+      // a person owes the answer. A tool-call ask has no origin to record.
+      const created = await api("POST", "/api/bots");
+      expect(created.status).toBe(201);
+      const patched = await api("PATCH", `/api/bots/${created.body.bot.id}`, {
+        name: "Queried",
+        modelSelection: { instanceId: "grokq", model: "fake-model" },
+      });
+      expect(patched.status).toBe(200);
+      const bot = patched.body.bot ?? created.body.bot;
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "ask me" })).status).toBe(202);
+
+      const card = await waitForBotCard(bot.id);
+      expect(card, "no question card ever appeared").not.toBeNull();
+      // a question, not a permission: no tool on the card, the choices as
+      // options. (The structured questionRequest payload itself arrives with
+      // the ACP normalization change, which stacks independently of this one.)
+      expect(card.card.tool).toBeUndefined();
+      expect(card.card.options).toContain("Blue");
+      expect(card.card.questionRequest?.origin).toBeUndefined();
+
+      const row = await waitForDecision((r) => r.decision === "card-shown" && r.botId === bot.id);
+      expect(row, "the question card never reached the decision log").not.toBeNull();
+      expect(row!.source).toBe("question");
+      expect(row!.origin).toBeUndefined();
+
+      const requestId = card.card.requestId as string;
+      const answered = await api("POST", `/api/bots/${bot.id}/respond`, { requestId, behavior: "answer", message: "Blue" });
+      expect(answered.status).toBe(200);
+      expect(answered.body.outcome).toBe("answered");
+    },
+    90_000,
+  );
+
+  it(
+    "a webhook turn's card is logged as unattended, in the bot's own mode",
+    async () => {
+      // A webhook turn runs in the mode the bot has, like any other; the
+      // row only records that nobody was at the keyboard when it asked.
+      const bot = await makePermissionBot({ name: "Nightshift", autoApprove: true });
 
       const hook = await api("POST", "/api/webhooks", {
         name: "Nightly build",
@@ -250,12 +298,11 @@ posixOnly("authorization decisions are logged", () => {
       const threadId = await waitForRunThread(runId);
       expect(threadId, "the webhook never started a task").toBeTruthy();
       const card = await waitForThreadCard(threadId!);
-      expect(card, "the webhook turn auto-approved instead of asking").not.toBeNull();
+      expect(card, "the webhook turn never asked").not.toBeNull();
 
       const row = await waitForDecision((r) => r.threadId === threadId && r.decision === "card-shown");
-      expect(row, "the unattended block never reached the decision log").not.toBeNull();
-      expect(row!.source).toBe("unattended-block");
-      expect(row!.rule).toBe("shell:echo");
+      expect(row, "the card never reached the decision log").not.toBeNull();
+      expect(row!.source).toBe("native-approval");
       expect(row!.unattended).toBe(true);
       expect(row!.botId).toBe(bot.id);
     },
@@ -270,5 +317,25 @@ posixOnly("authorization decisions are logged", () => {
     expect(one[0]).toEqual(all.at(-1));
     expect((await api("GET", "/api/decisions?limit=0")).status).toBe(400);
     expect((await api("GET", "/api/decisions?limit=nope")).status).toBe(400);
+  });
+
+  it("GET /api/decisions.csv exports a date range, one line per row, from the month files", async () => {
+    const all = (await api("GET", "/api/decisions")).body.decisions as DecisionRow[];
+    // Span the UTC days the rows were written on, not "today": a run that
+    // crosses midnight UTC writes rows on two days (and maybe two month files).
+    const days = all.map((row) => row.at.slice(0, 10)).sort();
+    const from = days[0];
+    const to = days.at(-1);
+    const res = await fetch(`${BASE}/api/decisions.csv?from=${from}&to=${to}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/^text\/csv/);
+    expect(res.headers.get("content-disposition")).toBe(`attachment; filename="decisions-${from}-${to}.csv"`);
+    const lines = (await res.text()).trim().split("\n");
+    expect(lines[0]).toBe("time,decision,source,bot,tool,summary,rule,unattended,answered_by,thread,request");
+    expect(lines).toHaveLength(all.length + 1);
+    // the owner answered the cards above from loopback
+    expect(lines.some((line) => line.includes(",user-approved,user,") && line.includes(",This computer,"))).toBe(true);
+    expect((await fetch(`${BASE}/api/decisions.csv?from=2026-13-01`)).status).toBe(400);
+    expect((await fetch(`${BASE}/api/decisions.csv?from=2025-01-01&to=2026-09-01`)).status).toBe(400);
   });
 });

@@ -1,7 +1,8 @@
-import { useRef, useState } from "react";
-import { Check, ImagePlus, Loader2, Sparkles, Trash2 } from "lucide-react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from "react";
+import { ImagePlus, Loader2, Trash2 } from "lucide-react";
 
-import { api, useStore, type Bot, type ConfigStatus } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
+import { useBotEditor } from "./bot-settings/BotEditorContext";
 import { imageAttachmentFromFile } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import {
@@ -12,15 +13,110 @@ import {
   type MausState,
 } from "@/lib/mascot";
 import {
+  AVATAR_FOCUS_CENTER,
+  AVATAR_ZOOM_MAX,
+  AVATAR_ZOOM_MIN,
   BOT_AVATAR_CROPS,
   botAvatarUrlFromStoredPath,
+  clampAvatarFocus,
+  clampAvatarZoom,
   type BotAvatarCrop,
 } from "../../shared/bot-avatar";
+import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import { BotAvatar, MausAvatar } from "./Avatar";
+import { AvatarImageGenerator } from "./AvatarImageGenerator";
+import { useOrganizationBranding } from "@/lib/use-organization-branding";
 
 type AvatarPatch = Partial<
-  Pick<Bot, "avatarCrop" | "avatarUrl" | "color" | "mascotExpression">
+  Pick<Bot, "avatarCrop" | "avatarUrl" | "avatarZoom" | "avatarFocusX" | "avatarFocusY" | "color" | "mascotExpression" | "mascotBody">
 >;
+
+const FRAME_SIZE = 168;
+
+function AvatarFraming({
+  bot,
+  disabled,
+  onPatch,
+}: {
+  bot: Bot;
+  disabled: boolean;
+  onPatch: (patch: AvatarPatch) => void;
+}) {
+  const zoom = clampAvatarZoom(bot.avatarZoom ?? AVATAR_ZOOM_MIN);
+  const focusX = clampAvatarFocus(bot.avatarFocusX ?? AVATAR_FOCUS_CENTER);
+  const focusY = clampAvatarFocus(bot.avatarFocusY ?? AVATAR_FOCUS_CENTER);
+  const framed = zoom !== AVATAR_ZOOM_MIN || focusX !== AVATAR_FOCUS_CENTER || focusY !== AVATAR_FOCUS_CENTER;
+  const drag = useRef<{ x: number; y: number; focusX: number; focusY: number; pointer: number } | null>(null);
+
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (disabled || event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { x: event.clientX, y: event.clientY, focusX, focusY, pointer: event.pointerId };
+  };
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = drag.current;
+    if (!start || event.pointerId !== start.pointer) return;
+    onPatch({
+      avatarFocusX: clampAvatarFocus(start.focusX - (event.clientX - start.x) / FRAME_SIZE / zoom),
+      avatarFocusY: clampAvatarFocus(start.focusY - (event.clientY - start.y) / FRAME_SIZE / zoom),
+    });
+  };
+  const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (drag.current?.pointer === event.pointerId) drag.current = null;
+  };
+  const onWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    if (disabled || event.deltaY === 0) return;
+    event.preventDefault();
+    onPatch({ avatarZoom: clampAvatarZoom(zoom + (event.deltaY < 0 ? 0.08 : -0.08)) });
+  };
+
+  return (
+    <div className="py-3">
+      <div
+        className="mx-auto w-fit cursor-grab touch-none active:cursor-grabbing"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endDrag}
+        onPointerCancel={endDrag}
+        onWheel={onWheel}
+      >
+        <BotAvatar bot={bot} size={FRAME_SIZE} animated={false} label={`${bot.name} avatar preview`} />
+      </div>
+      <div className="mb-1.5 mt-4 flex items-baseline justify-between">
+        <span className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">Zoom</span>
+        <span className="tabular-nums text-[12px] text-ink-secondary">{Math.round(zoom * 100)}%</span>
+      </div>
+      <input
+        type="range"
+        min={AVATAR_ZOOM_MIN}
+        max={AVATAR_ZOOM_MAX}
+        step={0.01}
+        value={zoom}
+        disabled={disabled}
+        aria-label="Zoom avatar"
+        aria-valuemin={AVATAR_ZOOM_MIN}
+        aria-valuemax={AVATAR_ZOOM_MAX}
+        aria-valuenow={zoom}
+        aria-valuetext={`${Math.round(zoom * 100)}%`}
+        onChange={(event) => onPatch({ avatarZoom: clampAvatarZoom(Number(event.target.value)) })}
+        className="w-full accent-accent"
+      />
+      <div className="mt-1.5 flex items-center justify-between gap-3 text-[11.5px] text-ink-secondary">
+        <span>Drag the picture to reposition it. Scroll to zoom.</span>
+        {framed && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => onPatch({ avatarZoom: AVATAR_ZOOM_MIN, avatarFocusX: AVATAR_FOCUS_CENTER, avatarFocusY: AVATAR_FOCUS_CENTER })}
+            className="shrink-0 rounded-md px-2 py-1 text-ink hover:bg-control disabled:opacity-50"
+          >
+            Reset framing
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const CROP_LABEL = {
   mascot: "Mascot",
@@ -40,30 +136,35 @@ export function BotProfileAvatarCard({
   mascotMotion: { kind: Exclude<MausMotion, "none">; nonce: number } | null;
   onPatch: (patch: AvatarPatch) => void;
 }) {
-  const { state, dispatch, flushBotPatches } = useStore();
+  const { flushBotPatches } = useStore();
+  const { request: api, uploadAvatar } = useBotEditor();
+  const organization = useOrganizationBranding();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-  const [imageKey, setImageKey] = useState("");
-  const [savingKey, setSavingKey] = useState(false);
-  const [direction, setDirection] = useState("");
+  const [savingConnection, setSavingConnection] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const crop = bot.avatarCrop ?? "mascot";
   const cropRef = useRef(crop);
   cropRef.current = crop;
-  const imageConfigured = state.config?.imageGen?.configured === true;
+  const busy = uploading || generating || savingConnection;
 
   const upload = async (file: File | undefined) => {
-    if (!file) return;
+    if (!file || busy) return;
     setUploading(true);
     setError(null);
     try {
-      const saved = await imageAttachmentFromFile(file);
-      if (!saved) throw new Error("Choose a PNG, JPEG, GIF, or WebP image");
-      const avatarUrl = botAvatarUrlFromStoredPath(saved.path);
+      const saved = uploadAvatar ? null : await imageAttachmentFromFile(file);
+      const avatarUrl = uploadAvatar ? await uploadAvatar(file) : saved ? botAvatarUrlFromStoredPath(saved.path) : null;
       if (!avatarUrl) throw new Error("The uploaded image could not be used as an avatar");
       const latestCrop = cropRef.current;
-      onPatch({ avatarUrl, avatarCrop: latestCrop === "mascot" ? "circle" : latestCrop });
+      onPatch({
+        avatarUrl,
+        avatarCrop: latestCrop === "mascot" ? "circle" : latestCrop,
+        avatarZoom: AVATAR_ZOOM_MIN,
+        avatarFocusX: AVATAR_FOCUS_CENTER,
+        avatarFocusY: AVATAR_FOCUS_CENTER,
+      });
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : String(uploadError));
     } finally {
@@ -74,31 +175,17 @@ export function BotProfileAvatarCard({
 
   const removeImage = () => {
     setError(null);
-    onPatch({ avatarUrl: null, avatarCrop: "mascot" });
+    onPatch({
+      avatarUrl: null,
+      avatarCrop: "mascot",
+      avatarZoom: AVATAR_ZOOM_MIN,
+      avatarFocusX: AVATAR_FOCUS_CENTER,
+      avatarFocusY: AVATAR_FOCUS_CENTER,
+    });
   };
 
-  const saveImageKey = async () => {
-    const key = imageKey.trim();
-    if (!key) return;
-    setSavingKey(true);
-    setError(null);
-    try {
-      const status: ConfigStatus = window.ogb?.setCredential
-        ? await window.ogb.setCredential("openaiImageApiKey", key)
-        : await api("/api/config", {
-            method: "PUT",
-            body: JSON.stringify({ imageGen: { key } }),
-          });
-      dispatch({ type: "configStatus", config: status });
-      setImageKey("");
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : String(saveError));
-    } finally {
-      setSavingKey(false);
-    }
-  };
-
-  const generate = async () => {
+  const generate = async (direction: string) => {
+    if (busy) return;
     setGenerating(true);
     setError(null);
     try {
@@ -114,6 +201,10 @@ export function BotProfileAvatarCard({
       const latestCrop = cropRef.current;
       onPatch({
         avatarUrl: result.avatarUrl,
+        // The server owns this crop for generate (server/index.ts picks
+        // "circle" for a mascot bot). The fallback below is never actually
+        // reached, since the server always assigns a crop; "circle" is kept
+        // only as the truthful default if it ever were.
         avatarCrop:
           latestCrop === cropAtStart
             ? (result.bot.avatarCrop ?? "circle")
@@ -131,23 +222,37 @@ export function BotProfileAvatarCard({
       <div className="flex items-center justify-between border-b border-hairline/40 px-3 py-2.5">
         <span className="rounded-lg bg-control px-3 py-1.5 text-[14px] font-medium text-ink">Avatar</span>
         <button
-          onClick={() => onPatch({ avatarCrop: "mascot", color: "green", mascotExpression: null })}
-          className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink"
+          disabled={busy}
+          onClick={() => onPatch({ avatarCrop: "mascot", color: "green", mascotExpression: null, mascotBody: "cursor" })}
+          className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"
         >
           Reset mascot
         </button>
       </div>
 
       <div className="p-3">
-        <div className="flex justify-center py-3">
-          <BotAvatar
-            bot={bot}
-            state={activeState}
-            size={112}
-            motion={mascotMotion?.kind ?? "none"}
-            motionKey={mascotMotion?.nonce ?? 0}
-          />
-        </div>
+        {Boolean(organization?.icons.length) && <div className="mb-3 border-b border-hairline/40 pb-3">
+          <div className="mb-2 text-[13px] font-medium text-ink-secondary">{organization!.name} icons</div>
+          <div className="flex flex-wrap gap-2">{organization!.icons.map(icon => <button key={icon.id} type="button" disabled={busy} title={icon.name} aria-label={`Use ${icon.name} icon`} className="flex size-12 items-center justify-center rounded-lg border border-hairline/40 hover:bg-control disabled:opacity-50" onClick={() => {
+            // Use the normal attachment path, so chosen icons survive removal
+            // from Admin and travel with the user's own workspace backups.
+            const bytes = Uint8Array.from(atob(icon.image.slice(22)), byte => byte.charCodeAt(0));
+            void upload(new File([bytes], `${icon.id}.png`, { type: "image/png" }));
+          }}><img src={icon.image} alt="" className="size-10 rounded-md object-contain" /></button>)}</div>
+        </div>}
+        {crop !== "mascot" && bot.avatarUrl ? (
+          <AvatarFraming bot={bot} disabled={busy} onPatch={onPatch} />
+        ) : (
+          <div className="flex justify-center py-3">
+            <BotAvatar
+              bot={bot}
+              state={activeState}
+              size={112}
+              motion={mascotMotion?.kind ?? "none"}
+              motionKey={mascotMotion?.nonce ?? 0}
+            />
+          </div>
+        )}
 
         <div className="mt-2 flex gap-2">
           <input
@@ -160,7 +265,7 @@ export function BotProfileAvatarCard({
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
-            disabled={uploading || generating}
+            disabled={busy}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
           >
             {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
@@ -170,7 +275,7 @@ export function BotProfileAvatarCard({
             <button
               type="button"
               onClick={removeImage}
-              disabled={uploading || generating}
+              disabled={busy}
               aria-label="Remove custom avatar image"
               title="Remove custom image"
               className="flex size-10 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
@@ -189,10 +294,11 @@ export function BotProfileAvatarCard({
             <button
               key={candidate}
               type="button"
+              disabled={busy}
               aria-pressed={crop === candidate}
               onClick={() => onPatch({ avatarCrop: candidate })}
               className={cn(
-                "py-1.5 text-[12.5px]",
+                "py-1.5 text-[12.5px] disabled:opacity-50",
                 index > 0 && "border-l border-hairline/40",
                 crop === candidate ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60 hover:text-ink",
               )}
@@ -212,16 +318,17 @@ export function BotProfileAvatarCard({
                 <button
                   key={expression}
                   type="button"
+                  disabled={busy}
                   aria-pressed={activeState === expression}
                   onClick={() => onPatch({ mascotExpression: expression })}
                   className={cn(
-                    "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-control",
+                    "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-control disabled:opacity-50",
                     activeState === expression && "ring-2 ring-accent-border",
                   )}
                   title={expression}
                   aria-label={`Use ${expression} expression`}
                 >
-                  <MausAvatar color={bot.color} state={expression} size={42} animated={false} />
+                  <MausAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state={expression} size={42} animated={false} />
                 </button>
               ))}
             </div>
@@ -234,10 +341,11 @@ export function BotProfileAvatarCard({
                 <button
                   key={color}
                   type="button"
+                  disabled={busy}
                   aria-pressed={bot.color === color}
                   onClick={() => onPatch({ color })}
                   className={cn(
-                    "size-10 rounded-full border-2 border-transparent transition-transform hover:scale-110",
+                    "size-10 rounded-full border-2 border-transparent transition-transform hover:scale-110 disabled:opacity-50",
                     bot.color === color && "ring-2 ring-accent-border ring-offset-2 ring-offset-card",
                   )}
                   style={{ backgroundColor: MAUS_COLORS[color] }}
@@ -246,89 +354,40 @@ export function BotProfileAvatarCard({
                 />
               ))}
             </div>
+
+            <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
+              Body
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {MASCOT_BODY_IDS.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  disabled={busy}
+                  aria-pressed={(bot.mascotBody ?? "cursor") === id}
+                  aria-label={`Use the ${MASCOT_BODIES[id].name} body`}
+                  onClick={() => onPatch({ mascotBody: id })}
+                  className={cn(
+                    "flex items-center justify-center rounded-lg py-1.5 disabled:opacity-50",
+                    (bot.mascotBody ?? "cursor") === id
+                      ? "bg-control text-ink"
+                      : "text-ink-secondary hover:bg-control/60",
+                  )}
+                >
+                  <MausAvatar color={bot.color} bodyId={id} size={34} animated={false} trackPointer={false} />
+                </button>
+              ))}
+            </div>
           </>
         )}
 
-        <div className="mt-5 border-t border-hairline/40 pt-4">
-          <div className="flex items-center gap-2 text-[13px] font-medium text-ink">
-            <Sparkles size={14} className="text-accent" /> Generate with GPT Image 2
-          </div>
-          <div className="mt-1 text-[11.5px] leading-relaxed text-ink-secondary">
-            Uses a low-quality square draft to keep cost down. OpenAI bills your API account.
-          </div>
-
-          {!imageConfigured ? (
-            <div className="mt-3">
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={imageKey}
-                  onChange={(event) => setImageKey(event.target.value)}
-                  onKeyDown={(event) => event.key === "Enter" && void saveImageKey()}
-                  placeholder="Paste OpenAI image API key"
-                  aria-label="OpenAI image API key"
-                  autoComplete="off"
-                  className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => void saveImageKey()}
-                  disabled={savingKey || !imageKey.trim()}
-                  className="flex w-[72px] items-center justify-center gap-1.5 rounded-lg bg-control text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-50"
-                >
-                  {savingKey ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} /> Save</>}
-                </button>
-              </div>
-              <div className="mt-1.5 text-[11px] text-ink-secondary">Stored in the operating system's encrypted credential store in the installed app.</div>
-            </div>
-          ) : (
-            <div className="mt-3">
-              <textarea
-                value={direction}
-                onChange={(event) => setDirection(event.target.value.slice(0, 400))}
-                maxLength={400}
-                placeholder={`Optional direction, e.g. “a calm navigator inspired by ${bot.title || bot.name}”`}
-                aria-label="Avatar generation direction"
-                className="min-h-[72px] w-full resize-none rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12.5px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-              />
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <span className="text-[11px] tabular-nums text-ink-secondary">{direction.length}/400</span>
-                <button
-                  type="button"
-                  onClick={() => void generate()}
-                  disabled={generating || uploading}
-                  className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
-                >
-                  {generating ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                  {generating ? "Generating…" : "Generate avatar"}
-                </button>
-              </div>
-              <details className="mt-3 rounded-lg border border-hairline/40 bg-inset px-3 py-2">
-                <summary className="cursor-pointer text-[11.5px] text-ink-secondary">Replace OpenAI image key</summary>
-                <div className="mt-2 flex gap-2">
-                  <input
-                    type="password"
-                    value={imageKey}
-                    onChange={(event) => setImageKey(event.target.value)}
-                    onKeyDown={(event) => event.key === "Enter" && void saveImageKey()}
-                    placeholder="Paste replacement key"
-                    aria-label="Replacement OpenAI image API key"
-                    autoComplete="off"
-                    className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-card px-3 py-2 text-[12px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void saveImageKey()}
-                    disabled={savingKey || !imageKey.trim()}
-                    className="flex w-[72px] items-center justify-center gap-1.5 rounded-lg bg-control text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
-                  >
-                    {savingKey ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} /> Save</>}
-                  </button>
-                </div>
-              </details>
-            </div>
-          )}
-        </div>
+        <AvatarImageGenerator
+          botLabel={bot.title || bot.name}
+          disabled={uploading}
+          generating={generating}
+          onGenerate={generate}
+          onSavingChange={setSavingConnection}
+        />
 
         {error && <div role="alert" className="mt-3 text-[12px] text-danger">{error}</div>}
       </div>

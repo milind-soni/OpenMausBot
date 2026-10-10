@@ -1,0 +1,38 @@
+---
+title: Google Antigravity
+description: Install Google's official ACP runtime and use your Google subscription in OpenMausBot.
+icon: Sparkles
+---
+
+OpenMausBot connects to Google Antigravity through Google's official Agent Client Protocol server. It does not ask for your Google password or copy a login from another app.
+
+## Set up
+
+1. Choose an Antigravity model in the model picker.
+2. Select **Install official Antigravity**. The download comes from `dl.google.com` and OpenMausBot verifies its pinned size and SHA-256 before installing it.
+3. Select **Sign in with Google** and finish in your browser.
+4. Return to OpenMausBot, open the model picker, and select **Refresh**. The account's available models appear after discovery completes.
+
+The runtime download is large because Google ships the ACP server and its local computer harness together. OpenMausBot stores it in its own data directory; it does not modify a system installation.
+
+## After upgrading from the older agy integration
+
+Version 0.1.51 switched from the community `agy` CLI to Google's official ACP runtime. An existing Antigravity app or `agy` login does not sign this separate runtime in. Complete **Install official Antigravity** and **Sign in with Google** in the model picker, then refresh and choose a model available to that account.
+
+Saved legacy `agy` paths, including Windows `.cmd` shims, now resolve to the official runtime. Genuine custom ACP executable paths are still respected. The migration does not copy credentials from another app, remove the old CLI, or change which Google account you authorize.
+
+The Google sign-in belongs to the engine instance, not the runtime version, so ordinary app updates do not require signing in again. Cold starts can be slow, particularly on Windows; setup and model discovery allow up to 90 seconds. If Google expires or revokes the saved session, sign in again when prompted.
+
+## Multiple Google accounts
+
+Create another Antigravity engine instance for another account. Each instance has a separate private `GEMINI_HOME`, token, settings file, and model catalog. Signing one instance in never replaces another instance's account.
+
+## Remote servers
+
+When the OpenMausBot server and browser are on different computers, Google's final redirect points to the server's loopback address and may show a page that cannot load locally. Expand **Signing in from another computer?**, copy the complete redirect URL from the browser address bar, and paste it into OpenMausBot. The server accepts only the loopback port and OAuth state created by that exact in-progress sign-in.
+
+## Permissions and tools
+
+Antigravity uses the same OpenMausBot approval cards as other ACP engines. Connected apps, custom MCP servers, the browser, computers, and teammate tools are mounted only for the active session; OpenMausBot no longer edits the user's global Gemini MCP configuration.
+
+The normal mode asks before protected actions. Full access maps to Antigravity's native `yolo` mode, but native questions still wait for a person instead of being guessed automatically.

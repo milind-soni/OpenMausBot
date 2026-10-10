@@ -6,7 +6,6 @@ const os = require("node:os");
 const path = require("node:path");
 const {
   CERTIFIED_DRIVER_VERSION,
-  CERTIFIED_MANIFEST_SCHEMA,
   desktopCommandEnvironment,
   inspectLinuxCuaDriver,
   sameDriverFileIdentity,

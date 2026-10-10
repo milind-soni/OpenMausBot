@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
 import { landOnSearchHit } from "@/lib/focus-message";
+import { t } from "@/lib/i18n";
 import type { SearchHit } from "@/lib/search-hit";
 import { api, useStore } from "@/state/store";
 
@@ -39,7 +40,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
         .catch((error) => {
           if (request !== requestRef.current) return;
           setHits([]);
-          dispatch({ type: "error", message: error instanceof Error ? error.message : "Search failed" });
+          dispatch({ type: "error", message: error instanceof Error ? error.message : t("chat.find.failed") });
         })
         .finally(() => {
           if (request === requestRef.current) setLoading(false);
@@ -53,7 +54,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
     if (!hit) return;
     setIndex(next);
     void landOnSearchHit(hit, state, dispatch).catch((error) =>
-      dispatch({ type: "error", message: error instanceof Error ? error.message : "That message is unavailable" }),
+      dispatch({ type: "error", message: error instanceof Error ? error.message : t("chat.find.unavailable") }),
     );
   };
   const move = (delta: number) => {
@@ -69,11 +70,12 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
   }, [hits]);
 
   return (
-    <div className="mx-auto w-full max-w-[900px] px-5 pb-2">
-      <div className="flex items-center gap-1.5 rounded-xl border border-hairline/50 bg-panel px-2 py-1.5 shadow-sm">
+    <div className="w-full px-5 pb-2">
+      <div className="flex items-center gap-1.5 rounded-xl border border-hairline/50 bg-panel px-2 py-1.5 shadow-sm focus-within:border-focus">
         <Search size={15} className="shrink-0 text-ink-secondary" />
         <input
           ref={inputRef}
+          dir="auto"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
@@ -85,18 +87,24 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
               move(event.shiftKey ? -1 : 1);
             }
           }}
-          placeholder="Find in this conversation"
-          aria-label="Find in this conversation"
-          className="min-w-0 flex-1 bg-transparent px-1 text-[13px] text-ink outline-none placeholder:text-ink-secondary/70"
+          placeholder={t("chat.find.placeholder")}
+          aria-label={t("chat.find.placeholder")}
+          className="min-w-0 flex-1 bg-transparent px-1 text-[13px] text-ink outline-none placeholder:text-ink-tertiary"
         />
         <span className="min-w-[58px] text-right text-[11.5px] tabular-nums text-ink-secondary">
-          {loading ? "Searching…" : query.trim() ? (hits.length ? `${index + 1} of ${hits.length}` : "No results") : ""}
+          {loading
+            ? t("chat.find.searching")
+            : query.trim()
+              ? hits.length
+                ? t("chat.find.position", { index: index + 1, count: hits.length })
+                : t("chat.find.noResults")
+              : ""}
         </span>
         <button
           type="button"
           onClick={() => move(-1)}
           disabled={!hits.length}
-          aria-label="Previous result"
+          aria-label={t("chat.find.previous")}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-30"
         >
           <ChevronUp size={15} />
@@ -105,7 +113,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
           type="button"
           onClick={() => move(1)}
           disabled={!hits.length}
-          aria-label="Next result"
+          aria-label={t("chat.find.next")}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-30"
         >
           <ChevronDown size={15} />
@@ -113,7 +121,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
         <button
           type="button"
           onClick={onClose}
-          aria-label="Close find"
+          aria-label={t("chat.find.close")}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
         >
           <X size={15} />

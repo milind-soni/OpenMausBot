@@ -1,16 +1,34 @@
 ---
 title: Routines and webhooks
-description: Start fresh agent tasks on a schedule or from an external event.
+description: Run agents on a schedule, collect their reports in one thread, or trigger work from an external event.
 icon: CalendarClock
 ---
 
 ## Routines
 
-A routine runs once or on selected weekdays. Each run starts a fresh task using the selected bot's model, permissions, tools, and computer configuration.
+A routine runs once, at a repeating interval, or on selected weekdays. Each run starts a fresh execution using the selected bot's model, permissions, tools, and computer configuration.
 
 <ProductScreenshot name="docs-automations" alt="An empty OpenMausBot automations calendar ready for its first schedule" caption="Review work across a day, three-day, or week view and filter by bot." />
 
 Run receipts distinguish queued, active, waiting, completed, missed, failed, and cancelled work. OpenMausBot must be running when a local routine becomes due.
+
+### Keep reports in one thread
+
+In a routine's editor, use **Post results to** to choose an existing thread or **Create a dedicated results thread**. You can move that results thread into a folder, such as **OMB management**, just like any other thread.
+
+Each run gets its own execution context, while dated reports collect in the chosen thread. Background execution threads stay out of the normal sidebar and mobile thread pickers. Use **Open run** on a report for its conversation and any approvals, then **Back to results** to return. **Run logs** keeps the execution history, including failures and waiting runs.
+
+A bot schedules, changes, pauses, resumes, and deletes its own routines from chat without asking, and each change shows as one line with **Undo** (see [Changes a bot makes to itself](/docs/features/approvals-and-inspector#changes-a-bot-makes-to-itself)). A routine for another bot asks first unless the conversation has Full access.
+
+Routines created in chat keep reporting to that conversation unless you choose a different destination. Changing the destination affects future runs, not the report links for older runs. If you delete a results thread, its hidden execution threads become visible so you can still inspect their work and respond to approvals.
+
+### Remember the last run
+
+Each run starts fresh by default. For work that builds on last time, such as a QA pass, monitoring or follow-ups, turn on **Remember the last run** under the routine's instructions. Each run then starts with the previous run's report (up to 2,000 characters), so the bot knows what it found before. It is available for repeating routines that one bot runs; team goals don't carry it yet. You can also ask the bot in chat to turn it on.
+
+### Clear a folder's unread dots
+
+Right-click a folder or open its **…** menu, then choose **Mark folder as read**. This clears unread dots without opening each thread. It does not answer approvals, dismiss questions, or stop any running work.
 
 ## Webhook triggers
 
@@ -22,8 +40,10 @@ Bearer authentication is preferred because it keeps the secret out of URLs and m
 
 ## Reaching a local webhook
 
-To accept events from the public internet, proxy only the webhook receiver through a narrowly configured relay or tunnel. Do not expose the main harness port.
+On My Cloud there is nothing to set up: webhooks use the workspace's own address. The Webhooks panel shows `https://` plus the workspace's hostname followed by `/hooks/` and the endpoint, and only those hook paths are passed to the receiver. The same is true of a hosted workspace.
+
+On the desktop app the receiver listens only on this computer. To accept events from the public internet, proxy only the webhook receiver through a narrowly configured relay or tunnel. Do not expose the main harness port.
 
 <Callout type="warn" title="OpenMausBot must remain running">
-  Local routines and webhook deliveries are not hosted jobs. Closing the desktop app stops the local executor and receiver.
+  Local routines and webhook deliveries are not hosted jobs. Closing the desktop app stops the local executor and receiver. My Cloud keeps running them while your computer is off.
 </Callout>

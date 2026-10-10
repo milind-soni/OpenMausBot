@@ -1,26 +1,88 @@
 import { track } from "@/lib/analytics";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, Clock, Hand, Mic, Paperclip, ShieldCheck, Square, Users, X } from "lucide-react";
-import { useStore, visibleMessages, type Bot, type Group, type Message } from "@/state/store";
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Sparkles, Square, Target, Users, X } from "lucide-react";
+import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
-import { useComposerDraft } from "@/lib/drafts";
-import { MausAvatar } from "./Avatar";
-import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
-import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
+import { useMenuMotion } from "./MenuMotion";
+import { activeLocale, t } from "@/lib/i18n";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
 import {
+  draftRevision,
+  appendDraftAttachments,
+  changeDraftAttachmentPending,
+  forgetFailedComposerSend,
+  markDraftEdited,
+  prependComposerDraft,
+  recoverFailedComposerSend,
+  rememberFailedComposerSend,
+  replaceDraftAttachment,
+  restoredSendId,
+  restoredRequestText,
+  useComposerDraft,
+  useComposerChannelMode,
+  useDraftAttachmentPending,
+  useFailedComposerSends,
+  type ComposerSendSnapshot,
+  type FailedComposerSend,
+} from "@/lib/drafts";
+import { BotAvatar } from "./Avatar";
+import { ComposerMenuRow } from "./ComposerMenuRow";
+import { MentionTextarea } from "./MentionTextarea";
+import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
+import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
+import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
+import { PlaceChip } from "./PlaceChip";
+import { FullAccessWarning } from "./FullAccessWarning";
+import { ApprovalModeSelector } from "./ApprovalModeSelector";
+import { CommandAllowlistDialog } from "./CommandAllowlistDialog";
+import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
+import {
+  appendPastedText,
+  handoffAttachmentImagePreview,
+  clipboardHasImages,
+  clipboardImageFiles,
   composeMessage,
+  dataContextFor,
+  composerShouldRefocus,
+  composerTakesFocusOnOpen,
   imageAttachmentFromFile,
+  replyTargetTakesFocus,
   intakeFiles,
-  isImageFile,
   isLongPaste,
+  optimisticImageAttachment,
   pasteAttachment,
+  releaseAttachmentImagePreview,
   type Attachment,
+  type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { normalizeState } from "@/lib/mascot";
-import { groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
+import { goalCoordinatorForComposer, groupComposerHint, jevRoomRoutingOn, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
+import { CallButton } from "./CallView";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
-import { ReplyQuote } from "./ReplyQuote";
+import { ComposerReplyStrip } from "./ReplyQuote";
+import { escapeCancelsReply } from "@/lib/replies";
+import { useThreadRefs } from "./ThreadRefs";
+import {
+  QueuedComposerMessages,
+  composerCanSteerQueuedMessages,
+  doubleEnterSteerWindowExpiresAt,
+  doubleEnterSteersQueue,
+} from "./ComposerQueuedMessages";
+import { skillAuthoringEnabled } from "@/lib/feature-flags";
+import { mentionChoicesForQuery, mentionRowDescription } from "@/lib/mentions";
+import { serializeThreadRefs, threadTokenFromPaste, threadTokenSpacing } from "@/lib/thread-refs";
+import {
+  composerSlashTrigger,
+  goalTextFromComposer,
+  replaceComposerSlashTrigger,
+  skillSlashCommands,
+  slashCommandMatches,
+  type ComposerSlashCommand,
+} from "@/lib/composer-commands";
+import { useSlashSkills } from "@/lib/use-slash-skills";
 
 /** The active @mention query at the caret: the text between an `@` that
  * starts a word and the caret. null = no mention being typed. */
@@ -36,109 +98,21 @@ function mentionQueryAt(text: string, caret: number): { start: number; query: st
 
 type MentionChoice = { id: string; name: string; bot?: Bot };
 
-function PermissionModeSelector({ bot, onSetAuto }: { bot: Bot; onSetAuto: (auto: boolean) => void }) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [open]);
-
-  const mode = bot.autoApprove ? "auto" : "ask";
-  const Icon = mode === "auto" ? ShieldCheck : Hand;
-  const label = mode === "auto" ? "Approve for me" : "Ask for approval";
-
-  return (
-    <div className="relative flex items-center" ref={wrapperRef}>
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        className="flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border border-hairline/20 bg-transparent px-3 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
-      >
-        <Icon size={14} className="opacity-70" />
-        {label}
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          aria-label={`Permission mode for ${bot.name}`}
-          className="absolute bottom-full left-0 z-30 mb-2 w-80 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
-        >
-          <div className="border-b border-hairline/20 px-4 py-3 text-[13px] font-medium text-ink-secondary">
-            How should {bot.name} actions be approved?
-          </div>
-          <div className="flex flex-col py-1">
-            <button
-              type="button"
-              role="menuitemradio"
-              aria-checked={mode === "ask"}
-              onClick={() => {
-                onSetAuto(false);
-                setOpen(false);
-              }}
-              className="flex items-start gap-3 px-4 py-3 text-left hover:bg-raised-hover"
-            >
-              <Hand size={16} className="mt-0.5 shrink-0 opacity-70" />
-              <div className="flex w-full flex-col gap-0.5">
-                <div className="flex items-center justify-between text-[14px] text-ink">
-                  Ask for approval
-                  {mode === "ask" && <Check size={14} />}
-                </div>
-                <div className="text-[13px] text-ink-secondary">Ask before actions that need your permission</div>
-              </div>
-            </button>
-            <button
-              type="button"
-              role="menuitemradio"
-              aria-checked={mode === "auto"}
-              onClick={() => {
-                onSetAuto(true);
-                setOpen(false);
-              }}
-              className="flex items-start gap-3 px-4 py-3 text-left hover:bg-raised-hover"
-            >
-              <ShieldCheck size={16} className="mt-0.5 shrink-0 opacity-70" />
-              <div className="flex w-full flex-col gap-0.5">
-                <div className="flex items-center justify-between text-[14px] text-ink">
-                  Approve for me
-                  {mode === "auto" && <Check size={14} />}
-                </div>
-                <div className="text-[13px] text-ink-secondary">
-                  Keep going automatically; destructive and sensitive actions still ask
-                </div>
-              </div>
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+interface ComposerDraftSnapshot extends ComposerSendSnapshot {
+  reply: Message | null;
 }
 
+/** Renders the editable message composer and its pending attachments. */
 export function Composer({
-  bot,
+  bot: profile,
   group,
   members,
   onEditLast,
   replyTo,
   onClearReply,
-  locked = false,
+  onConsumeReply,
+  onRestoreReply,
+  locked: setupLocked = false,
 }: {
   bot?: Bot;
   group?: Group;
@@ -146,21 +120,41 @@ export function Composer({
   onEditLast?: () => void;
   replyTo?: Message | null;
   onClearReply?: () => void;
+  onConsumeReply?: () => void;
+  onRestoreReply?: (message: Message, threadId: string) => void;
   /** New rooms keep the composer inert until their setup is saved or skipped. */
   locked?: boolean;
 }) {
+  const bot = profile ? currentTaskBot(profile) : undefined;
+  const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
   const { state, dispatch } = useStore();
+  const ownerOrAdmin = useOwnerOrAdmin();
+  const { threads, currentBotId } = useThreadRefs();
   const { capabilities } = useDesktopCapabilities();
+  // Simple leaves where a conversation works to its bot's Works on (Auto by
+  // default); pinning a place per conversation is an Advanced control.
+  const advanced = useAdvancedMode();
+  // Enter, Shift+Enter or Ctrl/⌘+Enter, from Settings → Appearance; the hints name it.
+  const sendKey = useSendKey();
+  const sendLabel = sendKeyLabel(sendKey);
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers members plus @everyone; explicit mentions override the room's
   // configured default responder.
-  const busy = group ? Boolean(group.busyBotId) : Boolean(bot?.busy);
+  const busy = group ? Boolean(group.working || group.busyBotId) : Boolean(bot?.busy);
   // an engine with a live session takes a message INTO the running turn;
-  // for those the composer never locks — the server steers instead of 409
+  // for those the composer never locks — the server steers instead of 409.
+  // A room steers through its busy speaker's engine, mirroring how the
+  // server's queue-steer route resolves the running turn.
+  const steerInstanceId = group
+    ? members?.find((member) => member.id === group.busyBotId)?.modelSelection.instanceId
+    : bot?.modelSelection.instanceId;
   const canSteer =
-    !group && Boolean(bot) && state.instances.find((i) => i.instanceId === bot!.modelSelection.instanceId)?.capabilities?.queueing === true;
+    state.instances.find((i) => i.instanceId === steerInstanceId)?.capabilities?.queueing === true;
   // a pending approval blocks the prompt until it is answered
   const threadId = group?.threadId ?? bot?.threadId ?? "";
+  // The conversation's own place, when pinned; the chip reads it next to the bot default.
+  const composerTask = profile?.tasks?.find((task) => task.threadId === threadId);
   // the VISIBLE branch only — an approval left on a branch you edited away
   // from must not keep blocking the composer
   const approvals = pendingApprovals(group ? group.messages : bot ? visibleMessages(bot) : []);
@@ -170,27 +164,133 @@ export function Composer({
       members?.find((member) => member.id === group.busyBotId)
     : bot;
   const busyName = group
-    ? (members?.find((b) => b.id === group.busyBotId)?.name ?? "A bot")
-    : (bot?.name ?? "The bot");
+    ? (members?.find((b) => b.id === group.busyBotId)?.name ??
+      (group.working ? t("composer.busy.team") : t("composer.busy.aBot")))
+    : (bot?.name ?? t("composer.busy.theBot"));
   // Per-thread draft: switching bots unmounts this component, so both the
   // text and its attachment chips have to outlive it (see lib/drafts).
+  const draftId = group
+    ? `group:${group.id}:${group.threadId}`
+    : `bot:${bot?.id ?? ""}:${bot?.threadId ?? ""}`;
   const [text, setText, attachments, setAttachments] = useComposerDraft(
-    group ? `group:${group.id}` : `bot:${bot?.id ?? ""}`,
+    draftId,
+    !group && bot ? `bot:${bot.id}` : undefined,
+  );
+  const attachmentPending = useDraftAttachmentPending(draftId);
+  const failedSends = useFailedComposerSends(draftId);
+  // Goal mode is opt-in and one-shot so the next ordinary channel message
+  // cannot accidentally start another multi-turn team run.
+  const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
+  const editText = useCallback(
+    (next: string) => {
+      markDraftEdited(draftId);
+      setText(next);
+    },
+    [draftId, setText],
+  );
+  const editAttachments = useCallback(
+    (next: SetStateAction<Attachment[]>) => {
+      markDraftEdited(draftId);
+      setAttachments(next);
+    },
+    [draftId, setAttachments],
+  );
+  const restoreDraft = useCallback(
+    (sent: ComposerDraftSnapshot) => {
+      // Shared recovery reaches a newly mounted view after navigation and
+      // falls back to a separate retry item when a newer draft already exists.
+      if (recoverFailedComposerSend(sent) === "restored") {
+        if (sent.reply) onRestoreReply?.(sent.reply, sent.threadId);
+      }
+    },
+    [onRestoreReply],
   );
   const addAttachments = useCallback(
-    (next: Attachment[]) => setAttachments((prev) => [...prev, ...next]),
-    [setAttachments],
+    (next: Attachment[]) => appendDraftAttachments(draftId, next),
+    [draftId],
   );
   const removeAttachment = useCallback(
-    (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id)),
-    [setAttachments],
+    (id: string) => {
+      const removed = attachments.find((attachment) => attachment.id === id);
+      if (removed?.kind === "image") releaseAttachmentImagePreview(removed);
+      editAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+    },
+    [attachments, editAttachments],
+  );
+  const displayPasteInChatBox = useCallback(
+    /** Moves one pasted attachment into the editable draft and restores focus. */
+    function displayPasteInChatBox(attachment: PasteAttachment) {
+      const nextText = appendPastedText(text, attachment.text);
+      editText(nextText);
+      editAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
+      setCaret(nextText.length);
+      setDismissedAt(null);
+      requestAnimationFrame(() => {
+        const input = inputRef.current;
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(nextText.length, nextText.length);
+      });
+    },
+    [text, editText, editAttachments],
   );
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null); // Esc'd this @
+  const [dismissedSlashAt, setDismissedSlashAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const draftIdRef = useRef(draftId);
+  draftIdRef.current = draftId;
+  // the latest caret, readable from callbacks without re-creating them
+  const caretRef = useRef(0);
+  caretRef.current = caret;
+  /** Returns keyboard focus to the draft, keeping the caret where it was. */
+  const refocusInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input || input.disabled || !composerShouldRefocus(document.activeElement, input)) return;
+      const at = Math.min(caretRef.current, input.value.length);
+      input.focus();
+      input.setSelectionRange(at, at);
+    });
+  }, []);
+  // The composer is keyed by thread, so mounting means a thread was just
+  // opened: put the caret at the end of its draft so the person can type
+  // without clicking the box first. Touch screens are skipped — focusing
+  // there pops the on-screen keyboard over the conversation.
+  useEffect(() => {
+    if (window.matchMedia?.("(hover: none) and (pointer: coarse)").matches) return;
+    const frame = requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input || input.disabled || !composerTakesFocusOnOpen(document.activeElement, input)) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
+  // Choosing a message to reply to means typing the reply comes next, so the
+  // caret follows the new target the same way it does when a thread opens.
+  // A reply restored with the thread is the open effect's; the ref starts on
+  // it so the two never both run.
+  const replyToId = replyTo?.id ?? null;
+  const focusedReplyRef = useRef(replyToId);
+  useEffect(() => {
+    const previous = focusedReplyRef.current;
+    focusedReplyRef.current = replyToId;
+    if (!replyTargetTakesFocus(previous, replyToId)) return;
+    if (window.matchMedia?.("(hover: none) and (pointer: coarse)").matches) return;
+    const frame = requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input || input.disabled || !composerTakesFocusOnOpen(document.activeElement, input)) return;
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [replyToId]);
+  const mentionListRef = useRef<HTMLDivElement>(null);
+  const commandListRef = useRef<HTMLDivElement>(null);
   // what was typed before the mic went on — partials append after it
   const baseText = useRef("");
 
@@ -202,48 +302,117 @@ export function Composer({
       candidate &&
         state.instances.find((i) => i.instanceId === candidate.modelSelection.instanceId)?.capabilities?.images,
     );
-  const imageTargetsSupport = (message: string) => {
+  const imageTargetsSupport = (message: string, mode: "chat" | "goal") => {
     if (!group) return botSupportsImages(bot);
+    if (mode === "goal") {
+      return botSupportsImages(goalCoordinatorForComposer(message, members ?? [], group) ?? undefined);
+    }
     const responders = roomRespondersForComposer(message, members ?? [], group);
     return responders.length > 0 && responders.every(botSupportsImages);
   };
-  const engineSupportsImages = imageTargetsSupport(text);
+  const typedGoalText = group && !group.dm ? goalTextFromComposer(text) : null;
+  const effectiveText = typedGoalText ?? text;
+  const effectiveChannelMode = typedGoalText !== null ? "goal" : channelMode;
+  const engineSupportsImages = imageTargetsSupport(effectiveText, effectiveChannelMode);
 
-  // ── @mention picker (tag another bot; the agent reaches it via ask_bot) ──
+  // ── Slash commands and @mentions ─────────────────────────────────────
+  const slash = composerSlashTrigger(text, caret);
+  const locale = activeLocale();
+  // A 1:1 chat also lists the bot's enabled skills; a room's members each
+  // have their own, so a room keeps to the built-in commands for now.
+  const slashSkills = useSlashSkills(group ? undefined : bot?.id, Boolean(slash) && slash?.start !== dismissedSlashAt);
+  const commandCandidates = useMemo(() => {
+    if (!slash || slash.start === dismissedSlashAt) return [];
+    const supportsAgents = (candidate?: Bot) =>
+      Boolean(
+        candidate &&
+          state.instances.find(
+            (instance) => instance.instanceId === candidate.modelSelection.instanceId,
+          )?.capabilities?.agentsMcp,
+      );
+    const available: ComposerSlashCommand[] = [];
+    if (group && !group.dm) available.push({
+      kind: "command",
+      id: "goal",
+      label: "/goal",
+      description: t("composer.command.goalDesc"),
+    });
+    if (
+      skillAuthoringEnabled(state.config) &&
+      (group ? (members ?? []).some(supportsAgents) : supportsAgents(bot))
+    ) {
+      available.push({
+        kind: "command",
+        id: "learn",
+        label: "/learn",
+        description: t("composer.command.learnDesc"),
+      });
+    }
+    // Setup mode needs the agents tools (propose_profile and friends) and a
+    // single bot: a room cannot set itself up.
+    if (!group && supportsAgents(bot)) available.push({
+      kind: "command",
+      id: "setup",
+      label: "/setup",
+      description: t("composer.command.setupDesc"),
+    });
+    available.push(...skillSlashCommands(slashSkills));
+    return available.filter((command) => slashCommandMatches(command, slash.query));
+  }, [slash, dismissedSlashAt, group, members, bot, state.config, state.instances, locale, slashSkills]);
+  const commandPickerOpen = commandCandidates.length > 0;
+
+  // Tag another bot; the agent reaches it via ask_bot.
   const mention = mentionQueryAt(text, caret);
   const candidates = useMemo(() => {
     if (!mention || mention.start === dismissedAt) return [];
     const pool: MentionChoice[] = group
       ? [
-          { id: "__everyone__", name: "everyone" },
+          ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }] : []),
           ...(members ?? []).map((member) => ({ id: member.id, name: member.name, bot: member })),
         ]
       : state.bots
           .filter((member) => member.id !== bot?.id && !member.hidden)
           .map((member) => ({ id: member.id, name: member.name, bot: member }));
-    const q = mention.query.trim().toLowerCase();
-    // "@Scout " — the full name plus a space — is a COMPLETED tag, not a
-    // search: keep the picker closed so Enter sends instead of re-picking
-    if (mention.query.endsWith(" ") && pool.some((b) => b.name.toLowerCase() === q)) return [];
-    return pool.filter((b) => !q || b.name.toLowerCase().includes(q)).slice(0, 6);
+    return mentionChoicesForQuery(pool, mention.query);
   }, [mention, dismissedAt, state.bots, bot?.id, group, members]);
-  const pickerOpen = candidates.length > 0;
+  // @everyone reaches the room's visible bots. Hidden members stay out of
+  // the count so the line matches who the server will actually answer.
+  const mentionEveryoneCount = (members ?? []).filter((member) => !member.hidden).length;
+  const mentionPickerOpen = candidates.length > 0;
+  const commandMotion = useMenuMotion(commandPickerOpen);
+  const mentionMotion = useMenuMotion(mentionPickerOpen);
 
-  useEffect(() => setHighlight(0), [mention?.start, mention?.query]);
+  useEffect(
+    () => setHighlight(0),
+    [mention?.start, mention?.query, slash?.start, slash?.query],
+  );
 
-  // grow the textarea with its content (capped by max-h in the className)
+  // skills load after the menu opens, so the list can shrink under the
+  // highlighted row
   useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [text]);
+    if (!commandPickerOpen) return;
+    setHighlight((current) => Math.min(current, commandCandidates.length - 1));
+  }, [commandCandidates.length, commandPickerOpen]);
+
+  useEffect(() => {
+    if (!commandPickerOpen) return;
+    commandListRef.current
+      ?.querySelector<HTMLElement>(`[data-command-index="${highlight}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [highlight, commandPickerOpen]);
+
+  useEffect(() => {
+    if (!mentionPickerOpen) return;
+    mentionListRef.current
+      ?.querySelector<HTMLElement>(`[data-mention-index="${highlight}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [highlight, mentionPickerOpen]);
 
   const pickMention = (peer: MentionChoice) => {
     if (!mention) return;
     const after = text.slice(caret);
     const next = `${text.slice(0, mention.start)}@${peer.name} ${after}`;
-    setText(next);
+    editText(next);
     const newCaret = mention.start + peer.name.length + 2;
     setCaret(newCaret);
     // picking completes this tag — close the popup so the next Enter sends
@@ -254,87 +423,357 @@ export function Composer({
     });
   };
 
-  // Rooms hold one message client-side while a member speaks; it auto-sends
-  // the moment the room settles. 1:1 mid-turn sends still POST (the harness
-  // queue), but stay off the transcript until drain — the chip here is the
-  // pending row so they cannot become the active leaf mid-turn.
-  const [queued, setQueued] = useState<{ text: string; replyToId?: string } | null>(null);
-  const pendingChip = group
-    ? queued?.text
-    : bot
-      ? state.pendingQueued?.[bot.threadId]?.map((entry) => entry.text).join("\n")
-      : undefined;
-  // a chip on its own is a message: the send control has to appear for it
-  const fileInput = useRef<HTMLInputElement>(null);
-  const [autoWarn, setAutoWarn] = useState(false);
-  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
-  // Auto mode belongs to one bot; a room has several, each with its own.
-  const autoBot = group ? undefined : bot;
-  const pickFiles = async (picked: FileList | null) => {
-    if (!picked?.length) return;
-    const { attachments: added, notice } = await intakeFiles(Array.from(picked), {
-      allowImages: engineSupportsImages,
-      getPath: pathForFile,
-      uploadImage: imageAttachmentFromFile,
+  const pickCommand = (command: ComposerSlashCommand | undefined) => {
+    if (!slash || !command) return;
+    const replacement = command.kind === "skill" ? `${command.label} `
+      : command.id === "learn" ? "/learn " : command.id === "setup" ? "/setup " : "";
+    const next = replaceComposerSlashTrigger(text, slash, replacement);
+    editText(next.text);
+    setCaret(next.caret);
+    setDismissedSlashAt(slash.start);
+    setChannelMode(command.kind === "command" && command.id === "goal" ? "goal" : "chat");
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(next.caret, next.caret);
     });
-    if (added.length) addAttachments(added);
-    // Keep file-specific failures beside the attachments. A successful
-    // overlapping intake must not erase an earlier failure before it is read.
-    if (notice) setAttachmentNotice(notice);
-  };
-  const setAuto = (auto: boolean) => {
-    if (!autoBot) return;
-    // Turning it on for a bot that drives THIS computer is the one case that
-    // has to be acknowledged first. The flag the dialog sends is stripped by
-    // the reducer rather than stored, so — exactly like the settings panel —
-    // the warning is shown on every switch-on, not just the first.
-    if (auto && !autoBot.autoApprove && autoBot.computer === "local") {
-      setAutoWarn(true);
-      return;
-    }
-    dispatch({ type: "updateBot", botId: autoBot.id, patch: { autoApprove: auto } });
   };
 
-  const hasContent = Boolean(text.trim()) || attachments.length > 0;
-  const send = () => {
-    if (locked) return;
-    if (attachments.some((attachment) => attachment.kind === "image") && !imageTargetsSupport(text)) {
-      dispatch({ type: "error", message: "The selected responder does not support image attachments." });
-      return;
-    }
-    const t = composeMessage(text, attachments);
-    if (!t) return;
-    if (busy && group) {
-      setQueued({ text: t, replyToId: replyTo?.id });
-      setText("");
-      setAttachments([]);
-      onClearReply?.();
-      return;
-    }
-    if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, text: t, replyToId: replyTo?.id });
-      track("message_sent", { room: true });
+  // Busy sends are owned by the harness immediately for both channels and
+  // 1:1 chats. Keeping a channel follow-up in this component used to lose its
+  // auto-send intent whenever navigation unmounted the composer.
+  const pendingCount = (state.pendingQueued[threadId] ?? []).length;
+  const queuedMessages = state.pendingQueued[threadId] ?? [];
+  const canSteerQueued = composerCanSteerQueuedMessages(
+    busy,
+    locked,
+    pendingCount,
+    Boolean(approval),
+  );
+  const [steering, setSteering] = useState(false);
+  const interruptTurn = () => {
+    if (group) dispatch({ type: "interruptGroup", groupId: group.id, threadId });
+    else if (bot) dispatch({ type: "interrupt", botId: bot.id, threadId });
+  };
+  const queueHeadId = queuedMessages[0]?.queueId;
+  const steerQueued = () => {
+    if (!queueHeadId) return;
+    setSteering(true);
+    const settle = () => setSteering(false);
+    if (group && canSteer) {
+      // A steer-capable room folds the queued head into the running turn
+      // through the server; it never interrupts the turn to do it.
+      dispatch({ type: "steerGroupQueued", groupId: group.id, threadId, queueId: queueHeadId, onError: settle, onSettled: settle });
+    } else if (group) {
+      // A room whose running engine cannot steer keeps the old behavior:
+      // Steer ends the running turn so the next queued message starts.
+      dispatch({ type: "interruptGroup", groupId: group.id, threadId, onError: settle });
+    } else if (bot && canSteer) {
+      // A steer-capable engine folds the queued words into the running turn
+      // through the server; it never interrupts the turn to do it.
+      dispatch({ type: "steerQueued", botId: bot.id, threadId, queueId: queueHeadId, onError: settle, onSettled: settle });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, text: t, replyToId: replyTo?.id });
+    // Unlike the general Stop control, Steer belongs to this exact queue.
+    // Scoping prevents a 1:1 queue from interrupting the same bot in a room
+    // (or a routine) whose work is unrelated to the words shown here.
+      dispatch({ type: "interrupt", botId: bot.id, threadId, onError: settle });
+    }
+  };
+  useEffect(() => setSteering(false), [threadId, queueHeadId]);
+  // Edit pulls a queued message back into the composer. The server removes it
+  // from the queue first; only a confirmed removal hands the words back, so a
+  // message that already drained into a turn can never also be resent.
+  const editQueued = (queueId: string) => {
+    const queued = queuedMessages.find((item) => item.queueId === queueId);
+    if (!queued) return;
+    const targetDraftId = draftId;
+    const onCancelled = () => {
+      const cited = splitTranscriptCitations(queued.text);
+      if (cited.display) prependComposerDraft(targetDraftId, cited.display);
+      appendDraftAttachments(targetDraftId, cited.citations);
+      if (targetDraftId !== draftIdRef.current) return;
+      requestAnimationFrame(() => {
+        const input = inputRef.current;
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(cited.display.length, cited.display.length);
+      });
+    };
+    if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId, onCancelled });
+    else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId, onCancelled });
+  };
+  // Double-Enter gesture: when a send lands as a queued chip on a busy
+  // steer-capable thread (live steer lost its race, an attachment, an
+  // older CLI), a second Enter within a short window pulls that queue into
+  // the running turn. Plain sends never consult the window, so they keep
+  // their normal latency.
+  const steerAgainUntilRef = useRef(0);
+  const prevPendingCountRef = useRef(pendingCount);
+  useEffect(() => {
+    const expiresAt = doubleEnterSteerWindowExpiresAt(
+      prevPendingCountRef.current,
+      pendingCount,
+      busy,
+      canSteer,
+    );
+    if (expiresAt !== null) steerAgainUntilRef.current = expiresAt;
+    prevPendingCountRef.current = pendingCount;
+  }, [pendingCount, busy, canSteer]);
+  // Most engines acknowledge interruption quickly, but a lost response must
+  // not leave a control claiming to steer forever. Queue drain or turn end
+  // clears it immediately; twenty seconds is the final recovery floor.
+  useEffect(() => {
+    if (!busy || pendingCount === 0) {
+      setSteering(false);
+      return;
+    }
+    if (!steering) return;
+    const timeout = window.setTimeout(() => setSteering(false), 20_000);
+    return () => window.clearTimeout(timeout);
+  }, [busy, pendingCount, steering]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [approvalWarning, setApprovalWarning] = useState<{
+    mode: "auto" | "full";
+    botId: string;
+    threadId: string;
+  } | null>(null);
+  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+  const [commandAllowlistTarget, setCommandAllowlistTarget] = useState<{ botId: string; botName: string; threadId: string } | null>(null);
+  // Approval mode belongs to one bot; a room has several, each with its own.
+  const modeBot = group ? undefined : bot;
+  const approvalEngine = modeBot
+    ? state.instances.find((instance) => instance.instanceId === modeBot.modelSelection.instanceId)
+    : undefined;
+  const trustedThreadAccess = Boolean(!remoteClient && window.ogb?.approvals && capabilities.host.packaged);
+  const uploadImage = useCallback(async (file: File): Promise<Attachment | null> => {
+    const optimistic = optimisticImageAttachment(file);
+    if (!optimistic) return null;
+    appendDraftAttachments(draftId, [optimistic]);
+    try {
+      const completed = await imageAttachmentFromFile(file, optimistic);
+      if (!completed) {
+        replaceDraftAttachment(draftId, optimistic.id, null);
+        releaseAttachmentImagePreview(optimistic);
+        return null;
+      }
+      handoffAttachmentImagePreview(completed.path, completed.previewUrl);
+      if (!replaceDraftAttachment(draftId, optimistic.id, completed)) {
+        // The user removed the chip while its upload was completing.
+        releaseAttachmentImagePreview(completed);
+      }
+      // The keyed draft already owns the completed attachment; returning it
+      // would make intakeFiles append a duplicate chip.
+      return null;
+    } catch (error) {
+      replaceDraftAttachment(draftId, optimistic.id, null);
+      releaseAttachmentImagePreview(optimistic);
+      throw error;
+    }
+  }, [draftId]);
+  const pickFiles = async (picked: FileList | null) => {
+    if (!picked?.length) return;
+    changeDraftAttachmentPending(draftId, true);
+    try {
+      const { attachments: added, notice } = await intakeFiles(Array.from(picked), {
+        allowImages: engineSupportsImages,
+        getPath: pathForFile,
+        uploadImage,
+      });
+      if (added.length) addAttachments(added);
+      if (notice) setAttachmentNotice(notice);
+    } finally {
+      changeDraftAttachmentPending(draftId, false);
+    }
+    // the file dialog leaves focus on the paperclip button; typing should
+    // continue in the draft without another click
+    refocusInput();
+  };
+  const setApprovalMode = (mode: ApprovalMode) => {
+    if (!modeBot || modeBot.busy || mode === approvalModeFor(modeBot)) return;
+    if ((mode === "full" || mode === "custom") && !trustedThreadAccess) return;
+    if (mode === "full") {
+      setApprovalWarning({ mode, botId: modeBot.id, threadId: modeBot.threadId });
+      return;
+    }
+    // Safe Auto still needs its dedicated warning when it can drive the host.
+    if (mode === "auto" && modeBot.computer === "local") {
+      setApprovalWarning({ mode: "auto", botId: modeBot.id, threadId: modeBot.threadId });
+      return;
+    }
+    dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { approvalMode: mode } });
+  };
+
+  const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
+  const retryFailedSend = (failed: FailedComposerSend) => {
+    const failedMode = failed.channelMode ?? "chat";
+    if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText, failedMode)) {
+      dispatch({ type: "error", message: t("composer.error.noImages") });
+      return;
+    }
+    forgetFailedComposerSend(draftId, failed.id);
+    const retry = {
+      sendId: failed.sendId,
+      text: failed.requestText,
+      replyToId: failed.replyToId,
+      threadId: failed.threadId,
+      onError: () => {
+        rememberFailedComposerSend(draftId, {
+          sendId: failed.sendId,
+          text: failed.text,
+          requestText: failed.requestText,
+          replyToId: failed.replyToId,
+          threadId: failed.threadId,
+          channelMode: failed.channelMode,
+        });
+      },
+    };
+    if (group) {
+      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
+    } else if (bot) {
+      dispatch({ type: "send", botId: bot.id, ...retry });
+    }
+  };
+  const send = () => {
+    if (locked || attachmentPending) return;
+    if (
+      attachments.some((attachment) => attachment.kind === "image") &&
+      !imageTargetsSupport(effectiveText, effectiveChannelMode)
+    ) {
+      dispatch({ type: "error", message: t("composer.error.noImages") });
+      return;
+    }
+    // named `body`, not `t` — that name belongs to the catalog lookup now
+    // resolvable "#Title" runs leave as canonical links, so the thread id
+    // stays machine-readable in the stored send and the model's context
+    const composed = composeMessage(serializeThreadRefs(effectiveText, threads, currentBotId), attachments);
+    if (!composed) return;
+    const body = restoredRequestText(draftId) ?? composed;
+    // The viewed Data result travels as its own field of the send, never in
+    // the words: only for this bot's own thread, and never ahead of an
+    // opening command the server parses first.
+    const dataContext = dataContextFor(body, state.computerOpen ? state.dataView : null, !group && bot ? { botId: bot.id, threadId } : undefined);
+    const sentDraft: ComposerDraftSnapshot = {
+      draftId,
+      revision: draftRevision(draftId),
+      sendId: restoredSendId(draftId) ?? crypto.randomUUID(),
+      text,
+      requestText: body,
+      attachments: [...attachments],
+      reply: replyTo ?? null,
+      replyToId: replyTo?.id,
+      threadId,
+      channelMode: group ? effectiveChannelMode : undefined,
+    };
+    if (group) {
+      dispatch({
+        type: "sendGroup",
+        groupId: group.id,
+        text: body,
+        sendId: sentDraft.sendId,
+        replyToId: replyTo?.id,
+        threadId,
+        mode: effectiveChannelMode,
+        onError: () => restoreDraft(sentDraft),
+      });
+      track("message_sent", { room: true, mode: effectiveChannelMode, queued: busy });
+    } else if (bot) {
+      dispatch({
+        type: "send",
+        botId: bot.id,
+        text: body,
+        sendId: sentDraft.sendId,
+        replyToId: replyTo?.id,
+        threadId,
+        dataContext,
+        onError: () => restoreDraft(sentDraft),
+      });
       track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy && !canSteer });
     }
     setText("");
     setAttachments([]);
-    onClearReply?.();
+    onConsumeReply?.();
+    if (group) setChannelMode("chat");
   };
-  useEffect(() => {
-    if (busy || !queued) return;
-    if (group) {
-      if (queued.text.includes("<attached-image ") && !imageTargetsSupport(queued.text)) {
-        dispatch({ type: "error", message: "The selected responder does not support image attachments." });
-        setQueued(null);
+
+  /**
+   * Handles clipboard paste events in the composer textarea: converts pasted clipboard
+   * images into uploaded attachments (if supported by the responder) and converts oversized
+   * text into draft attachment chips.
+   *
+   * @param e - Clipboard event from the composer textarea.
+   */
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    // an image from the clipboard becomes an uploaded attachment —
+    // but only for engines that can open one; a grok bot politely
+    // refuses instead of receiving a path it cannot read
+    const imageFiles = clipboardImageFiles(e.clipboardData);
+    if (imageFiles.length > 0 || clipboardHasImages(e.clipboardData)) {
+      e.preventDefault();
+      if (!engineSupportsImages) {
+        dispatch({
+          type: "error",
+          message: t("composer.error.noImages"),
+        });
         return;
       }
-      dispatch({ type: "sendGroup", groupId: group.id, text: queued.text, replyToId: queued.replyToId });
-      track("message_sent", { room: true, queued: true });
+      if (!imageFiles.length) {
+        dispatch({ type: "error", message: t("composer.error.clipboardImage") });
+        return;
+      }
+      if (imageFiles.length > 0) {
+        changeDraftAttachmentPending(draftId, true);
+        void (async () => {
+          try {
+            const results = await Promise.allSettled(imageFiles.map(uploadImage));
+            for (const result of results) {
+              if (result.status === "rejected") {
+                dispatch({
+                  type: "error",
+                  message: result.reason instanceof Error ? result.reason.message : "image upload failed",
+                });
+              }
+            }
+          } finally {
+            changeDraftAttachmentPending(draftId, false);
+          }
+        })();
+        return;
+      }
     }
-    setQueued(null);
-  }, [busy, queued, group, members, state.instances, dispatch]);
+    const pasted = e.clipboardData.getData("text/plain");
+    // a pasted thread reference — canonical link, its markdown shape, or a
+    // raw UUID — becomes the token the composer holds when it names a
+    // thread the person can see; anything else stays ordinary text
+    const reference = threadTokenFromPaste(pasted, threads, currentBotId);
+    if (reference) {
+      e.preventDefault();
+      const start = e.currentTarget.selectionStart ?? text.length;
+      const end = e.currentTarget.selectionEnd ?? start;
+      // "#Title" only links at a word boundary, so keep the token clear of
+      // the words it may land between
+      const { lead, trail } = threadTokenSpacing(text, start, end);
+      const token = lead + reference.token + trail;
+      editText(text.slice(0, start) + token + text.slice(end));
+      const at = start + token.length;
+      setCaret(at);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(at, at);
+      });
+      return;
+    }
+    // a wall of text becomes a chip instead of burying the input
+    if (!isLongPaste(pasted)) return;
+    e.preventDefault();
+    // Preserve native paste replacement semantics: if text was
+    // selected, the attachment replaces that selection.
+    const start = e.currentTarget.selectionStart;
+    const end = e.currentTarget.selectionEnd;
+    if (start !== end) {
+      editText(`${text.slice(0, start)}${text.slice(end)}`);
+      setCaret(start);
+    }
+    editAttachments((prev) => [...prev, pasteAttachment(pasted)]);
+  };
 
   // native dictation: partials stream into the input while the Swift
   // helper runs; the final transcript stays in the box, ready to edit/send
@@ -349,17 +788,21 @@ export function Composer({
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (typeof line.text === "string") {
         const base = baseText.current;
-        setText(base ? `${base} ${line.text}` : line.text);
+        editText(base ? `${base} ${line.text}` : line.text);
       }
     });
-    const offEnd = bridge.onSpeechEnd(({ code }) => {
+    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
       setRecording(false);
       if (code === 2) {
-        setSpeechError("Dictation is only available on macOS for now.");
+        setSpeechError(t("composer.dictation.macOnly"));
       } else if (code === 1) {
-        setSpeechError(
-          "Dictation needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
-        );
+        setSpeechError(t(
+          reason === "dictation-disabled"
+            ? "composer.dictation.disabled"
+            : reason === "speech-not-authorized"
+              ? "composer.dictation.permission"
+              : "composer.dictation.failed",
+        ));
       }
     });
     void bridge.speechStart();
@@ -368,11 +811,11 @@ export function Composer({
       offEnd();
       void bridge.speechStop();
     };
-  }, [recording]);
+  }, [recording, editText]);
 
   const toggleMic = () => {
     if (!capabilities.dictation.available || !window.ogb) {
-      setSpeechError("Dictation isn't available in this build.");
+      setSpeechError(t("composer.dictation.unavailable"));
       return;
     }
     baseText.current = text.trim();
@@ -380,87 +823,149 @@ export function Composer({
   };
 
   return (
-    <div className="px-5 pb-3 pt-1">
+    <div className="pointer-events-none relative px-5 pb-3">
+      {/* No fill or hairline on this wrapper — those were the black frame
+          in the pill's top corners. The dock overlays the transcript. */}
       {speechError && (
-        <div className="mx-auto mb-2 max-w-[900px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
+        <div className="pointer-events-auto mb-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}
         </div>
       )}
-      <div className="relative mx-auto max-w-[900px]">
-        {pendingChip && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[12.5px] text-ink-secondary">
-            <Clock size={13} className="shrink-0" />
-            <span className="min-w-0 flex-1 truncate">
-              Queued — sends when {busyName} finishes: “{pendingChip}”
-            </span>
-            {group && (
-              <button
-                onClick={() => setQueued(null)}
-                aria-label="Discard queued message"
-                className="rounded p-0.5 hover:bg-raised hover:text-ink"
-              >
-                <X size={13} />
-              </button>
-            )}
-          </div>
-        )}
-        {pickerOpen && (
+      <div className="pointer-events-auto relative w-full">
+        {failedSends.map((failed) => (
           <div
-            role="listbox"
-            aria-label="Tag a bot"
-            className="absolute bottom-full left-2 z-20 mb-2 w-72 overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
+            key={failed.id}
+            className="mb-2 flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12.5px] text-danger"
           >
-            {candidates.map((peer, i) => (
+            <span className="min-w-0 flex-1 truncate">
+              {t("composer.failed.notSent", {
+                text: failed.text.trim() || t("composer.failed.attachment"),
+              })}
+            </span>
+            <button
+              type="button"
+              onClick={() => retryFailedSend(failed)}
+              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-danger/10"
+            >
+              {t("chat.retry")}
+            </button>
+            <button
+              type="button"
+              onClick={() => forgetFailedComposerSend(draftId, failed.id)}
+              aria-label={t("composer.failed.dismissAria")}
+              title={t("composer.failed.dismiss")}
+              className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-danger/10"
+            >
+              <X size={13} strokeWidth={2.5} />
+            </button>
+          </div>
+        ))}
+        {commandMotion.shown && (
+          <div
+            ref={commandListRef}
+            role="listbox"
+            aria-label={t("composer.commands.aria")}
+            className={cn("absolute bottom-full left-2 z-20 mb-2 max-h-80 w-80 max-w-[calc(100%-1rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", commandMotion.className)} {...commandMotion.exitProps}
+          >
+            <div className="border-b border-hairline/20 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">
+              {t("composer.commands.title")}
+            </div>
+            {commandCandidates.map((command, index) => (
               <button
-                key={peer.id}
+                key={`${command.kind}:${command.id}`}
+                data-command-index={index}
+                type="button"
                 role="option"
-                aria-selected={i === highlight}
-                onClick={() => pickMention(peer)}
-                onMouseEnter={() => setHighlight(i)}
+                aria-selected={index === highlight}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => pickCommand(command)}
+                onMouseEnter={() => setHighlight(index)}
                 className={cn(
-                  "flex w-full items-center gap-2.5 px-3 py-2 text-left",
-                  i === highlight ? "bg-raised-hover" : "",
+                  "flex w-full items-center gap-3 px-3 py-2.5 text-left",
+                  index === highlight ? "bg-raised-hover" : "",
                 )}
               >
-                {peer.bot ? (
-                  <MausAvatar
-                    color={peer.bot.color}
-                    state={normalizeState(peer.bot.mascotExpression) ?? "happy"}
-                    size={24}
-                  />
-                ) : (
-                  <span className="flex size-6 items-center justify-center rounded-full bg-raised text-ink-secondary">
-                    <Users size={14} aria-hidden="true" />
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+                  {command.kind === "skill" ? (
+                    <Sparkles size={15} aria-hidden="true" />
+                  ) : command.id === "goal" ? (
+                    <Target size={15} aria-hidden="true" />
+                  ) : (
+                    <BookOpen size={15} aria-hidden="true" />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-[14px] font-medium text-accent">{command.label}</span>
+                    {command.kind === "skill" && (
+                      <span className="shrink-0 rounded-full bg-accent/10 px-1.5 text-[11px] font-medium leading-4 text-accent">{t("composer.command.skillTag")}</span>
+                    )}
                   </span>
-                )}
-                <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{peer.name}</span>
-                <span className="shrink-0 text-xs text-ink-secondary">{peer.bot ? "Agent" : "Channel"}</span>
+                  <span className="block truncate text-xs text-ink-secondary">
+                    {command.description}
+                  </span>
+                </span>
               </button>
             ))}
+          </div>
+        )}
+        {mentionMotion.shown && (
+          <div
+            ref={mentionListRef}
+            role="listbox"
+            aria-label={t("composer.mention.aria")}
+            className={cn("absolute bottom-full start-2 z-20 mb-2 max-h-72 w-72 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", mentionMotion.className)} {...mentionMotion.exitProps}
+          >
+            {candidates.map((peer, i) => {
+              const description = mentionRowDescription(peer.bot
+                ? { kind: "bot", title: peer.bot.title }
+                : { kind: "everyone", count: mentionEveryoneCount });
+              return (
+                <ComposerMenuRow
+                  key={peer.id}
+                  id={`composer-mention-${peer.id}`}
+                  data-mention-index={i}
+                  role="option"
+                  aria-selected={i === highlight}
+                  onClick={() => pickMention(peer)}
+                  onMouseEnter={() => setHighlight(i)}
+                  selected={i === highlight}
+                  icon={peer.bot ? (
+                    <BotAvatar
+                      bot={peer.bot}
+                      state={normalizeState(peer.bot.mascotExpression) ?? "happy"}
+                      size={24}
+                    />
+                  ) : (
+                    <span className="flex size-6 items-center justify-center rounded-full bg-raised text-ink-secondary">
+                      <Users size={14} aria-hidden="true" />
+                    </span>
+                  )}
+                  name={peer.name}
+                  description={description || undefined}
+                  kind={peer.bot ? t("composer.mention.agent") : t("composer.mention.channel")}
+                />
+              );
+            })}
           </div>
         )}
         {/* An approval takes over the composer: you answer it before you
             can type again, so a waiting bot is impossible to miss. */}
         {approval && (
           <div className="mb-2 overflow-hidden rounded-2xl border border-accent/40 bg-card">
-            <PendingApprovalPanel pending={approval} count={approvals.length} index={0} />
+            {/* locale: the panel is memoized and its other props do not
+                change with the language — see MessagesList in ChatView */}
+            <PendingApprovalPanel
+              pending={approval}
+              count={approvals.length}
+              index={0}
+              locale={activeLocale()}
+            />
             <PendingApprovalActions
               pending={approval}
               threadId={threadId}
               bot={approvalBot}
-              onCancelTurn={() => {
-                if (group) dispatch({ type: "interruptGroup", groupId: group.id });
-                else if (bot) dispatch({ type: "interrupt", botId: bot.id });
-              }}
-            />
-          </div>
-        )}
-        {replyTo && (
-          <div className="mb-2 px-1">
-            <ReplyQuote
-              message={replyTo}
-              fallbackName={bot?.name}
-              onClear={onClearReply}
+              onCancelTurn={interruptTurn}
             />
           </div>
         )}
@@ -468,11 +973,47 @@ export function Composer({
           items={attachments}
           onAdd={addAttachments}
           onRemove={removeAttachment}
+          onChangeCitation={(citation: CitationAttachment) => editAttachments((current) => current.map((attachment) => attachment.id === citation.id ? citation : attachment))}
+          onDisplayInChatBox={displayPasteInChatBox}
           allowImages={engineSupportsImages}
           notice={attachmentNotice}
           onNotice={setAttachmentNotice}
+          onPendingChange={(pending) => changeDraftAttachmentPending(draftId, pending)}
+          uploadImage={uploadImage}
         />
-        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-2 rounded-3xl border border-hairline/40 bg-raised/60 px-3 pb-2 pt-1">
+        <QueuedComposerMessages
+          items={queuedMessages}
+          onSteer={canSteerQueued ? steerQueued : undefined}
+          steerInterrupts={!canSteer}
+          steerMode={group ? "next" : "all"}
+          steering={steering}
+          onCancel={(queueId) => {
+            if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId });
+            else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId });
+          }}
+          onEdit={locked ? undefined : editQueued}
+        />
+        <div className="relative">
+          {/* App-ground from the pill midline down, full-bleed. Bubbles may
+              tuck into the top half of the radius; they must not show below
+              center. End at the dock's pb-3 padding: a viewport-height
+              backdrop extends the document and lets focus scroll the header
+              away. Only the decoration is bounded; upward menus stay free. */}
+          <div
+            aria-hidden
+            data-composer-backdrop
+            className="pointer-events-none absolute -left-5 -right-5 -bottom-3 top-1/2 bg-app"
+          />
+        {/* One row while it fits: chips, editor, mic. The editor is the only
+            child that can shrink, so in a narrow column (a bot's settings open
+            beside the chat, a small window) it collapsed to a few pixels and
+            its placeholder stacked one letter per line, while the auto-grow
+            made the box tall to fit them. Below the container width where the
+            chips and the placeholder cannot share a line, the editor takes a
+            full line of its own above the chips instead. */}
+        <div data-tour="composer" className="@container/composer relative z-[1] rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring">
+        {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
+        <div data-composer-row className="flex items-end gap-1 @max-[30rem]/composer:flex-wrap">
           <input
             ref={fileInput}
             type="file"
@@ -485,68 +1026,114 @@ export function Composer({
             }}
           />
           {!locked && (
-            <div className="col-start-1 row-start-2 mt-1 flex items-center gap-1">
+            <div className="flex flex-wrap items-center gap-1">
               <button
                 type="button"
                 onClick={() => fileInput.current?.click()}
-                aria-label="Attach a file"
-                title="Attach a file"
+                aria-label={t("composer.attach")}
+                title={t("composer.attach")}
                 className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
               >
                 <Paperclip size={17} />
               </button>
-              {autoBot && <PermissionModeSelector bot={autoBot} onSetAuto={setAuto} />}
+              {group && !group.dm && (
+                <button
+                  type="button"
+                  aria-pressed={effectiveChannelMode === "goal"}
+                  aria-label={t("composer.goal.aria")}
+                  title={t("composer.goal.title")}
+                  onClick={() => {
+                    markDraftEdited(draftId);
+                    if (typedGoalText !== null) {
+                      const nextCaret = Math.max(0, caret - (text.length - typedGoalText.length));
+                      editText(typedGoalText);
+                      setCaret(nextCaret);
+                      setChannelMode("chat");
+                      requestAnimationFrame(() => {
+                        inputRef.current?.focus();
+                        inputRef.current?.setSelectionRange(nextCaret, nextCaret);
+                      });
+                      return;
+                    }
+                    setChannelMode((current) => current === "goal" ? "chat" : "goal");
+                  }}
+                  className={cn(
+                    "flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-[13px] transition-colors",
+                    effectiveChannelMode === "goal"
+                      ? "border-accent/35 bg-accent/10 text-accent"
+                      : "border-hairline/20 bg-transparent text-ink-secondary hover:bg-raised hover:text-ink",
+                  )}
+                >
+                  <Target size={14} aria-hidden="true" />
+                  {effectiveChannelMode === "goal" ? "/goal" : t("composer.goal.chip")}
+                </button>
+              )}
+              {modeBot && approvalEngine && !remoteClient && (
+                <ApprovalModeSelector
+                  approvalMode={modeBot.approvalMode}
+                  autoApprove={modeBot.autoApprove}
+                  providerName={approvalEngine.displayName}
+                  driverKind={approvalEngine.driverKind}
+                  onSelect={setApprovalMode}
+                  disabled={Boolean(modeBot.busy)}
+                  trustedModesAvailable={trustedThreadAccess}
+                  onManageCommandAllowlist={ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: modeBot.id, botName: modeBot.name, threadId: modeBot.threadId }) : undefined}
+                />
+              )}
+              {modeBot && !remoteClient && advanced && (
+                <PlaceChip
+                  bot={modeBot}
+                  task={composerTask}
+                  live={Boolean(modeBot.busy)}
+                  disabled={Boolean(modeBot.busy)}
+                  onPin={(surface) => dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } })}
+                />
+              )}
             </div>
           )}
-          <textarea
-          ref={inputRef}
+          <MentionTextarea
+          wrapperClassName="@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full"
+          inputRef={inputRef}
+          peers={group ? members ?? [] : state.bots.filter((member) => member.id !== bot?.id)}
+          everyone={Boolean(group && !group.dm)}
+          // the message is composed in the writer's language, not the UI's
+          dir="auto"
           rows={1}
           value={text}
           onChange={(e) => {
-            setText(e.target.value);
+            editText(e.target.value);
             setCaret(e.target.selectionStart ?? e.target.value.length);
             setDismissedAt(null);
+            setDismissedSlashAt(null);
           }}
-          onPaste={(e) => {
-            // an image from the clipboard becomes an uploaded attachment —
-            // but only for engines that can open one; a grok bot politely
-            // refuses instead of receiving a path it cannot read
-            const imageFiles = Array.from(e.clipboardData.files).filter(isImageFile);
-            if (imageFiles.length && engineSupportsImages) {
-              e.preventDefault();
-              void (async () => {
-                for (const file of imageFiles) {
-                  try {
-                    const attachment = await imageAttachmentFromFile(file);
-                    if (attachment) setAttachments((prev) => [...prev, attachment]);
-                  } catch (err) {
-                    dispatch({
-                      type: "error",
-                      message: err instanceof Error ? err.message : "image upload failed",
-                    });
-                  }
-                }
-              })();
-              return;
-            }
-            // a wall of text becomes a chip instead of burying the input
-            const pasted = e.clipboardData.getData("text/plain");
-            if (!isLongPaste(pasted)) return;
-            e.preventDefault();
-            // Preserve native paste replacement semantics: if text was
-            // selected, the attachment replaces that selection.
-            const start = e.currentTarget.selectionStart;
-            const end = e.currentTarget.selectionEnd;
-            if (start !== end) {
-              setText(`${text.slice(0, start)}${text.slice(end)}`);
-              setCaret(start);
-            }
-            setAttachments((prev) => [...prev, pasteAttachment(pasted)]);
-          }}
+          onPaste={handlePaste}
           onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onKeyDown={(e) => {
-            if (pickerOpen) {
+            // an input method's keys pick its own candidates: its confirming
+            // Enter must not pick a mention or command, nor its arrows move them
+            if (imeComposing(e.nativeEvent)) return;
+            if (commandPickerOpen) {
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const delta = e.key === "ArrowDown" ? 1 : -1;
+                setHighlight((current) =>
+                  (current + delta + commandCandidates.length) % commandCandidates.length,
+                );
+                return;
+              }
+              if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                pickCommand(commandCandidates[highlight]);
+                return;
+              }
+              if (e.key === "Escape") {
+                e.preventDefault();
+                setDismissedSlashAt(slash?.start ?? null);
+                return;
+              }
+            }
+            if (mentionPickerOpen) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
                 const delta = e.key === "ArrowDown" ? 1 : -1;
@@ -564,50 +1151,82 @@ export function Composer({
                 return;
               }
             }
+            // Escape drops the reply target, the strip's x from the keyboard
+            if (onClearReply && escapeCancelsReply(e.nativeEvent, { replying: Boolean(replyTo), recording })) {
+              e.preventDefault();
+              onClearReply();
+              return;
+            }
             // an empty composer + ArrowUp = edit your last message (like a chat app)
             if (e.key === "ArrowUp" && !hasContent && onEditLast) {
               e.preventDefault();
               onEditLast();
               return;
             }
-            // Shift+Enter inserts a newline; plain Enter sends
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            // the chosen send key sends; any other Enter is a new line
+            if (sendsMessage(e.nativeEvent, sendKey)) {
               e.preventDefault();
+              // The second Enter of the gesture: the chip above is waiting,
+              // the composer is empty, and the window is open — steer the
+              // queue into the running turn instead of waiting it out.
+              if (
+                canSteer &&
+                doubleEnterSteersQueue(steerAgainUntilRef.current, Date.now(), pendingCount, hasContent)
+              ) {
+                steerAgainUntilRef.current = 0;
+                steerQueued();
+                return;
+              }
               send();
             }
             if (e.key === "Escape" && recording) setRecording(false);
           }}
+          // an upload in flight must not disable the box: a disabled element
+          // drops keyboard focus and never gets it back, so the writer had to
+          // click the input again after every pasted image (#1014). send()
+          // already refuses while an attachment is pending.
           disabled={Boolean(approval) || locked}
+          aria-busy={bot?.awaitingThreadSnapshot || undefined}
           placeholder={
-            locked
-              ? "Finish room setup to start chatting"
+            setupLocked
+              ? t("composer.placeholder.locked")
               : approval
-              ? "Answer the approval above to continue"
+              ? t("composer.placeholder.approval")
+              : attachmentPending
+              ? t("composer.placeholder.attaching")
               : recording
-              ? "Listening…"
+              ? t("composer.placeholder.listening")
+              : replyTo && !busy
+              ? t("composer.placeholder.reply")
               : busy && canSteer
-                ? `${busyName} is working — Enter sends this into the running turn`
+                ? pendingCount > 0
+                  ? t("composer.placeholder.steerQueued", { name: busyName, key: sendLabel })
+                  : t("composer.placeholder.steer", { name: busyName, key: sendLabel })
               : busy
                 ? group
-                  ? `${busyName} is working — Enter queues your message`
-                  : `${busyName} is working — sends when this turn finishes`
+                  ? t("composer.placeholder.queueGroup", { name: busyName, key: sendLabel })
+                  : t("composer.placeholder.queue", { name: busyName })
                 : group
-                  ? `Message ${group.name} — ${groupComposerHint(group, members ?? [])}`
-                  : `Message ${bot?.name ?? ""}`
+                  ? channelMode === "goal"
+                    ? t("composer.placeholder.goal", { name: group.name })
+                    : t("composer.placeholder.group", {
+                        name: group.name,
+                        hint: groupComposerHint(group, members ?? [], { jevOn: jevRoomRoutingOn(state.config) }),
+                      })
+                  : t("composer.placeholder.bot", { name: bot?.name ?? "" })
           }
-          aria-label={`Message ${group ? group.name : (bot?.name ?? "")}`}
-            className="col-span-full row-start-1 max-h-60 min-h-[40px] w-full resize-none self-center bg-transparent px-1 pb-0 pt-2.5 text-[15px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none"
+          aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
+            className="block max-h-[9rem] min-h-6 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-[15px] leading-6 placeholder:text-ink-secondary focus:outline-none"
           />
-          <div className="col-start-3 row-start-2 mt-1 flex items-center gap-1">
+          <div data-composer-actions className="flex items-center gap-1 @max-[30rem]/composer:ml-auto">
+          {/* Stop stays a stop. Stop-then-steer is named beside the queued
+              message above, where its effect is visible before activation. */}
           {busy && !locked && (
           <button
-            onClick={() => {
-              if (group) dispatch({ type: "interruptGroup", groupId: group.id });
-              else if (bot) dispatch({ type: "interrupt", botId: bot.id });
-            }}
-            aria-label="Stop this turn"
+            onClick={interruptTurn}
+            aria-label={t("chat.stopTurn")}
             className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
-            title="Stop"
+            title={t("chat.stop")}
           >
             <Square size={14} className="fill-current" />
           </button>
@@ -615,26 +1234,45 @@ export function Composer({
         {!locked && !busy && !hasContent && capabilities.dictation.available && (
           <button
             onClick={toggleMic}
-            aria-label={recording ? "Stop dictation" : "Start dictation"}
+            aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full",
               recording
                 ? "animate-pulse bg-danger/20 text-danger"
                 : "text-ink-secondary hover:bg-raised hover:text-ink",
             )}
-            title={recording ? "Stop dictation (Esc)" : "Dictate"}
+            title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
           >
             <Mic size={18} />
           </button>
         )}
+        {/* Calling the bot lives here, beside dictation, rather than in the
+            chat header: it is another way to talk to it. Rooms keep their
+            group call button in the room header. */}
+        {bot && !group && <CallButton bot={bot} placement="composer" />}
         {hasContent && !locked && (
           <button
             onClick={send}
-            aria-label={busy && canSteer ? "Send into the running turn" : busy ? "Queue message" : "Send message"}
-            title={busy && canSteer ? "Send into the running turn" : busy ? "Sends when the current turn finishes" : "Send"}
+            disabled={attachmentPending}
+            aria-label={
+              busy && canSteer
+                  ? t("composer.send.steer")
+                  : busy
+                    ? t("composer.send.queue")
+                    : t("composer.send.message")
+            }
+            title={
+              busy && canSteer
+                  ? t("composer.send.steer")
+                  : busy
+                    ? t("composer.send.queueHint")
+                    : `${t("chat.send")} (${sendLabel})`
+            }
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              busy && !canSteer ? "bg-raised text-ink-secondary hover:bg-raised-hover" : "bg-accent hover:brightness-110",
+              busy && !canSteer
+                  ? "bg-raised text-ink-secondary hover:bg-raised-hover"
+                  : "bg-accent hover:brightness-110",
             )}
           >
             {busy && !canSteer ? <Clock size={15} /> : <ArrowUp size={17} />}
@@ -642,21 +1280,43 @@ export function Composer({
           )}
           </div>
         </div>
+        </div>
+        </div>
       </div>
-      <LocalComputerAutoWarning
-        open={autoWarn}
-        onCancel={() => setAutoWarn(false)}
+      <div className="pointer-events-auto">
+      {commandAllowlistTarget && <CommandAllowlistDialog
+        key={`${commandAllowlistTarget.botId}:${commandAllowlistTarget.threadId}`}
+        {...commandAllowlistTarget}
+        onClose={() => setCommandAllowlistTarget(null)}
+      />}
+      <FullAccessWarning
+        open={approvalWarning?.mode === "full"}
+        scope="thread"
+        onCancel={() => setApprovalWarning(null)}
         onConfirm={() => {
-          if (autoBot) {
-            dispatch({
-              type: "updateBot",
-              botId: autoBot.id,
-              patch: { autoApprove: true, acknowledgeLocalAuto: true },
-            });
-          }
-          setAutoWarn(false);
+          const target = approvalWarning;
+          setApprovalWarning(null);
+          if (target?.mode !== "full" || !trustedThreadAccess) return;
+          dispatch({ type: "updateTask", botId: target.botId, threadId: target.threadId,
+            patch: { approvalMode: "full", confirmFullAccess: true } });
         }}
       />
+      <LocalComputerAutoWarning
+        open={approvalWarning?.mode === "auto"}
+        onCancel={() => setApprovalWarning(null)}
+        onConfirm={() => {
+          if (approvalWarning?.mode === "auto") {
+            dispatch({
+              type: "updateTask",
+              botId: approvalWarning.botId,
+              threadId: approvalWarning.threadId,
+              patch: { approvalMode: "auto", acknowledgeLocalAuto: true },
+            });
+          }
+          setApprovalWarning(null);
+        }}
+      />
+      </div>
     </div>
   );
 }

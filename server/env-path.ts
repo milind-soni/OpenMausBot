@@ -28,6 +28,16 @@ function nvmBinDirs(): string[] {
   }
 }
 
+/** A sealed test fixture finds CLIs only where it was granted them: its own
+ * PATH, OMB_EXTRA_PATH, app-managed dirs, and install dirs under its own
+ * temporary home. The machine-wide install dirs and the login shell's PATH
+ * would hand it this computer's real CLIs — a Homebrew `codex` made the
+ * fixture's ChatGPT plan engine "available" on a developer Mac (#2035).
+ * Only the verification launcher (scripts/control-omb.ts) sets it. */
+function sealedFixture(): boolean {
+  return process.env.OMB_TEST_SEALED_PATH === "1";
+}
+
 function knownDirs(): string[] {
   const home = homedir();
   return [
@@ -37,11 +47,15 @@ function knownDirs(): string[] {
     join(home, ".grok", "bin"), // x.ai installer
     join(home, ".opencode", "bin"), // opencode installer
     join(home, ".claude", "local"), // claude "local install"
-    "/opt/homebrew/bin", // brew, Apple silicon
-    "/usr/local/bin", // brew Intel / classic installs
+    // Machine-wide rather than under the (possibly temporary) home.
+    ...(sealedFixture() ? [] : [
+      "/opt/homebrew/bin", // brew, Apple silicon
+      "/usr/local/bin", // brew Intel / classic installs
+    ]),
     join(home, ".volta", "bin"),
     join(home, ".bun", "bin"),
     join(home, ".asdf", "shims"),
+    join(home, ".local", "share", "mise", "shims"), // mise installer
     join(home, ".deno", "bin"),
     join(home, "bin"),
     ...nvmBinDirs(),
@@ -53,8 +67,9 @@ function knownDirs(): string[] {
  * invisible until it restarts, because Windows never pushes PATH changes
  * into a live process. Scanning the standard install locations recovers
  * those without a restart — `~/.grok/bin` (the x.ai installer) and
- * `%APPDATA%\npm` (global npm shims), plus `%LOCALAPPDATA%\agy\bin`, cover
- * every engine we ship an install command for. */
+ * `%APPDATA%\npm` (global npm shims), plus `%LOCALAPPDATA%\agy\bin` and
+ * `%LOCALAPPDATA%\cursor-agent`, cover every engine we ship an install
+ * command for. */
 function windowsKnownDirs(): string[] {
   const home = homedir();
   const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
@@ -63,12 +78,15 @@ function windowsKnownDirs(): string[] {
     join(appData, "npm"), // npm -g shims: claude, codex
     join(home, ".grok", "bin"), // x.ai installer
     join(localAppData, "agy", "bin"), // Antigravity installer
+    // Cursor installer: cursor-agent.* and its `agent` copies (MOCA-272)
+    join(localAppData, "cursor-agent"),
     join(home, ".local", "bin"), // claude native installer
     join(home, ".claude", "local"),
     join(home, "bin"), // Factory droid installer (%USERPROFILE%\bin)
     join(home, ".bun", "bin"),
     join(home, ".deno", "bin"),
     join(home, "go", "bin"),
+    join(process.env.ProgramFiles ?? "C:\\Program Files", "Docker", "Docker", "resources", "bin"), // Docker Desktop installer
   ];
 }
 
@@ -84,6 +102,17 @@ let loginShellPath: string | null = null;
  * and without resetting it a rescan would rebuild the cache without those
  * entries and never re-probe — "check again" would permanently lose
  * anything only the login shell's rc file knows about. */
+// Directories the app manages itself (its own npm prefix for engines it
+// installs from Settings). They go ahead of everything else so an engine
+// installed there wins over an older copy elsewhere on PATH.
+const registeredDirs: string[] = [];
+
+export function registerPathDir(dir: string): void {
+  if (registeredDirs.includes(dir)) return;
+  registeredDirs.unshift(dir);
+  resetPathCache();
+}
+
 export function resetPathCache(): void {
   cached = null;
   probed = false;
@@ -93,6 +122,7 @@ export function resetPathCache(): void {
 export function augmentedPath(): string {
   if (cached === null) {
     cached = mergePaths([
+      ...registeredDirs.filter((d) => existsSync(d)),
       ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
       ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
       // Keep the last successful login-shell result while a rescan starts a
@@ -108,7 +138,7 @@ export function augmentedPath(): string {
   // belt-and-braces: fold in the login shell's PATH once, in the
   // background — catches anything the known-dirs list doesn't (custom
   // rc exports). Never blocks a spawn; the next one benefits.
-  if (!probed && !process.env.VITEST && process.platform !== "win32") {
+  if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32") {
     probed = true;
     probeLoginShellPath();
   }
@@ -142,6 +172,23 @@ export function resetPathCacheForTests(): void {
   cached = null;
   probed = false;
   loginShellPath = null;
+  registeredDirs.length = 0;
+}
+
+/** The user's home directory as this platform defines it. Windows keeps the
+ * real profile in USERPROFILE; a HOME that leaks in from a POSIX-flavored
+ * shell is not where Windows CLIs keep their state, so USERPROFILE wins there
+ * and HOME wins everywhere else. */
+export function userHome(env: Record<string, string | undefined> = process.env): string {
+  return process.platform === "win32"
+    ? env.USERPROFILE || env.HOME || homedir()
+    : env.HOME || env.USERPROFILE || homedir();
+}
+
+/** `<user home>/.<name>` — the per-harness state directory every CLI keeps
+ * (`.qwen`, `.grok`, `.codex`…), Windows-correct everywhere. */
+export function harnessHome(name: string, env: Record<string, string | undefined> = process.env): string {
+  return join(userHome(env), `.${name}`);
 }
 
 /** Every `name` binary on the augmented PATH as absolute paths, in PATH
@@ -219,8 +266,8 @@ function isFile(p: string): boolean {
 }
 
 /** PATHEXT-aware `which`. A path-ish cli is probed where it points. */
-function whichWin(cli: string): string | null {
-  const exts = (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+function whichWin(cli: string, env?: NodeJS.ProcessEnv): string | null {
+  const exts = ((env ?? process.env).PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
   // an extensionless name is not runnable on Windows, so PATHEXT wins over
   // the bare file — npm installs both `claude` (a sh script) and `claude.cmd`
   const probe = (base: string) => {
@@ -228,7 +275,8 @@ function whichWin(cli: string): string | null {
     return order.find(isFile) ?? null;
   };
   if (/[\\/]/.test(cli) || /^[a-zA-Z]:/.test(cli)) return probe(cli);
-  for (const dir of augmentedPath().split(delimiter)) {
+  const path = env ? (env.PATH ?? env.Path ?? "") : augmentedPath();
+  for (const dir of path.split(delimiter)) {
     if (!dir) continue;
     const hit = probe(join(dir, cli));
     if (hit) return hit;
@@ -239,19 +287,19 @@ function whichWin(cli: string): string | null {
 /** node.exe to run a script with: the one npm's shim would pick, else PATH,
  * else this executable only when it really is Node. In a packaged app,
  * process.execPath is Electron and must never be mistaken for node.exe. */
-function nodeExe(near: string): string | null {
+function nodeExe(near: string, env?: NodeJS.ProcessEnv): string | null {
   const local = join(near, "node.exe");
   if (isFile(local)) return local;
   // Ask for the executable explicitly so a custom PATHEXT ordering cannot
   // make a stray node.cmd hide the real node.exe beside it.
-  const onPath = whichWin("node.exe");
+  const onPath = whichWin("node.exe", env);
   if (onPath && extname(onPath).toLowerCase() === ".exe") return onPath;
   return (process.versions as Record<string, string | undefined>).electron ? null : process.execPath;
 }
 
 /** npm/pnpm .cmd shims all spell their target as "%dp0%\..." (or
  * "%~dp0\..."). Whatever of those exists on disk is what the shim runs. */
-function parseCmdShim(shim: string): ResolvedSpawn | null {
+function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | null {
   let text: string;
   try {
     text = readFileSync(shim, "utf8");
@@ -259,12 +307,17 @@ function parseCmdShim(shim: string): ResolvedSpawn | null {
     return null;
   }
   const dir = dirname(shim);
-  const targets = [...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]
+  // npm's own npm.cmd / npx.cmd, installed beside node.exe, name their entry
+  // in a variable next to a helper script that is not the CLI:
+  // SET "NPX_CLI_JS=%~dp0\node_modules\npm\bin\npx-cli.js". The launcher's
+  // switch to a globally upgraded npm is not followed; this node's npm runs.
+  const npmEntry = /^SET "NP[MX]_CLI_JS=%~dp0\\([^"]+)"/im.exec(text);
+  const targets = [...(npmEntry ? [npmEntry] : []), ...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]
     .map((m) => join(dir, m[1]))
     .filter((p) => isFile(p) && basename(p).toLowerCase() !== "node.exe");
   const script = targets.find((p) => /\.[cm]?js$/i.test(p));
   if (script) {
-    const node = nodeExe(dir);
+    const node = nodeExe(dir, env);
     if (node) return { command: node, args: [script] };
   }
   const exe = targets.find((p) => extname(p).toLowerCase() === ".exe");
@@ -273,7 +326,7 @@ function parseCmdShim(shim: string): ResolvedSpawn | null {
 
 /** `#!/usr/bin/env node` → `node <script>`. Only node: nothing else has a
  * meaningful Windows equivalent worth guessing at. */
-function parseNodeShebang(file: string): ResolvedSpawn | null {
+function parseNodeShebang(file: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | null {
   let head = "";
   let fd: number | null = null;
   try {
@@ -293,7 +346,7 @@ function parseNodeShebang(file: string): ResolvedSpawn | null {
     }
   }
   if (!/^#!.*\bnode(\.exe)?\b/.test(head)) return null;
-  const node = nodeExe(dirname(file));
+  const node = nodeExe(dirname(file), env);
   return node ? { command: node, args: [file] } : null;
 }
 
@@ -302,28 +355,28 @@ function parseNodeShebang(file: string): ResolvedSpawn | null {
  * everywhere but win32 — POSIX already resolves PATH and #! itself.
  */
 /** Resolve a single command word (no tokenizer) — the platform spawn rules. */
-function resolveWord(cli: string, args: string[]): ResolvedSpawn {
+function resolveWord(cli: string, args: string[], env?: NodeJS.ProcessEnv): ResolvedSpawn {
   if (process.platform !== "win32") return { command: cli, args };
-  const file = whichWin(cli);
+  const file = whichWin(cli, env);
   // not found: hand back the name so spawn reports its own ENOENT
   if (!file) return { command: cli, args };
   const ext = extname(file).toLowerCase();
   if (ext === ".cmd" || ext === ".bat") {
-    const direct = parseCmdShim(file);
+    const direct = parseCmdShim(file, env);
     return direct ? { command: direct.command, args: [...direct.args, ...args] } : { command: file, args };
   }
   if (ext === ".exe" || ext === ".com") return { command: file, args };
-  const viaNode = parseNodeShebang(file);
+  const viaNode = parseNodeShebang(file, env);
   return viaNode ? { command: viaNode.command, args: [...viaNode.args, ...args] } : { command: file, args };
 }
 
-export function resolveCliSpawn(cli: string, args: string[]): ResolvedSpawn {
+export function resolveCliSpawn(cli: string, args: string[], env?: NodeJS.ProcessEnv): ResolvedSpawn {
   // An EXISTING FILE wins over the tokenizer: paths with spaces come from
   // our own candidate list unquoted ("/Applications/My Tools/claude"), and
   // splitting those would shred them. Only a bare word (no spaces) or an
   // explicitly-quoted/wrapper string reaches the split below.
   const trimmed = cli.trim();
-  if (trimmed.includes(" ") && existsSync(trimmed)) return resolveWord(trimmed, args);
+  if (trimmed.includes(" ") && existsSync(trimmed)) return resolveWord(trimmed, args, env);
   // A `cli` value may carry fixed leading arguments — wrapper scripts like
   // `/usr/local/bin/ag claude agp` are one string in the Engines panel. ONE
   // tokenizer pass, then resolve the head directly (never re-tokenized: a
@@ -336,7 +389,7 @@ export function resolveCliSpawn(cli: string, args: string[]): ResolvedSpawn {
     const [head, ...fixed] = split;
     // empty input → hand the raw string to spawn so IT reports the ENOENT
     if (!head) return { command: cli, args };
-    return resolveWord(head, [...fixed, ...args]);
+    return resolveWord(head, [...fixed, ...args], env);
   }
-  return resolveWord(cli, args);
+  return resolveWord(cli, args, env);
 }

@@ -1,9 +1,40 @@
 import { z } from "zod";
 
-/** The mascot is a first-class avatar choice; the other values crop an image. */
+/**
+ * `mascot` draws the animated mascot body, filled with the bot's colour
+ * gradient. `circle`, `rounded`, and `square` crop the bot's own image
+ * instead, shown as it is, with no mascot at all.
+ */
 export const BOT_AVATAR_CROPS = ["mascot", "circle", "rounded", "square"] as const;
 export const botAvatarCropSchema = z.enum(BOT_AVATAR_CROPS);
 export type BotAvatarCrop = z.infer<typeof botAvatarCropSchema>;
+
+/** CSS radius for a profile crop. Mascot is drawn, not photo-cropped, so it is not clipped. */
+export function avatarCropRadius(crop: BotAvatarCrop): string {
+  if (crop === "circle") return "50%";
+  if (crop === "rounded") return "22%";
+  return "0";
+}
+
+/** 1 shows the picture with object-fit cover. Larger values zoom in. */
+export const AVATAR_ZOOM_MIN = 1;
+export const AVATAR_ZOOM_MAX = 3;
+/** The point of the picture kept in the middle of the crop, from 0 to 1. */
+export const AVATAR_FOCUS_CENTER = 0.5;
+
+export function clampAvatarZoom(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(parsed)) return AVATAR_ZOOM_MIN;
+  const clamped = Math.min(AVATAR_ZOOM_MAX, Math.max(AVATAR_ZOOM_MIN, parsed));
+  return Math.round(clamped * 100) / 100;
+}
+
+export function clampAvatarFocus(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number.NaN;
+  if (!Number.isFinite(parsed)) return AVATAR_FOCUS_CENTER;
+  const clamped = Math.min(1, Math.max(0, parsed));
+  return Math.round(clamped * 1000) / 1000;
+}
 
 /**
  * Custom avatars are deliberately limited to this app's attachment server.

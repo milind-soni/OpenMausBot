@@ -1,0 +1,125 @@
+name: Prepare next release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump"
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - custom
+      version:
+        description: "Custom version (only used when Version bump is custom)"
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Open the version-bump PR
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Choose the next version
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+          CUSTOM_VERSION: ${{ inputs.version }}
+        run: |
+          current=$(node -p "require('./package.json').version")
+          next=$(node --input-type=module - "$current" "$BUMP" "$CUSTOM_VERSION" <<'EOF'
+          const [current, bump, requested] = process.argv.slice(2);
+          const parse = (value) => {
+            const match = value.replace(/^v/, "").match(/^(\d+)\.(\d+)\.(\d+)$/);
+            if (!match) throw new Error(`expected a stable X.Y.Z version, got: ${value || "(empty)"}`);
+            return match.slice(1).map(Number);
+          };
+          const before = parse(current);
+          let after;
+          if (bump === "patch") after = [before[0], before[1], before[2] + 1];
+          else if (bump === "minor") after = [before[0], before[1] + 1, 0];
+          else if (bump === "custom") after = parse(requested);
+          else throw new Error(`unknown bump: ${bump}`);
+          if (after[0] < before[0]
+            || (after[0] === before[0] && after[1] < before[1])
+            || (after[0] === before[0] && after[1] === before[1] && after[2] <= before[2])) {
+            throw new Error(`${after.join(".")} must be newer than ${current}`);
+          }
+          console.log(after.join("."));
+          EOF
+          )
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "next=$next" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse an existing release or release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.next }}
+        run: |
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::error::v$VERSION already exists in $GITHUB_REPOSITORY"
+            exit 1
+          fi
+          if gh release view "v$VERSION" --repo milind-soni/openmausbot-releases > /dev/null 2>&1; then
+            echo "::error::v$VERSION already exists in the legacy updater mirror"
+            exit 1
+          fi
+          if git ls-remote --exit-code --heads origin "release/v$VERSION" > /dev/null 2>&1; then
+            echo "::error::release/v$VERSION already exists — use its existing PR"
+            exit 1
+          fi
+
+      - name: Commit the version bump
+        env:
+          VERSION: ${{ steps.version.outputs.next }}
+        run: |
+          npm pkg set "version=$VERSION"
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "release/v$VERSION"
+          git add package.json
+          git commit -m "chore(release): bump version to $VERSION"
+          git push --set-upstream origin "release/v$VERSION"
+
+      - name: Open the release PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.next }}
+        run: |
+          url=$(gh pr create \
+            --base main \
+            --head "release/v$VERSION" \
+            --title "chore(release): bump version to $VERSION" \
+            --body "Bumps OpenMausBot to \`$VERSION\`. Merging this PR automatically starts the existing release workflow and assembles a draft release from the exact merge commit.")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "### Release PR" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url" >> "$GITHUB_STEP_SUMMARY"
+
+      # GITHUB_TOKEN-created branches do not emit another push/pull_request
+      # workflow event. Dispatch CI explicitly so the normal required checks
+      # still gate the release PR.
+      - name: Start CI for the release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.next }}
+        run: gh workflow run ci.yml --ref "release/v$VERSION"

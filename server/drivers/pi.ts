@@ -13,19 +13,31 @@
 //
 // Model ids in the picker are `provider/modelId` composites (e.g.
 // `ollama-cloud/glm-5.2`); `set_model` splits that into pi's separate
-// `{provider, modelId}` fields. The live catalog is probed from
-// `get_available_models` and every entry is flagged `custom` because pi is a
-// custom-only (BYOK) engine — the model picker's Local pane only lists
-// `custom` options for custom-only engines.
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+// `{provider, modelId}` fields. Live local hosts (oMLX / Ollama / EXO /
+// LM Studio / Unsloth) land as `host::model` inject ids the same way the
+// other engines do: mergeLocalInject lists them in Custom, and a pick
+// upserts ~/.pi/agent/models.json so pi can reach the host. The live
+// catalog is probed from `get_available_models` and every entry is flagged
+// `custom` because pi is a custom-only (BYOK) engine — the model picker's
+// Local pane only lists `custom` options for custom-only engines.
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PROVIDER_CREDENTIAL_ENV, stripWorkspaceCredentialEnv } from "../config.ts";
-import { computerProxyEnv } from "../container-computer.ts";
+import { openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { augmentedPath } from "../env-path.ts";
-import { describeSpawnFailure, killCliTree, spawnCli } from "../procs.ts";
+import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
+import {
+  deletePromptSplitReceipt,
+  promptHalves,
+  readPromptSplitReceipt,
+  splitSessionPrompt,
+  writePromptSplitReceipt,
+} from "./prompt-split.ts";
+import type { PromptSplitReceipt } from "./prompt-split.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
 
 import type {
   DriverCreateInput,
@@ -37,13 +49,79 @@ import type {
   RuntimeEvent,
   RuntimeEventListener,
   SendTurnInput,
+  SteerOutcome,
+  TurnImageInput,
 } from "../contracts.ts";
-import { EFFORT_LEVELS, newEventId, newId } from "../contracts.ts";
+import { EFFORT_LEVELS } from "../../shared/wire.ts";
+import { newEventId, newId } from "../contracts.ts";
+import { parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../shared/ask-question.ts";
+import {
+  decodeInjectId,
+  encodeInjectId,
+  hostApiKey,
+  localHost,
+  mergeLocalInject,
+} from "./local-inject.ts";
 import { appendNative } from "./native.ts";
+import { canUseMcpServer, parseToolScope } from "../../shared/tool-scope.ts";
+import { gateServer, mcpStdioServer, resultBudget } from "../mcp-gate-config.ts";
+import { remoteMcpSpec } from "../mcp-http.ts";
 
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
+const PI_MODEL_UPDATE_ARGS = ["update", "--models", "--no-approve"];
 const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+/** omp's RPC transport caps one frame at 1 MiB and only chunks oversized
+ *  frames after the client negotiates protocol 2. Sent before the first
+ *  command on every spawn: stdin order guarantees the declaration lands
+ *  before the response to that command is encoded, and vanilla pi has no
+ *  handshake frame to wait for, so nobody gates on a reply. */
+const PI_NEGOTIATE_FRAME = { id: "negotiate", type: "negotiate_protocol", protocolVersion: 2 };
+/** After this many bare turns on one pi session the full prompt rides
+ * again even without a compaction event: any history rewrite the events
+ * miss (an older pi, a missed line) still loses at most this many turns
+ * of standing instructions instead of the rest of the session. */
+const PI_PROMPT_RE_ANCHOR_TURNS = 8;
+/** How long the driver keeps listening after a finished turn_end for the
+ * run's terminal agent_end before settling anyway: a runtime that never
+ * emits agent_end still completes, while one that does cancels the wait. */
+const PI_AGENT_END_GRACE_MS = 60_000;
+
+/** pi answered a command with success:false — an explicit refusal from a
+ * live runtime, not a transport failure. Only steer branches on the
+ * difference today ("refused": provably not delivered, safe to re-queue);
+ * the handshake commands keep their catch-all ignore. */
+class PiRpcRefusalError extends Error {}
+
+type PiPromptImage = {
+  type: "image";
+  data: string;
+  mimeType: TurnImageInput["mime"];
+};
+
+function readPiPromptImages(turn: SendTurnInput): PiPromptImage[] {
+  return (turn.images ?? []).map((image) => ({
+    type: "image",
+    data: readFileSync(image.path).toString("base64"),
+    mimeType: image.mime,
+  }));
+}
+
+/** Provider-native logs are designed for bug reports. Preserve the RPC
+ * shape and encoded size, but never persist a user's image bytes in them. */
+function piNativeLogMessage(message: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(message.images)) return message;
+  return {
+    ...message,
+    images: message.images.map((image) => {
+      if (!image || typeof image !== "object") return image;
+      const value = image as Record<string, unknown>;
+      return typeof value.data === "string"
+        ? { ...value, data: `[image data: ${value.data.length} base64 chars]` }
+        : value;
+    }),
+  };
+}
 
 /** Harness effort → pi thinking level (`set_thinking_level`). The sets match
  * one-for-one except for the name of the lowest rung: the harness calls it
@@ -56,15 +134,11 @@ export function piThinkingLevel(effort: EffortLevel): (typeof EFFORT_LEVELS)[num
  * a JSON-RPC 2.0 stdio server the pi-mcp-extension consumes. Returns null when
  * there is nothing to mount (the common case). */
 export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | null {
+  const parsed = parseToolScope(turn.toolScope);
+  if (!parsed.ok) throw new Error(parsed.error);
   const servers: Record<string, unknown> = {};
   if (turn.integrations?.composio) servers.composio = { ...turn.integrations.composio };
-  if (turn.integrations?.computer) {
-    servers.computer = {
-      command: process.execPath,
-      args: [SPAWNED_PROXIES.computer],
-      env: { ...NODE_ENV_FLAG, ...computerProxyEnv(turn.integrations.computer) },
-    };
-  } else if (turn.integrations?.localComputer) {
+  if (turn.integrations?.localComputer) {
     const local = turn.integrations.localComputer;
     servers.computer = {
       command: local.command,
@@ -84,6 +158,20 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
       env: { ...NODE_ENV_FLAG, DWEB_URL: turn.integrations.dweb.url },
     };
   }
+  if (turn.integrations?.browser) servers.browser = { ...turn.integrations.browser };
+  if (turn.integrations?.data) servers.data = { ...turn.integrations.data };
+  for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) servers[name] = { ...server, scope: "custom" };
+  for (const [name, server] of Object.entries(servers)) {
+    if (parsed.scope !== undefined && !canUseMcpServer(parsed.scope, name)) { delete servers[name]; continue; }
+    // Pi registers every tool it is given and has no tool search of its own,
+    // so a URL server's big catalog is searched instead (mcp-directory.ts).
+    const directory = remoteMcpSpec(server) !== undefined;
+    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, budget: name in (turn.integrations?.custom ?? {}) ? resultBudget() : 0, nodeEnv: NODE_ENV_FLAG, directory });
+    const stdio = gated ?? mcpStdioServer(server, { nodeEnv: NODE_ENV_FLAG, ...(directory ? { directory: { name } } : {}) });
+    if (!stdio) throw new Error("Pi MCP server configuration is invalid");
+    const original = server as { scope?: string };
+    servers[name] = { ...stdio, ...(original.scope ? { scope: original.scope } : {}), ...(directory ? { directory: true } : {}) };
+  }
   return Object.keys(servers).length ? servers : null;
 }
 
@@ -100,12 +188,25 @@ interface PiModelsResponse {
   data?: { models?: PiModelEntry[] };
 }
 
+/** One decoded frame → catalog, or null when it is not a successful
+ *  `get_available_models` response. Every option is `custom` (pi is BYOK)
+ *  and id is the `provider/modelId` composite the picker and `set_model`
+ *  both use. */
+function piCatalogFromFrame(frame: unknown, fallbackDefault: string): ModelCatalog | null {
+  const res = frame as PiModelsResponse;
+  if (res?.type !== "response" || res.command !== "get_available_models" || !res.success) return null;
+  const options: Array<{ id: string; label: string; custom: true; provider: string }> = [];
+  for (const m of res.data?.models ?? []) {
+    if (!m?.provider || !m?.id) continue;
+    const id = `${m.provider}/${m.id}`;
+    options.push({ id, label: m.name ?? m.id, custom: true, provider: m.provider });
+  }
+  return { default: fallbackDefault || (options[0]?.id ?? ""), options };
+}
+
 /** Pure parser: turn a `get_available_models` stdout blob into a catalog.
- *  Every option is `custom` (pi is BYOK) and id is the `provider/modelId`
- *  composite the picker and `set_model` both use. Exported for the test. */
+ *  Exported for the test. */
 export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatalog {
-  const options: Array<{ id: string; label: string; custom: true }> = [];
-  let def = fallbackDefault;
   for (const line of stdout.split("\n")) {
     if (!line.trim()) continue;
     let msg: unknown;
@@ -114,17 +215,272 @@ export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatal
     } catch {
       continue;
     }
-    const res = msg as PiModelsResponse;
-    if (res?.type !== "response" || res.command !== "get_available_models" || !res.success) continue;
-    for (const m of res.data?.models ?? []) {
-      if (!m?.provider || !m?.id) continue;
-      const id = `${m.provider}/${m.id}`;
-      options.push({ id, label: m.name ?? m.id, custom: true });
-    }
-    break;
+    const catalog = piCatalogFromFrame(msg, fallbackDefault);
+    if (catalog) return catalog;
   }
-  if (!def && options.length) def = options[0]!.id;
+  return { default: fallbackDefault, options: [] };
+}
+
+/** omp's RPC v2 splits any frame larger than 1 MiB into base64 `rpc_chunk`
+ *  pieces: one `chunkId`/`count`/`byteLength` for the whole frame, a
+ *  sequential `index`, and `data` carrying one piece. Reassembles one
+ *  logical frame at a time; any inconsistency drops the partial sequence so
+ *  a corrupt stream can never feed a half-built frame to the parser.
+ *  Exported for the test. */
+export class PiRpcChunks {
+  /** omp's advertised cap on one reassembled frame. */
+  static readonly MAX_BYTES = 64 * 1024 * 1024;
+  /** omp's cap on one decoded piece, which also bounds the piece count. */
+  static readonly MAX_PIECE_BYTES = 256 * 1024;
+  static readonly MAX_COUNT = PiRpcChunks.MAX_BYTES / PiRpcChunks.MAX_PIECE_BYTES;
+  private chunkId: string | null = null;
+  private count = 0;
+  private byteLength = 0;
+  private bytes = 0;
+  private parts: Buffer[] = [];
+
+  /** Feed one `rpc_chunk`; returns the reassembled frame when the last
+   *  piece arrives, or null while the sequence is incomplete or broken. */
+  accept(message: Record<string, unknown>): Record<string, unknown> | null {
+    const { chunkId, index, count, byteLength, data } = message;
+    if (
+      typeof chunkId !== "string" || chunkId.length === 0 || typeof data !== "string" ||
+      // Bound the base64 before decoding it, so an oversized piece is
+      // rejected without allocating its bytes.
+      data.length === 0 || data.length > Math.ceil(PiRpcChunks.MAX_PIECE_BYTES / 3) * 4 ||
+      !Number.isInteger(index) || !Number.isInteger(count) || !Number.isInteger(byteLength) ||
+      (index as number) < 0 || (count as number) < 2 || (count as number) > PiRpcChunks.MAX_COUNT ||
+      (index as number) >= (count as number) ||
+      (byteLength as number) < 0 || (byteLength as number) > PiRpcChunks.MAX_BYTES
+    ) {
+      this.reset();
+      return null;
+    }
+    if (chunkId !== this.chunkId) {
+      // A new sequence may only start at index 0; a different chunkId
+      // mid-sequence means the previous one can never complete.
+      if (index !== 0) {
+        this.reset();
+        return null;
+      }
+      this.chunkId = chunkId;
+      this.count = count as number;
+      this.byteLength = byteLength as number;
+      this.parts = [];
+      this.bytes = 0;
+    } else if (count !== this.count || byteLength !== this.byteLength) {
+      this.reset();
+      return null;
+    }
+    const part = Buffer.from(data, "base64");
+    // Every piece must carry bytes: an empty one would let a sequence grow
+    // `parts` without ever approaching `byteLength`.
+    if (
+      index !== this.parts.length || part.length === 0 || part.length > PiRpcChunks.MAX_PIECE_BYTES ||
+      this.bytes + part.length > this.byteLength
+    ) {
+      this.reset();
+      return null;
+    }
+    this.parts.push(part);
+    this.bytes += part.length;
+    if (this.parts.length < this.count) return null;
+    const complete = this.bytes === this.byteLength;
+    const text = Buffer.concat(this.parts).toString("utf8");
+    this.reset();
+    if (!complete) return null;
+    try {
+      const frame = JSON.parse(text) as unknown;
+      return frame && typeof frame === "object" && !Array.isArray(frame)
+        ? frame as Record<string, unknown>
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private reset(): void {
+    this.chunkId = null;
+    this.count = 0;
+    this.byteLength = 0;
+    this.bytes = 0;
+    this.parts = [];
+  }
+}
+
+/** Decode one pi stdout line: a plain JSON frame, or one piece of an
+ *  `rpc_chunk` sequence (omp's protocol v2) with the reassembled frame
+ *  returned once complete. Non-JSON lines, scalars and broken sequences
+ *  resolve null and are skipped. Exported for the test. */
+export function decodePiFrame(line: string, chunks: PiRpcChunks): Record<string, unknown> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const frame = parsed as Record<string, unknown>;
+  return frame.type === "rpc_chunk" ? chunks.accept(frame) : frame;
+}
+
+/** Longest stdout line a reader buffers: omp's cap on one whole frame. */
+const PI_MAX_LINE = PiRpcChunks.MAX_BYTES;
+
+/** Split a pi child's stdout into non-blank lines for `onLine`, which
+ *  returns true to stop reading. A line longer than PI_MAX_LINE is dropped
+ *  through its newline instead of growing the buffer without bound.
+ *  Exported for the test. */
+export function piLineReader(onLine: (line: string) => boolean | void): (chunk: string) => void {
+  let buf = "";
+  let dropping = false;
+  return (chunk) => {
+    buf += chunk;
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) !== -1) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (dropping) {
+        dropping = false;
+        continue;
+      }
+      if (line.length > PI_MAX_LINE || !line.trim()) continue;
+      if (onLine(line)) return;
+    }
+    if (buf.length > PI_MAX_LINE) {
+      buf = "";
+      dropping = true;
+    }
+  };
+}
+
+/** Split a picker id into pi's `{provider, modelId}`. Accepts both the
+ *  native `provider/modelId` composite and a live-host `host::model`
+ *  inject id. */
+export function splitPiModel(id: string): { provider: string; modelId: string } | null {
+  const inject = decodeInjectId(id);
+  if (inject) return { provider: inject.host, modelId: inject.model };
+  if (!id.includes("/")) return null;
+  const [provider, ...rest] = id.split("/");
+  if (!provider || !rest.length) return null;
+  return { provider, modelId: rest.join("/") };
+}
+
+/** Prefer live `host::model` inject rows over the same model already
+ *  listed as `host/model` from ~/.pi/agent/models.json, so Custom does
+ *  not show duplicates. */
+export function preferPiInjectRows(catalog: ModelCatalog): ModelCatalog {
+  const injectIds = new Set(
+    catalog.options.filter((option) => decodeInjectId(option.id)).map((option) => option.id),
+  );
+  if (!injectIds.size) return catalog;
+  const options = catalog.options.filter((option) => {
+    if (decodeInjectId(option.id)) return true;
+    const slash = option.id.indexOf("/");
+    if (slash <= 0) return true;
+    return !injectIds.has(encodeInjectId(option.id.slice(0, slash), option.id.slice(slash + 1)));
+  });
+  let def = catalog.default;
+  if (def && !options.some((option) => option.id === def)) {
+    const slash = def.indexOf("/");
+    const mapped = slash > 0 ? encodeInjectId(def.slice(0, slash), def.slice(slash + 1)) : "";
+    def = injectIds.has(mapped) ? mapped : (options[0]?.id ?? "");
+  }
   return { default: def, options };
+}
+
+export async function applyPiLocalCatalog(
+  catalog: ModelCatalog,
+  env: Record<string, string | undefined> = process.env,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ModelCatalog> {
+  return preferPiInjectRows(await mergeLocalInject(catalog, env, fetchImpl));
+}
+
+function piAgentDir(env: Record<string, string | undefined>): string {
+  return join(env.HOME || env.USERPROFILE || homedir(), ".pi", "agent");
+}
+
+/** Upsert a live local host into ~/.pi/agent/models.json so `set_model`
+ *  can reach it. Existing providers and models are kept. Returns the
+ *  `{provider, modelId}` pair pi's RPC expects, or null when the picker
+ *  id is not a model at all. */
+export function ensurePiInjectModel(
+  modelId: string,
+  env: Record<string, string | undefined> = process.env,
+): { provider: string; modelId: string } | null {
+  const split = splitPiModel(modelId);
+  if (!split) return null;
+  const inject = decodeInjectId(modelId);
+  if (!inject) return split;
+  const host = localHost(inject.host);
+  if (!host) return split;
+
+  const dir = piAgentDir(env);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "models.json");
+  let root: Record<string, unknown> = { providers: {} };
+  if (existsSync(path)) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        root = parsed as Record<string, unknown>;
+      } else {
+        // Malformed — do not destroy the file; still return the split so
+        // set_model can try.
+        return split;
+      }
+    } catch {
+      return split;
+    }
+  }
+
+  const providers =
+    root.providers && typeof root.providers === "object" && !Array.isArray(root.providers)
+      ? { ...(root.providers as Record<string, unknown>) }
+      : {};
+  const previous = providers[inject.host];
+  const existing: Record<string, unknown> =
+    previous && typeof previous === "object" && !Array.isArray(previous)
+      ? { ...(previous as Record<string, unknown>) }
+      : {
+          baseUrl: host.baseUrl,
+          api: "openai-completions",
+          apiKey: hostApiKey(host, env),
+          compat: { supportsDeveloperRole: false, supportsReasoningEffort: true },
+          models: [] as Array<Record<string, unknown>>,
+        };
+  existing.baseUrl = host.baseUrl;
+  existing.api = typeof existing.api === "string" && existing.api ? existing.api : "openai-completions";
+  existing.apiKey = hostApiKey(host, env);
+  if (!existing.compat) {
+    existing.compat = { supportsDeveloperRole: false, supportsReasoningEffort: true };
+  }
+  const models: Array<Record<string, unknown>> = Array.isArray(existing.models)
+    ? existing.models.filter(
+        (row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row),
+      )
+    : [];
+  if (!models.some((row) => row.id === inject.model)) {
+    models.push({
+      id: inject.model,
+      name: inject.model,
+      reasoning: true,
+      input: ["text"],
+      contextWindow: 131072,
+      maxTokens: 16384,
+    });
+  }
+  existing.models = models;
+  providers[inject.host] = existing;
+  root.providers = providers;
+  writeFileSync(path, `${JSON.stringify(root, null, 2)}\n`, { mode: 0o600 });
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    // Windows ignores POSIX modes; keep the inject even if chmod is unsupported.
+  }
+  return split;
 }
 
 /** The pi-side default model, read from ~/.pi/agent/settings.json so the
@@ -152,7 +508,6 @@ export async function fetchPiModels(
 ): Promise<ModelCatalog> {
   const child = spawnCli(cli, PI_ARGS, { stdio: ["pipe", "pipe", "pipe"], env });
   return new Promise((resolve) => {
-    let buf = "";
     let done = false;
     const fallbackDefault = readPiDefaultModel(env);
     const finish = (catalog: ModelCatalog) => {
@@ -167,29 +522,40 @@ export async function fetchPiModels(
     };
     const timer = setTimeout(() => finish({ default: "", options: [] }), 15_000);
     timer.unref?.();
+    const chunks = new PiRpcChunks();
     child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      buf += chunk;
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) !== -1) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        if (!line.trim()) continue;
-        const parsed = parsePiCatalog(line + "\n", fallbackDefault);
-        if (parsed.options.length || line.includes('"get_available_models"')) {
-          clearTimeout(timer);
-          finish(parsed);
-          return;
-        }
-      }
-    });
+    child.stdout.on("data", piLineReader((line) => {
+      const frame = decodePiFrame(line, chunks);
+      if (frame?.command !== "get_available_models") return false;
+      clearTimeout(timer);
+      finish(piCatalogFromFrame(frame, fallbackDefault) ?? { default: fallbackDefault, options: [] });
+      return true;
+    }));
     child.on("error", () => finish({ default: "", options: [] }));
     child.on("close", () => finish({ default: "", options: [] }));
     try {
+      child.stdin.write(`${JSON.stringify(PI_NEGOTIATE_FRAME)}\n`);
       child.stdin.write(JSON.stringify({ id: "catalog", type: "get_available_models" }) + "\n");
     } catch {
       finish({ default: "", options: [] });
     }
+  });
+}
+
+/** Refresh pi's provider-owned catalog cache. This is deliberately called
+ * only by the explicit model-picker refresh action, never during app startup.
+ * Failure is non-fatal: the caller still probes the last usable cache. */
+export async function updatePiModelCatalog(
+  cli: string,
+  env: Record<string, string | undefined>,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    execCli(
+      cli,
+      PI_MODEL_UPDATE_ARGS,
+      { env, timeout: 60_000, maxBuffer: 1024 * 1024 },
+      (error) => resolve(!error),
+    );
   });
 }
 
@@ -227,10 +593,15 @@ interface PiEvent {
   // tool_execution_*
   toolCallId?: string;
   toolName?: string;
+  args?: unknown;
+  result?: unknown;
   isError?: boolean;
   // turn_end / message_end
-  message?: { stopReason?: string; usage?: { input?: number; output?: number } };
+  message?: { stopReason?: string; errorMessage?: string; usage?: { input?: number; output?: number } };
   usage?: { input?: number; output?: number };
+  // agent_end / agent_settled
+  isTerminal?: boolean;
+  willRetry?: boolean;
   // extension_ui_request
   id?: string;
   method?: string;
@@ -270,15 +641,35 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     const { instanceId, config } = input;
     const catalogEnv = piEnvironment({ ...process.env, ...input.environment });
     let models = EMPTY;
-    const refreshModels = async () => {
+    const readModels = async () => {
+      let base = models;
       try {
         const resolved = await fetchPiModels(config.cli, catalogEnv);
-        if (resolved.options.length) models = resolved;
+        if (resolved.options.length) base = resolved;
       } catch {
         // Keep the last usable catalog when the probe fails.
       }
+      try {
+        const next = await applyPiLocalCatalog(base, catalogEnv);
+        if (next.options.length) models = next;
+      } catch {
+        if (base.options.length) models = base;
+      }
+      try { writeStartupModelCache(instanceId, models); } catch { /* derived cache */ }
     };
-    await refreshModels();
+    const refreshModels = async () => {
+      await updatePiModelCatalog(config.cli, catalogEnv);
+      await readModels();
+    };
+    // Startup stays local and fast. Only the explicit Refresh button crosses
+    // pi's model-catalog network boundary. A later start serves the saved
+    // list and reads the local catalog behind listen.
+    const startupModelRefresh = (await openStartupModelCatalog({
+      instanceId,
+      use: (catalog) => { models = catalog; },
+      current: () => models,
+      refresh: readModels,
+    }))?.pending ?? null;
 
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread
@@ -287,10 +678,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       turnId: string;
       pending: Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>;
       child?: { stdin: { write: (s: string) => void } };
+      steer?: (text: string) => Promise<SteerOutcome>;
     }>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of Array.from(listeners)) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -302,31 +694,62 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     });
 
     const sendTurn = async (turn: SendTurnInput) => {
+      if (startupModelRefresh) await startupModelRefresh;
       const { threadId } = turn;
+      const selection = parseToolScope(turn.toolScope);
+      if (!selection.ok) throw new Error(selection.error);
+      const toolScope = selection.scope;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      // Per-bot Ask/Auto is authoritative for harness turns. Preserve the
+      // legacy instance flag only for direct adapter callers that omit it.
+      const fullAuto = turn.approvalMode === undefined ? config.fullAuto : false;
       // Host control always routes through the permission card; full-auto must
       // never get unapproved hands on the user's machine (same guard as the
       // Claude and ACP drivers).
       const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
-      if (controlsHost && config.fullAuto) {
+      if (controlsHost && fullAuto) {
         throw new Error("local computer control requires the interactive approval broker");
       }
       const turnId = newId();
       const pending = new Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>();
+      // Ask fail-safe timers, tracked so settle() can cancel them outright:
+      // a cleared pending map alone leaves each timer holding the ask
+      // closure (send, child) alive until it fires.
+      const askTimers = new Set<ReturnType<typeof setTimeout>>();
       let settled = false;
+      // the last turn_end's outcome, replayed when the run's terminal
+      // agent_end (or the grace fallback) settles the turn
+      let endStopReason: string | undefined;
+      let endUsage: { input?: number; output?: number } | undefined;
+      let endErrorMessage: string | undefined;
+      // hang insurance for runtimes with no agent_end frame at all
+      let agentEndTimer: ReturnType<typeof setTimeout> | null = null;
+      // pi's RPC surface accepts image content directly. Read before spawning
+      // so an attachment that disappeared produces one clear dispatch error
+      // instead of starting a child that can never receive its prompt.
+      const images = readPiPromptImages(turn);
+
+      // Write ~/.pi/agent/models.json before creating any credential-bearing
+      // MCP temp files. If model setup fails, there is nothing sensitive to
+      // clean up yet.
+      if (typeof turn.model === "string" && turn.model) {
+        ensurePiInjectModel(turn.model, { ...process.env, ...input.environment });
+      }
 
       // integrations → stdio MCP servers for the pi-mcp-extension. The config
-      // carries credentials (box token, composio key, comms token), so it goes
+      // carries credentials (boat token, composio key, comms token), so it goes
       // into a 0600 temp file removed when the turn settles — never on argv.
       const mcpServers = buildMcpServers(turn);
       let mcpTempDir: string | null = null;
-      if (mcpServers) {
+      let scopeReadyPath: string | undefined;
+      if (mcpServers || toolScope !== undefined) {
         mcpTempDir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-"));
+        if (toolScope !== undefined) scopeReadyPath = join(mcpTempDir, "scope-ready.json");
         try {
-          writeFileSync(join(mcpTempDir, "mcp.json"), JSON.stringify({ mcpServers }), { mode: 0o600 });
+          writeFileSync(join(mcpTempDir, "mcp.json"), JSON.stringify({ mcpServers: mcpServers ?? {}, toolScope, scopeReadyPath, approvalMode: turn.approvalMode }), { mode: 0o600 });
         } catch (err) {
           // A failed write must not leave the temp dir behind — a partial file
-          // could still hold the box token / composio key / comms token.
+          // could still hold the boat token / composio key / comms token.
           try {
             rmSync(mcpTempDir, { recursive: true, force: true });
           } catch {
@@ -335,10 +758,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           throw err;
         }
       }
-      const childArgs = mcpServers ? [...PI_ARGS, "-e", SPAWNED_PROXIES.piMcpExtension] : PI_ARGS;
+      const childArgs = mcpTempDir ? [...PI_ARGS, "-e", SPAWNED_PROXIES.piMcpExtension] : PI_ARGS;
 
       // spawnCli can throw synchronously (unresolvable CLI); if it does, the
-      // 0600 temp file with the box token / composio key / comms token must
+      // 0600 temp file with the boat token / composio key / comms token must
       // not be left on disk — settle() never runs because no child existed.
       const child = (() => {
         try {
@@ -348,7 +771,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             env: piEnvironment({
               ...process.env,
               ...input.environment,
-              ...(mcpServers && mcpTempDir ? { OMB_MCP_CONFIG: join(mcpTempDir, "mcp.json") } : {}),
+              ...(mcpTempDir ? { OMB_MCP_CONFIG: join(mcpTempDir, "mcp.json") } : {}),
             }),
           });
         } catch (err) {
@@ -362,10 +785,18 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           throw err;
         }
       })();
-      let buf = "";
       let assistantText = "";
+      // set when a compaction event arrives this turn; gates the receipt
+      // write below so a compacted-around delivery is never claimed
+      let compactionObserved = false;
       // resolve one-shot RPC responses (new_session / switch_session / set_model)
       const responseWaiters = new Map<string, { resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>();
+      // Steer frames correlate by a unique per-request id, not the shared
+      // "steer" command name: two concurrent steers would otherwise overwrite
+      // each other's waiter, and a refusal response could reject the wrong
+      // caller — requeueing words pi already accepted. Every other command
+      // keeps its command-name key.
+      let steerSeq = 0;
       const rejectWaiters = (err: Error) => {
         for (const waiter of responseWaiters.values()) {
           clearTimeout(waiter.timer);
@@ -373,20 +804,25 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
         responseWaiters.clear();
       };
-      const awaitResponse = (command: string, timeoutMs = 20_000) =>
+      const awaitResponse = (command: string, timeoutMs = 20_000, key = command) =>
         new Promise<unknown>((resolve, reject) => {
           const timer = setTimeout(() => {
-            responseWaiters.delete(command);
+            responseWaiters.delete(key);
             reject(new Error(`pi ${command} timed out`));
           }, timeoutMs);
           timer.unref?.();
-          responseWaiters.set(command, { resolve, reject, timer });
+          responseWaiters.set(key, { resolve, reject, timer });
         });
       child.stdin.on("error", () => rejectWaiters(new Error("pi stdin closed")));
       const send = (obj: Record<string, unknown>) => {
-        appendNative(threadId, { dir: "out", source: "pi.rpc", msg: obj });
+        appendNative(threadId, { dir: "out", source: "pi.rpc", msg: piNativeLogMessage(obj) });
         child.stdin.write(JSON.stringify(obj) + "\n");
       };
+      // Declare protocol 2 on the same stdin before the first command, so an
+      // omp-style runtime chunks any oversized frame it sends back. Vanilla
+      // pi refuses the unknown command; no waiter is keyed for the reply,
+      // so either answer is ignored.
+      send(PI_NEGOTIATE_FRAME);
 
       /** Emit buffered assistant text as its own item, then clear it. */
       const flushAssistantText = () => {
@@ -399,6 +835,16 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       const settle = (ok: boolean, stopReason?: string | null, usage?: { input?: number; output?: number }) => {
         if (settled) return;
         settled = true;
+        if (agentEndTimer) {
+          clearTimeout(agentEndTimer);
+          agentEndTimer = null;
+        }
+        // The turn is over: drop unanswered asks so their 15-minute
+        // fail-safe timers are cancelled outright instead of no-oping on a
+        // dead child while holding the ask closure alive.
+        for (const timer of askTimers) clearTimeout(timer);
+        askTimers.clear();
+        pending.clear();
         flushAssistantText();
         emit({
           ...base(threadId, turnId),
@@ -427,6 +873,24 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         active.delete(threadId);
       };
 
+      /** Settle from the last turn_end's recorded outcome. Errors surface
+       * here, at run completion, so a failed run reports exactly once and
+       * only after any scheduled maintenance events had their chance to
+       * arrive. */
+      const finishRun = () => {
+        const sr = endStopReason;
+        if (sr === "error" || sr === "failed") {
+          emit({
+            ...base(threadId, turnId),
+            type: "runtime.error",
+            message: String(endErrorMessage ?? "pi turn failed").slice(0, 2_000),
+          });
+          settle(false, "failed", endUsage);
+          return;
+        }
+        settle(true, sr === "cancelled" || sr === "aborted" ? "cancelled" : "end_turn", endUsage);
+      };
+
       const stop = () => {
         try {
           send({ type: "abort" });
@@ -440,18 +904,50 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
         settle(true, "cancelled");
       };
-      active.set(threadId, { stop, turnId, pending, child });
+
+      // Mid-turn input rides pi's native steer frame — the runtime queues
+      // it into the running agent without aborting the in-flight step, and
+      // answers success only after session.steer() accepted it. A success:
+      // false response is an explicit refusal (nothing consumed the words:
+      // safe to re-queue), while a death or timeout after the frame was
+      // written leaves the outcome unknowable — those are "indeterminate"
+      // so the caller can never run the words twice. Each frame carries a
+      // unique id that pi echoes on its response, so concurrent steers on
+      // the same turn never share or overwrite a waiter.
+      const steerActiveTurn = async (text: string): Promise<SteerOutcome> => {
+        if (settled || child.exitCode !== null || child.signalCode !== null) return "refused";
+        let ack: Promise<unknown>;
+        try {
+          const id = `steer:${++steerSeq}`;
+          ack = awaitResponse("steer", 20_000, id);
+          send({ type: "steer", id, message: text });
+        } catch {
+          // stdin closed before the frame was written: provably undelivered.
+          return "refused";
+        }
+        try {
+          await ack;
+          return "steered";
+        } catch (error) {
+          return error instanceof PiRpcRefusalError ? "refused" : "indeterminate";
+        }
+      };
+      active.set(threadId, { stop, turnId, pending, child, steer: steerActiveTurn });
 
       const onEvent = (evt: PiEvent) => {
         appendNative(threadId, { dir: "in", source: "pi.rpc", msg: evt });
         switch (evt.type) {
           case "response": {
-            if (evt.command && responseWaiters.has(evt.command)) {
-              const waiter = responseWaiters.get(evt.command)!;
-              responseWaiters.delete(evt.command);
+            // Resolve the echoed request id first (unique per steer);
+            // fall back to the command name for the handshake-style call
+            // sites, whose responses carry no id.
+            const key = typeof evt.id === "string" && responseWaiters.has(evt.id) ? evt.id : evt.command;
+            if (key && responseWaiters.has(key)) {
+              const waiter = responseWaiters.get(key)!;
+              responseWaiters.delete(key);
               clearTimeout(waiter.timer);
               if (evt.success) waiter.resolve(evt.data);
-              else waiter.reject(new Error(`pi ${evt.command} failed`));
+              else waiter.reject(new PiRpcRefusalError(`pi ${evt.command} failed`));
             }
             return;
           }
@@ -474,6 +970,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
               itemType: "tool",
               itemId: evt.toolCallId,
               title: String(evt.toolName ?? "tool").slice(0, 80),
+              summary: commandSummary(evt.args),
+              input: toolDetailPreview(evt.args),
             });
             return;
           }
@@ -484,6 +982,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
               itemType: "tool",
               itemId: evt.toolCallId,
               ok: !evt.isError,
+              output: toolDetailPreview(evt.result),
             });
             return;
           }
@@ -493,31 +992,150 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             if (evt.method === "select" || evt.method === "confirm" || evt.method === "input") {
               flushAssistantText();
               const reqId = evt.id ?? newId();
-              const isQuestion = evt.method === "input";
+              const isSelect = evt.method === "select";
+              const isQuestion = isSelect || evt.method === "input";
+              const selectOptions: string[] = isSelect && Array.isArray(evt.options)
+                ? evt.options.filter((option): option is string => typeof option === "string") : [];
+              const summary = String(evt.title ?? (isQuestion ? "pi has a question" : "pi wants confirmation")).slice(0, 200);
+              // A select is a question with named options; the structured
+              // card renders from it while the flat choices keep older
+              // clients answering. An input has nothing to pick from and
+              // stays the free-text question it always was.
+              const question = isSelect
+                ? (parseAskQuestions({
+                    questions: [{ question: summary, options: selectOptions }],
+                  }) ?? [])[0]
+                : undefined;
+              const choices = question?.options.length ? question.options.map((option) => option.label) : undefined;
+              let timer: ReturnType<typeof setTimeout> | undefined;
+              // Register BEFORE emitting: the harness may auto-approve from
+              // inside its synchronous request.opened listener. Emitting first
+              // made respondToRequest see no pending ask, return unavailable,
+              // then fall back to a human card on every "Always allow" call.
+              pending.set(reqId, (decision) => {
+                if (timer) {
+                  clearTimeout(timer);
+                  askTimers.delete(timer);
+                }
+                if (decision.behavior === "deny") send({ type: "extension_ui_response", id: reqId, cancelled: true });
+                else if (isQuestion) {
+                  // Recover the picked label from a structured card's Q:/A:
+                  // reply; a flat answer or typed text passes through
+                  // verbatim (questionAnswersByQuestion's single-question
+                  // fallback does exactly that).
+                  const value = question
+                    ? questionAnswersByQuestion(decision.message ?? "", [question])[question.question] ?? decision.message ?? ""
+                    : decision.message ?? "";
+                  // Display labels are capped/trimmed; pi expects the
+                  // original option. Never guess if two normalize alike.
+                  const matched = selectOptions.filter(option => parseChoices([option], 1)?.[0] === value);
+                  send(matched.length > 1
+                    ? { type: "extension_ui_response", id: reqId, cancelled: true }
+                    : { type: "extension_ui_response", id: reqId, value: matched[0] ?? value });
+                }
+                else send({ type: "extension_ui_response", id: reqId, confirmed: true });
+              });
+              // The ask must never hold the turn forever: cancel it after 15
+              // minutes. The pending.delete guard makes this a no-op once the
+              // turn settled (settle clears pending) or a person answered.
+              timer = setTimeout(() => {
+                if (timer) askTimers.delete(timer);
+                if (!pending.delete(reqId)) return;
+                send({ type: "extension_ui_response", id: reqId, cancelled: true });
+                emit({
+                  ...base(threadId, turnId),
+                  requestId: reqId,
+                  type: "request.resolved",
+                  behavior: "deny",
+                  source: "timeout",
+                });
+              }, 15 * 60_000);
+              askTimers.add(timer);
+              timer.unref?.();
               emit({
                 ...base(threadId, turnId),
                 requestId: reqId,
                 type: "request.opened",
                 requestType: isQuestion ? "question" : "permission",
                 tool: String(evt.title ?? "pi"),
-                summary: String(evt.title ?? "pi wants confirmation"),
-              });
-              pending.set(reqId, (decision) => {
-                if (decision.behavior === "deny") send({ type: "extension_ui_response", id: reqId, cancelled: true });
-                else if (isQuestion) send({ type: "extension_ui_response", id: reqId, value: decision.message ?? "" });
-                else send({ type: "extension_ui_response", id: reqId, confirmed: true });
+                summary,
+                ...(choices ? { choices } : {}),
+                ...(question ? { questions: [question] } : {}),
               });
             }
             return;
           }
+          case "compaction_start":
+          case "compaction_end":
+          case "auto_compaction_start":
+          case "auto_compaction_end": {
+            // pi compaction (manual or automatic) summarizes older
+            // messages, which can absorb the turn that carried this
+            // session's standing prompt. Both events ride the RPC surface
+            // for every compaction kind, so the moment either arrives the
+            // receipt is dropped and the next turn re-establishes the full
+            // prompt. The rest of the compacting turn may still answer
+            // without its standing instructions; that single turn is the
+            // unavoidable cost of summarizing history mid-session.
+            if (sessionReady && sessionFile) {
+              compactionObserved = true;
+              deletePromptSplitReceipt("pi", JSON.stringify([threadId, sessionFile]));
+            }
+            return;
+          }
           case "turn_end":
-          case "agent_end": {
+          {
+            // a killed child can still flush one buffered frame after the
+            // turn settled (the abort path's cancelled turn_end is the
+            // common one); arming the grace timer then would leak it past
+            // a turn that is already complete.
+            if (settled) return;
             const sr = evt.message?.stopReason;
             // toolUse means pi ran a tool and auto-continues next turn to
-            // answer — settling now would drop the final reply.
+            // answer — the run is not over, and the next turn_end carries
+            // the real outcome.
             if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
-            const usage = evt.usage ?? evt.message?.usage;
-            settle(true, sr === "cancelled" ? "cancelled" : "end_turn", usage);
+            endStopReason = sr;
+            endUsage = evt.usage ?? evt.message?.usage;
+            endErrorMessage = evt.message?.errorMessage;
+            // agent_end, not turn_end, closes the run: pi can schedule
+            // post-run maintenance (overflow-recovery compaction) after
+            // the final turn_end, and only the terminal agent_end proves
+            // the session is done rewriting itself. The grace timer
+            // settles a runtime that never sends agent_end at all.
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = setTimeout(finishRun, PI_AGENT_END_GRACE_MS);
+            agentEndTimer.unref?.();
+            return;
+          }
+          case "agent_end": {
+            // Two dialects mark a non-terminal agent_end: upstream pi sets
+            // willRetry: true when an automatic retry follows (overflow
+            // recovery runs compaction and retries as a fresh run), and the
+            // omp fork sets isTerminal: false while maintenance or async
+            // delivery has more work scheduled. Either marker means the
+            // session may still rewrite the turn that carried this
+            // session's standing prompt — keep listening so those events
+            // can drop the prompt-split receipt.
+            if (evt.isTerminal === false || evt.willRetry === true) return;
+            if (agentEndTimer) {
+              clearTimeout(agentEndTimer);
+              agentEndTimer = null;
+            }
+            finishRun();
+            return;
+          }
+          case "agent_settled": {
+            // upstream pi's explicit fully-settled guarantee: no automatic
+            // retry, compaction retry, or queued continuation remains.
+            // Usually settles one frame after the final agent_end already
+            // did; kept as its own terminal signal so the driver never
+            // depends on which dialect the configured cli speaks.
+            if (agentEndTimer) {
+              clearTimeout(agentEndTimer);
+              agentEndTimer = null;
+            }
+            finishRun();
             return;
           }
           default:
@@ -525,23 +1143,19 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       };
 
+      const chunks = new PiRpcChunks();
       child.stdout.setEncoding("utf8");
-      child.stdout.on("data", (chunk: string) => {
-        buf += chunk;
-        let nl: number;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl);
-          buf = buf.slice(nl + 1);
-          if (!line.trim()) continue;
-          try {
-            onEvent(JSON.parse(line) as PiEvent);
-          } catch {
-            /* skip non-JSON line */
-          }
+      child.stdout.on("data", piLineReader((line) => {
+        const frame = decodePiFrame(line, chunks);
+        if (!frame) return;
+        try {
+          onEvent(frame as unknown as PiEvent);
+        } catch {
+          /* skip a frame the event handler can't consume */
         }
-      });
+      }));
       child.on("error", (err) => {
-        const fail = describeSpawnFailure(err as NodeJS.ErrnoException, config.cli);
+        const fail = describeSpawnFailure(err as NodeJS.ErrnoException, config.cli, turn.cwd);
         rejectWaiters(new Error(fail.message));
         emit({ ...base(threadId, turnId), type: "runtime.error", message: fail.message, setup: fail.setup });
         settle(false);
@@ -560,12 +1174,14 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // sessionFile, which switch_session expects as `sessionPath`.
       const sessionPath = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       let sessionFile = sessionPath;
+      let sessionReady = false;
       try {
         const command = sessionPath ? "switch_session" : "new_session";
         const hsPromise = awaitResponse(command);
         send(sessionPath ? { type: "switch_session", sessionPath } : { type: "new_session" });
         const hs = (await hsPromise) as { sessionFile?: string; sessionId?: string } | undefined;
         if (hs?.sessionFile) sessionFile = hs.sessionFile;
+        sessionReady = true;
         emit({
           ...base(threadId, turnId),
           type: "session.started",
@@ -577,12 +1193,12 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         // accepts a prompt without an explicit session.
       }
 
-      // pin the chosen model (composite id → provider + modelId)
-      if (typeof turn.model === "string" && turn.model.includes("/")) {
-        const [provider, ...rest] = turn.model.split("/");
+      // pin the chosen model (composite id or host::model inject → provider + modelId)
+      const chosen = typeof turn.model === "string" ? splitPiModel(turn.model) : null;
+      if (chosen) {
         try {
           const modelPromise = awaitResponse("set_model");
-          send({ type: "set_model", provider, modelId: rest.join("/") });
+          send({ type: "set_model", provider: chosen.provider, modelId: chosen.modelId });
           await modelPromise;
         } catch {
           /* keep going on the default model */
@@ -601,10 +1217,91 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       }
 
-      const message = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
+      if (scopeReadyPath) {
+        let ready = false;
+        try {
+          const receipt = JSON.parse(readFileSync(scopeReadyPath, "utf8")) as { ok?: unknown; toolScope?: unknown };
+          ready = receipt.ok === true && JSON.stringify(receipt.toolScope) === JSON.stringify(toolScope);
+        } catch { /* Missing or malformed readiness is never a grant. */ }
+        if (!ready) {
+          const message = "Pi tool selection enforcement is unavailable. Update Pi and check the OpenMausBot extension before retrying.";
+          emit({ ...base(threadId, turnId), type: "runtime.error", message });
+          settle(false);
+          throw new Error(message);
+        }
+      }
+
+      // The stable/volatile split: the full prompt rides only the turn that
+      // establishes - or re-instructs, after a soul edit - this pi session,
+      // which previously re-sent the whole system prompt on every turn and
+      // let it accumulate in the session file once per turn. pi compacts
+      // long sessions by summarizing older messages, which can absorb the
+      // turn that carried the prompt, so the driver watches pi's
+      // compaction events and drops the receipt the moment one arrives,
+      // and re-anchors the full prompt every PI_PROMPT_RE_ANCHOR_TURNS
+      // bare turns as a backstop for anything the events miss. Receipts
+      // are durable because the session file outlives both the per-turn
+      // child and this process. Without a session the prompt is the
+      // model's only context, so that turn keeps the full block and writes
+      // no receipt.
+      const halves = promptHalves(turn);
+      let message: string;
+      let pendingReceipt: { key: string; receipt: PromptSplitReceipt } | null = null;
+      if (halves.stable !== null && sessionReady && sessionFile) {
+        const receiptKey = JSON.stringify([threadId, sessionFile]);
+        const composed = splitSessionPrompt(
+          halves.stable,
+          halves.volatile,
+          readPromptSplitReceipt("pi", receiptKey),
+          turn.system,
+          turn.text,
+          Boolean(turn.mentionTurn),
+          PI_PROMPT_RE_ANCHOR_TURNS,
+        );
+        message = composed.text;
+        pendingReceipt = { key: receiptKey, receipt: composed.receipt };
+      } else {
+        message = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
+      }
+      // events cannot interleave with this synchronous stretch, so any
+      // compaction recorded above already invalidated what compose read
       try {
-        send({ type: "prompt", message });
-      } catch {
+        // pi answers the prompt with an authoritative response only after
+        // preflight accepts it - and rejects it outright while a
+        // compaction runs - so the receipt commits only after that
+        // acceptance: a rejected or compacted-around send redelivers on
+        // the next turn. The wait is long enough to survive a compaction
+        // queue; a dead child rejects it immediately.
+        // sendTurn still resolves once the prompt is written: a child that
+        // dies before replying settles the turn through the close handler,
+        // whose waiter sweep can precede this registration.
+        const accepted = awaitResponse("prompt", 120_000);
+        send({ type: "prompt", message, ...(images.length ? { images } : {}) });
+        void accepted.then(
+          () => {
+            if (!pendingReceipt || compactionObserved) return;
+            try {
+              writePromptSplitReceipt("pi", pendingReceipt.key, pendingReceipt.receipt);
+            } catch {
+              /* an unwritten receipt only re-delivers the full prompt next turn */
+            }
+          },
+          (err: Error) => {
+            if (settled) return;
+            emit({
+              ...base(threadId, turnId),
+              type: "runtime.error",
+              message: String(err?.message ?? err).slice(0, 2_000),
+            });
+            settle(false);
+          },
+        );
+      } catch (err) {
+        emit({
+          ...base(threadId, turnId),
+          type: "runtime.error",
+          message: String((err as Error)?.message ?? err).slice(0, 2_000),
+        });
         settle(false);
       }
 
@@ -653,6 +1350,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         return models;
       },
       refreshModels,
+      ...(startupModelRefresh ? { startupModelRefresh } : {}),
       snapshot,
       adapter: {
         provider: DRIVER_KIND,
@@ -665,19 +1363,25 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           computerMcp: true,
           composioMcp: true,
           phoneMcp: true,
+          customMcp: true,
+          browserMcp: true,
+          dataMcp: true,
           // Host control (the user's real Mac) rides the pi-native permission
           // card (`ctx.ui.confirm` → extension_ui_request) gated in the
           // extension, so it is offered exactly when the other engines offer
           // it: enabled unless the bot is in full-auto.
-          localComputerMcp: !config.fullAuto,
-          // Images ride the ordinary prompt as <attached-image path> refs the
-          // agent opens with its read tool — no native image blocks needed,
-          // same as every other CLI engine.
+          localComputerMcp: true,
+          // Images ride pi's native RPC prompt as base64 content blocks, so a
+          // vision model can inspect them without a separate file-read tool.
           images: true,
+          nativeImageInput: true,
           // Reasoning effort pins pi's thinking level per turn (none → off).
           // xhigh/max only land on models that expose them; pi rejects an
           // unsupported level and the turn keeps the engine default.
           effortLevels: EFFORT_LEVELS,
+          // pi's RPC mode takes a mid-turn steer frame the runtime queues
+          // into the running agent without aborting the current step.
+          queueing: true,
         },
         sendTurn,
         interruptTurn: async (threadId) => active.get(threadId)?.stop(),
@@ -695,6 +1399,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             source: "user",
           });
           return decision.behavior === "allow" ? "allowed-once" : decision.behavior === "answer" ? "answered" : "rejected";
+        },
+        steer: async (threadId, text) => {
+          const entry = active.get(threadId);
+          return entry?.steer ? await entry.steer(text) : "refused";
         },
         hasSession: (threadId) => active.has(threadId),
         stopAll: async () => {

@@ -41,9 +41,19 @@ const copy = (credentials) => {
  * snapshot over the other two. `afterPersist` supports changes that must also
  * be accepted by the local server: if that second phase fails, the encrypted
  * file is restored before another mutation may begin. */
-export function createSecureCredentialState(initialCredentials, persist) {
+export function createSecureCredentialState(initialCredentials, persist, { writable = true } = {}) {
   let current = copy(initialCredentials);
   let transition = Promise.resolve();
+
+  // A launch that could not READ the store starts from {}. Deriving a new
+  // document from {} and writing it would not add a secret — it would replace
+  // every secret in the file with nothing, stranding the connected-apps
+  // identity the user already authorized. Reads still work (callers get an
+  // honest empty view); writes refuse, loudly, until a launch can read again.
+  const assertWritable = () => {
+    if (writable) return;
+    throw new Error("The credential store could not be read on this launch, so credentials cannot be saved");
+  };
 
   const serialize = (work) => {
     const next = transition.then(work, work);
@@ -61,6 +71,7 @@ export function createSecureCredentialState(initialCredentials, persist) {
 
     update(derive, afterPersist) {
       return serialize(async () => {
+        assertWritable();
         const previous = copy(current);
         const next = copy(await derive(copy(previous)));
         await persist(copy(next));

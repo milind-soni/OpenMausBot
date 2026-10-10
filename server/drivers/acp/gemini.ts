@@ -1,5 +1,5 @@
 // Gemini CLI harness support — Google's `gemini` CLI over ACP stdio
-// (`gemini --experimental-acp`). Rides the generic runtime in acp/core.ts.
+// (`gemini --acp`). Rides the generic runtime in acp/core.ts.
 //
 // RETIRED FROM THE DEFAULT FLEET: Google stopped serving Gemini CLI requests
 // for the free/Pro/Ultra tiers on 2026-06-18 and pointed everyone at the
@@ -26,9 +26,9 @@
 // the ACP flag + auth method ids follow the published Gemini CLI ACP contract
 // and should be re-verified end-to-end once the CLI is present.
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { userHome } from "../../env-path.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 // Prefer an explicit key method, then personal OAuth, then Vertex — but fall
@@ -40,9 +40,9 @@ const AUTH_PREFERENCE = ["gemini-api-key", "oauth-personal", "vertex-ai"];
  * an enterprise licence may still redeem. A stale consumer credential —
  * the common case since 2026-06-18 — reads as not signed in, which is the
  * truthful answer for an engine that would fail its first turn anyway. */
-function liveOauthCredential(): boolean {
+function liveOauthCredential(env: Record<string, string | undefined>): boolean {
   try {
-    const creds = JSON.parse(readFileSync(join(homedir(), ".gemini", "oauth_creds.json"), "utf8")) as {
+    const creds = JSON.parse(readFileSync(join(userHome(env), ".gemini", "oauth_creds.json"), "utf8")) as {
       access_token?: unknown;
       refresh_token?: unknown;
       expiry_date?: unknown;
@@ -69,8 +69,17 @@ export function geminiIsAuthenticated(env: Record<string, string | undefined>): 
   return (
     nonBlank(env.GEMINI_API_KEY) ||
     nonBlank(env.GOOGLE_API_KEY) ||
-    (existsSync(join(homedir(), ".gemini", "oauth_creds.json")) && liveOauthCredential())
+    (existsSync(join(userHome(env), ".gemini", "oauth_creds.json")) && liveOauthCredential(env))
   );
+}
+
+/** Gemini CLI's approval modes, passed through: `--approval-mode auto_edit`
+ * approves file edits, `--yolo` approves everything; Gemini has no
+ * automatic reviewer, so Auto stays Ask. Ask sends nothing. */
+export function geminiApprovalArgs(fullAuto: boolean, approvalMode: string | undefined): string[] {
+  if (fullAuto) return ["--yolo"];
+  if (approvalMode === "edits") return ["--approval-mode", "auto_edit"];
+  return [];
 }
 
 const support: AcpSupport = {
@@ -88,7 +97,9 @@ const support: AcpSupport = {
   loginNote:
     "Gemini CLI needs a GEMINI_API_KEY, a Vertex AI setup, or an enterprise Code Assist login — consumer Google logins stopped working on 2026-06-18 (use the Antigravity engine for those accounts)",
 
-  spawnArgs: (_config, turn) => ["--experimental-acp", ...(turn.model ? ["-m", turn.model] : [])],
+  // --acp is the stable Gemini CLI surface. --experimental-acp remains an
+  // alias for older releases, but using it now emits a deprecation warning.
+  spawnArgs: (config, turn) => ["--acp", ...geminiApprovalArgs(config.fullAuto, turn.approvalMode), ...(turn.model ? ["-m", turn.model] : [])],
   credentialEnv: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
 
   pickAuthMethod: (methods) => {

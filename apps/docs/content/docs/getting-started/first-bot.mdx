@@ -14,11 +14,26 @@ Install and sign in to at least one supported agent CLI. OpenMausBot detects ins
 
 1. Select **New or share** in the sidebar.
 2. Choose **New bot**.
-3. Give the bot a clear name and purpose.
-4. Select its agent engine and model.
-5. Choose a working folder if it should edit files or work in a repository.
+3. Review the **New bot** dialog. Its settings start from your saved defaults, and the suggested name remains editable.
+4. Give the bot a clear name and purpose in **Identity**, then select its engine and model in **Model**.
+5. Review the other sections: **Soul**, **Skills**, **Memory**, **Routines**, **Access**, **Permissions**, and **Voice & alerts**. Choose a working folder in **Access** if it should edit files or work in a repository.
+6. Select **Create bot**. Closing or cancelling the dialog discards the draft without creating a bot.
 
 The working folder matters: it becomes the bot's starting context and limits accidental edits elsewhere. Use a dedicated project folder for coding, research, or content work.
+
+In **Identity**, **Random female name** and **Random male name** insert a local
+suggestion into the editable name field. Click again for another suggestion
+or type your own. The lists contain 4,944 female and 3,897 male names from
+stdlib's English-language Moby Word II datasets. Choosing a name does not
+create a bot, call a model, or change any other profile setting.
+
+## Set defaults for future bots
+
+Open **App settings → General → Defaults for new bots → Edit**. This opens the same editor as bot creation. Save the identity, model, instructions, access preferences, memory, skills, and routines you want future bots to start with. Leave the name empty for a random suggested name each time.
+
+Saving defaults does not change existing bots or start routines. When creating a bot, you can override or clear any inherited value. Full access and local-computer Auto still require their normal confirmation when the bot is created; a saved default is not a permission grant.
+
+These full templates apply to the creation dialog and the HTTP bot-creation endpoint. Bot-driven team setup keeps its own reviewed setup flow; it does not automatically copy template memory, skills, or routines.
 
 ## Give it a useful first task
 

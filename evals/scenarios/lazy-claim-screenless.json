@@ -1,0 +1,58 @@
+{
+  "id": "lazy-claim-screenless",
+  "title": "A screen-less Auto turn completes while another thread holds the Local VM",
+  "behavior": "An Auto turn that never makes a screen call does not queue behind a VM holder: its dispatch mounts the computer tools without claiming, the turn runs to completion, and neither transcript shows a computer wait.",
+  "issue": 1361,
+  "world": "localVm",
+  "gates": ["autoTurn", "holderTurn"],
+  "bots": [
+    {
+      "key": "holder",
+      "name": "VM holder",
+      "computer": "vm",
+      "turns": [
+        { "gate": "holderTurn", "reply": "Held the VM" }
+      ]
+    },
+    {
+      "key": "auto",
+      "name": "Screen-less Auto",
+      "browser": false,
+      "turns": [
+        { "gate": "autoTurn", "reply": "No screen work today" }
+      ]
+    }
+  ],
+  "steps": [
+    { "kind": "send", "bot": "holder", "text": "Hold the VM for this fixture." },
+    { "kind": "waitForBusy", "bot": "holder", "busy": true, "timeoutMs": 20000 },
+    { "kind": "consumeDump" },
+    { "kind": "send", "bot": "auto", "text": "No screen work today." },
+    { "kind": "waitForBusy", "bot": "auto", "busy": true, "timeoutMs": 20000 },
+    { "kind": "captureComputer", "bot": "auto" },
+    { "kind": "writeGate", "gate": "autoTurn" },
+    { "kind": "waitForBusy", "bot": "auto", "busy": false, "timeoutMs": 20000 },
+    { "kind": "writeGate", "gate": "holderTurn" },
+    { "kind": "waitForBusy", "bot": "holder", "busy": false, "timeoutMs": 20000 }
+  ],
+  "assertions": [
+    { "kind": "sendNotQueued", "bot": "auto" },
+    {
+      "kind": "noActivityPrefix",
+      "bot": "auto",
+      "prefix": "Waiting for its turn"
+    },
+    {
+      "kind": "noActivityPrefix",
+      "bot": "holder",
+      "prefix": "Waiting for its turn"
+    },
+    { "kind": "toolCalls", "bot": "auto", "equals": [] },
+    {
+      "kind": "transcriptIncludes",
+      "bot": "auto",
+      "thread": "active",
+      "text": "No screen work today"
+    }
+  ]
+}

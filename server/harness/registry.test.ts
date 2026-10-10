@@ -1,8 +1,14 @@
 // The registry's contract is forward/backward compatibility: a config
 // written by a newer or differently-built app must load as an
 // unavailable shadow, never crash the fleet. These tests pin that.
-import { describe, expect, it } from "vitest";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 
+import type { ModelCatalog } from "../contracts.ts";
+import { resetPathCacheForTests } from "../env-path.ts";
+import { removeTempDir } from "../testing/cleanup.ts";
 import { makeFakeDriver } from "../testing/fake-driver.ts";
 import { ProviderRegistry } from "./registry.ts";
 
@@ -49,6 +55,20 @@ describe("ProviderRegistry", () => {
     expect(described.untouched.access).toBe("subscription");
   });
 
+  it("resolves maintenance commands to the configured CLI or driver default", async () => {
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({
+      defaulted: { driver: "fake" },
+      overridden: { driver: "fake", config: { cli: "/opt/fake/custom-bin" } },
+    });
+
+    expect(registry.cliTarget("defaulted")).toEqual({ driverKind: "fake", cli: "fakebin" });
+    expect(registry.cliTarget("overridden")).toEqual({ driverKind: "fake", cli: "/opt/fake/custom-bin" });
+    expect(registry.cliTarget("missing")).toBeNull();
+  });
+
   it("publishes custom-only access from driver metadata", async () => {
     const fake = makeFakeDriver();
     Object.assign(fake.driver.metadata, { access: "custom" });
@@ -68,6 +88,7 @@ describe("ProviderRegistry", () => {
     expect(described.snapshot.reason).toContain("from-the-future");
     expect(described.displayName).toBe("Tomorrow");
     expect(described.models.options).toHaveLength(0);
+    expect(registry.cliTarget("mystery")).toEqual({ driverKind: "from-the-future", cli: null });
   });
 
   it("downgrades a config-decode failure to a shadow with the error as reason", async () => {
@@ -94,6 +115,76 @@ describe("ProviderRegistry", () => {
     const described = await registry.describe();
     const f = described.find((d) => d.instanceId === "f")!;
     expect(f.snapshot).toMatchObject({ state: "unavailable", reason: "boom at create" });
+  });
+
+  it("creates instances concurrently while keeping config order and failure isolation", async () => {
+    const first = makeFakeDriver({ kind: "first" });
+    const second = makeFakeDriver({ kind: "second" });
+    const broken = makeFakeDriver({ kind: "broken", failCreate: "boom at create" });
+    // Gate each create on a promise this test controls: "second" is released
+    // before "first", so completion order is the reverse of config order.
+    const started: string[] = [];
+    const release = [first, second, broken].map((handle) => {
+      let open!: () => void;
+      const gate = new Promise<void>((resolve) => (open = resolve));
+      const create = handle.driver.create.bind(handle.driver);
+      handle.driver.create = async (input) => {
+        started.push(input.instanceId);
+        await gate;
+        return create(input);
+      };
+      return open;
+    });
+    const registry = new ProviderRegistry([first.driver, second.driver, broken.driver]);
+    const loading = registry.load({
+      first: { driver: "first" },
+      second: { driver: "second" },
+      broken: { driver: "broken" },
+    });
+    const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+    let done = false;
+    void loading.then(() => (done = true));
+    // Every create must be in flight before any gate opens — the serial loop
+    // this replaces could not start one while an earlier one was pending.
+    await settle();
+    expect(started).toEqual(["first", "second", "broken"]);
+    expect(done).toBe(false);
+    release[1]();
+    await settle();
+    // A ready instance is usable before the slowest one lands.
+    expect(registry.get("second")).not.toBeNull();
+    expect(registry.get("first")).toBeNull();
+    release[0]();
+    release[2]();
+    await loading;
+
+    expect(registry.instances().map((i) => i.instanceId)).toEqual(["first", "second"]);
+    expect(registry.entries().map((e) => e.instanceId)).toEqual(["first", "second", "broken"]);
+    expect(registry.get("broken")).toBeNull();
+    const described = Object.fromEntries((await registry.describe()).map((d) => [d.instanceId, d]));
+    expect(Object.keys(described)).toEqual(["first", "second", "broken"]);
+    expect(described.broken.snapshot).toMatchObject({ state: "unavailable", reason: "boom at create" });
+  });
+
+  it("does not bring back an instance disposed while a slower one is still loading", async () => {
+    const fast = makeFakeDriver({ kind: "fast" });
+    const slow = makeFakeDriver({ kind: "slow" });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const create = slow.driver.create.bind(slow.driver);
+    slow.driver.create = async (input) => {
+      await gate;
+      return create(input);
+    };
+    const registry = new ProviderRegistry([fast.driver, slow.driver]);
+    const loading = registry.load({ fast: { driver: "fast" }, slow: { driver: "slow" } });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(registry.get("fast")).not.toBeNull();
+    await registry.disposeAll();
+    release();
+    await loading;
+    expect(registry.get("fast")).toBeNull();
+    expect(registry.entries().map((e) => e.instanceId)).toEqual(["slow"]);
   });
 
   it("describe() reports a snapshot() failure as unavailable rather than throwing", async () => {
@@ -123,6 +214,59 @@ describe("ProviderRegistry", () => {
     expect(described.capabilities.effortLevels).toBeUndefined();
   });
 
+  it("exposes model-variant support without manufacturing an effort list", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    registry.get("a")!.adapter.capabilities.modelVariants = true;
+    const [described] = await registry.describe();
+    expect(described.capabilities.modelVariants).toBe(true);
+    expect(described.capabilities.effortLevels).toBeUndefined();
+  });
+
+  it("reports whether an instance supports isolated approval review", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+
+    expect((await registry.describe())[0].capabilities.approvalReview).toBe(false);
+    Object.assign(registry.get("a")!, { reviewPermission: async () => "ok" });
+    expect((await registry.describe())[0].capabilities.approvalReview).toBe(true);
+  });
+
+  it("refreshes a live model catalog only on an explicit provider action", async () => {
+    const fake = makeFakeDriver();
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" }, b: { driver: "fake" } });
+    const refreshes = { a: 0, b: 0 };
+    for (const instanceId of ["a", "b"] as const) {
+      const instance = registry.get(instanceId)!;
+      const models: ModelCatalog = { default: "", options: [] };
+      Object.assign(instance, {
+        models,
+        refreshModels: async () => {
+          refreshes[instanceId] += 1;
+          const id = `${instanceId}-${refreshes[instanceId]}`;
+          models.default = id;
+          models.options = [{ id, label: `Dynamic ${id}` }];
+        },
+      });
+    }
+
+    await registry.refreshModels("a");
+    await registry.refreshModels("b");
+    const first = Object.fromEntries((await registry.describe()).map((row) => [row.instanceId, row.models]));
+    expect(first.a.default).toBe("a-1");
+    expect(first.b.default).toBe("b-1");
+
+    await registry.refreshModels("a");
+    await registry.refreshModels("b");
+    const second = Object.fromEntries((await registry.describe()).map((row) => [row.instanceId, row.models]));
+    expect(second.a.default).toBe("a-2");
+    expect(second.b.default).toBe("b-2");
+    expect(refreshes).toEqual({ a: 2, b: 2 });
+  });
+
   it("disposeAll disposes every live instance and empties the registry", async () => {
     const fake = makeFakeDriver();
     const registry = new ProviderRegistry([fake.driver]);
@@ -132,5 +276,82 @@ describe("ProviderRegistry", () => {
     expect(fake.disposed.sort()).toEqual(["a", "b"]);
     expect(registry.entries()).toHaveLength(0);
     expect(registry.get("a")).toBeNull();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("installing an npm engine from Settings", () => {
+  // A stand-in npm on PATH: records its arguments and drops the expected
+  // executable into the prefix it was given. No registry, no network.
+  const FAKE_NPM = `#!/usr/bin/env node
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+const args = process.argv.slice(2);
+appendFileSync(process.env.FAKE_NPM_LOG, JSON.stringify(args) + '\\n');
+const prefix = args[args.indexOf('--prefix') + 1];
+mkdirSync(join(prefix, 'bin'), { recursive: true });
+writeFileSync(join(prefix, 'bin', 'fakebin'), '#!/bin/sh\\necho fixture\\n', { mode: 0o755 });
+process.exit(0);
+`;
+  let scratch: string;
+  let originalPath: string | undefined;
+  afterEach(async () => {
+    process.env.PATH = originalPath;
+    delete process.env.FAKE_NPM_LOG;
+    resetPathCacheForTests();
+    await removeTempDir(scratch);
+  });
+  function addFakeNpm(binDir: string) {
+    const npm = join(binDir, "npm");
+    writeFileSync(npm, FAKE_NPM, { mode: 0o755 });
+    chmodSync(npm, 0o755);
+    resetPathCacheForTests();
+  }
+  function withFakeNpm(present: boolean): string {
+    scratch = mkdtempSync(join(tmpdir(), "omb-registry-install-"));
+    originalPath = process.env.PATH;
+    const binDir = join(scratch, "fake-path");
+    mkdirSync(binDir);
+    if (present) addFakeNpm(binDir);
+    process.env.PATH = binDir;
+    process.env.FAKE_NPM_LOG = join(scratch, "npm-calls.jsonl");
+    resetPathCacheForTests();
+    return binDir;
+  }
+
+  it("advertises and runs the install only when the driver names an npm package and npm is on PATH", async () => {
+    withFakeNpm(true);
+    const fake = makeFakeDriver();
+    fake.driver.defaultConfig = () => ({ cli: "fakebin" });
+    Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine", darwin: "npm install -g fake-engine" }, needsNode: true } });
+    const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data") });
+    await registry.load({ a: { driver: "fake" } });
+    const [described] = await registry.describe();
+    expect(described.install?.server).toEqual({ package: "fake-engine" });
+    expect(await registry.installRuntime("a")).toBe(true);
+    const calls = readFileSync(process.env.FAKE_NPM_LOG!, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(["install", "-g", "--prefix", join(scratch, "data", "tools", "npm"), "--loglevel=error", "--include=optional", "--allow-scripts=fake-engine", "fake-engine@latest"]);
+    expect(existsSync(join(scratch, "data", "tools", "npm", "bin", "fakebin"))).toBe(true);
+    expect(await registry.installRuntime("missing")).toBe(false);
+  });
+
+  it("offers nothing without npm, for a curl installer, or for a managed engine", async () => {
+    withFakeNpm(true);
+    const fake = makeFakeDriver();
+    Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine" } } });
+    // The PATH scan also looks in standard install locations, so "no npm" is
+    // injected rather than simulated through PATH.
+    const without = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data"), npmAvailable: () => false });
+    await without.load({ a: { driver: "fake" } });
+    expect((await without.describe())[0].install?.server).toBeUndefined();
+    expect(await without.installRuntime("a")).toBe(false);
+    const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data") });
+    await registry.load({ a: { driver: "fake" } });
+    Object.assign(fake.driver, { install: { command: { linux: "curl -fsSL https://example.test/install.sh | bash" } } });
+    expect((await registry.describe())[0].install?.server).toBeUndefined();
+    expect(await registry.installRuntime("a")).toBe(false);
+    Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine" }, managed: { label: "Install", downloadBytes: 1 } } });
+    expect((await registry.describe())[0].install?.server).toBeUndefined();
+    expect(existsSync(join(scratch, "data"))).toBe(false);
   });
 });

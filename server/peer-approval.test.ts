@@ -3,7 +3,7 @@
 // and the composer stays disabled behind it — so a gate that works
 // perfectly can still make a thread unusable. These tests pin the settle.
 import { rmSync } from "node:fs";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
@@ -17,6 +17,7 @@ import {
   type ApprovalBus,
 } from "./peer-approval.ts";
 import { closeMessageDb } from "./message-db.ts";
+import type { Notification } from "./notify.ts";
 import { Store, type BotRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
@@ -41,6 +42,8 @@ describe("peer approval card lifecycle", () => {
   });
 
   afterEach(() => {
+    cancelPeerApprovalsFor(from.id);
+    vi.useRealTimers();
     closeMessageDb();
     rmSync(DATA_DIR, { recursive: true, force: true });
   });
@@ -69,6 +72,120 @@ describe("peer approval card lifecycle", () => {
     expect(store.messagesFor(from.threadId).find((m) => m.id === card.id)?.card?.answered).toBe("deny");
   });
 
+  it("expires without attributing a decision to the user, and rejects late answers", async () => {
+    vi.useFakeTimers();
+    const verdict = requestPeerApproval(bus, from, target, "ping", "delegate_bot");
+    const card = pendingCard(store, from)!;
+    await vi.advanceTimersByTimeAsync(15 * 60_000);
+    expect(await verdict).toBe("expired");
+    expect(store.messagesFor(from.threadId).find(m => m.id === card.id)?.card)
+      .toMatchObject({ answered: "deny", dismissed: true });
+    expect(resolvePeerComms(bus, card.card!.requestId!, "allow")).toBe(false);
+    expect(pendingCard(store, from)).toBeUndefined();
+  });
+
+  // The card is the one bot-to-bot event that blocks on a person. Everything
+  // else a hop does is deliberately silent; this must not be.
+  it("tells the person the bot is waiting on them: a waiting state and a notification", async () => {
+    const frames: Array<Notification | null> = [];
+    bus = { store, broadcast: () => {}, notify: (frame) => frames.push(frame) };
+    store.setTaskActivity(from.id, from.threadId, "working");
+
+    const verdict = requestPeerApproval(bus, from, target, "Helper, can you take the deploy?", "ask_bot");
+    const card = pendingCard(store, from)!;
+
+    expect(store.bot(from.id)?.activity).toBe("waiting-on-you");
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toMatchObject({
+      kind: "approval",
+      botId: from.id,
+      threadId: from.threadId,
+      title: "Asker needs approval",
+    });
+    expect(frames[0]?.body).toContain("@Asker wants to contact @Helper");
+    expect(frames[0]?.body).toContain("Helper, can you take the deploy?");
+
+    // answered: the turn is working again, and nothing buzzes twice
+    resolvePeerComms(bus, card.card!.requestId!, "allow");
+    expect(await verdict).toBe("allow");
+    expect(store.bot(from.id)?.activity).toBe("working");
+    expect(frames).toHaveLength(1);
+  });
+
+  it("aims the notification and legacy activity at the room when the card is raised there", () => {
+    const frames: Array<Notification | null> = [];
+    bus = { store, broadcast: () => {}, notify: (frame) => frames.push(frame) };
+    const room = store.createGroup("Standup", [from.id, target.id], false);
+    store.setActivity(from.id, "working");
+
+    void requestPeerApproval(bus, from, target, "ping", "post_to_room", room.threadId);
+
+    expect(frames[0]).toMatchObject({
+      kind: "approval",
+      threadId: room.threadId,
+      groupId: room.id,
+      title: "Asker in Standup needs approval",
+    });
+    expect(store.bot(from.id)?.activity).toBe("waiting-on-you");
+    expect(store.taskByThread(from.id, from.threadId)?.activity).toBe("idle");
+    cancelPeerApprovalsForThread(room.threadId);
+    expect(store.bot(from.id)?.activity).toBe("working");
+  });
+
+  it("answers task A's approval after switching to B without unblocking B", async () => {
+    const threadA = from.threadId;
+    const taskB = store.createTask(from.id, "Independent B", true)!;
+    store.setTaskActivity(from.id, threadA, "working");
+    store.setTaskActivity(from.id, taskB.threadId, "working");
+    const answerA = requestPeerApproval(bus, from, target, "A request", "ask_bot", threadA);
+    const answerB = requestPeerApproval(bus, from, target, "B request", "ask_bot", taskB.threadId);
+    const cardA = store.messagesFor(threadA).find((message) => message.card?.requestId)!;
+    const cardB = store.messagesFor(taskB.threadId).find((message) => message.card?.requestId)!;
+    expect(store.taskByThread(from.id, threadA)?.activity).toBe("waiting-on-you");
+    expect(store.taskByThread(from.id, taskB.threadId)?.activity).toBe("waiting-on-you");
+
+    resolvePeerComms(bus, cardA.card!.requestId!, "allow");
+    await expect(answerA).resolves.toBe("allow");
+    expect(store.taskByThread(from.id, threadA)?.activity).toBe("working");
+    expect(store.taskByThread(from.id, taskB.threadId)?.activity).toBe("waiting-on-you");
+    expect(store.bot(from.id)?.activity).toBe("waiting-on-you");
+    expect(store.messagesFor(taskB.threadId).find((message) => message.id === cardB.id)?.card?.answered).toBeUndefined();
+
+    cancelPeerApprovalsForThread(taskB.threadId);
+    await expect(answerB).resolves.toBe("cancelled");
+    expect(store.taskByThread(from.id, threadA)?.activity).toBe("working");
+  });
+
+  it("stays quiet when a standing grant answers without a card", async () => {
+    const frames: Array<Notification | null> = [];
+    bus = { store, broadcast: () => {}, notify: (frame) => frames.push(frame) };
+    store.patchBot(from.id, { alwaysAllow: [peerAllowKey("ask_bot", target.id)] });
+    store.setTaskActivity(from.id, from.threadId, "working");
+
+    await expect(requestPeerApproval(bus, from, target, "ping", "ask_bot")).resolves.toBe("allow");
+    expect(frames).toEqual([]);
+    expect(store.bot(from.id)?.activity).toBe("working");
+  });
+
+  it("honors Full only for the exact source conversation without prompting or notifying", async () => {
+    const frames: Array<Notification | null> = [];
+    const fullThread = from.threadId;
+    const askThread = store.createTask(from.id, "Ask sibling")!.threadId;
+    store.patchBot(from.id, { approvalMode: "full" });
+    bus = { store, broadcast: () => {}, notify: frame => frames.push(frame),
+      autoApply: (botId, threadId) => botId === from.id && threadId === fullThread };
+    for (const action of ["ask_bot", "delegate_bot", "post_to_room"] as const) {
+      await expect(requestPeerApproval(bus, from, target, "ping", action, fullThread)).resolves.toBe("allow");
+    }
+    expect(store.messagesFor(fullThread).some(message => message.card?.requestId)).toBe(false);
+    expect(frames).toEqual([]);
+    const pending = requestPeerApproval(bus, from, target, "ask sibling", "ask_bot", askThread);
+    const card = store.messagesFor(askThread).find(message => message.card?.requestId)!.card!;
+    expect(card.answered).toBeUndefined();
+    resolvePeerComms(bus, card.requestId!, "deny");
+    await expect(pending).resolves.toBe("deny");
+  });
+
   it("answers an unknown requestId as not-ours, so provider cards still route", () => {
     expect(resolvePeerComms(bus, "not-a-peer-request", "allow")).toBe(false);
   });
@@ -86,28 +203,30 @@ describe("peer approval card lifecycle", () => {
     const card = pendingCard(store, from);
     expect(card).toBeTruthy();
     cancelPeerApprovalsFor(impostor.id);
-    await expect(verdict).resolves.toBe("deny");
+    await expect(verdict).resolves.toBe("cancelled");
   });
 
-  it("denies and settles when the bot on either side is deleted", async () => {
+  it.each(["from", "target"] as const)("cancels and settles when the %s bot is deleted", async (side) => {
     const verdict = requestPeerApproval(bus, from, target, "ping", "ask_bot");
     const card = pendingCard(store, from)!;
 
-    cancelPeerApprovalsFor(target.id);
+    cancelPeerApprovalsFor(side === "from" ? from.id : target.id);
 
-    expect(await verdict).toBe("deny");
+    expect(await verdict).toBe("cancelled");
+    expect(resolvePeerComms(bus, card.card!.requestId!, "allow")).toBe(false);
     const settled = store.messagesFor(from.threadId).find((m) => m.id === card.id);
     expect(settled?.card?.answered).toBe("deny");
     expect(settled?.card?.dismissed).toBe(true); // not the user's answer
   });
 
-  it("denies and settles approvals owned by an interrupted thread", async () => {
+  it("cancels and settles approvals owned by an interrupted thread", async () => {
     const verdict = requestPeerApproval(bus, from, target, "ping", "ask_bot");
     const card = pendingCard(store, from)!;
 
     cancelPeerApprovalsForThread(from.threadId);
 
-    expect(await verdict).toBe("deny");
+    expect(await verdict).toBe("cancelled");
+    expect(resolvePeerComms(bus, card.card!.requestId!, "allow")).toBe(false);
     const settled = store.messagesFor(from.threadId).find((m) => m.id === card.id);
     expect(settled?.card?.answered).toBe("deny");
     expect(settled?.card?.dismissed).toBe(true);
@@ -153,6 +272,48 @@ describe("peer approval card lifecycle", () => {
     expect(
       store.messagesFor(background.threadId).find((message) => message.id === orphan.id)?.card?.dismissed,
     ).toBe(true);
+  });
+
+  it("dismisses a stale card left in a room's thread, not just a bot's", () => {
+    // post_to_room and ask_bot both run from a room turn, and the card goes
+    // into the thread the caller is speaking from — the room's. Quitting the
+    // app with one open used to leave that room's composer blocked forever.
+    const room = store.createGroup("Standup", [from.id, target.id]);
+    const orphan = store.appendMessage(room.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "@Asker wants to post in “Standup”",
+        subtitle: "deploy is green",
+        options: ["Allow", "Deny"],
+        requestId: "room-card-from-a-dead-process",
+        tool: "post_to_room",
+      },
+    });
+
+    expect(dismissStalePeerCards(bus)).toBe(1);
+    const settled = store.messagesFor(room.threadId).find((message) => message.id === orphan.id);
+    expect(settled?.card?.dismissed, "a room's composer stayed blocked after a restart").toBe(true);
+    expect(settled?.card?.answered).toBe("deny");
+    expect(dismissStalePeerCards(bus)).toBe(0);
+  });
+
+  it("dismisses a stale card left in a room's background task thread", () => {
+    const room = store.createGroup("Release", [from.id, target.id]);
+    const task = store.createGroupTask(room.id, "Cut 1.2", false)!;
+    store.appendMessage(task.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "@Asker wants to contact @Helper",
+        subtitle: "ping",
+        options: ["Allow", "Deny"],
+        requestId: "room-task-card-from-a-dead-process",
+        tool: "ask_bot",
+      },
+    });
+
+    expect(dismissStalePeerCards(bus)).toBe(1);
   });
 
   it("leaves a live card alone at boot", async () => {

@@ -1,0 +1,93 @@
+OpenMausBot Windows vendor revision 0.36.0-omb.1.
+Base: vercel-labs/agent-browser eb05921bad874cd2a1b4fa5d1149f1ed26576cae.
+Carries only the Windows handle-inheritance fix from upstream PR1781,
+commit 81a98c349d04195396ffae6898bd375ad64280de, plus modification notices
+and package-version metadata. The MCP output-reader rewrite is not included.
+
+diff --git a/cli/src/connection.rs b/cli/src/connection.rs
+--- a/cli/src/connection.rs
++++ b/cli/src/connection.rs
+@@ -1,3 +1,4 @@
++// Modified by OpenMausBot: Windows stdio inheritance fix from upstream PR1781.
+ use crate::validation::sanitize_session_component;
+ use serde::{Deserialize, Serialize};
+ use serde_json::{json, Value};
+@@ -789,6 +790,29 @@ fn stop_existing_daemon_for_restart(session: &str) {
+     }
+ }
+ 
++/// On Windows a spawned child inherits every inheritable handle we hold. Our
++/// stdout/stderr may be pipes that a parent reads to EOF (the MCP server's
++/// `run_cli`, or a PowerShell capture). The detached daemon we are about to
++/// spawn is long-lived; if it keeps those write ends open the parent blocks
++/// forever waiting for EOF that never arrives. Mark our own stdio handles
++/// non-inheritable so the daemon cannot hold the pipes open.
++#[cfg(windows)]
++pub(crate) fn prevent_stdio_handle_inheritance() {
++    use std::os::windows::io::AsRawHandle;
++    use windows_sys::Win32::Foundation::{SetHandleInformation, HANDLE_FLAG_INHERIT};
++
++    unsafe {
++        for handle in [
++            std::io::stdout().as_raw_handle(),
++            std::io::stderr().as_raw_handle(),
++        ] {
++            if !handle.is_null() {
++                let _ = SetHandleInformation(handle as isize, HANDLE_FLAG_INHERIT, 0);
++            }
++        }
++    }
++}
++
+ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult, String> {
+     let mut restarted = false;
+ 
+@@ -898,6 +922,8 @@ pub fn ensure_daemon(session: &str, opts: &DaemonOptions) -> Result<DaemonResult
+     {
+         use std::os::windows::process::CommandExt;
+ 
++        prevent_stdio_handle_inheritance();
++
+         let mut cmd = Command::new(&exe_path);
+         cmd.env("AGENT_BROWSER_DAEMON", "1");
+         apply_daemon_env(&mut cmd, session, opts);
+diff --git a/cli/src/main.rs b/cli/src/main.rs
+--- a/cli/src/main.rs
++++ b/cli/src/main.rs
+@@ -1,3 +1,4 @@
++// Modified by OpenMausBot: Windows stdio inheritance fix from upstream PR1781.
+ mod ca_bundle;
+ mod chat;
+ mod color;
+@@ -1105,6 +1106,7 @@ fn run_dashboard_start(port: u16, allowed_origins: Vec<String>, json_mode: bool)
+         use std::os::windows::process::CommandExt;
+         const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+         const DETACHED_PROCESS: u32 = 0x00000008;
++        connection::prevent_stdio_handle_inheritance();
+         cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+     }
+ 
+diff --git a/cli/Cargo.toml b/cli/Cargo.toml
+--- a/cli/Cargo.toml
++++ b/cli/Cargo.toml
+@@ -1,6 +1,7 @@
++# Modified by OpenMausBot: distinguish the patched Windows vendor build.
+ [package]
+ name = "agent-browser"
+-version = "0.36.0"
++version = "0.36.0-omb.1"
+ edition = "2021"
+ description = "Fast browser automation CLI for AI agents"
+ license = "Apache-2.0"
+diff --git a/cli/Cargo.lock b/cli/Cargo.lock
+--- a/cli/Cargo.lock
++++ b/cli/Cargo.lock
+@@ -45,7 +45,7 @@
+ 
+ [[package]]
+ name = "agent-browser"
+-version = "0.36.0"
++version = "0.36.0-omb.1"
+ dependencies = [
+  "aes-gcm",
+  "async-trait",

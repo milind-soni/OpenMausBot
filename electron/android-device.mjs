@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import localOriginModule from "./local-origin.cjs";
 
 const execFileAsync = promisify(execFile);
 const STATUS_TTL_MS = 750;
@@ -235,7 +236,9 @@ export function createAndroidDeviceController(options = {}) {
 
   const registerIpc = (ipcMain) => {
     const protect = (handler) => async (event, ...args) => {
-      if (!trustedMainFrame(event)) throw new Error("Android device access is limited to the main app");
+      if (!trustedMainFrame(event) || !localOriginModule.isLocalSender(event)) {
+        throw new Error("Android device access is limited to the local app");
+      }
       return handler(...args);
     };
     ipcMain.handle("android-device:status", protect(() => status({ fresh: true })));

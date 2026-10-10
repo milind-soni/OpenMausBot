@@ -1,0 +1,12 @@
+{
+  "format": "openmaus.package",
+  "version": 3,
+  "package": {
+    "id": "from-the-future",
+    "release": "9.0.0",
+    "name": "From the future",
+    "somethingNew": {
+      "required": true
+    }
+  }
+}

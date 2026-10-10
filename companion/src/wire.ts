@@ -48,9 +48,15 @@ export const isJson = (contentType: string | undefined): boolean => {
 };
 
 /** How much of a single SSE event the scrubber will hold while waiting for
- * its terminator. Generous — the largest real frame is a bot payload, orders
- * of magnitude under this — because the number only exists to be a ceiling. */
-export const MAX_SSE_EVENT_BYTES = 1024 * 1024;
+ * its terminator.
+ *
+ * This used to be 1 MiB, on the reasoning that the largest real event was a
+ * bot payload orders of magnitude under it. Browser-live frames ended that:
+ * the harness caps one at 3 MiB of base64 (`MAX_FRAME` in browser-live.ts)
+ * and a phone may now ask for that stream, so the old ceiling would have torn
+ * down the whole connection on the first large frame. Sized above the
+ * harness's own cap, with headroom for the JSON and SSE wrapping around it. */
+export const MAX_SSE_EVENT_BYTES = 4 * 1024 * 1024;
 
 /**
  * Rewrites an SSE byte stream, scrubbing each event's `data:` payload while
@@ -93,10 +99,13 @@ export function createSseScrubber(): (chunk: string) => string {
       const boundary = nextBoundary(pending);
       if (!boundary) break;
       const event = pending.slice(0, boundary.index);
+      if (Buffer.byteLength(event) > MAX_SSE_EVENT_BYTES) {
+        throw new Error(`SSE event exceeded ${MAX_SSE_EVENT_BYTES} bytes`);
+      }
       pending = pending.slice(boundary.index + boundary.terminator.length);
       out += scrubEvent(event) + boundary.terminator;
     }
-    if (pending.length > MAX_SSE_EVENT_BYTES) {
+    if (Buffer.byteLength(pending) > MAX_SSE_EVENT_BYTES) {
       throw new Error(`SSE event exceeded ${MAX_SSE_EVENT_BYTES} bytes without a terminator`);
     }
     return out;

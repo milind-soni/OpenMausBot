@@ -1,9 +1,14 @@
 import { useState, type FormEvent } from "react";
-import { Check, ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "lucide-react";
+import { ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "lucide-react";
 
 import { credentialConfigPatch, credentialResumeOutcome } from "../../shared/credential-request";
 import { cn } from "@/lib/cn";
 import { api, useStore, type ConfigStatus, type Message } from "@/state/store";
+import { ASK_FIELD, ASK_PRIMARY_BUTTON, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
+
+// The key a bot asked for. It waits in the shared ask card with a masked
+// field, and once saved folds into one line that names the key and never
+// its value: the value goes straight to the host's settings, not the chat.
 
 export function SecretRequestCard({
   botId,
@@ -16,6 +21,7 @@ export function SecretRequestCard({
 }) {
   const { dispatch } = useStore();
   const secret = message.secret!;
+  const remoteClient = window.ogb?.remoteClient?.active === true;
   const [value, setValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedLocally, setSavedLocally] = useState(false);
@@ -25,7 +31,10 @@ export function SecretRequestCard({
   const outcome = credentialResumeOutcome(secret);
   const provided = outcome === "provided";
   const declined = outcome === "dismissed";
-  const description = provided
+  const superseded = secret.superseded === true;
+  const description = superseded
+    ? "This request was replaced by a newer one for the same key. Use the newest card to provide it."
+    : provided
     ? secret.resumed
       ? "Saved securely. Your bot is continuing the task."
       : "Saved securely. Your bot will continue when its current turn settles."
@@ -86,6 +95,7 @@ export function SecretRequestCard({
         setSavedLocally(true);
       }
       await notifyProvided();
+      returnFocusToComposer();
     } catch (error) {
       setLocalError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -100,97 +110,90 @@ export function SecretRequestCard({
     }).catch(() => {});
   };
 
+  if (superseded) {
+    return (
+      <AskSettledLine icon={<X size={13} />} ariaLabel={secret.label}>
+        <span className="text-ink-secondary" title={description}>{secret.label}</span>
+        <span> · Superseded by a newer request</span>
+      </AskSettledLine>
+    );
+  }
+
+  if (provided || declined) {
+    const retry = !secret.resumed && error ? (
+      <button type="button" onClick={() => void retryResume()} disabled={saving} className={cn(ASK_QUIET_BUTTON, "text-accent-text")}>
+        {saving ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+        Try again
+      </button>
+    ) : undefined;
+    return (
+      <AskSettledLine
+        ariaLabel={secret.label}
+        icon={secret.resumed
+          ? undefined
+          : declined
+            ? <X size={13} className="text-danger" />
+            : error
+              ? <KeyRound size={13} />
+              : <Loader2 size={13} className="animate-spin" />}
+        action={retry}
+        detail={error && <p role="alert" className="ms-[19px] mt-1 text-[12px] text-danger">{error}</p>}
+      >
+        <span className="text-ink-secondary" title={description}>{provided ? `${secret.label} saved securely` : secret.label}</span>
+        <span className={declined ? "text-danger" : undefined}> · {footerLabel}</span>
+      </AskSettledLine>
+    );
+  }
+
   return (
-    <div className="flex w-full justify-start">
-      <div className="w-full max-w-[520px] overflow-hidden rounded-2xl border border-hairline/50 bg-card shadow-sm">
-        <div className="flex items-start gap-3 p-4">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-control text-ink">
-            <KeyRound size={19} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-[14px] font-semibold text-ink">{secret.label}</span>
-              {provided && (
-                <span className="flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success">
-                  <Check size={11} /> Saved
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">
-              {description}
-            </p>
-            {!provided && !declined && (
-              <p className="mt-1 flex items-center gap-1 text-[11.5px] text-ink-secondary/80">
-                <LockKeyhole size={11} /> Stored securely by OpenMausBot and never added to chat.
-              </p>
-            )}
-            {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
-          </div>
-          {!provided && !declined && (
-            <button
-              onClick={dismiss}
-              aria-label="Not now"
-              title="Not now"
-              className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
-            >
-              <X size={15} />
-            </button>
-          )}
+    <AskCard
+      ariaLabel={secret.label}
+      icon={<KeyRound size={15} />}
+      title={secret.label}
+      explanation={description}
+      onDismiss={dismiss}
+      dismissLabel="Not now"
+    >
+      {remoteClient ? (
+        <div className="text-[12.5px] leading-relaxed text-ink-secondary">
+          This key must be saved on the host computer. Open this conversation on the host to continue securely.
         </div>
-        {!provided && !declined && (
-          <form onSubmit={(event) => void save(event)} className="border-t border-hairline/40 bg-panel/40 px-4 py-3">
-            <div className="flex gap-2">
-              <input
-                type="password"
-                autoComplete="new-password"
-                spellCheck={false}
-                value={value}
-                onChange={(event) => setValue(event.target.value)}
-                placeholder={secret.placeholder}
-                disabled={saving || savedLocally}
-                aria-label={secret.label}
-                className="min-w-0 flex-1 rounded-lg border border-hairline bg-inset px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-secondary/60 focus:border-accent disabled:opacity-60"
-              />
-              <button
-                type="submit"
-                disabled={saving || (!value.trim() && !savedLocally)}
-                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50"
-              >
-                {saving ? <Loader2 size={13} className="animate-spin" /> : <LockKeyhole size={13} />}
-                {savedLocally ? "Continue task" : "Save securely"}
-              </button>
-            </div>
+      ) : (
+        <form onSubmit={(event) => void save(event)}>
+          <div className="flex flex-wrap gap-2">
+            <input
+              type="password"
+              autoComplete="new-password"
+              spellCheck={false}
+              dir="ltr"
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              placeholder={secret.placeholder}
+              disabled={saving || savedLocally}
+              aria-label={secret.label}
+              className={cn(ASK_FIELD, "min-w-[10rem] flex-1")}
+            />
+            <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} className={ASK_PRIMARY_BUTTON}>
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <LockKeyhole size={14} />}
+              {savedLocally ? "Continue task" : "Save securely"}
+            </button>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-ink-tertiary">
+            <span className="flex items-center gap-1">
+              <LockKeyhole size={11} /> Stored securely by OpenMausBot and never added to chat.
+            </span>
             <a
               href={secret.helpUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2 inline-flex items-center gap-1 text-[11.5px] text-accent hover:underline"
+              className="inline-flex items-center gap-1 text-accent-text hover:underline"
             >
               Where to get this key <ExternalLink size={11} />
             </a>
-          </form>
-        )}
-        {(provided || declined) && (
-          <div className={cn(
-            "flex items-center justify-between border-t border-hairline/40 bg-panel/40 px-4 py-2.5 text-[11.5px]",
-            declined ? "text-danger" : "text-success",
-          )}>
-            <span className="flex items-center gap-1.5">
-              {secret.resumed ? <Check size={12} /> : error ? <KeyRound size={12} /> : <Loader2 size={12} className="animate-spin" />}
-              {footerLabel}
-            </span>
-            {!secret.resumed && error && (
-              <button
-                onClick={() => void retryResume()}
-                disabled={saving}
-                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
-              >
-                {saving ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Try again
-              </button>
-            )}
           </div>
-        )}
-      </div>
-    </div>
+        </form>
+      )}
+      {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
+    </AskCard>
   );
 }

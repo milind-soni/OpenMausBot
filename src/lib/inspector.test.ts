@@ -16,6 +16,42 @@ describe("summarizeRuntime", () => {
     });
     expect(summarizeRuntime({ ...base, type: "turn.completed", ok: false }).tone).toBe("error");
     expect(summarizeRuntime({ ...base, type: "runtime.error", message: "boom", setup: true }).summary).toBe("setup: boom");
+    // a notice did not fail the turn, so it is not drawn as an error
+    expect(summarizeRuntime({ ...base, type: "runtime.notice", message: "OpenCode no longer offers x" })).toEqual({
+      summary: "notice: OpenCode no longer offers x",
+      tone: "plain",
+    });
+  });
+
+  it("labels computer waits and their outcomes", () => {
+    expect(summarizeRuntime({ ...base, type: "turn.wait_started", resource: "computer:box:bx_1", holder: { name: "Ada", task: "Refill" } })).toEqual({
+      summary: "waiting for computer — Ada (Refill)",
+      tone: "plain",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_started", resource: "computer:host" })).toEqual({
+      summary: "waiting for computer — holder unknown",
+      tone: "plain",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 2_500, outcome: "acquired" })).toEqual({
+      summary: "computer acquired after 3s",
+      tone: "boundary",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 2_500, outcome: "stopped" })).toEqual({
+      summary: "computer wait stopped after 3s",
+      tone: "plain",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 120_000, outcome: "gave_up" })).toEqual({
+      summary: "computer wait gave up after 120s",
+      tone: "error",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 120_000, outcome: "parked" })).toEqual({
+      summary: "computer wait parked after 120s",
+      tone: "plain",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 800, outcome: "acquired" })).toEqual({
+      summary: "computer acquired after under a second",
+      tone: "boundary",
+    });
   });
 
   it("clips long assistant text to one line", () => {
@@ -24,6 +60,22 @@ describe("summarizeRuntime", () => {
     expect(summary.startsWith("assistant: line one line two")).toBe(true);
     expect(summary.length).toBeLessThanOrEqual("assistant: ".length + 120);
     expect(summary).not.toContain("\n");
+  });
+
+  it("marks an agent-composed ask without changing the tool-origin form", () => {
+    expect(
+      summarizeRuntime({
+        ...base,
+        type: "request.opened",
+        requestType: "question",
+        tool: "omb-ask",
+        summary: "Ship the release?",
+        origin: "output",
+      }).summary,
+    ).toBe("question (agent-composed): omb-ask — Ship the release?");
+    expect(
+      summarizeRuntime({ ...base, type: "request.opened", requestType: "question", tool: "ask_user", summary: "Ship?" }).summary,
+    ).toBe("question: ask_user — Ship?");
   });
 });
 

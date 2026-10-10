@@ -1,62 +1,30 @@
 // The narrow bridge the Electron preload exposes. Absent in the browser.
 
 declare global {
-type NativeSkillRecordingEvent = {
-  type: "app" | "click" | "scroll" | "key" | "typing" | "clipboard" | "download";
-  atMs: number;
-  app?: string;
-  windowTitle?: string;
-  x?: number;
-  y?: number;
-  button?: "left" | "right" | "other";
-  deltaY?: number;
-  keycode?: number;
-  meta?: boolean;
-  control?: boolean;
-  option?: boolean;
-  shift?: boolean;
-  /** Element identity for a click, from the accessibility tree. */
-  role?: string;
-  name?: string;
-  identifier?: string;
-  ancestry?: string[];
-  /** Typed keystroke count (never the characters themselves). */
-  keyCount?: number;
-  /** Clipboard action kind — never its contents. */
-  op?: "copy" | "cut" | "paste";
-  /** Downloaded file name and its origin URLs. */
-  filename?: string;
-  whereFroms?: string[];
-};
+  type CompanyBackupEntry = Omit<import("../../electron/company-backups.mjs").CompanyBackupMetadata, "status"> & { status: "creating" | "uploading" | "completing" | "ready" | "cleanup" };
+  interface CompanyBackupScheduleState {
+    enabled: boolean;
+    status: "off" | "waiting" | "running" | "paused" | "error";
+    nextBackupAt?: number;
+    lastAttemptAt?: number;
+    lastBackupAt?: number;
+    message?: string;
+  }
+  interface CompanyBackupState {
+    busy: boolean;
+    pendingRestore?: boolean;
+    kind?: "backup" | "restore";
+    progress?: import("../../electron/company-backups.mjs").CompanyBackupProgress;
+    message?: string;
+    lastBackupAt?: number;
+    schedule?: CompanyBackupScheduleState;
+  }
+/** The package.json version, inlined by Vite's define at build time. */
+const __APP_VERSION__: string;
 
-type SkillRecordingPayload = {
-  name: string;
-  description: string;
-  durationMs: number;
-  transcript: string;
-  transcription?: { provider: "assemblyai"; model: string };
-  audio?: string;
-  events: Array<{
-    type: "app" | "click" | "scroll" | "shortcut" | "typing" | "clipboard" | "download";
-    atMs: number;
-    app?: string;
-    windowTitle?: string;
-    direction?: "up" | "down";
-    shortcut?: string;
-    keyCount?: number;
-    screenshot?: string;
-    /** Element identity for a click. */
-    role?: string;
-    name?: string;
-    identifier?: string;
-    ancestry?: string[];
-    /** Clipboard action kind — never its contents. */
-    op?: "copy" | "cut" | "paste";
-    /** Downloaded file name and its origin URLs. */
-    filename?: string;
-    whereFroms?: string[];
-  }>;
-};
+  type DesktopSharedFolder = import("../../electron/computer-sharing.mjs").SharedFolder;
+  type DesktopComputerSharing = import("../../electron/computer-sharing.mjs").SharingState;
+  type DesktopLendingActivity = import("../../electron/computer-sharing.mjs").LendingActivityEntry;
 
   type DesktopCapabilities = {
     host: {
@@ -67,7 +35,7 @@ type SkillRecordingPayload = {
       session: "x11" | "wayland" | "headless" | "unknown";
       packaged: boolean;
     };
-    windowChrome: "mac-inset" | "native";
+    windowChrome: "mac-inset" | "win-caption" | "native";
     screenPreview: {
       available: boolean;
       interaction: "direct" | "portal-picker" | "none";
@@ -94,17 +62,141 @@ type SkillRecordingPayload = {
     };
   };
 
+  interface DesktopWorkspaceBounds {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }
+
+  interface BrowserSurfaceState {
+    botId: string;
+    open: boolean;
+    url: string;
+    title: string;
+    loading: boolean;
+    canGoBack: boolean;
+    canGoForward?: boolean;
+    visible: boolean;
+    partition?: string | null;
+    profile?: string | null;
+    mode?: "compact" | "expanded" | null;
+    code?: "renderer-gone" | "profile-deleted" | "evicted";
+  }
+
+  interface DesktopWorkspaceState {
+    contextId: string;
+    open: boolean;
+    status: "opening" | "ready" | "error" | "closed";
+    interactive: boolean;
+    code?: "load-failed" | "renderer-gone";
+  }
+
+  /** Whether the desktop is holding this computer awake for routines. */
+  interface DesktopRoutineWake {
+    /** the toggle */
+    keepAwake: boolean;
+    /** a power assertion is held right now */
+    hold: boolean;
+    /** "due" | "running" while held; "off" | "battery" | "idle" | "stopped" otherwise */
+    reason: string;
+    /** the due routine's time, when the hold is for a due routine */
+    at: number | null;
+    onBattery: boolean;
+  }
+  interface DesktopRemoteClientState {
+    active: boolean;
+    endpoint?: string;
+    serverName?: string;
+    deviceId?: string;
+  }
+
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      organization?: import("../../electron/managed-desktop.mjs").ManagedDesktopBridge;
+      cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
+      /** Copy this computer here: this computer's page names a saved server (or
+       * "cloud"); a server's own page is answered about itself only, and its
+       * Copy opens this computer's Settings on that copy (the verified Cloud's starts it). */
+      cloudMove?: import("../../electron/cloud-move.mjs").CloudMoveBridge;
+      /** The Cloud's setup checklist: shows the lending switch in this app's
+       * own Settings → OMB Cloud (leaving the Cloud's page). */
+      cloudLending?: { open(): Promise<void> };
+      /** Settings on the person's own Cloud: the plan, read only. */
+      cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
+      companyBackups?: {
+        state(): Promise<CompanyBackupState>;
+        list(): Promise<{ backups: CompanyBackupEntry[]; usedBytes: number; limits: { ownerQuotaBytes: number; retainedSnapshots: number } }>;
+        create(input: { clientState: import("../../shared/workspace-backup").WorkspaceBackupClientState }): Promise<CompanyBackupEntry>;
+        configureSchedule?(input: { enabled: false } | { enabled: true; confirmation: "BACK UP THIS WORKSPACE DAILY" }): Promise<CompanyBackupState>;
+        prepareRestore(input: { id: string; password?: string }): Promise<{ id: string; summary: import("../../shared/workspace-backup").WorkspaceBackupSummary }>;
+        restore(input: { id: string; confirmation: "REPLACE" }): Promise<{ restoreId: string }>;
+        delete(input: { id: string; confirmation: "DELETE" }): Promise<unknown>;
+        cancel(): Promise<void>;
+        onState(callback: (state: CompanyBackupState) => void): () => void;
+      };
+      workspaces?: {
+        state: () => Promise<{ local: boolean; name: string; origin?: string }>;
+        /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
+        menu: (options?: { from?: "howto" }) => Promise<void>;
+      };
+      /** Saved servers and the active one (desktop Server menu). Present on
+       * the local server's UI; a remote server's page sees a reduced bridge. */
+      environments?: {
+        state: () => Promise<{
+          localOrigin: string;
+          remote: boolean;
+          activeId: string;
+          environments: Array<{ id: string; name: string; origin: string }>;
+        }>;
+        switch: (id: string) => Promise<void>;
+        addFromLink: (link: string, name?: string) => Promise<boolean | void>;
+        forget: (id: string) => Promise<void>;
+        /** `panel` "copy": that server's Copy this computer here panel; otherwise its Computer access. */
+        onOpenSettings?: (callback: (computerId?: string | null, panel?: "copy") => void) => () => void;
+      };
+      /** Local main-window only. Hosted renderers cannot grant themselves access. */
+      computerSharing?: {
+        state(id: string): Promise<DesktopComputerSharing>;
+        chooseFolder(): Promise<DesktopSharedFolder | null>;
+        save(id: string, grant: Pick<DesktopComputerSharing, "folders" | "terminal" | "computer">): Promise<DesktopComputerSharing | null>;
+        revoke(id: string): Promise<DesktopComputerSharing>;
+        /** This computer's own record of what that server's bots did here, newest first. */
+        activity(id: string): Promise<DesktopLendingActivity[]>;
+      };
+      confirm(message: string): Promise<boolean>;
       getCapabilities(): Promise<DesktopCapabilities>;
       onCapabilitiesChanged(cb: (capabilities: DesktopCapabilities) => void): () => void;
+      remoteClient?: {
+        active: boolean;
+        state(): Promise<DesktopRemoteClientState>;
+        pair(endpoint: string, code: string): Promise<DesktopRemoteClientState>;
+        disconnect(): Promise<DesktopRemoteClientState>;
+      };
+      /** Keep this computer awake for scheduled routines; absent on remote
+       * server pages and in older desktop builds. */
+      routines?: {
+        wakeState(): Promise<DesktopRoutineWake>;
+        keepAwake(enabled: boolean): Promise<DesktopRoutineWake>;
+      };
       companionAccount?: {
         state(): Promise<CompanionAccountState>;
         requestCode(email: string): Promise<CompanionAccountState>;
         verifyCode(email: string, code: string): Promise<CompanionAccountState>;
         retry(): Promise<CompanionAccountState>;
         signOut(): Promise<CompanionAccountState>;
+      };
+      /** Local-shell-only bridge for trusted approval-mode transitions. It is
+       * absent on remote server pages and in older desktop builds. */
+      approvals?: {
+        setMode(
+          botId: string,
+          mode: import("../../shared/approval-mode").ApprovalMode,
+          options?: { acknowledgeLocalAuto?: boolean; threadId?: string; threadOnly?: boolean; allThreads?: boolean;
+            refreshPermissions?: boolean;
+            modelSelection?: import("../state/store").ModelSelection; updateBotDefault?: boolean },
+        ): Promise<import("../state/store").Bot>;
       };
       localControl: {
         status(): Promise<LinuxLocalControlStatus>;
@@ -130,37 +222,47 @@ type SkillRecordingPayload = {
         cb: (line: { partial?: boolean; text?: string; error?: string }) => void,
       ): () => void;
       onSpeechEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
-      skillRecorder?: {
-        permissions(): Promise<{ supported: boolean; reason?: string }>;
-        start(): Promise<{ recording: boolean }>;
-        stop(): Promise<{ recording: boolean }>;
-        save(payload: SkillRecordingPayload): Promise<{ id: string; path: string; events: number }>;
-        onEvent(cb: (event: NativeSkillRecordingEvent) => void): () => void;
-        onEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
-      };
-      transcription?: {
-        status(): Promise<{ configured: boolean }>;
-        setKey(value: string): Promise<{ configured: boolean }>;
-        streamingToken(): Promise<{ token: string; expiresInSeconds: number }>;
-      };
       /** Absolute path of a dropped File ("" when the drag carried no
        * file on disk). Absent in older builds of the shell. */
       getPathForFile?(file: File): string;
       /** {mic} TCC status: granted|denied|not-determined|unknown. Screen
        * status is deliberately absent — macOS 15+ caches it per-process,
-       * so it lies for the whole session after a grant. */
-      permStatus(): Promise<{ mic: string }>;
+       * so it lies for the whole session after a grant. `pageMic`: whether
+       * this app lets the asking page use the microphone (this computer's
+       * page always; a server's page only on the person's own Cloud).
+       * Absent in older builds of the shell. */
+      permStatus(): Promise<{ mic: string; pageMic?: "allowed" | "refused" }>;
       /** Triggers the macOS microphone prompt; resolves true when granted. */
       permRequestMic(): Promise<boolean>;
       /** Opens System Settings on a privacy pane: mic|screen|speech|accessibility. */
       permOpenSettings(pane: "mic" | "screen" | "speech" | "accessibility"): Promise<void>;
+      /** Relaunch the local desktop app through its normal shutdown cleanup. */
+      relaunch?(): Promise<boolean>;
       /** Copies an engine install command and opens a blank terminal. False
        * when no terminal could be launched; the clipboard still has it. */
       openInstallTerminal?(command: string): Promise<boolean>;
+      /** Writes plain text to the system clipboard; false on failure. Absent on older builds. */
+      copyText?(text: string): Promise<boolean>;
       /** Opens an http(s) link in the user's default browser. */
       openExternal?(url: string): Promise<boolean>;
+      /** Recolor the native window chrome for a skin; absent on older builds. */
+      applySkin?(skin: string): Promise<boolean>;
+      /** The renderer-drawn Windows caption buttons; absent outside the
+       * frameless Windows shell (macOS/Linux/browser keep native chrome). */
+      windowControls?: {
+        minimize(): Promise<boolean>;
+        toggleMaximize(): Promise<boolean>;
+        close(): Promise<boolean>;
+        state(): Promise<{ maximized: boolean }>;
+        onMaximizedChanged(cb: (maximized: boolean) => void): () => void;
+      };
       /** Receives a GitHub package URL opened through openmausbot://install. */
       onPackageInstall?(cb: (url: string) => void): () => void;
+      /** The desktop shell's app-menu Preferences… item was activated; open
+       * app Settings. Local-shell only: remote server pages never receive
+       * the channel, and the bridge is absent in the browser. "cloud" is the
+       * openmausbot://cloud link (Settings → OMB Cloud, opened by the link). */
+      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto") => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */
@@ -172,22 +274,49 @@ type SkillRecordingPayload = {
         currentState(): Promise<{ open: boolean; contextId: string | null }>;
         onState(cb: (state: { open: boolean; contextId: string | null }) => void): () => void;
       };
+      /** Two Local VM viewers embedded in one app window. URLs are accepted
+       * only by main-process validation and never return over this bridge. */
+      desktopWorkspace?: {
+        open(input: {
+          contextId: string;
+          url: string;
+          title: string;
+          bounds: DesktopWorkspaceBounds;
+        }): Promise<DesktopWorkspaceState>;
+        layout(items: Array<{
+          contextId: string;
+          bounds: DesktopWorkspaceBounds;
+          visible: boolean;
+        }>): Promise<boolean>;
+        setInteractive(contextId: string | null): Promise<boolean>;
+        close(contextId?: string): Promise<boolean>;
+        onState(cb: (state: DesktopWorkspaceState) => void): () => void;
+      };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;
       /** Writes the redacted diagnostics report to a user-chosen file;
        * resolves the path, or null when cancelled. */
       exportDiagnostics?(): Promise<string | null>;
+      /** Asks where to save a bot-created file (inside ~/.openmausbot), copies
+       * it there and reveals it. Resolves the chosen path, or null if the
+       * user cancelled the dialog. */
+      saveFile?(filePath: string): Promise<string | null>;
+      /** Points this computer's file manager at a file a bot linked outside
+       * its workspace, without opening or reading it. Local app only. */
+      revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey",
         value: string,
       ): Promise<ConfigStatus>;
-      /** In-app auto-update (packaged app only; dormant in dev). onState
-       * fires immediately with the current state, then on transitions. */
+      /** In-app auto-update (packaged app only; dormant in dev). Updates
+       * download by themselves. On this computer's page and the person's own
+       * Cloud page; any other server's page gets no state. onState fires
+       * with the current state, then on transitions. */
       updater?: {
         check(): Promise<void>;
-        download(): Promise<void>;
-        /** quit-and-install the downloaded update */
+        /** apply the download: quit-and-install, or copy the command and open
+         * a terminal. On a server's page, only from the person's click. */
         install(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
@@ -212,14 +341,31 @@ export interface UpdaterState {
   status:
     | "idle"
     | "checking"
-    | "available"
     | "downloading"
+    /** downloaded bytes are being staged by the native macOS updater */
+    | "preparing"
     | "downloaded"
     | "installing"
+    /** the command is on the clipboard; the user finishes in a terminal */
+    | "handed-off"
     | "error";
   version?: string;
+  /** the release's notes as published (HTML or Markdown), when the feed has them */
+  releaseNotes?: string;
   percent?: number;
   message?: string;
+  /** native work may still be running; recovery requires an app restart */
+  retryable?: boolean;
+  /**
+   * How the download gets applied. "restart" quits and installs in place;
+   * "handoff" copies the install command and opens a terminal so the user
+   * can finish — Ubuntu .deb (and rpm/pacman) builds use this.
+   */
+  installMode?: "restart" | "handoff";
+  /** hand-off only: the install command, already on the clipboard */
+  command?: string;
+  /** hand-off only: whether a terminal was opened to paste it into */
+  terminalOpened?: boolean;
 }
 
 export interface CompanionAccountState {

@@ -9,9 +9,29 @@ account. A user may separately sign in on the desktop to enable the optional
 
 - The iOS app stores the selected computer address in iOS preferences and its
   pairing token in the iOS Keychain.
+- The iOS Share extension can access that selected computer metadata through a
+  private App Group and its pairing token through a shared Keychain access
+  group. No other app receives those values.
 - The computer remains the source of bots, transcripts, approvals, credentials,
   SQLite data, and screen images. OpenMausBot's hosted control plane does not
   store a copy of that content.
+- When a user completes a supported credential request on the phone, the value
+  exists only in the native secure field long enough to encrypt it with the
+  public key pinned by that computer's QR code. The app clears that field
+  immediately after encryption. It may keep the resulting ciphertext in memory
+  long enough to retry the exact same operation after an interrupted response;
+  that ciphertext is never persisted and is discarded when the app exits.
+  Submission is available only
+  through hosted HTTPS or Tailscale, not cleartext LAN or Bonjour HTTP. The
+  sidecar and optional hosted relay receive an HPKE ciphertext, not the value.
+  Only the paired packaged
+  desktop processes receive the private key: the embedded server decrypts and
+  passes the value over Electron's private process channel to commit through
+  the same operating-system-encrypted store used by Settings. The value is not
+  written to
+  iOS preferences or Keychain by OpenMausMobile, chat, SQLite, logs, or the
+  hosted control-plane database. The user's chosen Password AutoFill provider
+  may separately store it under that provider's own settings and privacy terms.
 - On a local Wi-Fi or Tailscale connection, phone traffic goes directly to the
   user's computer. Tailscale is a separate service with its own privacy terms.
 - If the desktop user enables optional hosted access, OpenMausBot stores the
@@ -30,6 +50,27 @@ account. A user may separately sign in on the desktop to enable the optional
 - Connector tokens stay in the desktop operating system's encrypted credential
   store. Pairing and device tokens are not stored in the hosted control-plane
   database.
+- When a user explicitly chooses OpenMausBot from another app's Share sheet, or
+  uses the attachment button in a chat, the selected text, link, image, or
+  supported document is sent to the bot or room the user confirms. Images and
+  documents are stored in the attachments directory on the user's computer with
+  generated names and owner-only file permissions. Individual images are
+  limited to 10 MiB, documents to 25 MiB, and one message to four items and
+  50 MiB total. The computer refuses new uploads after 512 MiB of attachments
+  rather than silently deleting files referenced by older conversations.
+  Voice notes an agent sends are mp3 files in that same attachments directory
+  with generated names and the same owner-only permissions, and they count
+  against the same 512 MiB quota.
+  In-chat selections remain in memory until the message succeeds or the draft
+  is discarded. Temporary Share-extension copies are removed after a completed
+  send or cancellation. If iOS terminates the extension mid-transfer, the next
+  Share sheet session removes the abandoned copy immediately; an OpenMausMobile
+  foreground launch removes it once it is at least 60 minutes old.
+- Opening a file link sent by a bot requests that exact file from the paired
+  computer over the selected authenticated companion connection. The app keeps
+  a temporary local preview only while it is open, then removes it. Ordinary
+  web links continue to open in the system browser. The hosted control plane
+  does not store either the source file or its preview.
 - The app contains no advertising or analytics SDKs, does not track users
   across other companies' apps or websites, and does not sell personal data.
 

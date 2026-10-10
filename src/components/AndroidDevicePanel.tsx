@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Circle, Loader2, RotateCcw, ShieldCheck, Smartphone, Usb } from "lucide-react";
 import { usePageVisible } from "@/lib/page-visible";
+import { t } from "@/lib/i18n";
 import type { AndroidDeviceInput, AndroidDeviceStatus, AndroidUsbDevice } from "@/types/ogb";
 
 type UnitPoint = { x: number; y: number };
@@ -202,11 +203,11 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
               <Smartphone size={16} className="text-success" /> {deviceLabel(selected)}
             </div>
             <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
-              Connected directly over USB. The screen and controls stay on this computer.
+              {t("computer.android.usbSubtitle")}
             </div>
           </div>
           <span className="flex shrink-0 items-center gap-1 text-[11px] text-success">
-            <ShieldCheck size={12} /> USB
+            <ShieldCheck size={12} /> {t("computer.android.usb")}
           </span>
         </div>
         {status.devices.length > 1 && (
@@ -227,14 +228,14 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
       {!ready ? (
         <div className="rounded-xl border border-warning/25 bg-warning/10 p-4 text-[12px] leading-relaxed text-warning">
           {selected.state === "unauthorized"
-            ? "Unlock the Android phone, accept the “Allow USB debugging” prompt, and optionally choose Always allow from this computer."
-            : `The phone is ${selected.state}. Reconnect the USB cable and keep USB debugging enabled.`}
+            ? t("computer.android.unauthorized")
+            : t("computer.android.badState", { state: selected.state })}
         </div>
       ) : (
         <>
           <div
             role="application"
-            aria-label={`Interactive Android screen for ${deviceLabel(selected)}`}
+            aria-label={t("computer.android.screenAria", { name: deviceLabel(selected) })}
             tabIndex={0}
             onKeyDown={keyDown}
             onWheel={wheel}
@@ -274,7 +275,7 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
               <img
                 ref={imageRef}
                 src={frame}
-                alt={`${deviceLabel(selected)} screen`}
+                alt={t("computer.android.screenAlt", { name: deviceLabel(selected) })}
                 draggable={false}
                 onLoad={(event) => {
                   setDimensions({
@@ -293,23 +294,23 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
               onClick={() => send({ type: "key", key: "back" })}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[12px] text-ink hover:bg-raised-hover"
             >
-              <ArrowLeft size={13} /> Back
+              <ArrowLeft size={13} /> {t("computer.android.back")}
             </button>
             <button
               onClick={() => send({ type: "key", key: "home" })}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[12px] text-ink hover:bg-raised-hover"
             >
-              <Circle size={12} /> Home
+              <Circle size={12} /> {t("computer.android.home")}
             </button>
             <button
               onClick={() => send({ type: "key", key: "recent" })}
               className="flex items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[12px] text-ink hover:bg-raised-hover"
             >
-              <RotateCcw size={13} /> Recent
+              <RotateCcw size={13} /> {t("computer.android.recent")}
             </button>
           </div>
           <div className="text-center text-[11px] leading-relaxed text-ink-secondary">
-            Click to tap, drag or use a trackpad to scroll, and type after selecting a field.
+            {t("computer.android.hint")}
           </div>
         </>
       )}
@@ -322,26 +323,28 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
 
       <div className="rounded-xl bg-card p-4">
         <div className="flex items-center gap-2 text-[13px] font-medium text-ink">
-          <Usb size={15} className="text-accent" /> First-time USB setup
+          <Usb size={15} className="text-accent" /> {t("computer.android.setupTitle")}
         </div>
         <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-[11.5px] leading-relaxed text-ink-secondary">
-          <li>Connect the phone with a data-capable USB cable and keep it unlocked.</li>
+          <li>{t("computer.android.step1")}</li>
           <li>
-            Enable Developer options by tapping <span className="text-ink">Build number</span> seven times in
-            About phone, then turn on <span className="text-ink">USB debugging</span>.
+            {t("computer.android.step2").split(/(\{buildNumber\}|\{usbDebugging\})/).map((part, index) =>
+              part === "{buildNumber}" || part === "{usbDebugging}"
+                ? <span key={index} className="text-ink">{t(part === "{buildNumber}" ? "computer.android.buildNumber" : "computer.android.usbDebugging")}</span>
+                : part,
+            )}
           </li>
           <li>
-            Accept <span className="text-ink">Allow USB debugging</span> on the phone. You can choose Always allow
-            for this trusted computer.
+            {t("computer.android.step3a")}{" "}
+            <span className="text-ink">{t("computer.android.allowUsbDebugging")}</span>{" "}
+            {t("computer.android.step3b")}
           </li>
         </ol>
         <div className="mt-2 text-[11px] leading-relaxed text-ink-secondary">
-          Agent control uses this same authorized USB connection. No phone companion app, account, Tailscale, or
-          wireless pairing is needed.
+          {t("computer.android.agentNote")}
         </div>
         <div className="mt-2 rounded-lg bg-inset px-3 py-2 text-[11px] leading-relaxed text-ink-secondary">
-          Once connected, ask any compatible Maus to open an Android app or complete a task on your phone. The
-          bundled Phone Harness skill loads automatically for phone requests.
+          {t("computer.android.harnessNote")}
         </div>
       </div>
     </div>

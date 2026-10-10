@@ -3,6 +3,7 @@
 // is deterministic and unit-testable.
 
 const DESKTOP_PLATFORMS = new Set(["darwin", "linux", "win32"]);
+const UNAVAILABLE_LOCAL_STATUSES = new Set(["disabled", "checking", "starting", "error", "stopped", "unavailable"]);
 
 function normalizedPlatform(platform) {
   return DESKTOP_PLATFORMS.has(platform) ? platform : "other";
@@ -57,8 +58,20 @@ function linuxLocalControlSupport(platform, env) {
 }
 
 function localComputerReady(platform, connection) {
+  const validLegacyConnection = connection &&
+    (!Object.hasOwn(connection, "status") || connection.status === "ready") &&
+    typeof connection.socketPath === "string" && connection.socketPath.length > 0 &&
+    typeof connection.mcpCommand === "string" && connection.mcpCommand.trim().length > 0 &&
+    Array.isArray(connection.mcpArgs) && connection.mcpArgs[0] === "mcp" &&
+    connection.mcpArgs.every((arg) => typeof arg === "string") &&
+    connection.mcpEnv && typeof connection.mcpEnv === "object" && !Array.isArray(connection.mcpEnv) &&
+    Object.values(connection.mcpEnv).every((value) => typeof value === "string");
   if (platform === "darwin") {
-    return connection?.mode === "embedded" || connection?.mode === "standalone";
+    return Boolean(validLegacyConnection && (connection.mode === "embedded" || connection.mode === "standalone"));
+  }
+  // Windows only exposes the host-owned embedded connection.
+  if (platform === "win32") {
+    return Boolean(validLegacyConnection && connection.mode === "embedded");
   }
   if (
     platform !== "linux" ||
@@ -81,12 +94,17 @@ function desktopCapabilities({
   packaged = false,
   localConnection = null,
   homeDir = require("node:os").homedir(),
+  // The page asking is a remote server's UI: this computer's screen, voice
+  // and local control are not on offer, whatever the host could do.
+  remote = false,
 } = {}) {
   const hostPlatform = normalizedPlatform(platform);
   const isMac = hostPlatform === "darwin";
   const hostSession = linuxSession(hostPlatform, env);
   const linuxPreview = hostPlatform === "linux" && hostSession !== "headless";
   const localAvailable = localComputerReady(hostPlatform, localConnection);
+  const localStatus = localAvailable ? "ready" :
+    UNAVAILABLE_LOCAL_STATUSES.has(localConnection?.status) ? localConnection.status : "unavailable";
   const screenPreview = {
     available: isMac || linuxPreview,
     interaction:
@@ -115,25 +133,34 @@ function desktopCapabilities({
           ? "supported"
           : "unsupported",
     enabled: connectionEnabled(hostPlatform, localConnection),
-    status: localAvailable ? "ready" : localConnection?.status ?? "unavailable",
+    status: localStatus,
   };
-  if (typeof localConnection?.message === "string") {
-    localComputer.message = localConnection.message;
-  }
-  if (typeof localConnection?.driver?.path === "string") {
-    localComputer.driverPath = localConnection.driver.path;
-  }
-  if (typeof localConnection?.driver?.version === "string") {
-    localComputer.driverVersion = localConnection.driver.version;
-  }
-  if (typeof localConnection?.driver?.source === "string") {
-    localComputer.driverSource = localConnection.driver.source;
-  }
-  if (typeof localConnection?.session === "string") {
-    localComputer.session = localConnection.session;
-  }
-  if (typeof localConnection?.compositor === "string") {
-    localComputer.compositor = localConnection.compositor;
+  // These fields expose local-machine detail (installed driver, seat,
+  // diagnostics), so populate them only when no remote override replaces
+  // localComputer below; a remote page must never receive local values.
+  if (!remote) {
+    if (localConnection?.mode === "unavailable" && typeof localConnection.reason === "string" &&
+        localConnection.reason.trim() && localConnection.reason.length <= 2_000) {
+      localComputer.message = localConnection.reason.trim();
+    }
+    if (typeof localConnection?.message === "string") {
+      localComputer.message = localConnection.message;
+    }
+    if (typeof localConnection?.driver?.path === "string") {
+      localComputer.driverPath = localConnection.driver.path;
+    }
+    if (typeof localConnection?.driver?.version === "string") {
+      localComputer.driverVersion = localConnection.driver.version;
+    }
+    if (typeof localConnection?.driver?.source === "string") {
+      localComputer.driverSource = localConnection.driver.source;
+    }
+    if (typeof localConnection?.session === "string") {
+      localComputer.session = localConnection.session;
+    }
+    if (typeof localConnection?.compositor === "string") {
+      localComputer.compositor = localConnection.compositor;
+    }
   }
   if (!localAvailable) {
     localComputer.reasonCode =
@@ -141,7 +168,26 @@ function desktopCapabilities({
       (hostPlatform === "darwin" ? "cua-driver-unavailable" : "unsupported-platform");
   }
 
+  if (remote) {
+    const unavailable = { reasonCode: "remote-server" };
+    Object.assign(screenPreview, { available: false, interaction: "none" }, unavailable);
+    Object.assign(dictation, { available: false, engine: "none", onDevice: false }, unavailable);
+    Object.assign(localComputer, {
+      available: false,
+      support: "unsupported",
+      enabled: false,
+      status: "unavailable",
+      driverPath: "",
+      driverVersion: "",
+      driverSource: "",
+      session: "",
+      compositor: "",
+      message: "",
+    }, unavailable);
+  }
+
   return {
+    remote: Boolean(remote),
     host: {
       platform: hostPlatform,
       label:
@@ -155,10 +201,12 @@ function desktopCapabilities({
       session: hostSession,
       packaged: Boolean(packaged),
       // so the renderer can show paths as ~/… without a Node builtin in
-      // the sandboxed preload
-      homeDir,
+      // the sandboxed preload; a remote server's page learns nothing about
+      // this computer's users
+      homeDir: remote ? "" : homeDir,
     },
-    windowChrome: isMac ? "mac-inset" : "native",
+    windowChrome:
+      isMac ? "mac-inset" : hostPlatform === "win32" ? "win-caption" : "native",
     screenPreview,
     dictation,
     localComputer,
@@ -166,7 +214,9 @@ function desktopCapabilities({
 }
 
 function connectionEnabled(platform, connection) {
-  if (platform === "darwin") return localComputerReady(platform, connection);
+  if (platform === "darwin" || platform === "win32") {
+    return localComputerReady(platform, connection);
+  }
   return platform === "linux" && connection?.enabled === true;
 }
 

@@ -1,0 +1,54 @@
+# Edge for one OMB Cloud Pro home machine (docs/cloud-pro.md). Fly's proxy
+# terminates TLS for <app>.fly.dev and reaches this machine on :8080. The
+# OpenMausBot server listens only on 127.0.0.1, and every request forwarded
+# to it carries X-Forwarded-*, so it is never the loopback owner
+# (server/request-auth.ts): a remote client needs a paired session.
+{
+	admin off
+	auto_https off
+	persist_config off
+	servers {
+		# Fly's proxy connects from its private ranges and names the real
+		# client in Fly-Client-IP. Only those peers may name a client; the
+		# address feeds the pairing lockout, never authorization.
+		trusted_proxies static private_ranges
+		trusted_proxies_strict
+		client_ip_headers Fly-Client-IP
+	}
+}
+
+:8080 {
+	encode zstd gzip
+
+	# Fly's health check reaches the machine by address, not by name.
+	handle /api/health {
+		reverse_proxy 127.0.0.1:8799 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+
+	# Everything else answers only for this machine's own public name.
+	@home host {$OMB_CLOUD_PUBLIC_HOST}
+	handle @home {
+		# Webhook ingress has its own per-hook secrets.
+		handle /hooks/* {
+			reverse_proxy 127.0.0.1:8800 {
+				header_up X-Forwarded-Proto https
+				header_up X-Forwarded-For {client_ip}
+			}
+		}
+		handle {
+			reverse_proxy 127.0.0.1:8799 {
+				header_up X-Forwarded-Proto https
+				header_up X-Forwarded-For {client_ip}
+				# the event stream must not be buffered
+				flush_interval -1
+			}
+		}
+	}
+
+	handle {
+		respond 403
+	}
+}

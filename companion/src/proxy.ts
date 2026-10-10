@@ -10,8 +10,10 @@
 // request this process makes to 127.0.0.1 satisfies that by construction. So
 // the sidecar does NOT forward the device's Host or Origin. It speaks to the
 // harness as itself, from the machine the harness is already willing to
-// serve. Nothing upstream has to change, or even know this exists.
+// serve. Packaged harnesses also require a private per-launch relay capability,
+// attached only after authenticating the phone and authorizing its route.
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 
 import { bearerToken } from "./devices.ts";
 import {
@@ -19,15 +21,26 @@ import {
   MAX_COMPANION_ENDPOINTS,
   type CompanionEndpoint,
 } from "./endpoints.ts";
-import { denyReason, isCloudDesktopJoin } from "./routes.ts";
+import {
+  denyReason,
+  isBrowserControlAccess,
+  isCloudDesktopAccess,
+  isMessageFileDownload,
+} from "./routes.ts";
+import { CompanionViewerRelay } from "./viewer-relay.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
 /** What the forwarding handler needs from the process around it. */
 export interface ProxyOptions {
   /** Where the harness is listening on loopback. */
   harnessPort: number;
+  /** Private Electron capability; null means bootstrap is not ready yet.
+   * Undefined keeps standalone sidecars compatible with a plain Node harness. */
+  mutationToken?: () => string | null;
   /** Does this bearer token belong to a paired device? */
-  authenticate: (token: string | undefined) => { cloudDesktopAccess: boolean } | null;
+  authenticate: (
+    token: string | undefined,
+  ) => { id?: string; cloudDesktopAccess: boolean; browserControlAccess: boolean } | null;
   /** Redeem a pairing code. Handled here and never forwarded: the harness
    * has no such route and no idea devices exist — pairing is the sidecar's
    * own concern, and the one thing a device does before it has a token. */
@@ -46,6 +59,10 @@ export interface ProxyOptions {
   /** Complete connection URLs for current mobile clients. `hosts` remains
    * alongside this field for builds that predate typed endpoints. */
   endpoints?: () => CompanionEndpoint[];
+  /** Register one authenticated, live event stream. The tracker can terminate
+   * it synchronously when that device is revoked; the returned disposer is
+   * called exactly once when either side closes it. */
+  connected?: (deviceId: string, disconnect: () => void) => () => void;
   /** How long the harness may take to produce response *headers*. Optional,
    * and only ever set by tests — the default is the one that ships. */
   headersTimeoutMs?: number;
@@ -63,6 +80,17 @@ export interface CompanionEndpointSnapshot {
  * that deliberately never ends, and a timeout that could not tell the
  * difference would cut every live stream at thirty seconds. */
 const HEADERS_TIMEOUT_MS = 30_000;
+// Secure credential saves include bounded provider validation before the
+// encrypted desktop store commits. Keep this beyond the server's 90-second
+// private-save deadline but comfortably inside the hosted proxy's deadline,
+// leaving time for the final card update and response to travel back.
+const PHONE_SECRET_HEADERS_TIMEOUT_MS = 105_000;
+const PHONE_SECRET_PROVIDE_PATH = /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide(?:\?|$)/;
+
+export function proxyHeadersTimeoutMs(url: string, override?: number): number {
+  return override
+    ?? (PHONE_SECRET_PROVIDE_PATH.test(url) ? PHONE_SECRET_HEADERS_TIMEOUT_MS : HEADERS_TIMEOUT_MS);
+}
 
 /** A JSON response has to be buffered whole before it can be scrubbed, so the
  * buffer is the size of the response and nothing upstream promises that is
@@ -189,32 +217,122 @@ const endpointSnapshot = (options: ProxyOptions): CompanionEndpointSnapshot => {
   };
 };
 
-/** Headers worth carrying to the harness. An allowlist rather than a
- * blocklist: `host` and `origin` must not travel (see above), `authorization`
- * is the sidecar's credential and means nothing to the harness, and hop-by-hop
- * headers are by definition not ours to relay. */
-const forwardHeaders = (req: IncomingMessage): Record<string, string> => {
+/** Who is asking, as the harness hears it from this sidecar: the companion
+ * marker, and for an authenticated phone its registry id and the private
+ * relay token. Shared by the proxy and the companion's own notices
+ * (harness-notice.ts), so both speak to the harness the same way. */
+export function companionIdentityHeaders(authenticatedDeviceId?: string, mutationToken?: string): Record<string, string> {
   const out: Record<string, string> = {
-    accept: String(req.headers.accept ?? "*/*"),
     // Lets a response whose URL is intentionally loopback-only (the VPS SSH
     // viewer) fail before opening a tunnel a phone cannot reach. This header
     // carries no authority; it only narrows behavior at the harness.
     "x-openmausbot-companion": "1",
   };
+  // Never forward a caller-supplied device header. This value comes only
+  // from the registry entry which authenticated the bearer above, allowing
+  // the harness to bind an encrypted credential (and a Live call) to the
+  // same paired phone.
+  if (authenticatedDeviceId && /^[\w-]{1,128}$/.test(authenticatedDeviceId)) {
+    out["x-openmausbot-companion-device"] = authenticatedDeviceId;
+    if (mutationToken) out["x-openmausbot-companion-auth"] = mutationToken;
+  }
+  return out;
+}
+
+/** Headers worth carrying to the harness. An allowlist rather than a
+ * blocklist: `host` and `origin` must not travel (see above), `authorization`
+ * is the sidecar's credential and means nothing to the harness, and hop-by-hop
+ * headers are by definition not ours to relay. */
+const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string, mutationToken?: string): Record<string, string> => {
+  const out: Record<string, string> = {
+    accept: String(req.headers.accept ?? "*/*"),
+    ...companionIdentityHeaders(authenticatedDeviceId, mutationToken),
+  };
   const contentType = req.headers["content-type"];
   if (contentType) out["content-type"] = String(contentType);
+  // Preserve a trustworthy byte count for bounded raw uploads. Without it,
+  // the harness must grow its disk-quota reservation as each streamed chunk
+  // arrives. Node has already parsed this as one request header; keep an
+  // additional canonical-decimal check before replaying it upstream.
+  const contentLength = req.headers["content-length"];
+  if (
+    typeof contentLength === "string"
+    && /^(?:0|[1-9]\d*)$/.test(contentLength)
+    && Number.isSafeInteger(Number(contentLength))
+  ) {
+    out["content-length"] = contentLength;
+  }
   // Last-Event-ID is how a reconnecting client asks for the gap. Dropping it
   // would turn every resume into a full re-hydration, silently.
   const lastEventId = req.headers["last-event-id"];
   if (lastEventId) out["last-event-id"] = String(lastEventId);
+  // Range is how a player seeks inside a voice note; dropping it would turn
+  // every scrub into a full re-download on metered phones. Only the
+  // canonical single-range shapes travel — anything else stays behind and
+  // the harness answers the complete file, which is always correct.
+  const range = req.headers.range;
+  if (typeof range === "string") {
+    const canonical = range.trim();
+    if (/^bytes=\d*-\d*$/.test(canonical)) out.range = canonical;
+  }
   return out;
 };
 
 /** The device-facing handler: refuse a browser, check the allowlist, check
  * the token, then replay the request to the harness over loopback and scrub
  * what comes back. Pairing is the one route that stops here. */
+/** Ask the harness, as the paired device, whether a control lease still
+ * holds a bot's computer. Read-only (`action: "check"`); every failure —
+ * no token yet, a refusal, a timeout, an unreadable answer — is "no". */
+function harnessControlCheck(options: ProxyOptions) {
+  return (deviceId: string, botId: string, controlLeaseId: string): Promise<boolean> => new Promise((resolve) => {
+    const mutationToken = options.mutationToken?.();
+    if (options.mutationToken && !mutationToken) return resolve(false);
+    const body = JSON.stringify({ action: "check", controlLeaseId });
+    const headers: Record<string, string> = {
+      accept: "application/json",
+      "content-type": "application/json",
+      "content-length": String(Buffer.byteLength(body)),
+      "x-openmausbot-companion": "1",
+      "x-openmausbot-companion-device": deviceId,
+    };
+    if (mutationToken) headers["x-openmausbot-companion-auth"] = mutationToken;
+    const request = httpRequest({
+      hostname: "127.0.0.1",
+      port: options.harnessPort,
+      path: `/api/bots/${encodeURIComponent(botId)}/computer/control`,
+      method: "POST",
+      headers,
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      response.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+        if (size > 16_384) return request.destroy();
+        chunks.push(chunk);
+      });
+      response.once("end", () => {
+        try {
+          const parsed = JSON.parse(Buffer.concat(chunks).toString("utf8")) as { owned?: unknown };
+          resolve(response.statusCode === 200 && parsed.owned === true);
+        } catch {
+          resolve(false);
+        }
+      });
+      response.once("error", () => resolve(false));
+    });
+    request.setTimeout(5_000, () => request.destroy());
+    request.once("error", () => resolve(false));
+    request.end(body);
+  });
+}
+
 export function createProxyHandler(options: ProxyOptions) {
-  return function handle(req: IncomingMessage, res: ServerResponse): void {
+  const viewers = new CompanionViewerRelay({ checkControl: harnessControlCheck(options) });
+  /** Open SSE streams that exist only because of a per-device capability,
+   * keyed by device, so revoking the capability can close them. */
+  const capabilityStreams = new Map<string, Set<() => void>>();
+  const handle = function handle(req: IncomingMessage, res: ServerResponse): void {
     const path = (req.url ?? "/").split("?")[0];
     const method = req.method ?? "GET";
 
@@ -227,6 +345,22 @@ export function createProxyHandler(options: ProxyOptions) {
 
     const token = bearerToken(req.headers.authorization);
     const device = options.authenticate(token);
+    const browserRequest = isBrowserControlAccess(method, path);
+    const browserRefusal = () => {
+      if (!browserRequest) return null;
+      const current = options.authenticate(token);
+      if (!current || current.id !== device?.id) {
+        return { status: 401, error: "pair this device from Remote access settings on the host computer" };
+      }
+      return current.browserControlAccess ? null : {
+        status: 403,
+        error: "browser control is off for this device — enable it in Remote access settings on the host computer",
+      };
+    };
+    if (viewers.isViewerPath(req.url)) {
+      viewers.handleHttp(req, res, device);
+      return;
+    }
     const denial = denyReason({
       path,
       method,
@@ -239,13 +373,27 @@ export function createProxyHandler(options: ProxyOptions) {
     if (denial) return sendJson(res, denial.status, { error: denial.error });
 
     // Pairing a phone grants the ordinary companion surface, not a browser
-    // session with every credential that may exist inside the cloud desktop.
+    // session with every credential that may exist inside a bot's computer.
     // The computer owner enables this capability per device, off by default.
-    if (isCloudDesktopJoin(method, path) && !device?.cloudDesktopAccess) {
+    if (isCloudDesktopAccess(method, path) && !device?.cloudDesktopAccess) {
       return sendJson(res, 403, {
-        error: "cloud desktop access is off for this phone — enable it in OpenMausBot → Settings → Companion",
+        error: "computer access is off for this device — enable it in OpenMausBot → Settings → Remote access",
       });
     }
+
+    // The same shape, and a deliberately separate grant: this one reaches a
+    // browser that is normally signed into the person's own accounts.
+    if (isBrowserControlAccess(method, path) && !device?.browserControlAccess) {
+      return sendJson(res, 403, {
+        // Naming the button matters: the Remote access pane has two
+        // switches now, and every first-time user meets this message because
+        // the grant is deliberately off by default.
+        error: "browser control is off for this device — open Remote access on the computer and turn on \"Allow browser control\" for it",
+      });
+    }
+
+    const viewerClose = /^\/api\/bots\/([\w-]+)\/computer\/viewer-close$/.exec(path);
+    if (viewerClose && device?.id) viewers.close(device.id, viewerClose[1]);
 
     // Pairing terminates here. Forwarding it would hand the harness a route
     // it does not have, and the 404 would read to a phone as "wrong address".
@@ -291,16 +439,27 @@ export function createProxyHandler(options: ProxyOptions) {
       return sendJson(res, 200, endpointSnapshot(options));
     }
 
+    const mutationToken = device ? options.mutationToken?.() : undefined;
+    if (device && options.mutationToken && !mutationToken) {
+      return sendJson(res, 503, { error: "The desktop connection is starting. Please try again shortly." });
+    }
     const upstream = httpRequest(
       {
         hostname: "127.0.0.1",
         port: options.harnessPort,
         path: req.url,
         method,
-        headers: forwardHeaders(req),
+        headers: forwardHeaders(req, device?.id, mutationToken ?? undefined),
       },
       (harness) => {
         clearTimeout(headersDeadline);
+        // Opening the native browser can take time. A grant revoked during
+        // that wait must not expose frames or register a stream afterwards.
+        const refusal = browserRefusal();
+        if (refusal) {
+          harness.destroy();
+          return sendJson(res, refusal.status, { error: refusal.error });
+        }
         // Keep liveness tied to the actual harness. Answering from the
         // sidecar alone made a dead bot server look healthy and caused the
         // desktop to advertise a hosted route that could not serve chats.
@@ -355,6 +514,46 @@ export function createProxyHandler(options: ProxyOptions) {
         const isStream = String(contentType ?? "").includes("text/event-stream");
 
         if (isStream) {
+          const streamStatus = harness.statusCode ?? 500;
+          const tracksDeviceConnection = method === "GET"
+            && path === "/api/events"
+            && streamStatus >= 200
+            && streamStatus < 300
+            && Boolean(device?.id);
+          const currentDevice = tracksDeviceConnection ? options.authenticate(token) : device;
+          if (tracksDeviceConnection && currentDevice?.id !== device?.id) {
+            harness.destroy();
+            return sendJson(res, 401, {
+              error: "pair this device from Remote access settings on the host computer",
+            });
+          }
+          const disconnect = () => {
+            if (!harness.destroyed) harness.destroy();
+            if (!res.destroyed) res.destroy();
+          };
+          let releaseConnection =
+            tracksDeviceConnection && currentDevice?.id
+              ? options.connected?.(currentDevice.id, disconnect) ?? null
+              : null;
+          // A stream that exists only because of a per-device capability must
+          // be closable when that capability is taken away. `connected` above
+          // is about the /api/events presence indicator and deliberately does
+          // not cover these.
+          const capabilityOwner = isBrowserControlAccess(method, path) ? device?.id : undefined;
+          if (capabilityOwner) {
+            const open = capabilityStreams.get(capabilityOwner) ?? new Set<() => void>();
+            open.add(disconnect);
+            capabilityStreams.set(capabilityOwner, open);
+          }
+          const release = () => {
+            releaseConnection?.();
+            releaseConnection = null;
+            if (capabilityOwner) {
+              const open = capabilityStreams.get(capabilityOwner);
+              open?.delete(disconnect);
+              if (open && open.size === 0) capabilityStreams.delete(capabilityOwner);
+            }
+          };
           // Headers first and flushed, or nothing downstream believes the
           // connection is live. content-length is meaningless here and
           // content-encoding would be a lie once we rewrite the bytes.
@@ -370,6 +569,11 @@ export function createProxyHandler(options: ProxyOptions) {
           });
           res.flushHeaders?.();
           res.socket?.setNoDelay(true);
+          // The harness writes an SSE keepalive every 25 seconds. TCP
+          // keepalive covers the other direction so a vanished phone cannot
+          // leave the desktop indicator green indefinitely on a half-open
+          // connection.
+          res.socket?.setKeepAlive(true, 30_000);
 
           const scrubStream = createSseScrubber();
           harness.setEncoding("utf8");
@@ -380,6 +584,7 @@ export function createProxyHandler(options: ProxyOptions) {
             } catch {
               // The buffer ceiling. Half an event cannot be forwarded safely,
               // so the stream ends here rather than growing without bound.
+              release();
               harness.destroy();
               res.end();
               return;
@@ -393,18 +598,31 @@ export function createProxyHandler(options: ProxyOptions) {
             if (!res.write(rewritten)) harness.pause();
           });
           res.on("drain", () => harness.resume());
-          harness.on("end", () => res.end());
-          harness.on("error", () => res.destroy());
+          harness.on("end", () => {
+            release();
+            res.end();
+          });
+          harness.on("error", () => {
+            release();
+            res.destroy();
+          });
           // A device that hangs up must take the upstream connection with
           // it, or the harness accumulates readers nobody is listening to.
-          res.on("close", () => harness.destroy());
+          res.on("close", () => {
+            release();
+            harness.destroy();
+          });
           return;
         }
 
         const encoding = String(harness.headers["content-encoding"] ?? "")
           .trim()
           .toLowerCase();
-        if (!isJson(String(contentType ?? "")) || (encoding && encoding !== "identity")) {
+        if (
+          isMessageFileDownload(method, path)
+          || !isJson(String(contentType ?? ""))
+          || (encoding && encoding !== "identity")
+        ) {
           // images and anything else: byte-for-byte, no parsing.
           //
           // Encoded bodies come through here too. Scrubbing one would mean
@@ -439,6 +657,8 @@ export function createProxyHandler(options: ProxyOptions) {
         });
         harness.on("error", () => res.destroy());
         harness.on("end", () => {
+          const refusal = browserRefusal();
+          if (refusal) return sendJson(res, refusal.status, { error: refusal.error });
           const body = Buffer.concat(chunks).toString("utf8");
 
           // Two failures live here and they are not the same failure.
@@ -465,6 +685,12 @@ export function createProxyHandler(options: ProxyOptions) {
           // JSON.parse handles it fine.
           let text: string;
           try {
+            parsed = viewers.rewriteJoinResponse(
+              path,
+              parsed,
+              device?.id,
+              new URL(req.url ?? "/", "http://companion.invalid").searchParams.get("controlLeaseId"),
+            );
             text = JSON.stringify(scrub(parsed));
           } catch {
             sendJson(res, 502, { error: "the response could not be prepared for this device" });
@@ -507,10 +733,11 @@ export function createProxyHandler(options: ProxyOptions) {
     // harness that accepts the connection and then says nothing holds the
     // device's request open until one side gives up, which neither does.
     let timedOut = false;
+    const headersTimeoutMs = proxyHeadersTimeoutMs(req.url ?? "", options.headersTimeoutMs);
     const headersDeadline = setTimeout(() => {
       timedOut = true;
       upstream.destroy(new Error("the harness sent no response headers"));
-    }, options.headersTimeoutMs ?? HEADERS_TIMEOUT_MS);
+    }, headersTimeoutMs);
     headersDeadline.unref?.();
 
     upstream.on("error", () => {
@@ -535,4 +762,25 @@ export function createProxyHandler(options: ProxyOptions) {
     });
     req.pipe(upstream);
   };
+
+  handle.upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
+    if (req.headers.origin) {
+      socket.destroy();
+      return;
+    }
+    const token = bearerToken(req.headers.authorization);
+    const device = options.authenticate(token);
+    viewers.handleUpgrade(req, socket, head, device);
+  };
+  handle.disconnectDevice = (deviceId: string): void => {
+    viewers.closeDevice(deviceId);
+    // Revoking a capability has to reach the streams it already granted.
+    // `connected` only ever tracked /api/events, so without this a phone
+    // kept watching a signed-in browser after the grant was taken away.
+    const open = capabilityStreams.get(deviceId);
+    if (!open) return;
+    capabilityStreams.delete(deviceId);
+    for (const close of open) close();
+  };
+  return handle;
 }

@@ -1,0 +1,237 @@
+{
+  "format": "openmaus.package",
+  "version": 2,
+  "package": {
+    "id": "sales-desk",
+    "release": "1.3.0",
+    "name": "Sales desk",
+    "tagline": "Qualify leads, research prospects and write outreach.",
+    "summary": "A three-bot sales team with a deal desk, a daily digest and a weekly pipeline review.",
+    "notes": "Adds the weekly pipeline review goal.",
+    "category": "Sales",
+    "author": {
+      "name": "Acme Partners",
+      "url": "https://example.com"
+    },
+    "license": "Proprietary",
+    "tags": [
+      "sales",
+      "outreach"
+    ],
+    "outcomes": [
+      "Qualified leads every morning.",
+      "Consistent outreach drafts."
+    ],
+    "setupMinutes": 10,
+    "publisher": {
+      "organization": "someone-else",
+      "name": "A file cannot choose its publisher"
+    },
+    "requirements": {
+      "apps": [
+        {
+          "slug": "hubspot",
+          "label": "HubSpot",
+          "reason": "Read deals and contacts."
+        }
+      ],
+      "capabilities": []
+    },
+    "team": {
+      "name": "Sales desk",
+      "brief": "We sell a team plan at 49 per seat. Always quote from the price list and never promise discounts.",
+      "leader": "lead"
+    },
+    "agents": [
+      {
+        "key": "lead",
+        "name": "Morgan",
+        "title": "Sales lead",
+        "description": "Owns the pipeline and the final answer.",
+        "soul": "You coordinate the desk. Keep answers short and cite the price list.\n",
+        "appearance": {
+          "color": "purple",
+          "mascotExpression": "focused",
+          "avatar": {
+            "mime": "image/png",
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+            "crop": "circle"
+          }
+        },
+        "approval": "auto",
+        "playbooks": [
+          "qualify"
+        ],
+        "skills": [
+          "pricing-policy"
+        ],
+        "connections": [
+          "crm"
+        ],
+        "seed": {
+          "memory": {
+            "MEMORY.md": "- The team prefers short summaries.\n- Pricing notes live in memory/pricing.md.\n",
+            "memory/pricing.md": "# Pricing\n\nList price is 49 per seat per month.\n"
+          }
+        }
+      },
+      {
+        "key": "scout",
+        "name": "Scout",
+        "title": "Prospect researcher",
+        "description": "Finds and qualifies prospects.",
+        "appearance": {
+          "color": "cyan"
+        },
+        "skills": [
+          "pricing-policy",
+          "research-brief"
+        ],
+        "connections": [
+          "crm"
+        ]
+      },
+      {
+        "key": "writer",
+        "name": "Quill",
+        "title": "Outreach writer",
+        "description": "Drafts outreach for approval.",
+        "appearance": {
+          "color": "green",
+          "mascotBody": "round"
+        },
+        "approval": "ask"
+      }
+    ],
+    "rooms": [
+      {
+        "key": "desk",
+        "name": "Deal desk",
+        "members": [
+          "lead",
+          "scout",
+          "writer"
+        ],
+        "bulletin": "Cite sources. Morgan answers unless someone is mentioned.",
+        "defaultResponder": {
+          "kind": "agent",
+          "agent": "lead"
+        }
+      }
+    ],
+    "routines": [
+      {
+        "key": "daily-digest",
+        "name": "Daily digest",
+        "agent": "scout",
+        "prompt": "Summarize new leads from yesterday with one line each.",
+        "runOn": "maus",
+        "schedule": {
+          "type": "daily",
+          "time": "09:00",
+          "weekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        "durationMinutes": 30,
+        "timeoutMinutes": 20,
+        "overlap": "skip",
+        "continuity": true,
+        "enabledAfterInstall": true
+      },
+      {
+        "key": "weekly-review",
+        "name": "Weekly pipeline review",
+        "agent": "lead",
+        "room": "desk",
+        "prompt": "Review the pipeline together and agree the week's priorities.",
+        "runOn": "maus",
+        "schedule": {
+          "type": "cron",
+          "expression": "0 10 * * 1",
+          "timeZone": "UTC"
+        },
+        "durationMinutes": 60,
+        "enabledAfterInstall": false
+      }
+    ],
+    "playbooks": [
+      {
+        "key": "qualify",
+        "name": "Qualify a lead",
+        "summary": "Decide whether a lead is worth a call.",
+        "triggers": [
+          "qualify",
+          "lead"
+        ],
+        "instructions": "Check budget, authority, need and timing. Say which are unknown."
+      }
+    ],
+    "skills": {
+      "version": 1,
+      "entries": [
+        {
+          "name": "pricing-policy",
+          "description": "Quote prices from the price list.",
+          "instructions": "---\nname: pricing-policy\ndescription: Quote prices from the price list.\n---\n\n# Pricing policy\n\nQuote only list prices.\n"
+        },
+        {
+          "name": "research-brief",
+          "description": "Write a one-page prospect brief.",
+          "instructions": "---\nname: research-brief\ndescription: Write a one-page prospect brief.\n---\n\n# Research brief\n\nCompany, people, signals, sources.\n"
+        },
+        {
+          "name": "objection-handling",
+          "description": "Answer common objections.",
+          "instructions": "---\nname: objection-handling\ndescription: Answer common objections.\n---\n\n# Objections\n\nAcknowledge, clarify, answer.\n"
+        }
+      ]
+    },
+    "presets": [
+      {
+        "key": "support",
+        "name": "Support agent",
+        "description": "Answers customer questions kindly.",
+        "bot": {
+          "name": "Sky",
+          "title": "Support",
+          "soul": "Be kind and precise.\n",
+          "appearance": {
+            "color": "blue"
+          }
+        },
+        "playbooks": [
+          "qualify"
+        ],
+        "skills": [
+          "objection-handling"
+        ]
+      }
+    ],
+    "connections": [
+      {
+        "key": "crm",
+        "label": "CRM",
+        "reason": "Look up accounts and deals.",
+        "mcp": {
+          "transport": "http",
+          "url": "https://mcp.example.com/crm",
+          "valueNames": [
+            "Authorization"
+          ]
+        }
+      }
+    ],
+    "examples": [
+      {
+        "title": "Morning digest",
+        "input": "What came in overnight?",
+        "output": "Three new leads; one is qualified."
+      }
+    ]
+  }
+}

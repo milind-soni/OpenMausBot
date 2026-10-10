@@ -10,19 +10,28 @@
 // Legacy JSON thread files import lazily: the first read of a thread with
 // no rows pulls the old file in, after which the DB is the source of
 // truth (the JSON file is left behind as a one-time backup).
-import { chmodSync, closeSync, existsSync, openSync, readFileSync, renameSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { DATA_DIR } from "./config.ts";
+import { peerProvenanceAuthor } from "./peer-provenance.ts";
+import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
+import type { UsageTrigger } from "./usage-ledger.ts";
+import { MessageSearchWorker } from "./message-search-worker.ts";
+import { searchMessagesInDatabase, type SearchHit } from "./message-search-query.ts";
+export type { SearchHit } from "./message-search-query.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
 
 let handle: DatabaseSync | null = null;
 let handlePath: string | null = null;
+let searchWorker: MessageSearchWorker | null = null;
+let closingSearch: Promise<void> = Promise.resolve();
 
 function open(): DatabaseSync {
+  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   const file = DB_FILE();
   // Transcripts can contain private conversations and tool output. Create
   // the database with owner-only permissions and also repair an existing
@@ -46,13 +55,127 @@ function open(): DatabaseSync {
       PRIMARY KEY (thread_id, id)
     );
     CREATE INDEX IF NOT EXISTS messages_thread ON messages(thread_id);
+    -- at is not part of the primary key, so newest-per-thread reads cannot
+    -- walk these rows in time order on messages_thread. Created on every
+    -- open, including a database that already has messages.
+    CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
     CREATE TABLE IF NOT EXISTS thread_state (
       thread_id TEXT PRIMARY KEY,
       active_leaf_id TEXT
     );
+    CREATE TABLE IF NOT EXISTS chat_followups (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      send_id TEXT,
+      status TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS chat_followups_receipt ON chat_followups(kind, owner_id, thread_id, send_id);
+    CREATE TABLE IF NOT EXISTS command_receipts (
+      kind TEXT NOT NULL,
+      key TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      result TEXT NOT NULL,
+      PRIMARY KEY (kind, key)
+    );
   `);
+  ensureRecallIndex(db);
+  ensureMemoryIndex(db);
   return db;
 }
+
+// The bot's memory files — MEMORY.md, memory/<topic>.md, memory/log/<day>.md
+// — indexed for the same session_search. One row per file, with the size
+// and mtime it was indexed at so a search can notice a file the bot's own
+// file tools rewrote without any filesystem watcher. Kept in this database
+// because FTS5 is already here; the files themselves stay the source of
+// truth on disk and this table is rebuilt from them at any time.
+function ensureMemoryIndex(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_files (
+      bot_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      text TEXT NOT NULL,
+      mtime_ms INTEGER NOT NULL,
+      bytes INTEGER NOT NULL,
+      PRIMARY KEY (bot_id, path)
+    );
+    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+      text, content='memory_files', content_rowid='rowid', tokenize='unicode61'
+    );
+    CREATE TRIGGER IF NOT EXISTS memory_fts_ai AFTER INSERT ON memory_files BEGIN
+      INSERT INTO memory_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memory_fts_ad AFTER DELETE ON memory_files BEGIN
+      INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS memory_fts_au AFTER UPDATE ON memory_files BEGIN
+      INSERT INTO memory_fts(memory_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+      INSERT INTO memory_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+  `);
+}
+
+// Ranked recall over transcript text, for the bot's own session_search tool.
+// An external-content FTS5 table over messages.text: the index stores no
+// copy of the text, and three triggers keep it in step with every insert,
+// update, and delete on `messages`. FTS5 ships inside node:sqlite, so this
+// is no more of a dependency than the table it indexes. The sidebar's LIKE
+// search below stays as it is — substring find over a single thread wants
+// every occurrence, not a relevance ranking.
+/** FTS5 is in every runtime OpenMausBot supports — node:sqlite on Node ≥ 24
+ * (package.json engines) and the Node inside Electron 43 — so a SQLite
+ * without it is a mis-installed runtime, not a mode to run in. Say that,
+ * instead of surfacing SQLite's own "no such module: fts5" from deep inside
+ * open() with nothing about what to do. Anything else is rethrown as-is. */
+export function describeMissingFts5(error: unknown): Error | null {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!/no such module:\s*fts5/i.test(message)) return null;
+  return new Error(
+    `OpenMausBot needs SQLite with FTS5, which is built into Node 24 and newer (and into the app). ` +
+    `This Node (${process.version}) has none: install Node 24 or newer. (${message})`,
+  );
+}
+
+function ensureRecallIndex(db: DatabaseSync): void {
+  const existed = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
+    .get();
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+        text, content='messages', content_rowid='rowid', tokenize='unicode61'
+      );
+    `);
+  } catch (error) {
+    throw describeMissingFts5(error) ?? error;
+  }
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+      INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+    END;
+    CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+      INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
+    END;
+  `);
+  // First time on an existing database: index everything already there.
+  if (!existed) db.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
+}
+
+// INSERT OR REPLACE would delete and re-insert the row under a new rowid
+// without firing the delete trigger (SQLite only fires it with recursive
+// triggers on), leaving a dangling FTS entry. An upsert keeps the rowid and
+// runs the update trigger, so the index never drifts from the table.
+const UPSERT_MESSAGE =
+  "INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+  "ON CONFLICT(thread_id, id) DO UPDATE SET at = excluded.at, role = excluded.role, kind = excluded.kind, " +
+  "text = excluded.text, json = excluded.json";
 
 /** The live handle — reopened when the file was removed out from under us
  * (tests wipe DATA_DIR between cases; a fresh Store must get a fresh DB,
@@ -65,6 +188,175 @@ function db(): DatabaseSync {
   handle = open();
   handlePath = DB_FILE();
   return handle;
+}
+
+/** Nested writes use savepoints: even a caught inner error must not commit
+ * half of an inner command. The outer transaction still owns durability. */
+let transactionDepth = 0;
+function transaction<T>(fn: (database: DatabaseSync) => T): T {
+  const database = db();
+  if (transactionDepth > 0) {
+    const savepoint = `command_${transactionDepth}`;
+    database.exec(`SAVEPOINT ${savepoint}`);
+    transactionDepth += 1;
+    try {
+      const result = fn(database);
+      database.exec(`RELEASE ${savepoint}`);
+      return result;
+    } catch (error) {
+      database.exec(`ROLLBACK TO ${savepoint}`);
+      database.exec(`RELEASE ${savepoint}`);
+      throw error;
+    } finally { transactionDepth -= 1; }
+  }
+  database.exec("BEGIN IMMEDIATE");
+  transactionDepth = 1;
+  try {
+    const result = fn(database);
+    database.exec("COMMIT");
+    return result;
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  } finally {
+    transactionDepth = 0;
+  }
+}
+
+export interface FollowupPayload {
+  text: string;
+  prompt?: string;
+  replyToId?: string;
+  sendId?: string;
+  /** The Data result the words were sent about; the drained line keeps it. */
+  dataContext?: Message["dataContext"];
+  reason?: SteerQueueReason;
+  unattended?: boolean;
+  peerAsk?: Message["peerAsk"];
+  mode?: "chat" | "goal";
+  /** "api": a room line sent through the local API with no session behind
+   * it. "call": a person's words relayed from a Live call. */
+  via?: "api" | "call";
+  /** Who queued these words. Absent on the owner's own sends and on every
+   * row written before this existed; both read as the profile name. */
+  sender?: ResolvedSender;
+  /** Who the usage ledger books the turn these words start to. Absent on
+   * rows written before this existed. */
+  trigger?: UsageTrigger;
+  /** When the words were queued (epoch ms), so drain-time coalescing can
+   * tell a contiguous burst from hours-apart texts. Rows written before
+   * this existed read as queued at restore time. */
+  queuedAt?: number;
+  /** Aside-lane rows (kind "aside"): the peer whose words these are. The
+   * prompt carries the non-steering envelope; text stays the raw words. */
+  aside?: {
+    fromBotId: string;
+    fromBotName: string;
+    unattended?: boolean;
+    /** Comms depth captured when the aside was queued, so a degraded
+     * follow-up turn inherits the same one-hop chain limit. */
+    commsDepth: number;
+  };
+}
+export type FollowupStatus = "pending" | "dispatching" | "interrupted" | "cancelled";
+export interface ChatFollowup {
+  id: string;
+  kind: "bot" | "channel" | "aside";
+  ownerId: string;
+  threadId: string;
+  status: FollowupStatus;
+  payload: FollowupPayload;
+}
+
+/** A 202/cancel/dispatch claim must reach disk before publishing its result.
+ * Use the existing transcript DB (and backup path), with FULL sync for these
+ * small transactions only; ordinary transcript writes keep their policy. */
+function writeFollowups(write: (connection: DatabaseSync) => void): void {
+  const connection = db();
+  connection.exec("PRAGMA synchronous = FULL");
+  try {
+    connection.exec("BEGIN IMMEDIATE");
+    try { write(connection); connection.exec("COMMIT"); }
+    catch (error) { connection.exec("ROLLBACK"); throw error; }
+  } finally { connection.exec("PRAGMA synchronous = NORMAL"); }
+}
+
+export interface StoredCommandReceipt {
+  kind: string;
+  key: string;
+  at: number;
+  /** JSON text of the command's result, exactly as first produced. */
+  result: string;
+}
+
+export function readCommandReceipt(kind: string, key: string): StoredCommandReceipt | null {
+  const row = db()
+    .prepare("SELECT kind, key, at, result FROM command_receipts WHERE kind = ? AND key = ?")
+    .get(kind, key) as StoredCommandReceipt | undefined;
+  return row ?? null;
+}
+
+/** Run `apply` and record its receipt in ONE transaction on the transcript
+ * DB, so a command's rows and the proof that it ran land together or not
+ * at all. A receipt already present short-circuits: the stored result is
+ * returned and `apply` never runs. Everything `apply` writes through this
+ * module (insertMessage, setActiveLeaf, ...) joins the same transaction. */
+export function withCommandReceipt(
+  kind: string,
+  key: string,
+  apply: () => string,
+  at: number,
+): { result: string; replayed: boolean } {
+  return transaction((database) => {
+    const existing = database
+      .prepare("SELECT result FROM command_receipts WHERE kind = ? AND key = ?")
+      .get(kind, key) as { result: string } | undefined;
+    if (existing) return { result: existing.result, replayed: true };
+    const result = apply();
+    database
+      .prepare("INSERT INTO command_receipts(kind, key, at, result) VALUES (?, ?, ?, ?)")
+      .run(kind, key, at, result);
+    return { result, replayed: false };
+  });
+}
+
+export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
+  writeFollowups((connection) => connection.prepare(
+    "INSERT INTO chat_followups(id, kind, owner_id, thread_id, send_id, status, payload) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+  ).run(followup.id, followup.kind, followup.ownerId, followup.threadId, followup.payload.sendId ?? null, JSON.stringify(followup.payload)));
+}
+
+/** Null retires a dispatch whose canonical transcript is already durable.
+ * Cancellation tombstones remain so a retried sendId cannot resurrect it. */
+export function settleChatFollowups(ids: string[], status: FollowupStatus | null): void {
+  if (!ids.length) return;
+  writeFollowups((connection) => {
+    const statement = connection.prepare(status === null
+      ? "DELETE FROM chat_followups WHERE id = ?"
+      : status === "cancelled"
+        ? "UPDATE chat_followups SET status = ?, payload = '{\"text\":\"\"}' WHERE id = ?"
+        : "UPDATE chat_followups SET status = ? WHERE id = ?");
+    for (const id of ids) {
+      if (status === null) statement.run(id);
+      else statement.run(status, id);
+    }
+  });
+}
+
+export function chatFollowups(kind?: ChatFollowup["kind"]): ChatFollowup[] {
+  const rows = (kind
+    ? db().prepare("SELECT * FROM chat_followups WHERE kind = ? ORDER BY rowid").all(kind)
+    : db().prepare("SELECT * FROM chat_followups ORDER BY rowid").all()) as Array<{
+      id: string; kind: ChatFollowup["kind"]; owner_id: string; thread_id: string; status: FollowupStatus; payload: string;
+    }>;
+  return rows.map((row) => ({ id: row.id, kind: row.kind, ownerId: row.owner_id, threadId: row.thread_id,
+    status: row.status, payload: JSON.parse(row.payload) as FollowupPayload }));
+}
+
+export function cancelledChatFollowup(kind: ChatFollowup["kind"], ownerId: string, threadId: string, sendId: string): boolean {
+  return Boolean(db().prepare(
+    "SELECT 1 FROM chat_followups WHERE kind = ? AND owner_id = ? AND thread_id = ? AND send_id = ? AND status = 'cancelled'",
+  ).get(kind, ownerId, threadId, sendId));
 }
 
 const rowToMessage = (row: { json: string }): Message => JSON.parse(row.json) as Message;
@@ -88,6 +380,34 @@ export function readThread(threadId: string, legacyFile: string): ThreadRows {
   return importLegacy(threadId, legacyFile);
 }
 
+export interface ThreadTailRows extends ThreadRows {
+  /** `true` means older rows exist beyond this page; `false` means the SQL
+   * read returned the complete thread. Absent for a full legacy import.
+   * Both false and absent results can be cached as a full load. */
+  hasMore?: boolean;
+}
+
+/** The newest `limit` rows only, read at the SQL boundary — the fast path
+ * for a display page (startup hydrate, a fresh scrollback view) that never
+ * needs the rest of a long transcript. Falls back to a full legacy import
+ * on first touch, same as readThread(); that read is a one-time migration
+ * cost regardless of how much of the result the caller keeps. */
+export function readThreadTail(threadId: string, legacyFile: string, limit: number): ThreadTailRows {
+  const rows = db()
+    .prepare("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?")
+    .all(threadId, limit + 1) as Array<{ json: string }>;
+  if (rows.length) {
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.length = limit;
+    rows.reverse();
+    const state = db()
+      .prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?")
+      .get(threadId) as { active_leaf_id: string | null } | undefined;
+    return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null, hasMore };
+  }
+  return importLegacy(threadId, legacyFile);
+}
+
 function importLegacy(threadId: string, legacyFile: string): ThreadRows {
   let messages: Message[] = [];
   let activeLeafId: string | null = null;
@@ -102,9 +422,7 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
     messages = ((raw as { messages?: Message[] }).messages ?? []) as Message[];
     activeLeafId = (raw as { activeLeafId?: string | null }).activeLeafId ?? null;
   }
-  const insert = db().prepare(
-    "INSERT OR REPLACE INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  );
+  const insert = db().prepare(UPSERT_MESSAGE);
   db().exec("BEGIN");
   try {
     for (const message of messages) {
@@ -129,28 +447,47 @@ function importLegacy(threadId: string, legacyFile: string): ThreadRows {
 
 export function insertMessage(threadId: string, message: Message): void {
   db()
-    .prepare("INSERT OR REPLACE INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .prepare(UPSERT_MESSAGE)
     .run(threadId, message.id, message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message));
+}
+
+/** A backup may only populate a fresh thread, never replace a transcript. */
+export function importThread(threadId: string, messages: Message[], activeLeafId: string | null): void {
+  transaction((database) => {
+    if (database.prepare("SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1").get(threadId) ||
+        database.prepare("SELECT 1 FROM thread_state WHERE thread_id = ?").get(threadId)) {
+      throw new Error("Cannot import over an existing conversation");
+    }
+    for (const message of messages) insertMessage(threadId, message);
+    setActiveLeaf(threadId, activeLeafId);
+  });
 }
 
 /** Persist a new message and the branch head as one crash-safe mutation. */
 export function appendMessage(threadId: string, message: Message): void {
-  const database = db();
-  database.exec("BEGIN IMMEDIATE");
-  try {
+  transaction(() => {
     insertMessage(threadId, message);
     setActiveLeaf(threadId, message.id);
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
-  }
+  });
 }
 
 export function updateMessage(threadId: string, message: Message): void {
   db()
     .prepare("UPDATE messages SET at = ?, role = ?, kind = ?, text = ?, json = ? WHERE thread_id = ? AND id = ?")
     .run(message.at, message.role, message.kind, message.text ?? null, JSON.stringify(message), threadId, message.id);
+}
+
+/** Goal cards are new SQLite-backed messages, so crash recovery can locate
+ * the tiny set of unfinished receipts without eagerly loading every room
+ * transcript into memory at startup. */
+export function workingGoalRunMessages(): Array<{ threadId: string; message: Message }> {
+  const rows = db()
+    .prepare(
+      "SELECT thread_id, json FROM messages " +
+      "WHERE kind = 'goal.run' AND json_extract(json, '$.goalRun.status') = 'working'",
+    )
+    .all() as Array<{ thread_id: string; json: string }>;
+  return rows.map((row) => ({ threadId: row.thread_id, message: JSON.parse(row.json) as Message }));
 }
 
 export function setActiveLeaf(threadId: string, leafId: string | null): void {
@@ -162,84 +499,404 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
     .run(threadId, leafId);
 }
 
-export function deleteThread(threadId: string): void {
-  db().prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
-  db().prepare("DELETE FROM thread_state WHERE thread_id = ?").run(threadId);
+/** Newest message timestamp per thread. One grouped read, chunked under
+ * SQLite's variable limit. Threads with no rows are absent. */
+export function latestMessageAts(threadIds: readonly string[]): Map<string, number> {
+  const ids = [...new Set(threadIds.filter((id) => id.length > 0))];
+  const out = new Map<string, number>();
+  const chunk = 400;
+  for (let i = 0; i < ids.length; i += chunk) {
+    const slice = ids.slice(i, i + chunk);
+    const placeholders = slice.map(() => "?").join(", ");
+    const rows = db()
+      .prepare(`SELECT thread_id, MAX(at) AS at FROM messages WHERE thread_id IN (${placeholders}) GROUP BY thread_id`)
+      .all(...slice) as Array<{ thread_id: string; at: number }>;
+    for (const row of rows) {
+      if (typeof row.at === "number" && Number.isFinite(row.at)) out.set(row.thread_id, row.at);
+    }
+  }
+  return out;
 }
 
-export interface SearchHit {
+export function deleteThread(threadId: string): void {
+  writeFollowups((connection) => {
+    connection.prepare("DELETE FROM chat_followups WHERE thread_id = ?").run(threadId);
+    connection.prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
+    connection.prepare("DELETE FROM thread_state WHERE thread_id = ?").run(threadId);
+  });
+}
+
+/** Every thread whose stored messages mention `fragment` anywhere (an
+ * attachment's file name, say). A scan, like search; used only to decide
+ * whether a member on a workspace with a restricted bot may fetch a file. */
+export function threadsReferencing(fragment: string): string[] {
+  if (!fragment) return [];
+  const rows = db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>;
+  return rows.map((row) => row.thread_id);
+}
+
+/** Case-insensitive substring search over text messages, newest first.
+ * Keep literal substring semantics; HTTP callers run the scan off-thread. */
+export function searchMessages(query: string, limit = 40, threadId?: string): SearchHit[] {
+  return searchMessagesInDatabase(db(), query, limit, threadId);
+}
+
+export function searchMessagesAsync(query: string, limit = 40, threadId?: string): Promise<SearchHit[]> {
+  if (!query.trim()) return Promise.resolve([]);
+  db(); // The owner initializes/migrates the schema before any read-only scan.
+  searchWorker ??= new MessageSearchWorker(DB_FILE());
+  return searchWorker.search(query, limit, threadId);
+}
+
+export interface RecallHit {
   threadId: string;
   messageId: string;
   at: number;
   role: string;
-  kind: string;
-  /** the matched text, trimmed to a window around the first hit */
+  /** "digest" for a work-digest row; absent for ordinary text. */
+  kind?: "digest";
+  /** the matched text, with each matched term wrapped in [brackets] */
   snippet: string;
-  /** where the match sits inside `snippet`, for highlighting */
-  matchStart: number;
-  matchLength: number;
   /** room messages: which member said it */
   from?: string;
+  /** a user-role line another bot delivered with ask_bot: that bot's name.
+   * The stored text opens with a note saying so, but the snippet windows
+   * around the match and drops it, so the reader learns it here. */
+  peer?: string;
 }
 
-/** Case-insensitive substring search over text messages, newest first.
- * A LIKE scan, deliberately: local transcripts are megabytes at most, a
- * scan is milliseconds, and it needs no FTS extension to exist. */
-export function searchMessages(query: string, limit = 40, threadId?: string): SearchHit[] {
-  const needle = query.trim().toLowerCase();
-  if (!needle) return [];
-  // escape LIKE wildcards so a literal % or _ in the query stays literal
-  const pattern = `%${needle.replace(/([\\%_])/g, "\\$1")}%`;
-  // text messages by their text; activity chips by the tool name — "which
-  // bot ran that migration" is a tool-name question. The chip's name lives
-  // in the row's json; a JSON1 extract keeps this one query.
-  const scope = threadId ? "thread_id = ? AND " : "";
-  const statement = db().prepare(
-    "SELECT thread_id, id, at, role, kind, text, json_extract(json, '$.tool.name') AS tool_name, json_extract(json, '$.from.name') AS from_name FROM messages " +
-      `WHERE ${scope}((kind = 'text' AND text IS NOT NULL AND lower(text) LIKE ? ESCAPE '\\') ` +
-      "   OR (kind = 'activity' AND tool_name IS NOT NULL AND lower(tool_name) LIKE ? ESCAPE '\\')) " +
-      "ORDER BY at DESC LIMIT ?",
-  );
-  const rows = (threadId
-    ? statement.all(threadId, pattern, pattern, limit)
-    : statement.all(pattern, pattern, limit)) as Array<{
+/** Who wrote a user-role line that reads as the user's. The structural
+ * field wins; rows stored before it existed still open with the note. */
+function peerAuthor(peerName: string | null, text: string): string | null {
+  return peerName ?? peerProvenanceAuthor(text);
+}
+
+/** Enough of a line to see whether it opens with an ask_bot note — the
+ * note's fixed wording plus a bot name — without reading the whole text. */
+const PEER_NOTE_HEAD_CHARS = 160;
+
+// Every query token must match, so a function word the model happened to
+// include ("archive reference on") turns a good query into a miss. Drop
+// the common ones; if that empties the query, search for what was sent.
+const STOP_WORDS = new Set(
+  "a an and are as at be by did do for from had has have how i in is it its of on or that the this to was we were what when where which who why with you your".split(" "),
+);
+
+/** Turn free text into an FTS5 query that cannot be misparsed: every
+ * whitespace-separated token becomes a quoted string, so `AND`, `NOT`,
+ * `*`, `:`, and stray quotes are searched for rather than interpreted.
+ * Tokens are ANDed — FTS5's default — so a hit contains all of them. */
+function ftsQuery(query: string, mode: SearchMode = "all"): string | null {
+  const tokens = query
+    .split(/\s+/)
+    .map((token) => token.replace(/"/g, "").trim())
+    .filter(Boolean);
+  if (!tokens.length) return null;
+  const content = tokens.filter((token) => !STOP_WORDS.has(token.toLowerCase()));
+  if (mode === "any") {
+    // Automatic recall searches with a whole message: any content word may
+    // match, ranked by bm25. Punctuation-only tokens are dropped, since a
+    // lone "?" or "—" would match nothing useful. No content word, no query.
+    const terms = recallTerms(query).map(recallMatchTerm).filter(Boolean);
+    return terms.length ? terms.join(" OR ") : null;
+  }
+  return (content.length ? content : tokens).map((token) => `"${token}"`).join(" ");
+}
+
+/** One recall term as FTS5 syntax. The index does no stemming, so a word
+ * of four or more letters matches as a prefix, with a plural -s taken off
+ * first: "restaurant" and "restaurants" find each other. Skip punctuation
+ * terms: unicode61 cannot distinguish "-10" from "10" or "c++" from "c",
+ * even in a quoted FTS phrase. Explicit all-term search stays unchanged. */
+export function recallMatchTerm(term: string): string | null {
+  if (!/^[\p{L}\p{N}]+$/u.test(term)) return null;
+  if (!/^\p{L}{4,}$/u.test(term)) return `"${term}"`;
+  const stem = term.length > 4 && term.endsWith("s") && !term.endsWith("ss") ? term.slice(0, -1) : term;
+  return `"${stem}"*`;
+}
+
+/** "all": every word must match (session_search). "any": one is enough (automatic recall). */
+export type SearchMode = "all" | "any";
+
+/** Words that go at the end of a question and say nothing about its topic. */
+const RECALL_FILLER = new Set(
+  "about again also any anything can could does don't know me my please remember remind should tell there they us would hi hello hey thanks thank ok okay yes yeah no i'm im i've i'll i'd you're quick just".split(" "),
+);
+
+/** The content words of a message, for an any-term recall: lower-cased,
+ * de-duplicated, stop words and filler dropped. Ordinary separators between
+ * letters split words; signs, language symbols and versions (`-10`, `c++`,
+ * `v2.1`) survive as written rather than matching a different fact. */
+export function recallTerms(query: string): string[] {
+  const out: string[] = [];
+  for (const raw of query.split(/\s+|(?<=\p{L})[/,;:.—–-]+(?=\p{L})/u)) {
+    const token = raw.replace(/"/g, "").replace(/^[\s.,;:!?()[\]{}'`“”‘’]+|[\s.,;:!?()[\]{}'`“”‘’]+$/g, "").toLowerCase();
+    if (token.length < 2 && !/\d/.test(token)) continue;
+    if (!/[\p{L}\p{N}]/u.test(token)) continue;
+    if (STOP_WORDS.has(token) || RECALL_FILLER.has(token)) continue;
+    if (!out.includes(token)) out.push(token);
+  }
+  return out.slice(0, 16);
+}
+
+/** How much of a matched message rides back in a hit. Wide enough that a
+ * short report reads whole; a longer one is fetched with readMessageText. */
+const SNIPPET_TOKENS = 48;
+
+/** Full text of one text message, for a session_read after a search hit.
+ * Null for a missing row or a non-text kind (activity chips carry no
+ * transcript text). */
+export function readMessageText(
+  threadId: string,
+  messageId: string,
+): { threadId: string; messageId: string; at: number; role: string; text: string; from?: string; peer?: string } | null {
+  const row = db()
+    .prepare(
+      "SELECT at, role, text, json_extract(json, '$.from.name') AS from_name, " +
+        "json_extract(json, '$.peerAsk.name') AS peer_name FROM messages " +
+        "WHERE thread_id = ? AND id = ? AND kind = 'text' AND text IS NOT NULL",
+    )
+    .get(threadId, messageId) as
+    | { at: number; role: string; text: string; from_name: string | null; peer_name: string | null }
+    | undefined;
+  if (!row) return null;
+  const peer = peerAuthor(row.peer_name, row.text);
+  return {
+    threadId,
+    messageId,
+    at: row.at,
+    role: row.role,
+    text: row.text,
+    ...(row.from_name ? { from: row.from_name } : {}),
+    ...(peer ? { peer } : {}),
+  };
+}
+
+/** Relevance-ranked recall over the text messages of the given threads:
+ * the bot's own past conversations, best match first, not newest first.
+ * bm25 rank from FTS5; the snippet is FTS5's own, windowed around the
+ * matched terms. Scoping happens in SQL before LIMIT, so a busy thread
+ * cannot crowd out a quieter one. */
+/** An optional time window on a recall: milliseconds since the epoch. */
+export interface RecallRange {
+  since?: number;
+  until?: number;
+}
+
+function rangeClause(range: RecallRange | undefined, column: string): { sql: string; params: number[] } {
+  const parts: string[] = [];
+  const params: number[] = [];
+  if (range?.since !== undefined) {
+    parts.push(`${column} >= ?`);
+    params.push(range.since);
+  }
+  if (range?.until !== undefined) {
+    parts.push(`${column} <= ?`);
+    params.push(range.until);
+  }
+  return { sql: parts.map((part) => ` AND ${part}`).join(""), params };
+}
+
+export function recallMessages(query: string, threadIds: readonly string[], limit = 12, range?: RecallRange, mode: SearchMode = "all"): RecallHit[] {
+  const match = ftsQuery(query, mode);
+  if (!match || !threadIds.length) return [];
+  const placeholders = threadIds.map(() => "?").join(", ");
+  const window = rangeClause(range, "m.at");
+  const rows = db()
+    .prepare(
+      "SELECT m.thread_id, m.id, m.at, m.role, m.kind, json_extract(m.json, '$.from.name') AS from_name, " +
+        `json_extract(m.json, '$.peerAsk.name') AS peer_name, substr(m.text, 1, ${PEER_NOTE_HEAD_CHARS}) AS head, ` +
+        `snippet(messages_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
+        "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid " +
+        `WHERE messages_fts MATCH ? AND m.kind IN ('text', 'digest') AND m.thread_id IN (${placeholders})${window.sql} ` +
+        // a digest is a record of work, not something anyone said: it ranks
+        // after every text hit so recall reads like a conversation first
+        "ORDER BY (m.kind = 'digest'), bm25(messages_fts), m.at DESC LIMIT ?",
+    )
+    .all(match, ...threadIds, ...window.params, limit) as Array<{
     thread_id: string;
     id: string;
     at: number;
     role: string;
     kind: string;
-    text: string | null;
-    tool_name: string | null;
     from_name: string | null;
+    peer_name: string | null;
+    head: string;
+    snippet: string;
   }>;
   return rows.map((row) => {
-    const haystack = row.kind === "activity" ? (row.tool_name ?? "") : (row.text ?? "");
-    const hitAt = Math.max(0, haystack.toLowerCase().indexOf(needle));
-    const start = Math.max(0, hitAt - 60);
-    const end = Math.min(haystack.length, hitAt + needle.length + 90);
-    const head = start > 0 ? "…" : "";
-    const body = haystack.slice(start, end).replace(/\s+/g, " ").trim();
-    const snippet = head + body + (end < haystack.length ? "…" : "");
-    // whitespace folding can shift the offset; find the match again inside
-    const folded = needle.replace(/\s+/g, " ");
-    const matchStart = snippet.toLowerCase().indexOf(folded);
+    const peer = peerAuthor(row.peer_name, row.head);
     return {
       threadId: row.thread_id,
       messageId: row.id,
       at: row.at,
       role: row.role,
-      kind: row.kind,
-      snippet,
-      matchStart: matchStart < 0 ? head.length : matchStart,
-      // A defensive fallback must not mark arbitrary snippet text as the hit.
-      matchLength: matchStart < 0 ? 0 : folded.length,
+      ...(row.kind === "digest" ? { kind: "digest" as const } : {}),
+      snippet: row.snippet.replace(/\s+/g, " ").trim(),
       ...(row.from_name ? { from: row.from_name } : {}),
+      ...(peer ? { peer } : {}),
     };
   });
 }
 
+/** Characters of a message shown when a recall is by time, not by words:
+ * enough to know what was said, never the whole message. */
+const RECENT_HEAD_CHARS = 240;
+
+/** The text messages of the given threads inside a time window, newest
+ * first — "what happened since yesterday" needs no words to match. Same
+ * shape as a ranked hit, with the head of the message standing in for the
+ * FTS snippet. */
+export function recentMessages(threadIds: readonly string[], range: RecallRange, limit = 12): RecallHit[] {
+  if (!threadIds.length) return [];
+  const placeholders = threadIds.map(() => "?").join(", ");
+  const window = rangeClause(range, "m.at");
+  const rows = db()
+    .prepare(
+      "SELECT m.thread_id, m.id, m.at, m.role, json_extract(m.json, '$.from.name') AS from_name, " +
+        `json_extract(m.json, '$.peerAsk.name') AS peer_name, substr(m.text, 1, ${Math.max(PEER_NOTE_HEAD_CHARS, RECENT_HEAD_CHARS)}) AS head ` +
+        `FROM messages m WHERE m.kind = 'text' AND m.text IS NOT NULL AND m.thread_id IN (${placeholders})${window.sql} ` +
+        "ORDER BY m.at DESC LIMIT ?",
+    )
+    .all(...threadIds, ...window.params, limit) as Array<{
+    thread_id: string;
+    id: string;
+    at: number;
+    role: string;
+    from_name: string | null;
+    peer_name: string | null;
+    head: string;
+  }>;
+  return rows.map((row) => {
+    const peer = peerAuthor(row.peer_name, row.head);
+    const folded = row.head.replace(/\s+/g, " ").trim();
+    return {
+      threadId: row.thread_id,
+      messageId: row.id,
+      at: row.at,
+      role: row.role,
+      snippet: folded.length > RECENT_HEAD_CHARS ? `${folded.slice(0, RECENT_HEAD_CHARS)}…` : folded,
+      ...(row.from_name ? { from: row.from_name } : {}),
+      ...(peer ? { peer } : {}),
+    };
+  });
+}
+
+/** The newest thing one bot said in a thread. */
+export interface ThreadLatest {
+  threadId: string;
+  messageId: string;
+  at: number;
+  /** the head of that message, whitespace folded */
+  head: string;
+}
+
+/** For each of the given threads, the newest text message the bot itself
+ * said there since `since` — one row per thread, newest thread first. A
+ * room line carries from.botId; a 1:1 line carries none and is the bot's
+ * by construction. What a bot last said in a conversation is the shortest
+ * honest answer to "what have you been doing there". */
+export function latestSaidByBot(threadIds: readonly string[], botId: string, since: number, limit = 20): ThreadLatest[] {
+  if (!threadIds.length) return [];
+  const placeholders = threadIds.map(() => "?").join(", ");
+  const rows = db()
+    .prepare(
+      "SELECT thread_id, id, at, head FROM (" +
+        "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head, " +
+        "ROW_NUMBER() OVER (PARTITION BY m.thread_id ORDER BY m.at DESC) AS rn " +
+        "FROM messages m " +
+        `WHERE m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (${placeholders}) ` +
+        "AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)" +
+        ") WHERE rn = 1 ORDER BY at DESC LIMIT ?",
+    )
+    .all(since, ...threadIds, botId, limit) as Array<{ thread_id: string; id: string; at: number; head: string }>;
+  return rows.map((row) => ({
+    threadId: row.thread_id,
+    messageId: row.id,
+    at: row.at,
+    head: row.head.replace(/\s+/g, " ").trim(),
+  }));
+}
+
+export interface MemoryFileStat {
+  path: string;
+  mtimeMs: number;
+  bytes: number;
+}
+
+/** Index one memory file (upsert keeps the rowid, so the update trigger
+ * keeps the FTS rows in step — the same reasoning as UPSERT_MESSAGE). */
+export function indexMemoryFile(botId: string, path: string, text: string, stat: { mtimeMs: number; bytes: number }): void {
+  db()
+    .prepare(
+      "INSERT INTO memory_files (bot_id, path, text, mtime_ms, bytes) VALUES (?, ?, ?, ?, ?) " +
+        "ON CONFLICT(bot_id, path) DO UPDATE SET text = excluded.text, mtime_ms = excluded.mtime_ms, bytes = excluded.bytes",
+    )
+    .run(botId, path, text, Math.trunc(stat.mtimeMs), stat.bytes);
+}
+
+export function removeMemoryFile(botId: string, path: string): void {
+  db().prepare("DELETE FROM memory_files WHERE bot_id = ? AND path = ?").run(botId, path);
+}
+
+/** Remove one bot's memory-file rows. The delete trigger drops the
+ * matching external-content FTS rows, the same way deleting a thread's
+ * messages drops theirs. */
+export function deleteBotMemoryFiles(botId: string): void {
+  db().prepare("DELETE FROM memory_files WHERE bot_id = ?").run(botId);
+}
+
+/** What is indexed for a bot, so the caller can compare against the disk. */
+export function indexedMemoryFiles(botId: string): MemoryFileStat[] {
+  const rows = db()
+    .prepare("SELECT path, mtime_ms, bytes FROM memory_files WHERE bot_id = ?")
+    // SAFETY: the SELECT names exactly these three NOT NULL columns
+    .all(botId) as Array<{ path: string; mtime_ms: number; bytes: number }>;
+  return rows.map((row) => ({ path: row.path, mtimeMs: row.mtime_ms, bytes: row.bytes }));
+}
+
+export interface MemoryHit {
+  /** workspace-relative: MEMORY.md, memory/<topic>.md, memory/log/<day>.md */
+  file: string;
+  /** the matched passage, with each matched term wrapped in [brackets] */
+  snippet: string;
+  /** when the file was last written, from its mtime */
+  at: number;
+}
+
+/** Relevance-ranked recall over ONE bot's memory files. Scoped by bot id
+ * in SQL, the same way recallMessages scopes by thread: another bot's
+ * memory is not a lower-ranked result, it is not a result. */
+export function recallMemory(query: string, botId: string, limit = 12, mode: SearchMode = "all"): MemoryHit[] {
+  const match = ftsQuery(query, mode);
+  if (!match) return [];
+  const rows = db()
+    .prepare(
+      "SELECT f.path, f.mtime_ms, " +
+        `snippet(memory_fts, 0, '[', ']', '…', ${SNIPPET_TOKENS}) AS snippet ` +
+        "FROM memory_fts JOIN memory_files f ON f.rowid = memory_fts.rowid " +
+        "WHERE memory_fts MATCH ? AND f.bot_id = ? " +
+        // Automatic recall must filter before LIMIT; historical logs can
+        // otherwise crowd all current topic files out of the result set.
+        (mode === "any" ? "AND f.path NOT IN ('MEMORY.md', 'memory/archive.md') AND f.path NOT LIKE 'memory/log/%' " : "") +
+        "ORDER BY bm25(memory_fts), f.mtime_ms DESC LIMIT ?",
+    )
+    // SAFETY: the SELECT names exactly these three columns; snippet() is never null
+    .all(match, botId, limit) as Array<{ path: string; mtime_ms: number; snippet: string }>;
+  return rows.map((row) => ({ file: row.path, at: row.mtime_ms, snippet: row.snippet.replace(/\s+/g, " ").trim() }));
+}
+
+/** Await before maintenance replaces the database or shutdown releases its lease. */
+export async function closeMessageSearch(): Promise<void> {
+  const worker = searchWorker;
+  searchWorker = null;
+  if (worker) closingSearch = Promise.all([closingSearch, worker.close()]).then(() => {});
+  await closingSearch;
+}
+
 /** Test/shutdown hook — closes the handle so a wiped DATA_DIR starts clean. */
 export function closeMessageDb(): void {
+  void closeMessageSearch();
   try {
     handle?.close();
   } catch {}

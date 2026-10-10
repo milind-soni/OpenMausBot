@@ -2,7 +2,7 @@
 // tests are mostly about the cases where the answer is "stay quiet".
 import { describe, expect, it } from "vitest";
 
-import { buildNotification, summarize } from "./notify.ts";
+import { blockedTarget, buildNotification, buildSpendNotification, summarize } from "./notify.ts";
 
 const bot = { id: "bot-1", name: "Scout", threadId: "thread-1" };
 
@@ -18,11 +18,28 @@ describe("buildNotification", () => {
     expect(buildNotification("question", bot, "thread-1", "which branch?")?.title).toBe("Scout has a question");
     expect(buildNotification("done", bot, "thread-1", "pushed the branch")?.title).toBe("Scout finished");
     expect(buildNotification("routine-failed", bot, "thread-1", "boom")?.title).toBe("Scout's routine failed");
+    expect(buildNotification("routine-deferred", bot, "thread-1", "target busy for 30 minutes")?.title)
+      .toBe("Scout's routine is waiting");
+    expect(buildNotification("incident", bot, "thread-1", "the run stopped: exit_before_result")?.title).toBe("Scout hit a problem");
+    expect(buildNotification("turn-failed", bot, "thread-1", "the Local VM is not ready")?.title)
+      .toBe("Scout couldn't start");
+  });
+
+  it("announces a delegation settle as a resume with results", () => {
+    expect(buildNotification("delegation-settled", bot, "thread-1", "Results in from Atlas")).toMatchObject({
+      kind: "delegation-settled",
+      botId: "bot-1",
+      threadId: "thread-1",
+      title: "Scout resumed with results",
+      body: "Results in from Atlas",
+    });
+    // the toggle rules this frame like every other
+    expect(buildNotification("delegation-settled", { ...bot, notifications: false }, "thread-1", "Results in from Atlas")).toBeNull();
   });
 
   it("stays silent for a bot whose notifications are off", () => {
     const quiet = { ...bot, notifications: false };
-    for (const kind of ["approval", "question", "done", "routine-failed"] as const) {
+    for (const kind of ["approval", "question", "done", "routine-failed", "turn-failed"] as const) {
       expect(buildNotification(kind, quiet, "thread-1", "anything")).toBeNull();
     }
     // absent means "not turned off" — older bot records predate the flag
@@ -35,6 +52,7 @@ describe("buildNotification", () => {
     expect(buildNotification("done", bot, "thread-1", "")).toBeNull();
     // ...but a blocked bot is worth knowing about even with a thin summary
     expect(buildNotification("approval", bot, "thread-1", "")).not.toBeNull();
+    expect(buildNotification("turn-failed", bot, "thread-1", "")).not.toBeNull();
   });
 
   it("uses the thread it was raised on, not the bot's current one", () => {
@@ -53,6 +71,42 @@ describe("buildNotification", () => {
   });
 });
 
+describe("blockedTarget", () => {
+  const room = { id: "room-1", name: "Launch", threadId: "room-thread", busyBotId: "bot-1" };
+
+  it("opens the room a bot is speaking in, not the bot's own thread", () => {
+    // the turn, the screen and the card are all in the room; the 1:1 thread
+    // the notification used to open has nothing on it
+    expect(blockedTarget(bot, room)).toEqual({
+      threadId: "room-thread",
+      group: { id: "room-1", name: "Launch" },
+    });
+  });
+
+  it("stays on the bot's own thread for a room it is not holding", () => {
+    expect(blockedTarget(bot, { ...room, busyBotId: "someone-else" })).toEqual({ threadId: "thread-1" });
+    expect(blockedTarget(bot, { ...room, busyBotId: null })).toEqual({ threadId: "thread-1" });
+    expect(blockedTarget(bot, null)).toEqual({ threadId: "thread-1" });
+    expect(blockedTarget(bot)).toEqual({ threadId: "thread-1" });
+  });
+
+  it("names the room in the title and carries its id for grouping", () => {
+    const target = blockedTarget(bot, room);
+    expect(buildNotification("takeover", bot, target.threadId, "the login page wants a code", {
+      group: target.group,
+    })).toMatchObject({
+      kind: "takeover",
+      threadId: "room-thread",
+      groupId: "room-1",
+      title: "Scout in Launch needs your hands",
+    });
+    // a 1:1 takeover is untouched — no room to name, nothing to group under
+    const direct = buildNotification("takeover", bot, bot.threadId, "the login page wants a code");
+    expect(direct?.title).toBe("Scout needs your hands");
+    expect(direct?.groupId).toBeUndefined();
+  });
+});
+
 describe("summarize", () => {
   it("flattens a model's answer into one lock-screen line", () => {
     expect(summarize("line one\n\nline two")).toBe("line one line two");
@@ -65,5 +119,15 @@ describe("summarize", () => {
     expect(long).toHaveLength(140);
     expect(long.endsWith("…")).toBe(true);
     expect(summarize("short")).toBe("short");
+  });
+});
+
+describe("buildSpendNotification", () => {
+  it("opens the thread whose turn crossed the line, and a bot's own toggle does not silence it", () => {
+    const quiet = { ...bot, notifications: false };
+    expect(buildSpendNotification(quiet, "thread-9", { title: "Monthly spend limit reached", body: "$100.00 of $100.00 spent this month (2026-09)." })).toEqual({
+      kind: "spend", botId: "bot-1", botName: "Scout", threadId: "thread-9",
+      title: "Monthly spend limit reached", body: "$100.00 of $100.00 spent this month (2026-09).",
+    });
   });
 });

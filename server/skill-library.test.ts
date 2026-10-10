@@ -3,7 +3,10 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadUserSkills, mergeSkills, parseSkillManifest, skillInstructionsFor, type BundledSkill } from "./skill-library.ts";
+import { loadBundledSkills, loadUserSkills, mergeSkills, parseSkillManifest, renderSkillInstructions, selectBundledSkills, type BundledSkill } from "./skill-library.ts";
+
+const instructionsFor = (text: string, capabilities: string[], skills: BundledSkill[], options?: { includeRoot?: boolean }) =>
+  renderSkillInstructions(selectBundledSkills(text, capabilities, skills), options);
 
 const phone: BundledSkill = {
   directory: "/skills/phone-harness",
@@ -21,13 +24,13 @@ const phone: BundledSkill = {
 
 describe("bundled skill library", () => {
   it("selects a skill only when both its trigger and capability are present", () => {
-    const rendered = skillInstructionsFor("Open Uber on my Android", ["phoneMcp"], [phone]);
+    const rendered = instructionsFor("Open Uber on my Android", ["phoneMcp"], [phone]);
     expect(rendered).toContain("Use phone tools");
     expect(rendered).not.toContain('root="/skills/phone-harness"');
-    expect(skillInstructionsFor("Open Uber on my Android", ["phoneMcp"], [phone], { includeRoot: true }))
+    expect(instructionsFor("Open Uber on my Android", ["phoneMcp"], [phone], { includeRoot: true }))
       .toContain('root="/skills/phone-harness"');
-    expect(skillInstructionsFor("Open Uber on my Android", [], [phone])).toBe("");
-    expect(skillInstructionsFor("Write a poem", ["phoneMcp"], [phone])).toBe("");
+    expect(instructionsFor("Open Uber on my Android", [], [phone])).toBe("");
+    expect(instructionsFor("Write a poem", ["phoneMcp"], [phone])).toBe("");
   });
 
   it("requires the manifest id to match its isolated folder", () => {
@@ -37,7 +40,7 @@ describe("bundled skill library", () => {
     }, "/skills/phone-harness")).toThrow(/invalid id/);
   });
 
-  it("loads a recorded skill without letting a broken sibling disable it", () => {
+  it("loads a user skill without letting a broken sibling disable it", () => {
     const root = mkdtempSync(join(tmpdir(), "openmausbot-skills-"));
     const valid = join(root, "file-expense");
     mkdirSync(valid);
@@ -63,5 +66,42 @@ describe("bundled skill library", () => {
     const file = join(root, "not-a-directory");
     writeFileSync(file, "nope");
     expect(loadUserSkills(file)).toEqual([]);
+  });
+});
+
+describe("bundled verification skill", () => {
+  const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const instructions = skills.find((skill) => skill.manifest.id === "create-verification-skill")?.instructions ?? "";
+
+  it("ships one reviewed authoring adapter", () => {
+    const ids = skills.map((skill) => skill.manifest.id);
+    expect(ids).toContain("create-verification-skill");
+    expect(ids).not.toContain("maintain-verification-skill");
+    expect(instructions).toContain("skill_manage");
+    expect(instructions).not.toContain("~/.openmausbot");
+    expect(instructions).not.toContain("propose_routine");
+  });
+
+  it("requires skill authoring and an explicit creation request", () => {
+    for (const text of [
+      "/create-verification-skill for my notes app",
+      "can you make a verification skill so you can prove changes work",
+    ]) {
+      expect(selectBundledSkills(text, [], skills)).toEqual([]);
+      expect(selectBundledSkills(text, ["skillAuthoring"], skills).map((skill) => skill.manifest.id))
+        .toEqual(["create-verification-skill"]);
+    }
+  });
+
+  it("does not mount for generic verification or maintenance phrasing", () => {
+    for (const text of [
+      "please verify the numbers in this invoice",
+      "maintain the verification skill for atlas",
+      "the verification skill is stale",
+      "make a control cli",
+      "create a feature map for my app",
+    ]) {
+      expect(selectBundledSkills(text, ["skillAuthoring"], skills)).toEqual([]);
+    }
   });
 });

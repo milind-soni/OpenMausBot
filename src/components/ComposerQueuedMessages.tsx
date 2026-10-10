@@ -1,0 +1,175 @@
+import { CornerDownRight, Pencil, Trash2 } from "lucide-react";
+
+import type { SteerQueueReason } from "../../shared/wire";
+import { t } from "@/lib/i18n";
+import { replySnippet } from "@/lib/replies";
+import { splitTranscriptCitations } from "@/lib/citations";
+
+function queuedMessageLabel(text: string): string {
+  return splitTranscriptCitations(text).citations.length ? replySnippet(text, 500) : text;
+}
+
+export function composerCanSteerQueuedMessages(
+  busy: boolean,
+  locked: boolean,
+  pendingCount: number,
+  approvalPending = false,
+): boolean {
+  return busy && !locked && !approvalPending && pendingCount > 0;
+}
+
+/** How long a just-queued chip accepts a second Enter as "steer it now". */
+export const DOUBLE_ENTER_STEER_WINDOW_MS = 1_500;
+
+/** A new chip on a busy steer-capable thread opens the double-Enter
+ * window: the words queued because the live steer lost its race (or carried
+ * an attachment) can still join the running turn without interrupting it.
+ * Rooms and 1:1 threads share the gesture; capability, not the surface,
+ * decides whether it applies.
+ * Returns the window's expiry, or null when the gesture does not apply. */
+export function doubleEnterSteerWindowExpiresAt(
+  prevPendingCount: number,
+  pendingCount: number,
+  busy: boolean,
+  canSteer: boolean,
+  now = Date.now(),
+): number | null {
+  if (!busy || !canSteer) return null;
+  return pendingCount > prevPendingCount ? now + DOUBLE_ENTER_STEER_WINDOW_MS : null;
+}
+
+/** Whether an Enter press is the second one: empty composer, a chip waiting,
+ * and inside the window opened when that chip arrived. */
+export function doubleEnterSteersQueue(
+  windowExpiresAt: number,
+  now: number,
+  pendingCount: number,
+  hasContent: boolean,
+): boolean {
+  return !hasContent && pendingCount > 0 && now < windowExpiresAt;
+}
+
+/** Messages held by the harness until the running turn settles.
+ *
+ * The queue sits directly above the composer rather than pretending these
+ * words are already part of the transcript. Only its head owns Steer: room
+ * queues drain one item at a time, while bot queues coalesce all waiting
+ * items into one follow-up. Edit and Delete remain available on every exact
+ * queue id: Edit takes the message out of the queue and hands its words back
+ * to the composer, so nothing unsent is ever changed behind the harness.
+ */
+export function QueuedComposerMessages({
+  items,
+  onSteer,
+  steerMode = "all",
+  steering = false,
+  steerInterrupts = false,
+  onCancel,
+  onEdit,
+}: {
+  items: Array<{ queueId: string; text: string; reason?: SteerQueueReason }>;
+  onSteer?: () => void;
+  steerMode?: "all" | "next";
+  steering?: boolean;
+  /** True when Steer is backed by an interrupt (engine without live steer):
+   * the hint must say what the click really does. */
+  steerInterrupts?: boolean;
+  onCancel: (queueId: string) => void;
+  /** Pull this queued message back into the composer to tweak or extend it. */
+  onEdit?: (queueId: string) => void;
+}) {
+  if (!items.length) return null;
+
+  const multiple = items.length > 1;
+  const steerLabel = steering
+    ? t("composer.queued.steering")
+    : multiple
+      ? steerMode === "all"
+        ? t("composer.queued.steerAll")
+        : t("composer.queued.steerNext")
+      : t("composer.queued.steer");
+  const steerDescription = steerInterrupts
+    ? multiple
+      ? steerMode === "all"
+        ? t("composer.queued.steerAllInterruptHint", { count: items.length })
+        : t("composer.queued.steerNextInterruptHint")
+      : t("composer.queued.steerInterruptHint")
+    : multiple
+      ? steerMode === "all"
+        ? t("composer.queued.steerAllHint", { count: items.length })
+        : t("composer.queued.steerNextHint")
+      : t("composer.queued.steerHint");
+
+  return (
+    <div
+      className="relative z-[1] mx-3 -mb-3 max-h-36 overflow-y-auto rounded-t-2xl border border-b-0 border-hairline/40 bg-raised/95 pb-3 shadow-sm backdrop-blur-sm"
+      aria-label={
+        items.length === 1
+          ? t("composer.queued.regionOne")
+          : t("composer.queued.regionMany", { count: items.length })
+      }
+      aria-live="polite"
+    >
+      {items.some((item) => item.reason === "group-turn") && (
+        <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.groupTurn")}</p>
+      )}
+      {items.some((item) => item.reason === "capacity") && (
+        <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.capacity")}</p>
+      )}
+      <ul className="divide-y divide-hairline/25" aria-label={t("composer.queued.list")}>
+        {items.map((item, index) => {
+          const label = queuedMessageLabel(item.text);
+          return <li key={item.queueId} className="flex min-h-10 min-w-0 items-center gap-2 px-2.5 py-1.5">
+            <CornerDownRight
+              size={14}
+              strokeWidth={1.8}
+              className="shrink-0 text-ink-secondary"
+              aria-hidden="true"
+            />
+            <span dir="auto" className="min-w-0 flex-1 truncate text-[14px] text-ink" title={label}>
+              {label}
+            </span>
+            {index === 0 && onSteer && (
+              <button
+                type="button"
+                onClick={onSteer}
+                disabled={steering}
+                aria-label={steering ? t("composer.queued.steeringAria") : steerDescription}
+                title={steerDescription}
+                className="flex h-7 shrink-0 items-center gap-1 rounded-lg px-2 text-[13px] font-medium text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-wait disabled:opacity-60"
+              >
+                <CornerDownRight
+                  size={13}
+                  strokeWidth={2}
+                  className={steering ? "animate-pulse" : undefined}
+                  aria-hidden="true"
+                />
+                {steerLabel}
+              </button>
+            )}
+            {onEdit && (
+              <button
+                type="button"
+                onClick={() => onEdit(item.queueId)}
+                aria-label={t("composer.queued.editAria", { index: index + 1, count: items.length })}
+                title={t("composer.queued.editTitle")}
+                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60"
+              >
+                <Pencil size={14} aria-hidden="true" />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => onCancel(item.queueId)}
+              aria-label={t("composer.queued.deleteAria", { index: index + 1, count: items.length })}
+              title={t("composer.queued.deleteTitle")}
+              className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </button>
+          </li>;
+        })}
+      </ul>
+    </div>
+  );
+}

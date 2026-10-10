@@ -1,25 +1,53 @@
 ---
-title: Bots and tasks
-description: Organize persistent agents, focused tasks, shared rooms, and delegated work.
+title: Bots, folders, and threads
+description: Share one agent profile across organized, independent conversations.
 icon: Bot
 ---
 
 ## Bots are persistent teammates
 
-A bot keeps its own conversation, model, instructions, working folder, memory, connected tools, and computer preference. Create separate bots when the role, access, or project context should differ.
+A bot keeps its identity, instructions, memory, approved skills, connected tools, and computer preference. Create separate bots when the role or access should differ. You do not need another bot just to start a different project or choose another model.
 
 - A coding bot attached to one repository
 - A research bot with browser and document tools
 - An operations bot with Gmail, Calendar, and Slack
 - A local-model bot for private or offline work
 
-## Tasks are focused runs
+**New bot** opens an editable draft before anything is created. Review its profile, model, permissions, memory, skills, and routines, then select **Create bot**. **App settings → General → Defaults for new bots → Edit** sets the starting values for future creation dialogs without changing existing bots. See [Create your first bot](/docs/getting-started/first-bot) for the full flow.
 
-Use **Task** when the work should have a clear beginning and result. Tasks are easier to track than mixing every request into the bot's main conversation, and scheduled runs create tasks automatically.
+## Threads are independent conversations
 
-## Rooms and teams
+The conversations previously called **Tasks** are now **Threads**. Expand a bot in the sidebar and choose **New thread**, or use **All threads** to find an older conversation. Existing history is preserved.
 
-Rooms let multiple bots and people share context. Use a room when several specialists need the same brief or should hand work to one another. A chief-of-staff pattern works well: one bot receives the request, delegates focused tasks, and summarizes the result.
+Each thread has its own progress, approvals, and Stop control. Start another thread while one is working; stopping one does not redirect its siblings. Up to three direct threads can run per bot, including threads waiting for your approval.
+
+## Threads use their bot's model
+
+Every thread runs on its bot's model. Change the bot's model and its threads change with it, including old ones a routine, a delegation or a hand-off opens again. A thread keeps a model of its own only when you pick one in that thread; choose the bot's own model in that thread's model menu (for a bot named Ada, **Use Ada's model**) to put it back on the bot's. A thread that follows the bot shows **(bot's model)** beside that model.
+
+When some threads use their own model, the bot's model setting says how many, with **Switch them too**. That moves them all back onto the bot's model once; it is not a setting. A thread that is working keeps its model until it finishes.
+
+If a thread's own model can't run (its engine was removed, turned off, can't start, or isn't allowed), the turn runs on the bot's model instead, the thread uses the bot's model from then on, and one line in the thread says so. A thread whose engine is signed out does the same only when the bot's model is on another engine that can run; on the same engine you see the sign-in prompt.
+
+## Folders keep related threads together
+
+Folders are optional organization under a bot. For example, Pepper can have an **Email** folder containing **Triage Gmail** and **Triage iCloud**, alongside a **Website** folder.
+
+A thread can choose its own model in the chat header and its Ask/Auto setting inside the composer. Folders have no model or permission settings. Moving a thread does not change its model, account, or access, or interrupt it. Removing a folder leaves its conversations ungrouped; it does not delete their history.
+
+All the bot's threads share its saved memory and skills; they do not automatically receive every sibling transcript. Folders are not separate accounts or privacy boundaries. Bot profiles can carry different access preferences, but app organization is not an operating-system sandbox.
+
+Threads can converse independently, but a physical computer, browser session, or shared project folder cannot safely have two agents changing it at once. OpenMausBot reports contention instead of allowing overlapping managed actions. New local-agent threads use separate working folders by default; existing pinned folders are retained.
+
+## Groups and teams
+
+Groups are the conversations previously called channels or rooms. They let multiple bots share context. Use a group when several specialists need the same brief or should hand work to one another. Membership, instructions and thread history are retained. The existing multi-bot turn-taking behavior is unchanged.
+
+Existing sections keep their Chief of Staff assignments and bot communication rules. They are not thread folders. A Chief remains a bot role: it receives requests, delegates focused tasks, and summarizes the results.
+
+Ask an existing Chief to appoint a bot as Chief of an authorized team, including a new team it creates. The combined setup shows the leadership change. In Ask mode, choose **Apply setup** or **Cancel**; Full Access applies it immediately. To replace a Chief, the plan must explicitly remove the old assignment and appoint the new Chief together. Each team has at most one Chief.
+
+The new Chief can coordinate and configure its own team. It does not inherit the creator's access to other teams or execution permissions. Removing a Chief assignment also removes that bot's additional managed-team access. Existing conversations and model selections remain intact.
 
 ## Delegation
 
@@ -28,7 +56,8 @@ Delegation asks another bot to handle a bounded subtask. The delegated task keep
 | Need | Use |
 |---|---|
 | Ongoing relationship and memory | Bot |
-| One deliverable with a status | Task |
-| Several participants sharing context | Room |
+| Related conversations organized together | Folder |
+| An independent conversation and running state | Thread |
+| Several bots sharing context | Group |
 | A specialist handling one branch of work | Delegation |
 | Repeated work at a known time | Schedule |

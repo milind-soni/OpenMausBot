@@ -1,7 +1,7 @@
 ---
 title: Local VM
 description: Run desktop work inside an isolated Docker or Podman environment.
-icon: Box
+icon: Boat
 ---
 
 The Local VM gives each bot a containerized Linux desktop on the same machine as OpenMausBot. It is useful for browser work, downloads, and repeatable automation that should not run directly on your host desktop.
@@ -11,6 +11,32 @@ The Local VM gives each bot a containerized Linux desktop on the same machine as
 - Docker Desktop, Docker Engine, or a supported Podman setup
 - Enough local memory and disk for the desktop image
 - A healthy container runtime available to the OpenMausBot process
+
+On Windows, Podman is the preferred Local VM runtime. OpenMausBot checks Podman before Docker and validates the exact Windows-to-VM workspace mount before reusing a container.
+
+Before starting two desktops on Windows, confirm the Podman machine is running and has enough shared CPU, memory, and disk for both. Podman Desktop exposes that machine under **Settings → Resources**; both OpenMausBot desktops consume the same machine budget.
+
+## Run two bot desktops
+
+1. Open **App Settings → Local VM**, prepare the managed desktop image, and choose **Per bot**.
+2. Set **Maximum per-bot desktops** to `2`.
+3. Give two bots **Local VM** as their computer and create each desktop from that bot's Computer panel.
+4. Choose **Open two desktops** from either bot to watch both in one workspace.
+
+Both desktops may keep running, but only one pane can hold interactive control at a time. Switching control releases the previous pane first; opening the two-up workspace never creates or starts a VM.
+
+The equivalent source configuration is:
+
+```json
+{
+  "localVm": {
+    "mode": "per-bot",
+    "maxInstances": 2
+  }
+}
+```
+
+Local VMs always run on the same physical host as the OpenMausBot desktop process. `maxInstances: 2` does not pool one VM from a Mac and another from a Windows PC. To use Windows capacity today, run OpenMausBot on Windows with its supported Podman lane and create both per-bot desktops there. The BYO-VPS backend is limited to an x86_64 Linux Docker host; do not point it at Windows as a substitute remote Local VM. Cross-host Mac and Windows pooling is tracked in [issue #508](https://github.com/milind-soni/OpenMausBot/issues/508).
 
 ## Persistence
 

@@ -74,8 +74,8 @@ export function SkinPicker() {
   );
 
   return (
-    // One row, so the whole set is visible without scrolling the modal —
-    // 2x2 pushed the second row below the fold of its 560px frame.
+    // Four columns keep each miniature useful while allowing the collection
+    // to grow into a second row; Settings already scrolls on short windows.
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {SKINS.map((skin) => {
         const selected = skin.id === active;

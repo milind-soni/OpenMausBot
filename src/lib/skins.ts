@@ -4,7 +4,17 @@
 // that keeps the two halves from drifting apart, and it means adding a skin is
 // one CSS block plus one line in SKINS.
 
-export const SKIN_IDS = ["midnight", "atelier", "foundry", "lagoon"] as const;
+export const SKIN_IDS = [
+  "midnight",
+  "atelier",
+  "foundry",
+  "lagoon",
+  "graphite",
+  "linen",
+  "dusk",
+  "daylight",
+  "meadow",
+] as const;
 export type SkinId = (typeof SKIN_IDS)[number];
 
 export type Skin = {
@@ -19,6 +29,11 @@ export const SKINS: readonly Skin[] = [
   { id: "atelier", name: "Atelier", tagline: "Daylight on paper, warm and quiet." },
   { id: "foundry", name: "Foundry", tagline: "Night shift. Dark, warm, lit in brass." },
   { id: "lagoon", name: "Lagoon", tagline: "Cool daylight. Porcelain and deep teal." },
+  { id: "graphite", name: "Graphite", tagline: "Quiet charcoal and softened steel blue." },
+  { id: "linen", name: "Linen", tagline: "Clean daylight with a restrained navy accent." },
+  { id: "dusk", name: "Dusk", tagline: "Muted plum after dark, calm and low-key." },
+  { id: "daylight", name: "Daylight", tagline: "Midnight in reverse. Near-white, ink-black bubbles." },
+  { id: "meadow", name: "Meadow", tagline: "Fresh white with a calm green. The MausBot look." },
 ];
 
 export const DEFAULT_SKIN: SkinId = "midnight";
@@ -66,5 +81,15 @@ export function applySkin(id: SkinId): void {
     getStore()?.setItem(KEY, id);
   } catch {
     /* quota / private mode — the skin still applies for this session */
+  }
+  // The one surface CSS cannot reach: on Windows the caption buttons sit in a
+  // native overlay the main process paints. Left at the default it stays
+  // Midnight-black on a light skin — the "black block in the top-right
+  // corner" of issue #454. Best-effort: a browser tab or an older desktop
+  // build has no bridge, and the skin still applies without it.
+  try {
+    void window.ogb?.applySkin?.(id)?.catch(() => undefined);
+  } catch {
+    /* no bridge */
   }
 }

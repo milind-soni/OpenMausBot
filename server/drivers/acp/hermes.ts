@@ -11,13 +11,27 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { harnessHome } from "../../env-path.ts";
+import { resolveCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
-function hermesHome(env: Record<string, string | undefined>): string {
-  return env.HERMES_HOME || join(env.HOME || env.USERPROFILE || homedir(), ".hermes");
+export const HERMES_OPENMAUS_SCREENSHOT_COMPAT = "HERMES_OPENMAUS_SCREENSHOT_COMPAT";
+export const HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL = "HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL";
+
+/** Bind screenshot pseudo-call compatibility to one exact injected model. */
+export function bindHermesScreenshotCompat(
+  env: Record<string, string | undefined>,
+  modelId: string | null | undefined,
+): void {
+  delete env[HERMES_OPENMAUS_SCREENSHOT_COMPAT];
+  delete env[HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL];
+  const inject = decodeInjectId(modelId);
+  if (!inject) return;
+  env[HERMES_OPENMAUS_SCREENSHOT_COMPAT] = "1";
+  env[HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL] = inject.model;
 }
 
 function quoteYaml(value: string): string {
@@ -63,7 +77,7 @@ export function ensureHermesInjectProvider(
   const host = localHost(inject.host);
   if (!host) return modelId;
 
-  const dir = hermesHome(env);
+  const dir = env.HERMES_HOME || harnessHome("hermes", env);
   mkdirSync(dir, { recursive: true });
   const path = join(dir, "config.yaml");
   let text = "";
@@ -190,7 +204,7 @@ function hermesConfigDefault(text: string): { model: string; provider: string } 
 export function hermesConfiguredModel(
   env: Record<string, string | undefined> = process.env,
 ): { id: string; label: string; custom: true } | null {
-  const dir = hermesHome(env);
+  const dir = env.HERMES_HOME || harnessHome("hermes", env);
   let secrets = "";
   try {
     secrets = readFileSync(join(dir, ".env"), "utf8");
@@ -244,14 +258,32 @@ export function hermesConfiguredModel(
  * Failure is non-fatal and returns [] — a catalog probe must never be the
  * reason an agent becomes unselectable.
  */
-async function fetchHermesAcpModels(
+export const HERMES_ACP_MODELS_TIMEOUT_ENV = "HERMES_ACP_MODELS_TIMEOUT_MS";
+/** Overall deadline for the initialize + session/new catalog probe. A Hermes
+ * install with several authenticated providers answers `initialize` in about
+ * a second but needs ~6-7s for `session/new`, whose result carries the model
+ * list — the old 5s cap killed the probe every time on exactly the installs
+ * that have a catalog worth showing. */
+export const HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS = 15_000;
+
+function hermesAcpModelsTimeoutMs(env: Record<string, string | undefined>): number {
+  const raw = env[HERMES_ACP_MODELS_TIMEOUT_ENV];
+  if (raw === undefined) return HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647
+    ? parsed
+    : HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS;
+}
+
+export async function fetchHermesAcpModels(
   cli: string,
   env: Record<string, string | undefined>,
 ): Promise<{ id: string; label: string; custom: true }[]> {
   return await new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(cli, ["acp"], { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv });
+      const resolved = resolveCli(cli, ["acp"], env);
+      child = spawn(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, windowsHide: true });
     } catch {
       return resolve([]);
     }
@@ -278,7 +310,7 @@ async function fetchHermesAcpModels(
       }
       resolve(out);
     };
-    timer = setTimeout(() => done([]), 5_000);
+    timer = setTimeout(() => done([]), hermesAcpModelsTimeoutMs(env));
     child.once("error", () => done([]));
     child.once("close", () => {
       if (hardKillTimer) clearTimeout(hardKillTimer);
@@ -382,6 +414,10 @@ const support: AcpSupport = {
   models: EMPTY,
   resolveModels: (env: Record<string, string | undefined>, config: any) => resolveModels(env, config),
   resolveTurnModel: (model, env) => {
+    // Never inherit a broad or stale compatibility grant from the parent.
+    // Only this OpenMaus driver binds one concrete local model; Hermes still
+    // requires the exact read-only screenshot MCP tool before activation.
+    bindHermesScreenshotCompat(env, model);
     if (!model) return model;
     ensureHermesInjectProvider(model, env);
     return model;

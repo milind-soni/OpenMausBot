@@ -4,3 +4,39 @@ Copyright 2026 Milind Soni and OpenMausBot contributors
 OpenMausBot was relicensed from the MIT License to the Apache License,
 Version 2.0, with the consent of all contributors whose copyright was
 incorporated before the transition.
+
+The Google Antigravity ACP integration adapts release, installation, profile,
+authentication, and runtime temporary-folder behavior from T3 Code, Copyright
+2026 T3 Tools Inc., used under the MIT License (third_party/t3-code/LICENSE).
+
+Selected-text citation matching adapts T3 Code's assistant citation selection,
+Copyright 2026 T3 Tools Inc., used under the MIT License.
+
+The secure phone credential transport uses @hpke/core and @hpke/common from
+hpke-js, Copyright 2023-2024 Ajitomi Daisuke, used under the MIT License.
+
+The Android companion app bundles a prebuilt WebRTC library for Live calls
+(io.github.webrtc-sdk:android), built from the WebRTC project, Copyright (c)
+2011, The WebRTC project authors, used under the BSD 3-Clause License. WebRTC
+includes third-party components under their own licenses, listed with the
+library.
+
+Selected provider icon paths are from Simple Icons, used under CC0 1.0.
+The Cohere provider icon path is from Lobe Icons, Copyright 2023 LobeHub,
+used under the MIT License.
+
+The model provider catalog bundles provider and model data from models.dev,
+https://github.com/anomalyco/models.dev, Copyright (c) 2025 models.dev, used
+under the MIT License. Its cache and refresh logic is adapted from OpenCode,
+https://github.com/anomalyco/opencode, Copyright (c) 2025 opencode, used under
+the MIT License. The full license texts are in third_party/models-dev/LICENSE
+and third_party/opencode/LICENSE.
+
+The browser desktop viewer bundles the unmodified noVNC 1.7.0 library,
+Copyright the noVNC authors, under MPL-2.0 and its accompanying licenses.
+Attribution, license terms and the corresponding source location are in
+public/novnc-NOTICE.txt (novnc-NOTICE.txt in the built UI).
+The iOS companion app bundles a prebuilt WebRTC library for Live calls
+(stasel/WebRTC), built from the WebRTC project, Copyright (c) 2011, The WebRTC
+project authors, used under the BSD 3-Clause License. WebRTC includes
+third-party components under their own licenses, listed with the library.

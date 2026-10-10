@@ -41,11 +41,16 @@ describe("MinimaxDriver", () => {
     expect(MinimaxDriver.models).toEqual({
       default: "MiniMax-M3",
       options: [
-        { id: "MiniMax-M3", label: "MiniMax M3", contextWindow: 1_000_000 },
-        { id: "MiniMax-M2.7", label: "MiniMax M2.7", contextWindow: 204_800 },
-        { id: "MiniMax-M2.7-highspeed", label: "MiniMax M2.7 Highspeed", contextWindow: 204_800 },
+        { id: "MiniMax-M3", label: "MiniMax M3", contextWindow: 1_000_000, custom: true },
+        { id: "MiniMax-M2.7", label: "MiniMax M2.7", contextWindow: 204_800, custom: true },
+        { id: "MiniMax-M2.7-highspeed", label: "MiniMax M2.7 Highspeed", contextWindow: 204_800, custom: true },
       ],
     });
+  });
+
+  it("flags every catalog model custom so the picker's custom-access pane lists them", () => {
+    expect(MinimaxDriver.metadata.access).toBe("custom");
+    expect(MinimaxDriver.models.options.every((option) => option.custom === true)).toBe(true);
   });
 
   it("normalizes custom API roots", () => {
@@ -91,6 +96,7 @@ describe("MinimaxDriver", () => {
   });
 
   it("streams content and usage with the MiniMax OpenAI contract", async () => {
+    const anySignal = vi.spyOn(AbortSignal, "any");
     let request: RequestInit | undefined;
     vi.stubGlobal("fetch", vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       request = init;
@@ -121,10 +127,44 @@ describe("MinimaxDriver", () => {
       stream_options: { include_usage: true },
     });
     expect(request?.signal).toBeInstanceOf(AbortSignal);
+    expect(anySignal).toHaveBeenCalledTimes(1);
     expect(completed).toMatchObject({ ok: true, usage: { input: 12, output: 3 } });
     recorder.stop();
     await instance.dispose();
   });
+
+  it("smoke: offers ask_user and returns the person's reply verbatim", async () => {
+    const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
+      + JSON.stringify(JSON.stringify({ questions: [{ question: "Ship the fixture?", options: [{ label: "Yes" }, { label: "No" }] }] }))
+      + '}}]}}]}\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n'
+      + 'data: [DONE]\n';
+    const doneBody = 'data: {"choices":[{"delta":{"content":"done"}}]}\n'
+      + 'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}\n'
+      + 'data: [DONE]\n';
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      bodies.push(String(init?.body));
+      return new Response(bodies.length === 1 ? askBody : doneBody, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await MinimaxDriver.create({
+      instanceId: "minimax-ask", displayName: "MiniMax", enabled: true,
+      config: MinimaxDriver.defaultConfig(), environment: { MINIMAX_API_KEY: "secret" },
+    });
+    const recorder = recordEvents(instance.adapter);
+    await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "question", tool: "ask_user", choices: ["Yes", "No"] });
+    const reply = "The user answered your questions.\n\nQ: Ship the fixture?\nA: Yes";
+    expect(await instance.adapter.respondToRequest("thread", opened.requestId!, { behavior: "answer", message: reply })).toBe("answered");
+    const completed = await recorder.until((event) => event.type === "turn.completed");
+    expect(completed).toMatchObject({ ok: true });
+    expect(bodies[0]).toContain('"ask_user"');
+    expect(JSON.parse(JSON.parse(bodies[1]!).messages.at(-1).content).result).toBe(reply);
+    recorder.stop();
+    await instance.dispose();
+  }, 20_000);
 
   it("reports a bodyless stream clearly and releases the turn", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
@@ -147,4 +187,12 @@ describe("MinimaxDriver", () => {
     recorder.stop();
     await instance.dispose();
   });
+});
+
+
+it("minimax preserves an explicit tools-off connection and rejects ambiguous flags", () => {
+  expect(MinimaxDriver.decodeConfig({})).not.toHaveProperty("tools");
+  expect(MinimaxDriver.decodeConfig({ tools: false })).toMatchObject({ tools: false });
+  expect(MinimaxDriver.decodeConfig({ tools: true })).toMatchObject({ tools: true });
+  expect(() => MinimaxDriver.decodeConfig({ tools: "false" })).toThrow("tools must be a boolean");
 });

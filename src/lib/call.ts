@@ -14,7 +14,7 @@ let current: string | null = null;
 const watchers = new Set<() => void>();
 
 function notify() {
-  for (const fn of [...watchers]) fn();
+  for (const fn of Array.from(watchers)) fn();
 }
 
 /** The bot or room on a call, or null. Safe to read outside React. */
@@ -25,9 +25,11 @@ export function currentCall(): string | null {
 export function startCall(targetId: string) {
   if (current === targetId) return;
   // Switching calls must silence both halves before ownership changes; the
-  // old overlay may not unmount until React's next render.
+  // old overlay may not unmount until React's next render. A server's page
+  // in the desktop app (My Cloud) has no speech bridge (electron/preload.cjs
+  // REMOTE_SAFE): nothing listens there, and its Live call goes on.
   speaker.stop();
-  void window.ogb?.speechStop();
+  void window.ogb?.speechStop?.();
   current = targetId;
   notify();
 }
@@ -39,7 +41,7 @@ export function endCall(targetId?: string): boolean {
   if (current === null) return false;
   current = null;
   speaker.stop();
-  void window.ogb?.speechStop();
+  void window.ogb?.speechStop?.();
   notify();
   return true;
 }

@@ -26,6 +26,12 @@ export interface DeviceRecord {
   /** Full interactive access to a bot's cloud desktop. Deliberately off on
    * every new and migrated device until the computer owner enables it. */
   cloudDesktopAccess: boolean;
+  /** Watching and driving a bot's own browser. A separate grant from the
+   * cloud desktop above, because a disposable VM and a browser signed into
+   * the person's real accounts are not the same risk — a device trusted with
+   * the first must not inherit the second. Off on every new and migrated
+   * device until the computer owner enables it. */
+  browserControlAccess: boolean;
 }
 
 /** What the UI is allowed to see: a device without its secret. */
@@ -94,6 +100,7 @@ function sameCredential(a: string, b: string): boolean {
  * clamp the length and drop control characters before they reach a UI. */
 export function cleanDeviceName(raw: unknown): string {
   const name = String(raw ?? "")
+    // oxlint-disable-next-line no-control-regex -- strips control characters from a display name
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .trim()
     .slice(0, 60);
@@ -118,6 +125,7 @@ function normalizeDevice(record: Partial<DeviceRecord> & { id: string; tokenHash
     createdAt,
     lastSeenAt: timestamp(record.lastSeenAt, createdAt),
     cloudDesktopAccess: record.cloudDesktopAccess === true,
+    browserControlAccess: record.browserControlAccess === true,
   };
 }
 
@@ -165,7 +173,7 @@ export class DeviceRegistry {
 
   /** Every paired device, without the hash — this is what the page renders. */
   list(): PublicDevice[] {
-    return this.devices.map(({ tokenHash, ...rest }) => rest);
+    return this.devices.map(({ tokenHash: _tokenHash, ...rest }) => rest);
   }
 
   /** How many phones are paired, against MAX_DEVICES. */
@@ -193,9 +201,11 @@ export class DeviceRegistry {
     return this.window;
   }
 
-  closePairing() {
+  closePairing(expectedToken?: string): boolean {
+    if (expectedToken !== undefined && this.pairing()?.token !== expectedToken) return false;
     this.window = null;
     this.clearReplay();
+    return true;
   }
 
   /** Erase the only in-memory copy of a successfully issued device token.
@@ -240,7 +250,7 @@ export class DeviceRegistry {
     }
 
     const window = this.pairing();
-    if (!window) return { error: "no pairing is in progress — open Companion settings on your computer" };
+    if (!window) return { error: "no pairing is in progress — open Phone settings on your computer" };
     if (!sameCredential(window.code, presented) && !sameCredential(window.token, presented)) {
       window.attemptsLeft -= 1;
       // A burned window is the whole point: without this, six digits is a
@@ -269,6 +279,7 @@ export class DeviceRegistry {
       createdAt: Date.now(),
       lastSeenAt: Date.now(),
       cloudDesktopAccess: false,
+      browserControlAccess: false,
     };
     this.devices.push(device);
     // Unlike the lastSeenAt write below, this one must not be swallowed. A
@@ -282,7 +293,7 @@ export class DeviceRegistry {
       this.devices.pop();
       return { error: `could not save the pairing: ${(e as Error).message}` };
     }
-    const { tokenHash, ...pub } = device;
+    const { tokenHash: _tokenHash, ...pub } = device;
     const result = { device: pub, token };
     if (requestId) {
       this.replay = {
@@ -349,6 +360,22 @@ export class DeviceRegistry {
       this.persist();
     } catch (error) {
       device.cloudDesktopAccess = previous;
+      throw error;
+    }
+    return true;
+  }
+
+  /** Grant or remove the capability to watch and drive a bot's browser.
+   * Separate from the desktop grant above on purpose: see the field. */
+  setBrowserControlAccess(id: string, allowed: boolean): boolean {
+    const device = this.devices.find((candidate) => candidate.id === id);
+    if (!device) return false;
+    const previous = device.browserControlAccess;
+    device.browserControlAccess = allowed;
+    try {
+      this.persist();
+    } catch (error) {
+      device.browserControlAccess = previous;
       throw error;
     }
     return true;

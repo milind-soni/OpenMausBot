@@ -13,6 +13,11 @@ import { DeviceRegistry } from "../src/devices.ts";
 let control: Server;
 let port = 0;
 let devices: DeviceRegistry;
+let connectedDeviceIds: string[] = [];
+let disconnectedDeviceIds: string[] = [];
+let revokedDeviceIds: string[] = [];
+let tailscaleRefreshes = 0;
+let completedTailscaleRefreshes = 0;
 
 const ask = async (
   method: string,
@@ -35,11 +40,25 @@ beforeAll(async () => {
   control = createControlServer({
     devices,
     companionPort: 8810,
+    secretPublicKey: () => "BIPBQ12_dWnF1DZLsTZO3Vg0NGjds5-jp9h3jhjr2To7bJelczS0LM82rfXV68PmSJhz2ePosj3fL974XckCpDU",
     hostedUrl: () => hostedUrl,
     setHostedUrl: (next) => {
       hostedUrl = next;
     },
     discovery: () => ({ advertising: false, name: "Test computer" }),
+    connectedDeviceIds: () => connectedDeviceIds,
+    disconnectDevice: (deviceId) => {
+      disconnectedDeviceIds.push(deviceId);
+      connectedDeviceIds = connectedDeviceIds.filter((connectedId) => connectedId !== deviceId);
+    },
+    revoked: (deviceId) => {
+      revokedDeviceIds.push(deviceId);
+    },
+    refreshTailscale: async () => {
+      tailscaleRefreshes += 1;
+      await Promise.resolve();
+      completedTailscaleRefreshes += 1;
+    },
   });
   port = await new Promise<number>((resolve) =>
     control.listen(0, "127.0.0.1", () => resolve((control.address() as { port: number }).port)),
@@ -57,10 +76,14 @@ describe("origins the control server will change state for", () => {
     if ("error" in paired) throw new Error(paired.error);
 
     expect(paired.device.cloudDesktopAccess).toBe(false);
+    disconnectedDeviceIds = [];
     expect((await ask("POST", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
     expect(devices.authenticate(paired.token)?.cloudDesktopAccess).toBe(true);
+    expect(disconnectedDeviceIds).toEqual([paired.device.id]);
+    disconnectedDeviceIds = [];
     expect((await ask("DELETE", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
     expect(devices.authenticate(paired.token)?.cloudDesktopAccess).toBe(false);
+    expect(disconnectedDeviceIds).toEqual([paired.device.id]);
     expect((await ask("POST", "/devices/missing/cloud-desktop")).status).toBe(404);
   });
 
@@ -130,6 +153,32 @@ describe("origins the control server will change state for", () => {
     await ask("DELETE", "/pairing");
   });
 
+  it("refreshes Tailscale before returning state without opening pairing", async () => {
+    const before = tailscaleRefreshes;
+    const refreshed = await ask("POST", "/tailscale/refresh");
+
+    expect(refreshed.status).toBe(200);
+    expect(tailscaleRefreshes).toBe(before + 1);
+    expect(completedTailscaleRefreshes).toBe(tailscaleRefreshes);
+    expect(refreshed.body.pairing).toBeNull();
+  });
+
+  it("refuses a Tailscale refresh from a foreign page", async () => {
+    const before = tailscaleRefreshes;
+    expect((await ask("POST", "/tailscale/refresh", { origin: "https://evil.example" })).status).toBe(403);
+    expect(tailscaleRefreshes).toBe(before);
+  });
+
+  it("does not let a stale conditional close cancel a replacement code", async () => {
+    const first = await ask("POST", "/pairing");
+    const second = await ask("POST", "/pairing");
+
+    await ask("DELETE", `/pairing?expectedToken=${encodeURIComponent(first.body.pairing.token)}`);
+    expect((await ask("GET", "/state")).body.pairing.token).toBe(second.body.pairing.token);
+    await ask("DELETE", `/pairing?expectedToken=${encodeURIComponent(second.body.pairing.token)}`);
+    expect((await ask("GET", "/state")).body.pairing).toBeNull();
+  });
+
   it("refuses a foreign origin on a safe method too", async () => {
     // This line used to expect 200, on the argument that a GET changes
     // nothing and the same-origin policy already hides the reply. The
@@ -171,11 +220,56 @@ describe("hostCandidates", () => {
     expect(status).toBe(200);
     expect(Array.isArray(body.hosts)).toBe(true);
     expect(Array.isArray(body.endpoints)).toBe(true);
+    expect(body.secretPublicKey).toBe("BIPBQ12_dWnF1DZLsTZO3Vg0NGjds5-jp9h3jhjr2To7bJelczS0LM82rfXV68PmSJhz2ePosj3fL974XckCpDU");
     // Whatever this machine's interfaces are, the mDNS fallback is always
     // present and always last.
     expect(body.hosts.at(-1)).toMatch(/^openmausbot-[0-9a-f]{8}\.local$/);
     expect(body.endpoints.at(-1)).toMatchObject({ kind: "bonjour", priority: 300 });
     expect(body.endpoints.at(-1).url).toMatch(/^http:\/\/openmausbot-[0-9a-f]{8}\.local:8810$/);
+  });
+
+  it("reports only the device ids backed by live authenticated streams", async () => {
+    connectedDeviceIds = ["phone-live"];
+    try {
+      expect((await ask("GET", "/state")).body.connectedDeviceIds).toEqual(["phone-live"]);
+    } finally {
+      connectedDeviceIds = [];
+    }
+  });
+
+  it("disconnects streams only after a device is successfully revoked", async () => {
+    const { code } = devices.openPairing();
+    const paired = devices.redeem(code, "Revoked phone");
+    if ("error" in paired) throw new Error(paired.error);
+    disconnectedDeviceIds = [];
+    connectedDeviceIds = [paired.device.id];
+
+    expect((await ask("DELETE", "/devices/missing-device")).status).toBe(404);
+    expect(disconnectedDeviceIds).toEqual([]);
+    expect(connectedDeviceIds).toEqual([paired.device.id]);
+
+    const revoked = await ask("DELETE", `/devices/${paired.device.id}`);
+    expect(revoked.status).toBe(200);
+    expect(disconnectedDeviceIds).toEqual([paired.device.id]);
+    expect(revoked.body.connectedDeviceIds).toEqual([]);
+  });
+
+  // A phone's requests reach the harness as this computer's own, so the
+  // harness cannot tell by itself that a phone lost its access. The revoke
+  // tells it, so a Live call that phone holds ends too.
+  it("tells the harness about a revoked device, and only about a revoke", async () => {
+    const { code } = devices.openPairing();
+    const paired = devices.redeem(code, "Lost phone");
+    if ("error" in paired) throw new Error(paired.error);
+    revokedDeviceIds = [];
+
+    expect((await ask("DELETE", "/devices/missing-device")).status).toBe(404);
+    expect((await ask("POST", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
+    expect((await ask("DELETE", `/devices/${paired.device.id}/cloud-desktop`)).status).toBe(200);
+    expect(revokedDeviceIds).toEqual([]);
+
+    expect((await ask("DELETE", `/devices/${paired.device.id}`)).status).toBe(200);
+    expect(revokedDeviceIds).toEqual([paired.device.id]);
   });
 });
 

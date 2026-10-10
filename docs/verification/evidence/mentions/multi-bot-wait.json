@@ -1,0 +1,156 @@
+{
+  "status": "settled",
+  "targetType": "channel",
+  "targetId": "ec952c04-4e41-4a13-ba87-8c79b3137c05",
+  "taskId": "53318e53-0087-41d1-a227-74c09b21f98a",
+  "target": {
+    "id": "ec952c04-4e41-4a13-ba87-8c79b3137c05",
+    "name": "Design review",
+    "memberIds": [
+      "73a49951-87aa-4e9e-9f2e-05814cc5a6cb",
+      "00e91e9d-9581-4dd6-98bf-71fd084212b3",
+      "19e624be-d0e9-434a-aa34-71eb6334f11e",
+      "dc16bfed-7019-4c90-b0ef-7288ebb974af"
+    ],
+    "bulletin": "",
+    "defaultResponder": {
+      "kind": "member",
+      "botId": "73a49951-87aa-4e9e-9f2e-05814cc5a6cb"
+    },
+    "section": null,
+    "directMessage": false,
+    "working": false,
+    "busyBotId": null,
+    "activeTaskId": "53318e53-0087-41d1-a227-74c09b21f98a",
+    "tasks": [
+      {
+        "taskId": "53318e53-0087-41d1-a227-74c09b21f98a",
+        "title": "@Atlas first. @Juniper second. @調査担当 third.",
+        "createdAt": 1788790739326,
+        "active": true
+      }
+    ]
+  },
+  "messages": [
+    {
+      "id": "8911ca47-cd24-4a03-8a6d-ad137eb4894a",
+      "at": 1788790824135,
+      "role": "user",
+      "kind": "text",
+      "text": "@Atlas first. @Juniper second. @調査担当 third.\n@調査担当 reverse. @Juniper again. @Atlas last.\n@everyone neutral. @Ghost plain."
+    },
+    {
+      "id": "d5e254c3-d10a-4548-b08b-7101cf021164",
+      "at": 1788790824320,
+      "role": "bot",
+      "kind": "text",
+      "text": "hello from fake claude",
+      "from": {
+        "botId": "73a49951-87aa-4e9e-9f2e-05814cc5a6cb",
+        "name": "調査担当",
+        "color": "orange"
+      }
+    },
+    {
+      "id": "10d7aabf-04ac-4168-84d3-08fcd6abb2be",
+      "at": 1788790824322,
+      "role": "bot",
+      "kind": "activity",
+      "from": {
+        "botId": "73a49951-87aa-4e9e-9f2e-05814cc5a6cb",
+        "name": "調査担当",
+        "color": "orange"
+      },
+      "tool": {
+        "name": "Bash",
+        "ok": true,
+        "spoken": "running a command"
+      }
+    },
+    {
+      "id": "4c91c400-3654-4322-9495-28a0e38f2da9",
+      "at": 1788790824490,
+      "role": "bot",
+      "kind": "text",
+      "text": "hello from fake claude",
+      "from": {
+        "botId": "00e91e9d-9581-4dd6-98bf-71fd084212b3",
+        "name": "Juniper",
+        "color": "red"
+      }
+    },
+    {
+      "id": "ce84ef34-0bb2-486b-baf9-51d019c7ff0c",
+      "at": 1788790824493,
+      "role": "bot",
+      "kind": "activity",
+      "from": {
+        "botId": "00e91e9d-9581-4dd6-98bf-71fd084212b3",
+        "name": "Juniper",
+        "color": "red"
+      },
+      "tool": {
+        "name": "Bash",
+        "ok": true,
+        "spoken": "running a command"
+      }
+    },
+    {
+      "id": "43d976ef-7e05-4b70-ba34-1df1ca2be5e8",
+      "at": 1788790824677,
+      "role": "bot",
+      "kind": "text",
+      "text": "hello from fake claude",
+      "from": {
+        "botId": "19e624be-d0e9-434a-aa34-71eb6334f11e",
+        "name": "Atlas",
+        "color": "blue"
+      }
+    },
+    {
+      "id": "a2f280b0-666d-43e6-a2d8-8872281b121b",
+      "at": 1788790824679,
+      "role": "bot",
+      "kind": "activity",
+      "from": {
+        "botId": "19e624be-d0e9-434a-aa34-71eb6334f11e",
+        "name": "Atlas",
+        "color": "blue"
+      },
+      "tool": {
+        "name": "Bash",
+        "ok": true,
+        "spoken": "running a command"
+      }
+    },
+    {
+      "id": "cc5505eb-3afb-400a-a395-abf6f62a57ed",
+      "at": 1788790824865,
+      "role": "bot",
+      "kind": "text",
+      "text": "hello from fake claude",
+      "from": {
+        "botId": "dc16bfed-7019-4c90-b0ef-7288ebb974af",
+        "name": "Churro",
+        "color": "green"
+      }
+    },
+    {
+      "id": "979be3a1-34e3-4aef-a1c2-323c929d7811",
+      "at": 1788790824866,
+      "role": "bot",
+      "kind": "activity",
+      "from": {
+        "botId": "dc16bfed-7019-4c90-b0ef-7288ebb974af",
+        "name": "Churro",
+        "color": "green"
+      },
+      "tool": {
+        "name": "Bash",
+        "ok": true,
+        "spoken": "running a command"
+      }
+    }
+  ],
+  "hasMore": false
+}

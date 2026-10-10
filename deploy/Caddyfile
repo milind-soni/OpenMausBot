@@ -1,0 +1,30 @@
+# Edge for one OpenMausBot tenant: automatic HTTPS in front of a server that
+# only listens on loopback. Login is pairing (docs/self-hosting.md "Using it
+# from your computer"): a remote browser without a session sees the pair
+# page, everything else is refused by the server itself, so Caddy adds no
+# password of its own. Caddy forwards the real Host and sets
+# X-Forwarded-For / X-Forwarded-Proto, which the server uses for the
+# same-origin rule, Secure cookies and the pairing lockout.
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Webhook ingress is designed to be reachable by third parties (it has its
+	# own per-hook secrets), so it sits outside any login. The path is passed
+	# through unchanged: the receiver routes on /hooks/<id>.
+	handle /hooks/* {
+		reverse_proxy 127.0.0.1:8800
+	}
+
+	handle {
+		# Optional second wall in front of pairing (a shared password):
+		#   basic_auth {
+		#     {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+		#   }
+		# and set both variables in .env (hash with `caddy hash-password`,
+		# every `$` doubled for Compose).
+		reverse_proxy 127.0.0.1:8799 {
+			# SSE: stream events as they arrive
+			flush_interval -1
+		}
+	}
+}

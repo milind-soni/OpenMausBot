@@ -22,10 +22,14 @@ key.
 2. Sign in with `cursor-agent login`, or set `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`
    in the environment of the Cursor instance.
 
-3. Confirm `cursor-agent --version` works. The binary installs to `~/.local/bin` by
-   default; OpenMausBot already looks there when launched from a GUI.
+3. Confirm `cursor-agent --version` works. Cursor's docs call the command `agent`;
+   the installer adds `cursor-agent` beside it, and OpenMausBot runs that name,
+   because other tools also install an `agent`. The binary installs to
+   `~/.local/bin` by default (`%LOCALAPPDATA%\cursor-agent` on Windows);
+   OpenMausBot already looks in both, so a CLI installed while the app is open
+   is found without restarting.
 
-The engine stays unavailable until the `cursor-agent` executable is on PATH. A
+The engine stays unavailable until the `cursor-agent` executable is found. A
 missing login shows as unauthenticated rather than crashing the fleet.
 
 ## Models
@@ -36,16 +40,30 @@ Live ids are merged into the main cloud rail (not the local-models pane). A
 failed listing keeps the last usable catalog (then the static fallback) rather
 than emptying the rail.
 
-`--model <id>` is passed as a global CLI flag before `acp`. When the running
-CLI also implements ACP `session/set_model`, OpenMausBot pins the same id over
-the wire. If that method is missing (`-32601`), the argv pin is left to stand
-and the turn continues.
+`--model <id>` is passed as a global CLI flag before `acp`. Current CLIs
+(checked with 2026.09.28) ignore that flag in ACP sessions: every session
+starts on `default[]` (Auto). The pick only lands through ACP
+`session/set_model`, which accepts only the parameterised ids the session
+advertises, such as `grok-4.7[context=256k,reasoning_effort=high,fast=true]`.
+OpenMausBot maps the picker slug onto that list: `auto` to `default[]`, a
+plain slug to its Standard variant, `-fast` to `fast=true`, and an effort
+slug such as `grok-4.7-high-fast` to the variant with that effort. The
+session advertises one variant per base, so a slug with another effort
+(`grok-4.7-medium-fast`) gets that variant and a notice in the conversation.
+
+If `session/set_model` is missing (`-32601`), the argv pin is left to stand
+and the turn continues. If Cursor refuses the id (`-32602`), the turn also
+continues, on the model the session started with, and the conversation shows
+a notice that names it.
 
 ## Autonomy
 
-Instance `fullAuto: true` adds `--force` (the CLI's documented auto-approve
-switch). OpenMausBot still answers ACP `session/request_permission` itself:
-full-auto selects an allow option when the CLI offered one.
+For compatibility with direct driver embedders, an instance `fullAuto: true`
+adds `--force` (the CLI's documented auto-approve switch) only when a turn
+does not provide a bot approval level. OpenMausBot app turns always provide
+one: both **Ask for approval** and **Approve for me** launch Cursor without
+`--force`, then OpenMausBot handles its permission requests according to the
+bot's current level.
 
 ## What this driver does not do yet
 

@@ -1,0 +1,1044 @@
+{
+ "driver": "cua-driver 0.12.6 (macOS), `cua-driver describe <tool>` input_schema",
+ "tools": {
+  "bring_to_front": {
+   "properties": {
+    "pid": {
+     "type": "integer"
+    },
+    "window_id": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "pid"
+   ]
+  },
+  "browser_click": {
+   "properties": {
+    "input_route": {
+     "enum": [
+      "trusted",
+      "dom_event"
+     ],
+     "type": "string"
+    },
+    "ref": {
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "tab_id": {
+     "type": "string"
+    },
+    "target_id": {
+     "type": "string"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "target_id",
+    "tab_id"
+   ]
+  },
+  "browser_dialog": {
+   "properties": {
+    "action": {
+     "enum": [
+      "inspect",
+      "accept",
+      "dismiss"
+     ],
+     "type": "string"
+    },
+    "delivery_mode": {
+     "default": "background",
+     "enum": [
+      "background",
+      "foreground"
+     ],
+     "type": "string"
+    },
+    "dialog_id": {
+     "type": "string"
+    },
+    "prompt_text": {
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "tab_id": {
+     "type": "string"
+    },
+    "target_id": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "target_id",
+    "tab_id",
+    "action"
+   ]
+  },
+  "browser_navigate": {
+   "properties": {
+    "session": {
+     "type": "string"
+    },
+    "tab_id": {
+     "type": "string"
+    },
+    "target_id": {
+     "type": "string"
+    },
+    "url": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "target_id",
+    "tab_id",
+    "url"
+   ]
+  },
+  "browser_pointer": {
+   "properties": {
+    "action": {
+     "enum": [
+      "hover",
+      "right_click",
+      "double_click",
+      "scroll",
+      "drag"
+     ],
+     "type": "string"
+    },
+    "delta_x": {
+     "type": "number"
+    },
+    "delta_y": {
+     "type": "number"
+    },
+    "destination_ref": {
+     "type": "string"
+    },
+    "input_route": {
+     "default": "trusted",
+     "enum": [
+      "trusted",
+      "dom_event"
+     ],
+     "type": "string"
+    },
+    "ref": {
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "tab_id": {
+     "type": "string"
+    },
+    "target_id": {
+     "type": "string"
+    },
+    "to_x": {
+     "type": "number"
+    },
+    "to_y": {
+     "type": "number"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "target_id",
+    "tab_id",
+    "session",
+    "action"
+   ]
+  },
+  "browser_type": {
+   "properties": {
+    "mode": {
+     "enum": [
+      "insert_text",
+      "keystrokes"
+     ],
+     "type": "string"
+    },
+    "ref": {
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "tab_id": {
+     "type": "string"
+    },
+    "target_id": {
+     "type": "string"
+    },
+    "text": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "target_id",
+    "tab_id",
+    "ref",
+    "text"
+   ]
+  },
+  "check_permissions": {
+   "properties": {
+    "probe_direct_capture": {
+     "type": "boolean"
+    },
+    "prompt": {
+     "type": "boolean"
+    }
+   },
+   "required": []
+  },
+  "click": {
+   "properties": {
+    "action": {
+     "type": "string"
+    },
+    "button": {
+     "enum": [
+      "left",
+      "right",
+      "middle"
+     ],
+     "type": "string"
+    },
+    "count": {
+     "type": "integer"
+    },
+    "debug_image_out": {
+     "type": "string"
+    },
+    "delivery_mode": {
+     "enum": [
+      "background",
+      "foreground"
+     ],
+     "type": "string"
+    },
+    "element_index": {
+     "type": "integer"
+    },
+    "element_token": {
+     "type": "string"
+    },
+    "from_zoom": {
+     "type": "boolean"
+    },
+    "modifier": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "scope": {
+     "enum": [
+      "window",
+      "desktop"
+     ],
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "window_id": {
+     "type": "integer"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": []
+  },
+  "double_click": {
+   "properties": {
+    "delivery_mode": {
+     "enum": [
+      "background",
+      "foreground"
+     ],
+     "type": "string"
+    },
+    "element_index": {
+     "type": "integer"
+    },
+    "element_token": {
+     "type": "string"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "session": {
+     "type": "string"
+    },
+    "window_id": {
+     "type": "integer"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "pid"
+   ]
+  },
+  "drag": {
+   "properties": {
+    "button": {
+     "enum": [
+      "left",
+      "right",
+      "middle"
+     ],
+     "type": "string"
+    },
+    "delivery_mode": {
+     "enum": [
+      "background",
+      "foreground"
+     ],
+     "type": "string"
+    },
+    "duration_ms": {
+     "maximum": 10000,
+     "minimum": 0,
+     "type": "integer"
+    },
+    "from_x": {
+     "type": "number"
+    },
+    "from_y": {
+     "type": "number"
+    },
+    "from_zoom": {
+     "type": "boolean"
+    },
+    "modifier": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "scope": {
+     "default": "window",
+     "enum": [
+      "window",
+      "desktop"
+     ],
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "steps": {
+     "maximum": 200,
+     "minimum": 1,
+     "type": "integer"
+    },
+    "to_x": {
+     "type": "number"
+    },
+    "to_y": {
+     "type": "number"
+    },
+    "window_id": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "from_x",
+    "from_y",
+    "to_x",
+    "to_y"
+   ]
+  },
+  "end_session": {
+   "properties": {
+    "session": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "session"
+   ]
+  },
+  "escalate_session": {
+   "properties": {
+    "detail": {
+     "maxLength": 200,
+     "type": "string"
+    },
+    "reason": {
+     "enum": [
+      "ax_tree_pixel_mismatch",
+      "background_delivery_failed",
+      "foreground_ineffective",
+      "no_window_target",
+      "other"
+     ],
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "session",
+    "reason"
+   ]
+  },
+  "get_accessibility_tree": {
+   "properties": {},
+   "required": []
+  },
+  "get_agent_cursor_state": {
+   "properties": {
+    "cursor_id": {
+     "type": "string"
+    }
+   },
+   "required": []
+  },
+  "get_browser_state": {
+   "properties": {
+    "continuation": {
+     "type": "string"
+    },
+    "include_screenshot": {
+     "default": false,
+     "type": "boolean"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "query": {
+     "type": "string"
+    },
+    "scope_ref": {
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "snapshot_format": {
+     "enum": [
+      "dom_refs_v1",
+      "semantic_v2"
+     ],
+     "type": "string"
+    },
+    "tab_id": {
+     "type": "string"
+    },
+    "target_id": {
+     "type": "string"
+    },
+    "window_id": {
+     "type": "integer"
+    }
+   },
+   "required": []
+  },
+  "get_cursor_position": {
+   "properties": {
+    "session": {
+     "type": "string"
+    }
+   },
+   "required": []
+  },
+  "get_desktop_state": {
+   "properties": {
+    "screenshot_out_file": {
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    }
+   },
+   "required": []
+  },
+  "get_screen_size": {
+   "properties": {
+    "session": {
+     "type": "string"
+    }
+   },
+   "required": []
+  },
+  "get_session_state": {
+   "properties": {
+    "session": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "session"
+   ]
+  },
+  "get_window_state": {
+   "properties": {
+    "capture_mode": {
+     "enum": [
+      "ax",
+      "vision"
+     ],
+     "type": "string"
+    },
+    "include_screenshot": {
+     "type": "boolean"
+    },
+    "max_depth": {
+     "minimum": 1,
+     "type": "integer"
+    },
+    "max_elements": {
+     "minimum": 1,
+     "type": "integer"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "query": {
+     "type": "string"
+    },
+    "screenshot_out_file": {
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "window_id": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "pid",
+    "window_id"
+   ]
+  },
+  "hotkey": {
+   "properties": {
+    "delivery_mode": {
+     "enum": [
+      "background",
+      "foreground"
+     ],
+     "type": "string"
+    },
+    "keys": {
+     "items": {
+      "type": "string"
+     },
+     "minItems": 2,
+     "type": "array"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "scope": {
+     "default": "window",
+     "enum": [
+      "window",
+      "desktop"
+     ],
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "window_id": {
+     "type": "integer"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "keys"
+   ]
+  },
+  "launch_app": {
+   "properties": {
+    "additional_arguments": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "bundle_id": {
+     "type": "string"
+    },
+    "creates_new_application_instance": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": "string"
+    },
+    "urls": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "webkit_inspector_port": {
+     "type": "integer"
+    }
+   },
+   "required": []
+  },
+  "list_apps": {
+   "properties": {},
+   "required": []
+  },
+  "list_windows": {
+   "properties": {
+    "on_screen_only": {
+     "type": "boolean"
+    },
+    "pid": {
+     "type": "integer"
+    }
+   },
+   "required": []
+  },
+  "move_cursor": {
+   "properties": {
+    "cursor_id": {
+     "type": "string"
+    },
+    "scope": {
+     "default": "window",
+     "enum": [
+      "window",
+      "desktop"
+     ],
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "x",
+    "y"
+   ]
+  },
+  "press_key": {
+   "properties": {
+    "delivery_mode": {
+     "enum": [
+      "background",
+      "foreground"
+     ],
+     "type": "string"
+    },
+    "element_index": {
+     "type": "integer"
+    },
+    "element_token": {
+     "type": "string"
+    },
+    "key": {
+     "type": "string"
+    },
+    "modifiers": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "scope": {
+     "default": "window",
+     "enum": [
+      "window",
+      "desktop"
+     ],
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "window_id": {
+     "type": "integer"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "key"
+   ]
+  },
+  "right_click": {
+   "properties": {
+    "delivery_mode": {
+     "enum": [
+      "background",
+      "foreground"
+     ],
+     "type": "string"
+    },
+    "element_index": {
+     "type": "integer"
+    },
+    "element_token": {
+     "type": "string"
+    },
+    "modifier": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "session": {
+     "type": "string"
+    },
+    "window_id": {
+     "type": "integer"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "pid"
+   ]
+  },
+  "scroll": {
+   "properties": {
+    "amount": {
+     "maximum": 50,
+     "minimum": 1,
+     "type": "integer"
+    },
+    "by": {
+     "enum": [
+      "line",
+      "page"
+     ],
+     "type": "string"
+    },
+    "delivery_mode": {
+     "enum": [
+      "background",
+      "foreground"
+     ],
+     "type": "string"
+    },
+    "direction": {
+     "enum": [
+      "up",
+      "down",
+      "left",
+      "right"
+     ],
+     "type": "string"
+    },
+    "element_index": {
+     "type": "integer"
+    },
+    "element_token": {
+     "type": "string"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "scope": {
+     "default": "window",
+     "enum": [
+      "window",
+      "desktop"
+     ],
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "window_id": {
+     "type": "integer"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "direction"
+   ]
+  },
+  "set_agent_cursor_enabled": {
+   "properties": {
+    "cursor_id": {
+     "type": "string"
+    },
+    "enabled": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "enabled"
+   ]
+  },
+  "set_agent_cursor_motion": {
+   "properties": {
+    "arc_flow": {
+     "type": "number"
+    },
+    "arc_size": {
+     "type": "number"
+    },
+    "cursor_color": {
+     "type": "string"
+    },
+    "cursor_icon": {
+     "type": "string"
+    },
+    "cursor_id": {
+     "type": "string"
+    },
+    "cursor_label": {
+     "type": "string"
+    },
+    "cursor_opacity": {
+     "type": "number"
+    },
+    "cursor_size": {
+     "type": "number"
+    },
+    "dwell_after_click_ms": {
+     "maximum": 5000,
+     "minimum": 0,
+     "type": "number"
+    },
+    "end_handle": {
+     "type": "number"
+    },
+    "glide_duration_ms": {
+     "maximum": 5000,
+     "minimum": 50,
+     "type": "number"
+    },
+    "idle_hide_ms": {
+     "maximum": 60000,
+     "minimum": 0,
+     "type": "number"
+    },
+    "spring": {
+     "type": "number"
+    },
+    "start_handle": {
+     "type": "number"
+    },
+    "turn_radius": {
+     "maximum": 1000,
+     "minimum": 1,
+     "type": "number"
+    }
+   },
+   "required": []
+  },
+  "set_agent_cursor_style": {
+   "properties": {
+    "bloom_color": {
+     "type": "string"
+    },
+    "cursor_id": {
+     "type": "string"
+    },
+    "gradient_colors": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "image_path": {
+     "type": "string"
+    }
+   },
+   "required": []
+  },
+  "set_value": {
+   "properties": {
+    "element_index": {
+     "type": "integer"
+    },
+    "element_token": {
+     "type": "string"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "session": {
+     "type": "string"
+    },
+    "value": {
+     "type": "string"
+    },
+    "window_id": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "pid",
+    "value"
+   ]
+  },
+  "start_session": {
+   "properties": {
+    "capture_scope": {
+     "default": "auto",
+     "enum": [
+      "auto",
+      "window",
+      "desktop"
+     ],
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "session"
+   ]
+  },
+  "type_text": {
+   "properties": {
+    "delay_ms": {
+     "maximum": 200,
+     "minimum": 0,
+     "type": "integer"
+    },
+    "delivery_mode": {
+     "enum": [
+      "background",
+      "foreground"
+     ],
+     "type": "string"
+    },
+    "element_index": {
+     "type": "integer"
+    },
+    "element_token": {
+     "type": "string"
+    },
+    "pid": {
+     "type": "integer"
+    },
+    "scope": {
+     "default": "window",
+     "enum": [
+      "window",
+      "desktop"
+     ],
+     "type": "string"
+    },
+    "session": {
+     "type": "string"
+    },
+    "text": {
+     "type": "string"
+    },
+    "window_id": {
+     "type": "integer"
+    },
+    "x": {
+     "type": "number"
+    },
+    "y": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "text"
+   ]
+  },
+  "zoom": {
+   "properties": {
+    "pid": {
+     "type": "integer"
+    },
+    "window_id": {
+     "type": "integer"
+    },
+    "x1": {
+     "type": "number"
+    },
+    "x2": {
+     "type": "number"
+    },
+    "y1": {
+     "type": "number"
+    },
+    "y2": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "window_id",
+    "x1",
+    "y1",
+    "x2",
+    "y2"
+   ]
+  }
+ }
+}

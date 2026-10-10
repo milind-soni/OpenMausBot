@@ -43,6 +43,17 @@ describe("DeviceRegistry", () => {
     expect(registry.list()[0]).not.toHaveProperty("tokenHash");
   });
 
+  it("closes only the pairing window named by an expected token", () => {
+    const registry = new DeviceRegistry();
+    const first = registry.openPairing();
+    const second = registry.openPairing();
+
+    expect(registry.closePairing(first.token)).toBe(false);
+    expect(registry.pairing()?.token).toBe(second.token);
+    expect(registry.closePairing(second.token)).toBe(true);
+    expect(registry.pairing()).toBeNull();
+  });
+
   it("survives a restart", () => {
     const { token } = pair(new DeviceRegistry());
     expect(new DeviceRegistry().authenticate(token)).not.toBeNull();
@@ -126,6 +137,12 @@ describe("DeviceRegistry", () => {
     expect(registry.redeem(code, "iPhone")).toHaveProperty("token");
     expect(registry.redeem(code, "iPad")).toMatchObject({ error: expect.stringContaining("no pairing") });
     expect(registry.count()).toBe(1);
+  });
+
+  it("points an out-of-window pairing attempt to Phone settings", () => {
+    expect(new DeviceRegistry().redeem("000000", "iPhone")).toEqual({
+      error: "no pairing is in progress — open Phone settings on your computer",
+    });
   });
 
   it("replays one logical redemption without creating an orphan device", () => {
@@ -367,5 +384,68 @@ describe("bearerToken", () => {
     expect(bearerToken("Bearer ")).toBeUndefined();
     expect(bearerToken("Bearer   ")).toBeUndefined();
     expect(bearerToken("Beareromb_abc")).toBeUndefined();
+  });
+});
+
+describe("browser control capability", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("is off for a newly paired device", () => {
+    const registry = new DeviceRegistry();
+    const { device } = pair(registry);
+
+    expect(device.browserControlAccess).toBe(false);
+    expect(registry.list()[0].browserControlAccess).toBe(false);
+  });
+
+  it("reads a record written before the capability existed as off", () => {
+    // Not undefined-and-therefore-truthy somewhere downstream: a migrated
+    // device must be denied until someone grants it on purpose.
+    const registry = new DeviceRegistry();
+    const { device } = pair(registry);
+    const path = join(DATA_DIR, "devices.json");
+    const stored = JSON.parse(readFileSync(path, "utf8"));
+    delete stored.devices[0].browserControlAccess;
+    writeFileSync(path, JSON.stringify(stored));
+
+    expect(new DeviceRegistry().list().find((d) => d.id === device.id)?.browserControlAccess).toBe(false);
+  });
+
+  it("grants and revokes per device, leaving the other one alone", () => {
+    const registry = new DeviceRegistry();
+    const first = pair(registry, "First").device;
+    const second = pair(registry, "Second").device;
+
+    expect(registry.setBrowserControlAccess(first.id, true)).toBe(true);
+
+    const byId = (id: string) => registry.list().find((d) => d.id === id)!;
+    expect(byId(first.id).browserControlAccess).toBe(true);
+    expect(byId(second.id).browserControlAccess).toBe(false);
+
+    expect(registry.setBrowserControlAccess(first.id, false)).toBe(true);
+    expect(byId(first.id).browserControlAccess).toBe(false);
+  });
+
+  it("is a separate grant from cloud desktop access", () => {
+    const registry = new DeviceRegistry();
+    const { device } = pair(registry);
+
+    registry.setCloudDesktopAccess(device.id, true);
+
+    // Trusting a device with a throwaway VM must never hand it the person's
+    // signed-in browser as a side effect.
+    expect(registry.list()[0].cloudDesktopAccess).toBe(true);
+    expect(registry.list()[0].browserControlAccess).toBe(false);
+  });
+
+  it("survives a restart and refuses an unknown device", () => {
+    const registry = new DeviceRegistry();
+    const { device } = pair(registry);
+    registry.setBrowserControlAccess(device.id, true);
+
+    expect(new DeviceRegistry().list()[0].browserControlAccess).toBe(true);
+    expect(registry.setBrowserControlAccess("nobody", true)).toBe(false);
   });
 });

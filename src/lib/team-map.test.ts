@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTeamMapEdges, buildTeamMapSections, teamMapStatus, type TeamMapSnapshot } from "./team-map";
+import { setLocale } from "./i18n";
+import { buildTeamMapEdges, buildTeamMapSections, teamMapBotCount, teamMapStatus, type TeamMapSnapshot } from "./team-map";
 
 const bots = [
   { id: "chief", name: "Atlas", section: "Work", chiefOfStaff: true, busy: true },
@@ -10,6 +11,10 @@ const bots = [
 ];
 
 describe("team map projection", () => {
+  it("shows persisted empty teams alongside legacy bot membership", () => {
+    expect(buildTeamMapSections(bots, ["Empty", "Work"]).map(({ key, members }) => [key, members.length]))
+      .toEqual([["Work", 1], ["", 1], ["Empty", 0]]);
+  });
   it("groups visible bots by section and separates chiefs", () => {
     expect(buildTeamMapSections(bots)).toEqual([
       { key: "Work", name: "Work", chiefs: [bots[0]], members: [bots[1]] },
@@ -35,7 +40,18 @@ describe("team map projection", () => {
       running: [{ sourceBotId: "chief", targetBotId: "maker", threadId: "task" }],
     };
     expect(buildTeamMapEdges(bots, snapshot)).toEqual([
-      { sourceBotId: "chief", targetBotId: "maker", state: "running", groupId: undefined },
+      { sourceBotId: "chief", targetBotId: "maker", state: "running", groupId: undefined, threadId: "task" },
+    ]);
+  });
+
+  it("keeps the work thread of a queued handoff so the row can open it", () => {
+    const snapshot: TeamMapSnapshot = {
+      collaborations: [],
+      queued: [{ sourceBotId: "chief", targetBotId: "home", threadId: "home-task" }],
+      running: [],
+    };
+    expect(buildTeamMapEdges(bots, snapshot)).toEqual([
+      { sourceBotId: "chief", targetBotId: "home", state: "queued", threadId: "home-task" },
     ]);
   });
 
@@ -51,5 +67,14 @@ describe("team map projection", () => {
       label: "Waiting for you",
       tone: "warning",
     });
+  });
+});
+
+describe("team map header", () => {
+  it("counts one bot in the singular", () => {
+    setLocale("en");
+    expect(teamMapBotCount(1)).toBe("1 bot");
+    expect(teamMapBotCount(0)).toBe("0 bots");
+    expect(teamMapBotCount(2)).toBe("2 bots");
   });
 });

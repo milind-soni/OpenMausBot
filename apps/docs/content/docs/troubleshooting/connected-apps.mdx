@@ -17,6 +17,10 @@ Start a new task after connecting the app so the engine receives a fresh tool ca
 
 Some engines expose connected tools differently. Verify the chosen engine supports MCP or the connected-tool bridge used by the app.
 
+## The tool is missing or the bot says it is not allowed
+
+Check the bot's tool grants. A bot with an assigned grant list only sees the tools granted to it — ungranted tools disappear from its catalog and calls to them are refused, by design. Open the bot's settings on the desktop, look under **Connected apps**, and either add the tool to the granted list or set the service back to all tools. Bots with no grant record at all keep every tool; phones show the current grants read-only under **App tools** in the bot's profile.
+
 ## Official build says the service is unavailable
 
 Check internet connectivity and try again later before reconnecting every account. The packaged app preserves its installation identity across transient broker outages; rotating or deleting local credentials during an outage can separate existing grants from the installation.

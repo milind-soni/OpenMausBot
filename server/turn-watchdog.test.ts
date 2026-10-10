@@ -70,6 +70,27 @@ describe("TurnWatchdog", () => {
     expect(stalls).toHaveLength(0);
   });
 
+  it("lets the computer wait's own deadline govern, then restarts the stall clock", () => {
+    const { dog, stalls, tick } = rig();
+    dog.watch("t1", "bot1");
+    dog.setWaitingOnComputer("t1", true);
+    tick(STALL * 100);
+    dog.sweep();
+    expect(stalls).toHaveLength(0);
+    // Resolving an unrelated human ask cannot clear the resource wait.
+    dog.setWaitingOnHuman("t1", false);
+    tick(STALL * 100);
+    dog.sweep();
+    expect(stalls).toHaveLength(0);
+    dog.setWaitingOnComputer("t1", false);
+    tick(STALL - 1);
+    dog.sweep();
+    expect(stalls).toHaveLength(0);
+    tick(2);
+    dog.sweep();
+    expect(stalls).toHaveLength(1);
+  });
+
   it("re-watching a thread replaces the previous turn", () => {
     const { dog, stalls, tick } = rig();
     dog.watch("t1", "bot1");

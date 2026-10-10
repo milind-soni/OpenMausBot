@@ -27,6 +27,25 @@ export function tailWindowStart(total: number, size: number = TRANSCRIPT_WINDOW_
   return Math.max(0, total - size);
 }
 
+/** The next boundary for a reader following the bottom, given the current
+ * one: the tail window, stretched back to the newest message the person sent
+ * when that message is already mounted and at most one more window back. A
+ * turn can add hundreds of tool steps that draw nothing (Tool calls is off by
+ * default); counted against the window, they would push the question out
+ * while the person watches it being answered. The stretch stops at one more
+ * window, so a long turn whose rows all draw, or a room where bots answer
+ * each other, still mounts at most two windows. Only the mounted part of
+ * that range is scanned. When the thread got shorter (a branch switch), its
+ * tail can start before the current boundary; the boundary moves back to it. */
+export function followWindowStart(messages: readonly { role?: string }[], start: number): number {
+  const tail = tailWindowStart(messages.length);
+  const oldest = Math.max(start, tail - TRANSCRIPT_WINDOW_SIZE);
+  for (let index = messages.length - 1; index >= oldest; index--) {
+    if (messages[index].role === "user") return Math.min(tail, index);
+  }
+  return tail;
+}
+
 /** One "Show earlier" click: pull the boundary back by another `size`. */
 export function expandWindowStart(startIndex: number, size: number = TRANSCRIPT_WINDOW_SIZE): number {
   return Math.max(0, startIndex - size);
@@ -48,10 +67,13 @@ export function focusWindowRange(
 
 /** Resolve a stored boundary against the current list. The boundary is
  * anchored — appends grow the window instead of sliding it, so rows the
- * reader is looking at never drop out from under them. Anchoring means a
- * thread that shrinks (branch switch, edit rewinding the tail) can leave the
- * boundary at or past the new end; that stale boundary falls back to a fresh
- * tail window rather than blanking the transcript. */
+ * reader is looking at never drop out from under them. (The viewport hook
+ * moves the boundary to `followWindowStart` while the reader follows the
+ * bottom, so only a reader who has scrolled away sees the window keep
+ * growing.)
+ * Anchoring means a thread that shrinks (branch switch, edit rewinding the
+ * tail) can leave the boundary at or past the new end; that stale boundary
+ * falls back to a fresh tail window rather than blanking the transcript. */
 export function resolveTranscriptWindow<T>(
   messages: readonly T[],
   startIndex: number,

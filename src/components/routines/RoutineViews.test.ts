@@ -1,0 +1,149 @@
+import { Children, createElement, isValidElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Routine, RoutineRun } from "@/lib/routines";
+import { RoutineList } from "./RoutineList";
+import { RoutineLogs } from "./RoutineLogs";
+import { latestRoutineRun, routineNextLabel } from "@/lib/routine-display";
+
+const routine: Routine = {
+  id: "brief", name: "Morning brief", prompt: "Report progress", target: "bot", botId: "scout", runOn: "maus", enabled: true,
+  schedule: { type: "interval", everyMinutes: 60, anchorAt: 1 }, durationMinutes: 30, nextRunAt: 3_600_000, createdAt: 1, updatedAt: 1,
+};
+const run: RoutineRun = { id: "run", routineId: routine.id, routineName: routine.name, target: "bot", botId: routine.botId, runOn: "maus", scheduledFor: 100, createdAt: 100, status: "completed", manual: false, output: "Brief prepared." };
+
+function list(props: Partial<Parameters<typeof RoutineList>[0]> = {}) {
+  return renderToStaticMarkup(createElement(RoutineList, { routines: [routine], runs: [run], onOpen: vi.fn(), onLogs: vi.fn(), ...props }));
+}
+function logs(props: Partial<Parameters<typeof RoutineLogs>[0]> = {}) {
+  return renderToStaticMarkup(createElement(RoutineLogs, { runs: [run], bots: [], status: "all", onStatusChange: vi.fn(), onClearRoutine: vi.fn(), onOpen: vi.fn(), ...props }));
+}
+
+afterEach(() => vi.useRealTimers());
+
+describe("routine list", () => {
+  it("shows saved skips and recent failure streaks without claiming all offline occurrences were counted", () => {
+    const markup = list({ routines: [{ ...routine, skippedRuns: 3, lastSkippedAt: 100, failureStreak: 2 }] });
+    expect(markup).toContain("Scheduled occurrences skipped while busy: 3");
+    expect(markup).toContain("Recent consecutive failures: 2");
+    expect(markup).toContain("Last:");
+    expect(list()).not.toContain("Recent consecutive failures:");
+    expect(list()).not.toContain("Scheduled occurrences skipped while busy:");
+  });
+  it("retains visible records and latest results during a failed refresh", () => {
+    const markup = list({ error: true });
+    expect(markup).toContain('role="alert"');
+    expect(markup).toContain("Retrying…");
+    expect(markup).toContain("Morning brief");
+    expect(markup).toContain("Brief prepared.");
+    expect(markup).toContain('aria-label="Run logs for Morning brief"');
+  });
+
+  it("does not show the empty state before hydration or on transport failure", () => {
+    expect(list({ routines: [], runs: [], loading: true })).toContain("Loading routines…");
+    expect(list({ routines: [], runs: [], loading: true })).not.toContain("No schedules yet.");
+    expect(list({ routines: [], runs: [], error: true })).not.toContain("No schedules yet.");
+    expect(list({ routines: [], runs: [] })).toContain("No schedules yet.");
+  });
+
+  it("distinguishes a finished one-shot schedule from a successful run", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const markup = list({ routines: [{ ...routine, schedule: { type: "once", at: 10 }, enabled: false, nextRunAt: null }], runs: [{ ...run, status: "failed", error: "Provider disconnected." }] });
+    expect(markup).toContain("Finished schedule");
+    expect(markup.match(/Finished schedule/g)).toHaveLength(1);
+    expect(markup).toContain("Latest: Failed");
+    expect(markup).toContain("Provider disconnected.");
+    expect(markup).not.toContain("Latest: Completed");
+  });
+
+  it("never advertises a stale next timestamp for a paused routine", () => {
+    expect(routineNextLabel({ ...routine, enabled: false })).toBe("Paused");
+    expect(list({ routines: [{ ...routine, enabled: false }] })).not.toContain("Next Jan");
+  });
+
+  it("chooses a new pending run ahead of an older run that finished later", () => {
+    const pending = { ...run, id: "new", createdAt: 200, scheduledFor: 200, status: "waiting" as const, attention: "Waiting for delegated work to finish" };
+    expect(latestRoutineRun(routine.id, [{ ...run, finishedAt: 300 }, pending])).toBe(pending);
+    expect(list({ runs: [run, pending] })).toContain("Latest: Waiting");
+    expect(list({ runs: [run, pending] })).toContain("Waiting for delegated work to finish");
+  });
+});
+
+describe("central routine logs", () => {
+  it("keeps deleted-routine receipts and distinguishes all run outcomes", () => {
+    const statuses = ["queued", "running", "waiting", "completed", "failed", "missed", "cancelled"] as const;
+    const markup = logs({ runs: statuses.map((status, index) => ({ ...run, id: `run-${status}`, routineId: `removed-${index}`, routineName: `Routine ${status}`, status })) });
+    for (const status of statuses) expect(markup).toContain(`Open Routine ${status} run:`);
+    expect(markup).toContain("Bot unavailable");
+    expect(markup).toContain("Recent saved runs");
+  });
+
+  it("filters failed and missed runs together through the shared Problems view", () => {
+    const fine = { ...run, id: "fine", routineName: "Fine brief" };
+    const broken = { ...run, id: "broken", routineName: "Broken report", status: "failed" as const, error: "Provider crashed" };
+    const stale = { ...run, id: "stale", routineName: "Stale digest", status: "missed" as const };
+    const problems = logs({ runs: [fine, broken, stale], status: "problems" });
+    expect(problems).toContain("Broken report");
+    expect(problems).toContain("Stale digest");
+    expect(problems).not.toContain("Fine brief");
+    expect(problems).toContain('<option value="problems" selected="">Problems</option>');
+    const everything = logs({ runs: [fine, broken, stale] });
+    for (const name of ["Fine brief", "Broken report", "Stale digest"]) expect(everything).toContain(name);
+  });
+
+  it("marks unseen problem runs with a dot that clears once they are read", () => {
+    const unseen = { ...run, id: "unseen", routineName: "Unseen crash", status: "failed" as const, error: "Provider crashed" };
+    const seen = { ...unseen, id: "seen", routineName: "Seen crash", seenAt: 500 };
+    const markup = logs({ runs: [unseen, seen] });
+    expect(markup.match(/title="Unseen failure"/g)).toHaveLength(1);
+    expect(logs({ runs: [unseen, seen], status: "problems" }).match(/title="Unseen failure"/g)).toHaveLength(1);
+    expect(markup).toContain('aria-label="Open Unseen crash run: Failed · Unseen failure"');
+    expect(markup).toContain('aria-label="Open Seen crash run: Failed"');
+  });
+
+  it("reports status changes to its parent instead of keeping private filter state", () => {
+    const onStatusChange = vi.fn();
+    let select: { onChange?: (event: { target: { value: string } }) => void } | undefined;
+    function visit(node: ReactNode) {
+      Children.forEach(node, (child) => {
+        if (!isValidElement<{ onChange?: (event: { target: { value: string } }) => void; children?: ReactNode }>(child)) return;
+        if (child.type === "select") select = child.props;
+        visit(child.props.children);
+      });
+    }
+    function Capture() {
+      visit(RoutineLogs({ runs: [], bots: [], status: "all", onStatusChange, onClearRoutine: vi.fn(), onOpen: vi.fn() }));
+      return null;
+    }
+    renderToStaticMarkup(createElement(Capture));
+    select!.onChange!({ target: { value: "problems" } });
+    expect(onStatusChange).toHaveBeenCalledExactlyOnceWith("problems");
+  });
+
+  it("lands on only the requested routine's history", () => {
+    const markup = logs({ routineId: "brief", runs: [run, { ...run, id: "other", routineId: "other", routineName: "Private other routine" }] });
+    expect(markup).toContain("Open Morning brief run: Completed");
+    expect(markup).not.toContain("Private other routine");
+    expect(markup).toContain("Show all routines");
+  });
+
+  it("does not confuse delegated waiting with an approval request", () => {
+    const markup = logs({ runs: [{ ...run, status: "waiting", attention: "Waiting for delegated work to finish" }] });
+    expect(markup).toContain("Open Morning brief run: Waiting");
+    expect(markup).toContain("Waiting for delegated work to finish");
+    expect(markup).not.toContain("Needs your input");
+  });
+
+  it("keeps a team-goal block distinct from successful scheduler completion", () => {
+    const markup = logs({ runs: [{ ...run, status: "completed", goalStatus: "blocked" }] });
+    expect(markup).toContain("Open Morning brief run: Blocked");
+  });
+
+  it("provides distinct initial-loading, failure, and empty states", () => {
+    expect(logs({ runs: [], loading: true })).toContain("Loading routines…");
+    expect(logs({ runs: [], loading: true })).not.toContain("No runs recorded yet");
+    expect(logs({ runs: [], error: true })).toContain('role="alert"');
+    expect(logs({ runs: [] })).toContain("No runs recorded yet");
+  });
+});

@@ -18,13 +18,25 @@ OpenMausBot does not proxy every message through its own model account. It start
 | Cursor | Cursor Agent CLI login or API key | ACP driver with live model discovery |
 | Kimi | Kimi CLI login | ACP integration |
 | Droid | Factory Droid CLI login | ACP integration |
-| Antigravity | Google Antigravity CLI login | Default Google consumer engine |
+| Antigravity | Google account through the official ACP server | Managed install, isolated accounts, live models, and approval cards |
 | OpenCode | Existing OpenCode provider login or optional API key | Live Zen, Go, third-party, and local model discovery through ACP |
 | Qwen | Qwen CLI login | ACP integration |
 | Hermes | Hermes CLI login | ACP integration |
 | Pi | Pi CLI login | Native driver |
 
 Additional driver instances can be declared in local configuration. Unavailable engines remain visible with a reason instead of crashing the provider fleet.
+
+To use OpenRouter, Fireworks AI, DeepSeek, Cline, or your own OpenAI- or Anthropic-compatible service, see [Other model providers](./model-providers.mdx).
+
+Codex models come from the signed-in CLI's live model list. If that list cannot be read, the picker shows an offline fallback that includes GPT-6 Astra, Sol, and Luna with availability marked unverified. An older CLI may not expose newer models; OpenMausBot checks for a newer stable Codex release and offers an update command for the configured executable. Updating the CLI does not grant model access to an account.
+
+## Mistral API
+
+Open **Settings → Connections**, save your **Mistral API key**, then choose **Mistral (API)** in a bot's model picker. No CLI installation is needed. The **Test** button checks catalog access without sending a chat message.
+
+The model list refreshes from Mistral's `/v1/models` endpoint, including versioned models and aliases. Archived and non-chat models are excluded. Use **Refresh models** after new models become available to your account; an unsuccessful refresh preserves the previous list. Mistral bills requests to your API account.
+
+For a server deployment, set `MISTRAL_API_KEY` or save `mistral.key` in the server configuration. Advanced users can declare additional `mistral` instances with a `config.model` default and endpoint URL. A saved workspace key is shared by those instances. The connection supports streamed replies and structured tools through the shared chat-completions runtime; it does not launch a local agent CLI or grant filesystem access.
 
 ## Detection
 
@@ -37,6 +49,29 @@ If detection fails, use **Settings → Engines** to set an explicit executable p
 The model picker groups models by provider and marks defaults. Supported engines can refresh their model catalog from the installed CLI. Changing the model affects future turns; it does not rewrite earlier transcript history.
 
 <ProductScreenshot name="docs-model-picker" alt="The OpenMausBot model picker with several cloud and local engines" caption="Every bot can use a different engine and model." />
+
+## Codex browser tools
+
+Codex bots use the browser and computer selected in OpenMausBot. Desktop-only Codex
+browser/computer features and their bundled plugins are disabled for those bot
+processes, so bots do not select a native desktop connection that is unavailable
+inside the CLI. This does not uninstall plugins or change the standalone Codex app.
+Native web search keeps its configured mode.
+
+After built-in browser navigation, OpenMausBot collects a snapshot in the same
+browser session. A sign-in page or redirect is evidence of where navigation landed,
+not confirmation that the requested task finished. Connection failures retain the
+selected computer/account and do not automatically replay uncertain actions.
+
+## Multiple Claude accounts
+
+Open **Settings → Engines → Add Claude account** and give the account a name, such as **Work** or **Personal**. OpenMausBot creates a separate configuration-directory setting for it; it does not copy your existing login. Under **Manage account and sign-in**, copy the sign-in command and run it on the computer hosting OpenMausBot, then choose **Check account**. On Windows, use PowerShell. Claude handles the browser sign-in and stores its own credentials.
+
+In a bot's model picker, choose **Claude**, select **Work** or **Personal** in the **Account** dropdown, then choose a model to save the selection. Claude appears only once in the provider list. Each bot keeps its own selection, and the chat header shows the account name. Account changes apply to future turns and are blocked while that bot is responding; other bots are unaffected. Conversation history is not erased when you change the selection.
+
+The original **Default** entry keeps using your existing CLI login. Advanced users can supply an existing, separate Claude configuration directory. Once an account has been used by bots or conversation history, add a new account instead of repointing its directory. Removing an account from OpenMausBot does not delete its files or sign it out; first move any bots using it to another account.
+
+This does not require a CLI proxy, and there is no automatic account rotation or fallback. Named account management currently supports Claude only.
 
 <Callout type="info" title="Subscriptions stay with the provider">
   Your existing CLI login or provider API key determines access and billing. OpenMausBot does not turn one subscription into access to another provider.

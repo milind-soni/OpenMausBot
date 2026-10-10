@@ -1,10 +1,17 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { listenWebhookIngress, MAX_WEBHOOK_BODY_BYTES, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
+import {
+  advertisedWebhookBase,
+  listenWebhookIngress,
+  MAX_WEBHOOK_BODY_BYTES,
+  webhookCredential,
+  type WebhookIngress,
+} from "./webhook-ingress.ts";
 import { WebhookManager } from "./webhooks.ts";
+import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 
 let dir: string;
 let ingress: WebhookIngress;
@@ -35,6 +42,22 @@ afterAll(async () => {
 });
 
 describe("webhook-only ingress", () => {
+  it("does not record or enqueue incoming webhooks during workspace backup", async () => {
+    const gate = new WorkspaceBackupMaintenance();
+    const guarded = await listenWebhookIngress(manager, { port: 0, claimRequest: () => gate.request() });
+    const before = manager.listAttempts();
+    const beforeQueued = queued.length;
+    try {
+      await gate.run(async () => {
+        const response = await fetch(`${guarded.baseUrl}/hooks/${endpointId}/${secret}`, { method: "POST", body: "{}" });
+        expect(response.status).toBe(503);
+        expect(manager.listAttempts()).toEqual(before);
+        expect(queued).toHaveLength(beforeQueued);
+      }, { idle: () => true, pause: () => {}, resume: () => {}, flush: async () => {} });
+    } finally {
+      await new Promise<void>((resolve) => guarded.server.close(() => resolve()));
+    }
+  });
   it("exposes health but nothing from the main OpenMausBot API", async () => {
     const health = await fetch(`${ingress.baseUrl}/health`);
     expect(health.status).toBe(200);
@@ -114,5 +137,91 @@ describe("webhook-only ingress", () => {
     });
     expect(oversized.status).toBe(413);
     expect(manager.listAttempts().filter((attempt) => attempt.webhookId === manager.list().find((webhook) => webhook.endpointId === endpointId)?.id && attempt.outcome === "rejected").length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("requests with a wrong secret", () => {
+  it("answers a malformed escape in the URL secret with 401, not 500", async () => {
+    const response = await fetch(`${ingress.baseUrl}/hooks/${endpointId}/%E0%A4%A`, { method: "POST", body: "{}" });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Invalid webhook URL or secret" });
+  });
+
+  it("neither evicts real deliveries nor rewrites the file for each request", async () => {
+    const floodDir = mkdtempSync(join(tmpdir(), "omb-webhook-flood-"));
+    const file = join(floodDir, "webhooks.json");
+    const emitted = new Set<string>();
+    let runs = 0;
+    const flooded = new WebhookManager({
+      file,
+      botState: () => "ready",
+      enqueue: () => ({ id: `flood-run-${++runs}` }),
+      emit: (frame) => { if (frame.kind === "webhook.attempt") emitted.add(frame.attempt.id); },
+    });
+    const created = flooded.create({ name: "CI", prompt: "Review", botId: "maus-1" });
+    const receiver = await listenWebhookIngress(flooded, { port: 0 });
+    const url = `${receiver.baseUrl}/hooks/${created.webhook.endpointId}`;
+    const deliver = (id: string) => fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${created.secret}`, "content-type": "application/json", "idempotency-key": id },
+      body: "{}",
+    });
+    try {
+      expect((await deliver("real-1")).status).toBe(202);
+      const written = statSync(file);
+      // More bad requests than the shared history holds (2,000).
+      for (let i = 0; i < 2_100; i += 1) {
+        const response = await fetch(url, { method: "POST", headers: { authorization: "Bearer wrong" }, body: "" });
+        expect(response.status).toBe(401);
+        await response.arrayBuffer();
+      }
+      // The file was not written again.
+      const after = statSync(file);
+      expect([after.ino, after.mtimeMs]).toEqual([written.ino, written.mtimeMs]);
+
+      const attempts = flooded.listAttempts();
+      expect(attempts.filter((attempt) => attempt.outcome === "accepted").map((attempt) => attempt.deliveryId)).toEqual(["real-1"]);
+      const rejected = attempts.filter((attempt) => attempt.outcome === "rejected");
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0]).toMatchObject({ statusCode: 401, reason: "Invalid webhook URL or secret (2100 requests)" });
+      // Clients get one record, updated in place, not 2,100 new ones.
+      expect(emitted.size).toBe(2);
+
+      // The rolling record is saved with the next real change.
+      expect((await deliver("real-2")).status).toBe(202);
+      const reloaded = new WebhookManager({ file, botState: () => "ready", enqueue: () => ({ id: "unused" }) });
+      expect(reloaded.listAttempts().map((attempt) => [attempt.outcome, attempt.statusCode])).toEqual([
+        ["accepted", 202],
+        ["rejected", 401],
+        ["accepted", 202],
+      ]);
+    } finally {
+      await new Promise<void>((resolve) => receiver.server.close(() => resolve()));
+      rmSync(floodDir, { recursive: true, force: true });
+    }
+  }, 60_000);
+});
+
+describe("advertised base URL", () => {
+  it("hands senders the public base instead of the loopback listener", async () => {
+    const proxied = await listenWebhookIngress(manager, { port: 0, publicBaseUrl: "https://bots.example.com/" });
+    try {
+      expect(proxied.baseUrl).toBe("https://bots.example.com");
+      expect(proxied.host).toBe("127.0.0.1");
+      const credential = webhookCredential(proxied.baseUrl, endpointId, secret);
+      expect(credential.endpointUrl).toBe(`https://bots.example.com/hooks/${endpointId}`);
+      // the listener itself is still local: the public base only changes what is advertised
+      const health = await fetch(`http://127.0.0.1:${proxied.port}/health`);
+      expect(health.status).toBe(200);
+    } finally {
+      await new Promise<void>((resolve) => proxied.server.close(() => resolve()));
+    }
+  });
+
+  it("refuses a base that is not an absolute http(s) URL, naming the fix", () => {
+    for (const bad of ["bots.example.com", "ftp://bots.example.com", "", "/hooks"]) {
+      expect(() => advertisedWebhookBase(bad)).toThrow(/absolute http\(s\) URL such as https:\/\//);
+    }
+    expect(advertisedWebhookBase("http://10.0.0.5:8800///")).toBe("http://10.0.0.5:8800");
   });
 });

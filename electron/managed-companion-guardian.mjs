@@ -7,7 +7,6 @@
 // expose whatever process happens to bind a reusable local port later.
 import { spawn } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   createCompanionOriginGateway,
@@ -187,7 +186,7 @@ export async function runManagedCompanionGuardian({
   return outcome.kind === "connector" ? outcome.code : 0;
 }
 
-function guardianArguments(argv) {
+export function guardianArguments(argv) {
   if (argv.length !== 5) throw new Error("The managed companion guardian arguments are invalid");
   const [cloudflaredBinary, tokenFile, socketPath, rawPid, rawPort] = argv;
   const pid = Number(rawPid);
@@ -199,12 +198,8 @@ function guardianArguments(argv) {
   return { cloudflaredBinary, tokenFile, target, originPort };
 }
 
-const isDirectExecution =
-  process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
-
-if (isDirectExecution) {
-  runManagedCompanionGuardian(guardianArguments(process.argv.slice(2))).then(
-    (code) => process.exit(code),
-    () => process.exit(1),
-  );
-}
+// Executed as a process through managed-companion-guardian-main.mjs. This file
+// is a library on purpose: managed-companion-tunnel.mjs imports an environment
+// helper from it, and anything that bundles that module (the headless CLI's
+// entries) would otherwise inline a "run when executed directly" check that
+// is true for the bundle itself.

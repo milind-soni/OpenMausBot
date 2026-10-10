@@ -1,7 +1,8 @@
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import afterPack from "./after-pack.mjs";
 import { LICENSE_FILES } from "./cua-linux-release.mjs";
 
@@ -72,5 +73,88 @@ describe.skipIf(process.platform === "win32")("Linux afterPack permissions", () 
     await afterPack({ electronPlatformName: "darwin", appOutDir });
     expect(fs.lstatSync(cua).mode & 0o777).toBe(0o775);
     expect(fs.lstatSync(path.join(cua, "cua-driver")).mode & 0o777).toBe(0o664);
+  });
+});
+
+describe("desktop browser package gate", () => {
+  it("rejects a missing browser manifest instead of accepting partial resources", async () => {
+    const { appOutDir, resources } = fixture();
+    fs.mkdirSync(path.join(resources, "browser-engine"));
+    await expect(afterPack({ electronPlatformName: "win32", arch: 1, appOutDir }))
+      .rejects.toThrow(/manifest\.json/);
+  });
+
+  it("rejects an unsupported package architecture before accepting the browser", async () => {
+    const { appOutDir, resources } = fixture();
+    fs.mkdirSync(path.join(resources, "browser-engine"));
+    await expect(afterPack({ electronPlatformName: "win32", arch: 0, appOutDir }))
+      .rejects.toThrow(/Unsupported desktop browser package architecture/);
+  });
+});
+
+// Real Mach-O fixtures: /usr/bin binaries are arm64e, not arm64, so compile.
+const canBuildMachO = process.platform === "darwin" && fs.existsSync("/usr/bin/lipo") &&
+  spawnSync("cc", ["--version"]).status === 0;
+
+describe.skipIf(!canBuildMachO)("macOS afterPack platform-tools slices", () => {
+  const binaries = {};
+  let directory;
+  const archs = (file) => execFileSync("/usr/bin/lipo", ["-archs", file], { encoding: "utf8" }).trim();
+
+  beforeAll(() => {
+    directory = fs.mkdtempSync(path.join(os.tmpdir(), "omb-macho-"));
+    fs.writeFileSync(path.join(directory, "main.c"), "int main(void) { return 0; }\n");
+    for (const arch of ["arm64", "x86_64"]) {
+      binaries[arch] = path.join(directory, arch);
+      execFileSync("cc", ["-arch", arch, "-o", binaries[arch], path.join(directory, "main.c")]);
+    }
+    binaries.fat = path.join(directory, "fat");
+    execFileSync("/usr/bin/lipo", ["-create", binaries.arm64, binaries.x86_64, "-output", binaries.fat]);
+  });
+  afterAll(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+  function macApp() {
+    const appOutDir = fs.mkdtempSync(path.join(os.tmpdir(), "omb-after-pack-mac-"));
+    temporaryDirectories.push(appOutDir);
+    const tools = path.join(appOutDir, "OpenMausBot.app", "Contents", "Resources", "android-platform-tools", "darwin");
+    fs.mkdirSync(path.join(tools, "lib64"), { recursive: true });
+    fs.copyFileSync(binaries.fat, path.join(tools, "adb"));
+    fs.copyFileSync(binaries.fat, path.join(tools, "lib64", "libc++.dylib"));
+    fs.chmodSync(path.join(tools, "adb"), 0o755);
+    fs.writeFileSync(path.join(tools, "NOTICE.txt"), "notice");
+    return { appOutDir, tools };
+  }
+
+  it.each([["arm64", 3], ["x86_64", 1]])("keeps only the %s slice of every Mach-O", async (expected, arch) => {
+    const { appOutDir, tools } = macApp();
+    await afterPack({ electronPlatformName: "darwin", arch, appOutDir });
+    expect(archs(path.join(tools, "adb"))).toBe(expected);
+    expect(archs(path.join(tools, "lib64", "libc++.dylib"))).toBe(expected);
+    expect(fs.statSync(path.join(tools, "adb")).mode & 0o777).toBe(0o755);
+    expect(fs.readFileSync(path.join(tools, "NOTICE.txt"), "utf8")).toBe("notice");
+    expect(fs.readdirSync(tools).sort()).toEqual(["NOTICE.txt", "adb", "lib64"]);
+  });
+
+  it("never rewrites a hard-linked staging source", async () => {
+    const { appOutDir, tools } = macApp();
+    const staged = path.join(appOutDir, "staged-adb");
+    fs.copyFileSync(binaries.fat, staged);
+    fs.rmSync(path.join(tools, "adb"));
+    fs.linkSync(staged, path.join(tools, "adb"));
+    await afterPack({ electronPlatformName: "darwin", arch: 3, appOutDir });
+    expect(archs(path.join(tools, "adb"))).toBe("arm64");
+    expect(fs.readFileSync(staged).equals(fs.readFileSync(binaries.fat))).toBe(true);
+  });
+
+  it("fails packaging when a binary lacks the app's arch", async () => {
+    const { appOutDir, tools } = macApp();
+    fs.copyFileSync(binaries.x86_64, path.join(tools, "adb"));
+    await expect(afterPack({ electronPlatformName: "darwin", arch: 3, appOutDir })).rejects.toThrow(/no arm64 slice/);
+  });
+
+  it("rejects a universal package instead of guessing a slice", async () => {
+    const { appOutDir } = macApp();
+    await expect(afterPack({ electronPlatformName: "darwin", arch: 4, appOutDir }))
+      .rejects.toThrow(/Unsupported macOS package architecture/);
   });
 });

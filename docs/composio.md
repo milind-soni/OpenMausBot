@@ -8,10 +8,10 @@ OpenMausBot uses one Composio project API key and one reusable Composio Session.
 2. Select **Platform**, select or create a project, then open **Settings → API Keys**.
 3. Copy a project key beginning with `ak_`.
 4. In OpenMausBot, open **App Settings → Connections** and save it under **Composio project key**.
-5. Open **Connected apps** and choose Gmail, GitHub, Slack, or another service. Authentication happens in your normal browser.
-6. To connect another account for the same app, choose **Add account**, give it a unique label such as `work` or `personal`, and finish the second authorization in your browser.
+5. Open **Connected apps** and choose Gmail, GitHub, Slack, or another service. Enter a unique label such as `work` or `personal`, then finish the authorization in your normal browser.
+6. To connect another account for the same app, choose **Add account**, give it a unique label, and finish the second authorization in your browser.
 
-The Connected tab lists every account separately. **Disconnect** revokes only the account named on that row. OpenMausBot requires a label for a second account and configures Composio to require explicit selection when more than one account could run a tool; a new OAuth flow never silently becomes the default for an existing connection.
+The Connected tab lists every account separately. **Disconnect** revokes only the account named on that row. OpenMausBot asks for a label for every new account and configures Composio to require explicit selection when more than one account could run a tool; a new OAuth flow never silently becomes the default for an existing connection.
 
 The desktop app validates the key before saving it. The key is encrypted using Electron's operating-system-backed `safeStorage`; the local JSON configuration stores only the non-secret Composio user and Session identifiers.
 
@@ -47,6 +47,42 @@ If a provider or restricted Composio project policy prevents another authorizati
 
 The hosted/managed connected-apps broker exposes the same account-aware response shape and account-specific removal routes as the self-hosted project-key mode; it does not send broker or provider credentials to the renderer.
 
+## Permissions the default connection does not ask for
+
+Each app you connect uses the Composio project's authorization for that app. Unless you set up your own, that is the Composio-managed one, which asks the provider only for Composio's default permissions. Some actions need more. In Gmail:
+
+- **Filters, the vacation responder, IMAP and POP settings** need `https://www.googleapis.com/auth/gmail.settings.basic`.
+- **Forwarding addresses, send-as aliases and delegates** need `https://www.googleapis.com/auth/gmail.settings.sharing`.
+
+Without the permission, Google refuses the call with `403 ACCESS_TOKEN_SCOPE_INSUFFICIENT`. Reconnecting the account does not help: the consent screen asks for the same permissions every time. OpenMausBot adds a note to that refusal, so the bot tells you what to change instead of retrying.
+
+To grant the permission:
+
+1. In the [Composio Dashboard](https://dashboard.composio.dev), open your project's **Auth Configs** and create an auth config for the app (for example Gmail) that uses your own OAuth app credentials.
+2. Add the permissions you need to it, keep it enabled, and leave it available to Tool Router.
+3. In OpenMausBot, open **Connected apps** and reconnect the account. The consent screen now asks for the added permissions.
+
+OpenMausBot uses your project's own auth config for an app automatically, in place of the Composio-managed one. If there are several for the same app, it uses the most recently updated, and it skips disabled ones and ones turned off for Tool Router. Google may require your OAuth app to list the added permissions on its consent screen, and to be verified before people outside your organization can grant them.
+
+On a MausBot Cloud plan, connected apps run through OpenMausBot's managed connection service rather than your own Composio project, so you cannot add permissions yourself; ask OpenMausBot support instead.
+
+## Browser authorization recovery
+
+The web UI reserves an authorization tab during your click, before requesting
+the link. If the browser still blocks it, use **Open authorization page** in
+the Apps modal or connector card. **Continue** / **Open again** reuses the
+pending link instead of creating another account. Links stay in UI memory only;
+after ten minutes, retry requests a fresh link, as required by
+[Composio's connection lifecycle](https://docs.composio.dev/kb/guide/platform-connected-accounts).
+
+If all existing accounts for that app are `INITIALIZING`, `INITIATED`, or
+`EXPIRED`, an alias-less retry gets a unique `omb-retry-…` alias. It never deletes
+or replaces an account: `EXPIRED` can also describe a formerly active grant.
+Active or unknown states still require an explicit unique label, and the
+five-usable-account limit remains. At that limit, inspect the account rows and
+disconnect only an account you intend to revoke. Managed installations need
+the updated broker as well as the updated app; this is not a client-side bypass.
+
 ## Renderer-neutral connection inventory
 
 Desktop, web, and mobile clients can load the complete account inventory in one request:
@@ -74,3 +110,19 @@ GET /api/connectors/connected
 This operation cursor-paginates both the Session toolkit state and the user's connected accounts directly. It merges no-auth toolkits and the Session-selected account with the full multi-account inventory, without deriving service slugs from marketplace cards, so account visibility is independent of catalog ordering and pagination. If a scoped project key can read the Session but cannot list raw connected accounts, the response safely falls back to the Session-selected and no-auth toolkit inventory rather than making those services appear disconnected. The managed broker provides the same behavior and response at `GET /v1/connectors/connected`; the local server adds the normal `configured: false` empty response when no connection service is configured. Responses expose only connected-account IDs, user-supplied aliases, and lifecycle status—never project keys, broker tokens, provider tokens, or write-only authorization fields.
 
 The existing scoped `GET /api/connectors?services=gmail,slack` operation remains available for lightweight post-OAuth polling and backward compatibility.
+
+## Per-bot tool grants
+
+The workspace-level connections above say which accounts exist. A second, per-bot layer says which of an app's **tools** each bot may actually call. Open a bot's settings on the desktop, and under **Connected apps** each service can be set to:
+
+- **All tools** — every tool the service offers (the wildcard grant).
+- **An exact list** — only the named tools, such as GMAIL_SEND_EMAIL, shown as the granted count.
+- **No tools** — the service is listed but grants nothing.
+
+A bot with no grant record at all keeps the legacy behavior: every tool on every connected app it can see. Assigning the first grant switches the bot to exact-tool mode — a service not on the list grants nothing, even when the workspace is connected to it.
+
+**Nothing changes until you assign.** Upgrading OpenMausBot does not alter any bot's access: existing bots keep the all-tools default until someone edits their grants. An emptied grant list is deliberate and means "no tools on any connected app."
+
+**Imported bots land with no grants.** Shareable packages and team imports never carry grants — an imported bot starts with connected apps off, and any grants it later gets are chosen by the importing workspace. Grants also never appear in exports; only the workspace's own private team backup keeps them.
+
+Grants are enforced on the real tool names at call time (including batches inside the MULTI_EXECUTE meta-tool), the tool list offered to the model is filtered to the granted set, and every allow/deny writes a decision-log row. Refusals do not enumerate what else is granted. Paired phones see each bot's grants read-only in its profile (What this bot does → App tools); grants are assigned on the computer, never from a phone.

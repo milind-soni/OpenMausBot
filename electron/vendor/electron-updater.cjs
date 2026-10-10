@@ -12109,7 +12109,7 @@ var require_ElectronAppAdapter = __commonJS({
         this.app.quit();
       }
       relaunch() {
-        this.app.relaunch();
+        this.app.relaunch({ args: process.argv.slice(1).filter((arg) => arg !== "openmausbot://organization") });
       }
       onQuit(handler) {
         this.app.once("quit", (_, exitCode) => handler(exitCode));
@@ -14939,7 +14939,6 @@ var require_AppImageUpdater = __commonJS({
         if (!path2.isAbsolute(appImageFile) || appImageFile.includes("\0")) {
           throw (0, builder_util_runtime_1.newError)(`APPIMAGE env is not a valid absolute path: "${appImageFile}"`, "ERR_UPDATER_OLD_FILE_NOT_FOUND");
         }
-        (0, fs_1.unlinkSync)(appImageFile);
         let destination;
         const existingBaseName = path2.basename(appImageFile);
         const installerPath = this.installerPath;
@@ -14950,9 +14949,11 @@ var require_AppImageUpdater = __commonJS({
         if (path2.basename(installerPath) === existingBaseName || !/\d+\.\d+\.\d+/.test(existingBaseName)) {
           destination = appImageFile;
         } else {
-          destination = path2.join(path2.dirname(appImageFile), path2.basename(installerPath));
+          destination = appImageFile;
         }
-        (0, child_process_1.execFileSync)("mv", ["-f", installerPath, destination]);
+        const stagedDestination = `${destination}.new`;
+        (0, child_process_1.execFileSync)("mv", ["-f", installerPath, stagedDestination]);
+        (0, fs_1.renameSync)(stagedDestination, destination);
         if (destination !== appImageFile) {
           this.emit("appimage-filename-updated", destination);
         }
@@ -14961,7 +14962,16 @@ var require_AppImageUpdater = __commonJS({
           APPIMAGE_SILENT_INSTALL: "true"
         };
         if (options.isForceRunAfter) {
-          this.spawnLog(destination, [], env);
+          const previousSilentInstall = process.env.APPIMAGE_SILENT_INSTALL;
+          try {
+            process.env.APPIMAGE_SILENT_INSTALL = env.APPIMAGE_SILENT_INSTALL;
+            if (require("electron").app.relaunch({ execPath: destination, args: [] }) === false) {
+              throw new Error("Could not schedule the updated AppImage to restart");
+            }
+          } finally {
+            if (previousSilentInstall === undefined) delete process.env.APPIMAGE_SILENT_INSTALL;
+            else process.env.APPIMAGE_SILENT_INSTALL = previousSilentInstall;
+          }
         } else {
           env.APPIMAGE_EXIT_AFTER_INSTALL = "true";
           (0, child_process_1.execFileSync)(destination, [], { env });
@@ -15446,7 +15456,16 @@ var require_MacUpdater = __commonJS({
           }
           return `http://127.0.0.1:${address === null || address === void 0 ? void 0 : address.port}`;
         };
+        this.squirrelDownloadedUpdate = false;
         return await new Promise((resolve, reject) => {
+          const cleanup = () => {
+            this.nativeUpdater.removeListener("error", fail);
+            this.nativeUpdater.removeListener("update-downloaded", ready);
+            this.server?.removeListener("error", fail);
+          };
+          const fail = (error) => { cleanup(); reject(error); };
+          const ready = () => { cleanup(); resolve([]); };
+          this.server.once("error", fail);
           const pass = (0, crypto_1.randomBytes)(64).toString("base64").replace(/\//g, "_").replace(/\+/g, "-");
           const authInfo = Buffer.from(`autoupdater:${pass}`, "ascii");
           const fileUrl = `/${(0, crypto_1.randomBytes)(64).toString("hex")}.zip`;
@@ -15483,13 +15502,6 @@ var require_MacUpdater = __commonJS({
               return;
             }
             log.info(`${fileUrl} requested by Squirrel.Mac, pipe ${downloadedFile}`);
-            let errorOccurred = false;
-            response.on("finish", () => {
-              if (!errorOccurred) {
-                this.nativeUpdater.removeListener("error", reject);
-                resolve([]);
-              }
-            });
             const readStream = (0, fs_1.createReadStream)(downloadedFile);
             readStream.on("error", (error) => {
               try {
@@ -15497,9 +15509,7 @@ var require_MacUpdater = __commonJS({
               } catch (e) {
                 log.warn(`cannot end response: ${e}`);
               }
-              errorOccurred = true;
-              this.nativeUpdater.removeListener("error", reject);
-              reject(new Error(`Cannot pipe "${downloadedFile}": ${error}`));
+              fail(new Error(`Cannot pipe "${downloadedFile}": ${error}`));
             });
             response.writeHead(200, {
               "Content-Type": "application/zip",
@@ -15510,19 +15520,24 @@ var require_MacUpdater = __commonJS({
           this.debug(`Proxy server for native Squirrel.Mac is starting to listen (${logContext})`);
           this.server.listen(0, "127.0.0.1", () => {
             this.debug(`Proxy server for native Squirrel.Mac is listening (address=${getServerUrl(this.server)}, ${logContext})`);
-            this.nativeUpdater.setFeedURL({
-              url: getServerUrl(this.server),
-              headers: {
-                "Cache-Control": "no-cache",
-                Authorization: `Basic ${authInfo.toString("base64")}`
+            try {
+              this.nativeUpdater.setFeedURL({
+                url: getServerUrl(this.server),
+                headers: {
+                  "Cache-Control": "no-cache",
+                  Authorization: `Basic ${authInfo.toString("base64")}`
+                }
+              });
+              this.dispatchUpdateDownloaded(event);
+              if (this.autoInstallOnAppQuit) {
+                this.nativeUpdater.once("error", fail);
+                this.nativeUpdater.once("update-downloaded", ready);
+                this.nativeUpdater.checkForUpdates();
+              } else {
+                ready();
               }
-            });
-            this.dispatchUpdateDownloaded(event);
-            if (this.autoInstallOnAppQuit) {
-              this.nativeUpdater.once("error", reject);
-              this.nativeUpdater.checkForUpdates();
-            } else {
-              resolve([]);
+            } catch (error) {
+              fail(error);
             }
           });
         });
@@ -15539,10 +15554,7 @@ var require_MacUpdater = __commonJS({
         if (this.squirrelDownloadedUpdate) {
           this.handleUpdateDownloaded();
         } else {
-          this.nativeUpdater.on("update-downloaded", () => this.handleUpdateDownloaded());
-          if (!this.autoInstallOnAppQuit) {
-            this.nativeUpdater.checkForUpdates();
-          }
+          throw new Error("The native Mac update is not ready to install.");
         }
       }
     };

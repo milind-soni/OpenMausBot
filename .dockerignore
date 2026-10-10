@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+dist
+dist-server
+dist-electron
+release
+.git
+.github
+.claude
+*.dmg
+*.zip
+*.log
+electron/resources/cloudflared*
+.omb-scratch
+.env
+**/.env
+**/.env.*

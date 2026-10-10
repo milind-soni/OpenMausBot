@@ -4,6 +4,7 @@ import {
   TRANSCRIPT_WINDOW_SIZE,
   expandWindowStart,
   focusWindowRange,
+  followWindowStart,
   resolveTranscriptWindow,
   tailWindowStart,
 } from "./transcript-window";
@@ -25,6 +26,39 @@ describe("tailWindowStart", () => {
 
   it("is zero for an empty thread", () => {
     expect(tailWindowStart(0)).toBe(0);
+  });
+});
+
+describe("followWindowStart", () => {
+  const turn = (asked: number, total: number) =>
+    Array.from({ length: total }, (_, i) => ({ role: i === asked ? "user" : "bot" }));
+
+  it("is the tail window when the newest message is inside it", () => {
+    expect(followWindowStart(turn(250, 300), 0)).toBe(180);
+  });
+
+  it("stops at the newest message when a long turn follows it", () => {
+    expect(followWindowStart(turn(100, 300), 0)).toBe(100);
+  });
+
+  it("stops at most one more window back", () => {
+    expect(followWindowStart(turn(60, 300), 0)).toBe(60);
+    expect(followWindowStart(turn(59, 300), 0)).toBe(180);
+  });
+
+  it("does not stop at a message that is already above the window", () => {
+    expect(followWindowStart(turn(100, 300), 150)).toBe(180);
+  });
+
+  it("is the tail window when the person has not written", () => {
+    expect(followWindowStart(turn(-1, 300), 0)).toBe(180);
+    expect(followWindowStart([], 0)).toBe(0);
+  });
+
+  it("moves back to the tail when the thread got shorter than the boundary allows", () => {
+    expect(followWindowStart(turn(450, 560), 500)).toBe(440);
+    expect(followWindowStart(turn(520, 560), 500)).toBe(440);
+    expect(followWindowStart(turn(-1, 20), 500)).toBe(0);
   });
 });
 

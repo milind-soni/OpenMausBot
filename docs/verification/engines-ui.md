@@ -1,0 +1,104 @@
+# Engine library: onboarding and Settings
+
+Use the actual renderer with sample engine statuses and a disposable server:
+
+```sh
+node --experimental-strip-types scripts/verify-engines-ui.ts
+```
+
+Open its printed `previewUrl`. The bottom toolbar switches between the real
+Settings modal and onboarding, applies the app's Midnight/Atelier skins, and
+toggles a synthetic Antigravity connection. **Onboarding preview** opens the
+welcome flow directly at the engines beat. Provider install, sign-in, path-save, and
+account-management requests are rejected by fixture-only middleware; no real
+provider login or user configuration is involved. A rejected setup request is
+useful for checking error presentation, not evidence that provider auth works.
+Icon updates are the exception: fixture middleware stores them only in the
+synthetic instances for the lifetime of the preview process.
+**Toggle sample ChatGPT plan** changes only the synthetic account state; it
+does not sign in or contact OpenAI.
+Vite's generated source cache stays in the checkout's ignored
+`.omb-scratch/engine-preview-vite` directory; fixture accounts, home, and app data
+remain disposable. Keeping these separate prevents late cache writes from
+recreating a removed fixture directory.
+
+## Checks
+
+1. Settings groups cards into Ready / Needs setup with two columns at 1280px;
+   onboarding uses one compact list with status pills and collapsed setup rows.
+   Both retain provider marks and the selected skin's colors. At 390px,
+   Settings cards become one column; no horizontal page overflow; onboarding Continue
+   and Settings Close remain reachable while the engine list scrolls.
+2. Expand Antigravity in Settings, expand **CLI path and updates**, choose
+   **Set CLI…**, and enter `/preview/keep-this-draft`. Click **Toggle sample
+   connection**. Its card moves into Ready while staying expanded and retaining
+   that unsaved path. Collapse/reopen the card; the draft must remain.
+3. In onboarding, toggle the sample connection. Group counts and Antigravity's
+   status change immediately without reopening onboarding or changing focus.
+   `Claude · Local` remains Ready despite having no cloud login.
+4. With Antigravity needing setup, click **Sign in with Google**. The synthetic
+   error appears and the button becomes enabled again. Settings must remain
+   closable. Real Google browser, callback and account flows are deliberately
+   not exercised by this fixture.
+5. Expand Codex/Claude and check that account identity and protected sign-out
+   controls are retained. Expand the advanced CLI disclosure to reach path,
+   reset and update controls. Tab to a card and press Enter/Space; its native
+   disclosure must work with a visible focus indicator.
+6. Expand Kimi to find **Install Kimi on this server**, and OpenCode to find
+   **Update OpenCode on this server**. Click each and confirm the fixture error
+   appears with its button usable again. Terminal commands remain under
+   **Prefer a terminal?**. These clicks never perform a real installation.
+7. Expand Claude and use **Add Claude account** inside its card. Enter an
+   account name, collapse/reopen the card, and confirm the draft remains.
+   Cancel, then repeat with **Add ChatGPT account** in the ChatGPT plan card.
+   Submit once to check that the fixture-only error stays inside that card and
+   the form remains editable. Neither action should appear below the engine
+   grid, in unrelated providers, or in read-only managed cards. Provider-icon
+   editing controls should not appear. Repeat at a 390px viewport.
+   Repeat with **Add Google account** inside Antigravity. Toggle its sample
+   connection and confirm `google@example.test` appears without losing the
+   account-name draft. A failed save must leave the draft editable. The hint
+   should explain selecting accounts in the model picker, not quota rotation.
+7. Expand Codex, choose **Google Gemini** under **Provider icon**, and reload.
+   The selected icon should persist while sibling instances keep their icons.
+   Upload a small PNG, JPEG, or WebP and check that it renders in the card and
+   picker. Reject unsupported or invalid images with a visible error. **Reset**
+   restores the default icon. Check the controls in both themes at desktop and
+   narrow widths. The server API test separately verifies on-disk persistence;
+   this preview's synthetic state does not survive process restart.
+8. Expand **ChatGPT plan**. Its setup card offers **Continue with ChatGPT**,
+   not a device code or terminal login. Toggle the sample plan connection:
+   the first-use dialog should focus **Got it**, fit at 390px, and explain
+   ChatGPT plan usage separately from MausBot Cloud. Dismiss it, disconnect
+   and reconnect the sample: it must not return. The connected card retains
+   **Using ChatGPT plan**, **Manage usage**, the synthetic account address,
+   and protected sign-out. Check Midnight and Atelier; no horizontal overflow.
+
+Automated coverage:
+
+```sh
+pnpm exec vitest run scripts/verify-engines-ui.test.mjs
+pnpm exec vitest run server/antigravity-account-api.test.ts server/drivers/antigravity-account.test.ts src/components/ChatGptPlanSignIn.interaction.test.ts
+pnpm exec vitest run src/components/EngineLibrary.test.ts src/components/EnginesSettings.test.ts src/components/EngineSetup.test.ts src/components/ClaudeAccountSettings.test.ts src/components/CodexAccountSettings.test.ts src/components/ClaudeSignIn.test.ts src/components/DeviceSignIn.test.ts src/components/GrokSignIn.interaction.test.ts src/components/EngineSetup.grok.test.ts src/components/EngineUpdateNotice.test.ts src/components/SettingsModal.appearance.test.ts src/components/ModelPicker.test.ts
+pnpm typecheck
+pnpm i18n:check
+pnpm build
+```
+
+Interrupt the foreground launcher to stop only its owned child and remove its
+temporary data. Keep the printed server log as evidence. Restore any temporary
+browser viewport override after responsive checks. This recipe does not prove
+real provider installations or sign-ins; use the separate
+[offline server sign-in recipe](server-settings.md) for the real auth boundary.
+
+The Antigravity HTTP fixture creates two independent accounts, rejects invalid
+and non-admin requests, switches a bot's model account, and restarts its isolated
+server to verify persistence. Identity tests mock Google's token and userinfo
+responses and cover caching, credential replacement and lookup failures. Neither
+uses a real Google account or proves live Google consent or quota behavior.
+
+Stopping during unfinished Vite dependency transforms can still report exit 13
+from `ui.close()`. The app server and its disposable data are cleaned first;
+verify those outcomes rather than treating that development-tool exit code as
+an installed-app failure. Ready preview shutdown exits 0; startup cancellation
+reports the launch-cancelled error.

@@ -18,6 +18,11 @@ export function createAuth(
     database: env.DB,
     trustedOrigins: [...config.allowedOrigins],
     logger: { disabled: true },
+    // Better Auth would otherwise delete expired verification rows inline on
+    // every OTP check: a SELECT and a DELETE, two serial D1 round trips. Expired
+    // codes are still rejected by their expiresAt check; index.ts runs the
+    // sweep after the sign-in response instead.
+    verification: { disableCleanup: true },
     rateLimit: {
       enabled: true,
       storage: "database",
@@ -65,6 +70,20 @@ export function createAuth(
 }
 
 export type ControlPlaneAuth = ReturnType<typeof createAuth>;
+
+/**
+ * The expired-verification cleanup that `verification.disableCleanup` turns
+ * off, as a single DELETE. It calls the adapter directly, so it skips
+ * verification delete hooks. None are registered (emailOTP and bearer add
+ * none); revisit this if databaseHooks are added or better-auth is upgraded.
+ */
+export async function deleteExpiredVerifications(auth: ControlPlaneAuth): Promise<void> {
+  const context = await auth.$context;
+  await context.adapter.deleteMany({
+    model: "verification",
+    where: [{ field: "expiresAt", operator: "lt", value: new Date() }],
+  });
+}
 
 export async function accountSession(request: Request, auth: ControlPlaneAuth) {
   const authorization = request.headers.get("authorization");

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  avatarCropRadius,
   botAvatarProfile,
   botAvatarCropSchema,
   botAvatarUrlFromStoredPath,
   botAvatarUrlSchema,
+  clampAvatarFocus,
+  clampAvatarZoom,
 } from "../shared/bot-avatar.ts";
 
 describe("bot avatar profile schema", () => {
@@ -34,6 +37,22 @@ describe("bot avatar profile schema", () => {
     expect(botAvatarUrlFromStoredPath("C:\\data\\attachments\\abc-123.jpg"))
       .toBe("/api/attachments/abc-123.jpg");
     expect(botAvatarUrlFromStoredPath("/tmp/attachments/avatar.svg")).toBeNull();
+  });
+
+  it("clamps zoom to 1–3 and focus to the picture", () => {
+    expect(clampAvatarZoom(2.226)).toBe(2.23);
+    expect(clampAvatarZoom(8)).toBe(3);
+    expect(clampAvatarZoom("wide")).toBe(1);
+    expect(clampAvatarFocus(-0.2)).toBe(0);
+    expect(clampAvatarFocus(1.4)).toBe(1);
+    expect(clampAvatarFocus(undefined)).toBe(0.5);
+  });
+
+  it("uses the photo crop's radius and does not round a mascot", () => {
+    expect(avatarCropRadius("circle")).toBe("50%");
+    expect(avatarCropRadius("rounded")).toBe("22%");
+    expect(avatarCropRadius("square")).toBe("0");
+    expect(avatarCropRadius("mascot")).toBe("0");
   });
 
   it("falls back safely for malformed persisted data", () => {

@@ -8,8 +8,8 @@
 # mac build — different trees under one version number. Run this from the
 # same commit as the mac build and attach the artifact to the release.
 #
-# Deliberately artifact-only: pushing straight to the separate releases
-# repo would need a cross-repo token this workflow has no business holding.
+# Deliberately artifact-only: the full release workflow is the one place
+# allowed to create a GitHub release.
 name: Package Windows
 
 on:
@@ -42,6 +42,12 @@ jobs:
         shell: bash
         run: rm -rf dist dist-server release
       - run: pnpm package:win
+      - name: Verify the bundled browser with an empty home
+        run: node scripts/smoke-browser-bundle.mjs --resources "${{ github.workspace }}/release/win-unpacked/resources"
+      - name: Verify the packaged server discovers its browser
+        env:
+          OMB_SMOKE_DIST: ${{ github.workspace }}/release/win-unpacked/resources/server
+        run: node scripts/smoke-packaged-server.mjs --browser-bundle "${{ github.workspace }}/release/win-unpacked/resources/browser-engine"
       - name: report what was built
         shell: bash
         run: |
@@ -61,6 +67,8 @@ jobs:
           # missing → utilityProcess.fork fails → the 🐭 "Couldn't start the
           # bot server" page
           [ -f "$res/server/index.js" ] || { echo "::error::missing $res/server/index.js"; fail=1; }
+          # missing → the desktop falls back to index.js with no compile cache
+          [ -f "$res/server/desktop-entry.mjs" ] || { echo "::error::missing $res/server/desktop-entry.mjs"; fail=1; }
           # missing → the server has nothing to serve → black window
           [ -f "$res/ui/index.html" ] || { echo "::error::missing $res/ui/index.html"; fail=1; }
           [ -f "$res/cloudflared/cloudflared.exe" ] || {
@@ -79,8 +87,8 @@ jobs:
           fi
           [ -f "$res/app-update.yml" ] || { echo "::error::missing $res/app-update.yml"; fail=1; }
           if [ -f "$res/app-update.yml" ]; then
-            grep -q "openmausbot-releases" "$res/app-update.yml" || {
-              echo "::error::app-update.yml does not point at openmausbot-releases"; fail=1; }
+            grep -Eq '^repo: OpenMausBot$' "$res/app-update.yml" || {
+              echo "::error::app-update.yml does not point at milind-soni/OpenMausBot"; fail=1; }
             # while the build is unsigned, a publisherName makes
             # electron-updater reject every update as untrusted
             if grep -q "publisherName" "$res/app-update.yml"; then

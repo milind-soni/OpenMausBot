@@ -5,13 +5,18 @@
 // asks before registering — the classic miss is a path the terminal sees
 // but this GUI app can't.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Loader2, TriangleAlert } from "lucide-react";
+import { Check, ChevronDown, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
-import { EngineGroupLabel } from "./EngineGroupLabel";
-import { ProviderMark } from "./ProviderIcons";
-import { splitEngineRail } from "@/lib/engine-rail";
+import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
 import { cn } from "@/lib/cn";
+import { useMenuMotion } from "./MenuMotion";
+import { t } from "@/lib/i18n";
+import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotice, isApiKeyEngine } from "./EngineSetup";
+import { AddClaudeAccount, ClaudeAccountSettings } from "./ClaudeAccountSettings";
+import { AddProviderAccount, CodexAccountSettings } from "./CodexAccountSettings";
+import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
+import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 
 interface ProbeResult {
   ok: boolean;
@@ -114,11 +119,11 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
               setSelected(e.target.value);
               setManual("");
             }}
-            aria-label={`${instance.displayName} detected CLI`}
+            aria-label={t("engines.detectedAria", { name: instance.displayName })}
             disabled={busy}
-            className="w-full appearance-none rounded-lg border border-hairline/40 bg-inset px-3 py-2 pr-8 font-mono text-[12px] text-ink focus:border-hairline focus:outline-none disabled:opacity-50"
+            className="w-full appearance-none rounded-lg border border-hairline/40 bg-inset px-3 py-2 pr-8 font-mono text-[12px] text-ink focus:outline-none disabled:opacity-50"
           >
-            <option value="">Select a detected binary…</option>
+            <option value="">{t("engines.selectBinary")}</option>
             {candidates.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
@@ -136,23 +141,20 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
           if (!value || !dirty) return; // nothing to save — same hint the disabled button gives
           save();
         }}
-        placeholder={candidates?.length ? "Enter path manually…" : "/absolute/path/to/cli"}
-        aria-label={`${instance.displayName} custom CLI path`}
+        placeholder={candidates?.length ? t("engines.manualPath") : "/absolute/path/to/cli"}
+        aria-label={t("engines.customAria", { name: instance.displayName })}
         spellCheck={false}
         disabled={busy}
-        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink placeholder:font-sans placeholder:text-ink-secondary focus:border-hairline focus:outline-none disabled:opacity-50"
+        className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink placeholder:font-sans placeholder:text-ink-secondary focus:outline-none disabled:opacity-50"
       />
       {probe && !probe.ok && probe.message && (
         <div role="alert" className="flex gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2.5 py-2 text-[12px] leading-relaxed text-warning">
           <TriangleAlert size={13} className="mt-0.5 shrink-0" />
-          <span>
-            Test failed — {probe.message}
-            {" "}Register this path anyway?
-          </span>
+          <span>{t("engines.testFailed", { message: probe.message })}</span>
         </div>
       )}
       {probe?.ok && probe.version && (
-        <div className="text-[12px] text-success">Test passed — {probe.version}</div>
+        <div className="text-[12px] text-success">{t("engines.testPassed", { version: probe.version })}</div>
       )}
       {error && <div role="alert" className="text-[12px] text-danger">{error}</div>}
       <div className="flex justify-end gap-2">
@@ -161,7 +163,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
           disabled={busy}
           className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"
         >
-          Cancel
+          {t("common.cancel")}
         </button>
         {probe && !probe.ok ? (
           <>
@@ -170,14 +172,14 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
               disabled={busy}
               className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"
             >
-              Edit path
+              {t("engines.editPath")}
             </button>
             <button
               onClick={() => persist()}
               disabled={busy}
               className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-danger hover:bg-raised-hover disabled:opacity-50"
             >
-              {saving ? <Loader2 size={13} className="animate-spin" /> : "Save anyway"}
+              {saving ? <Loader2 size={13} className="animate-spin" /> : t("engines.saveAnyway")}
             </button>
           </>
         ) : (
@@ -190,7 +192,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
               "disabled:cursor-not-allowed disabled:opacity-50",
             )}
           >
-            {busy ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />Save</>}
+            {busy ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />{t("common.save")}</>}
           </button>
         )}
       </div>
@@ -201,7 +203,10 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
 function EngineRow({ instance }: { instance: InstanceInfo }) {
   const { refreshInstances } = useStore();
   const [open, setOpen] = useState(false);
+  const cliMotion = useMenuMotion(open);
   const [switching, setSwitching] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [updatedVersion, setUpdatedVersion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const wasOpenFor = useRef<string | null>(null);
 
@@ -217,7 +222,7 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
   }, [instance.cli]);
 
   const reset = () => {
-    if (switching) return;
+    if (switching || updating) return;
     setSwitching(true);
     setError(null);
     api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, {
@@ -231,52 +236,134 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
       .finally(() => setSwitching(false));
   };
 
+  const updateClaude = () => {
+    if (switching || updating) return;
+    setUpdating(true);
+    setUpdatedVersion(null);
+    setError(null);
+    api(`/api/instances/${encodeURIComponent(instance.instanceId)}/claude-update`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    })
+      .then(async ({ version }: { version: string }) => {
+        setUpdatedVersion(version);
+        await Promise.resolve(refreshInstances()).catch(() => {});
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setUpdating(false));
+  };
+
+  const policyNote = instance.policy && <p className="mb-2 text-[12px] leading-relaxed text-ink-secondary">
+    <span className="font-medium text-ink">{t("policy.managedBy", { organization: instance.policy.organizationName })}</span> · {instance.policy.reason}
+  </p>;
+  // The trial's AI credit on My Cloud: what it is, and why it is not running when it is not.
+  if (instance.trialCredit) return <EngineCard instance={instance}>
+    <p data-trial-credit={instance.trialCredit} className="text-[13px] leading-relaxed text-ink-secondary">{t(instance.trialCredit === "used_up" ? "engines.trialCreditUsedUp"
+      : instance.trialCredit === "ended" ? "engines.trialCreditEnded" : engineReady(instance) ? "engines.trialCredit" : "engines.trialCreditOwn")}</p>
+  </EngineCard>;
+  if (instance.readOnly) return <EngineCard instance={instance}>
+    {policyNote}
+    <p className="text-[13px] leading-relaxed text-ink-secondary">{t("organization.managedEngine")}</p>
+    {!engineReady(instance) && <p className="mt-2 text-[12px] text-ink-secondary">{t("organization.engineUnavailable")}</p>}
+  </EngineCard>;
+
   return (
-    <div>
-      <div className="flex items-center gap-2 text-[13px]">
-        <span className={cn("size-1.5 shrink-0 rounded-full", instance.cli ? "bg-accent" : "bg-raised-hover")} />
-        <ProviderMark driverKind={instance.driverKind} size={14} />
-        <span className="shrink-0 text-ink">{instance.displayName}</span>
-        {instance.cli ? (
-          <span className="truncate font-mono text-[11.5px] text-accent" title={instance.cli}>
-            {instance.cli}
-          </span>
-        ) : (
-          instance.cliDefault && (
-            <span className="truncate text-[11px] text-ink-secondary">{instance.cliDefault} · default</span>
+    <EngineCard instance={instance}>
+      {policyNote}
+      {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} unframed />}
+      {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
+      {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" />}
+      {instance.snapshot.warning && <EngineWarningNotice warning={instance.snapshot.warning} className="mt-3" />}
+      {instance.claudeAccount && <ClaudeAccountSettings instance={instance} />}
+      {engineReady(instance) && instance.snapshot.authenticated === true && (
+        (instance.authentication?.method === "device-code" || instance.authentication?.method === "browser-pkce") && deviceSignInProvider(instance.driverKind) === "codex"
+          ? <CodexAccountSettings instance={instance} />
+          : instance.authentication?.method === "device-code"
+          ? <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t(DEVICE_SIGN_IN_COPY[deviceSignInProvider(instance.driverKind)].connectedAccount)}</p>
+          : instance.authentication?.method === "paste-code" && !instance.claudeAccount && (
+            <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t("engineSetup.claude.connectedAccount")}</p>
           )
-        )}
-        <span className="flex-1" />
-        {instance.cli && (
-          <button
-            onClick={reset}
-            disabled={switching}
-            className="shrink-0 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
-          >
-            {switching ? "Resetting…" : "Reset"}
-          </button>
-        )}
-        <button
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className={cn(
-            "shrink-0 rounded-lg border border-hairline/40 px-3 py-1 text-[12px]",
-            open ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
-          )}
-        >
-          Set CLI…
-        </button>
-      </div>
-      {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
-      {open && (
-        <CustomPicker
-          instance={instance}
-          cliDefault={instance.cliDefault}
-          onClose={() => setOpen(false)}
-          onSaved={refreshInstances}
-        />
       )}
-    </div>
+      {instance.freeUpSpace && <AntigravityFreeSpace instance={instance} />}
+      {instance.driverKind === "antigravityAgent" && (
+        <div className="mt-3 space-y-3">
+          {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
+          <AddProviderAccount antigravityInstanceId={instance.instanceId} />
+        </div>
+      )}
+      {instance.driverKind === "claudeAgent" && instance.access !== "custom" && (
+        <div className="mt-3"><AddClaudeAccount /></div>
+      )}
+      {instance.snapshot.chatgptPlan && !instance.snapshot.authenticationUnavailableReason && (
+        <div className="mt-3"><AddProviderAccount /></div>
+      )}
+      <details className="mt-4 border-t border-hairline/40 pt-3">
+        <summary className="cursor-pointer rounded-md py-1 text-[12px] font-medium text-ink-secondary outline-none hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">{t("engines.library.advanced")}</summary>
+        <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("engines.footer")}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
+          {instance.cli ? (
+            <span className="w-full break-all font-mono text-[11.5px] text-ink-secondary" title={instance.cli}>
+              {instance.cli}
+            </span>
+          ) : (
+            instance.cliDefault && (
+              <span className="break-all font-mono text-[11px] text-ink-secondary">{instance.cliDefault}</span>
+            )
+          )}
+          {instance.snapshot.version && (
+            <span className="break-all text-[11px] text-ink-secondary" title={instance.snapshot.version}>
+              {instance.snapshot.version}
+            </span>
+          )}
+          <span className="flex-1" />
+          {instance.driverKind === "claudeAgent" && (
+            <button
+              onClick={updateClaude}
+              disabled={switching || updating}
+              className="flex shrink-0 items-center gap-1 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
+            >
+              {updating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {updating ? t("engines.updating") : t("engines.updateClaude")}
+            </button>
+          )}
+          {instance.cli && (
+            <button
+              onClick={reset}
+              disabled={switching || updating}
+              className="shrink-0 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
+            >
+              {switching ? t("engines.resetting") : t("engines.reset")}
+            </button>
+          )}
+          <button
+            onClick={() => setOpen((v) => !v)}
+            disabled={updating}
+            aria-expanded={open}
+            className={cn(
+              "shrink-0 rounded-lg border border-hairline/40 px-3 py-1 text-[12px]",
+              open ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
+              "disabled:opacity-50",
+            )}
+          >
+            {t("engines.setCli")}
+          </button>
+        </div>
+        {updatedVersion && (
+          <div role="status" className="mt-1 text-[12px] text-success">{t("engines.claudeUpdated", { version: updatedVersion })}</div>
+        )}
+        {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
+        {cliMotion.shown && (
+          <div className={cliMotion.className} {...cliMotion.exitProps}>
+            <CustomPicker
+              instance={instance}
+              cliDefault={instance.cliDefault}
+              onClose={() => setOpen(false)}
+              onSaved={refreshInstances}
+            />
+          </div>
+        )}
+      </details>
+    </EngineCard>
   );
 }
 
@@ -285,32 +372,20 @@ export function EnginesSettings() {
   // every KNOWN-driver instance has cliDefault; unknown-driver shadows have
   // neither unless an override was set. Including them keeps a Reset-able row
   // (and a Set CLI… path) for engines the running build doesn't recognize.
-  const rows = state.instances.filter((i) => i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable");
+  // Key engines have no CLI; keep them once their key is saved, or the card
+  // (and the only way back to a mistyped key) vanishes (MOCA-292).
+  const rows = state.instances.filter((i) => i.readOnly || i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable" || isApiKeyEngine(i));
 
   return (
-    <div className="flex flex-col gap-5">
-      {rows.length === 0 && (
-        <div className="text-[13px] text-ink-secondary">No CLI engines detected yet.</div>
-      )}
-      {(() => {
-        const { subscription, custom } = splitEngineRail(rows);
-        return (
-          <>
-            {subscription.length > 0 && <EngineGroupLabel>Cloud</EngineGroupLabel>}
-            {subscription.map((i) => (
-              <EngineRow key={i.instanceId} instance={i} />
-            ))}
-            {custom.length > 0 && <EngineGroupLabel className="pt-1">Local</EngineGroupLabel>}
-            {custom.map((i) => (
-              <EngineRow key={i.instanceId} instance={i} />
-            ))}
-          </>
-        );
-      })()}
-      <div className="text-[12px] leading-relaxed text-ink-secondary">
-        Set CLI points an engine at a specific binary — a versioned build, a wrapper script, or an
-        absolute path. Saving reloads providers and interrupts any running turns.
+    <div className="flex min-w-0 flex-col gap-6 pb-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-60">
+          <h1 className="text-[22px] font-semibold tracking-tight text-ink">{t("settings.engines.title")}</h1>
+          <p className="mt-2 max-w-lg text-[13px] leading-relaxed text-ink-secondary">{t("engines.library.intro")}</p>
+        </div>
+        <RefreshEngines />
       </div>
+      <EngineSections instances={rows} renderEngine={(instance) => <EngineRow instance={instance} />} />
     </div>
   );
 }

@@ -5,6 +5,40 @@ import { describe, expect, it, vi } from "vitest";
 import { createSecureCredentialState } from "./secure-credential-state.mjs";
 
 describe("serialized secure credential state", () => {
+  // A launch that could not READ credentials.bin starts from {}. Writing a
+  // document derived from {} would not "add a key" — it would replace every
+  // secret in the file with nothing, and orphan the connected-apps identity
+  // the user already authorized. So such a state does not write at all.
+  it("refuses to persist when it was built from an unreadable store", async () => {
+    const persist = vi.fn();
+    const state = createSecureCredentialState({}, persist, { writable: false });
+
+    await expect(state.update((credentials) => ({ ...credentials, xaiApiKey: "new" }))).rejects.toThrow(
+      /credential store/i,
+    );
+    expect(persist).not.toHaveBeenCalled();
+  });
+
+  it("still answers reads when it cannot write, so callers see an empty view rather than a crash", async () => {
+    const state = createSecureCredentialState({}, vi.fn(), { writable: false });
+    expect(state.read()).toEqual({});
+  });
+
+  it("writes normally when the store was readable", async () => {
+    const persist = vi.fn().mockResolvedValue(undefined);
+    const state = createSecureCredentialState({ boxToken: "old" }, persist, { writable: true });
+
+    await state.update((credentials) => ({ ...credentials, boxToken: "new" }));
+    expect(persist).toHaveBeenCalledWith({ boxToken: "new" });
+  });
+
+  it("writes normally when no options are passed at all", async () => {
+    const persist = vi.fn().mockResolvedValue(undefined);
+    const state = createSecureCredentialState({}, persist);
+    await state.update(() => ({ boxToken: "x" }));
+    expect(persist).toHaveBeenCalled();
+  });
+
   it("derives concurrent changes from the latest committed copy", async () => {
     const writes = [];
     let releaseFirst;

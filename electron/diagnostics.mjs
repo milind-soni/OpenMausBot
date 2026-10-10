@@ -1,22 +1,46 @@
 // One-click bug-report bundle: app facts, a safe config summary and the
-// server.log tail, formatted for pasting into a public issue. Pure string
-// work lives here so redaction stays unit-testable without Electron; main.mjs
-// owns the fs and dialog plumbing. Safety is layered: the collector never
-// reads secret fields at all (only the server's booleans-only config status),
+// server/updater log tails, formatted for pasting into a public issue. Formatting and
+// bounded log reads live here so redaction and path safety stay unit-testable
+// without Electron; main.mjs owns the dialog plumbing. Safety is layered: the
+// collector never reads secret fields at all (only the server's booleans-only config status),
 // and everything that does get in is scrubbed again here before it lands on
 // disk — so a future collector mistake still cannot leak a credential.
 //
+import fs from "node:fs";
+
 // CREDENTIAL_ENV_NAMES mirrors WORKSPACE_CREDENTIAL_ENV (server/config.ts).
 // Duplicated because the desktop shell cannot import TypeScript; a test
 // asserts the two lists never drift apart.
 export const CREDENTIAL_ENV_NAMES = [
   "XAI_API_KEY",
+  "MISTRAL_API_KEY",
+  "CEREBRAS_API_KEY",
+  "OMB_ANTHROPIC_API_KEY",
+  "OMB_ANTHROPIC_API_URL",
+  "OMB_HOSTED_MODEL_TOKEN",
+  "OMB_HOSTED_MODELS",
+  "OPENAI_COMPAT_API_KEY",
+  "OPENAI_COMPAT_URL",
+  "OMB_OPENAI_API_KEY",
+  "OMB_OPENROUTER_API_KEY",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
   "OMB_TTS_KEY",
+  "OMB_FISH_AUDIO_API_KEY",
+  "OMB_JEV_API_KEY",
   "OMB_OPENAI_IMAGE_KEY",
+  "OMB_CUSTOM_IMAGE_KEY",
+  "OMB_OPENAI_LIVE_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
+  "OMB_CLOUD_BOAT_TOKEN",
+  "OMB_CLOUD_VOICE_TOKEN",
+  "OMB_CLOUD_DECIDER_TOKEN",
+  "OMB_CLOUD_AI_TOKEN",
+  // Browser capability files and app-owned state paths are private even
+  // though they are not traditional API credentials.
+  "OMB_BROWSER_CONNECTION",
+  "OMB_USER_DATA",
 ];
 
 // Credential-shaped tokens (server/redact.ts parity): unmistakable formats
@@ -33,9 +57,10 @@ const CREDENTIAL_TOKEN_FORMATS = [
   /\bnpm_[A-Za-z0-9]{20,}/g,
 ];
 const KEY_VALUE_PAIR =
-  /\b([A-Za-z0-9_.-]*(?:api[_-]?key|apikey|secret|token|password|passwd|authorization|auth[_-]?token|access[_-]?key|private[_-]?key)s?)\s*[:=]\s*("[^"]*"|'[^']*'|[^\s"',;)\]}]+)/gi;
+  /\b([A-Za-z0-9_.-]*(?:api[_-]?key|apikey|secret|token|password|passwd|authorization|auth[_-]?token|access[_-]?key|private[_-]?key)s?)["']?\s*[:=]\s*("[^"]*"|'[^']*'|[^\s"',;)\]}]+)/gi;
 const AUTHORIZATION =
-  /\b(authorization)\s*[:=]\s*(?:"|')?([A-Za-z][A-Za-z0-9_-]*\s+[A-Za-z0-9._~+/=-]+)(?:"|')?/gi;
+  /\b(authorization)["']?\s*[:=]\s*(?:"|')?([A-Za-z][A-Za-z0-9_-]*\s+[A-Za-z0-9._~+/=-]+)(?:"|')?/gi;
+const COOKIE = /\b((?:set-)?cookie)["']?\s*[:=]\s*("[^"\r\n]*"|'[^'\r\n]*'|[^\r\n]+)/gi;
 const BEARER = /(\bbearer\s+)([A-Za-z0-9._~+/=-]{8,})/gi;
 const PEM_BLOCK =
   /(-----BEGIN [A-Z ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----)/g;
@@ -49,14 +74,24 @@ const VALUE_PART = String.raw`("[^"]*"|'[^']*'|[^\s"',;)\]}]+)`;
 
 export function redactSecretsInLine(line) {
   let out = String(line ?? "");
+  // Updater HTTP errors include signed redirect URLs. Keep the host/path for
+  // diagnosis, but never export userinfo or any query/fragment, even when a
+  // provider gives its capability an unfamiliar or percent-encoded name.
+  out = out.replace(/\bhttps?:\/\/[^\s"'<>]+/gi, (url) => {
+    const query = url.search(/[?#]/);
+    const address = query < 0 ? url : url.slice(0, query);
+    return address.replace(/^(https?:\/\/)[^/]*@/i, "$1«redacted credentials»@")
+      + (query < 0 ? "" : "?«redacted URL parameters»");
+  });
   const alreadyMasked = (value) => String(value).includes("«redacted");
   for (const name of CREDENTIAL_ENV_NAMES) {
     out = out.replace(
-      new RegExp(`\\b(${name})\\s*[:=]\\s*${VALUE_PART}`, "gi"),
+      new RegExp(`\\b(${name})["']?\\s*[:=]\\s*${VALUE_PART}`, "gi"),
       (_match, key, value) => `${key}=${mask(unquote(value))}`,
     );
   }
   out = out.replace(AUTHORIZATION, (_match, key, value) => `${key}=${mask(value)}`);
+  out = out.replace(COOKIE, (_match, key, value) => `${key}=${mask(unquote(value))}`);
   out = out.replace(BEARER, (_match, lead, token) => `${lead}${mask(token)}`);
   out = out.replace(PEM_BLOCK, (_match, open, close) => `${open}«redacted private key»${close}`);
   out = out.replace(KEY_VALUE_PAIR, (_match, key, value) =>
@@ -76,6 +111,154 @@ export function decodeLogTail(buffer, truncated = false) {
     complete = newline < 0 ? buffer.subarray(0, 0) : buffer.subarray(newline + 1);
   }
   return { tail: complete.toString("utf8"), bytes: complete.length };
+}
+
+/** Read a bounded regular-file tail without following a replaced log-path
+ * symlink into unrelated user data. The pre/post-open identity check closes
+ * the Windows gap where O_NOFOLLOW is unavailable; POSIX uses both. */
+export function readSafeLogTail(logPath, maxBytes = 256 * 1024, platform = process.platform) {
+  let handle = null;
+  try {
+    const before = fs.lstatSync(logPath);
+    if (!before.isFile() || before.nlink !== 1) return null;
+    const flags = fs.constants.O_RDONLY | (platform === "win32" ? 0 : fs.constants.O_NOFOLLOW);
+    handle = fs.openSync(logPath, flags);
+    const after = fs.fstatSync(handle);
+    if (!after.isFile() || after.nlink !== 1) return null;
+    if (before.dev !== after.dev || before.ino !== after.ino) return null;
+    const start = Math.max(0, after.size - maxBytes);
+    const buffer = Buffer.alloc(after.size - start);
+    fs.readSync(handle, buffer, 0, buffer.length, start);
+    return decodeLogTail(buffer, start > 0);
+  } catch {
+    return null;
+  } finally {
+    if (handle !== null) {
+      try {
+        fs.closeSync(handle);
+      } catch {}
+    }
+  }
+}
+
+// Desktop crash records are written synchronously from Electron's main
+// process, including from uncaughtExceptionMonitor where an async stream may
+// never flush. Keep them deliberately metadata-only: no URL, title, error
+// message, command line or absolute path can reach the public diagnostics
+// export. Main-process failures retain only their origin and standard error
+// class, enough to distinguish a genuine fatal path without exposing content.
+const PROCESS_GONE_REASONS = new Set([
+  "abnormal-exit",
+  "clean-exit",
+  "crashed",
+  "integrity-failure",
+  "killed",
+  "launch-failed",
+  "oom",
+]);
+const CHILD_PROCESS_TYPES = new Set([
+  "GPU",
+  "Pepper Plugin",
+  "Pepper Plugin Broker",
+  "Sandbox helper",
+  "Unknown",
+  "Utility",
+  "Zygote",
+]);
+const MAIN_FAILURE_ORIGINS = new Set(["uncaughtException", "unhandledRejection"]);
+const ERROR_NAMES = new Set([
+  "AggregateError",
+  "Error",
+  "EvalError",
+  "RangeError",
+  "ReferenceError",
+  "SyntaxError",
+  "TypeError",
+  "URIError",
+]);
+
+function known(value, allowed, fallback = "unknown") {
+  return typeof value === "string" && allowed.has(value) ? value.replaceAll(" ", "-") : fallback;
+}
+
+function exitCode(value) {
+  return Number.isSafeInteger(value) ? value : "unknown";
+}
+
+function safeErrorName(error) {
+  try {
+    return known(error?.name, ERROR_NAMES, "Error");
+  } catch {
+    return "Error";
+  }
+}
+
+/** Build one privacy-safe line for desktop-crashes.log. Unknown event shapes
+ * are dropped rather than serialised, so new Electron fields cannot leak by
+ * accident. clean-exit is normal lifecycle noise and is not a crash record. */
+export function formatDesktopCrashRecord(event = {}) {
+  try {
+    if (event.kind === "renderer") {
+      const reason = known(event.reason, PROCESS_GONE_REASONS);
+      if (reason === "clean-exit") return null;
+      const surface = event.surface === "main-window" ? "main-window" : "auxiliary";
+      return `event=render-process-gone surface=${surface} reason=${reason} exitCode=${exitCode(event.exitCode)}`;
+    }
+    if (event.kind === "child") {
+      const reason = known(event.reason, PROCESS_GONE_REASONS);
+      if (reason === "clean-exit") return null;
+      const type = known(event.type, CHILD_PROCESS_TYPES);
+      return `event=child-process-gone type=${type} reason=${reason} exitCode=${exitCode(event.exitCode)}`;
+    }
+    if (event.kind === "main") {
+      const origin = known(event.origin, MAIN_FAILURE_ORIGINS, "uncaughtException");
+      return `event=main-process-failure origin=${origin} error=${safeErrorName(event.error)}`;
+    }
+  } catch {
+    // Crash reporting must be safer than the failure it is trying to record.
+  }
+  return null;
+}
+
+/** Register Electron/Node crash observers without changing their lifecycle.
+ * Dependencies are injected so the exact event wiring stays unit-testable
+ * without importing Electron. The returned disposer is primarily for tests;
+ * production keeps these observers for the lifetime of the app. */
+export function installDesktopCrashListeners({
+  appTarget,
+  processTarget,
+  record,
+  isShuttingDown = () => false,
+  mainWebContents = () => null,
+}) {
+  const onMainFailure = (error, origin) => record({ kind: "main", error, origin });
+  const onRendererGone = (_event, contents, details) => {
+    if (isShuttingDown()) return;
+    record({
+      kind: "renderer",
+      surface: contents === mainWebContents() ? "main-window" : "auxiliary",
+      reason: details?.reason,
+      exitCode: details?.exitCode,
+    });
+  };
+  const onChildGone = (_event, details) => {
+    if (isShuttingDown()) return;
+    record({
+      kind: "child",
+      type: details?.type,
+      reason: details?.reason,
+      exitCode: details?.exitCode,
+    });
+  };
+
+  processTarget.on("uncaughtExceptionMonitor", onMainFailure);
+  appTarget.on("render-process-gone", onRendererGone);
+  appTarget.on("child-process-gone", onChildGone);
+  return () => {
+    processTarget.off("uncaughtExceptionMonitor", onMainFailure);
+    appTarget.off("render-process-gone", onRendererGone);
+    appTarget.off("child-process-gone", onChildGone);
+  };
 }
 
 const APP_INFO_KEYS = ["version", "platform", "arch", "electron", "node", "packaged", "uptimeSeconds"];
@@ -107,6 +290,8 @@ function flattenSummary(input, prefix = "", depth = 0, out = {}) {
 export function buildDiagnosticsReport({
   appInfo = {},
   configSummary = {},
+  desktopLogTail,
+  updaterLogTail,
   logTail,
   now = new Date().toISOString(),
 } = {}) {
@@ -131,11 +316,25 @@ export function buildDiagnosticsReport({
   }
   if (!shown) lines.push("(no configuration summary available)");
   lines.push("");
+  lines.push("## Desktop crash events — privacy-safe metadata only");
+  if (desktopLogTail && desktopLogTail.trim()) {
+    for (const line of redactSecretsInLine(desktopLogTail).split(/\r?\n/)) lines.push(line);
+  } else {
+    lines.push("(no desktop crash events available)");
+  }
+  lines.push("");
   lines.push(logTail && logTail.trim() ? "## Server log tail — known credential patterns auto-masked" : "## Server log tail");
   if (logTail && logTail.trim()) {
     for (const line of redactSecretsInLine(logTail).split(/\r?\n/)) lines.push(line);
   } else {
     lines.push("(server log unavailable)");
+  }
+  lines.push("");
+  lines.push("## Updater log tail — credentials and URL parameters auto-masked");
+  if (updaterLogTail && updaterLogTail.trim()) {
+    for (const line of redactSecretsInLine(updaterLogTail).split(/\r?\n/)) lines.push(line);
+  } else {
+    lines.push("(updater log unavailable)");
   }
   lines.push("");
   return lines.join("\n");

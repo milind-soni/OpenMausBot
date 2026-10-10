@@ -1,71 +1,70 @@
-export interface ChiefTeamMember {
-  id: string;
-  name: string;
-  title?: string;
-  description?: string;
-  busy?: boolean;
-  hidden?: boolean;
-  section?: string;
-}
+import { peerName, renderRoster, reachablePeers, type RosterMember } from "./peer-roster.ts";
 
-// The roster is interpolated into a TRUSTED bot's system prompt on every
-// turn, and its inputs (name/title/description) are user-editable and — via
-// team import — third-party-authored. Caps bound both the token spend and
-// how much room an imported persona gets to talk to the Chief with system
-// authority. agents-proxy applies the same discipline (120-char list_bots
-// descriptions); these are the roster's own limits.
+export type ChiefTeamMember = RosterMember;
+
+// The Chief's roster stays wider than an ordinary bot's (peer-roster.ts caps
+// that one at a dozen): staffing the section is this bot's whole job, so it
+// reads the team as a directory rather than as a nudge. The field-level caps
+// and the one-line flattening are shared, so the widest roster in the app is
+// still the safest place for an imported persona to land.
 const ROSTER_MAX_BOTS = 40;
-const ROSTER_NAME_MAX = 80;
-const ROSTER_ROLE_MAX = 120;
-const ROSTER_ABOUT_MAX = 200;
-
-const clip = (value: string, max: number) => (value.length > max ? `${value.slice(0, max - 1)}…` : value);
 
 const sectionKey = (section?: string): string => section?.trim() || "";
 
 /** Dynamic system context for a section's Chief of Staff.
  * It names the current team on every turn, while list_bots remains the
- * authoritative tool for IDs and live availability at delegation time. */
+ * authoritative tool for IDs and live availability at delegation time.
+ * Who is busy right now is not part of it: that changes turn to turn, so it
+ * rides the volatile half (teammateAvailabilityPrompt in peer-roster.ts). */
 export function chiefOfStaffSystemPrompt(
   chiefId: string,
   bots: ChiefTeamMember[],
   canDelegate: boolean,
+  boundedCoordination = false,
 ): string {
   const chief = bots.find((bot) => bot.id === chiefId);
   const chiefSection = sectionKey(chief?.section);
-  const sectionName = chiefSection || "General";
-  const team = bots.filter(
-    (bot) => bot.id !== chiefId && !bot.hidden && sectionKey(bot.section) === chiefSection,
-  );
-  const listed = team.slice(0, ROSTER_MAX_BOTS);
-  const overflow = team.length - listed.length;
-  const roster = team.length
-    ? listed
-        .map((bot) => {
-          const name = clip(bot.name, ROSTER_NAME_MAX);
-          const role = clip(bot.title?.trim() || "General assistant", ROSTER_ROLE_MAX);
-          const about = bot.description?.trim();
-          const availability = bot.busy ? "working right now" : "available";
-          return `- ${name} — ${role}${about ? `: ${clip(about, ROSTER_ABOUT_MAX)}` : ""} (${availability})`;
-        })
-        .join("\n") + (overflow > 0 ? `\n- …and ${overflow} more (use list_bots for the full roster).` : "")
-    : "- No other visible bots are available yet.";
+  const sectionName = peerName(chiefSection) || "General";
+  // A Chief with its own allow-list is bound by it here too: the roster and
+  // the endpoints must agree, or the prompt names teammates the tools will
+  // then refuse to reach.
+  const team = reachablePeers(bots, chief ?? { id: chiefId, name: "" });
+  // `about: true` keeps the blurb the Chief staffs from. The ordinary-bot
+  // roster drops it (peer-roster.ts); widening the Chief's existing exposure
+  // was never in scope, and narrowing it here would silently change how a
+  // Chief picks a specialist.
+  const roster = renderRoster(team, {
+    max: ROSTER_MAX_BOTS,
+    empty: "- No other visible bots are available yet.",
+    about: true,
+  });
 
   const delegation = canDelegate
-    ? [
-        "Use list_bots to confirm the live roster and IDs. Use ask_bot when a teammate is better suited to part of the request.",
-        "When the user asks you to assemble a team, use create_bot for each genuinely useful specialist. Give each one a clear role and instructions, then use delegate_bot to assign its work. Do not create duplicate or unnecessary bots.",
-        "Delegate with a clear, self-contained brief and wait for the teammate's actual reply before claiming its work is complete.",
-        "You may consult more than one teammate when the request genuinely benefits, then combine their results into one coherent answer.",
+    ? boundedCoordination
+      ? "Use list_bots or list_room_targets for the live reachable roster. Use coordinate_bots to ask actual teammates for advice or assign concrete work. Give clear briefs, then end your turn; you resume automatically after their results return. Leads can coordinate their own specialists. Do not poll, send acknowledgements as new work, or substitute native helpers for named bots. On return, verify the requested outcome, resolve decisions within the user's scope, request concrete corrections with rework=true when necessary, and return one consolidated answer. Consultations are advice, not proof that work or tests ran. A refusal from coordinate_bots means nothing was sent: fix what it names (usually the id — copy it from list_bots or your roster; a unique teammate name also works) and retry, and never describe a handoff the tool did not accept."
+      : [
+        "Use list_bots to confirm the live roster and IDs. When assigning work to a teammate, use delegate_bot: it returns immediately, keeps you available to the user, and delivers the teammate's outcome back into this conversation automatically — success or failure. When the result arrives you are woken with it: report it to the user and act. If the teammate fails or stalls, tell the user plainly and decide the next step yourself.",
+        "After delegate_bot accepts the task, acknowledge the handoff and continue with any independent work or end your turn. Do not call wait_delegation or repeatedly poll check_delegation in the same turn.",
+        "Use ask_bot only for a brief consultation whose answer you must have before writing your current response. Never use ask_bot for an assigned task, background work, or anything potentially long-running.",
+        "Delegate with a clear, self-contained brief. Say that the task is assigned, not completed; only claim completion after the teammate's result has actually arrived. A refusal from delegate_bot or ask_bot means nothing was sent: fix what it names (usually the id — copy it from list_bots or your roster) and retry.",
+        "You may assign work to more than one teammate when the request genuinely benefits. Stay responsive while they work, then combine their returned results when the user asks for a synthesis.",
       ].join(" ")
     : "Your current engine cannot contact teammates. Be honest about that limitation and ask the user to choose a delegation-compatible engine before promising coordinated work.";
 
   return [
     `You are the Chief of Staff for the ${sectionName} section. You are the user's primary contact for this section's team of bots.`,
+    chief?.managedSections?.length
+      ? `The owner also allows you to coordinate and propose setup changes for these teams: ${chief.managedSections.map(s => peerName(s) || "General").join(", ")}. You remain the user's single point of contact. This does not grant other bots your access, change their tool permissions, or expose unrelated conversation history. Use list_bots for the actual reachable roster.`
+      : "",
     "Own the outcome: understand the request, decide what to handle yourself, coordinate the right specialists when useful, and return one concise consolidated answer.",
     "Do not delegate trivial work merely to appear busy. Never invent a teammate's progress or result. Normal permission and approval rules still apply.",
+    canDelegate
+      ? "Incidents: when a teammate's run fails, stalls or cannot start, OpenMausBot reports it to you in your \"Team incidents\" thread with a link to the thread. Read the report, then either call retry_thread to resume that thread where it stopped, delegate_bot with a corrected brief when the request itself must change, or — when only the person can fix the cause (a sign-in, a missing credential, an unanswered question, a setting) — say so plainly and stop. Never retry the same thread more than twice; report what failed and what you did in one or two sentences."
+      : "",
     delegation,
-    `Current ${sectionName} section team:`,
+    canDelegate ? "When the user asks you to assemble or configure a team, use list_team_setup for the exact authorized teams, bot IDs and model catalog, then propose_team_setup once with all named specialists and their profile/model changes. Include new teams explicitly; the plan covers their creation and your access. Existing thread models and other bots' execution permissions stay unchanged. Follow the tool result: granted Full Access may apply the plan immediately; after an applied result, continue already-requested work without another confirmation. Only if review is pending, end your turn: the user's decision automatically resumes you once with a structured result. Report failed or cancelled results honestly. Do not ask for another yes, poll, or repeat the proposal. After successful setup, use the available coordination tools for already requested work. Use create_bot only for a single specialist when no combined setup was requested. For explicitly requested bot deletion, use propose_bot_deletion separately and follow its applied or pending result too. Do not create duplicate or unnecessary bots." : "",
+    canDelegate ? "If the requested work clearly needs a specialist your team lacks and the user did not ask for one, you may suggest it with create_bot and suggestion: true. Keep at most one suggestion open in a conversation. If the user chooses Not now, do not suggest another specialist in that conversation unless they ask." : "",
+    chief?.managedSections?.length ? "Reachable teammates in your allowed teams:" : `Current ${sectionName} section team:`,
     roster,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }

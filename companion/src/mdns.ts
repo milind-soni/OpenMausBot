@@ -184,9 +184,48 @@ export function decodeMessage(buf: Buffer): DnsMessage | null {
   }
 }
 
+/**
+ * May this record tell a client to discard what it already holds?
+ *
+ * The cache-flush bit means "everything else you have cached for this name
+ * and type is stale, drop it" (RFC 6762 §10.2), and two rules keep it off a
+ * record here:
+ *
+ * - **Shared records (§10.2).** The PTR of `_openmausbot._tcp.local` is
+ *   shared: every computer running the companion answers that same name with
+ *   its own instance, and the service-type enumeration PTR is shared wider
+ *   still. Flushing one tells the client to throw away the instances the
+ *   other machines advertised, so the bit is forbidden on both.
+ * - **Legacy-unicast replies (§6.7).** They go to a resolver with no mDNS
+ *   cache to invalidate, which reads the top class bit as part of the class,
+ *   so nothing in such a response may carry it.
+ *
+ * The rrtype test below is a shorthand that holds *for the records this file
+ * builds*, and not a general rule: §2 defines shared versus unique over the
+ * RRset, not over the type, so a PTR is not inherently shared nor an SRV
+ * inherently unique. `serviceRecords` emits exactly four RRsets — two shared
+ * PTRs, and SRV/TXT/A on names derived from this machine — and no other
+ * shared type is constructed anywhere here, which is what makes the
+ * shorthand safe. Add a record type and this predicate is the thing to
+ * revisit.
+ *
+ * Nor does "unique" mean *verified* unique: §8.3 and §10.2 want the bit only
+ * on a name defended by probing, and this responder deliberately does not
+ * probe (see the note at the top of this file). Marking SRV/TXT/A is how a
+ * client learns an address changed instead of holding the old one alongside
+ * the new for its TTL — but the claim of sole ownership rests on the hashed
+ * host name, not on §8.1. That gap predates this function and is unchanged
+ * by it; the bit simply stopped going where the RFC forbids it outright.
+ */
+function mayFlush(record: ResourceRecord, legacy: boolean): boolean {
+  return !legacy && record.type !== TYPE.PTR;
+}
+
 /** One resource record on the wire. `ttlOverride` is how a goodbye is sent:
- * the same records, TTL 0, meaning "forget what I told you". */
-function encodeRecord(record: ResourceRecord, ttlOverride?: number): Buffer {
+ * the same records, TTL 0, meaning "forget what I told you". `flush` is the
+ * caller's answer to `mayFlush` — stated at every call site rather than
+ * defaulted, because the default that used to be here was "always". */
+function encodeRecord(record: ResourceRecord, ttlOverride: number | undefined, flush: boolean): Buffer {
   let rdata: Buffer;
   let ttl: number;
   switch (record.type) {
@@ -228,7 +267,7 @@ function encodeRecord(record: ResourceRecord, ttlOverride?: number): Buffer {
   const name = encodeName(record.name);
   const fixed = Buffer.alloc(10);
   fixed.writeUInt16BE(record.type, 0);
-  fixed.writeUInt16BE(CLASS_IN | FLUSH, 2);
+  fixed.writeUInt16BE(flush ? CLASS_IN | FLUSH : CLASS_IN, 2);
   fixed.writeUInt32BE(ttlOverride ?? ttl, 4);
   fixed.writeUInt16BE(rdata.length, 8);
   return Buffer.concat([name, fixed, rdata]);
@@ -237,9 +276,13 @@ function encodeRecord(record: ResourceRecord, ttlOverride?: number): Buffer {
 export function encodeResponse(
   answers: ResourceRecord[],
   additionals: ResourceRecord[] = [],
-  opts: { id?: number; ttl?: number; questions?: Question[] } = {},
+  opts: { id?: number; ttl?: number; questions?: Question[]; legacy?: boolean } = {},
 ): Buffer {
   const questions = opts.questions ?? [];
+  // Carried explicitly rather than inferred from the echoed questions: the
+  // echo is what §6.7 asks for, the flush policy is a separate rule of the
+  // same section, and tying one to the other hides the second.
+  const legacy = opts.legacy ?? false;
   const header = Buffer.alloc(12);
   header.writeUInt16BE(opts.id ?? 0, 0);
   header.writeUInt16BE(0x8400, 2); // QR=1 (response), AA=1 (authoritative)
@@ -258,8 +301,8 @@ export function encodeResponse(
   return Buffer.concat([
     header,
     ...questionBytes,
-    ...answers.map((record) => encodeRecord(record, opts.ttl)),
-    ...additionals.map((record) => encodeRecord(record, opts.ttl)),
+    ...answers.map((record) => encodeRecord(record, opts.ttl, mayFlush(record, legacy))),
+    ...additionals.map((record) => encodeRecord(record, opts.ttl, mayFlush(record, legacy))),
   ]);
 }
 
@@ -369,6 +412,7 @@ export function answersFor(
  * characters, and inside the 63-byte limit even in UTF-8. */
 export function dnsLabel(text: string, fallback = "OpenMausBot"): string {
   let label = text
+    // oxlint-disable-next-line no-control-regex -- control characters are not valid in a DNS label
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .replace(/\./g, " ")
     .trim();
@@ -630,7 +674,7 @@ export class MdnsResponder {
     const packet = encodeResponse(
       answers,
       additionals,
-      legacy ? { id: message.id, questions: message.questions } : {},
+      legacy ? { id: message.id, questions: message.questions, legacy: true } : {},
     );
     try {
       // A unicast answer goes back the way the question came — the kernel

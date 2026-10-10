@@ -14,7 +14,14 @@ type PaletteEntry =
   | { kind: "room"; group: Group }
   | { kind: "message"; hit: SearchHit };
 
-export function CommandPalette() {
+const OPEN_EVENT = "omb:open-command-palette";
+
+/** Open the palette from a button, for places with no room for a search box. */
+export function openCommandPalette() {
+  window.dispatchEvent(new Event(OPEN_EVENT));
+}
+
+export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const { state, dispatch } = useStore();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -32,8 +39,13 @@ export function CommandPalette() {
         setOpen((o) => !o);
       }
     };
+    const onOpen = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener(OPEN_EVENT, onOpen);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_EVENT, onOpen);
+    };
   }, []);
 
   // fresh palette every open; stale queries from last time would flash
@@ -43,6 +55,10 @@ export function CommandPalette() {
     setMessageHits([]);
     setCursor(0);
   }, [open]);
+
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [onOpenChange, open]);
 
   const q = query.trim().toLowerCase();
 
@@ -195,7 +211,7 @@ export function CommandPalette() {
           )}
           {rooms.length > 0 && (
             <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
-              Channels
+              Groups
             </div>
           )}
           {rooms.map((group, i) =>

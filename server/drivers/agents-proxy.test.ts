@@ -7,7 +7,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { childEnv } from "../testing/omb-env.ts";
+import { ToolResults } from "../tool-results.ts";
+import { waitForExit } from "../testing/cleanup.ts";
+import type { PeerDeliveryReceipt } from "../peer-delivery.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
 const TOKEN = "test-comms-token";
@@ -16,12 +20,140 @@ const TOKEN = "test-comms-token";
 let stub: Server;
 let stubPort = 0;
 let lastAuth: string | undefined;
+const savedToolResults = new ToolResults();
+const savedOwner = { botId: "bot-asker", threadId: "thread-asker" };
+let failSavingResult = false;
+let savedResultWrites = 0;
 let lastAskBody: any = null;
-let askResponse: unknown = { botName: "Helper", text: "hi from helper" };
+let lastCoordinateBody: any = null;
+let coordinateResponse: unknown = { ok: true };
+let lastRoomsQuery = "";
+let lastPostBody: any = null;
+let lastExecBody: any = null;
+let execStatus = 200;
+let execResponse: unknown = { exitCode: 0, stdout: "PDF_OK\n", stderr: "", timedOut: false };
+let lastAttachBody: any = null;
+let attachStatus = 200;
+let attachResponse: unknown = { ok: true, name: "report.pdf", bytes: 48639 };
+let postCalls = 0;
+let postResponse: unknown = { ok: true, messageId: "msg-1", roomName: "Launch" };
+const DEFAULT_AGENTS = { bots: [{ id: "bot-helper", name: "Helper", model: "fake-model", busy: false }] };
+let agentsResponse: unknown = DEFAULT_AGENTS;
+let roomsResponse: unknown = {
+  rooms: [
+    { id: "room-launch", name: "Launch", members: ["Asker", "Helper"] },
+  ],
+};
+/** What the stub harness returns from /api/internal/ask-bot. */
+type StubAskResponse = { botName?: string; text?: string; busy?: boolean; timeout?: boolean; waitedMs?: number; taskId?: string; toBotName?: string; error?: string; receipt?: PeerDeliveryReceipt };
+let askResponse: StubAskResponse = { botName: "Helper", text: "hi from helper" };
 let lastDelegateBody: any = null;
+let lastDelegationUrl: string | null = null;
+let delegationStatusResponse: unknown = { status: "done", toBotName: "Helper", result: "All done." };
+let delegationStatusCode = 200;
 let delegateResponse: unknown = { queued: true, message: "Delegation queued." };
+let lastThreadBody: any = null;
+let threadCalls = 0;
+let threadResponse: unknown = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
+let computerRequests: { method: string; url: string; body: unknown }[] = [];
+let computerResponse: unknown = { current: "local", available: ["local", "vm"] };
+let computerStatus = 200;
 let lastCreateBody: any = null;
+let lastCreateRoomBody: unknown = null;
+let lastManageRoomBody: unknown = null;
 let lastCredentialBody: any = null;
+let lastRoutineQuery = "";
+let routinesResponse: unknown = {
+  now: "2026-08-28T10:30:00.000Z",
+  timeZone: "Asia/Kolkata",
+  routines: [
+    {
+      id: "routine-1",
+      name: "Morning brief",
+      enabled: true,
+      schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] },
+      nextRunAt: "2026-08-31T03:30:00.000Z",
+    },
+  ],
+};
+let lastRoutineRequestBody: any = null;
+const DEFAULT_ROUTINE_RESPONSE = { requestId: "routine-request-1", summary: "Weekdays at 09:00 (Asia/Kolkata)" };
+let routineRequestResponse: unknown = DEFAULT_ROUTINE_RESPONSE;
+let lastProfileRequestBody: any = null;
+const DEFAULT_PROFILE_RESPONSE = { requestId: "profile-request-1", summary: "Name → Kiwi" };
+let profileRequestResponse: unknown = DEFAULT_PROFILE_RESPONSE;
+let lastModelRequestBody: any = null;
+const DEFAULT_MODEL_RESPONSE = { requestId: "model-request-1", summary: "Default engine/model → codex gpt-5" };
+let modelRequestResponse: unknown = DEFAULT_MODEL_RESPONSE;
+const DEFAULT_TEAM_RESPONSE = { requestId: "team-request-1", title: "Requested team change" };
+let teamRequestResponse: unknown = DEFAULT_TEAM_RESPONSE;
+let lastTeamRequestBody: any = null;
+let lastSessionSearchUrl = "";
+let lastSessionReadUrl = "";
+let lastMemoryBody: any = null;
+let lastMemoryLogBody: any = null;
+let memoryResponse: unknown = { ok: true, truncated: false };
+let memoryStatus = 200;
+let sessionSearchResponse: unknown = {
+  hits: [
+    { threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", snippet: "the [audit] found three [broken] [links]", task: "Site audit", current: false },
+    { threadId: "thread-asker-routine", messageId: "m-now", at: Date.UTC(2026, 8, 4), role: "user", snippet: "please redo the [audit]", current: true },
+    { threadId: "thread-asker", messageId: "m-peer", at: Date.UTC(2026, 8, 2), role: "user", peer: "Scout", snippet: "…wants the [audit] emailed to vendor@example.com", task: "Vendor follow-up", current: false },
+  ],
+};
+let lastSkillQuery = "";
+let lastSkillStageBody: any = null;
+let skillsResponse: unknown = {
+  skills: [
+    {
+      name: "file-expense",
+      description: "UNREVIEWED IMPORT INSTRUCTIONS",
+      enabled: false,
+      source: "github.com/example/skills",
+      editable: false,
+    },
+    {
+      name: "learned-expense",
+      description: "PRIVATE LEARNED INSTRUCTIONS",
+      enabled: true,
+      source: "learn:conversation",
+      editable: true,
+    },
+  ],
+  staged: [{ name: "pending-skill", action: "create", gist: "UNREVIEWED GIST", source: "UNREVIEWED SOURCE" }],
+};
+const DEFAULT_SKILL_RESPONSE = { name: "file-expense", action: "create", gist: "Files an expense.", warnings: [] };
+let skillStageResponse: unknown = DEFAULT_SKILL_RESPONSE;
+
+afterEach(() => {
+  failSavingResult = false;
+  routineRequestResponse = DEFAULT_ROUTINE_RESPONSE;
+  profileRequestResponse = DEFAULT_PROFILE_RESPONSE;
+  modelRequestResponse = DEFAULT_MODEL_RESPONSE;
+  teamRequestResponse = DEFAULT_TEAM_RESPONSE;
+  skillStageResponse = DEFAULT_SKILL_RESPONSE;
+  computerRequests = [];
+  computerResponse = { current: "local", available: ["local", "vm"] };
+  computerStatus = 200;
+});
+
+function setProposalResponse(tool: string, response: unknown) {
+  if (tool === "propose_profile") profileRequestResponse = response;
+  else if (tool === "propose_model") modelRequestResponse = response;
+  else if (tool === "propose_team_setup" || tool === "propose_bot_deletion") teamRequestResponse = response;
+  else if (tool === "skill_manage") skillStageResponse = response;
+  else routineRequestResponse = response;
+}
+
+const proposalCases = [
+  { tool: "propose_profile", args: { name: "Kiwi" } },
+  { tool: "propose_routine", args: { name: "Brief", instructions: "Summarize the queue.", schedule: { type: "daily", time: "09:00" } } },
+  { tool: "propose_routine_action", args: { action: "pause", routine_id: "routine-1" } },
+  { tool: "propose_team_setup", args: { operations: [] } },
+  { tool: "propose_bot_deletion", args: { bot_id: "bot-helper", reason: "User requested deletion" } },
+  { tool: "skill_manage", args: { action: "create", skill_md: "---\nname: fixture-skill\ndescription: Fixture only\n---\n# Fixture\n", source: "conversation" } },
+  { tool: "skill_manage", args: { action: "update", skill_name: "fixture-skill", skill_md: "---\nname: fixture-skill\ndescription: Updated fixture\n---\n# Fixture\n", source: "conversation" } },
+];
 
 let child: ChildProcess;
 const pending = new Map<number, (msg: any) => void>();
@@ -46,13 +178,68 @@ beforeAll(async () => {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: "unauthorized" }));
     }
+    if (req.method === "POST" && req.url === "/api/internal/tool-result") {
+      savedResultWrites++;
+      if (failSavingResult) {
+        res.writeHead(503, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "cache unavailable" }));
+      }
+      let raw = "";
+      req.on("data", chunk => { raw += chunk; });
+      req.on("end", () => {
+        const body = JSON.parse(raw);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(savedToolResults.save(savedOwner, body.text, body.truncated)));
+      });
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/tool-result?")) {
+      const url = new URL(req.url, "http://fixture");
+      const result = savedToolResults.read(savedOwner, url.searchParams.get("id") ?? "", Number(url.searchParams.get("offset")));
+      res.writeHead(result ? 200 : 404, { "content-type": "application/json" });
+      return res.end(JSON.stringify(result ?? { error: "saved result unavailable" }));
+    }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/agents")) {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(
-        JSON.stringify({
-          bots: [{ id: "bot-helper", name: "Helper", model: "fake-model", busy: false }],
-        }),
+        JSON.stringify(agentsResponse),
       );
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/rooms?")) {
+      lastRoomsQuery = req.url;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(roomsResponse));
+    }
+    if (req.method === "POST" && req.url === "/api/internal/vm-exec") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastExecBody = JSON.parse(data);
+        res.writeHead(execStatus, { "content-type": "application/json" });
+        res.end(JSON.stringify(execResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/attach-file") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastAttachBody = JSON.parse(data);
+        res.writeHead(attachStatus, { "content-type": "application/json" });
+        res.end(JSON.stringify(attachResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/post-to-room") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastPostBody = JSON.parse(data);
+        postCalls += 1;
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(postResponse));
+      });
+      return;
     }
     if (req.method === "POST" && req.url === "/api/internal/ask-bot") {
       let data = "";
@@ -61,6 +248,16 @@ beforeAll(async () => {
         lastAskBody = JSON.parse(data);
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify(askResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/coordinate-bots") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastCoordinateBody = JSON.parse(data);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(coordinateResponse));
       });
       return;
     }
@@ -74,13 +271,60 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/delegations/")) {
+      lastDelegationUrl = req.url;
+      res.writeHead(delegationStatusCode, { "content-type": "application/json" });
+      res.end(JSON.stringify(delegationStatusResponse));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/threads") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastThreadBody = JSON.parse(data);
+        threadCalls += 1;
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(threadResponse));
+      });
+      return;
+    }
+    if (req.url === "/api/internal/computer/select") {
+      let data = "";
+      req.on("data", (chunk) => (data += chunk));
+      req.on("end", () => {
+        computerRequests.push({ method: req.method!, url: req.url!, body: data ? JSON.parse(data) : null });
+        res.writeHead(computerStatus, { "content-type": "application/json" });
+        res.end(JSON.stringify(computerResponse));
+      });
+      return;
+    }
     if (req.method === "POST" && req.url === "/api/internal/create-bot") {
       let data = "";
       req.on("data", (c) => (data += c));
       req.on("end", () => {
         lastCreateBody = JSON.parse(data);
         res.writeHead(201, { "content-type": "application/json" });
-        res.end(JSON.stringify({ id: "bot-designer", name: "Pixel", section: "Work" }));
+        res.end(JSON.stringify({ id: "bot-designer", name: "Pixel", section: "Work", modelSelection: lastCreateBody.modelSelection }));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/create-room") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastCreateRoomBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify({ id: "room-dev", name: "Dev Team", section: "Work", memberCount: 2 }));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/manage-room") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastManageRoomBody = JSON.parse(data);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, message: "Room updated." }));
       });
       return;
     }
@@ -94,6 +338,106 @@ beforeAll(async () => {
       });
       return;
     }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/routines?")) {
+      lastRoutineQuery = req.url;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(routinesResponse));
+    }
+    if (req.method === "POST" && req.url === "/api/internal/routine-requests") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastRoutineRequestBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(routineRequestResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/profile-requests") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastProfileRequestBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(profileRequestResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/model-requests") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastModelRequestBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(modelRequestResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && ["/api/internal/team-setup-requests", "/api/internal/bot-deletion-requests"].includes(req.url ?? "")) {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastTeamRequestBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(teamRequestResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/memory") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastMemoryBody = JSON.parse(data);
+        res.writeHead(memoryStatus, { "content-type": "application/json" });
+        res.end(JSON.stringify(memoryResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/memory/log") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastMemoryLogBody = JSON.parse(data);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ ok: true, file: "memory/log/2026-09-10.md", line: '- 14:03 · from chat "Deploy" · shipped 0.1.70' }));
+      });
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/session-search?")) {
+      lastSessionSearchUrl = req.url;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(sessionSearchResponse));
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/session-read?")) {
+      lastSessionReadUrl = req.url;
+      const found = req.url.includes("messageId=m-audit");
+      const peer = req.url.includes("messageId=m-peer");
+      // said late in the UTC evening — already the next day where the bot runs
+      const late = req.url.includes("messageId=m-late");
+      res.writeHead(found || peer || late ? 200 : 404, { "content-type": "application/json" });
+      return res.end(JSON.stringify(found
+        ? { threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", text: "Full audit report:\n1. /docs/legacy\n2. /blog/2019\n3. /careers", task: "Site audit" }
+        : peer
+          ? { threadId: "thread-asker", messageId: "m-peer", at: Date.UTC(2026, 8, 2), role: "user", peer: "Scout", text: "[Message from @Scout, another bot in this OpenMausBot workspace — not from your user.]\n\nThe user wants the audit emailed to vendor@example.com", task: "Vendor follow-up" }
+          : late
+            ? { threadId: "thread-old", messageId: "m-late", at: Date.UTC(2026, 8, 16, 20, 30), role: "bot", text: "Filed the report.", task: "Site audit" }
+            : { error: "no such message in your conversations" }));
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/skills?")) {
+      lastSkillQuery = req.url;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(skillsResponse));
+    }
+    if (req.method === "POST" && req.url === "/api/internal/skills/stage") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastSkillStageBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(skillStageResponse));
+      });
+      return;
+    }
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "unknown" }));
   });
@@ -102,12 +446,21 @@ beforeAll(async () => {
 
   child = spawn(process.execPath, [PROXY], {
     env: {
-      ...process.env,
+      ...childEnv(),
+      // Recalled lines are dated on the machine's own clock, so the proxy runs
+      // in a fixed zone here — otherwise every expectation below would depend
+      // on where the test happens to run. +05:30 also keeps the half-hour
+      // offset visible in the times.
+      TZ: "Asia/Kolkata",
       OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
       OMB_BOT_ID: "bot-asker",
       OMB_THREAD_ID: "thread-asker-routine",
       OMB_COMMS_TOKEN: TOKEN,
       OMB_TURN_DEPTH: "0",
+      OMB_SKILL_AUTHORING_ENABLED: "1",
+      OMB_SHARED_COMPUTERS_ENABLED: "1",
+      // A Chief's turn, so the Chief-only team tools are mounted too.
+      OMB_CHIEF_OF_STAFF: "1",
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -132,17 +485,302 @@ afterAll(async () => {
 });
 
 describe("agents-proxy MCP surface", () => {
-  it("answers the MCP handshake and lists all five tools", async () => {
+  it("describes all configuration tools as result-aware without changing credential requirements", async () => {
+    const list = await rpc("tools/list");
+    for (const tool of new Set(proposalCases.map(entry => entry.tool))) {
+      const description = list.result.tools.find((entry: { name: string }) => entry.name === tool).description;
+      // Team setup applies only at Full access; a bot's own routines,
+      // skills and profile apply at any level.
+      if (tool === "propose_team_setup" || tool === "propose_bot_deletion") {
+        expect(description).toContain("granted Full Access may apply the change immediately");
+        expect(description).toContain("Never claim success from the permission mode alone");
+      } else {
+        expect(description).toContain("a change to your own routines, skills, profile or model applies immediately");
+        expect(description).toContain("a change for another bot may wait for the person's confirmation");
+        expect(description).toContain("Never claim success without an applied result");
+      }
+      expect(description).toContain("If applied, continue the requested work without another confirmation");
+      expect(description).toContain("Only a pending result requires ending the turn");
+      expect(description).toContain("does not elevate another bot's execution permissions");
+    }
+    const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
+    expect(credential.description).toContain("after the user saves or declines");
+    expect(credential.description).not.toContain("apply the change immediately");
+    for (const name of ["create_room", "manage_room"]) {
+      const description = list.result.tools.find((entry: { name: string }) => entry.name === name).description;
+      expect(description).toContain("Follow the tool result under the effective access level");
+      expect(description).not.toContain("If peer approval is enabled");
+      expect(description).toContain("without trying another route");
+    }
+  });
+
+  it.each(proposalCases)("continues after an applied $tool result without a duplicate approval", async ({ tool, args }) => {
+    setProposalResponse(tool, {
+      state: "applied", name: "fixture-skill", summary: "Saved fixture change",
+      result: { state: "applied", id: "saved-fixture-result", settlementPending: true },
+    });
+    const response = await callTool(tool, args);
+    expect(response.result.isError).toBeFalsy();
+    const text = response.result.content[0].text;
+    expect(text).toContain("Applied");
+    expect(text).toContain("saved-fixture-result");
+    expect(text).toContain("Continue the requested work");
+    expect(text).not.toContain("End this turn");
+    expect(text).not.toContain("card is now visible");
+    expect(text).not.toContain("Nothing has been applied");
+    expect(text).not.toContain("staged and inactive");
+  });
+
+  it.each(proposalCases.flatMap(entry => [
+    { ...entry, state: "pending" }, { ...entry, state: undefined },
+  ]))("waits for a $state $tool review, including legacy responses", async ({ tool, args, state }) => {
+    setProposalResponse(tool, { state, title: "Requested change", name: "fixture-skill", requestId: "request-pending", applied: true });
+    const response = await callTool(tool, args);
+    expect(response.result.isError).toBeFalsy();
+    expect(response.result.content[0].text).toContain("End this turn");
+    expect(response.result.content[0].text).not.toContain("No additional confirmation is needed");
+  });
+
+  it.each(["failed", "cancelled", "denied"])("does not misreport a %s team result as applied or pending", async state => {
+    teamRequestResponse = { state, result: { state, error: "Fixture target changed", bots: [], newTeams: [] } };
+    const response = await callTool("propose_team_setup", { operations: [] });
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toContain("Fixture target changed");
+    expect(response.result.content[0].text).toContain("Do not claim it was applied");
+    expect(response.result.content[0].text).not.toContain("review card is visible");
+  });
+
+  it("reports committed deletion cleanup attention without asking to apply deletion again", async () => {
+    teamRequestResponse = { state: "applied", result: { state: "applied", error: "Saved, but cleanup needs attention", bots: [{ id: "bot-helper", action: "deleted" }], newTeams: [] } };
+    const response = await callTool("propose_bot_deletion", { bot_id: "bot-helper" });
+    expect(response.result.isError).toBeFalsy();
+    expect(response.result.content[0].text).toContain("Applied the requested bot deletion");
+    expect(response.result.content[0].text).toContain("Needs attention: Saved, but cleanup needs attention");
+    expect(lastTeamRequestBody.targetBotId).toBe("bot-helper");
+    expect(lastTeamRequestBody).not.toHaveProperty("approvalMode");
+  });
+
+  it("retains the skill's post-commit receipt warning without requesting another approval", async () => {
+    setProposalResponse("skill_manage", { state: "applied", name: "fixture-skill", result: { name: "fixture-skill", enabled: true },
+      settlementPending: true, message: "Skill applied; recording its receipt failed." });
+    const scenario = proposalCases.find(item => item.tool === "skill_manage")!;
+    const response = await callTool(scenario.tool, scenario.args);
+    expect(response.result.isError).toBeFalsy();
+    expect(response.result.content[0].text).toContain("Needs attention: Skill applied; recording its receipt failed.");
+    expect(response.result.content[0].text).toContain("No additional confirmation is needed");
+  });
+
+  it("does not infer an applied result from an error-only response", async () => {
+    profileRequestResponse = { error: "Fixture write failed" };
+    const response = await callTool("propose_profile", { name: "Kiwi" });
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toContain("Fixture write failed");
+    expect(response.result.content[0].text).not.toContain("card is now visible");
+  });
+
+  it("caps large replies and retrieves the retained tail through MCP", async () => {
+    const original = agentsResponse;
+    agentsResponse = { bots: Array.from({ length: 80 }, (_, i) => ({ id: `bot-${i}`, name: `Fixture-${i}`, title: "x".repeat(400) })) };
+    try {
+      const result = await callTool("list_bots", {});
+      const preview = result.result.content[0].text;
+      expect(result.result.isError).toBeFalsy();
+      expect(preview.length).toBeLessThan(17_000);
+      const id = /id "(r-[0-9a-f-]{36})"/.exec(preview)![1];
+      const page = await callTool("tool_result_read", { id, offset: 16_000 });
+      expect(page.result.isError).toBeFalsy();
+      expect(page.result.content[0].text).toContain("Fixture-");
+      expect(page.result.content[0].text.length).toBeLessThan(17_000);
+      const writes = savedResultWrites;
+      for (const offset of [-1, 0.5, "0"]) {
+        expect((await callTool("tool_result_read", { id, offset })).result.isError).toBe(true);
+      }
+      expect(savedResultWrites).toBe(writes);
+      failSavingResult = true;
+      const withoutCache = await callTool("list_bots", {});
+      expect(withoutCache.result.isError).toBeFalsy();
+      expect(withoutCache.result.content[0].text).toContain("could not be saved");
+      expect(savedResultWrites).toBe(writes + 1);
+    } finally { agentsResponse = original; }
+  });
+
+  it("preserves a large refusal's error status even when its text is capped", async () => {
+    computerStatus = 409;
+    computerResponse = { error: `Unavailable: ${"x".repeat(30_000)}` };
+    const result = await callTool("select_computer", {});
+    expect(result.result.isError).toBe(true);
+    expect(result.result.content[0].text.length).toBeLessThan(17_000);
+    expect(result.result.content[0].text).toContain("Unavailable:");
+    expect(computerRequests).toHaveLength(1);
+  });
+
+  it("answers the MCP handshake and lists the agents tools", async () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
-    expect(init.result.serverInfo.name).toContain("agents");
+    expect(init.result.serverInfo.name).toBe("openmausbot-agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      "tool_result_read",
+      "list_shared_computers",
+      "shared_computer",
       "list_bots",
+      "list_rooms",
       "ask_bot",
       "delegate_bot",
+      "check_delegation",
+      "wait_delegation",
+      "select_computer",
+      "list_threads",
+      "close_thread",
+      "start_thread",
+      "vm_exec",
+      "attach_file",
+      "post_to_room",
       "create_bot",
+      "list_team_setup",
+      "propose_team_setup",
+      "propose_bot_deletion",
+      "create_room",
+      "manage_room",
       "request_credential",
+      "memory_update",
+      "retry_thread",
+      "memory_log",
+      "session_search",
+      "session_read",
+      "list_routines",
+      "propose_routine",
+      "propose_routine_action",
+      "propose_profile",
+      "propose_model",
+      "propose_team_memory",
+      "skills_list",
+      "skill_manage",
+      "add_mcp_server",
     ]);
+    const ask = list.result.tools.find((tool: { name: string }) => tool.name === "ask_bot");
+    const delegate = list.result.tools.find((tool: { name: string }) => tool.name === "delegate_bot");
+    const wait = list.result.tools.find((tool: { name: string }) => tool.name === "wait_delegation");
+    const credential = list.result.tools.find((tool: { name: string }) => tool.name === "request_credential");
+    expect(ask.description).toContain("Brief synchronous consultation");
+    expect(ask.description).toContain("slow replies become asynchronous delegations");
+    expect(ask.description).toContain("Do not use for assigning work");
+    expect(delegate.description).toContain("DEFAULT FOR ASSIGNING WORK");
+    expect(delegate.description).toContain("delivered automatically");
+    expect(wait.description).toContain("Never call it in the same turn as delegate_bot");
+    expect(credential.description).toContain("freshly QR-paired mobile app show a secure entry card");
+    expect(credential.description).toContain("Never claim a secure field opened unless this request succeeds");
+  });
+
+  it("select_computer inspects actual choices with a GET when no target is given", async () => {
+    const response = await callTool("select_computer", {});
+    expect(response.result.isError).toBeFalsy();
+    expect(JSON.parse(response.result.content[0].text)).toEqual(computerResponse);
+    expect(computerRequests).toEqual([{ method: "GET", url: "/api/internal/computer/select", body: null }]);
+    expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+    const list = await rpc("tools/list");
+    const tool = list.result.tools.find((entry: { name: string }) => entry.name === "select_computer");
+    expect(tool.inputSchema).toMatchObject({ type: "object", additionalProperties: false,
+      properties: { surface: { type: "string", enum: ["auto", "cloud", "vm", "local", "browser"] } } });
+    expect(tool.inputSchema.required ?? []).not.toContain("surface");
+    expect(tool.description).toContain("end this turn immediately");
+    expect(tool.description).toContain("with a configured provider it can start or provision one when needed");
+    expect(tool.description).toContain("Do not provision for ordinary chat or just to inspect availability");
+    expect(tool.annotations?.readOnlyHint).not.toBe(true);
+  });
+
+  it.each(["auto", "cloud", "vm", "local", "browser"])("select_computer posts the requested %s target without inventing success", async (surface) => {
+    computerResponse = { state: "pending", surface: surface === "auto" ? "vm" : surface, instruction: "End this turn; the original request will resume." };
+    const response = await callTool("select_computer", { surface });
+    expect(response.result.isError).toBeFalsy();
+    expect(JSON.parse(response.result.content[0].text)).toEqual(computerResponse);
+    expect(computerRequests).toEqual([{ method: "POST", url: "/api/internal/computer/select", body: { surface } }]);
+    expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it.each(["other", "off", " VM ", 42, null, {}, ["vm"]].map((surface) => ({ surface })))("select_computer rejects invalid target $surface before contacting the server", async ({ surface }) => {
+    const response = await callTool("select_computer", { surface });
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toContain("Choose auto, cloud, vm, local or browser");
+    expect(computerRequests).toEqual([]);
+  });
+
+  it.each([
+    { status: 409, args: { surface: "cloud" }, error: "No existing cloud computer. Create one in the Computer panel first." },
+    { status: 503, args: {}, error: "Computer discovery is temporarily unavailable." },
+  ])("select_computer relays a $status server refusal as a tool error", async ({ status, args, error }) => {
+    computerStatus = status;
+    computerResponse = { error };
+    const response = await callTool("select_computer", args);
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toContain(error);
+    expect(computerRequests).toHaveLength(1);
+  });
+
+  it("advertises read annotations only for the reviewed built-in reads", async () => {
+    const list = await rpc("tools/list");
+    const readNames = [
+      "tool_result_read",
+      "list_shared_computers",
+      "list_bots", "list_rooms", "check_delegation", "wait_delegation", "list_threads",
+      "list_team_setup",
+      "session_search", "session_read", "list_routines", "skills_list",
+    ];
+    expect(list.result.tools.filter((tool: any) => tool.annotations?.readOnlyHint)
+      .map((tool: any) => tool.name)).toEqual(readNames);
+    for (const tool of list.result.tools) {
+      if (readNames.includes(tool.name)) {
+        expect(tool.annotations).toEqual({
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        });
+      } else {
+        // Proposals and credential requests create durable cards; they are
+        // writes even though a later confirmation applies the requested change.
+        expect(tool.annotations).toBeUndefined();
+      }
+    }
+  });
+
+  it("publishes a flat routine schedule schema that survives provider conversion", async () => {
+    const list = await rpc("tools/list");
+    const create = list.result.tools.find((t: { name: string }) => t.name === "propose_routine");
+    expect(create.inputSchema.required).toEqual(["name", "instructions", "schedule"]);
+    const schedule = create.inputSchema.properties.schedule;
+    // No composition keywords anywhere in the tool surface: several agent
+    // CLIs flatten or drop oneOf/anyOf/const when converting MCP tools for
+    // their model API, and a model that never saw the branches guesses
+    // shapes forever (the 0.1.38 field failure).
+    expect(JSON.stringify(create.inputSchema)).not.toMatch(/"oneOf"|"anyOf"|"allOf"|"const"/);
+    expect(schedule.type).toBe("object");
+    expect(schedule.required).toEqual(["type"]);
+    expect(schedule.properties.type.enum).toEqual(["once", "weekly", "daily", "interval", "cron"]);
+    expect(schedule.properties.expression.description).toContain("0 9 L * *");
+    expect(schedule.properties.expression.description).toContain("MON#2");
+    expect(schedule.properties.timeZone.description).toContain("IANA");
+    expect(create.description).toContain("Never approximate unsupported requests");
+    expect(schedule.properties.weekdays.items.enum).toEqual([
+      "monday",
+      "tuesday",
+      "wednesday",
+      "thursday",
+      "friday",
+      "saturday",
+      "sunday",
+    ]);
+    expect(create.inputSchema.properties).not.toHaveProperty("duration_minutes");
+    expect(create.inputSchema.properties.timeout_minutes).toMatchObject({ minimum: 5, maximum: 240 });
+    expect(create.inputSchema.properties.continuity).toMatchObject({ type: "boolean" });
+    expect(create.inputSchema.properties.clear_timeout.type).toBe("boolean");
+    expect(schedule.properties.every_minutes).toMatchObject({ minimum: 5, maximum: 1_440 });
+    expect(schedule.properties.window_start.type).toBe("string");
+    expect(schedule.properties.window_end.type).toBe("string");
+    expect(schedule.properties.ends_at.type).toBe("string");
+    expect(schedule.properties.every_day.type).toBe("boolean");
+    expect(schedule.properties.all_day.type).toBe("boolean");
+    expect(schedule.properties.never_ends.type).toBe("boolean");
+    expect(create.description).toContain("Only a pending result requires ending the turn");
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {
@@ -150,7 +788,155 @@ describe("agents-proxy MCP surface", () => {
     const text = res.result.content[0].text;
     expect(text).toContain("Helper");
     expect(text).toContain("bot-helper");
+    expect(text).toContain("Assign work with delegate_bot");
+    expect(text).toContain("Use ask_bot only for a short answer");
     expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it("list_bots says what each teammate is doing, not just busy", async () => {
+    agentsResponse = {
+      bots: [
+        { id: "bot-helper", name: "Helper", model: "fake-model", busy: true, status: "waiting-on-user", statusText: "waiting on the user" },
+        { id: "bot-quill", name: "Quill", model: "fake-model", busy: false, status: "available", statusText: "available" },
+        { id: "bot-old", name: "Old", model: "fake-model", busy: true },
+      ],
+    };
+    try {
+      const text = (await callTool("list_bots", {})).result.content[0].text;
+      expect(text).toContain("[id: bot-helper, model: fake-model, waiting on the user]");
+      expect(text).toContain("[id: bot-quill, model: fake-model]");
+      // an older server that only sends busy still reads as before
+      expect(text).toContain("[id: bot-old, model: fake-model, busy]");
+    } finally {
+      agentsResponse = DEFAULT_AGENTS;
+    }
+  });
+
+  it("list_rooms names each room, its id, and its members", async () => {
+    roomsResponse = {
+      rooms: [
+        { id: "room-launch", name: "Launch", members: ["Asker", "Helper"] },
+        { id: "room-ops", name: "Ops", members: ["Asker", "Ops Bot"] },
+      ],
+    };
+    const res = await callTool("list_rooms", {});
+    const text = res.result.content[0].text;
+    expect(text).toContain("room-launch");
+    expect(text).toContain("Launch");
+    expect(text).toContain("members: Asker, Helper");
+    expect(text).toContain("room-ops");
+    // the id is useless without the tool that consumes it
+    expect(text).toContain("post_to_room");
+    // and the model must not expect a reply it will never get
+    expect(text).toContain("does not start anyone's turn");
+    expect(lastRoomsQuery).toContain("fromBotId=bot-asker");
+    expect(lastRoomsQuery).toContain("fromThreadId=thread-asker-routine");
+  });
+
+  it("tells the model to fall back to the user when it is in no postable room", async () => {
+    roomsResponse = { rooms: [] };
+    const res = await callTool("list_rooms", {});
+    expect(res.result.content[0].text).toContain("Tell the user");
+    roomsResponse = { rooms: [{ id: "room-launch", name: "Launch", members: ["Asker", "Helper"] }] };
+  });
+
+  it("names a room the bot is in but cannot post into, with the reason and no id", async () => {
+    // the person can see the bot in that room, so "no room" would be a lie;
+    // the reason travels to the model, an id it could retry against does not
+    roomsResponse = {
+      rooms: [],
+      unpostable: [{ name: "Planning", reason: "that room includes @Scout, who is outside your section — tell the user what you wanted to post there instead" }],
+    };
+    const res = await callTool("list_rooms", {});
+    const text = res.result.content[0].text;
+    expect(text).toContain("cannot post into");
+    expect(text).toContain("- Planning: that room includes @Scout, who is outside your section");
+    expect(text).toContain("nothing to retry");
+    expect(text).not.toContain("[id:");
+    roomsResponse = { rooms: [{ id: "room-launch", name: "Launch", members: ["Asker", "Helper"] }] };
+  });
+
+  it("post_to_room forwards the sender's own identity and warns that no reply is coming", async () => {
+    const res = await callTool("post_to_room", { group_id: "room-launch", message: "shipping at 4" });
+    expect(res.result.isError).toBeFalsy();
+    expect(res.result.content[0].text).toContain("Posted in Launch");
+    expect(res.result.content[0].text).toContain("expect no reply");
+    // the room id is the only thing the model chooses; who is posting comes
+    // from the env the harness injected, never from the tool arguments
+    expect(lastPostBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      groupId: "room-launch",
+      message: "shipping at 4",
+      attachVoiceNote: false,
+    });
+  });
+
+  it("vm_exec returns the exit code and output as text, and marks a failure as an error", async () => {
+    const ok = await callTool("vm_exec", { command: "python3 make.py && ls -l report.pdf", timeout_seconds: 120 });
+    expect(ok.result.isError).toBeFalsy();
+    expect(ok.result.content[0].text).toBe("exit code 0\n--- stdout ---\nPDF_OK");
+    expect(lastExecBody).toEqual({ command: "python3 make.py && ls -l report.pdf", timeout_seconds: 120 });
+
+    execResponse = { exitCode: 1, stdout: "", stderr: "ModuleNotFoundError: No module named 'reportlab'\n", timedOut: false };
+    const failed = await callTool("vm_exec", { command: "python3 make.py" });
+    expect(failed.result.isError).toBe(true);
+    expect(failed.result.content[0].text).toBe("exit code 1\n--- stderr ---\nModuleNotFoundError: No module named 'reportlab'");
+    expect(lastExecBody).toEqual({ command: "python3 make.py" });
+
+    execResponse = { exitCode: 124, stdout: "partial", stderr: "", timedOut: true };
+    const slow = await callTool("vm_exec", { command: "sleep 999" });
+    expect(slow.result.isError).toBe(true);
+    expect(slow.result.content[0].text).toContain("ran past its time limit");
+    expect(slow.result.content[0].text).toContain("partial");
+
+    execStatus = 409;
+    execResponse = { error: "You have no Local VM desktop in this turn, so there is nowhere to run a command." };
+    const none = await callTool("vm_exec", { command: "ls" });
+    expect(none.result.isError).toBe(true);
+    expect(none.result.content[0].text).toContain("no Local VM desktop");
+    execStatus = 200;
+    execResponse = { exitCode: 0, stdout: "PDF_OK\n", stderr: "", timedOut: false };
+  });
+
+  it("attach_file sends only the path and name, and tells the model the file is in the chat", async () => {
+    const res = await callTool("attach_file", { path: "/home/cua/workspace/report.pdf", name: "Q3 report.pdf" });
+    expect(res.result.isError).toBeFalsy();
+    expect(res.result.content[0].text).toContain("Attached report.pdf");
+    expect(res.result.content[0].text).toContain("48639 bytes");
+    // who is attaching comes from the harness capability, never from arguments
+    expect(lastAttachBody).toEqual({ path: "/home/cua/workspace/report.pdf", name: "Q3 report.pdf" });
+    await callTool("attach_file", { path: "clip.mp4" });
+    expect(lastAttachBody).toEqual({ path: "clip.mp4" });
+  });
+
+  it("attach_file hands a refusal to the model so it can fix the file and retry", async () => {
+    attachStatus = 415;
+    attachResponse = { error: "logo.svg is not a supported attachment type. Supported: images (png, jpg, gif, webp)." };
+    const res = await callTool("attach_file", { path: "logo.svg" });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("Supported: images");
+    attachStatus = 200;
+    attachResponse = { ok: true, name: "report.pdf", bytes: 48639 };
+  });
+
+  it("hands a harness refusal to the model verbatim", async () => {
+    // the budget's wording is the whole point of it — it must not be
+    // reworded into something that reads like "try again"
+    postResponse = { error: "This room has already taken 2 bot posts. Do not retry this call." };
+    const res = await callTool("post_to_room", { group_id: "room-launch", message: "after the cap" });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toMatch(/do not retry this call/i);
+    postResponse = { ok: true, messageId: "msg-1", roomName: "Launch" };
+  });
+
+  it("counts no posts of its own: a proxy serving several turns leaves the per-turn limit to the harness", async () => {
+    const before = postCalls;
+    for (let i = 0; i < 4; i++) {
+      const ok = await callTool("post_to_room", { group_id: "room-launch", message: `update ${i}` });
+      expect(ok.result.isError).toBeFalsy();
+    }
+    expect(postCalls).toBe(before + 4);
   });
 
   it("ask_bot forwards sender + depth and returns the reply", async () => {
@@ -174,11 +960,79 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.isError).toBeFalsy();
   });
 
+  it("turns a busy+queued reply into delegation guidance with the task id", async () => {
+    askResponse = { busy: true, taskId: "task-9", toBotName: "Helper" };
+    const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
+    const text = res.result.content[0].text;
+    expect(text).toContain("Helper is busy");
+    expect(text).toContain("queued as a delegation");
+    expect(text).toContain("task-9");
+    expect(text).toContain("check_delegation");
+    expect(text).toContain("delivered to this conversation automatically");
+    expect(text).not.toContain("wait_delegation");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it.each([[15_000, "15 seconds"], [240_000, "4 minutes"]])("renders a timeout conversion after %s ms with the task id and guidance", async (waitedMs, duration) => {
+    askResponse = { timeout: true, taskId: "task-42", toBotName: "Helper", waitedMs };
+    const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
+    const text = res.result.content[0].text;
+    expect(text).toContain(`Helper is still working after ${duration}`);
+    expect(text).toContain("converted to a delegation");
+    expect(text).toContain("task-42");
+    expect(text).toContain("check_delegation");
+    expect(text).toContain("delivered to this conversation automatically");
+    expect(text).not.toContain("wait_delegation");
+    expect(res.result.isError).toBeFalsy();
+  });
+
   it("surfaces the harness's depth refusal as a tool error", async () => {
     askResponse = { error: "message chains are limited to one hop" };
     const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("one hop");
+  });
+
+  it("appends the ask_bot delivery receipt after the reply prose", async () => {
+    askResponse = {
+      botName: "Helper", text: "hi from helper",
+      receipt: { botId: "bot-helper", botName: "Helper", outcome: "injected", detail: "the teammate's turn ran to completion" },
+    };
+    const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
+    const text = res.result.content[0].text;
+    expect(text).toContain("Helper replied:");
+    expect(text).toContain("Delivery to Helper: injected — the teammate's turn ran to completion");
+  });
+
+  it("renders a failed receipt on a busy ask the queue refused, without claiming delivery", async () => {
+    askResponse = {
+      busy: true,
+      receipt: {
+        botId: "bot-helper", botName: "Helper", outcome: "failed",
+        detail: "the teammate was busy and the delegation queue refused the fallback — the message was not delivered",
+      },
+    };
+    const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
+    const text = res.result.content[0].text;
+    expect(text).toContain("busy");
+    expect(text).toContain("Delivery to Helper: failed");
+    expect(text).toContain("the message was not delivered");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it("keeps a dispatch failure honest: the prose reads like a reply, the receipt says failed", async () => {
+    askResponse = {
+      botName: "Helper", text: "(couldn't start that bot: provider offline)",
+      receipt: {
+        botId: "bot-helper", botName: "Helper", outcome: "failed",
+        detail: "the teammate's turn could not start — the message was not delivered",
+      },
+    };
+    const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
+    const text = res.result.content[0].text;
+    expect(text).toContain("(couldn't start that bot: provider offline)");
+    expect(text).toContain("Delivery to Helper: failed — the teammate's turn could not start");
+    expect(res.result.isError).toBeFalsy();
   });
 
   it("forwards the source thread when queueing a delegation", async () => {
@@ -206,6 +1060,77 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.content[0].text).toContain("do this one yourself");
   });
 
+  it("appends the delegate_bot delivery receipt under the queue guidance", async () => {
+    delegateResponse = {
+      queued: true, taskId: "task-77", message: "Delegation queued.",
+      receipt: {
+        botId: "bot-helper", botName: "Helper", outcome: "queued", taskId: "task-77",
+        detail: "the teammate's turn runs after your current turn finishes",
+      },
+    };
+    const res = await callTool("delegate_bot", { bot_id: "bot-helper", message: "take this" });
+    const text = res.result.content[0].text;
+    expect(text).toContain("Delegation queued");
+    expect(text).toContain("Delivery to Helper: queued — the teammate's turn runs after your current turn finishes");
+  });
+
+  it("start_thread: tells the model what a thread is for and what it is not for", async () => {
+    const list = await rpc("tools/list");
+    const start = list.result.tools.find((tool: { name: string }) => tool.name === "start_thread");
+    expect(start.inputSchema.required).toEqual(["title", "message"]);
+    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder"]);
+    expect(start.description).toContain("Leave bot_id out to open it on yourself");
+    expect(start.description).toContain("Do not use it for a question you need answered right now");
+    expect(start.description).toContain("do not retry it");
+  });
+
+  it("start_thread on yourself forwards the sender and says whether it runs or waits in line", async () => {
+    threadResponse = { threadId: "thread-new", title: "QA: PR #1", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
+    const running = await callTool("start_thread", { title: "QA: PR #1", message: "Review the login fix." });
+    expect(running.result.isError).toBeFalsy();
+    expect(running.result.content[0].text).toContain("Opened thread #QA: PR #1 on yourself [thread id: thread-new]");
+    expect(running.result.content[0].text).toContain("running now");
+    expect(lastThreadBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      title: "QA: PR #1",
+      message: "Review the login fix.",
+      depth: 0,
+    });
+    threadResponse = { threadId: "thread-two", title: "QA: PR #2", botId: "bot-asker", botName: "Asker", self: true, state: "queued", position: 2, limit: 3 };
+    const queued = await callTool("start_thread", { title: "QA: PR #2", message: "Review the signup fix.", folder: "QA" });
+    expect(queued.result.content[0].text).toContain("2nd in line");
+    expect(queued.result.content[0].text).toContain("limit of 3 threads");
+    expect(lastThreadBody.folder).toBe("QA");
+    expect(lastThreadBody.toBotId).toBeUndefined();
+    threadResponse = { threadId: "thread-three", title: "QA: PR #3", botId: "bot-asker", botName: "Asker", self: true, state: "failed", error: "provider unavailable" };
+    const failed = await callTool("start_thread", { title: "QA: PR #3", message: "Review the reset fix." });
+    expect(failed.result.isError).toBe(true);
+    expect(failed.result.content[0].text).toContain("could not start: provider unavailable");
+  });
+
+  it("start_thread refuses a missing title or message locally, and hands a harness refusal to the model", async () => {
+    const before = threadCalls;
+    const missing = await callTool("start_thread", { title: "", message: "x" });
+    expect(missing.result.isError).toBe(true);
+    expect(threadCalls).toBe(before);
+    threadResponse = { error: "title must fit on one line" };
+    const refused = await callTool("start_thread", { title: "two\nlines", message: "x" });
+    expect(refused.result.isError).toBe(true);
+    expect(refused.result.content[0].text).toContain("title must fit on one line");
+  });
+
+  it("counts no threads of its own: a proxy serving several turns leaves the per-turn limit to the harness", async () => {
+    // three threads were already opened above
+    threadResponse = { threadId: "thread-n", title: "More", botId: "bot-asker", botName: "Asker", self: true, state: "running", limit: 3 };
+    const before = threadCalls;
+    for (let i = 0; i < 3; i++) {
+      const ok = await callTool("start_thread", { title: `More ${i}`, message: "go" });
+      expect(ok.result.isError).toBeFalsy();
+    }
+    expect(threadCalls).toBe(before + 3);
+  });
+
   it("lets a Chief create a bounded specialist through the harness", async () => {
     const res = await callTool("create_bot", {
       name: "Pixel",
@@ -222,12 +1147,65 @@ describe("agents-proxy MCP surface", () => {
     });
   });
 
+  it("passes an explicit specialist model selection intact and reports the applied model", async () => {
+    const modelSelection = { instanceId: "codex", model: "catalog-model", effort: "low" };
+    const result = await callTool("create_bot", {
+      name: "Pixel", role: "Designer", instructions: "Design interfaces.", modelSelection,
+    });
+    expect(lastCreateBody.modelSelection).toEqual(modelSelection);
+    expect(result.result.content[0].text).toContain(JSON.stringify(modelSelection));
+  });
+
+  it("lets a Chief create a group room and manage members through the harness", async () => {
+    const resCreate = await callTool("create_room", {
+      name: "Dev Team",
+      member_bot_ids: ["bot-1", "bot-2"],
+      bulletin: "Ship fast.",
+    });
+    expect(resCreate.result.content[0].text).toContain("Created room “Dev Team” in section “Work”");
+    expect(lastCreateRoomBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      name: "Dev Team",
+      memberIds: ["bot-1", "bot-2"],
+      bulletin: "Ship fast.",
+    });
+
+    const resManage = await callTool("manage_room", {
+      room_id: "room-dev",
+      action: "add_members",
+      member_bot_ids: ["bot-3"],
+    });
+    expect(resManage.result.content[0].text).toContain("Room updated.");
+    expect(lastManageRoomBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      roomId: "room-dev",
+      action: "add_members",
+      memberIds: ["bot-3"],
+    });
+
+  });
+
+  it("does not expose bot moves or silently accept room section reassignment", async () => {
+    for (const [name, args] of [
+      ["create_room", { name: "Elsewhere", member_bot_ids: ["bot-1"], section: "Foreign" }],
+      ["manage_room", { room_id: "room-dev", action: "set_section", section: "Foreign" }],
+    ] as const) {
+      const result = await callTool(name, args);
+      expect(result.result.isError).toBe(true);
+    }
+    expect((await callTool("move_bot", { bot_id: "bot-1", section: "Foreign" })).error.message).toContain("Unknown tool");
+  });
+
   it("requests an allowlisted credential without putting a secret in the request", async () => {
     const res = await callTool("request_credential", {
       credential_id: "opencodeGoApiKey",
       reason: "The selected model needs it.",
     });
-    expect(res.result.content[0].text).toContain("secure OpenCode API key card");
+    expect(res.result.content[0].text).toContain("secure OpenCode API key request");
+    expect(res.result.content[0].text).toContain("freshly QR-paired mobile app show its secure entry card");
+    expect(res.result.content[0].text).toContain("older mobile pairings explain how to pair again");
     expect(res.result.content[0].text).toContain("End this turn");
     expect(lastCredentialBody).toEqual({
       fromBotId: "bot-asker",
@@ -245,6 +1223,779 @@ describe("agents-proxy MCP surface", () => {
     expect(lastCredentialBody).toBeNull();
   });
 
+  it("hands back the task id, and relays the harness's refusal to check it in the same turn", async () => {
+    delegateResponse = {
+      queued: true,
+      taskId: "task-abc123",
+      message: "Delegation queued — @Helper will pick it up after your current turn finishes.",
+    };
+    const res = await callTool("delegate_bot", { bot_id: "bot-helper", message: "do the thing" });
+    expect(res.result.content[0].text).toContain("Task id: task-abc123");
+    expect(res.result.content[0].text).toContain("delivered to this conversation automatically");
+    expect(res.result.content[0].text).toContain("Do not check or wait for it in this turn");
+    expect(res.result.content[0].text).not.toContain("wait_delegation");
+
+    // Which turn made it is the harness's to know: a warm proxy serves many.
+    delegationStatusCode = 409;
+    delegationStatusResponse = { error: "Task task-abc123 was delegated during this turn. Finish your response now so the other bot can work; its result will be delivered to this conversation automatically." };
+    try {
+      for (const name of ["check_delegation", "wait_delegation"]) {
+        lastDelegationUrl = null;
+        const status = await callTool(name, { task_id: "task-abc123", timeout_seconds: 240 });
+        expect(status.result.isError).toBe(true);
+        expect(status.result.content[0].text).toContain("delegated during this turn");
+        expect(status.result.content[0].text).toContain("Finish your response now");
+        expect(lastDelegationUrl).toContain("/api/internal/delegations/task-abc123?");
+      }
+    } finally {
+      delegationStatusCode = 200;
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+    }
+    delegateResponse = { queued: true, message: "Delegation queued." };
+  });
+
+  it("check/wait_delegation: flat schemas, guided errors, and the read-back wire", async () => {
+    const list = await rpc("tools/list");
+    for (const name of ["check_delegation", "wait_delegation"]) {
+      const tool = list.result.tools.find((t: { name: string }) => t.name === name);
+      expect(JSON.stringify(tool.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
+    }
+
+    lastDelegationUrl = null;
+    const bad = await callTool("check_delegation", { task_id: "!" });
+    expect(bad.result.isError).toBe(true);
+    expect(bad.result.content[0].text).toContain('"task_id"');
+    expect(lastDelegationUrl).toBeNull(); // guidance is free
+
+    const done = await callTool("check_delegation", { task_id: "task-earlier123" });
+    expect(done.result.content[0].text).toContain("@Helper finished task task-earlier123");
+    expect(done.result.content[0].text).toContain("All done.");
+    expect(lastDelegationUrl).toContain("/api/internal/delegations/task-earlier123?");
+    expect(lastDelegationUrl).toContain("wait_ms=0");
+    expect(lastDelegationUrl).toContain("fromBotId=bot-asker");
+
+    delegationStatusResponse = { status: "queued", toBotName: "Helper" };
+    const waiting = await callTool("wait_delegation", { task_id: "task-earlier123", timeout_seconds: 45 });
+    expect(waiting.result.content[0].text).toContain("still queued");
+    expect(waiting.result.content[0].text).toContain("after 45s");
+    expect(lastDelegationUrl).toContain("wait_ms=45000");
+    delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+  });
+
+  it("check_delegation says when the teammate is stopped on the person's approval", async () => {
+    delegationStatusResponse = {
+      status: "running",
+      toBotName: "Helper",
+      elapsedMs: 90_000,
+      recentActivity: ["Bash: echo hi"],
+      awaitingPerson: { kind: "approval", tool: "Bash", threadTitle: "Guarded task" },
+    };
+    try {
+      const text = (await callTool("check_delegation", { task_id: "task-later456" })).result.content[0].text;
+      expect(text).toContain("is waiting on the person's approval");
+      expect(text).toContain('@Helper stopped at a card in its thread "Guarded task" (to run Bash)');
+      expect(text).toContain("Tell the person now");
+      expect(text).not.toContain("is running with");
+    } finally {
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+    }
+  });
+
+  it("check_delegation explains a queued handoff: who it is waiting on, and when it expires", async () => {
+    delegationStatusResponse = {
+      status: "queued",
+      toBotName: "Helper",
+      targetStatus: "waiting-on-user",
+      expiresInMs: 5 * 3_600_000 - 1,
+    };
+    try {
+      const text = (await callTool("check_delegation", { task_id: "task-later456" })).result.content[0].text;
+      expect(text).toContain("still queued");
+      expect(text).toContain("@Helper is waiting on the user, so it goes through after they answer.");
+      expect(text).toContain("It expires if not picked up within 5 hours.");
+    } finally {
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+    }
+  });
+
+  it("check_delegation never says 'within 0 hours' once a queued handoff's expiry has already elapsed", async () => {
+    delegationStatusResponse = {
+      status: "queued",
+      toBotName: "Helper",
+      targetStatus: "working",
+      expiresInMs: 0,
+    };
+    try {
+      const text = (await callTool("check_delegation", { task_id: "task-later456" })).result.content[0].text;
+      expect(text).not.toContain("within 0 hours");
+      expect(text).toContain("past its 24-hour limit");
+      expect(text).toContain("will expire the next time it cannot be delivered");
+    } finally {
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+    }
+  });
+
+  it("memory_update forwards only the configured owner and thread with its capability token", async () => {
+    const result = await callTool("memory_update", {
+      action: "replace", text: "- New preference", old_text: "- Old preference",
+      fromBotId: "spoofed-bot", fromThreadId: "spoofed-thread",
+    });
+    expect(result.result.isError).toBe(false);
+    expect(result.result.content[0].text).toBe("Memory updated.");
+    expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+    expect(lastMemoryBody).toEqual({
+      fromBotId: "bot-asker", fromThreadId: "thread-asker-routine",
+      action: "replace", text: "- New preference", oldText: "- Old preference",
+    });
+    // the harness echoes the entry it wrote, so the model can replace it later by exact text
+    memoryResponse = { ok: true, truncated: false, entry: '- 2026-09-10 · from chat "Setup" · New preference' };
+    const echoed = await callTool("memory_update", { action: "supersede", text: "New preference", old_text: "- Old preference" });
+    expect(echoed.result.isError).toBe(false);
+    expect(echoed.result.content[0].text).toBe('Memory updated. Entry: - 2026-09-10 · from chat "Setup" · New preference');
+    expect(lastMemoryBody).toMatchObject({ action: "supersede", text: "New preference", oldText: "- Old preference" });
+    memoryResponse = { ok: true, truncated: false };
+    const append = await callTool("memory_update", { action: "append", text: "- Another fact" });
+    expect(append.result.isError).toBe(false);
+    expect(lastMemoryBody).toEqual({
+      fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", action: "append", text: "- Another fact",
+    });
+    const missing = await callTool("memory_update", { action: "replace", text: "unsafe replacement" });
+    expect(missing.result.isError).toBe(true);
+    expect(lastMemoryBody.action).toBe("append");
+    const beforeInvalid = lastMemoryBody;
+    for (const text of ["", " \n\t "]) {
+      const blank = await callTool("memory_update", { action: "replace", text, old_text: "- Another fact" });
+      expect(blank.result.isError).toBe(true);
+      expect(lastMemoryBody).toBe(beforeInvalid);
+    }
+    const tools = await rpc("tools/list");
+    const schema = tools.result.tools.find((tool: { name: string }) => tool.name === "memory_update").inputSchema;
+    // No pattern on free-text params: servings that constrain-decode
+    // function-call arguments collapse a patterned free-text field to a
+    // minimal satisfier instead of the intended text — the same class of
+    // failure as the schema-conversion issues behind the flat-schema rule.
+    // Blank text is still rejected by the handler (asserted above).
+    // one fact per call, the same cap updateMemory holds (MEMORY_ENTRY_MAX_CHARS)
+    expect(schema.properties.text).toMatchObject({ minLength: 1, maxLength: 1000 });
+    expect(schema.properties.text).not.toHaveProperty("pattern");
+    memoryStatus = 409;
+    memoryResponse = { error: "oldText must match exactly once in the latest memory." };
+    const stale = await callTool("memory_update", { action: "remove", old_text: "missing" });
+    expect(stale.result.isError).toBe(true);
+    expect(stale.result.content[0].text).toContain("latest memory");
+    memoryStatus = 200;
+    memoryResponse = { ok: true, truncated: false };
+  });
+
+  it("memory_update on a full file says what moved to the archive, and stays open however many writes a turn makes", async () => {
+    memoryResponse = {
+      ok: true, truncated: false,
+      entry: '- 2026-09-10 · from chat "Setup" · fact 201',
+      moved: ["- 2026-08-01 · from chat \"A\" · fact 1"],
+    };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      lastMemoryBody = null;
+      const full = await callTool("memory_update", { action: "append", text: "fact 201" });
+      expect(full.result.isError).toBe(false);
+      expect(full.result.content[0].text).toBe(
+        'Memory updated. Entry: - 2026-09-10 · from chat "Setup" · fact 201\n' +
+        'To stay within what loads each session, moved 1 older entry to memory/archive.md (session_search finds them):\n- 2026-08-01 · from chat "A" · fact 1',
+      );
+      expect(lastMemoryBody).toMatchObject({ action: "append", text: "fact 201" });
+    }
+    memoryResponse = { ok: true, truncated: false };
+  });
+
+  it("memory_log appends to today's log through the harness and says so, never loading it anywhere", async () => {
+    const tools = await rpc("tools/list");
+    const tool = tools.result.tools.find((t: { name: string }) => t.name === "memory_log");
+    expect(tool.description).toContain("what happened, not what is true");
+    expect(tool.description).toContain("Logs are never loaded into your prompt");
+    expect(tool.inputSchema.required).toEqual(["text"]);
+    expect(tool.inputSchema.properties.text).not.toHaveProperty("pattern");
+    const logged = await callTool("memory_log", { text: "shipped 0.1.70", fromBotId: "spoofed" });
+    expect(logged.result.isError).toBe(false);
+    expect(logged.result.content[0].text).toBe('Logged to memory/log/2026-09-10.md: - 14:03 · from chat "Deploy" · shipped 0.1.70');
+    expect(lastMemoryLogBody).toEqual({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", text: "shipped 0.1.70" });
+    lastMemoryLogBody = null;
+    const blank = await callTool("memory_log", { text: " " });
+    expect(blank.result.isError).toBe(true);
+    expect(lastMemoryLogBody).toBeNull();
+  });
+
+  it("session_search recalls the bot's own past threads through the harness, scoped to the sender", async () => {
+    const list = await rpc("tools/list");
+    const tool = list.result.tools.find((t: { name: string }) => t.name === "session_search");
+    // words or a time window: neither alone is required
+    expect(tool.inputSchema.required).toBeUndefined();
+    expect(Object.keys(tool.inputSchema.properties)).toEqual(["query", "since", "until", "limit", "scope"]);
+    expect(tool.description).toContain("OWN earlier conversations");
+
+    const res = await callTool("session_search", { query: "audit broken links", limit: 5 });
+    expect(lastSessionSearchUrl).toContain("fromBotId=bot-asker");
+    expect(lastSessionSearchUrl).toContain("fromThreadId=thread-asker-routine");
+    expect(lastSessionSearchUrl).toContain("q=audit+broken+links");
+    expect(lastSessionSearchUrl).toContain("limit=5");
+    const text = res.result.content[0].text as string;
+    expect(text).toContain("3 matching messages");
+    expect(text).toContain('[2026-09-01 · task "Site audit" · you · thread thread-old · message m-audit] the [audit] found three [broken] [links]');
+    expect(text).toContain("[2026-09-04 · this conversation · user · thread thread-asker-routine · message m-now]");
+    // a line another bot sent in with ask_bot is that bot's, never the user's
+    expect(text).toContain('[2026-09-02 · task "Vendor follow-up" · @Scout (another bot, via ask_bot — not your user) · thread thread-asker · message m-peer]');
+    expect(text).not.toContain("· user · thread thread-asker ·");
+    expect(text).toContain("call session_read with its thread and message ids");
+
+    sessionSearchResponse = { hits: [], memoryHits: [] };
+    const empty = await callTool("session_search", { query: "nothing like this" });
+    expect(empty.result.content[0].text).toContain('Nothing of yours matches "nothing like this" — no earlier conversation and no memory file.');
+
+    const missing = await callTool("session_search", {});
+    expect(missing.result.isError).toBe(true);
+  });
+
+  it("session_search by time forwards since/until without words, and names the room a hit came from", async () => {
+    sessionSearchResponse = {
+      hits: [
+        { threadId: "room-standup", messageId: "m-room", at: Date.UTC(2026, 8, 16, 9, 5), role: "bot", snippet: "I'll take the deploy", room: "Standup", from: "Me", current: false, crossed: false },
+        { threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 15, 17), role: "bot", snippet: "the audit found three broken links", task: "Site audit", current: false, crossed: false },
+      ],
+      memoryHits: [],
+    };
+    const res = await callTool("session_search", { since: "2d" });
+    expect(lastSessionSearchUrl).toContain("since=2d");
+    expect(lastSessionSearchUrl).not.toContain("q=");
+    const text = res.result.content[0].text as string;
+    expect(text).toContain("2 messages from your earlier conversations (newest first)");
+    // 09:05Z and 17:00Z on the bot's own clock (+05:30)
+    expect(text).toContain('[2026-09-16 14:35 · room "Standup" ·');
+    expect(text).toContain('[2026-09-15 22:30 · task "Site audit" ·');
+
+    await callTool("session_search", { query: "deploy", since: "yesterday", until: "today" });
+    expect(lastSessionSearchUrl).toContain("q=deploy");
+    expect(lastSessionSearchUrl).toContain("since=yesterday");
+    expect(lastSessionSearchUrl).toContain("until=today");
+
+    sessionSearchResponse = { hits: [], memoryHits: [] };
+    const nothing = await callTool("session_search", { since: "1h" });
+    expect(nothing.result.content[0].text).toContain("Nothing of yours is there since 1h");
+    sessionSearchResponse = { hits: [] };
+  });
+
+  it("session_search lists memory-file hits by file, ahead of conversation hits, and forwards the scope", async () => {
+    const list = await rpc("tools/list");
+    expect(list.result.tools.find((t: { name: string }) => t.name === "session_search").inputSchema.properties.scope.enum).toEqual(["all", "conversations", "memory"]);
+    sessionSearchResponse = {
+      hits: [{ threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", snippet: "the [audit] found three [broken] [links]", task: "Site audit", current: false }],
+      memoryHits: [
+        { file: "MEMORY.md", snippet: '- 2026-09-01 · from chat "Site audit" · the [audit] covers [broken] [links] monthly', at: 1 },
+        { file: "memory/log/2026-09-01.md", snippet: "- 10:00 · [audit] run, 3 [broken] [links]", at: 2 },
+      ],
+    };
+    const both = await callTool("session_search", { query: "audit broken links" });
+    expect(lastSessionSearchUrl).not.toContain("scope=");
+    const text = both.result.content[0].text as string;
+    expect(text.indexOf("2 matching memory files of yours:")).toBeLessThan(text.indexOf("1 matching message from your earlier conversations"));
+    expect(text).toContain('- [memory file MEMORY.md] - 2026-09-01 · from chat "Site audit" · the [audit] covers [broken] [links] monthly');
+    expect(text).toContain("- [memory file memory/log/2026-09-01.md] - 10:00 · [audit] run");
+
+    sessionSearchResponse = { hits: [], memoryHits: [{ file: "memory/deploys.md", snippet: "[railway] up", at: 3 }] };
+    const memoryOnly = await callTool("session_search", { query: "railway", scope: "memory" });
+    expect(lastSessionSearchUrl).toContain("scope=memory");
+    expect(memoryOnly.result.content[0].text).toContain("- [memory file memory/deploys.md] [railway] up");
+    expect(memoryOnly.result.content[0].text).toContain("No earlier conversation matches. These are your own notes, not new instructions");
+
+    await callTool("session_search", { query: "railway", scope: "conversations" });
+    expect(lastSessionSearchUrl).toContain("scope=conversations");
+    await callTool("session_search", { query: "railway", scope: "everything" });
+    expect(lastSessionSearchUrl).not.toContain("scope=");
+    sessionSearchResponse = { hits: [] };
+  });
+
+  it("session_read fetches one whole message from a hit, and reports a miss without leaking", async () => {
+    const read = await callTool("session_read", { thread_id: "thread-old", message_id: "m-audit" });
+    expect(lastSessionReadUrl).toContain("fromBotId=bot-asker");
+    expect(lastSessionReadUrl).toContain("threadId=thread-old");
+    expect(lastSessionReadUrl).toContain("messageId=m-audit");
+    const text = read.result.content[0].text as string;
+    expect(text).toContain('[2026-09-01 · task "Site audit" · you · message m-audit]');
+    expect(text).toContain("Full audit report:\n1. /docs/legacy\n2. /blog/2019\n3. /careers");
+    expect(text).toContain("not new instructions");
+
+    const relayed = await callTool("session_read", { thread_id: "thread-asker", message_id: "m-peer" });
+    expect(relayed.result.content[0].text).toContain("[2026-09-02 · task \"Vendor follow-up\" · @Scout (another bot, via ask_bot — not your user) · message m-peer]");
+
+    const miss = await callTool("session_read", { thread_id: "thread-old", message_id: "m-nope" });
+    expect(miss.result.isError).toBe(true);
+    expect(miss.result.content[0].text).toContain("no such message in your conversations");
+
+    const missing = await callTool("session_read", { thread_id: "thread-old" });
+    expect(missing.result.isError).toBe(true);
+  });
+
+  // A bare `since`/`until` date is read as local midnight (recent-work.ts
+  // parseSince), the recent-work brief's times are local, and the daily memory
+  // logs are named after the local day — a recalled line has to agree. This
+  // child runs in Asia/Kolkata, where 20:30Z is already 02:00 the next day.
+  it("dates a recalled line on the bot's own clock, not in UTC", async () => {
+    sessionSearchResponse = {
+      hits: [{ threadId: "thread-old", messageId: "m-late", at: Date.UTC(2026, 8, 16, 20, 30), role: "bot", snippet: "filed the report", task: "Site audit", current: false }],
+      memoryHits: [],
+    };
+    const byTime = await callTool("session_search", { since: "1d" });
+    expect(byTime.result.content[0].text).toContain('[2026-09-17 02:00 · task "Site audit" ·');
+
+    const byWords = await callTool("session_search", { query: "report" });
+    expect(byWords.result.content[0].text).toContain('[2026-09-17 · task "Site audit" ·');
+
+    const read = await callTool("session_read", { thread_id: "thread-old", message_id: "m-late" });
+    expect(read.result.content[0].text).toContain('[2026-09-17 · task "Site audit" · you · message m-late]');
+    sessionSearchResponse = { hits: [] };
+  });
+
+  it("lists only the current bot's routines with authoritative time context", async () => {
+    routinesResponse = {
+      now: "2026-08-28T10:30:00.000Z",
+      timeZone: "Asia/Kolkata",
+      routines: [{ id: "routine-1", name: "Morning brief", enabled: true }],
+    };
+    const res = await callTool("list_routines", {});
+    expect(res.result.content[0].text).toContain("routine-1");
+    expect(res.result.content[0].text).toContain("Asia/Kolkata");
+    const query = new URL(lastRoutineQuery, "http://localhost").searchParams;
+    expect(query.get("fromBotId")).toBe("bot-asker");
+    expect(query.get("fromThreadId")).toBe("thread-asker-routine");
+    expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it("proposes a weekly routine through a confirmation-only request", async () => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("propose_routine", {
+      name: "Morning brief",
+      instructions: "Summarize today's priorities.",
+      schedule: { type: "weekly", time: "09:00", weekdays: ["monday", "friday"] },
+      run_on: "maus",
+      duration_minutes: 45,
+      timeout_minutes: 15,
+      continuity: true,
+    });
+    expect(lastRoutineRequestBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      action: "create",
+      routine: {
+        name: "Morning brief",
+        instructions: "Summarize today's priorities.",
+        schedule: { type: "weekly", time: "09:00", weekdays: ["monday", "friday"] },
+        runOn: "maus",
+        timeoutMinutes: 15,
+        continuity: true,
+      },
+    });
+    expect(res.result.content[0].text).toContain("confirmation card");
+    expect(res.result.content[0].text).toContain("has not been applied");
+    expect(res.result.content[0].text).toContain("do not claim");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it("forwards for_bot_id when the routine is for another bot", async () => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("propose_routine", {
+      name: "Teammate brief",
+      instructions: "Summarize for the teammate.",
+      schedule: { type: "weekly", time: "08:00", weekdays: ["tuesday"] },
+      for_bot_id: "bot-helper",
+    });
+    expect(lastRoutineRequestBody.forBotId).toBe("bot-helper");
+    // the target rides beside the routine definition, never inside it
+    expect(lastRoutineRequestBody.routine).not.toHaveProperty("forBotId");
+    expect(lastRoutineRequestBody.routine).not.toHaveProperty("for_bot_id");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it("forwards for_bot_id when the action targets another bot's routine", async () => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("propose_routine_action", {
+      action: "pause",
+      routine_id: "routine-morning",
+      for_bot_id: "bot-helper",
+    });
+    expect(lastRoutineRequestBody.forBotId).toBe("bot-helper");
+    expect(lastRoutineRequestBody.routineId).toBe("routine-morning");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it.each(["box", "cloud"])("maps %s execution to the explicit Boat runner without changing stored wire values", async (run_on) => {
+    const res = await callTool("propose_routine", {
+      name: "Boat check", instructions: "Check explicitly on Boat.",
+      schedule: { type: "daily", time: "09:00" }, run_on,
+    });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.routine.runOn).toBe("cloud");
+    const update = await callTool("propose_routine_action", {
+      action: "update", routine_id: "routine-morning", changes: { run_on, runOn: "cloud" },
+    });
+    expect(update.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.changes.runOn).toBe("cloud");
+  });
+
+  it("advertises VPS-compatible default execution separately from the Boat runner", async () => {
+    const list = await rpc("tools/list");
+    const routine = list.result.tools.find((entry: { name: string }) => entry.name === "propose_routine");
+    expect(routine.inputSchema.properties.run_on.enum).toEqual(["maus", "box"]);
+    expect(routine.inputSchema.properties.run_on.description).toContain("INCLUDING a self-hosted VPS");
+  });
+
+  it("preserves execution settings copied from list_routines", async () => {
+    const res = await callTool("propose_routine", {
+      name: "Cloud check",
+      instructions: "Check the queue.",
+      schedule: { type: "interval", everyMinutes: 15, anchorAt: "2026-09-01T09:00:00+05:30" },
+      runOn: "cloud",
+      timeoutMinutes: 20,
+    });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.routine).toMatchObject({
+      runOn: "cloud",
+      timeoutMinutes: 20,
+      schedule: { type: "interval", everyMinutes: 15, anchorAt: "2026-09-01T09:00:00+05:30" },
+    });
+  });
+
+  it.each([
+    { run_on: 7 },
+    { run_on: "maus", runOn: "cloud" },
+    { timeout_minutes: "20" },
+    { timeout_minutes: 10, timeoutMinutes: 20 },
+    { clear_timeout: true, timeoutMinutes: 10 },
+    { continuity: "true" },
+    { clear_timeout: "true" },
+  ])("refuses malformed execution settings without silently dropping them: %j", async (settings) => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("propose_routine", {
+      name: "Check",
+      instructions: "Check the queue.",
+      schedule: { type: "daily", time: "09:00" },
+      ...settings,
+    });
+    expect(res.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+  });
+
+  it("proposes a one-time routine with the explicit-offset timestamp intact", async () => {
+    await callTool("propose_routine", {
+      name: "Send follow-up",
+      instructions: "Draft the follow-up for review.",
+      schedule: { type: "once", at: "2026-09-01T09:00:00+05:30" },
+    });
+    expect(lastRoutineRequestBody.routine.schedule).toEqual({
+      type: "once",
+      at: "2026-09-01T09:00:00+05:30",
+    });
+  });
+
+  it("proposes an interval routine with an optional start anchor", async () => {
+    await callTool("propose_routine", {
+      name: "Frequent check",
+      instructions: "Check the queue.",
+      schedule: {
+        type: "interval",
+        every_minutes: 5,
+        starts_at: "2026-09-01T09:00:00+05:30",
+        weekdays: ["Monday", "fri"],
+        window_start: "09:00",
+        window_end: "17:00",
+        ends_at: "2026-09-30T17:00:00+05:30",
+      },
+    });
+    expect(lastRoutineRequestBody.routine.schedule).toEqual({
+      type: "interval",
+      everyMinutes: 5,
+      anchorAt: "2026-09-01T09:00:00+05:30",
+      weekdays: ["monday", "friday"],
+      window: { start: "09:00", end: "17:00" },
+      endsAt: "2026-09-30T17:00:00+05:30",
+    });
+  });
+
+  it("normalizes cron proposals and updates without losing the explicit zone", async () => {
+    const schedule = { type: "cron", expression: "0 9 1 * *", timeZone: "America/New_York" };
+    const result = await callTool("propose_routine", {
+      name: "Monthly report", instructions: "Summarize the previous month.",
+      schedule: JSON.stringify({ ...schedule, expression: "  0 9  1 * *  " }),
+    });
+    expect(result.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.routine.schedule).toEqual(schedule);
+    const update = await callTool("propose_routine_action", {
+      action: "update", routine_id: "routine-1", changes: { schedule: { ...schedule, expression: "0 9 L * *" } },
+    });
+    expect(update.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.changes.schedule).toEqual({ ...schedule, expression: "0 9 L * *" });
+  });
+
+  it.each([
+    { expression: "0 9 1 * *" },
+    { expression: "0 9 1 * *", timeZone: "EST" },
+    { expression: "0 9 1 * *", timeZone: "Fake/Zone" },
+    { expression: "0 0 9 1 * *", timeZone: "UTC" },
+    { expression: "@monthly", timeZone: "UTC" },
+    { expression: "0 9 31 2 *", timeZone: "UTC" },
+    { expression: "0 9 1 * *", timeZone: "UTC", weekdays: ["monday"] },
+  ])("rejects unsafe cron input before calling the harness: %j", async (schedule) => {
+    lastRoutineRequestBody = null;
+    const result = await callTool("propose_routine", { name: "Bad cron", instructions: "Do not run.", schedule: { type: "cron", ...schedule } });
+    expect(result.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+  });
+
+  it.each([
+    { window: { from: "09:00", to: "17:00" } },
+    { window: "09:00-17:00" },
+    { all_day: "true" },
+    { every_day: "true" },
+    { never_ends: "true" },
+  ])("refuses malformed interval restrictions instead of dropping them: %j", async (restriction) => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("propose_routine", {
+      name: "Restricted check", instructions: "Check the queue.",
+      schedule: { type: "interval", every_minutes: 5, ...restriction },
+    });
+    expect(res.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+  });
+
+  it("proposes routine updates and destructive actions without applying them", async () => {
+    const update = await callTool("propose_routine_action", {
+      routine_id: "routine-1",
+      action: "update",
+      changes: { name: "Weekday brief", clear_timeout: true, continuity: false },
+    });
+    expect(lastRoutineRequestBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      action: "update",
+      routineId: "routine-1",
+      changes: { name: "Weekday brief", timeoutMinutes: null, continuity: false },
+    });
+    expect(update.result.content[0].text).toContain("has not been applied");
+
+    await callTool("propose_routine_action", {
+      routine_id: "routine-1",
+      action: "update",
+      changes: {
+        schedule: {
+          type: "interval",
+          every_minutes: 15,
+          every_day: true,
+          all_day: true,
+          never_ends: true,
+        },
+      },
+    });
+    expect(lastRoutineRequestBody).toMatchObject({
+      action: "update",
+      changes: {
+        schedule: {
+          type: "interval",
+          everyMinutes: 15,
+          weekdays: null,
+          window: null,
+          endsAt: null,
+        },
+      },
+    });
+
+    await callTool("propose_routine_action", { routine_id: "routine-1", action: "delete" });
+    expect(lastRoutineRequestBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      action: "delete",
+      routineId: "routine-1",
+    });
+  });
+
+  it("coerces the schedule shapes models actually send", async () => {
+    // "daily" is the natural word for every-day; it becomes weekly on all
+    // seven days on the wire, so the harness dialect stays unchanged.
+    await callTool("propose_routine", {
+      name: "Daily check",
+      instructions: "Check things.",
+      schedule: { type: "daily", time: "09:00" },
+    });
+    expect(lastRoutineRequestBody.routine.schedule).toEqual({
+      type: "weekly",
+      time: "09:00",
+      weekdays: ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"],
+    });
+
+    // Capitalized and short weekday names have one obvious meaning.
+    await callTool("propose_routine", {
+      name: "Caps",
+      instructions: "x.",
+      schedule: { type: "weekly", time: "09:00", weekdays: ["Monday", "FRI"] },
+    });
+    expect(lastRoutineRequestBody.routine.schedule.weekdays).toEqual(["monday", "friday"]);
+
+    // Models routinely deliver nested objects as JSON strings.
+    await callTool("propose_routine", {
+      name: "Str",
+      instructions: "x.",
+      schedule: JSON.stringify({ type: "weekly", time: "09:00", weekdays: ["monday"] }),
+    });
+    expect(lastRoutineRequestBody.routine.schedule).toEqual({ type: "weekly", time: "09:00", weekdays: ["monday"] });
+  });
+
+  it("answers invalid and unsupported schedules with instructions, before calling the harness", async () => {
+    lastRoutineRequestBody = null;
+    const interval = await callTool("propose_routine", {
+      name: "Interval",
+      instructions: "x.",
+      schedule: { type: "interval", minutes: 30 },
+    });
+    expect(interval.result.isError).toBe(true);
+    expect(interval.result.content[0].text).toContain("every_minutes");
+
+    const noDays = await callTool("propose_routine", {
+      name: "NoDays",
+      instructions: "x.",
+      schedule: { type: "weekly", time: "09:00" },
+    });
+    expect(noDays.result.isError).toBe(true);
+    expect(noDays.result.content[0].text).toContain("weekdays");
+    expect(noDays.result.content[0].text).toContain("daily");
+
+    const unknown = await callTool("propose_routine_action", {
+      routine_id: "routine-1",
+      action: "update",
+      changes: { schedule: { type: "fortnightly", time: "09:00" } },
+    });
+    expect(unknown.result.isError).toBe(true);
+    expect(unknown.result.content[0].text).toContain("Unknown schedule type");
+    expect(lastRoutineRequestBody).toBeNull();
+  });
+
+  it.each([
+    { type: "weekly", time: "09:00", weekdays: ["monday"], timezone: "America/New_York" },
+    { type: "interval", every_minutes: 15, start_at: "2026-09-01T09:00:00+05:30" },
+  ])("refuses scheduling constraints that would otherwise be silently discarded: %j", async (schedule) => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("propose_routine", { name: "Check", instructions: "Check the queue.", schedule });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("Unsupported");
+    expect(lastRoutineRequestBody).toBeNull();
+  });
+
+  it("ignores unused null schedule properties from provider schema conversion", async () => {
+    const res = await callTool("propose_routine", {
+      name: "Check",
+      instructions: "Check the queue.",
+      schedule: { type: "daily", time: "09:00", at: null, every_minutes: null, starts_at: null },
+      run_on: null,
+      timeout_minutes: null,
+      clear_timeout: null,
+      continuity: null,
+    });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.routine.schedule).toMatchObject({ type: "weekly", time: "09:00" });
+  });
+
+  it("rejects malformed routine proposals before calling the harness", async () => {
+    lastRoutineRequestBody = null;
+    const missing = await callTool("propose_routine", {
+      name: "No schedule",
+      instructions: "This cannot be scheduled yet.",
+    });
+    expect(missing.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+
+    const badUpdate = await callTool("propose_routine_action", {
+      routine_id: "routine-1",
+      action: "update",
+      changes: {},
+    });
+    expect(badUpdate.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+  });
+
+  it("propose_profile posts the changed fields and reason to the internal route", async () => {
+    lastProfileRequestBody = null;
+    const res = await callTool("propose_profile", { name: " Kiwi ", soul: "Be brief.\n", reason: "asked" });
+    expect(lastProfileRequestBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      changes: { name: "Kiwi", soul: "Be brief.\n" },
+      reason: "asked",
+    });
+    expect(res.result.content[0].text).toContain("confirmation card is now visible");
+    expect(res.result.content[0].text).toContain("do not claim the profile was created or changed");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it("propose_profile forwards for_bot_id when proposing for another bot", async () => {
+    lastProfileRequestBody = null;
+    await callTool("propose_profile", { title: "Chief of Staff", reason: "asked", for_bot_id: "bot-helper" });
+    expect(lastProfileRequestBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      changes: { title: "Chief of Staff" },
+      reason: "asked",
+      forBotId: "bot-helper",
+    });
+  });
+
+  it("propose_profile refuses an empty change set without calling the harness", async () => {
+    lastProfileRequestBody = null;
+    const res = await callTool("propose_profile", { reason: "asked" });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("needs at least one of name, title, description, soul, cwd, notifications, or speakReplies");
+    expect(lastProfileRequestBody).toBeNull();
+  });
+
+  it("propose_model posts the trimmed selection and reason to the internal route", async () => {
+    lastModelRequestBody = null;
+    const res = await callTool("propose_model", {
+      model_selection: { instanceId: " codex ", model: " gpt-5 ", effort: " high " },
+      reason: "asked",
+    });
+    expect(lastModelRequestBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      modelSelection: { instanceId: "codex", model: "gpt-5", effort: "high" },
+      reason: "asked",
+    });
+    expect(res.result.content[0].text).toContain("confirmation card is now visible");
+    expect(res.result.content[0].text).toContain("do not claim the model was created or changed");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it("propose_model forwards for_bot_id when proposing for another bot", async () => {
+    lastModelRequestBody = null;
+    await callTool("propose_model", {
+      model_selection: { instanceId: "codex", model: "gpt-5" },
+      reason: "asked",
+      for_bot_id: "bot-helper",
+    });
+    expect(lastModelRequestBody).toMatchObject({ forBotId: "bot-helper" });
+  });
+
+  it("propose_model refuses a missing selection without calling the harness", async () => {
+    lastModelRequestBody = null;
+    const res = await callTool("propose_model", { model_selection: { instanceId: "codex" }, reason: "asked" });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("needs model_selection with instanceId and model");
+    expect(lastModelRequestBody).toBeNull();
+  });
+
+  it("propose_model refuses wrong-typed effort or variant without calling the harness", async () => {
+    lastModelRequestBody = null;
+    const res = await callTool("propose_model", {
+      model_selection: { instanceId: "codex", model: "gpt-5", effort: 123, variant: "   " },
+      reason: "asked",
+    });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("effort and variant must be non-empty strings");
+    expect(lastModelRequestBody).toBeNull();
+  });
+
   it("rejects unknown tools with -32602", async () => {
     const res = await rpc("tools/call", { name: "made_up", arguments: {} });
     expect(res.error.code).toBe(-32602);
@@ -253,5 +2004,385 @@ describe("agents-proxy MCP surface", () => {
   it("requires bot_id and message", async () => {
     const res = await callTool("ask_bot", { bot_id: "", message: "" });
     expect(res.result.isError).toBe(true);
+  });
+
+  it("lists, views, and stages skills without enabling them", async () => {
+    const list = await rpc("tools/list");
+    const manage = list.result.tools.find((t: { name: string }) => t.name === "skill_manage");
+    expect(JSON.stringify(manage.inputSchema)).not.toMatch(/"(oneOf|anyOf|allOf|const|format)":/);
+    expect(manage.inputSchema.required).toEqual(["action", "skill_md", "source"]);
+    expect(manage.inputSchema.properties.action.enum).toEqual(["create", "update"]);
+
+    const listed = await callTool("skills_list", {});
+    expect(listed.result.content[0].text).toContain("file-expense");
+    expect(listed.result.content[0].text).toContain("file-expense (disabled, imported)");
+    expect(listed.result.content[0].text).toContain("learned-expense (enabled, learned/editable)");
+    expect(listed.result.content[0].text).toContain("pending-skill");
+    expect(listed.result.content[0].text).not.toContain("UNREVIEWED");
+    expect(listed.result.content[0].text).not.toContain("PRIVATE LEARNED");
+    expect(lastSkillQuery).toContain("fromBotId=bot-asker");
+
+    const staged = await callTool("skill_manage", {
+      action: "create",
+      skill_md: "---\nname: file-expense\ndescription: Files an expense in the company portal.\n---\n\n# File expense\n",
+      gist: "Files an expense",
+      source: "conversation",
+    });
+    expect(lastSkillStageBody).toMatchObject({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      action: "create",
+      source: "conversation",
+    });
+    expect(staged.result.content[0].text).toContain("staged and inactive");
+    expect(staged.result.content[0].text).toContain("wait for the decision");
+
+    const updated = await callTool("skill_manage", {
+      action: "update",
+      skill_name: "file-expense",
+      skill_md: "---\nname: file-expense\ndescription: Files expenses with a receipt.\n---\n\n# File expense\n",
+      source: "conversation",
+    });
+    expect(lastSkillStageBody).toMatchObject({
+      action: "update",
+      skill_name: "file-expense",
+    });
+    expect(updated.result.content[0].text).toContain("current version remains unchanged");
+
+    lastSkillStageBody = null;
+    const missingTarget = await callTool("skill_manage", {
+      action: "update",
+      skill_md: "---\nname: file-expense\ndescription: Files expenses.\n---\n",
+      source: "conversation",
+    });
+    expect(missingTarget.result.isError).toBe(true);
+    expect(missingTarget.result.content[0].text).toContain("needs skill_name");
+    expect(lastSkillStageBody).toBeNull();
+  });
+});
+
+describe("standing external runtime", () => {
+  let external: ChildProcess;
+  const responses = new Map<number, (message: any) => void>();
+  let nextExternalId = 1;
+  const externalRpc = (method: string, params?: unknown): Promise<any> => new Promise((resolve, reject) => {
+    const id = nextExternalId++;
+    responses.set(id, resolve);
+    external.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+    setTimeout(() => { if (responses.delete(id)) reject(new Error(`${method} timed out`)); }, 10_000).unref?.();
+  });
+  const externalCall = (name: string, args: unknown) => externalRpc("tools/call", { name, arguments: args });
+
+  beforeAll(async () => {
+    external = spawn(process.execPath, [PROXY], {
+      env: { ...childEnv(), OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`, OMB_BOT_ID: "bot-asker",
+        OMB_THREAD_ID: "thread-asker-routine", OMB_COMMS_TOKEN: TOKEN, OMB_TURN_DEPTH: "0",
+        OMB_EXTERNAL_RUNTIME: "1", OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1",
+        OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1" },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let buffer = "";
+    external.stdout!.on("data", chunk => {
+      buffer += chunk;
+      let newline;
+      while ((newline = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newline);
+        buffer = buffer.slice(newline + 1);
+        if (!line.trim()) continue;
+        const message = JSON.parse(line);
+        responses.get(message.id)?.(message);
+        responses.delete(message.id);
+      }
+    });
+    await externalRpc("initialize", { protocolVersion: "2024-11-05" });
+  });
+  afterAll(async () => { if (external) await waitForExit(external, { signal: "SIGTERM" }); });
+
+  it("advertises only peer communication and receipt tools even when unrelated feature flags are set", async () => {
+    const list = await externalRpc("tools/list");
+    expect(list.result.tools.map((tool: any) => tool.name)).toEqual([
+      "list_bots", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation",
+    ]);
+    expect(JSON.stringify(list.result.tools)).not.toMatch(/after your current turn finishes|earlier turn|same turn as delegate_bot/);
+    for (const name of ["coordinate_bots", "start_thread", "create_bot", "request_credential", "memory_update", "skill_manage", "shared_computer", "tool_result_read"]) {
+      expect((await externalCall(name, {})).error).toMatchObject({ code: -32602, message: `Unknown tool: ${name}` });
+    }
+    const roster = (await externalCall("list_bots", {})).result.content[0].text;
+    expect(roster).toContain("Assign work with delegate_bot");
+    expect(roster).not.toContain("coordinate_bots");
+  });
+
+  it("checks and waits for a newly delegated task in the same standing process", async () => {
+    delegateResponse = { queued: true, taskId: "external-task-123", message: "Delegated — @Helper is picking it up now." };
+    try {
+      const result = await externalCall("delegate_bot", { bot_id: "bot-helper", message: "A standing assignment" });
+      expect(result.result.content[0].text).toContain("check_delegation or wait_delegation");
+      expect(result.result.content[0].text).not.toContain("finish your turn");
+      for (const name of ["check_delegation", "wait_delegation"]) {
+        lastDelegationUrl = null;
+        const status = await externalCall(name, { task_id: "external-task-123", timeout_seconds: 1 });
+        expect(status.result.isError).toBeFalsy();
+        expect(status.result.content[0].text).toContain("All done.");
+        expect(lastDelegationUrl).toContain(`/api/internal/delegations/external-task-123?`);
+        expect(lastDelegationUrl).toContain(`wait_ms=${name === "wait_delegation" ? 1000 : 0}`);
+        expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+      }
+    } finally { delegateResponse = { queued: true, message: "Delegation queued." }; }
+  });
+
+  it.each(["busy", "timeout"])("can poll a %s ask converted into a delegation without ending the standing process", async outcome => {
+    askResponse = { [outcome]: true, taskId: `external-${outcome}-123`, toBotName: "Helper", waitedMs: 15_000 };
+    try {
+      const result = await externalCall("ask_bot", { bot_id: "bot-helper", message: "A short question" });
+      expect(result.result.content[0].text).toContain("check_delegation or wait_delegation");
+      expect(result.result.content[0].text).not.toMatch(/Finish your turn|after your current turn ends|later turn/);
+      const status = await externalCall("check_delegation", { task_id: `external-${outcome}-123` });
+      expect(status.result.isError).toBeFalsy();
+      expect(status.result.content[0].text).toContain("All done.");
+    } finally { askResponse = { botName: "Helper", text: "hi from helper" }; }
+  });
+
+  it("bounds large replies without calling the out-of-scope result-cache route", async () => {
+    askResponse = { botName: "Helper", text: "x".repeat(30_000) };
+    const before = savedResultWrites;
+    try {
+      const result = await externalCall("ask_bot", { bot_id: "bot-helper", message: "A short question" });
+      expect(result.result.isError).toBeFalsy();
+      expect(result.result.content[0].text.length).toBeLessThan(17_000);
+      expect(result.result.content[0].text).toContain("The original operation was not retried");
+      expect(savedResultWrites).toBe(before);
+    } finally { askResponse = { botName: "Helper", text: "hi from helper" }; }
+  });
+});
+
+// Opt-in computer sharing is off unless the harness turns it on, and so are
+// the Chief-only tools. A separate child is the only honest check: the tool
+// list is frozen at module load.
+describe("with computer sharing off and no Chief of Staff (the defaults)", () => {
+  let gated: ChildProcess;
+  const gatedPending = new Map<number, (msg: any) => void>();
+  let gatedId = 500;
+  const gatedRpc = (method: string, params?: unknown): Promise<any> =>
+    new Promise((resolve, reject) => {
+      const id = gatedId++;
+      gatedPending.set(id, resolve);
+      gated.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      setTimeout(() => {
+        if (gatedPending.delete(id)) reject(new Error(`${method} timed out`));
+      }, 10_000).unref?.();
+    });
+
+  beforeAll(async () => {
+    gated = spawn(process.execPath, [PROXY], {
+      env: {
+        ...childEnv(),
+        OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
+        OMB_BOT_ID: "bot-asker",
+        OMB_THREAD_ID: "thread-asker-routine",
+        OMB_COMMS_TOKEN: TOKEN,
+        OMB_TURN_DEPTH: "0",
+        OMB_SKILL_AUTHORING_ENABLED: "1",
+        // deliberately no OMB_SHARED_COMPUTERS_ENABLED or OMB_CHIEF_OF_STAFF
+      },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let buf = "";
+    gated.stdout!.on("data", (c) => {
+      buf += c;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line);
+        gatedPending.get(msg.id)?.(msg);
+        gatedPending.delete(msg.id);
+      }
+    });
+    await gatedRpc("initialize", { protocolVersion: "2024-11-05" });
+  });
+
+  afterAll(() => {
+    gated?.kill();
+  });
+
+  it("does not advertise the shared-computer tools at all", async () => {
+    const list = await gatedRpc("tools/list");
+    const names = list.result.tools.map((tool: { name: string }) => tool.name);
+    expect(names).not.toContain("list_shared_computers");
+    expect(names).not.toContain("shared_computer");
+    // the rest of the surface is untouched — this is a gate, not a removal
+    expect(names).toContain("list_bots");
+    expect(names).toContain("skills_list");
+  });
+
+  it("refuses the handlers if a model calls them by name anyway", async () => {
+    for (const name of ["list_shared_computers", "shared_computer"]) {
+      const refused = await gatedRpc("tools/call", { name, arguments: { computer_id: "x", action: "list_files" } });
+      expect(refused.error?.message ?? refused.result?.content?.[0]?.text).toMatch(/unknown tool|turned off/i);
+    }
+  });
+
+  it("shows a bot that is not a Chief none of the Chief-only tools or parameters", async () => {
+    type ListedTool = { name: string; description: string; inputSchema: { properties: Record<string, unknown> } };
+    const tools = new Map(((await gatedRpc("tools/list")).result.tools as ListedTool[]).map((tool) => [tool.name, tool]));
+    for (const name of ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"]) {
+      expect(tools.has(name), name).toBe(false);
+    }
+    for (const name of ["propose_profile", "propose_model"]) {
+      expect(tools.get(name)!.inputSchema.properties).not.toHaveProperty("for_bot_id");
+      expect(tools.get(name)!.description).not.toContain("for_bot_id");
+    }
+    // A routine change may still target a reachable section peer.
+    expect(tools.get("propose_routine_action")!.inputSchema.properties).toHaveProperty("for_bot_id");
+  });
+
+  it("refuses a Chief-only tool called by name without reaching the harness", async () => {
+    lastCreateBody = null;
+    lastCreateRoomBody = null;
+    const created = await gatedRpc("tools/call", { name: "create_bot", arguments: { name: "Scout", role: "Ops", instructions: "Work." } });
+    expect(created.error).toMatchObject({ code: -32602, message: "Unknown tool: create_bot" });
+    const room = await gatedRpc("tools/call", { name: "create_room", arguments: { name: "Ops", member_bot_ids: ["bot-helper"] } });
+    expect(room.error).toMatchObject({ code: -32602, message: "Unknown tool: create_room" });
+    expect(lastCreateBody).toBeNull();
+    expect(lastCreateRoomBody).toBeNull();
+  });
+});
+
+// coordinate_bots exists only in room turns, so its argument handling needs
+// its own child with the room flag on; the stub harness records the wire body.
+describe("coordinate_bots arguments (room turn)", () => {
+  let room: ChildProcess;
+  const roomPending = new Map<number, (msg: any) => void>();
+  let roomId = 700;
+  const roomRpc = (method: string, params?: unknown): Promise<any> =>
+    new Promise((resolve, reject) => {
+      const id = roomId++;
+      roomPending.set(id, resolve);
+      room.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      setTimeout(() => {
+        if (roomPending.delete(id)) reject(new Error(`${method} timed out`));
+      }, 10_000).unref?.();
+    });
+
+  beforeAll(async () => {
+    room = spawn(process.execPath, [PROXY], {
+      env: {
+        ...childEnv(),
+        OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
+        OMB_BOT_ID: "bot-asker",
+        OMB_THREAD_ID: "thread-asker-routine",
+        OMB_COMMS_TOKEN: TOKEN,
+        OMB_TURN_DEPTH: "0",
+        OMB_ROOM_TURN: "1",
+      },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let buf = "";
+    room.stdout!.on("data", (c) => {
+      buf += c;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line);
+        roomPending.get(msg.id)?.(msg);
+        roomPending.delete(msg.id);
+      }
+    });
+    await roomRpc("initialize", { protocolVersion: "2024-11-05" });
+  });
+
+  afterAll(() => {
+    room?.kill();
+  });
+
+  it("maps camelCase aliases onto the canonical snake_case fields", async () => {
+    const res = await roomRpc("tools/call", { name: "coordinate_bots", arguments: {
+      botIds: ["bot-helper"], message: "please review the patch",
+    } });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastCoordinateBody).toMatchObject({
+      botIds: ["bot-helper"], message: "please review the patch",
+    });
+  });
+
+  it("sends cross-bot work one way through the existing thread route", async () => {
+    const listed = await roomRpc("tools/list");
+    const send = listed.result.tools.find((tool: { name: string }) => tool.name === "send_to_bot");
+    expect(send.description).toContain("cross-bot only");
+    const previous = threadResponse;
+    threadResponse = { threadId: "thread-sent", title: "Ship it", botId: "bot-helper", botName: "Helper", self: false };
+    try {
+      const result = await roomRpc("tools/call", { name: "send_to_bot", arguments: {
+        bot_id: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.",
+      } });
+      expect(result.result.isError).toBeFalsy();
+      expect(lastThreadBody).toMatchObject({
+        toBotId: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.", oneWay: true,
+      });
+      expect(result.result.content[0].text).toContain("nothing there will resume you");
+    } finally {
+      threadResponse = previous;
+    }
+  });
+
+  it("reports a cross-bot send that is waiting for approval", async () => {
+    const previous = threadResponse;
+    threadResponse = {
+      threadId: "thread-sent", title: "Ship it", botId: "bot-helper", botName: "Helper",
+      self: false, state: "pending", approvalRequired: true,
+    };
+    try {
+      const result = await roomRpc("tools/call", { name: "send_to_bot", arguments: {
+        bot_id: "bot-helper", title: "Ship it", message: "Ship the reviewed patch.",
+      } });
+      expect(result.result.isError).toBeFalsy();
+      expect(result.result.content[0].text).toContain("pending approval");
+      expect(result.result.content[0].text).not.toContain("Ownership moved");
+    } finally {
+      threadResponse = previous;
+    }
+  });
+
+  it("refuses send_to_bot to self without contacting the server", async () => {
+    lastThreadBody = null;
+    const result = await roomRpc("tools/call", { name: "send_to_bot", arguments: {
+      bot_id: "bot-asker", title: "Separate work", message: "Do it.",
+    } });
+    expect(result.result.isError).toBe(true);
+    expect(result.result.content[0].text).toContain("cross-bot only");
+    expect(lastThreadBody).toBeNull();
+  });
+
+  it("keeps the documented snake_case key when both spellings arrive", async () => {
+    const res = await roomRpc("tools/call", { name: "coordinate_bots", arguments: {
+      bot_ids: ["bot-helper"], botIds: ["bot-other"], group_id: "room-right", groupId: "room-wrong",
+      message: "m", request_key: "from an older tool list", label: "from an older tool list",
+    } });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastCoordinateBody).toMatchObject({
+      botIds: ["bot-helper"], groupId: "room-right",
+    });
+    expect(lastCoordinateBody.botIds).not.toContain("bot-other");
+    // Fields from an older tool list are dropped.
+    expect(lastCoordinateBody).not.toHaveProperty("requestKey");
+    expect(lastCoordinateBody).not.toHaveProperty("label");
+  });
+
+  it("names the expected snake_case fields when arguments are unusable", async () => {
+    lastCoordinateBody = null;
+    const res = await roomRpc("tools/call", { name: "coordinate_bots", arguments: {
+      botIds: "bot-helper", message: "ids is not an array",
+    } });
+    expect(res.result.isError).toBe(true);
+    const text = res.result.content[0].text;
+    for (const field of ["bot_ids", "message", "group_id", "rework"]) {
+      expect(text).toContain(field);
+    }
+    expect(text).toContain("botIds");
+    expect(text).toContain("message");
+    expect(lastCoordinateBody).toBeNull();
   });
 });

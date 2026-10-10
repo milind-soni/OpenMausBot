@@ -2,9 +2,6 @@ import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   EYE_SCALE,
-  FACE_SCALE,
-  FACE_X,
-  FACE_Y,
   MausAvatar,
   MOUTH_WEIGHT,
   type MausAvatarHandle,
@@ -59,10 +56,6 @@ const MOTION_COLORS: MausColor[] = [
 ];
 
 type Tuning = {
-  faceX: number;
-  faceY: number;
-  faceScale: number;
-  eyeSpacing: number;
   eyeScale: number;
   mouthStroke: number;
   spring: number;
@@ -72,10 +65,6 @@ type Tuning = {
 };
 
 const DEFAULTS: Tuning = {
-  faceX: FACE_X,
-  faceY: FACE_Y,
-  faceScale: FACE_SCALE,
-  eyeSpacing: 1,
   eyeScale: EYE_SCALE,
   mouthStroke: MOUTH_WEIGHT,
   spring: 7,
@@ -85,10 +74,6 @@ const DEFAULTS: Tuning = {
 };
 
 const SLIDERS: { key: keyof Tuning; min: number; max: number; step: number; hint: string }[] = [
-  { key: "faceX", min: 40, max: 120, step: 0.5, hint: "face anchor across the body" },
-  { key: "faceY", min: 60, max: 150, step: 0.5, hint: "face anchor up the body" },
-  { key: "faceScale", min: 0.2, max: 0.9, step: 0.005, hint: "overall face size" },
-  { key: "eyeSpacing", min: 0.4, max: 1.8, step: 0.01, hint: "distance between the eyes" },
   { key: "eyeScale", min: 0.4, max: 2, step: 0.01, hint: "eye size" },
   { key: "mouthStroke", min: 2, max: 26, step: 0.5, hint: "mouth thickness" },
   { key: "spring", min: 2, max: 20, step: 0.5, hint: "morph stiffness" },
@@ -135,10 +120,6 @@ function Tuner({
           expression={expression}
           size={300}
           label={`${state} maus`}
-          faceX={tuning.faceX}
-          faceY={tuning.faceY}
-          faceScale={tuning.faceScale}
-          eyeSpacing={tuning.eyeSpacing}
           eyeScale={tuning.eyeScale}
           mouthStroke={tuning.mouthStroke}
           spring={tuning.spring}

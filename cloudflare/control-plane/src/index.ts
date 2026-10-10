@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { accountSession, createAuth } from "./auth";
+import { accountSession, createAuth, deleteExpiredVerifications } from "./auth";
 import { readConfig, type ControlPlaneConfig } from "./config";
 import { errorResponse, HTTPError, json, preflight, secureResponse, withBoundedRequestBody } from "./http";
 import { limitedOTPResponse } from "./otp-rate-limit";
@@ -12,6 +12,7 @@ import {
   provisionManagedEndpoint,
   sweepManagedEndpointCleanup,
 } from "./endpoints";
+import { capacityHealth, reportEndpointAccountProblems, scanTunnelCapacity } from "./tunnel-capacity";
 import {
   createInstallation,
   installationSelf,
@@ -20,6 +21,7 @@ import {
   rotateInstallationCredential,
 } from "./installations";
 
+const SIGN_IN_OTP_PATH = "/api/auth/sign-in/email-otp";
 const ROTATE_ROUTE = /^\/v1\/installations\/([^/]+)\/credentials\/rotate$/;
 const INSTALLATION_ROUTE = /^\/v1\/installations\/([^/]+)$/;
 
@@ -74,7 +76,28 @@ async function route(
   if (url.pathname.startsWith("/api/auth/")) {
     const limited = await limitedOTPResponse(request, env);
     if (limited) return limited;
-    const response = await createAuth(env, ctx, config, requestId).handler(request);
+    const auth = createAuth(env, ctx, config, requestId);
+    const response = await auth.handler(request);
+    // Better Auth's inline expired-code cleanup is off (see auth.ts), so
+    // sign-in sweeps after responding. It skips 429 and 5xx responses. Other
+    // 4xx responses still sweep, including validation errors that never
+    // reached Better Auth's cleanup; its per-IP sign-in limit bounds them. The
+    // other email-otp routes that check a code no longer sweep; sign-in runs
+    // often enough to keep the table bounded.
+    if (
+      request.method === "POST"
+      && url.pathname === SIGN_IN_OTP_PATH
+      && response.status !== 429
+      && response.status < 500
+    ) {
+      ctx.waitUntil(deleteExpiredVerifications(auth).catch(() => {
+        console.error(JSON.stringify({
+          message: "expired verification sweep failed",
+          requestId,
+          errorCode: "auth_internal",
+        }));
+      }));
+    }
     return canonicalAuthResponse(response);
   }
 
@@ -141,12 +164,21 @@ export function createWorker(cloudflareFetch: CloudflareFetch = fetch) {
       const requestId = crypto.randomUUID();
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/healthz") {
+        let healthConfig: ControlPlaneConfig;
         try {
-          readConfig(env);
+          healthConfig = readConfig(env);
         } catch {
           return secureResponse(errorResponse(503, "misconfigured"), request, null, requestId);
         }
-        return secureResponse(json({ ok: true, service: "openmausbot-control-plane" }), request, null, requestId);
+        // `ok` keeps meaning "this Worker is correctly configured"; desktops
+        // gate hosted sign-in on it. Provider capacity is reported beside it
+        // so a full quota never hides sign-in, recovery, or local pairing.
+        const capacity = await capacityHealth(env, healthConfig, ctx).catch(() => null);
+        return secureResponse(json({
+          ok: true,
+          service: "openmausbot-control-plane",
+          ...(capacity === null ? {} : { capacity }),
+        }), request, null, requestId);
       }
 
       let config: ControlPlaneConfig | null = null;
@@ -174,12 +206,44 @@ export function createWorker(cloudflareFetch: CloudflareFetch = fetch) {
     scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): void {
       const requestId = crypto.randomUUID();
       ctx.waitUntil((async () => {
+        let config: ControlPlaneConfig;
         try {
-          const config = readConfig(env);
+          config = readConfig(env);
+        } catch {
+          console.error(JSON.stringify({
+            message: "managed endpoint cleanup sweep failed",
+            requestId,
+            errorCode: "misconfigured",
+          }));
+          return;
+        }
+        // The scan only marks idle rows; the sweep below performs every
+        // deletion through the ownership-verified path. A failed scan must
+        // never block cleanup that is already queued. Both act on each
+        // endpoint's own Cloudflare account.
+        try {
+          await scanTunnelCapacity(env, config, cloudflareFetch, requestId);
+        } catch {
+          console.error(JSON.stringify({
+            message: "managed endpoint tunnel scan failed",
+            requestId,
+            errorCode: "endpoint_internal",
+          }));
+        }
+        try {
           await sweepManagedEndpointCleanup(env, config, cloudflareFetch, requestId);
         } catch {
           console.error(JSON.stringify({
             message: "managed endpoint cleanup sweep failed",
+            requestId,
+            errorCode: "endpoint_internal",
+          }));
+        }
+        try {
+          await reportEndpointAccountProblems(env, config, requestId);
+        } catch {
+          console.error(JSON.stringify({
+            message: "managed endpoint account check failed",
             requestId,
             errorCode: "endpoint_internal",
           }));

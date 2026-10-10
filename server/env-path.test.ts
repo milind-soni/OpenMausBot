@@ -2,12 +2,21 @@
 // well-known install dir — or an nvm bin dir — must be findable even
 // when the process itself started with a bare GUI PATH.
 import { execFile } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { augmentedPath, resetPathCache, resetPathCacheForTests, splitCliString } from "./env-path.ts";
+import {
+  augmentedPath,
+  findCliCandidates,
+  harnessHome,
+  registerPathDir,
+  resetPathCache,
+  resetPathCacheForTests,
+  splitCliString,
+  userHome,
+} from "./env-path.ts";
 import { resolveCli } from "./procs.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
@@ -105,6 +114,54 @@ describe("augmentedPath", () => {
     }
   });
 
+  posixIt("keeps a sealed fixture off machine-wide install dirs and the login shell (#2035)", async () => {
+    // Real directories on this machine: Homebrew's codex lives in one of them.
+    const machineDirs = ["/opt/homebrew/bin", "/usr/local/bin"].filter((dir) => existsSync(dir));
+    const ownBin = join(homedir(), ".local", "bin");
+    mkdirSync(ownBin, { recursive: true });
+    const shell = join(homedir(), "fake-login-shell");
+    const ran = join(homedir(), "login-shell-ran");
+    const rcOnlyBin = join(homedir(), "rc-only", "bin");
+    writeFileSync(shell, `#!/bin/sh\n: > '${ran}'\nprintf '__OMB_PATH__%s' '${rcOnlyBin}'\n`);
+    chmodSync(shell, 0o755);
+
+    const saved = { PATH: process.env.PATH, SHELL: process.env.SHELL, VITEST: process.env.VITEST };
+    const restore = (key: keyof typeof saved) => {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    };
+    try {
+      // A bare PATH, as the fixture has, so only discovery could add a dir.
+      process.env.PATH = join(homedir(), "bare-path");
+      process.env.SHELL = shell;
+      delete process.env.VITEST;
+
+      // Control: unsealed, the product scans both. This is the leak.
+      delete process.env.OMB_TEST_SEALED_PATH;
+      resetPathCacheForTests();
+      expect(augmentedPath().split(delimiter)).toEqual(expect.arrayContaining(machineDirs));
+      await vi.waitFor(() => expect(augmentedPath().split(delimiter)).toContain(rcOnlyBin));
+      rmSync(ran);
+
+      process.env.OMB_TEST_SEALED_PATH = "1";
+      resetPathCacheForTests();
+      const sealed = augmentedPath().split(delimiter);
+      for (const dir of machineDirs) expect(sealed).not.toContain(dir);
+      // Its own home is still where a test plants a CLI for it to find.
+      expect(sealed).toContain(ownBin);
+      // The unsealed probe above landed well inside this; the sealed one never starts.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(existsSync(ran)).toBe(false);
+      expect(augmentedPath().split(delimiter)).not.toContain(rcOnlyBin);
+    } finally {
+      delete process.env.OMB_TEST_SEALED_PATH;
+      restore("PATH");
+      restore("SHELL");
+      restore("VITEST");
+      resetPathCacheForTests();
+    }
+  });
+
   it("skips known dirs that do not exist", () => {
     resetPathCacheForTests();
     const parts = augmentedPath().split(delimiter);
@@ -127,6 +184,84 @@ describe("augmentedPath", () => {
       resetPathCacheForTests();
       rmSync(localAppData, { recursive: true, force: true });
     }
+  });
+
+  it.skipIf(process.platform !== "win32")("finds Docker Desktop's bin dir (#2117)", () => {
+    const previous = process.env.ProgramFiles;
+    const programFiles = mkdtempSync(join(tmpdir(), "omb-programfiles-"));
+    try {
+      process.env.ProgramFiles = programFiles;
+      const dockerBin = join(programFiles, "Docker", "Docker", "resources", "bin");
+      mkdirSync(dockerBin, { recursive: true });
+      resetPathCacheForTests();
+      expect(augmentedPath().split(delimiter)).toContain(dockerBin);
+    } finally {
+      if (previous === undefined) delete process.env.ProgramFiles;
+      else process.env.ProgramFiles = previous;
+      resetPathCacheForTests();
+      rmSync(programFiles, { recursive: true, force: true });
+    }
+  });
+
+  // MOCA-272: OMB installs Cursor from Settings with cursor.com's Windows
+  // script, which puts cursor-agent.* (and `agent` copies) in
+  // %LOCALAPPDATA%\cursor-agent and adds that to the user PATH — which a
+  // running app never sees. Simulated so it runs on every platform.
+  it("finds Cursor installed after launch on Windows", () => {
+    const realPlatform = process.platform;
+    const previous = { LOCALAPPDATA: process.env.LOCALAPPDATA, PATHEXT: process.env.PATHEXT };
+    const localAppData = mkdtempSync(join(tmpdir(), "omb-localappdata-"));
+    try {
+      Object.defineProperty(process, "platform", { value: "win32" });
+      process.env.LOCALAPPDATA = localAppData;
+      // The simulated Windows platform still has the host's case-sensitive filesystem.
+      process.env.PATHEXT = ".com;.exe;.bat;.cmd";
+      const cursorDir = join(localAppData, "cursor-agent");
+      mkdirSync(join(cursorDir, "versions", "2026.09.28-64d2043"), { recursive: true });
+      for (const name of ["cursor-agent.cmd", "cursor-agent.ps1", "agent.cmd", "agent.ps1"]) writeFileSync(join(cursorDir, name), "@echo off\n");
+      resetPathCacheForTests();
+      expect(augmentedPath().split(delimiter)).toContain(cursorDir);
+      expect(findCliCandidates("cursor-agent").map((path) => path.toLowerCase())).toContain(join(cursorDir, "cursor-agent.cmd").toLowerCase());
+    } finally {
+      Object.defineProperty(process, "platform", { value: realPlatform });
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      resetPathCacheForTests();
+      rmSync(localAppData, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("userHome / harnessHome", () => {
+  const realPlatform = process.platform;
+  const setPlatform = (value: NodeJS.Platform) => {
+    Object.defineProperty(process, "platform", { value, configurable: true });
+  };
+
+  afterEach(() => {
+    setPlatform(realPlatform);
+  });
+
+  it("prefers HOME off Windows and USERPROFILE on Windows", () => {
+    setPlatform("linux");
+    expect(userHome({ HOME: "/home/alice", USERPROFILE: "C:\\Users\\alice" })).toBe("/home/alice");
+    setPlatform("win32");
+    expect(userHome({ HOME: "/home/alice", USERPROFILE: "C:\\Users\\alice" })).toBe("C:\\Users\\alice");
+  });
+
+  it("falls back through the other variable to homedir", () => {
+    setPlatform("linux");
+    expect(userHome({ USERPROFILE: "/home/alice" })).toBe("/home/alice");
+    setPlatform("win32");
+    expect(userHome({ HOME: "C:\\Users\\alice" })).toBe("C:\\Users\\alice");
+    expect(userHome({})).toBe(homedir());
+  });
+
+  it("puts each harness's state directory under the user home", () => {
+    expect(harnessHome("qwen", { HOME: "/home/alice" })).toBe(join("/home/alice", ".qwen"));
+    expect(harnessHome("codex", { HOME: "/home/alice" })).toBe(join("/home/alice", ".codex"));
   });
 });
 
@@ -167,6 +302,34 @@ IF EXIST "%dp0%\\node.exe" (
 endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\pkg\\bin\\ombfake.js" %*
 `;
 
+// ...and npm's own npm.cmd / npx.cmd, which Node's installer puts beside
+// node.exe with CRLF endings: the CLI entry sits in a variable, next to a
+// helper script
+const npmLauncher = (name: "npm" | "npx") => {
+  const upper = name.toUpperCase();
+  return `:: Created by npm, please don't edit manually.
+@ECHO OFF
+
+SETLOCAL
+
+SET "NODE_EXE=%~dp0\\node.exe"
+IF NOT EXIST "%NODE_EXE%" (
+  SET "NODE_EXE=node"
+)
+
+SET "NPM_PREFIX_JS=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js"
+SET "${upper}_CLI_JS=%~dp0\\node_modules\\npm\\bin\\${name}-cli.js"
+FOR /F "delims=" %%F IN ('CALL "%NODE_EXE%" "%NPM_PREFIX_JS%"') DO (
+  SET "NPM_PREFIX_${upper}_CLI_JS=%%F\\node_modules\\npm\\bin\\${name}-cli.js"
+)
+IF EXIST "%NPM_PREFIX_${upper}_CLI_JS%" (
+  SET "${upper}_CLI_JS=%NPM_PREFIX_${upper}_CLI_JS%"
+)
+
+"%NODE_EXE%" "%${upper}_CLI_JS%" %*
+`.replaceAll("\n", "\r\n");
+};
+
 describe("resolveCli", () => {
   it.skipIf(process.platform === "win32")("is identity off Windows — the kernel already resolves PATH and #!", () => {
     expect(resolveCli("claude", ["-p", "hi"])).toEqual({ command: "claude", args: ["-p", "hi"] });
@@ -205,6 +368,16 @@ winOnly("resolveCli (Windows)", () => {
     });
   });
 
+  it("uses the supplied PATH and PATHEXT without depending on the app environment", () => {
+    shimWith("ombfake.cmd", EXE_SHIM, "ombfake.exe", "MZ-not-really");
+    expect(resolveCli("ombfake", ["acp"], { Path: dir, PATHEXT: ".CMD" })).toEqual({
+      command: join(dir, "node_modules", "pkg", "bin", "ombfake.exe"),
+      args: ["acp"],
+    });
+    onPath();
+    expect(resolveCli("ombfake", [], { PATH: "", PATHEXT: ".CMD" })).toEqual({ command: "ombfake", args: [] });
+  });
+
   it("parses an npm .cmd shim down to `node <cli.js>`, never the shim's own node.exe", async () => {
     shimWith("ombfake.cmd", JS_SHIM, "ombfake.js", "console.log('js target ' + process.argv.slice(2).join(','));\n");
     onPath();
@@ -215,6 +388,22 @@ winOnly("resolveCli (Windows)", () => {
       execFile(r.command, r.args, (err, out) => (err ? reject(err) : resolve(out))),
     );
     expect(stdout.trim()).toBe("js target -p,hi");
+  });
+
+  it.each(["npm", "npx"] as const)("parses npm's own %s.cmd down to `node <cli.js>`, not its prefix helper", async (name) => {
+    writeFileSync(join(dir, `${name}.cmd`), npmLauncher(name));
+    const bin = join(dir, "node_modules", "npm", "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "npm-prefix.js"), "console.log('prefix helper');\n");
+    writeFileSync(join(bin, `${name}-cli.js`), `console.log('${name} entry ' + process.argv.slice(2).join(','));\n`);
+    onPath();
+    const r = resolveCli(name, ["-y", "mcp-remote"]);
+    expect(r.args).toEqual([join(bin, `${name}-cli.js`), "-y", "mcp-remote"]);
+    expect(r.command.toLowerCase()).toMatch(/node\.exe$/);
+    const stdout = await new Promise<string>((resolve, reject) =>
+      execFile(r.command, r.args, (err, out) => (err ? reject(err) : resolve(out))),
+    );
+    expect(stdout.trim()).toBe(`${name} entry -y,mcp-remote`);
   });
 
   it("prefers the PATHEXT hit over the extensionless sibling npm installs beside it", () => {
@@ -311,5 +500,25 @@ describe("resolveCli with wrapper commands", () => {
       command: join(bin, "omb"),
       args: ["space", "dir/nope", "two", "words", "--version"],
     });
+  });
+});
+
+describe("registerPathDir", () => {
+  afterEach(() => resetPathCacheForTests());
+
+  it("puts an app-managed directory ahead of PATH once it exists, and survives a rescan", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-registered-path-"));
+    const missing = join(dir, "not-yet");
+    try {
+      registerPathDir(missing);
+      expect(augmentedPath().split(delimiter)).not.toContain(missing);
+      mkdirSync(missing);
+      resetPathCache();
+      expect(augmentedPath().split(delimiter)[0]).toBe(missing);
+      registerPathDir(missing);
+      expect(augmentedPath().split(delimiter).filter((d) => d === missing)).toHaveLength(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
