@@ -53,6 +53,58 @@ describe("autoVerdict", () => {
     }
     expect(autoVerdict("full", "Bash", { commandAllowed: true, requiresExplicitApproval: true }).source).toBe("full-access");
   });
+  it("never uses the standing command policy to send, elevate, or answer a question", () => {
+    // The policy exists to stop asking about ordinary commands. It must not
+    // become a second way to reach the three things that always ask — that
+    // is the whole reason it is checked after them rather than before.
+    for (const mode of ["ask", "edits", "auto", "custom"] as const) {
+      expect(autoVerdict(mode, "mcp__composio__GMAIL_SEND_DRAFT", { commandPolicyAllowed: true }))
+        .toEqual({ approve: null, source: "outbound-guard" });
+      expect(autoVerdict(mode, "Bash", { commandPolicyAllowed: true, requiresExplicitApproval: true }))
+        .toEqual({ approve: null, source: "explicit-approval-block" });
+      expect(autoVerdict(mode, "AskUserQuestion", { commandPolicyAllowed: true }).approve).toBeNull();
+    }
+  });
+  it("applies the standing command policy to an ordinary command in every mode", () => {
+    for (const mode of ["ask", "edits", "auto", "custom"] as const) {
+      expect(autoVerdict(mode, "Bash", { commandPolicyAllowed: true }))
+        .toEqual({ approve: "approved Bash (command policy)", source: "command-policy" });
+    }
+    // Absent or false is exactly the behaviour every install had before it.
+    expect(autoVerdict("ask", "Bash", { commandPolicyAllowed: false }).source).toBe("no-grant");
+    expect(autoVerdict("ask", "Bash").source).toBe("no-grant");
+    // A saved exact grant is the person's own and keeps its own chip.
+    expect(autoVerdict("ask", "Bash", { commandAllowed: true, commandPolicyAllowed: true }).source)
+      .toBe("command-allowlist");
+  });
+  it("never lets the tool policy approve a send, a sandbox widening, or a question", () => {
+    // The same three guarantees the command policy has. The tool policy is
+    // read after the outbound guard and the sandbox block, so it cannot
+    // widen either, whatever the operator put on its list.
+    for (const mode of ["ask", "edits", "auto", "custom"] as const) {
+      expect(autoVerdict(mode, "mcp__composio__GMAIL_SEND_DRAFT", { toolPolicyAllowed: true }))
+        .toEqual({ approve: null, source: "outbound-guard" });
+      expect(autoVerdict(mode, "Bash", { toolPolicyAllowed: true, requiresExplicitApproval: true }))
+        .toEqual({ approve: null, source: "explicit-approval-block" });
+      expect(autoVerdict(mode, "AskUserQuestion", { toolPolicyAllowed: true }).approve).toBeNull();
+    }
+  });
+  it("applies the standing tool policy in every mode", () => {
+    for (const mode of ["ask", "edits", "auto", "custom"] as const) {
+      expect(autoVerdict(mode, "composio_COMPOSIO_MULTI_EXECUTE_TOOL", { toolPolicyAllowed: true }))
+        .toEqual({
+          approve: "approved composio_COMPOSIO_MULTI_EXECUTE_TOOL (tool policy)",
+          source: "tool-policy",
+        });
+    }
+    // Absent or false is exactly the behaviour every install had before it.
+    expect(autoVerdict("ask", "composio_COMPOSIO_MULTI_EXECUTE_TOOL", { toolPolicyAllowed: false }).source)
+      .toBe("no-grant");
+    expect(autoVerdict("ask", "composio_COMPOSIO_MULTI_EXECUTE_TOOL").source).toBe("no-grant");
+    // The person's own saved grant still wins and keeps its own chip.
+    expect(autoVerdict("ask", "Bash", { commandAllowed: true, toolPolicyAllowed: true }).source)
+      .toBe("command-allowlist");
+  });
   it("answers only for Full access, and then answers everything", () => {
     expect(autoVerdict("full", "Bash")).toEqual({ approve: "approved Bash (full access)", source: "full-access" });
     expect(autoVerdict("full", "Bash", { requiresExplicitApproval: true })).toEqual({
