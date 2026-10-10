@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Bell, CheckCircle2, CircleHelp, HandHelping, Pin, RotateCcw, Wallet, X, type LucideIcon } from "lucide-react";
 import { useStore, openNotificationTarget } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { BotAvatar, type BotAvatarProps } from "./Avatar";
 import type { NotificationLogEntry, NotifyKind } from "../../shared/notification";
 
 /** One icon and tone per NotifyKind — the same four tones ActivityPanel's
@@ -43,6 +44,12 @@ interface TitledThread { threadId: string; title: string }
 interface ThreadLookupState {
   bots: Array<{ id: string; threadId: string; tasks?: TitledThread[] }>;
   groups: Array<{ threadId: string; name: string; tasks?: TitledThread[] }>;
+}
+
+/** The bot a notification came from, or null (workspace events, deleted bots)
+ * so the row keeps its status icon. */
+export function notificationBotForAvatar<T extends { id: string }>(entry: { botId: string }, bots: T[]): T | null {
+  return bots.find((bot) => bot.id === entry.botId) ?? null;
 }
 
 /** The thread (or room) name a notification belongs to, or null when the
@@ -191,7 +198,7 @@ export function NotificationsPanel() {
           <div className="px-3.5 py-6 text-[13px] text-ink-secondary">{state.notifications.length === 0 ? "Nothing yet." : "No notifications for this bot."}</div>
         )}
         {visible.map((entry) => (
-          <NotificationRow key={entry.id} entry={entry} now={now} threadName={notificationThreadName(entry, state)} onOpen={() => openRow(entry)} />
+          <NotificationRow key={entry.id} entry={entry} now={now} bot={notificationBotForAvatar(entry, state.bots)} threadName={notificationThreadName(entry, state)} onOpen={() => openRow(entry)} />
         ))}
       </div>
       <div className="border-t border-hairline/40 px-3.5 py-2 text-center text-[11.5px] text-ink-tertiary">
@@ -201,7 +208,7 @@ export function NotificationsPanel() {
   );
 }
 
-function NotificationRow({ entry, now, threadName, onOpen }: { entry: NotificationLogEntry; now: number; threadName: string | null; onOpen: () => void }) {
+function NotificationRow({ entry, now, bot, threadName, onOpen }: { entry: NotificationLogEntry; now: number; bot: BotAvatarProps["bot"] | null; threadName: string | null; onOpen: () => void }) {
   const { Icon, className } = KIND_ICON[entry.kind];
   return (
     <button
@@ -213,7 +220,11 @@ function NotificationRow({ entry, now, threadName, onOpen }: { entry: Notificati
         !entry.read && "bg-accent/5",
       )}
     >
-      <Icon size={16} aria-hidden="true" className={cn("mt-0.5 shrink-0", className)} />
+      {bot ? (
+        <span className="mt-px shrink-0" aria-hidden="true"><BotAvatar bot={bot} state="happy" size={24} /></span>
+      ) : (
+        <Icon size={16} aria-hidden="true" className={cn("mt-0.5 shrink-0", className)} />
+      )}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-1.5 text-[12.5px] font-medium text-ink">
           {!entry.read && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}

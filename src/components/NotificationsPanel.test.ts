@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ALL_BOTS, filterNotifications, notificationBots, notificationThreadName } from "./NotificationsPanel";
+import { ALL_BOTS, filterNotifications, notificationBots, notificationBotForAvatar, notificationThreadName } from "./NotificationsPanel";
 
 const state = {
   bots: [{ id: "b1", threadId: "t-main", tasks: [{ threadId: "t-main", title: "Notification Pane" }, { threadId: "t-2", title: "Hotpatches" }] }],
@@ -32,5 +32,15 @@ describe("bot filter", () => {
     expect(filterNotifications(rows, "b2")).toHaveLength(2);
     expect(filterNotifications(rows, ALL_BOTS)).toHaveLength(3);
     expect(filterNotifications(rows, "none")).toHaveLength(0);
+  });
+});
+
+describe("notificationBotForAvatar", () => {
+  const bots = [{ id: "a" }, { id: "b" }];
+  it("finds the bot that sent the notification", () => {
+    expect(notificationBotForAvatar({ botId: "b" }, bots)).toBe(bots[1]);
+  });
+  it("returns null for workspace events or deleted bots", () => {
+    expect(notificationBotForAvatar({ botId: "gone" }, bots)).toBeNull();
   });
 });
