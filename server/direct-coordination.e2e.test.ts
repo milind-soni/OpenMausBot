@@ -712,6 +712,13 @@ it("runs a message sent while a teammate works, keeps the assignment, and names 
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
   const assignment = f.nodes().find((node: any) => node.parentId);
 
+  // The Chief's own assigning turn must have ended: a message sent while it
+  // is still finishing is steered into that live turn, which carries no
+  // outstanding-assignments note (slow Windows runners hit this).
+  await expect.poll(async () => {
+    const chief = (await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.chief.id);
+    return { busy: chief.busy, waitingForTeammates: chief.waitingForTeammates };
+  }, { timeout: 15_000 }).toEqual({ busy: false, waitingForTeammates: true });
   const receipt = await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Also make sure the export is UTF-8.", threadId: f.chief.activeTaskId });
   // It ran; it was not held behind the outstanding work.
   expect(receipt.queued).toBeUndefined();
