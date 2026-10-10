@@ -118,6 +118,7 @@ export function NotificationsPanel() {
   const bots = notificationBots(state.notifications);
   const activeFilter = botFilter === ALL_BOTS || bots.some((bot) => bot.id === botFilter) ? botFilter : ALL_BOTS;
   const visible = filterNotifications(state.notifications, activeFilter);
+  const unreadCount = state.notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -142,7 +143,10 @@ export function NotificationsPanel() {
       className="animate-panel-in flex h-full w-[300px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30"
     >
       <div className="flex items-center gap-1.5 border-b border-hairline/40 px-3.5 py-2.5">
-        <span className="flex-1 text-[13px] font-medium text-ink">Notifications</span>
+        <span className="flex-1 text-[13px] font-medium text-ink">
+          Notifications
+          {unreadCount > 0 && <span className="ml-1.5 text-[11.5px] font-normal text-accent">· {unreadCount} unread</span>}
+        </span>
         <button type="button" onClick={markAllRead} className="shrink-0 whitespace-nowrap text-[11.5px] text-accent hover:underline">
           Mark all read
         </button>
