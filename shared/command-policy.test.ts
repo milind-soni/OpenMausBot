@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { commandPolicyVerdict } from "./command-policy.ts";
 
-const ROOT = "/home/rahul/agent-workspace";
+const ROOT = "/home/user/agent-workspace";
 const verdict = (command: string, cwd = `${ROOT}/research`) =>
   commandPolicyVerdict({ command, cwd, workspaceRoots: [ROOT] });
 
@@ -90,7 +90,7 @@ describe("commandPolicyVerdict: staying inside the workspace", () => {
 
   it("asks for an absolute path argument outside the workspace", () => {
     expect(verdict("cat /etc/passwd").decision).toBe("ask");
-    expect(verdict("cp draft.md /home/rahul/notes.md").decision).toBe("ask");
+    expect(verdict("cp draft.md /home/user/notes.md").decision).toBe("ask");
   });
 
   it("allows an absolute path argument inside the workspace", () => {
@@ -102,7 +102,7 @@ describe("commandPolicyVerdict: staying inside the workspace", () => {
     "ls ~/.openmausbot",
     "cat ~/.hermes/auth.json",
     "grep -r token ~/.gemini-profiles",
-    "cat /home/rahul/.aws/credentials",
+    "cat /home/user/.aws/credentials",
   ])("asks for %s", (command) => {
     expect(verdict(command).decision).toBe("ask");
   });
@@ -120,9 +120,9 @@ describe("commandPolicyVerdict: more than one root", () => {
   // The real shape on this machine: the engine runs commands in the bot's own
   // per-thread task workspace, while the shared material it reads lives in
   // ~/agent-workspace. Measured 2026-10-10 — a shell request arrived with
-  // Cwd "/home/rahul/.openmausbot/task-workspaces/<bot>/<thread>", not the
+  // Cwd "/home/user/.openmausbot/task-workspaces/<bot>/<thread>", not the
   // folder pinned on the bot. A single-root policy refused every command.
-  const TASKS = "/home/rahul/.openmausbot/task-workspaces";
+  const TASKS = "/home/user/.openmausbot/task-workspaces";
   const BOT_CWD = `${TASKS}/fc432790/4b7437fe`;
   const twoRoots = (command: string, cwd = BOT_CWD) =>
     commandPolicyVerdict({ command, cwd, workspaceRoots: [ROOT, TASKS] });
@@ -140,8 +140,8 @@ describe("commandPolicyVerdict: more than one root", () => {
     // task-workspaces is a root; its parent is not. This is the check that
     // keeps config.json, bots.json and the transcripts out of reach, and it
     // works on the resolved path rather than on how the path was spelled.
-    expect(twoRoots("cat /home/rahul/.openmausbot/config.json").decision).toBe("ask");
-    expect(twoRoots("cat /home/rahul/.openmausbot/bots.json").decision).toBe("ask");
+    expect(twoRoots("cat /home/user/.openmausbot/config.json").decision).toBe("ask");
+    expect(twoRoots("cat /home/user/.openmausbot/bots.json").decision).toBe("ask");
     expect(twoRoots(`cat ${TASKS}/../messages.db`).decision).toBe("ask");
     // From <bot>/<thread>, two levels up is still task-workspaces, which is
     // a root; it takes three to reach the runtime's own directory.
@@ -190,5 +190,72 @@ describe("commandPolicyVerdict: fails closed", () => {
     expect(allows("git status")).toBe(true);
     expect(verdict("git switch main").decision).toBe("ask");
     expect(verdict("git").decision).toBe("ask");
+  });
+});
+
+// Each of the three below was allowed by this module before it was probed on
+// 2026-10-10, and each was found by asking what a listed binary can actually
+// do rather than by reading the list. They are pinned so they cannot come
+// back quietly.
+describe("commandPolicyVerdict: regressions found by probe", () => {
+  it("does not treat a writing `git config` as a read", () => {
+    // `config` is on the read-only subcommand list, but the same subcommand
+    // writes when a value follows the key, and `--global` writes the file in
+    // the home directory — outside the workspace altogether.
+    expect(verdict("git config user.email someone@example.com").decision).toBe("ask");
+    expect(verdict("git config --global user.name someone").decision).toBe("ask");
+    expect(verdict("git config --global core.pager cat").decision).toBe("ask");
+    // The read forms stay allowed, which is why `config` is listed at all.
+    expect(allows("git config --get user.email")).toBe(true);
+    expect(allows("git config --list")).toBe(true);
+    // A read of a file outside the workspace is still outside the workspace.
+    expect(verdict("git config --global --get user.name").decision).toBe("ask");
+  });
+
+  it("judges the program a wrapper runs, not the wrapper", () => {
+    // `env`, `timeout` and `xargs` are on the safe list because their
+    // ordinary use is safe; what they RUN is what the safe list has to be
+    // checked against. A bare `docker ps` always asked, so these three
+    // allowing it was the allowlist being bypassed by spelling.
+    expect(verdict("env docker ps").decision).toBe("ask");
+    expect(verdict("timeout 5 docker ps").decision).toBe("ask");
+    expect(verdict("xargs docker ps").decision).toBe("ask");
+    expect(verdict("nohup timeout 5 docker ps").decision).toBe("ask");
+    // and the wrappers still work over something on the list
+    expect(allows("env grep -rn kapyn .")).toBe(true);
+    expect(allows("timeout 5 node build.mjs")).toBe(true);
+    expect(allows("find . -name '*.md' | xargs grep kapyn")).toBe(true);
+    // a wrapper with nothing left to run cannot be read, so it asks
+    expect(verdict("env").decision).toBe("ask");
+    expect(verdict("timeout 5").decision).toBe("ask");
+  });
+
+  it("resolves a redirect target against the roots, with or without a space", () => {
+    // `>/etc/cron.d/x` is a single token that does not begin with `/`, so
+    // resolving it as written placed it harmlessly inside the working
+    // directory. The operator is split from its target first.
+    expect(verdict("echo hi >/etc/cron.d/task").decision).toBe("ask");
+    expect(verdict("echo hi > /etc/cron.d/task").decision).toBe("ask");
+    expect(verdict(`echo hi >${ROOT}/../outside.txt`).decision).toBe("ask");
+    // A redirect inside the workspace is ordinary work and must not ask.
+    expect(allows("echo hi > out.txt")).toBe(true);
+    expect(allows(`echo hi > ${ROOT}/research/out.txt`)).toBe(true);
+    expect(allows("echo hi >> notes.md")).toBe(true);
+    expect(allows("cat notes.md 2>&1")).toBe(true);
+  });
+
+  it("applies the redirect rule to every configured root, not one by name", () => {
+    // The rule this replaced exempted one hardcoded directory name, so a
+    // redirect into any other configured root still asked — including the
+    // per-thread task workspace the engine actually runs commands in.
+    const TASKS = "/home/user/.openmausbot/task-workspaces";
+    const twoRoots = (command: string) =>
+      commandPolicyVerdict({ command, cwd: `${TASKS}/bot/thread`, workspaceRoots: [ROOT, TASKS] });
+    expect(twoRoots(`echo hi > ${TASKS}/bot/thread/out.txt`)).toEqual({
+      decision: "allow",
+      reason: "ordinary command inside the workspace",
+    });
+    expect(twoRoots(`echo hi > ${ROOT}/shared/out.txt`).decision).toBe("allow");
+    expect(twoRoots("echo hi > /home/user/elsewhere/out.txt").decision).toBe("ask");
   });
 });
