@@ -3385,15 +3385,25 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
   });
 }
 
+/** Include configuration that the driver snapshot itself does not carry. */
+function selectableInstances<T extends SelectableInstance>(instances: readonly T[]): T[] {
+  const configs = providerConfigs();
+  return instances.map(instance => ({
+    ...instance,
+    enabled: configs[instance.instanceId]?.enabled ?? instance.enabled,
+    ...(configs[instance.instanceId]?.access ? { access: configs[instance.instanceId].access } : {}),
+  }));
+}
+
 // New bots honor setup's saved choice; without one, an engine that can run a
 // turn now (Claude first). While enrolled, a Company model that can run beats
 // a signed-out personal engine, and the organisation's policy is respected;
 // otherwise inert. `null` leaves the saved choice out (moveOffComputerEngine).
 // On a Cloud home, the trial's Claude credit counts like a Company engine: a
 // working engine of the person's own wins over it.
-async function defaultSelection(saved: ModelSelection | null = cfg.defaultModelSelection ?? null) {
+async function defaultSelection(saved: ModelSelection | null = cfg.defaultModelSelection ?? null, instances?: readonly SelectableInstance[]) {
   if (hostedModels) return hostedModels.select(saved ?? undefined);
-  return selectDefaultModelSelection(await registry.describe(), saved ?? undefined, {
+  return selectDefaultModelSelection(selectableInstances(instances ?? await registry.describe()), saved ?? undefined, {
     company: (instanceId) => managedDesktop.owns(instanceId) || cloudCredit?.owns(instanceId) === true,
     refusal: (instance) => policyModelRefusal(instance),
   });
@@ -3404,6 +3414,20 @@ const selectionContext = {
   company: (instanceId: string) => managedDesktop.owns(instanceId) || cloudCredit?.owns(instanceId) === true,
   refusal: (instance: SelectableInstance) => policyModelRefusal(instance),
 };
+
+/** First-run setup can create its bot before an account or model list is
+ * ready. Fill only genuinely unset choices when an engine becomes ready;
+ * intentional bot and thread selections are never replaced. */
+async function refreshUnsetModelSelections(instances?: readonly SelectableInstance[]): Promise<void> {
+  const selectable = selectableInstances(instances ?? await registry.describe());
+  bootSelection = await defaultSelection(undefined, selectable.filter(instance => readyToRun(instance, selectionContext)));
+  if (hostedModels || !bootSelection.instanceId || !bootSelection.model) return;
+  const selection = withNewBotEffort(bootSelection, cfg.newBots?.effort,
+    registry.get(bootSelection.instanceId)?.adapter.capabilities.effortLevels);
+  for (const bot of store.bots) {
+    if (!bot.modelSelection.instanceId && !bot.modelSelection.model) store.applyModelDefault(bot.id, selection);
+  }
+}
 
 /** The person's own engine can run here now, so nothing runs on the trial's
  * Claude credit any more: each bot and conversation still on it, and a saved
@@ -3894,28 +3918,23 @@ await retryComputerEngineMove();
 // A new Cloud home's first bot runs on its trial Claude credit when the
 // person has no AI of their own there yet: the credit's engine is waited for, briefly.
 if (store.needsSeed()) await Promise.race([cloudCreditStarted, new Promise(resolve => setTimeout(resolve, 15_000).unref())]);
-if (store.needsSeed()) bootSelection = await defaultSelection();
-else enginesRead = defaultSelection().then(
-  (selection) => { bootSelection = selection; },
+if (store.needsSeed()) await refreshUnsetModelSelections();
+else enginesRead = refreshUnsetModelSelections().catch(
   (error) => console.warn(`[engines] reading the engines at start failed: ${error instanceof Error ? error.message : String(error)}`),
 ).finally(() => { enginesRead = null; });
 // Model lists served from the last run refresh behind listen. Each one
-// notifies the picker when it lands, then the new-bot default is read again
-// so a bot created this session sees the discovered model.
+// fills unset starter bots and notifies the picker when it lands. Don't wait
+// for unrelated providers' catalogs before the first connected one can run.
 const startupCatalogs = registry.instances().flatMap((instance) =>
   instance.startupModelRefresh ? [instance.startupModelRefresh] : []);
 for (const pending of startupCatalogs) {
-  void pending.then(() => broadcast({ kind: "config", ...configStatus() }), () => {});
-}
-if (startupCatalogs.length) {
-  void Promise.all(startupCatalogs).then(async () => {
-    if (store.needsSeed()) return;
-    try {
-      bootSelection = await defaultSelection();
-    } catch (error) {
+  void pending.then(async () => {
+    try { await refreshUnsetModelSelections(); }
+    catch (error) {
       console.warn(`[engines] refreshing the new-bot default after model discovery failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-  });
+    broadcast({ kind: "config", ...configStatus() });
+  }, () => {});
 }
 store.seedIfEmpty();
 hostedModels?.reconcile(store);
@@ -9365,6 +9384,14 @@ async function acceptDirectSend(
         }
       }
 
+      // Resolve first-run setup before reading admission/guarded-send
+      // preconditions. Provider discovery yields; transcript reservation
+      // after those checks must remain synchronous.
+      const profile = store.bot(botId);
+      if (profile && !profile.modelSelection.instanceId && !profile.modelSelection.model) {
+        if (enginesRead) await enginesRead;
+        await refreshUnsetModelSelections();
+      }
       const currentAtStart = store.projectBotForTask(botId, threadId);
       if (!currentAtStart) throw Object.assign(new Error("no such bot"), { status: 404 });
       if (!store.taskByThread(currentAtStart.id, threadId)) {
@@ -15871,7 +15898,8 @@ async function describeInstances() {
   // (an install, a sign-in, a key or a Company engine), so a bot still on the
   // removed Computer engine moves now rather than at the next start.
   void retryComputerEngineMove();
-  const engines = await registry.describe();
+  const engines = selectableInstances(await registry.describe());
+  await refreshUnsetModelSelections(engines);
   // ...and where a Cloud home learns the person's own AI can run: from then
   // on nothing runs on the trial's Claude credit, which says so.
   moveOffTrialCredit(engines);

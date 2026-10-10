@@ -112,6 +112,13 @@ await textVisible("Couldn't check your AI connections");
 assert.deepEqual(await evaluate("[...document.querySelectorAll('.welcome-card [aria-expanded]')].map(e => e.textContent)"), inventoryBefore);
 await click("Check again");
 await poll(async () => (await snapshot()).includes("Couldn't check your AI connections"), false, "inventory retry");
+const starter = await evaluate("fetch('/api/bots').then(r => r.json()).then(data => data.bots.find(bot => bot.name === 'Pepper'))");
+assert.ok(starter?.modelSelection?.instanceId && starter.modelSelection.model, "starter has a model without opening the picker");
+const engines = await evaluate("fetch('/api/instances').then(r => r.json()).then(data => data.instances)");
+const selected = engines.find((engine: any) => engine.instanceId === starter.modelSelection.instanceId);
+assert.equal(selected?.snapshot.state, "available", "starter uses an available provider");
+assert.notEqual(selected?.snapshot.authenticated, false, "starter uses a connected account");
+assert.equal(starter.modelSelection.model, selected.models.default);
 await click("Continue");
 await textVisible("Your phone");
 await click("Not now");
@@ -131,6 +138,10 @@ for (const step of TOUR_STEPS) {
   await poll(async () => (await config()).onboarding.hintsSeen.includes(step.id), true, `saved ${step.id}`);
 }
 await poll(() => evaluate("document.querySelectorAll('[data-tour-card]').length"), 0, "tour closed");
+await type("Message Pepper", "FIRST_MESSAGE_AFTER_ONBOARDING_7J");
+await ui("press", "--keys", "Enter");
+await poll(() => evaluate(`fetch('/api/threads/${starter.threadId}/messages?limit=20').then(r => r.json()).then(data => data.messages.some(message => message.role === 'bot' && message.kind === 'text' && message.turnSucceeded === true))`), true, "first onboarding message completes");
+console.log("PASS connected default selected automatically; first message succeeds without a model pick");
 await evaluate("setTimeout(() => location.reload(), 0); true");
 await textVisible("Message Pepper");
 assert.equal(await evaluate("document.querySelectorAll('.welcome-card, [data-tour-card]').length"), 0);

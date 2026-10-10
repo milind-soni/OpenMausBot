@@ -19,6 +19,8 @@ pairing, native permissions or user workspace is involved.
 
 Assertions cover profile-save failure and retry, reduced-motion reel playback,
 engine refresh failure without losing inventory, phone skip, welcome completion,
+automatic starter-model selection and a successful first composer message without
+opening the model picker,
 every guided tour step, persistence after reload, Settings replay, skipping
 while Next is saving, closing welcome while its save is pending, and replay on
 legacy installs with a failed-save retry. Screenshots
@@ -27,6 +29,24 @@ each workflow. Actual provider authentication and native Electron permissions
 remain covered by their separate platform recipes, not this browser fixture.
 
 Stop the launcher with Ctrl-C; it owns and removes only its disposable home.
+
+## Providers connected after first launch
+
+```sh
+pnpm exec vitest run server/onboarding-model-default.e2e.test.ts server/default-model-selection.test.ts src/components/NewBotDialog.test.ts
+```
+
+The server tests launch only disposable homes and repository-owned fake engines.
+They cover a genuinely signed-out first install, a missing CLI connected later,
+and first-send discovery without opening settings. They assert the selected model
+in persisted bot records and fake-provider arguments, settled turns and bounded
+transcripts. Existing bot choices and explicitly pinned thread models survive
+both automatic repair and a restart. Disabled and signed-out engines stay unset.
+Guarded messages recheck permissions after held provider discovery before starting.
+Pure-picker tests cover API/custom engines, empty catalogs, fallback model options
+and organization policy. Dialog tests cover blank saved new-bot templates without
+replacing deliberate choices. Real provider authentication and packaged native
+installation are not exercised by these offline fixtures.
 
 ## Organization row, hosted beats and member note (Sep 23 2026)
 

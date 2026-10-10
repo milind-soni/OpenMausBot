@@ -97,7 +97,10 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
       .then(result => {
         if (cancelled) return;
         const defaults = structuredClone(result.defaults);
-        defaults.profile.modelSelection ??= result.modelSelection;
+        const selection = defaults.profile.modelSelection;
+        if (!selection || (selection.instanceId === "" && selection.model === "")) {
+          defaults.profile.modelSelection = result.modelSelection;
+        }
         if (!defaultsMode) defaults.profile.name = defaults.profile.name?.trim() || result.suggestedName;
         if (section !== undefined) defaults.profile.section = section;
         setDraft(new BotCreationDraft(defaults, () => render(value => value + 1)));
