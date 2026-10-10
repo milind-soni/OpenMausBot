@@ -85,6 +85,12 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
         winKeys: ["↑"],
       },
       {
+        id: "add-to-prompt",
+        description: "Add selected message text to the prompt",
+        macKeys: ["⌘", "L"],
+        winKeys: ["Ctrl", "L"],
+      },
+      {
         id: "close-panel",
         description: "Close active drawer, modal, or find bar",
         macKeys: ["Esc"],

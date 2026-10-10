@@ -157,3 +157,32 @@ export function citationTabShortcut() {
     },
   };
 }
+
+type ShortcutEvent = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "isComposing">;
+
+/** ⌘L on a Mac, Ctrl+L elsewhere: add the selected message text to the
+ * prompt. Free in the app's own catalog (src/lib/keyboard-shortcuts.ts) and
+ * only taken while a message selection is showing the pill. `code` keeps it
+ * on the L key in non-Latin layouts. */
+export function isAddToPromptShortcut(event: ShortcutEvent, isMac: boolean): boolean {
+  if (event.isComposing || event.shiftKey || event.altKey) return false;
+  const modifier = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+  return modifier && (event.key.toLowerCase() === "l" || event.code === "KeyL");
+}
+
+/** The chord as the pill shows it and announces it (aria-keyshortcuts). */
+export function addToPromptChord(isMac: boolean): { text: string; aria: string } {
+  return isMac ? { text: "\u2318L", aria: "Meta+L" } : { text: "Ctrl+L", aria: "Control+L" };
+}
+
+/** Whether a key in the composer takes the newest quote chip back out:
+ * Escape, or Backspace with the caret at the very start of the input, right
+ * after the chips. */
+export function removesQuoteChip(
+  event: Pick<KeyboardEvent, "key" | "isComposing">,
+  selection: { start: number | null; end: number | null },
+): boolean {
+  if (event.isComposing) return false;
+  if (event.key === "Escape") return true;
+  return event.key === "Backspace" && selection.start === 0 && selection.end === 0;
+}
