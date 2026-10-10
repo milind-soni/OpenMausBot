@@ -2374,7 +2374,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             options,
           });
         } finally {
-          rmSync(cwd, { recursive: true, force: true });
+          // On Windows the engine process can still hold the folder for a
+          // moment after it exits; a cleanup failure must never replace the
+          // one-shot's own result or error. The OS temp folder is reclaimed later.
+          try { rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* left for the OS */ }
         }
       };
 
