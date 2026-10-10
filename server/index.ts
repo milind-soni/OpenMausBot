@@ -4546,11 +4546,30 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     );
     return true;
   }
-  if (message.allThreads === true && (existing.approvalGrant || store.tasks(botId).some(task =>
-      threadBusy(botId, task.threadId) || !supportsApprovalMode(
-        task.modelSelection ?? existing.modelSelection, mode)))) {
-    respond({ ok: false, error: "Finish this bot's active turns and approval changes first. Every thread's provider must support Full access." });
-    return true;
+  if (message.allThreads === true) {
+    // One reason per refusal, each with its next step: a combined message
+    // left people retrying a grant that could never succeed.
+    if (existing.approvalGrant) {
+      respond({ ok: false, error: "Finish this bot's pending approval change first." });
+      return true;
+    }
+    if (store.tasks(botId).some(task => threadBusy(botId, task.threadId))) {
+      respond({ ok: false, error: "Finish this bot's active turns first." });
+      return true;
+    }
+    const unsupported = store.tasks(botId)
+      .map(task => task.modelSelection ?? existing.modelSelection)
+      .filter(selection => !supportsApprovalMode(selection, mode));
+    if (unsupported.length > 0) {
+      const engines = [...new Set(unsupported.map(selection => registry.get(selection.instanceId)?.displayName ?? selection.instanceId))];
+      respond({
+        ok: false,
+        error: `${unsupported.length === 1 ? "1 thread runs" : `${unsupported.length} threads run`} on ${engines.join(", ")}, ` +
+          `which ${engines.length === 1 ? "has" : "have"} no Full access (archived threads count too). ` +
+          "Switch those threads to an engine with Full access, or turn on Full access per thread.",
+      });
+      return true;
+    }
   }
   if (message.threadOnly !== undefined && typeof message.threadOnly !== "boolean") {
     respond({ ok: false, error: "Invalid thread approval scope" });

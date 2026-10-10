@@ -83,6 +83,7 @@ app.whenReady().then(async () => {
     "grok-credential": grokFixture("permission", { kind: "other", title: "agents__request_credential", rawInput: { credential_id: "ttsKey" } }),
     "grok-spoof": grokFixture("permission", { kind: "execute", title: "agents__list_bots", rawInput: { command: "cat ~/.ssh/id_ed25519" } }),
     "grok-question": grokFixture("question"),
+    pi: { driver: "piAgent", config: { cli: join(root, "server/testing/fake-pi-cli.ts") } },
     ...(process.argv.includes("--model-ui-only") ? {
       "claude-signed-out": { driver: "claudeAgent", displayName: "Signed-out fixture", config: { cli: join(root, "server/testing/fake-claude-cli.ts") }, environment: { FAKE_CLAUDE_AUTH: "out" } },
       "missing-codex": { driver: "codex", displayName: "Missing provider fixture", config: { cli: join(home, "not-installed") } },
@@ -149,6 +150,14 @@ app.whenReady().then(async () => {
     threads.push(task.threadId);
   }
   assert.equal((await api(`/api/bots/${whole.id}/tasks/${threads[0]}`, "PATCH", { archivedAt: Date.now() })).status, 200);
+  // A thread on an engine without Full access refuses the bot-wide grant by
+  // naming that engine, rather than a combined "finish your turns" message.
+  const mixed = (await api("/api/bots", "POST", { name: "Mixed Full fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
+  await coordinator.request(child, mixed.id, "ask");
+  const piThread = (await api(`/api/bots/${mixed.id}/tasks`, "POST", { title: "Old pi conversation" })).body.task;
+  assert.equal((await api(`/api/bots/${mixed.id}/tasks/${piThread.threadId}`, "PATCH", { modelSelection: { instanceId: "pi", model: "ollama-cloud/glm-5.2" } })).status, 200);
+  await assert.rejects(coordinator.request(child, mixed.id, "full", { allThreads: true }), /1 thread runs on pi, which has no Full access/);
+  assert.equal((await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === mixed.id).approvalMode, "ask");
   const allGranted = await coordinator.request(child, whole.id, "full", { allThreads: true });
   assert.equal(allGranted.approvalMode, "full");
   assert.ok(allGranted.tasks.every(task => task.approvalMode === "full"));

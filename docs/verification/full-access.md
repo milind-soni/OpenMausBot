@@ -46,7 +46,9 @@ The desktop smoke uses a disposable Electron utility-process server and the
 real private approval bridge. It covers one confirmed Full Access grant for
 all existing, archived and future threads, including mixed Claude, Codex,
 Grok and Antigravity providers. Other bots and per-thread model choices stay
-unchanged. The real settings confirmation is driven in a hidden fixture
+unchanged. A bot with a thread on an engine without Full access (pi) is refused
+with a message naming that engine and how many threads use it, and keeps Ask.
+The real settings confirmation is driven in a hidden fixture
 window, including Cancel, the all-threads checkbox and the committed result.
 Screenshots are saved under `.omb-scratch/verify-evidence/provider-fixes/`.
 Provider processes are fake; this does not test live account access.
