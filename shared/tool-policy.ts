@@ -19,6 +19,8 @@
 // them is on the operator's list. Unreadable, empty, partial or unknown all
 // return `ask`, which is the behaviour that exists today.
 
+import { isOutboundTool } from "./outbound.ts";
+
 export type ToolDecision = "allow" | "ask";
 
 export interface ToolPolicyVerdict {
@@ -99,11 +101,20 @@ export function toolPolicyVerdict(input: ToolPolicyInput): ToolPolicyVerdict {
     if (slugs.some((slug) => MULTIPLEXERS.has(slug))) return ask("an inner tool is itself a multiplexer");
     const refused = slugs.find((slug) => !allowed.has(slug));
     if (refused) return ask(`${refused} is not on the tool policy list`);
+    // A send is never this policy's to approve, even when the operator put it
+    // on the list. autoVerdict's own outbound guard cannot catch these: it
+    // sees ACP's category ("other"), and isOutboundTool("other") is false.
+    // The relay's gate in server/index.ts does check inner slugs and would
+    // still stop the send, but a card that auto-approves a send is wrong on
+    // its own terms. Found 2026-10-11 in review.
+    const sends = slugs.find((slug) => isOutboundTool(slug));
+    if (sends) return ask(`${sends} sends something, which this policy never approves`);
     return { decision: "allow", reason: `tool policy: ${slugs.join(", ")}` };
   }
 
   if (MULTIPLEXERS.has(tool)) return ask("a multiplexer is never granted by its own name");
   if (!allowed.has(tool)) return ask(`${tool} is not on the tool policy list`);
+  if (isOutboundTool(tool)) return ask(`${tool} sends something, which this policy never approves`);
   return { decision: "allow", reason: `tool policy: ${tool}` };
 }
 

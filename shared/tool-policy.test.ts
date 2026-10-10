@@ -68,6 +68,35 @@ describe("toolPolicyVerdict: the wrapper's name is never the grant", () => {
   });
 });
 
+describe("toolPolicyVerdict: a send is never this policy's to approve", () => {
+  // autoVerdict's outbound guard cannot catch these: it sees ACP's category,
+  // "other", and isOutboundTool("other") is false. So the refusal has to live
+  // here too, even though the relay's gate would also stop the send.
+  it("refuses an outbound inner tool even when the operator listed it", () => {
+    expect(toolPolicyVerdict({
+      tool: "composio_COMPOSIO_MULTI_EXECUTE_TOOL",
+      innerToolSlugs: ["GMAIL_SEND_EMAIL"],
+      allowedToolSlugs: ["GMAIL_SEND_EMAIL"],
+    })).toEqual({ decision: "ask", reason: "GMAIL_SEND_EMAIL sends something, which this policy never approves" });
+  });
+
+  it("refuses when one of several inner tools sends", () => {
+    expect(toolPolicyVerdict({
+      tool: "composio_COMPOSIO_MULTI_EXECUTE_TOOL",
+      innerToolSlugs: ["GOOGLESHEETS_BATCH_GET", "GMAIL_SEND_EMAIL"],
+      allowedToolSlugs: ["GOOGLESHEETS_BATCH_GET", "GMAIL_SEND_EMAIL"],
+    }).decision).toBe("ask");
+  });
+
+  it("refuses a directly named outbound tool on the list", () => {
+    expect(verdict("composio_GMAIL_SEND_EMAIL", undefined, ["GMAIL_SEND_EMAIL"]).decision).toBe("ask");
+  });
+
+  it("still allows a listed read", () => {
+    expect(verdict("composio_COMPOSIO_MULTI_EXECUTE_TOOL", ["GOOGLESHEETS_BATCH_GET"]).decision).toBe("allow");
+  });
+});
+
 describe("toolPolicyVerdict: off by default, and fail closed", () => {
   it("asks when no list is configured", () => {
     expect(verdict("composio_GOOGLESHEETS_BATCH_GET", undefined, []))

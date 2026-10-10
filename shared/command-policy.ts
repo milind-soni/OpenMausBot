@@ -96,6 +96,11 @@ const ALWAYS_ASK: ReadonlyArray<{ pattern: RegExp; reason: string }> = [
   // on the word refused every ordinary command run in the folder the engine
   // actually works in. Observed 2026-10-10.
   { pattern: /\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b/, reason: "recursive forced delete" },
+  // `find` is on the safe list because searching is ordinary, but these
+  // actions make it delete or run another program, and the flag is skipped by
+  // the path loop because it starts with `-`. `find . -delete` was allowed:
+  // it empties the workspace without a card. Found 2026-10-11 by probe.
+  { pattern: /\s-(delete|exec|execdir|ok|okdir|fprintf|fls)\b/, reason: "a search that deletes or runs another command" },
   // A redirect to a path outside the workspace is NOT matched here. It was,
   // by a pattern that exempted one hardcoded directory name, which meant a
   // redirect into any other configured root — including the per-thread task
@@ -169,6 +174,11 @@ function binaryOf(segment: string): string | null {
     if (!name) return null;
     if (!WRAPPER_BINARIES.has(name)) return name;
     tokens = tokens.slice(1);
+    // A wrapper flag that moves the working directory invalidates every path
+    // check below, which resolves against the cwd the provider reported.
+    // `env --chdir=/elsewhere cat config.json` was allowed because the flag
+    // starts with `-` and the path loop skips it. Found 2026-10-11 by probe.
+    if (tokens.some((token) => /^(--chdir(=|$)|-C(=|$))/.test(token))) return null;
     // the wrapper's own flags, and the single value some of them take
     // (`timeout 5 …`, `nice -n 5 …`, `stdbuf -oL …`)
     while (tokens.length && tokens[0].startsWith("-")) tokens = tokens.slice(1);

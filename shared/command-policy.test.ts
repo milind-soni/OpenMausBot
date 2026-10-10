@@ -209,6 +209,32 @@ describe("commandPolicyVerdict: fails closed", () => {
 // 2026-10-10, and each was found by asking what a listed binary can actually
 // do rather than by reading the list. They are pinned so they cannot come
 // back quietly.
+describe("commandPolicyVerdict: holes found in external review", () => {
+  // Both were allowed by this module until 2026-10-11, and both were missed
+  // by an earlier read-through of the same file. Found by probing it.
+  it("asks for a search that deletes or runs another command", () => {
+    // `find` is safe-listed because searching is ordinary; `-delete` is
+    // skipped by the path loop because it starts with a dash.
+    expect(verdict("find . -delete").decision).toBe("ask");
+    expect(verdict("find . -name '*.md' -delete").decision).toBe("ask");
+    expect(verdict("find . -exec rm {} ;").decision).toBe("ask");
+    expect(verdict("find . -execdir sh -c 'x' ;").decision).toBe("ask");
+    // an ordinary search is still ordinary
+    expect(allows("find . -name '*.md'")).toBe(true);
+    expect(allows("find . -type f -newer notes.md")).toBe(true);
+  });
+
+  it("asks when a wrapper flag moves the working directory", () => {
+    // Every path check below resolves against the cwd the provider reported,
+    // so a flag that changes it invalidates all of them.
+    expect(verdict("env --chdir=/home/user/.openmausbot cat config.json").decision).toBe("ask");
+    expect(verdict("env -C /home/user/.openmausbot cat config.json").decision).toBe("ask");
+    expect(verdict("env --chdir=/etc cat passwd").decision).toBe("ask");
+    // a wrapper without one still works
+    expect(allows("env grep -rn kapyn .")).toBe(true);
+  });
+});
+
 describe("commandPolicyVerdict: regressions found by probe", () => {
   it("does not treat a writing `git config` as a read", () => {
     // `config` is on the read-only subcommand list, but the same subcommand
