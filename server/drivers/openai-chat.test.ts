@@ -328,6 +328,78 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     }
   }, 20_000);
 
+  it("feeds a corrective round back when toolErrorCorrectiveRounds is set, and honors the cap", async () => {
+    // With toolErrors.correctiveRounds > 0, a done-after-failure feeds one
+    // corrective round back to the model (never after a denial — no denial
+    // happens here), so the turn can retry. After the configured rounds are
+    // used, the next done-after-failure still ends with tool_error.
+    const dir = mkdtempSync(join(tmpdir(), "omb-chat-toolerr-")); mcpDir.push(dir);
+    const script = join(dir, "fake-fail-mcp.mjs");
+    writeFileSync(script, `#!/usr/bin/env node
+      const send = (m) => process.stdout.write(JSON.stringify(m) + "\\n");
+      let buffer = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => {
+        buffer += chunk;
+        let nl;
+        while ((nl = buffer.indexOf("\\n")) !== -1) {
+          const line = buffer.slice(0, nl); buffer = buffer.slice(nl + 1);
+          const m = JSON.parse(line);
+          if (m.method === "initialize") send({jsonrpc:"2.0",id:m.id,result:{protocolVersion:"2024-11-05",capabilities:{tools:{}}}});
+          else if (m.method === "tools/list") send({jsonrpc:"2.0",id:m.id,result:{tools:[{name:"write",description:"Fixture write",inputSchema:{type:"object",properties:{},additionalProperties:false}}]}});
+          else if (m.method === "tools/call") send({jsonrpc:"2.0",id:m.id,result:{isError:true,content:[{type:"text",text:"boom"}]}});
+        }
+      });
+    `);
+    chmodSync(script, 0o755);
+    const callBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fx_write","arguments":"{}"}}]}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const retryBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c2","type":"function","function":{"name":"fx_write","arguments":"{}"}}]}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const doneBody = 'data: {"choices":[{"index":0,"delta":{"content":"Done."}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
+      if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      bodies.push(JSON.parse(String(init?.body)));
+      // 1: tool call c1 (fails). 2: model says done -> corrective round fed back.
+      // 3: tool call c2 (fails; a fresh id so the reused-id guard stays quiet).
+      // 4: model says done -> cap used up -> tool_error.
+      const n = bodies.length;
+      return new Response(n === 1 ? callBody : n === 2 ? doneBody : n === 3 ? retryBody : doneBody, { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "toolerr2", displayName: "Synthetic", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+      environment: { K: "synthetic" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    try {
+      await instance.adapter.sendTurn({
+        threadId: "toolerr2", text: "Use the tool, then answer.", approvalMode: "full",
+        toolErrorCorrectiveRounds: 1,
+        integrations: { custom: { fx: { command: script, args: [], env: {} } } },
+      });
+      await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
+      // Tool call, done (corrective), tool call, done (cap exhausted).
+      expect(bodies).toHaveLength(4);
+      // The corrective round was fed back: the message rides the shared
+      // transcript, so it appears in every request after the first done.
+      // It is absent from the first request and present in the last.
+      const firstHasCorrective = bodies[0]!.messages.some((message: any) => message.role === "user" && /re-run the failed/i.test(String(message.content)));
+      expect(firstHasCorrective).toBe(false);
+      const lastCorrective = bodies.at(-1)!.messages.filter((message: any) => message.role === "user" && /re-run the failed/i.test(String(message.content)));
+      expect(lastCorrective).toHaveLength(1);
+      // With the cap exhausted, the turn still ends in tool_error.
+      const completed = events.find((event) => event.type === "turn.completed") as any;
+      expect(completed.ok).toBe(false);
+      expect(completed.stopReason).toBe("tool_error");
+    } finally {
+      await instance.dispose();
+    }
+  }, 20_000);
+
   it("completes the turn when a question goes unanswered, without tainting the final answer", async () => {
     // An unanswered question is absence, not a "no": the card times out or the
     // person closes it, the model is told not to guess, and the turn ends with

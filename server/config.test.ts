@@ -22,6 +22,7 @@ import { cacheUntilConfigChanges,
   roomHandoffLimits,
   roomTurnTimeoutMinutes,
   mcpCallTimeoutMinutes,
+  toolErrorCorrectiveRounds,
   maxConcurrentBotThreads,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
@@ -525,6 +526,27 @@ describe("configuration boundaries", () => {
 
   it("rejects unknown keys under the mcp config section", () => {
     expect(() => parseConfigPatch({ mcp: { callTimeoutMinutes: 10, surprise: 1 } })).toThrow("mcp");
+  });
+
+  it("accepts persisted tool-error corrective rounds and supplies the default of 0", () => {
+    expect(parseStoredConfig({ toolErrors: { correctiveRounds: 2 } })).toEqual({
+      toolErrors: { correctiveRounds: 2 },
+    });
+    expect(toolErrorCorrectiveRounds({ toolErrors: { correctiveRounds: 2 } })).toBe(2);
+    expect(toolErrorCorrectiveRounds({})).toBe(0);
+  });
+
+  it.each([-1, 1.5, 6, 10, "2", null])(
+    "rejects an invalid corrective-rounds value: %j",
+    (correctiveRounds) => {
+      expect(() => parseConfigPatch({ toolErrors: { correctiveRounds } })).toThrow(
+        "toolErrors.correctiveRounds",
+      );
+    },
+  );
+
+  it("rejects unknown keys under the toolErrors config section", () => {
+    expect(() => parseConfigPatch({ toolErrors: { correctiveRounds: 2, surprise: 1 } })).toThrow("toolErrors");
   });
 
   it("preserves shared Local VM behavior by default and accepts bounded per-bot mode", () => {

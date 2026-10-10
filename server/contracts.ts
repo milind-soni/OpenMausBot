@@ -242,6 +242,11 @@ export interface SendTurnInput {
   /** Per-call ceiling (ms) for this turn's MCP tools, from the server config
    * `mcp.callTimeoutMinutes`. Absent = the driver's default (10 min). */
   mcpCallTimeoutMs?: number;
+  /** How many corrective rounds this turn may give the model after a failed
+   * tool op (never after a person's denial), from the server config
+   * `toolErrors.correctiveRounds`. Absent = 0 = upstream behavior: a
+   * done-after-failure ends the turn with tool_error. */
+  toolErrorCorrectiveRounds?: number;
 }
 
 /** An MCP server this machine starts and talks to over stdio. */

@@ -623,6 +623,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       let stopReason: string | null = null;
       let failure: string | undefined;
       let toolFailed = false;
+      /** Corrective rounds already fed back this turn (bounded by the
+       * configured `toolErrorCorrectiveRounds`). */
+      let correctiveRoundsUsed = 0;
       const denials: string[] = [];
       const seenCalls = new Set<string>();
       let nudged = false;
@@ -747,9 +750,20 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               continue;
             }
             if (toolFailed) {
-              // A failed or denied tool op ends the turn: the final answer is
-              // not an execution receipt, and a person's "no" must never be
-              // answered with a prompt to run the same thing again.
+              // A failed tool op can feed a corrective round back to the
+              // model instead of ending the turn, so a routine non-zero exit
+              // or bad-args call lets the bot retry with corrected inputs in
+              // the same turn. Bounded by the configured correctiveRounds.
+              // A person's denial is never retried: `denials` records any
+              // approval "no" or unanswered ask, and the corrective text only
+              // repeats what the tool results already marked ok:false.
+              const correctiveRounds = turn.toolErrorCorrectiveRounds ?? 0;
+              if (correctiveRounds > 0 && correctiveRoundsUsed < correctiveRounds && denials.length === 0) {
+                correctiveRoundsUsed += 1;
+                toolFailed = false;
+                messages.push({ role: "user", content: "Some tool operations in this turn failed (their tool results are marked ok:false). Re-run the failed operations with corrected inputs where possible, verify their state, and then give your final answer. Do not fabricate results." });
+                continue;
+              }
               stopReason = "tool_error";
               throw new ChatProtocolError("One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.");
             }

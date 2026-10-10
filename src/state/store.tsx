@@ -678,6 +678,8 @@ export interface ConfigStatus {
   /** Per-call ceiling (minutes) for a bot's MCP tools. Absent from servers
    * older than the setting; read it with mcpCallTimeoutMinutes(). */
   mcp?: { callTimeoutMinutes: number };
+  /** In-turn corrective rounds after a failed tool op; 0 = end the turn. */
+  toolErrors: { correctiveRounds: number };
   /** Workspace defaults for new bots; absent effort = no level is sent. */
   newBots?: { effort?: EffortLevel };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
@@ -779,10 +781,12 @@ export interface BrowserProfile {
 // is wiped from state.config whenever a live frame lands, so whichever of a
 // save's own response and its broadcast frame arrives last decides what
 // Settings shows (a saved key's Test button used to vanish that way).
-export type ConfigStatusFrame = Pick<
+// `toolErrors` is Optional on the frame type (servers older than the setting
+// omit it); configStatusFromFrame normalizes an absent section to 0 rounds.
+export type ConfigStatusFrame = Omit<Pick<
   ConfigStatus,
-  "xai" | "mistral" | "cerebras" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "live" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
->;
+  "xai" | "mistral" | "cerebras" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "toolErrors" | "threads" | "automaticRecovery" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "live" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
+>, "toolErrors"> & Partial<Pick<ConfigStatus, "toolErrors">>;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
   return {
@@ -799,6 +803,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     vps: frame.vps,
     rooms: frame.rooms,
     mcp: frame.mcp,
+    toolErrors: frame.toolErrors ?? { correctiveRounds: 0 },
     threads: frame.threads,
     automaticRecovery: frame.automaticRecovery,
     localVm: frame.localVm,

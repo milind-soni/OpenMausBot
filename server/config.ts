@@ -37,6 +37,11 @@ export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
 export const DEFAULT_MCP_CALL_TIMEOUT_MINUTES = 10;
 export const MIN_MCP_CALL_TIMEOUT_MINUTES = 1;
 export const MAX_MCP_CALL_TIMEOUT_MINUTES = 60;
+/** How many corrective rounds a turn may give the model after a failed tool
+ * op (a non-zero exit or bad args — never after a person's denial). 0 = the
+ * upstream behavior: a done-after-failure ends the turn with tool_error. */
+export const DEFAULT_TOOL_ERROR_CORRECTIVE_ROUNDS = 0;
+export const MAX_TOOL_ERROR_CORRECTIVE_ROUNDS = 5;
 export const DEFAULT_ROOM_HANDOFF_LIFETIME_MINUTES = 30;
 export const DEFAULT_ROOM_HANDOFF_MIN_RUNWAY_MINUTES = 10;
 export const DEFAULT_ROOM_HANDOFF_HARD_CAP_MINUTES = 240;
@@ -132,6 +137,19 @@ const mcpConfigSchema = z.object({
     .int()
     .min(MIN_MCP_CALL_TIMEOUT_MINUTES)
     .max(MAX_MCP_CALL_TIMEOUT_MINUTES)
+    .optional(),
+}).strict();
+/** In-turn recovery for a bot's own tool failures. `correctiveRounds` is the
+ * number of times a turn may feed a corrective round back to the model after
+ * a tool op failed (its result marked ok:false) before the turn ends with
+ * tool_error. It never applies after a person's denial: a "no" is final and
+ * an unattended thread must not retry it. */
+const toolErrorsConfigSchema = z.object({
+  correctiveRounds: z
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_TOOL_ERROR_CORRECTIVE_ROUNDS)
     .optional(),
 }).strict();
 /** Isolation for bot desktops. Migration note (issue #1654): switching
@@ -553,6 +571,7 @@ const appConfigSchema = z.object({
   language: optionalText,
   rooms: roomConfigSchema.optional(),
   mcp: mcpConfigSchema.optional(),
+  toolErrors: toolErrorsConfigSchema.optional(),
   context: z.object({
     rebuildBytes: z.number().int().min(1_024).max(1_000_000).optional(),
     compactAt: z.number().positive().max(10_000_000).optional(),
@@ -643,6 +662,7 @@ export interface AppConfig {
   profile?: { name?: string; email?: string; aboutMe?: string };
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
   mcp?: { callTimeoutMinutes?: number };
+  toolErrors?: { correctiveRounds?: number };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
@@ -785,6 +805,10 @@ export function roomTurnTimeoutMinutes(cfg: AppConfig): number {
 
 export function mcpCallTimeoutMinutes(cfg: AppConfig): number {
   return cfg.mcp?.callTimeoutMinutes ?? DEFAULT_MCP_CALL_TIMEOUT_MINUTES;
+}
+
+export function toolErrorCorrectiveRounds(cfg: AppConfig): number {
+  return cfg.toolErrors?.correctiveRounds ?? DEFAULT_TOOL_ERROR_CORRECTIVE_ROUNDS;
 }
 
 export const LIVE_IDLE_MINUTES_DEFAULT = 5;
@@ -1365,7 +1389,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "toolErrors", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

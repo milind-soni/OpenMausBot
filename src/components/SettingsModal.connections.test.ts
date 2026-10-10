@@ -62,6 +62,7 @@ describe("Settings → Connections", () => {
       vps: { configured: false, sshAlias: "" },
       rooms: { turnTimeoutMinutes: 10 },
       mcp: { callTimeoutMinutes: 10 },
+      toolErrors: { correctiveRounds: 0 },
       localVm: { mode: "shared", maxInstances: 1 },
       cloudHome: true,
     });
