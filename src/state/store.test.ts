@@ -2626,6 +2626,24 @@ describe("notifications feed", () => {
     expect(state.notifications.map((n) => n.id)).toEqual(["n2", "n1"]);
   });
 
+  it("hydration keeps a live entry that arrived while the request was in flight, newest first", () => {
+    let state = reducer(initialState, { type: "notificationReceived", entry: entry("live", 5) });
+    state = reducer(state, { type: "notificationsHydrated", notifications: [entry("n2", 2), entry("n1", 1)] });
+    expect(state.notifications.map((n) => n.id)).toEqual(["live", "n2", "n1"]);
+  });
+
+  it("hydration takes the server's copy for an id both sides have (a failed mark-read resyncs to unread)", () => {
+    let state = reducer(initialState, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    state = reducer(state, { type: "notificationRead", id: "n1" });
+    state = reducer(state, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    expect(state.notifications[0].read).toBe(false);
+  });
+
+  it("showRoutines closes the feed so its rail is reachable again", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(reducer(open, { type: "showRoutines" }).notificationsOpen).toBe(false);
+  });
+
   it("marks one or all read without touching the rest", () => {
     let state = reducer(initialState, {
       type: "notificationsHydrated",

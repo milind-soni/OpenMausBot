@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { ALL_BOTS, filterNotifications, notificationBots, notificationBotForAvatar, notificationThreadName } from "./NotificationsPanel";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ALL_BOTS, filterNotifications, notificationBots, notificationBotForAvatar, notificationThreadName, postNotificationRead } from "./NotificationsPanel";
 
 const state = {
   bots: [{ id: "b1", threadId: "t-main", tasks: [{ threadId: "t-main", title: "Notification Pane" }, { threadId: "t-2", title: "Hotpatches" }] }],
@@ -42,5 +42,40 @@ describe("notificationBotForAvatar", () => {
   });
   it("returns null for workspace events or deleted bots", () => {
     expect(notificationBotForAvatar({ botId: "gone" }, bots)).toBeNull();
+  });
+});
+
+describe("postNotificationRead", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const reply = (ok: boolean, body: unknown = {}) => ({ ok, json: async () => body });
+
+  it("does nothing more when the server accepts the request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(reply(true));
+    vi.stubGlobal("fetch", fetchMock);
+    const dispatch = vi.fn();
+    await postNotificationRead("/api/notifications/read-all", dispatch);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("reloads the feed from the server after an HTTP error", async () => {
+    const feed = [{ id: "n1" }];
+    const fetchMock = vi.fn().mockResolvedValueOnce(reply(false)).mockResolvedValueOnce(reply(true, { notifications: feed }));
+    vi.stubGlobal("fetch", fetchMock);
+    const dispatch = vi.fn();
+    await postNotificationRead("/api/notifications/n1/read", dispatch);
+    expect(dispatch).toHaveBeenCalledWith({ type: "notificationsHydrated", notifications: feed });
+  });
+
+  it("reloads the feed after a network error, and stays quiet if that fails too", async () => {
+    const feed = [{ id: "n1" }];
+    const dispatch = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new Error("down")).mockResolvedValueOnce(reply(true, { notifications: feed })));
+    await postNotificationRead("/api/notifications/n1/read", dispatch);
+    expect(dispatch).toHaveBeenCalledWith({ type: "notificationsHydrated", notifications: feed });
+    dispatch.mockClear();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("down")));
+    await expect(postNotificationRead("/api/notifications/n1/read", dispatch)).resolves.toBeUndefined();
+    expect(dispatch).not.toHaveBeenCalled();
   });
 });

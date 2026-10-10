@@ -5,7 +5,7 @@
 // store.tsx) so a stale/unknown thread degrades the same way there too.
 import { useEffect, useState } from "react";
 import { AlertTriangle, Bell, CheckCircle2, CircleHelp, HandHelping, Pin, RotateCcw, Wallet, X, type LucideIcon } from "lucide-react";
-import { useStore, openNotificationTarget } from "@/state/store";
+import { useStore, openNotificationTarget, type Action } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { BotAvatar, type BotAvatarProps } from "./Avatar";
 import type { NotificationLogEntry, NotifyKind } from "../../shared/notification";
@@ -118,6 +118,21 @@ export function NotificationRail() {
   );
 }
 
+/** Marks entries read on the server; if that fails, reloads the feed so the UI shows what the server has. */
+export async function postNotificationRead(url: string, dispatch: (action: Action) => void): Promise<void> {
+  try {
+    if ((await fetch(url, { method: "POST" })).ok) return;
+  } catch {
+    // fall through to the resync below
+  }
+  try {
+    const res = await fetch("/api/notifications");
+    if (res.ok) dispatch({ type: "notificationsHydrated", notifications: (await res.json()).notifications });
+  } catch {
+    // offline: the next hydration corrects the badge
+  }
+}
+
 export function NotificationsPanel() {
   const { state, dispatch } = useStore();
   const [now, setNow] = useState(() => Date.now());
@@ -134,14 +149,14 @@ export function NotificationsPanel() {
   const openRow = (entry: NotificationLogEntry) => {
     if (!entry.read) {
       dispatch({ type: "notificationRead", id: entry.id });
-      fetch(`/api/notifications/${entry.id}/read`, { method: "POST" }).catch(() => {});
+      void postNotificationRead(`/api/notifications/${entry.id}/read`, dispatch);
     }
     openNotificationTarget(dispatch, { botId: entry.botId, threadId: entry.threadId }, state);
   };
 
   const markAllRead = () => {
     dispatch({ type: "notificationsMarkAllRead" });
-    fetch("/api/notifications/read-all", { method: "POST" }).catch(() => {});
+    void postNotificationRead("/api/notifications/read-all", dispatch);
   };
 
   return (

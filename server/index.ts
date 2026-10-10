@@ -657,6 +657,7 @@ import { createAntigravityLeftoverRoutes } from "./routes/antigravity-leftovers.
 import { createAntigravityAccountRoutes } from "./routes/antigravity-accounts.ts";
 import { findAntigravityLeftovers, removeAntigravityLeftovers } from "./drivers/antigravity-temp.ts";
 import { createLiveRoutes } from "./routes/live.ts";
+import { createNotificationRoutes } from "./routes/notifications.ts";
 import { createUsageRoutes } from "./routes/usage.ts";
 import { withScopeHint } from "./connector-scope-hint.ts";
 
@@ -6255,7 +6256,12 @@ const providerLabel = (provider: string): string => {
 function notify(notification: Notification | null) {
   if (!notification) return;
   const entry: NotificationLogEntry = { ...notification, id: randomUUID(), at: Date.now(), read: false };
-  insertNotificationLog(entry);
+  try {
+    insertNotificationLog(entry);
+  } catch (err) {
+    // a full disk must not swallow the live notification
+    console.error("[notify] could not persist notification to notification_log:", err);
+  }
   // nested rather than spread — the frame's own `kind` names the frame,
   // exactly like {kind:"message", message} and {kind:"bot", bot}
   broadcast({ kind: "notify", notification: entry });
@@ -16264,6 +16270,7 @@ ROUTES.push(createBotMemoryRoutes({
 }));
 ROUTES.push(createDeciderRoutes({ decider }));
 // The usage ledger (JSON and CSV). Admin scope stays in server/request-auth.ts.
+ROUTES.push(createNotificationRoutes({ recent: () => recentNotificationLog(), markRead: markNotificationLogRead, markAllRead: markAllNotificationLogRead }));
 ROUTES.push(createUsageRoutes({
   dataDir: DATA_DIR,
   prices: operatorPrices,
@@ -21737,18 +21744,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const visible = wireBot(bot);
       broadcast({ kind: "bot", bot: visible });
       return json(res, 200, { bot: visible });
-    }
-    if (method === "GET" && path === "/api/notifications") {
-      return json(res, 200, { notifications: recentNotificationLog() });
-    }
-    if (method === "POST" && path === "/api/notifications/read-all") {
-      markAllNotificationLogRead();
-      return json(res, 200, { ok: true });
-    }
-    m = path.match(/^\/api\/notifications\/([\w-]+)\/read$/);
-    if (m && method === "POST") {
-      markNotificationLogRead(m[1]);
-      return json(res, 200, { ok: true });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/command-allowlist(?:\/([\w-]+))?$/);
     if (m && ["GET", "POST", "DELETE"].includes(method)) {

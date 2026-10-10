@@ -1651,6 +1651,7 @@ export function reducer(state: AppState, action: Action): AppState {
         computerOpen: false,
         inspectorOpen: false,
         activityOpen: false,
+        notificationsOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
         triggersOpen: false,
@@ -2256,8 +2257,13 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "toggleNotificationsPinned":
       return { ...state, notificationsPinned: action.pinned ?? !state.notificationsPinned };
-    case "notificationsHydrated":
-      return { ...state, notifications: action.notifications };
+    case "notificationsHydrated": {
+      // The server's copy wins for ids it has; live entries that arrived while
+      // the request was in flight (or that it has not seen) are kept.
+      const hydrated = new Set(action.notifications.map((n) => n.id));
+      const live = state.notifications.filter((n) => !hydrated.has(n.id));
+      return { ...state, notifications: [...live, ...action.notifications].sort((a, b) => b.at - a.at).slice(0, 500) };
+    }
     case "notificationReceived":
       return state.notifications.some((n) => n.id === action.entry.id)
         ? state
@@ -3944,7 +3950,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         key: "notifications",
         request: async () => {
           const { notifications } = await api("/api/notifications");
-          return () => rawDispatch({ type: "notificationsHydrated", notifications });
+          return () => rawDispatch({ type: "notificationsHydrated", notifications: Array.isArray(notifications) ? notifications : [] });
         },
       },
       ...(window.ogb?.remoteClient?.active ? [] : [{
