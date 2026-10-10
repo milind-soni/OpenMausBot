@@ -60,6 +60,19 @@ export function notificationThreadName(entry: { botId: string; threadId: string 
   return task?.title || null;
 }
 
+export const ALL_BOTS = "all";
+
+/** Distinct bots that appear in the feed, by name, for the filter dropdown. */
+export function notificationBots(entries: Array<{ botId: string; botName: string }>): Array<{ id: string; name: string }> {
+  const seen = new Map<string, string>();
+  for (const entry of entries) if (!seen.has(entry.botId)) seen.set(entry.botId, entry.botName);
+  return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function filterNotifications<T extends { botId: string }>(entries: T[], botId: string): T[] {
+  return botId === ALL_BOTS ? entries : entries.filter((entry) => entry.botId === botId);
+}
+
 function relativeTime(at: number, now: number): string {
   const minutes = Math.max(0, Math.round((now - at) / 60_000));
   if (minutes < 1) return "just now";
@@ -103,6 +116,10 @@ export function NotificationRail() {
 export function NotificationsPanel() {
   const { state, dispatch } = useStore();
   const [now, setNow] = useState(() => Date.now());
+  const [botFilter, setBotFilter] = useState(ALL_BOTS);
+  const bots = notificationBots(state.notifications);
+  const activeFilter = botFilter === ALL_BOTS || bots.some((bot) => bot.id === botFilter) ? botFilter : ALL_BOTS;
+  const visible = filterNotifications(state.notifications, activeFilter);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -154,11 +171,24 @@ export function NotificationsPanel() {
           <X size={14} />
         </button>
       </div>
+      <div className="border-b border-hairline/40 px-3.5 py-2">
+        <select
+          aria-label="Filter notifications by bot"
+          value={activeFilter}
+          onChange={(event) => setBotFilter(event.target.value)}
+          className="w-full rounded-md border border-hairline/60 bg-raised px-2 py-1 text-[12px] text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+        >
+          <option value={ALL_BOTS}>All bots</option>
+          {bots.map((bot) => (
+            <option key={bot.id} value={bot.id}>{bot.name}</option>
+          ))}
+        </select>
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {state.notifications.length === 0 && (
-          <div className="px-3.5 py-6 text-[13px] text-ink-secondary">Nothing yet.</div>
+        {visible.length === 0 && (
+          <div className="px-3.5 py-6 text-[13px] text-ink-secondary">{state.notifications.length === 0 ? "Nothing yet." : "No notifications for this bot."}</div>
         )}
-        {state.notifications.map((entry) => (
+        {visible.map((entry) => (
           <NotificationRow key={entry.id} entry={entry} now={now} threadName={notificationThreadName(entry, state)} onOpen={() => openRow(entry)} />
         ))}
       </div>

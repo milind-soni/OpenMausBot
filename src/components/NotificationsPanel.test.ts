@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { notificationThreadName } from "./NotificationsPanel";
+import { ALL_BOTS, filterNotifications, notificationBots, notificationThreadName } from "./NotificationsPanel";
 
 const state = {
   bots: [{ id: "b1", threadId: "t-main", tasks: [{ threadId: "t-main", title: "Notification Pane" }, { threadId: "t-2", title: "Hotpatches" }] }],
@@ -16,5 +16,21 @@ describe("notificationThreadName", () => {
   });
   it("returns null for an unknown thread", () => {
     expect(notificationThreadName({ botId: "b1", threadId: "gone" }, state)).toBeNull();
+  });
+});
+
+describe("bot filter", () => {
+  const rows = [
+    { botId: "b2", botName: "Dev" },
+    { botId: "b1", botName: "Claw1" },
+    { botId: "b2", botName: "Dev" },
+  ];
+  it("lists each bot once, sorted by name", () => {
+    expect(notificationBots(rows)).toEqual([{ id: "b1", name: "Claw1" }, { id: "b2", name: "Dev" }]);
+  });
+  it("filters to one bot, or returns everything for all", () => {
+    expect(filterNotifications(rows, "b2")).toHaveLength(2);
+    expect(filterNotifications(rows, ALL_BOTS)).toHaveLength(3);
+    expect(filterNotifications(rows, "none")).toHaveLength(0);
   });
 });
