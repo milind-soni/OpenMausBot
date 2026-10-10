@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 
+import { activeLocale } from "./i18n";
 import { isMacPlatform } from "./keyboard-shortcuts";
 
 export const SEND_KEY_KEY = "omb-send-key";
@@ -12,8 +13,15 @@ export const SEND_KEY_KEY = "omb-send-key";
 export const SEND_KEYS = ["enter", "shift-enter", "mod-enter"] as const;
 export type SendKey = (typeof SEND_KEYS)[number];
 
-export function parseSendKey(value: string | null | undefined): SendKey {
-  return SEND_KEYS.find((mode) => mode === value) ?? "enter";
+/** The send key before anyone chooses: Ctrl/⌘+Enter when the app speaks
+ * Japanese, whose input method confirms every conversion with Enter, so a
+ * confirming Enter can never send half a sentence; Enter everywhere else. */
+export function defaultSendKey(locale: string = activeLocale()): SendKey {
+  return locale === "ja" || locale.startsWith("ja-") ? "mod-enter" : "enter";
+}
+
+export function parseSendKey(value: string | null | undefined, fallback: SendKey = defaultSendKey()): SendKey {
+  return SEND_KEYS.find((mode) => mode === value) ?? fallback;
 }
 
 /** An input method is composing, so this key (Enter, an arrow, Tab, Escape)
@@ -59,7 +67,7 @@ function sendKey(): SendKey {
   try {
     return parseSendKey(storage()?.getItem(SEND_KEY_KEY));
   } catch {
-    return "enter";
+    return defaultSendKey();
   }
 }
 
@@ -98,5 +106,5 @@ export function setSendKey(mode: SendKey): void {
 }
 
 export function useSendKey(): SendKey {
-  return useSyncExternalStore(subscribe, sendKey, () => "enter");
+  return useSyncExternalStore(subscribe, sendKey, () => defaultSendKey());
 }

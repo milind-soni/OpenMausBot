@@ -122,6 +122,27 @@ describe("the local send key choice", () => {
     expect(local.setItem).not.toHaveBeenCalled();
   });
 
+  it("makes Ctrl/⌘+Enter the default in Japanese, and a stored choice still wins", async () => {
+    const i18n = await import("./i18n");
+    const preference = await import("./send-key");
+    expect(preference.defaultSendKey("ja")).toBe("mod-enter");
+    expect(preference.defaultSendKey("ja-jp")).toBe("mod-enter");
+    for (const locale of ["en", "zh", "ko", "jam"]) expect(preference.defaultSendKey(locale)).toBe("enter");
+    try {
+      i18n.setLocale("ja-JP");
+      expect(preference.useSendKey()).toBe("mod-enter");
+      expect(hook.serverSnapshot!()).toBe("mod-enter");
+      expect(preference.parseSendKey("bogus")).toBe("mod-enter");
+      local.setItem(preference.SEND_KEY_KEY, "enter");
+      expect(preference.useSendKey()).toBe("enter");
+      local.removeItem(preference.SEND_KEY_KEY);
+      i18n.setLocale("en-US");
+      expect(preference.useSendKey()).toBe("enter");
+    } finally {
+      i18n.setLocale("en-US");
+    }
+  });
+
   it("persists every choice through a renderer reload", async () => {
     for (const mode of [...SEND_KEYS, "enter"] as const) {
       let preference = await import("./send-key");
