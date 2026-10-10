@@ -1,4 +1,8 @@
 {
+  "keys.greenference.label": "Greenference API token",
+  "keys.greenference.placeholder": "Paste your Greenference token",
+  "keys.greenference.desc": "Adds Greenference with its live model list. The connection test checks catalog access, not token validity; your first chat verifies the token.",
+  "keys.greenference.link": "Get a Greenference token",
   "whop.description": "Products, checkout links, memberships and payments through Whop’s official integration.",
   "whop.otherAppsSetup": "Whop is connected. Set up or restore the connection service to use the other apps.",
   "whop.connect": "Connect Whop",

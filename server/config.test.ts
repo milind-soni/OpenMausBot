@@ -754,6 +754,22 @@ describe("saving the newer sections", () => {
 });
 
 describe("default fleet", () => {
+  it("scopes Greenference tokens to their provider and preserves explicit private routing", () => {
+    const cfg: AppConfig = { greenference: { key: "green-fixture" }, instances: {
+      codex: { driver: "codex" },
+      privateGreen: { driver: "greenference", config: { url: "https://private.example.test/v1" }, environment: { GREENFERENCE_TOKEN: "private-fixture" } },
+    } };
+    const map = instanceConfigs(cfg);
+    expect(map.greenference).toEqual({ driver: "greenference", environment: { GREENFERENCE_TOKEN: "green-fixture" } });
+    expect(map.privateGreen.environment).toEqual({ GREENFERENCE_TOKEN: "private-fixture" });
+    expect(map.codex.environment).toEqual({});
+    expect(parseConfigPatch({ greenference: { key: "" } })).toEqual({ greenference: { key: "" } });
+    expect(providerReloadKeys({ greenference: { key: "new" } })).toContain("greenference");
+    const env = { GREENFERENCE_TOKEN: "green-fixture", KEEP: "yes" };
+    stripWorkspaceCredentialEnv(env);
+    expect(env).toEqual({ KEEP: "yes" });
+    expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("greenference");
+  });
   it("adds a separate ChatGPT plan account without copying Codex credentials", () => {
     const cfg: AppConfig = { instances: { codex: { driver: "codex", config: { cli: "/fixture/codex" }, environment: { CODEX_HOME: "/other-account", OPENAI_API_KEY: "not-for-plan" } } } };
     expect(instanceConfigs(cfg).chatgpt).toMatchObject({ driver: "codex", displayName: "ChatGPT plan", config: { cli: "/fixture/codex", authMode: "chatgpt-plan" }, environment: {} });

@@ -4,6 +4,7 @@ export const API_ENDPOINTS = [
   { id: "openai", label: "OpenAI API", url: "https://api.openai.com/v1", keyUrl: "https://platform.openai.com/api-keys" },
   { id: "openrouter", label: "OpenRouter", url: "https://openrouter.ai/api/v1", keyUrl: "https://openrouter.ai/settings/keys" },
   { id: "groq", label: "Groq", url: "https://api.groq.com/openai/v1", keyUrl: "https://console.groq.com/keys" },
+  { id: "greenference", label: "Greenference", url: "https://llm.eu.greenference.com/v1", keyUrl: "https://greenference.com/dashboard/tokens" },
 ] as const;
 
 export function normalizeApiUrl(value: string): string {

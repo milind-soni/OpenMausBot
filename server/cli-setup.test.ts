@@ -409,17 +409,29 @@ describe("API onboarding", () => {
   it("keeps custom API setup after the built-in endpoints", async () => {
     const deps = dependencies();
     const ui = prompts({
-      choices: [2, 3, 0], answers: ["https://custom.example.test/v1"],
+      choices: [2, 4, 0], answers: ["https://custom.example.test/v1"],
       secrets: ["fixture-custom-key"], confirms: [true, true],
     });
     expect(await runSetup(options, ui.io, deps)).toBe(true);
     expect(ui.io.choose.mock.calls[1]?.[1]).toEqual([
-      "OpenAI API", "OpenRouter", "Groq", "Other OpenAI-compatible endpoint",
+      "OpenAI API", "OpenRouter", "Groq", "Greenference", "Other OpenAI-compatible endpoint",
     ]);
     expect(deps.verify).toHaveBeenCalledWith("https://custom.example.test/v1", "fixture-custom-key", "fixture-default");
     const cfg = loadConfig();
     expect(cfg.instances?.[cfg.defaultModelSelection!.instanceId]).toMatchObject({
       driver: "openai-compat", config: { url: "https://custom.example.test/v1", key: "fixture-custom-key" },
+    });
+    ui.assertConsumed();
+  });
+
+  it("verifies a Greenference completion before saving its compatible connection", async () => {
+    const deps = dependencies();
+    const ui = prompts({ choices: [2, 3, 0], secrets: ["fixture-greenference-token"], confirms: [true, true] });
+    expect(await runSetup(options, ui.io, deps)).toBe(true);
+    expect(deps.verify).toHaveBeenCalledWith("https://llm.eu.greenference.com/v1", "fixture-greenference-token", "fixture-default");
+    const cfg = loadConfig();
+    expect(cfg.instances?.[cfg.defaultModelSelection!.instanceId]).toMatchObject({
+      driver: "openai-compat", config: { url: "https://llm.eu.greenference.com/v1", key: "fixture-greenference-token" },
     });
     ui.assertConsumed();
   });

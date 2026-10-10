@@ -24,7 +24,7 @@ export const TASK_WORKSPACES_DIR = join(DATA_DIR, "task-workspaces");
 
 /** MCP support does not imply native filesystem tools or a local working directory. */
 export function supportsWorkspaceFiles(driverKind: string): boolean {
-  return !["grok", "openai-compat", "minimax", "mistral", "cerebras"].includes(driverKind);
+  return !["grok", "openai-compat", "minimax", "mistral", "cerebras", "greenference"].includes(driverKind);
 }
 
 /** Default task files are private to the thread, outside the bot's shared

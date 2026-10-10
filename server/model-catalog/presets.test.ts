@@ -9,6 +9,12 @@ const snapshot = JSON.parse(readFileSync(join(import.meta.dirname, "models-dev.s
 const catalog = trimModelsDevCatalog(unpackCatalog(snapshot.providers));
 
 describe("provider presets table", () => {
+  it("registers Greenference's own token and public catalog without promising Claude or Codex support", () => {
+    expect(providerPreset("greenference")).toMatchObject({ api: "https://llm.eu.greenference.com/v1",
+      env: "GREENFERENCE_TOKEN", publicModels: true, doc: "https://greenference.com/dashboard/tokens" });
+    expect(providerPreset("greenference")?.anthropic).toBeUndefined();
+    expect(providerPreset("greenference")?.codex).toBeUndefined();
+  });
   it("lists the recommended providers in the agreed order", () => {
     const recommended = PROVIDER_PRESETS.filter((preset) => preset.recommended !== undefined)
       .sort((a, b) => a.recommended! - b.recommended!);

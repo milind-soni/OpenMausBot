@@ -49,6 +49,12 @@ describe("provider key rows", () => {
     expect(render(createElement(ApiKeyRow, { section: "openrouter", testProvider: "openrouter" }))).toContain("sk-or-v1-…");
 
     expect(render(createElement(ApiKeyRow, { section: "xai", testProvider: "xai" }))).toContain("xAI API key");
+    const greenference = render(createElement(ApiKeyRow, { section: "greenference", testProvider: "greenference" }));
+    expect(greenference).toContain("Greenference API token");
+    expect(greenference).toContain('type="password"');
+    expect(greenference).toContain('value=""');
+    expect(greenference).not.toContain("Connected");
+    expect(greenference).not.toContain(">Test<");
   });
 
   it("saves on paste instead of a Save button, and keeps key effects in view", () => {

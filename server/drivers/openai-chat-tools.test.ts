@@ -17,6 +17,7 @@ import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
 import { GrokDriver } from "./grok.ts";
 import { CerebrasDriver } from "./cerebras.ts";
+import { GreenferenceDriver } from "./greenference.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
@@ -33,7 +34,7 @@ interface ChatRequest {
 }
 
 type Script = (body: ChatRequest, response: ServerResponse, round: number) => void;
-type Provider = "openai-compat" | "grok" | "minimax" | "cerebras";
+type Provider = "openai-compat" | "grok" | "minimax" | "cerebras" | "greenference";
 const API_KEY_CANARY = "fixture-credential-cda00ee8d8384f54";
 
 function deferred<T = void>() {
@@ -124,6 +125,8 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
     ? await MinimaxDriver.create({ ...common, config: { url: `${origin}/v1` }, environment: { MINIMAX_API_KEY: apiKey } })
     : provider === "cerebras"
     ? await CerebrasDriver.create({ ...common, config: CerebrasDriver.decodeConfig({ url: `${origin}/v1` }), environment: { CEREBRAS_API_KEY: apiKey } })
+    : provider === "greenference"
+    ? await GreenferenceDriver.create({ ...common, config: GreenferenceDriver.decodeConfig({ url: `${origin}/v1` }), environment: { GREENFERENCE_TOKEN: apiKey } })
     : await (provider === "grok" ? GrokDriver : OpenAICompatDriver).create({
       ...common,
       config: { url: `${origin}/v1`, apiKeyEnv: "FIXTURE_CHAT_KEY" },
@@ -428,7 +431,7 @@ describe("OpenAI-compatible computer images", () => {
   });
 });
 
-describe.each<Provider>(["openai-compat", "grok", "minimax"])("%s structured tool contract", (provider) => {
+describe.each<Provider>(["openai-compat", "grok", "minimax", "greenference"])("%s structured tool contract", (provider) => {
   it("handles content:null tool calls when a compatible endpoint returns a JSON completion", async () => {
     const f = await fixture((_body, response, round) => {
       response.setHeader("content-type", "application/json");

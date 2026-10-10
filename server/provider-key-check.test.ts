@@ -44,6 +44,7 @@ describe("provider key check", () => {
   });
 
   it("builds each provider's models endpoint from its base URL or the default", () => {
+    expect(providerModelsUrl("greenference")).toBe("https://llm.eu.greenference.com/v1/models");
     expect(providerModelsUrl("anthropic")).toBe("https://api.anthropic.com/v1/models");
     expect(providerModelsUrl("anthropic", "https://proxy.example.test/v1/")).toBe("https://proxy.example.test/v1/models");
     expect(providerModelsUrl("openaiCompat")).toBe("https://openrouter.ai/api/v1/models");
@@ -62,6 +63,16 @@ describe("provider key check", () => {
     expect(openai.ok).toBe(true);
     expect(seen[1]).toMatchObject({ path: "/v1/models", headers: { authorization: "Bearer good-key" } });
     expect(seen[1]!.headers["x-api-key"]).toBeUndefined();
+  });
+
+  it("does not mistake Greenference's public catalog for token authentication", async () => {
+    const provider: typeof fetch = async (url, init) => {
+      expect(String(url)).toBe("https://llm.eu.greenference.com/v1/models");
+      expect(init?.headers).toEqual({ authorization: "Bearer unverified-fixture-token" });
+      return Response.json({ data: [{ id: "greenference/fixture-model" }] });
+    };
+    expect(await checkProviderKey({ provider: "greenference", key: "unverified-fixture-token" }, provider))
+      .toEqual({ ok: true, check: "models", models: ["greenference/fixture-model"] });
   });
 
   it.each(["array", "data", "models"])("accepts %s model catalogs with the same bounded id filtering", async shape => {

@@ -75,6 +75,12 @@ export const OPENAI_COMPATIBLE_NPM = "@ai-sdk/openai-compatible";
 
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
   {
+    id: "greenference", label: "Greenference", api: "https://llm.eu.greenference.com/v1",
+    env: "GREENFERENCE_TOKEN", npm: OPENAI_COMPATIBLE_NPM,
+    doc: "https://greenference.com/dashboard/tokens", publicModels: true,
+    checkedAt: "2026-10-08",
+  },
+  {
     id: "openrouter",
     catalogId: "openrouter",
     label: "OpenRouter",

@@ -9,9 +9,9 @@ import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "greenference";
 /** Sections whose key can be tried against the provider from the server. */
-export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras";
+export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "greenference";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -44,6 +44,7 @@ const SECTIONS: Record<
   openrouter: { body: (v) => ({ openrouter: { key: v } }), flag: (c) => c.openrouter?.configured ?? false },
   openaiCompat: { body: (v) => ({ openaiCompat: { key: v } }), flag: (c) => c.openaiCompat?.configured ?? false },
   mistral: { body: (v) => ({ mistral: { key: v } }), flag: (c) => c.mistral?.configured ?? false },
+  greenference: { body: (v) => ({ greenference: { key: v } }), flag: (c) => c.greenference?.configured ?? false },
   cerebras: { body: (v) => ({ cerebras: { key: v } }), flag: (c) => c.cerebras?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
 };
@@ -138,6 +139,14 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.mistral.desc",
     href: "https://console.mistral.ai/api-keys",
     linkLabelKey: "keys.mistral.link",
+    optional: true,
+  },
+  greenference: {
+    labelKey: "keys.greenference.label",
+    placeholderKey: "keys.greenference.placeholder",
+    descriptionKey: "keys.greenference.desc",
+    href: "https://greenference.com/dashboard/tokens",
+    linkLabelKey: "keys.greenference.link",
     optional: true,
   },
   cerebras: {
