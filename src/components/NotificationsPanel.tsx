@@ -89,18 +89,16 @@ function relativeTime(at: number, now: number): string {
 export function NotificationRail() {
   const { state, dispatch } = useStore();
   const unread = state.notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0);
+  if (state.notificationsOpen) return null;
   return (
-    <aside aria-label="Notification rail" className="flex w-11 shrink-0 flex-col items-center gap-1 border-l border-hairline/40 bg-panel py-2">
+    <aside aria-label="Notification rail" className="absolute right-0 top-1/2 z-20 -translate-y-1/2 rounded-l-lg border border-r-0 border-hairline/40 bg-panel p-1 shadow-sm">
       <button
         type="button"
         onClick={() => dispatch({ type: "toggleNotifications" })}
         aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
         title="Notifications"
-        aria-pressed={state.notificationsOpen}
-        className={cn(
-          "relative flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink",
-          state.notificationsOpen && "bg-raised text-ink",
-        )}
+        aria-pressed={false}
+        className="relative flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
       >
         <Bell size={17} />
         {unread > 0 && (
