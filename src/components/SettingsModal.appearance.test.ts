@@ -5,7 +5,7 @@ import { setLocale } from "@/lib/i18n";
 import type { SendKey } from "@/lib/send-key";
 import type { AppSettingsSection } from "@/state/store";
 import type { Switch } from "./SettingsPrimitives";
-import { SettingsModal } from "./SettingsModal";
+import { SECTIONS, sectionMatches, SettingsModal } from "./SettingsModal";
 
 const fixture = vi.hoisted(() => ({
   section: "appearance" as AppSettingsSection,
@@ -180,9 +180,9 @@ describe("Settings → Appearance", () => {
   });
 
   it.each([
-    ["enter", "Enter (Shift+Enter for a new line)"],
-    ["shift-enter", "Shift+Enter (Enter for a new line)"],
-    ["mod-enter", "Ctrl+Enter (Enter for a new line)"],
+    ["enter", "Enter"],
+    ["shift-enter", "Shift+Enter"],
+    ["mod-enter", "Ctrl+Enter"],
   ] as const)("shows the saved send key (%s) on this device only", (sendKey, label) => {
     fixture.sendKey = sendKey;
     const html = render();
@@ -192,11 +192,8 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("as Japanese input does. Ctrl+Enter sends whichever you choose.");
     expect(html).toContain(`<option value="${sendKey}" selected="">${label}</option>`);
     const options = [...html.matchAll(/<option value="(enter|shift-enter|mod-enter)"[^>]*>([^<]*)</g)].map((match) => [match[1], match[2]]);
-    expect(options).toEqual([
-      ["enter", "Enter (Shift+Enter for a new line)"],
-      ["shift-enter", "Shift+Enter (Enter for a new line)"],
-      ["mod-enter", "Ctrl+Enter (Enter for a new line)"],
-    ]);
+    // only the key, so the closed menu fits its 240px column in every language
+    expect(options).toEqual([["enter", "Enter"], ["shift-enter", "Shift+Enter"], ["mod-enter", "Ctrl+Enter"]]);
     expect(fixture.setSendKey).not.toHaveBeenCalled();
     expect(fixture.api).not.toHaveBeenCalled();
     expect(fixture.dispatch).not.toHaveBeenCalled();
@@ -208,9 +205,16 @@ describe("Settings → Appearance", () => {
     const html = render();
     expect(html).toContain("メッセージの送信キー");
     expect(html).toContain("日本語入力のように Enter で変換を確定する場合は、Shift+Enter か Ctrl+Enter を選ぶと Enter で改行できます。");
-    expect(html).toContain(">Enter（Shift+Enter で改行）</option>");
-    expect(html).toContain('<option value="shift-enter" selected="">Shift+Enter（Enter で改行）</option>');
-    expect(html).toContain(">Ctrl+Enter（Enter で改行）</option>");
+    expect(html).toContain('<option value="enter">Enter</option>');
+    expect(html).toContain('<option value="shift-enter" selected="">Shift+Enter</option>');
+    expect(html).toContain('<option value="mod-enter">Ctrl+Enter</option>');
+  });
+
+  it("finds the send key by the keys' names on every platform", () => {
+    const appearance = SECTIONS.find((section) => section.id === "appearance")!;
+    for (const query of ["enter", "return", "shift+enter", "ctrl+enter", "cmd", "cmd+enter", "⌘", "⌘+enter", "command", "send", "new line", "ime"]) {
+      expect(sectionMatches(appearance, query), query).toBe(true);
+    }
   });
 
   it("offers the run card visibility toggle in Appearance", () => {

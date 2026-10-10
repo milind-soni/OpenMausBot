@@ -735,7 +735,6 @@
   "settings.font.serif": "Serif",
   "settings.sendKey.title": "Send messages with",
   "settings.sendKey.subtitle": "Choose Shift+Enter or {key} so Enter starts a new line instead, handy when your input method confirms text with Enter, as Japanese input does. {key} sends whichever you choose. On this device only.",
-  "settings.sendKey.option": "{key} ({newLine} for a new line)",
   "settings.sidebarDensity.subtitle": "How much room each bot and thread takes in the sidebar, on this device only. Avatars only is the same as collapsing the sidebar from its header.",
   "settings.advancedMode.title": "Advanced mode",
   "settings.advancedMode.subtitle": "Show every technical control on this device: usage and tokens, the inspector and other tools for builders. Turn it off for a simpler app. Nothing is deleted either way.",

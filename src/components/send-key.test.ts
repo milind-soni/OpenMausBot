@@ -2,7 +2,8 @@
 // Settings → Appearance → Send messages with, in every box that sends on
 // Enter: the composer (1:1 and rooms), editing a sent message, a citation's
 // comment and the Cloud's first job; the hints and the tour name it. Ctrl/⌘+Enter
-// always sends, and an input method's confirming Enter never does.
+// always sends, and an input method's confirming Enter never sends nor picks
+// from the composer's menus.
 import { createElement, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -179,6 +180,36 @@ describe.each(SEND_KEYS)("in %s mode", (mode) => {
     expectSendKey(mode, job, given);
     expect(given()).toBe(1);
     setPendingIntent(null);
+  });
+});
+
+describe("an input method in the composer's menus", () => {
+  const ime = [{ isComposing: true }, { keyCode: 229 }];
+
+  it("leaves the Enter that confirms 山田 to the input method, not the mention menu", () => {
+    render(createElement(Composer, { group: room, members: [{ ...bot, name: "山田" }] }));
+    type(textarea(), "@山田");
+    for (const init of ime) {
+      for (const key of ["Enter", "Tab", "ArrowDown"]) {
+        expect(press(textarea(), { ...init, key }).defaultPrevented, JSON.stringify({ ...init, key })).toBe(false);
+      }
+      expect(textarea().value).toBe("@山田");
+    }
+    expect(press(textarea()).defaultPrevented).toBe(true);
+    expect(textarea().value).toBe("@山田 ");
+    expect(sends()).toEqual([]);
+  });
+
+  it("leaves it to the input method in the command menu too", () => {
+    render(createElement(Composer, { group: room, members: [bot] }));
+    type(textarea(), "/go");
+    for (const init of ime) {
+      expect(press(textarea(), init).defaultPrevented, JSON.stringify(init)).toBe(false);
+      expect(textarea().value).toBe("/go");
+    }
+    expect(press(textarea()).defaultPrevented).toBe(true);
+    expect(textarea().value).toBe("");
+    expect(sends()).toEqual([]);
   });
 });
 

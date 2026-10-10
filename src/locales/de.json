@@ -1610,6 +1610,5 @@
   "place.view.autoTeam.short": "Gemeinsam",
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "Nachrichten senden mit",
-  "settings.sendKey.subtitle": "Wähle Shift+Enter oder {key}, damit Enter stattdessen eine neue Zeile beginnt – praktisch, wenn deine Eingabemethode Text mit Enter bestätigt, wie bei japanischer Eingabe. {key} sendet bei jeder Wahl. Nur auf diesem Gerät.",
-  "settings.sendKey.option": "{key} ({newLine} für eine neue Zeile)"
+  "settings.sendKey.subtitle": "Wähle Shift+Enter oder {key}, damit Enter stattdessen eine neue Zeile beginnt – praktisch, wenn deine Eingabemethode Text mit Enter bestätigt, wie bei japanischer Eingabe. {key} sendet bei jeder Wahl. Nur auf diesem Gerät."
 }

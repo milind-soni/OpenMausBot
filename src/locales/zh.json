@@ -400,7 +400,6 @@
   "settings.font.serif": "衬线体",
   "settings.sendKey.title": "发送消息的按键",
   "settings.sendKey.subtitle": "选择 Shift+Enter 或 {key} 后，按 Enter 会换行，适合用 Enter 确认候选词的输入法（例如日文输入）。无论选哪一项，{key} 都会发送。仅对这台设备生效。",
-  "settings.sendKey.option": "{key}（{newLine} 换行）",
   "settings.threadDisplay.title": "对话",
   "settings.threadDisplay.subtitle": "仅在这部设备上显示对话清单与控制项。隐藏后仍会保留所有对话记录与进行中的工作；群组不受影响。重新打开即可再次访问你的对话。",
   "settings.threadDisplay.show": "显示对话",

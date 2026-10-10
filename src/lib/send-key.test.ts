@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { newLineKeyLabel, SEND_KEYS, sendKeyLabel, sendsMessage, type SendKey } from "./send-key";
+import { imeComposing, SEND_KEYS, sendKeyLabel, sendsMessage, type SendKey } from "./send-key";
 
 const hook = vi.hoisted(() => ({
   subscribe: undefined as undefined | ((listener: () => void) => () => void),
@@ -68,7 +68,14 @@ describe("which Enter sends", () => {
     expect(sendKeyLabel("shift-enter", false)).toBe("Shift+Enter");
     expect(sendKeyLabel("mod-enter", true)).toBe("⌘+Enter");
     expect(sendKeyLabel("mod-enter", false)).toBe("Ctrl+Enter");
-    expect(SEND_KEYS.map(newLineKeyLabel)).toEqual(["Shift+Enter", "Enter", "Enter"]);
+  });
+
+  it("leaves an input method's keys to it, Enter or not", () => {
+    for (const other of ["Enter", "ArrowDown", "Tab", "Escape"]) {
+      expect(imeComposing(key({ key: other, isComposing: true }))).toBe(true);
+      expect(imeComposing(key({ key: other, keyCode: 229 }))).toBe(true);
+      expect(imeComposing(key({ key: other }))).toBe(false);
+    }
   });
 });
 

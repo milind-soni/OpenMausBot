@@ -1592,6 +1592,5 @@
   "place.view.autoTeam.short": "साझा",
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "संदेश भेजने की कुंजी",
-  "settings.sendKey.subtitle": "Shift+Enter या {key} चुनें ताकि Enter नई पंक्ति शुरू करे — यह तब काम आता है जब आपकी इनपुट विधि Enter से टेक्स्ट पक्का करती है, जैसे जापानी इनपुट में। {key} हर विकल्प में भेजता है। सिर्फ़ इस डिवाइस पर।",
-  "settings.sendKey.option": "{key} (नई पंक्ति के लिए {newLine})"
+  "settings.sendKey.subtitle": "Shift+Enter या {key} चुनें ताकि Enter नई पंक्ति शुरू करे — यह तब काम आता है जब आपकी इनपुट विधि Enter से टेक्स्ट पक्का करती है, जैसे जापानी इनपुट में। {key} हर विकल्प में भेजता है। सिर्फ़ इस डिवाइस पर।"
 }

@@ -686,7 +686,6 @@
   "settings.font.serif": "襯線體",
   "settings.sendKey.title": "傳送訊息的按鍵",
   "settings.sendKey.subtitle": "選擇 Shift+Enter 或 {key} 後，按 Enter 會換行，適合用 Enter 確認選字的輸入法（例如日文輸入）。無論選哪一項，{key} 都會傳送。僅套用於這部裝置。",
-  "settings.sendKey.option": "{key}（{newLine} 換行）",
   "settings.sidebarDensity.subtitle": "每個機器人與對話在側邊欄中所占的空間，僅套用於這部裝置。「僅顯示頭像」等同於從側邊欄標題列將其收合。",
   "settings.advancedMode.title": "進階模式",
   "settings.advancedMode.subtitle": "在這部裝置上顯示所有技術控制項：用量與 token、檢查器，以及其他給開發者的工具。關閉即可使用較精簡的介面。無論開或關都不會刪除任何內容。",

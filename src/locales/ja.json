@@ -1595,6 +1595,5 @@
   "place.view.autoTeam.short": "共有",
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "メッセージの送信キー",
-  "settings.sendKey.subtitle": "日本語入力のように Enter で変換を確定する場合は、Shift+Enter か {key} を選ぶと Enter で改行できます。どの設定でも {key} で送信できます。この端末だけの設定です。",
-  "settings.sendKey.option": "{key}（{newLine} で改行）"
+  "settings.sendKey.subtitle": "日本語入力のように Enter で変換を確定する場合は、Shift+Enter か {key} を選ぶと Enter で改行できます。どの設定でも {key} で送信できます。この端末だけの設定です。"
 }

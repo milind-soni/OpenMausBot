@@ -7,7 +7,7 @@ import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
+import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
 import {
   draftRevision,
   appendDraftAttachments,
@@ -1117,6 +1117,9 @@ export function Composer({
           onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onKeyDown={(e) => {
+            // an input method's keys pick its own candidates: its confirming
+            // Enter must not pick a mention or command, nor its arrows move them
+            if (imeComposing(e.nativeEvent)) return;
             if (commandPickerOpen) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();

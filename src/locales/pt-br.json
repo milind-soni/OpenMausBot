@@ -1608,6 +1608,5 @@
   "place.view.autoTeam.short": "Compartilhado",
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "Enviar mensagens com",
-  "settings.sendKey.subtitle": "Escolha Shift+Enter ou {key} para que Enter comece uma nova linha, útil quando seu método de entrada confirma o texto com Enter, como na digitação em japonês. {key} envia em qualquer opção. Só neste dispositivo.",
-  "settings.sendKey.option": "{key} ({newLine} para nova linha)"
+  "settings.sendKey.subtitle": "Escolha Shift+Enter ou {key} para que Enter comece uma nova linha, útil quando seu método de entrada confirma o texto com Enter, como na digitação em japonês. {key} envia em qualquer opção. Só neste dispositivo."
 }

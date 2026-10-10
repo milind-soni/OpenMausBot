@@ -1592,6 +1592,5 @@
   "place.view.autoTeam.short": "Partagé",
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "Envoyer les messages avec",
-  "settings.sendKey.subtitle": "Choisissez Shift+Enter ou {key} pour qu'Enter passe plutôt à la ligne, pratique si votre méthode de saisie valide le texte avec Enter, comme pour le japonais. {key} envoie quel que soit votre choix. Sur cet appareil uniquement.",
-  "settings.sendKey.option": "{key} ({newLine} pour aller à la ligne)"
+  "settings.sendKey.subtitle": "Choisissez Shift+Enter ou {key} pour qu'Enter passe plutôt à la ligne, pratique si votre méthode de saisie valide le texte avec Enter, comme pour le japonais. {key} envoie quel que soit votre choix. Sur cet appareil uniquement."
 }

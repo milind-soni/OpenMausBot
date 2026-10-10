@@ -16,27 +16,28 @@ export function parseSendKey(value: string | null | undefined): SendKey {
   return SEND_KEYS.find((mode) => mode === value) ?? "enter";
 }
 
+/** An input method is composing, so this key (Enter, an arrow, Tab, Escape)
+ * is its own: isComposing, or keyCode 229 for the confirming Enter WebKit
+ * delivers after compositionend. A box's pickers and send leave it alone. */
+export function imeComposing(event: Pick<KeyboardEvent, "isComposing" | "keyCode">): boolean {
+  return event.isComposing || event.keyCode === 229;
+}
+
 /** Whether this keydown in a multi-line message box sends it; otherwise the
- * browser inserts the line break. Never while an input method is composing:
- * isComposing, or keyCode 229 for the confirming Enter WebKit delivers after
- * compositionend. Single-line fields keep their plain Enter. */
+ * browser inserts the line break. Never while an input method is composing.
+ * Single-line fields keep their plain Enter. */
 export function sendsMessage(
   event: Pick<KeyboardEvent, "key" | "shiftKey" | "ctrlKey" | "metaKey" | "isComposing" | "keyCode">,
   mode: SendKey,
 ): boolean {
-  if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) return false;
+  if (event.key !== "Enter" || imeComposing(event)) return false;
   if (event.ctrlKey || event.metaKey) return true;
   return mode === "enter" ? !event.shiftKey : mode === "shift-enter" && event.shiftKey;
 }
 
-/** The sending key as hints and tooltips name it. */
+/** The sending key as the setting, hints and tooltips name it. */
 export function sendKeyLabel(mode: SendKey, mac: boolean = isMacPlatform()): string {
   return mode === "enter" ? "Enter" : mode === "shift-enter" ? "Shift+Enter" : mac ? "⌘+Enter" : "Ctrl+Enter";
-}
-
-/** The key that adds a line instead. */
-export function newLineKeyLabel(mode: SendKey): string {
-  return mode === "enter" ? "Shift+Enter" : "Enter";
 }
 
 // Only a renderer preference, like thread-preferences.ts: a session choice
