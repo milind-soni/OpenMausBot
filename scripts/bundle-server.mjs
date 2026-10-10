@@ -18,7 +18,7 @@
 // drivers/ nested; import.meta.url still resolves to the same location, so
 // that lookup is unaffected.
 import { build } from "esbuild";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -177,3 +177,7 @@ const piMcpExtDest = join(root, "dist-server", "drivers", "pi-mcp-extension.ts")
 mkdirSync(dirname(piMcpExtDest), { recursive: true });
 await build({ entryPoints: [piMcpExtSrc], outfile: piMcpExtDest, bundle: true,
   platform: "node", target: "node24", format: "esm", external: ["typebox"], });
+
+// Desktop resources live outside app.asar, so its package.json cannot mark
+// these .js bundles as ESM. Do not inherit a user's CommonJS package scope.
+writeFileSync(join(root, "dist-server", "package.json"), '{"type":"module"}\n');
