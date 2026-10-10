@@ -516,6 +516,7 @@ import { OutboundCounts } from "./outbound-counts.ts";
 import { OutboundRequestService } from "./outbound-requests.ts";
 import { DEFAULT_OUTBOUND_POLICY, connectorCallsIn, normalizeOutboundPolicy, outboundCallsIn } from "../shared/outbound.ts";
 import { commandPolicyVerdict } from "../shared/command-policy.ts";
+import { toolPolicyVerdict } from "../shared/tool-policy.ts";
 import { connectorAccessDecision, describeConnectorScopes, normalizeConnectorScopes } from "../shared/connector-scopes.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -822,6 +823,16 @@ const commandPolicyRoots = (process.env.OMB_COMMAND_POLICY_ROOT ?? "")
     return true;
   });
 if (commandPolicyRoots.length) console.log(`command policy: ordinary commands run without a card inside ${commandPolicyRoots.join(", ")}`);
+// The standing tool policy (shared/tool-policy.ts): the tool slugs a bot may
+// call without a card, comma-separated. Unset — the default, and what every
+// install had before this — leaves every tool call on a card exactly as
+// before. These are INNER slugs (GOOGLESHEETS_BATCH_GET), never the name of
+// the wrapper that runs them; the policy refuses a wrapper named here.
+const toolPolicyAllow = (process.env.OMB_TOOL_POLICY_ALLOW ?? "")
+  .split(",")
+  .map((entry) => entry.trim())
+  .filter(Boolean);
+if (toolPolicyAllow.length) console.log(`tool policy: these tools run without a card: ${toolPolicyAllow.join(", ")}`);
 // `openmausbot serve` on a service-trust server hands the server it starts a
 // per-launch secret on stdin, then closes it (server/cli.ts). It opens only
 // the pairing route, for that CLI. Never an environment variable: every
@@ -7979,6 +7990,19 @@ bus.subscribe((event: RuntimeEvent) => {
               command: event.command.command,
               cwd: event.command.cwd,
               workspaceRoots: commandPolicyRoots,
+            }).decision === "allow",
+          ),
+          // The operator's standing policy for tool calls, off unless
+          // OMB_TOOL_POLICY_ALLOW names them. Keyed on the inner slugs the
+          // driver read from the native input, never on the tool's own name:
+          // Composio mounts one wrapper that runs anything the workspace has
+          // connected, so its name is not an identity.
+          toolPolicyAllowed: Boolean(
+            toolPolicyAllow.length && !guestDriven &&
+            toolPolicyVerdict({
+              tool: event.tool,
+              innerToolSlugs: event.innerToolSlugs,
+              allowedToolSlugs: toolPolicyAllow,
             }).decision === "allow",
           ),
         })

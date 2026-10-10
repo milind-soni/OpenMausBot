@@ -108,6 +108,8 @@ function bareToolName(tool: string): string {
  * `command-policy` is the operator's standing rule for ordinary commands
  * inside a scoped workspace (shared/command-policy.ts), off unless
  * OMB_COMMAND_POLICY_ROOT names that workspace;
+ * `tool-policy` is the same idea for tool calls (shared/tool-policy.ts), off
+ * unless OMB_TOOL_POLICY_ALLOW names the tools;
  * `web-search` is the one action Approve for me grants itself;
  * `native-approval` is a card the provider's own reviewer (Auto, or Custom's
  * config) left for the person; `explicit-approval-block` is a sandbox
@@ -117,6 +119,7 @@ export type AutoVerdictSource =
   | "full-access"
   | "command-allowlist"
   | "command-policy"
+  | "tool-policy"
   | "web-search"
   | "native-approval"
   | "explicit-approval-block"
@@ -145,6 +148,11 @@ export function autoVerdict(
      * sandbox block, so it can never widen either: it only answers the
      * ordinary commands that would otherwise each need a tap. */
     commandPolicyAllowed?: boolean;
+    /** The operator's standing policy for tool calls
+     * (shared/tool-policy.ts). Read in the same place and for the same
+     * reason as commandPolicyAllowed: after the outbound guard and the
+     * sandbox block, so it can never widen either. */
+    toolPolicyAllowed?: boolean;
   },
 ): AutoVerdict {
   // A question is for a person, whatever channel it arrived on — and
@@ -161,6 +169,7 @@ export function autoVerdict(
   if (isOutboundTool(tool)) return { approve: null, source: "outbound-guard" };
   if (context?.commandAllowed) return { approve: `approved ${tool} (saved command)`, source: "command-allowlist" };
   if (context?.commandPolicyAllowed) return { approve: `approved ${tool} (command policy)`, source: "command-policy" };
+  if (context?.toolPolicyAllowed) return { approve: `approved ${tool} (tool policy)`, source: "tool-policy" };
   // The one action the app itself grants. A fetch of an arbitrary URL is not
   // a search and stays a prompt, in this mode and every other.
   if (mode === "auto" && WEB_SEARCH.has(bareToolName(tool))) {
