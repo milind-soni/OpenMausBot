@@ -11,9 +11,13 @@ import { closeMessageDb,
   indexMemoryFile,
   indexedMemoryFiles,
   insertMessage,
+  insertNotificationLog,
   latestSaidByBot,
+  markAllNotificationLogRead,
+  markNotificationLogRead,
   readMessageText,
   recentMessages,
+  recentNotificationLog,
   recallMemory,
   removeMemoryFile,
   readThread,
@@ -22,6 +26,7 @@ import { closeMessageDb,
   searchMessages,
   setActiveLeaf,
   updateMessage, describeMissingFts5 } from "./message-db.ts";
+import type { NotificationLogEntry } from "../shared/notification.ts";
 import { withPeerProvenance } from "./peer-provenance.ts";
 import { Store, type Message } from "./store.ts";
 import type { ModelSelection } from "./contracts.ts";
@@ -437,5 +442,52 @@ describe("recall of digest rows", () => {
     const hits = recallMessages("retry limit", ["t1"]);
     expect(hits.map((h) => h.messageId)).toEqual(["m1", "d1"]);
     expect(hits[1]?.kind).toBe("digest");
+  });
+});
+
+describe("notification_log", () => {
+  beforeEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    mkdirSync(DATA_DIR, { recursive: true });
+  });
+
+  const entry = (id: string, at: number, extra: Partial<NotificationLogEntry> = {}): NotificationLogEntry => ({
+    id, at, kind: "done", botId: "bot-1", botName: "Scout", threadId: "thread-1", title: `${id} finished`, body: "", read: false, ...extra,
+  });
+
+  it("reads rows back newest first, read defaulting to false", () => {
+    insertNotificationLog(entry("n1", 1000));
+    insertNotificationLog(entry("n2", 2000, { groupId: "room-1" }));
+    const rows = recentNotificationLog();
+    expect(rows.map((r) => r.id)).toEqual(["n2", "n1"]);
+    expect(rows.every((r) => r.read === false)).toBe(true);
+    expect(rows.find((r) => r.id === "n2")?.groupId).toBe("room-1");
+  });
+
+  it("marking read in the attention layer never deletes a row: read-one and read-all only flip the flag", () => {
+    insertNotificationLog(entry("n1", 1000));
+    insertNotificationLog(entry("n2", 2000));
+    markNotificationLogRead("n1");
+    let rows = recentNotificationLog();
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.id === "n1")?.read).toBe(true);
+    expect(rows.find((r) => r.id === "n2")?.read).toBe(false);
+
+    markAllNotificationLogRead();
+    rows = recentNotificationLog();
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.read)).toBe(true);
+  });
+
+  it("keeps only the newest 500 rows, FIFO", () => {
+    for (let i = 0; i < 503; i++) insertNotificationLog(entry(`n${i}`, i));
+    const rows = recentNotificationLog(1000);
+    expect(rows).toHaveLength(500);
+    // the oldest 3 (n0, n1, n2) were evicted; the newest (n502) survives
+    expect(rows.map((r) => r.id)).not.toContain("n0");
+    expect(rows.map((r) => r.id)).not.toContain("n2");
+    expect(rows[0]?.id).toBe("n502");
+    expect(rows.map((r) => r.id)).toContain("n3");
   });
 });

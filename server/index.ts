@@ -230,6 +230,7 @@ import { entitled } from "./enterprise.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
 import { blockedTarget, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
+import type { NotificationLogEntry } from "../shared/notification.ts";
 import {
   isModelVariant,
   TurnNotStartedError,
@@ -271,7 +272,7 @@ import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-g
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./drivers/acp/opencode-go.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
-import { readMessageText, recallMessages, recentMessages, searchMessagesAsync, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing } from "./message-db.ts";
+import { readMessageText, recallMessages, recentMessages, searchMessagesAsync, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing, insertNotificationLog, recentNotificationLog, markNotificationLogRead, markAllNotificationLogRead } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
 import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentText, type Incident, type IncidentKind } from "./incidents.ts";
@@ -6247,11 +6248,17 @@ const providerLabel = (provider: string): string => {
 };
 
 /** Put a notification on the wire. Clients decide what to do with it — a
- * desktop notification now, a push to a paired phone later. */
+ * desktop notification now, a push to a paired phone later. Every one that
+ * reaches here also lands a durable row in notification_log — the feed a
+ * client can scroll back through, independent of the bell's own live toggle
+ * and of the attention layer's unread flag, which never deletes from it. */
 function notify(notification: Notification | null) {
+  if (!notification) return;
+  const entry: NotificationLogEntry = { ...notification, id: randomUUID(), at: Date.now(), read: false };
+  insertNotificationLog(entry);
   // nested rather than spread — the frame's own `kind` names the frame,
   // exactly like {kind:"message", message} and {kind:"bot", bot}
-  if (notification) broadcast({ kind: "notify", notification });
+  broadcast({ kind: "notify", notification: entry });
 }
 
 // Group threads: the fold needs to know WHO is talking — the turn engine
@@ -21730,6 +21737,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const visible = wireBot(bot);
       broadcast({ kind: "bot", bot: visible });
       return json(res, 200, { bot: visible });
+    }
+    if (method === "GET" && path === "/api/notifications") {
+      return json(res, 200, { notifications: recentNotificationLog() });
+    }
+    if (method === "POST" && path === "/api/notifications/read-all") {
+      markAllNotificationLogRead();
+      return json(res, 200, { ok: true });
+    }
+    m = path.match(/^\/api\/notifications\/([\w-]+)\/read$/);
+    if (m && method === "POST") {
+      markNotificationLogRead(m[1]);
+      return json(res, 200, { ok: true });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/command-allowlist(?:\/([\w-]+))?$/);
     if (m && ["GET", "POST", "DELETE"].includes(method)) {
