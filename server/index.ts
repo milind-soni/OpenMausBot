@@ -7990,6 +7990,8 @@ bus.subscribe((event: RuntimeEvent) => {
               command: event.command.command,
               cwd: event.command.cwd,
               workspaceRoots: commandPolicyRoots,
+              taskWorkspaceRoot: TASK_WORKSPACES_DIR,
+              botId: asker.id,
             }).decision === "allow",
           ),
           // The operator's standing policy for tool calls, off unless

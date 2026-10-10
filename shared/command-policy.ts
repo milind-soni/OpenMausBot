@@ -203,6 +203,11 @@ export interface CommandPolicyInput {
    * sits in `~/agent-workspace`. A command is in bounds if it is inside any
    * of them. */
   workspaceRoots: readonly string[];
+  /** Base directory that contains every bot's task workspaces. When this base
+   * is one of `workspaceRoots`, only its child for `botId` is in bounds. */
+  taskWorkspaceRoot?: string;
+  /** Trusted bot identity supplied by the host, never parsed from `cwd`. */
+  botId?: string;
 }
 
 /**
@@ -219,10 +224,35 @@ export function commandPolicyVerdict(input: CommandPolicyInput): CommandPolicyVe
   if (!command) return ask("no command text");
   if (command.length > 4_096) return ask("command is too long to review");
 
-  const roots = (input.workspaceRoots ?? [])
+  let roots = (input.workspaceRoots ?? [])
     .map((root) => root.trim().replace(/\/+$/, ""))
     .filter((root) => root.startsWith("/"));
   if (!roots.length) return ask("no workspace root configured");
+
+  if (input.taskWorkspaceRoot !== undefined) {
+    const taskRoot = input.taskWorkspaceRoot.trim().replace(/\/+$/, "");
+    if (!taskRoot.startsWith("/")) return ask("task workspace root is not absolute");
+
+    const touchesTaskWorkspaces = roots.some((root) =>
+      root === taskRoot || root.startsWith(`${taskRoot}/`) || taskRoot.startsWith(`${root}/`));
+    if (touchesTaskWorkspaces) {
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(input.botId ?? "")) {
+        return ask("no trustworthy bot identity for the task workspace");
+      }
+      const botRoot = `${taskRoot}/${input.botId}`;
+      const scoped: string[] = [];
+      for (const root of roots) {
+        if (root === taskRoot) scoped.push(botRoot);
+        else if (taskRoot.startsWith(`${root}/`)) {
+          return ask("a workspace root is broader than the task workspace root");
+        } else if (root.startsWith(`${taskRoot}/`)) {
+          if (root === botRoot || root.startsWith(`${botRoot}/`)) scoped.push(root);
+          else return ask("a workspace root belongs to another bot");
+        } else scoped.push(root);
+      }
+      roots = scoped;
+    }
+  }
 
   const inWorkspace = (path: string) => roots.some((root) => path === root || path.startsWith(`${root}/`));
   if (!inWorkspace(input.cwd ?? "")) return ask("working folder is outside the workspace");

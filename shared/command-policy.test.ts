@@ -125,7 +125,13 @@ describe("commandPolicyVerdict: more than one root", () => {
   const TASKS = "/home/user/.openmausbot/task-workspaces";
   const BOT_CWD = `${TASKS}/fc432790/4b7437fe`;
   const twoRoots = (command: string, cwd = BOT_CWD) =>
-    commandPolicyVerdict({ command, cwd, workspaceRoots: [ROOT, TASKS] });
+    commandPolicyVerdict({
+      command,
+      cwd,
+      workspaceRoots: [ROOT, TASKS],
+      taskWorkspaceRoot: TASKS,
+      botId: "fc432790",
+    });
 
   it("allows an ordinary command in the bot's own task workspace", () => {
     expect(twoRoots("ls -la").decision).toBe("allow");
@@ -137,24 +143,30 @@ describe("commandPolicyVerdict: more than one root", () => {
   });
 
   it("still refuses the rest of the runtime's own directory", () => {
-    // task-workspaces is a root; its parent is not. This is the check that
-    // keeps config.json, bots.json and the transcripts out of reach, and it
-    // works on the resolved path rather than on how the path was spelled.
+    // task-workspaces is configured as a base, but the effective root is this
+    // bot's child. That keeps config.json, bots.json, transcripts and sibling
+    // bots out of reach by resolved path rather than by spelling.
     expect(twoRoots("cat /home/user/.openmausbot/config.json").decision).toBe("ask");
     expect(twoRoots("cat /home/user/.openmausbot/bots.json").decision).toBe("ask");
     expect(twoRoots(`cat ${TASKS}/../messages.db`).decision).toBe("ask");
-    // From <bot>/<thread>, two levels up is still task-workspaces, which is
-    // a root; it takes three to reach the runtime's own directory.
-    expect(twoRoots("cat ../../other-bot/thread/notes.md").decision).toBe("allow");
+    // From <bot>/<thread>, two levels up reaches the shared task-workspaces
+    // base and therefore leaves this bot's effective root.
+    expect(twoRoots("cat ../../other-bot/thread/notes.md").decision).toBe("ask");
     expect(twoRoots("cat ../../../config.json").decision).toBe("ask");
     expect(twoRoots("cat ../../../../.ssh/id_rsa").decision).toBe("ask");
   });
 
-  it("still refuses another bot's workspace only by root, not by bot", () => {
-    // Deliberately recorded rather than claimed as isolation: every bot's
-    // task workspace is under the same root, so this policy does not keep
-    // one bot out of another's. Per-bot roots would be the way to do that.
-    expect(twoRoots(`cat ${TASKS}/someotherbot/thread/notes.md`).decision).toBe("allow");
+  it("refuses another bot's task workspace", () => {
+    expect(twoRoots(`cat ${TASKS}/someotherbot/thread/notes.md`).decision).toBe("ask");
+  });
+
+  it("fails closed when the task root has no trustworthy bot identity", () => {
+    expect(commandPolicyVerdict({
+      command: "ls -la",
+      cwd: BOT_CWD,
+      workspaceRoots: [ROOT, TASKS],
+      taskWorkspaceRoot: TASKS,
+    }).decision).toBe("ask");
   });
 });
 
