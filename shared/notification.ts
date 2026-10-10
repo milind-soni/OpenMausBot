@@ -38,3 +38,15 @@ export interface Notification {
   groupId?: string;
 }
 
+/** A `Notification` as it lives in the persistent feed: stamped with an id
+ * and a time by the one place that writes the log (notify() in
+ * server/index.ts), so the live push and the row a later GET /api/notifications
+ * returns are the exact same object. Kept apart from `Notification` itself
+ * so buildNotification/buildSpendNotification stay pure and unaware that a
+ * log exists. */
+export interface NotificationLogEntry extends Notification {
+  id: string;
+  at: number;
+  read: boolean;
+}
+

@@ -19,6 +19,7 @@ import {
   preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoutinesPage, SettingsModal, TeamMapPage, TriggersPanel,
 } from "@/components/lazy-screens";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
+import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
@@ -114,7 +115,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   // A side panel beside the full sidebar leaves the default 1100px window a
   // ~330px chat. Fold the sidebar to its avatar rail for as long as a panel
   // is open and the window is not wide enough for all three.
-  const sidePanelOpen = Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen);
+  // notificationsOpen is cross-bot — it folds the sidebar the same as the
+  // other docked panels, but (unlike them) does it with no bot selected.
+  const sidePanelOpen =
+    (Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen)) ||
+    state.notificationsOpen;
   const collapseSidebar = sidePanelOpen && !sidebarAndPanelFit;
   const calendarFocus = state.activeView === "routines";
   // Turning Advanced mode off closes the inspector it no longer offers.
@@ -375,11 +380,15 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           (their own controls open settings). Two static panels beside the
           sidebar leave the default 1100px window a sliver of chat, so until
           the window is wide enough to seat both, settings floats over the
-          chat instead and the other panel is still there when it closes. */}
+          chat instead and the other panel is still there when it closes.
+          A pinned notification feed is a third lane settings can meet here
+          too (it alone survives the mutual-exclusion the other three
+          enforce on each other — see toggleComputer/Inspector/Activity in
+          store.tsx), so it counts toward the same "need the overlay" check. */}
       {state.settingsOpen && bot && (
         remoteClient
-          ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
-          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={(state.inspectorOpen || state.computerOpen) && !twoSidePanelsFit} />
+          ? <RemoteAgentSettingsPanel bot={bot} overlay={(state.computerOpen || state.notificationsOpen) && !twoSidePanelsFit} />
+          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={(state.inspectorOpen || state.computerOpen || state.notificationsOpen) && !twoSidePanelsFit} />
       )}
       {state.computerOpen && bot && (
         remoteClient ? (
@@ -394,6 +403,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       )}
       {!remoteClient && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
       {!remoteClient && state.activityOpen && bot && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
+      {/* Not keyed by bot/thread, and no `&& bot` gate: the feed outlives
+          whichever conversation is on screen (see notificationsOpen above). */}
+      {!remoteClient && !calendarFocus && state.notificationsOpen && <NotificationsPanel />}
+      {!remoteClient && !calendarFocus && <NotificationRail />}
       {state.appSettingsOpen && <SettingsModal />}
       {/* Add a Cloud: the buying journey's one dialog, and Show me how's one step. */}
       <CloudAddDialog />

@@ -15,6 +15,7 @@ import {
 import { flushSync } from "react-dom";
 import type { BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, LiveSettings, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
 import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-surface";
+import type { NotificationLogEntry } from "../../shared/notification";
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
@@ -1001,6 +1002,19 @@ export interface AppState {
   /** the per-thread event inspector (runtime stream + native protocol tee) */
   inspectorOpen: boolean;
   activityOpen: boolean;
+  /** The right-rail notification feed. Unlike computerOpen/inspectorOpen/
+   * activityOpen, never reset on select/switchTask: the feed is cross-bot,
+   * not a lens on whichever bot happens to be selected. */
+  notificationsOpen: boolean;
+  /** While true, opening Computer/Inspector/Activity/app Settings never
+   * auto-closes the feed the way it otherwise would (toggleComputer etc.) —
+   * the docked panel stays put and the fit-check (BotSettingsDialog/
+   * RemoteAgentSettingsPanel's `overlay` prop in App.tsx) is what keeps the
+   * chat from being squeezed when a narrow window can't seat both. */
+  notificationsPinned: boolean;
+  /** Newest first, capped at the server's own retention (notification_log,
+   * last 500). Hydrated once on connect, then grown by each "notify" frame. */
+  notifications: NotificationLogEntry[];
   appSettingsOpen: boolean;
   appSettingsSection: AppSettingsSection;
   /** Non-zero while Settings → OMB Cloud is open because of the Cloud page's
@@ -1179,6 +1193,12 @@ export type Action =
   | { type: "routinePatched"; routine: Routine }
   | { type: "routineDeleted"; routineId: string }
   | { type: "routineRunPatched"; run: RoutineRun }
+  | { type: "notificationsHydrated"; notifications: NotificationLogEntry[] }
+  | { type: "notificationReceived"; entry: NotificationLogEntry }
+  | { type: "notificationRead"; id: string }
+  | { type: "notificationsMarkAllRead" }
+  | { type: "toggleNotifications"; open?: boolean }
+  | { type: "toggleNotificationsPinned"; pinned?: boolean }
   | { type: "webhooksHydrated"; webhooks: WebhookTrigger[]; attempts: WebhookAttempt[]; ingress: WebhookIngressStatus }
   | { type: "webhookPatched"; webhook: WebhookTrigger }
   | { type: "webhookAttempted"; attempt: WebhookAttempt }
@@ -1631,6 +1651,7 @@ export function reducer(state: AppState, action: Action): AppState {
         computerOpen: false,
         inspectorOpen: false,
         activityOpen: false,
+        notificationsOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
         triggersOpen: false,
@@ -2186,6 +2207,9 @@ export function reducer(state: AppState, action: Action): AppState {
         inspectorOpen: open ? false : state.inspectorOpen,
         activityOpen: open ? false : state.activityOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
+        // Pinned, the feed outlasts this open the same way it outlasts a
+        // bot switch — only an unpinned feed yields the lane.
+        notificationsOpen: open && !state.notificationsPinned ? false : state.notificationsOpen,
       };
     }
     case "toggleInspector": {
@@ -2197,6 +2221,7 @@ export function reducer(state: AppState, action: Action): AppState {
         computerOpen: open ? false : state.computerOpen,
         activityOpen: open ? false : state.activityOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
+        notificationsOpen: open && !state.notificationsPinned ? false : state.notificationsOpen,
       };
     }
     case "toggleActivity": {
@@ -2208,8 +2233,48 @@ export function reducer(state: AppState, action: Action): AppState {
         computerOpen: open ? false : state.computerOpen,
         inspectorOpen: open ? false : state.inspectorOpen,
         appSettingsOpen: open ? false : state.appSettingsOpen,
+        notificationsOpen: open && !state.notificationsPinned ? false : state.notificationsOpen,
       };
     }
+    // Deliberately NOT bot-scoped: no `bot &&` gate in App.tsx, and this
+    // case never clears on "select"/"switchTask"/"switchGroupTask" the way
+    // the panels above do by living behind `state.computerOpen && bot` etc.
+    // — the feed is the same list regardless of which bot or room is open.
+    // Opening notifications itself still closes the other four (unaffected
+    // by the pin — pin only protects an already-open feed from being closed
+    // by one of them; see toggleComputer/Inspector/Activity/AppSettings).
+    case "toggleNotifications": {
+      const open = action.open ?? !state.notificationsOpen;
+      return {
+        ...state,
+        notificationsOpen: open,
+        settingsOpen: open ? false : state.settingsOpen,
+        computerOpen: open ? false : state.computerOpen,
+        inspectorOpen: open ? false : state.inspectorOpen,
+        activityOpen: open ? false : state.activityOpen,
+        appSettingsOpen: open ? false : state.appSettingsOpen,
+      };
+    }
+    case "toggleNotificationsPinned":
+      return { ...state, notificationsPinned: action.pinned ?? !state.notificationsPinned };
+    case "notificationsHydrated": {
+      // The server's copy wins for ids it has; live entries that arrived while
+      // the request was in flight (or that it has not seen) are kept.
+      const hydrated = new Set(action.notifications.map((n) => n.id));
+      const live = state.notifications.filter((n) => !hydrated.has(n.id));
+      return { ...state, notifications: [...live, ...action.notifications].sort((a, b) => b.at - a.at).slice(0, 500) };
+    }
+    case "notificationReceived":
+      return state.notifications.some((n) => n.id === action.entry.id)
+        ? state
+        : { ...state, notifications: [action.entry, ...state.notifications].slice(0, 500) };
+    case "notificationRead":
+      return {
+        ...state,
+        notifications: state.notifications.map((n) => (n.id === action.id ? { ...n, read: true } : n)),
+      };
+    case "notificationsMarkAllRead":
+      return { ...state, notifications: state.notifications.map((n) => (n.read ? n : { ...n, read: true })) };
     case "toggleAppSettings": {
       const open = action.open ?? !state.appSettingsOpen;
       return {
@@ -2224,6 +2289,7 @@ export function reducer(state: AppState, action: Action): AppState {
         inspectorOpen: open ? false : state.inspectorOpen,
         pluginsOpen: open ? false : state.pluginsOpen,
         triggersOpen: open ? false : state.triggersOpen,
+        notificationsOpen: open && !state.notificationsPinned ? false : state.notificationsOpen,
       };
     }
     case "toggleShortcuts": {
@@ -2616,6 +2682,9 @@ export const initialState: AppState = {
   computerOpen: false,
   inspectorOpen: false,
   activityOpen: false,
+  notificationsOpen: false,
+  notificationsPinned: false,
+  notifications: [],
   appSettingsOpen: false,
   appSettingsSection: "general",
   appSettingsCloudLink: 0,
@@ -3835,7 +3904,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
-    type PeripheralKey = "instances" | "config" | "routines" | "webhooks";
+    type PeripheralKey = "instances" | "config" | "routines" | "webhooks" | "notifications";
     type PeripheralPart = {
       key: PeripheralKey;
       request: () => Promise<() => void>;
@@ -3875,6 +3944,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         request: async () => {
           const { routines, runs } = await api("/api/routines");
           return () => rawDispatch({ type: "routinesHydrated", routines, runs });
+        },
+      },
+      {
+        key: "notifications",
+        request: async () => {
+          const { notifications } = await api("/api/notifications");
+          return () => rawDispatch({ type: "notificationsHydrated", notifications: Array.isArray(notifications) ? notifications : [] });
         },
       },
       ...(window.ogb?.remoteClient?.active ? [] : [{
@@ -4109,6 +4185,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             stateRef.current.bots.find((bot) => bot.id === frame.notification.botId)?.avatarUrl,
             visibleNotificationThread(stateRef.current),
           );
+          // The persistent feed is independent of the banner above: it grows
+          // even when the banner stays quiet (focused on that exact thread).
+          rawDispatch({ type: "notificationReceived", entry: frame.notification });
           break;
         case "group.deleted":
           rawDispatch({ type: "groupDeleted", groupId: frame.groupId });

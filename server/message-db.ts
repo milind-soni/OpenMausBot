@@ -21,6 +21,7 @@ import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 import { MessageSearchWorker } from "./message-search-worker.ts";
 import { searchMessagesInDatabase, type SearchHit } from "./message-search-query.ts";
+import type { NotificationLogEntry } from "../shared/notification.ts";
 export type { SearchHit } from "./message-search-query.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
@@ -80,6 +81,20 @@ function open(): DatabaseSync {
       result TEXT NOT NULL,
       PRIMARY KEY (kind, key)
     );
+    CREATE TABLE IF NOT EXISTS notification_log (
+      id TEXT PRIMARY KEY,
+      at INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      bot_name TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      group_id TEXT,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      avatar_url TEXT,
+      read INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS notification_log_at ON notification_log(at);
   `);
   ensureRecallIndex(db);
   ensureMemoryIndex(db);
@@ -318,6 +333,58 @@ export function withCommandReceipt(
       .run(kind, key, at, result);
     return { result, replayed: false };
   });
+}
+
+const NOTIFICATION_LOG_LIMIT = 500;
+
+const rowToNotificationLogEntry = (row: {
+  id: string; at: number; kind: string; bot_id: string; bot_name: string; thread_id: string;
+  group_id: string | null; title: string; body: string; avatar_url: string | null; read: number;
+}): NotificationLogEntry => ({
+  id: row.id,
+  at: row.at,
+  kind: row.kind as NotificationLogEntry["kind"],
+  botId: row.bot_id,
+  botName: row.bot_name,
+  threadId: row.thread_id,
+  ...(row.group_id ? { groupId: row.group_id } : {}),
+  title: row.title,
+  body: row.body,
+  ...(row.avatar_url ? { avatarUrl: row.avatar_url } : {}),
+  read: row.read !== 0,
+});
+
+/** Append one event to the persistent feed, then trim to the last
+ * NOTIFICATION_LOG_LIMIT rows. Marking read elsewhere (the attention layer's
+ * own unread flag) never calls this file, so it can never delete from this
+ * log — only this function's own FIFO cap does. */
+export function insertNotificationLog(entry: NotificationLogEntry): void {
+  transaction((database) => {
+    database.prepare(
+      "INSERT INTO notification_log(id, at, kind, bot_id, bot_name, thread_id, group_id, title, body, avatar_url, read) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+    ).run(entry.id, entry.at, entry.kind, entry.botId, entry.botName, entry.threadId, entry.groupId ?? null, entry.title, entry.body, entry.avatarUrl ?? null);
+    database.prepare(
+      "DELETE FROM notification_log WHERE id NOT IN (SELECT id FROM notification_log ORDER BY at DESC, rowid DESC LIMIT ?)",
+    ).run(NOTIFICATION_LOG_LIMIT);
+  });
+}
+
+/** Newest first, capped at the same retention the FIFO trim enforces. */
+export function recentNotificationLog(limit = NOTIFICATION_LOG_LIMIT): NotificationLogEntry[] {
+  const rows = db().prepare(
+    "SELECT id, at, kind, bot_id, bot_name, thread_id, group_id, title, body, avatar_url, read FROM notification_log ORDER BY at DESC, rowid DESC LIMIT ?",
+  ).all(limit) as Array<Parameters<typeof rowToNotificationLogEntry>[0]>;
+  return rows.map(rowToNotificationLogEntry);
+}
+
+/** One row read, so a click can confirm what it just marked before the next
+ * hydration round-trips it back. */
+export function markNotificationLogRead(id: string): void {
+  db().prepare("UPDATE notification_log SET read = 1 WHERE id = ?").run(id);
+}
+
+export function markAllNotificationLogRead(): void {
+  db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0").run();
 }
 
 export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {

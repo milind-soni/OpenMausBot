@@ -2610,3 +2610,94 @@ describe("restoring the open conversation", () => {
     });
   });
 });
+
+describe("notifications feed", () => {
+  const entry = (id: string, at: number) => ({
+    id, at, kind: "done" as const, botId: "b1", botName: "Scout", threadId: "t1", title: `${id} finished`, body: "", read: false,
+  });
+
+  it("hydrates, then grows on each push without duplicating a replayed id", () => {
+    let state = reducer(initialState, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    expect(state.notifications.map((n) => n.id)).toEqual(["n1"]);
+    state = reducer(state, { type: "notificationReceived", entry: entry("n2", 2) });
+    expect(state.notifications.map((n) => n.id)).toEqual(["n2", "n1"]);
+    // the same frame replayed (a resumed SSE stream) must not duplicate the row
+    state = reducer(state, { type: "notificationReceived", entry: entry("n2", 2) });
+    expect(state.notifications.map((n) => n.id)).toEqual(["n2", "n1"]);
+  });
+
+  it("hydration keeps a live entry that arrived while the request was in flight, newest first", () => {
+    let state = reducer(initialState, { type: "notificationReceived", entry: entry("live", 5) });
+    state = reducer(state, { type: "notificationsHydrated", notifications: [entry("n2", 2), entry("n1", 1)] });
+    expect(state.notifications.map((n) => n.id)).toEqual(["live", "n2", "n1"]);
+  });
+
+  it("hydration takes the server's copy for an id both sides have (a failed mark-read resyncs to unread)", () => {
+    let state = reducer(initialState, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    state = reducer(state, { type: "notificationRead", id: "n1" });
+    state = reducer(state, { type: "notificationsHydrated", notifications: [entry("n1", 1)] });
+    expect(state.notifications[0].read).toBe(false);
+  });
+
+  it("showRoutines closes the feed so its rail is reachable again", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(reducer(open, { type: "showRoutines" }).notificationsOpen).toBe(false);
+  });
+
+  it("marks one or all read without touching the rest", () => {
+    let state = reducer(initialState, {
+      type: "notificationsHydrated",
+      notifications: [entry("n1", 1), entry("n2", 2)],
+    });
+    state = reducer(state, { type: "notificationRead", id: "n1" });
+    expect(state.notifications.find((n) => n.id === "n1")?.read).toBe(true);
+    expect(state.notifications.find((n) => n.id === "n2")?.read).toBe(false);
+    state = reducer(state, { type: "notificationsMarkAllRead" });
+    expect(state.notifications.every((n) => n.read)).toBe(true);
+  });
+
+  it("toggleNotifications closes the other docked panels, and vice versa", () => {
+    let state = reducer(initialState, { type: "toggleComputer", open: true });
+    expect(state.computerOpen).toBe(true);
+    state = reducer(state, { type: "toggleNotifications", open: true });
+    expect(state).toMatchObject({ notificationsOpen: true, computerOpen: false });
+    state = reducer(state, { type: "toggleActivity", open: true });
+    expect(state).toMatchObject({ activityOpen: true, notificationsOpen: false });
+  });
+
+  it("toggleNotificationsPinned flips independently of notificationsOpen", () => {
+    const state = reducer(initialState, { type: "toggleNotificationsPinned" });
+    expect(state).toMatchObject({ notificationsPinned: true, notificationsOpen: false });
+  });
+
+  it("survives a bot switch: select/switchTask never reset it", () => {
+    const withOpen = reducer(initialState, { type: "toggleNotifications", open: true });
+    const afterSwitch = reducer(withOpen, { type: "switchTask", botId: "other-bot", threadId: "other-thread" });
+    expect(afterSwitch.notificationsOpen).toBe(true);
+  });
+
+  it("pinned, the feed survives Computer/Inspector/Activity/AppSettings opening", () => {
+    const open = { ...reducer(initialState, { type: "toggleNotifications", open: true }), notificationsPinned: true };
+    for (const action of [
+      { type: "toggleComputer", open: true } as const,
+      { type: "toggleInspector", open: true } as const,
+      { type: "toggleActivity", open: true } as const,
+      { type: "toggleAppSettings", open: true } as const,
+    ]) {
+      expect(reducer(open, action).notificationsOpen).toBe(true);
+    }
+  });
+
+  it("unpinned, the same four still close it exactly as before (regression guard)", () => {
+    const open = reducer(initialState, { type: "toggleNotifications", open: true });
+    expect(open.notificationsPinned).toBe(false);
+    for (const action of [
+      { type: "toggleComputer", open: true } as const,
+      { type: "toggleInspector", open: true } as const,
+      { type: "toggleActivity", open: true } as const,
+      { type: "toggleAppSettings", open: true } as const,
+    ]) {
+      expect(reducer(open, action).notificationsOpen).toBe(false);
+    }
+  });
+});
