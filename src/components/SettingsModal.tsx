@@ -1177,7 +1177,7 @@ export function SettingsModal() {
         </nav>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 py-3 pl-7 pr-3 sm:pl-9">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:pl-9">
             {advanced ? (
               <select
                 aria-label={t("settings.title")}
@@ -1222,7 +1222,7 @@ export function SettingsModal() {
               onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
               aria-label={t("settings.close")}
               title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
-              className="ui-icon-button shrink-0"
+              className="ui-icon-button cursor-pointer shrink-0"
             >
               <X size={18} />
             </button>

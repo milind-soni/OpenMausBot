@@ -89,7 +89,7 @@ export function SkinPicker() {
             }}
             aria-pressed={selected}
             className={cn(
-              "flex flex-col gap-2 rounded-xl border p-2 text-left transition-colors",
+              "cursor-pointer flex flex-col gap-2 rounded-xl border p-2 text-left transition-colors",
               selected
                 ? "border-accent-border bg-control"
                 : "border-hairline/60 hover:border-hairline hover:bg-control/50",
