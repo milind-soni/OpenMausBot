@@ -84,7 +84,7 @@ describe("commandPolicyVerdict: syntax that could hide a second command", () => 
 
 describe("commandPolicyVerdict: staying inside the workspace", () => {
   it("asks when the working folder is outside the workspace", () => {
-    expect(commandPolicyVerdict({ command: "ls -la", cwd: "/home/rahul", workspaceRoots: [ROOT] }))
+    expect(commandPolicyVerdict({ command: "ls -la", cwd: "/home/user", workspaceRoots: [ROOT] }))
       .toEqual({ decision: "ask", reason: "working folder is outside the workspace" });
   });
 
