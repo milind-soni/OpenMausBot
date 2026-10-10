@@ -1882,16 +1882,18 @@ button:disabled.bg-danger {
 /* Tailwind v4 does not provide pointer cursors for buttons by default.
    Restore them for enabled interactive controls across the app.
    Keep specificity low so component cursor styles can override this. */
+
 @layer base {
   :where(
     button:not(:disabled, [aria-disabled="true"], [aria-busy="true"]),
-    [role="button"]:not([aria-disabled="true"], [aria-busy="true"]),
+    [role="button"]:not(:disabled, [aria-disabled="true"], [aria-busy="true"]),
     [role="link"]:not([aria-disabled="true"], [aria-busy="true"]),
-    summary:not([aria-disabled="true"])
+    summary:not([aria-disabled="true"], [aria-busy="true"])
   ) {
     cursor: pointer;
   }
 }
+
 
 ::highlight(omb-citation-source) {
   background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
