@@ -100,6 +100,7 @@ import {
   messageFolderEntryName,
   openMessageFile,
   openMessageFolderEntry,
+  referencedFileName,
 } from "./message-file.ts";
 import {
   avatarGenerationRequestSchema,
@@ -163,7 +164,7 @@ import {
   type LocalVmTarget,
   type Runtime,
 } from "./container-computer.ts";
-import { attachForTurn, saveBotAttachment } from "./bot-attachment.ts";
+import { attachForTurn, deliveredCopy, saveBotAttachment } from "./bot-attachment.ts";
 import {
   cacheUntilConfigChanges,
   ensureDirs,
@@ -20114,12 +20115,26 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           ? await openMessageFolderEntry(href, folderEntry, roots)
           : await openMessageFile(href, roots);
       } catch (error) {
-        // Only a client that asks for listings gets one; older clients keep the 400.
-        if (body?.listFolder !== true || folderEntry || (error as { code?: unknown } | null)?.code !== "directory") throw error;
-        const listing = await listMessageFolder(href, roots);
-        res.setHeader("x-openmausbot-folder", "1");
-        res.setHeader("cache-control", "private, no-store");
-        return json(res, 200, listing);
+        const code = (error as { code?: unknown } | null)?.code;
+        const status = (error as { status?: unknown } | null)?.status;
+        // A reply's file outside the conversation's folders, or gone, that
+        // its bot delivered with attach_file this turn: the stored copy is
+        // what the reply shows and saves, as a chat link's would be.
+        const name = message.role === "bot" && !botAttachment && !folderEntry && (code === "outside_workspace" || status === 404)
+          ? referencedFileName(href)
+          : null;
+        const copy = name ? deliveredCopy(store.messagesFor(threadId), message, name) : null;
+        if (copy) {
+          file = await openMessageFile(copy.path, [ATTACHMENTS_DIR]);
+          downloadName = copy.name;
+        } else {
+          // Only a client that asks for listings gets one; older clients keep the 400.
+          if (body?.listFolder !== true || folderEntry || code !== "directory") throw error;
+          const listing = await listMessageFolder(href, roots);
+          res.setHeader("x-openmausbot-folder", "1");
+          res.setHeader("cache-control", "private, no-store");
+          return json(res, 200, listing);
+        }
       }
       if ((streamsMessageImage || botAttachment?.kind === "image") && !file.mime.startsWith("image/")) {
         await file.handle.close();

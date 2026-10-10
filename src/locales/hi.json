@@ -559,6 +559,8 @@
   "attach.previous": "पिछली छवि",
   "attach.next": "अगली छवि",
   "attach.retryAria": "{name} फिर से लोड करें",
+  "attach.imageUnavailable": "छवि उपलब्ध नहीं है",
+  "attach.imageOutsideWorkspace": "यह तस्वीर इस चैट के कार्य फ़ोल्डर से बाहर है, इसलिए इसे यहाँ नहीं दिखाया जा सकता",
   "attach.previewImageAria": "संलग्न छवि {name} की झलक",
   "attach.externalHidden": "निजता के लिए बाहरी छवि छिपाई गई",
   "attach.savedTo": "{path} पर सहेजा गया",

@@ -724,6 +724,8 @@
   "attach.previous": "Попереднє зображення",
   "attach.next": "Наступне зображення",
   "attach.retryAria": "Повторити завантаження {name}",
+  "attach.imageUnavailable": "Зображення недоступне",
+  "attach.imageOutsideWorkspace": "Це зображення поза робочою папкою цього чату, тому його не можна показати тут",
   "attach.previewImageAria": "Переглянути прикріплене зображення {name}",
   "attach.externalHidden": "Зовнішнє зображення приховано заради приватності",
   "attach.savedTo": "Збережено до {path}",

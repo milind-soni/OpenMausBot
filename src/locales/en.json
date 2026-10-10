@@ -1537,6 +1537,8 @@
   "attach.previous": "Previous image",
   "attach.next": "Next image",
   "attach.retryAria": "Retry loading {name}",
+  "attach.imageUnavailable": "Image unavailable",
+  "attach.imageOutsideWorkspace": "This picture is outside this chat's working folder, so it can't be shown here",
   "attach.previewImageAria": "Preview attached image {name}",
   "attach.externalHidden": "External image hidden for privacy",
   "attach.savedTo": "Saved to {path}",

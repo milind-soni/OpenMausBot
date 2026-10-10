@@ -21,6 +21,7 @@ import {
   messageNeedsKatex,
 } from "./ChatMarkdown";
 import { StoreProvider } from "@/state/store";
+import { setLocale } from "@/lib/i18n";
 import { ThreadRefsContext } from "./ThreadRefs";
 import * as AttachmentPreview from "./AttachmentPreview";
 
@@ -637,6 +638,15 @@ describe("ChatMarkdown attachments", () => {
     expect(html).toContain('title="Save a copy"');
     expect(html).not.toContain("/Users/milind/report.md");
     expect(html).not.toContain("C:/Users/Maus/report.md");
+  });
+
+  it("says an image with no source is unavailable in the person's language", () => {
+    setLocale("de");
+    try {
+      expect(renderToStaticMarkup(createElement(ChatMarkdown, { text: "![Sideboard]()" }))).toContain("Bild nicht verfügbar");
+    } finally {
+      setLocale("en");
+    }
   });
 
   it("keeps delivered-file downloads scoped alongside GitHub reference pills", () => {

@@ -1514,6 +1514,8 @@
   "attach.previous": "前の画像",
   "attach.next": "次の画像",
   "attach.retryAria": "{name} を再読み込み",
+  "attach.imageUnavailable": "画像を表示できません",
+  "attach.imageOutsideWorkspace": "この画像はこのチャットの作業フォルダー外にあるため、ここでは表示できません",
   "attach.previewImageAria": "添付画像 {name} をプレビュー",
   "attach.externalHidden": "プライバシー保護のため外部画像を非表示にしています",
   "attach.savedTo": "{path} に保存しました",
