@@ -33,7 +33,8 @@ describe("glass surface", () => {
     expect(rule(".glass-card")).toContain("var(--color-card) 60%");
     const scrim = rule(".glass-scrim");
     expect(scrim).toContain("background: color-mix(in srgb, black 28%, transparent)");
-    expect(scrim).not.toMatch(/(?:-webkit-)?backdrop-filter\s*:/);
+    const scrimRules = [...css.matchAll(/\.glass-scrim\s*\{[^}]*\}/g)].map((match) => match[0]).join("\n");
+    expect(scrimRules).not.toMatch(/(?:-webkit-)?backdrop-filter\s*:/);
     for (const selector of [".glass-surface", ".glass-card", ".glass-scrim", ".glass-rail"]) {
       expect(rule(selector), selector).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     }
