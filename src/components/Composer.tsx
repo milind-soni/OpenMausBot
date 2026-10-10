@@ -1113,6 +1113,8 @@ export function Composer({
           onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onKeyDown={(e) => {
+            // Candidate confirmation belongs to the IME, not Send or either picker.
+            if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
             if (commandPickerOpen) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
@@ -1158,7 +1160,7 @@ export function Composer({
               return;
             }
             // Shift+Enter inserts a newline; plain Enter sends
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               // The second Enter of the gesture: the chip above is waiting,
               // the composer is empty, and the window is open — steer the

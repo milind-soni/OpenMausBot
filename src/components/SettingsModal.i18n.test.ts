@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
+import { en, locales } from "@/locales";
 import { StoreProvider } from "@/state/store";
 
 // This suite has no DOM. The screen only asks the desktop bridge whether it is
@@ -49,6 +50,15 @@ describe("Settings → General", () => {
     const ja = await renderSettings();
     expect(ja).toContain("設定");
     expect(ja).toContain("モデルプロバイダー");
+    for (const key of [
+      "settings.group.you", "settings.group.computers", "settings.group.account",
+      "settings.section.appearance", "settings.section.backups", "settings.section.people",
+      "settings.advancedMode.title",
+    ] as const) {
+      expect(locales.ja[key], key).toBeTruthy();
+      expect(locales.ja[key], key).not.toBe(en[key]);
+      expect(ja, key).toContain(locales.ja[key]!);
+    }
     expect(ja).not.toContain("Provedores de modelos");
   });
 
