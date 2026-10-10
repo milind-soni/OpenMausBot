@@ -16,8 +16,11 @@
 // person's own page hearing it. Any other server's page stays refused.
 //
 // A second, separate exception: the paired remote server open in the main
-// window may write the clipboard (the copy button) and nothing else. Both
-// clipboard writes follow the one rule in remoteClipboardWriteAllowed.
+// window may use the microphone (for a Live call) and write the clipboard (the
+// copy button), and nothing else. Pairing takes a code the server printed for
+// the person, so it is their own server, as personal as their Cloud. Both
+// microphones follow the one rule in mainFrameMicrophoneAllowed; both clipboard
+// writes follow the one rule in remoteClipboardWriteAllowed.
 
 const ALLOWED_APP_PERMISSIONS = new Set([
   "notifications",
@@ -69,27 +72,28 @@ export function appPermissionAllowed(permission, requestingUrlOrOrigin, renderer
 }
 
 /**
- * Whether the person's own Cloud may use the microphone: only in the main
- * frame, only at the exact origin the verified Cloud sign-in reports. Never the
- * camera, screen capture or notifications; its clipboard writes are the
- * separate rule in remoteClipboardWriteAllowed, and it never reads the clipboard.
+ * Whether the person's own Cloud, or the active paired server, may use the
+ * microphone: only in the main frame, only at the exact origin the verified
+ * Cloud sign-in or the active saved environment reports. Never the camera,
+ * screen capture or notifications; clipboard writes are the separate rule in
+ * remoteClipboardWriteAllowed, and neither page ever reads the clipboard.
  *
  * @param {string} permission The Electron/Chromium permission name
  * @param {string} requestingUrlOrOrigin The URL or origin requesting the permission
- * @param {string | null} homeOrigin The verified Cloud's origin, or null when there is none
+ * @param {string | null | undefined} trustedOrigin The verified Cloud's or the active server's origin, or null when there is none
  * @param {{ isMainFrame?: boolean, mediaTypes?: string[], mediaType?: string }} [details] Request details
- * @returns {boolean} True only for the Cloud's own microphone request
+ * @returns {boolean} True only for that page's own microphone request
  */
-function cloudHomeMicrophoneAllowed(permission, requestingUrlOrOrigin, homeOrigin, details) {
-  // This computer's media rule with the Cloud as the trusted origin, narrowed
+function mainFrameMicrophoneAllowed(permission, requestingUrlOrOrigin, trustedOrigin, details) {
+  // This computer's media rule with that page as the trusted origin, narrowed
   // to the main frame and never getDisplayMedia (empty mediaTypes).
   if (permission !== "media" || details?.isMainFrame !== true || details.mediaTypes?.length === 0) return false;
-  return appPermissionAllowed("media", requestingUrlOrOrigin, homeOrigin, details);
+  return appPermissionAllowed("media", requestingUrlOrOrigin, trustedOrigin ?? null, details);
 }
 
 /**
- * The one capability a paired remote server's page gets on this computer (and,
- * besides the microphone, the one the person's own Cloud gets):
+ * The one capability besides the microphone a paired remote server's page gets
+ * on this computer (and the same one the person's own Cloud gets):
  * writing the clipboard (navigator.clipboard.writeText asks Chromium for
  * "clipboard-sanitized-write", which covers text and the HTML/images Chromium
  * sanitizes). It is granted only to the main frame of the server the person is
@@ -119,7 +123,7 @@ export function remoteClipboardWriteAllowed(permission, requestingUrlOrOrigin, a
  * The session's permission handlers. This computer's own page gets
  * appPermissionAllowed; the Cloud gets the microphone and clipboard writes,
  * and only while it is the page open in the main window; the active remote
- * server, in that same window, gets clipboard writes.
+ * server, in that same window, gets the same two.
  *
  * @param {{ rendererOrigin: () => string, mainContents: () => unknown, cloudHomeOrigin: () => string | null,
  *   cloudHomeRestoring?: () => Promise<unknown> | null, activeRemoteOrigin?: () => string | null }} context
@@ -134,7 +138,11 @@ export function remoteClipboardWriteAllowed(permission, requestingUrlOrOrigin, a
 export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeOrigin, cloudHomeRestoring = () => null, activeRemoteOrigin = () => null }) {
   // The main window's page asking for the microphone: its Cloud's own ask, if it is the Cloud.
   const asksAsCloud = (contents, permission, requesting, details) =>
-    Boolean(contents) && contents === mainContents() && cloudHomeMicrophoneAllowed(permission, requesting, requesting, details);
+    Boolean(contents) && contents === mainContents() && mainFrameMicrophoneAllowed(permission, requesting, requesting, details);
+  // The active remote server's page, in the main window's own main frame,
+  // asking for the microphone; read per request so a server switch withdraws it.
+  const activeRemoteMicrophone = (contents, permission, requesting, details) =>
+    Boolean(contents) && contents === mainContents() && mainFrameMicrophoneAllowed(permission, requesting, activeRemoteOrigin(), details);
   // The active remote server's page, or the person's own Cloud, in the main
   // window's own main frame, writing the clipboard: one rule for both.
   const clipboardWrite = (contents, permission, requesting, details) =>
@@ -143,7 +151,8 @@ export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeO
       remoteClipboardWriteAllowed(permission, requesting, cloudHomeOrigin(), details));
   const allowed = (contents, permission, requesting, details) =>
     appPermissionAllowed(permission, requesting, rendererOrigin(), details) ||
-    (asksAsCloud(contents, permission, requesting, details) && cloudHomeMicrophoneAllowed(permission, requesting, cloudHomeOrigin(), details)) ||
+    (asksAsCloud(contents, permission, requesting, details) && mainFrameMicrophoneAllowed(permission, requesting, cloudHomeOrigin(), details)) ||
+    activeRemoteMicrophone(contents, permission, requesting, details) ||
     clipboardWrite(contents, permission, requesting, details);
   return {
     // Only a request may wait (Electron answers it through the callback). A
