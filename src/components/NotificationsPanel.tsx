@@ -25,6 +25,41 @@ const KIND_ICON: Record<NotifyKind, { Icon: LucideIcon; className: string }> = {
   spend: { Icon: Wallet, className: "text-accent" },
 };
 
+/** Plain colored status word shown on the right of a row's first line. */
+const KIND_STATUS: Record<NotifyKind, string> = {
+  done: "Done",
+  "delegation-settled": "Done",
+  approval: "Approval",
+  question: "Question",
+  takeover: "Takeover",
+  incident: "Incident",
+  "turn-failed": "Failed",
+  "routine-failed": "Failed",
+  "routine-deferred": "Deferred",
+  spend: "Spend",
+};
+
+interface TitledThread { threadId: string; title: string }
+interface ThreadLookupState {
+  bots: Array<{ id: string; threadId: string; tasks?: TitledThread[] }>;
+  groups: Array<{ threadId: string; name: string; tasks?: TitledThread[] }>;
+}
+
+/** The thread (or room) name a notification belongs to, or null when the
+ * thread is unknown or deleted so the row falls back to the stored title. */
+export function notificationThreadName(entry: { botId: string; threadId: string }, state: ThreadLookupState): string | null {
+  const group = state.groups.find(
+    (candidate) => candidate.threadId === entry.threadId || (candidate.tasks ?? []).some((task) => task.threadId === entry.threadId),
+  );
+  if (group) {
+    const task = (group.tasks ?? []).find((candidate) => candidate.threadId === entry.threadId);
+    return task?.title || group.name || null;
+  }
+  const bot = state.bots.find((candidate) => candidate.threadId === entry.threadId || candidate.tasks?.some((task) => task.threadId === entry.threadId));
+  const task = bot?.tasks?.find((candidate) => candidate.threadId === entry.threadId);
+  return task?.title || null;
+}
+
 function relativeTime(at: number, now: number): string {
   const minutes = Math.max(0, Math.round((now - at) / 60_000));
   if (minutes < 1) return "just now";
@@ -124,7 +159,7 @@ export function NotificationsPanel() {
           <div className="px-3.5 py-6 text-[13px] text-ink-secondary">Nothing yet.</div>
         )}
         {state.notifications.map((entry) => (
-          <NotificationRow key={entry.id} entry={entry} now={now} onOpen={() => openRow(entry)} />
+          <NotificationRow key={entry.id} entry={entry} now={now} threadName={notificationThreadName(entry, state)} onOpen={() => openRow(entry)} />
         ))}
       </div>
       <div className="border-t border-hairline/40 px-3.5 py-2 text-center text-[11.5px] text-ink-tertiary">
@@ -134,7 +169,7 @@ export function NotificationsPanel() {
   );
 }
 
-function NotificationRow({ entry, now, onOpen }: { entry: NotificationLogEntry; now: number; onOpen: () => void }) {
+function NotificationRow({ entry, now, threadName, onOpen }: { entry: NotificationLogEntry; now: number; threadName: string | null; onOpen: () => void }) {
   const { Icon, className } = KIND_ICON[entry.kind];
   return (
     <button
@@ -150,7 +185,16 @@ function NotificationRow({ entry, now, onOpen }: { entry: NotificationLogEntry; 
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-1.5 text-[12.5px] font-medium text-ink">
           {!entry.read && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}
-          <span className="truncate">{entry.title}</span>
+          {threadName ? (
+            <>
+              <span className="shrink-0 max-w-[45%] truncate">{entry.botName}</span>
+              <span className="shrink-0 text-ink-tertiary" aria-hidden="true">·</span>
+              <span className="min-w-0 flex-1 truncate font-normal">{threadName}</span>
+            </>
+          ) : (
+            <span className="min-w-0 flex-1 truncate">{entry.title}</span>
+          )}
+          <span className={cn("shrink-0 text-[11px] font-medium", className)}>{KIND_STATUS[entry.kind]}</span>
         </span>
         {entry.body && <span className="mt-0.5 block truncate text-[12px] text-ink-secondary">{entry.body}</span>}
         <span className="mt-0.5 block text-[11px] text-ink-tertiary">{relativeTime(entry.at, now)}</span>
