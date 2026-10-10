@@ -148,7 +148,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg bg-raised px-3 py-1 font-medium text-ink hover:brightness-110"
+            className="ui-button ui-button-md"
           >
             Done
           </button>

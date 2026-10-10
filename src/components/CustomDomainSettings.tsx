@@ -147,7 +147,7 @@ export function CustomDomainSettings() {
               <CustomDomainDnsRecord domain={domain} serverIpv4={status.serverIpv4} />
               <p className="text-[11.5px] leading-relaxed text-ink-secondary">{t("settings.domain.httpsNeeded")}</p>
               <div className="flex flex-wrap gap-2 pt-1">
-                <button type="submit" disabled={!domain.trim() || busy !== null} className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-semibold text-white hover:brightness-110 disabled:opacity-50">
+                <button type="submit" disabled={!domain.trim() || busy !== null} className="ui-button ui-button-primary">
                   {busy === "saving" ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
                   {busy === "saving" ? t("settings.domain.verifying") : t("settings.domain.verify")}
                 </button>

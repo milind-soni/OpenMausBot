@@ -11,6 +11,7 @@ import {
   connectionStatus,
   listConnectorTools,
   listToolkits,
+  toolkitCategories,
   mcpIntegration,
   normalizeAccountAlias,
   prepareProjectSession,
@@ -285,7 +286,7 @@ beforeAll(async () => {
     if (req.method === "GET" && url.pathname === "/api/v3/toolkits") {
       res.writeHead(200, { "content-type": "application/json" });
       if (apiKey === "ak_catalog_a") {
-        return res.end(JSON.stringify({ items: [{ slug: "notion", name: "Catalog A" }] }));
+        return res.end(JSON.stringify({ items: [{ slug: "notion", name: "Catalog A", meta: { categories: [{ id: "productivity", name: "Productivity" }, { id: "documents", name: " Documents " }, { id: "productivity", name: "Productivity" }] } }] }));
       }
       if (apiKey === "ak_catalog_b") {
         return res.end(JSON.stringify({ items: [{ slug: "linear", name: "Catalog B" }] }));
@@ -460,6 +461,9 @@ describe.sequential("Composio Sessions", () => {
     const second = await listToolkits({ composio: { apiKey: "ak_catalog_b" } });
 
     expect(first.cards).toEqual([expect.objectContaining({ slug: "notion", label: "Catalog A" })]);
+    // the toolkit's own categories ride along, trimmed and once each
+    expect(first.cards[0]?.categories).toEqual(["Productivity", "Documents"]);
+    expect(second.cards[0]).not.toHaveProperty("categories");
     expect(second.cards).toEqual([expect.objectContaining({ slug: "linear", label: "Catalog B" })]);
     expect(calls.slice(before).filter((call) => call.path === "/api/v3/toolkits").map((call) => call.apiKey)).toEqual([
       "ak_catalog_a",
@@ -1334,5 +1338,15 @@ describe("connector tool inventory", () => {
       brokerMcpTools = null;
       setManagedBrokerAccess(null);
     }
+  });
+});
+
+describe("toolkitCategories", () => {
+  it("reads named objects and plain strings, and drops anything else", () => {
+    expect(toolkitCategories([{ id: "crm", name: "CRM" }, "Sales", { id: "x" }, 7, null, "  "])).toEqual(["CRM", "Sales"]);
+    expect(toolkitCategories(undefined)).toBeUndefined();
+    expect(toolkitCategories("CRM")).toBeUndefined();
+    expect(toolkitCategories([])).toBeUndefined();
+    expect(toolkitCategories(["a", "b", "c", "d", "e"])).toHaveLength(4);
   });
 });

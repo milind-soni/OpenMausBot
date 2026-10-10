@@ -141,7 +141,7 @@ export function ExportTranscriptMenu({
                 type="button"
                 role="menuitem"
                 onClick={() => void handleCopy()}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-ink hover:bg-raised/70"
+                className="ui-menu-row text-ink"
               >
                 {copied ? (
                   <Check size={14} className="shrink-0 text-success" />
@@ -163,7 +163,7 @@ export function ExportTranscriptMenu({
                 type="button"
                 role="menuitem"
                 onClick={handleDownload}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] text-ink hover:bg-raised/70"
+                className="ui-menu-row text-ink"
               >
                 <Download size={14} className="shrink-0 text-ink-secondary" />
                 <span className="flex-1 truncate">Download as .md</span>

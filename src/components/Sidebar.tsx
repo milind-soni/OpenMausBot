@@ -15,6 +15,7 @@ import {
   Copy,
   Crown,
   FolderMinus,
+  FolderOpen,
   FolderPlus,
   Library,
   Loader2,
@@ -40,7 +41,7 @@ import { peerLine } from "@/lib/peer-message";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 
-import { BotAvatar, InitialsAvatar } from "./Avatar";
+import { BotAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
@@ -65,6 +66,8 @@ import { TeamDialog } from "./TeamDialog";
 import { RenameTitle } from "./RenameTitle";
 import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
+import { NewTaskFolderDialog } from "./NewTaskFolderDialog";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { botUnreadThreadIds, folderUnreadThreadIds, markBotRead, markFolderRead } from "@/lib/folder-read";
 import { orderedThreadList, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
@@ -117,7 +120,8 @@ import { SidebarAppsButton, SidebarFooterNav } from "./SidebarFooterNav";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
 import { useCloudOwner } from "./CloudOwner";
-import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
+import { SidebarProfileMenu } from "./SidebarProfileMenu";
+import { UpdateIndicator } from "./UpdateIndicator";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
@@ -128,6 +132,7 @@ import { useLiveMedia } from "@/lib/live-call-media";
 import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
 import { ShortcutHint } from "./ShortcutHint";
 import { citationPreviewText } from "@/lib/citations";
+import { plainPreviewText } from "@/lib/plain-preview";
 import { isClientCancellation } from "../../shared/client-cancel";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode";
@@ -172,10 +177,12 @@ function preview(bot: Bot, visible: Message[], instances: InstanceInfo[]): strin
   if (last.kind === "activity" && last.tool) return activityPreview(last.tool, botEngine(bot, instances), last.dataResult);
   if (last.kind === "screen") return t("sidebar.preview.screenFrame");
   if (last.kind === "connector" && last.connector) return sidebarConnectorPreview(last.connector, t);
+  // one line of what the reply says, never the Markdown that draws it
+  // (`**[repo](https://…)**` reads as "repo")
   const peer = peerLine(last);
-  if (peer) return `${peer.name}: ${peer.body}`;
+  if (peer) return `${peer.name}: ${plainPreviewText(peer.body)}`;
   if (last.role !== "user" && isClientCancellation(last.text ?? "")) return t("chat.turnStopped");
-  return citationPreviewText(last.text ?? "");
+  return plainPreviewText(citationPreviewText(last.text ?? ""));
 }
 
 interface MenuState {
@@ -210,7 +217,7 @@ function groupPreview(group: Group, bots: Bot[], instances: InstanceInfo[]): str
       : last.kind === "connector" && last.connector
         ? sidebarConnectorPreview(last.connector, t)
         : (last.text ?? "");
-  const readable = citationPreviewText(text);
+  const readable = plainPreviewText(citationPreviewText(text));
   if (last.role === "user") return t("sidebar.preview.you", { text: readable });
   return last.from ? `${last.from.name}: ${readable}` : readable;
 }
@@ -381,7 +388,7 @@ export function GroupThreadList({ group, selected, density = "comfortable", quer
   return <div className="mb-2 space-y-0.5" role="group" aria-label={t("task.namedList", { name: group.name })}>
     {visible.map((task) => <SidebarThreadRow key={task.threadId} task={task} ownerId={group.id} current={selected && task.threadId === group.threadId} compact={density === "compact"}
       now={stampClock(threadRecency(task), now)} locale={locale} {...actions} />)}
-    {!query && !showAll && tasks.length > visible.length && <button type="button" onClick={() => setShowAll(true)} className="pl-6 pr-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
+    {!query && !showAll && tasks.length > visible.length && <button type="button" onClick={() => setShowAll(true)} className="inline-flex h-7 items-center self-start pl-6 pr-3 text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
   </div>;
 }
 
@@ -761,6 +768,7 @@ export function BotContextMenu({
   onDelete,
   onMoveToSection,
   onNewFolder,
+  onNewTaskFolder,
 }: {
   menu: MenuState | null;
   onClose: () => void;
@@ -768,11 +776,13 @@ export function BotContextMenu({
   onDelete: (bot: Bot) => void;
   onMoveToSection: (botId: string) => void;
   onNewFolder: (botId: string) => void;
+  onNewTaskFolder: (botId: string) => void;
 }) {
   const motion = useHeldMenuMotion(menu);
   const shown = motion.value;
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
+  const canChooseFolder = useOwnerOrAdmin();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
   const menuRef = useRef<HTMLDivElement>(null);
@@ -890,6 +900,7 @@ export function BotContextMenu({
     >
       {showThreads && <>
         {item(<Plus size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
+        {canChooseFolder && item(<FolderOpen size={16} className="shrink-0 text-ink-secondary" />, t("task.folder.new"), () => onNewTaskFolder(bot.id))}
         {item(<FolderPlus size={16} className="text-ink-secondary" />, t("folder.new"), () => onNewFolder(bot.id))}
         {divider("threads")}
       </>}
@@ -1218,7 +1229,7 @@ export function BotThreadList({ bot, selected, density, query, pendingQueued, re
       <span role="status" className="sr-only">{readStatus}</span>
       {projects.length > 0 && ungrouped.length > 0 && <div className="pl-6 pr-3 pb-1 pt-2 text-[10.5px] text-ink-tertiary">{t("task.list")}</div>}
       {ungrouped.map(renderThread)}
-      {!query && !showAll && tasks.length > visibleTasks.length && <button type="button" onClick={() => setShowAll(true)} className="pl-6 pr-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
+      {!query && !showAll && tasks.length > visibleTasks.length && <button type="button" onClick={() => setShowAll(true)} className="inline-flex h-7 items-center self-start pl-6 pr-3 text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
       <FullAccessWarning
         open={permissionRefresh?.kind === "full"}
         scope="thread"
@@ -1440,25 +1451,28 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   useEffect(() => {
     if (iconOnly) setRenaming(false);
   }, [iconOnly]);
-  const avatarSize = iconOnly ? 44 : density === "compact" ? (showThreads ? 26 : 40) : (showThreads ? 32 : 56);
+  // one medium portrait for every bot, the Chief of Staff included: the
+  // name and the line under it carry the row, not the mascot's size
+  const avatarSize = iconOnly ? 44 : density === "compact" ? (showThreads ? 26 : 36) : (showThreads ? 32 : 44);
   // the visible branch, so a version switch changes the row with the chat
   const visible = useVisibleMessages(bot);
   const last = visible.at(-1);
-  // the role from Bot Settings → Title. A badge or tooltip beside the name
-  // (#866, #871) always traded the name's width against the title's; its own
-  // line above the name lets both truncate independently instead.
+  // the role from Bot Settings → Title is not drawn in the row: a row is the
+  // name and what was last said. The role and the Chief of Staff mark stay
+  // in the avatar's tooltip and are read out with the name.
   const title = bot.title.trim();
+  const details = [title, bot.chiefOfStaff ? t("sidebar.bot.chiefOfStaff") : ""].filter(Boolean);
   const rowClass = cn(
-    "flex w-full items-center rounded-md text-left outline-none focus-visible:ring-1 focus-visible:ring-accent/60",
+    "flex w-full items-center rounded-xl text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-accent/60",
     iconOnly
       ? "justify-center px-1 py-1.5"
       : density === "compact"
-        ? cn(showThreads ? "gap-1.5 py-1" : "gap-2 py-1.5", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-[5.75rem] touch:pr-[5.75rem]" : "pl-2 pr-9")
-        : cn(showThreads ? "gap-2 py-2" : "gap-3 py-2.5", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-[5.75rem] touch:pr-[5.75rem]" : "pl-2 pr-9"),
-    // Chief of Staff is called out by the crown label below, not by tinting
+        ? cn(showThreads ? "gap-1.5 py-1" : "gap-2.5 py-1.5", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-[5.75rem] touch:pr-[5.75rem]" : "pl-2 pr-9")
+        : cn(showThreads ? "gap-2 py-2" : "gap-3 py-2", showThreads ? "pl-6 pr-9 group-hover:pr-[5.75rem] group-focus-within:pr-[5.75rem] max-md:pr-[5.75rem] touch:pr-[5.75rem]" : "pl-2.5 pr-9"),
+    // Chief of Staff is called out by the crown on its avatar, not by tinting
     // the whole row — an accent border + fill read as "selected" even when
-    // another bot was active.
-    selected ? "bg-raised/70" : "hover:bg-raised/40",
+    // another bot was active. The selected row is one soft raised surface.
+    selected ? "bg-raised shadow-[0_1px_2px_rgb(0_0_0/0.10)]" : "hover:bg-raised/50",
   );
   const activityTasks = sidebarBotActivityTasks(bot, pendingQueued);
   const waiting = bot.activity === "waiting-on-you" || activityTasks.some((task) => task.activity === "waiting-on-you");
@@ -1476,7 +1490,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     <>
       {/* flex, not inline: an inline wrapper adds a baseline gap under the
           avatar and makes the row taller than before the presence dot */}
-      <span className="relative flex shrink-0">
+      <span className="relative flex shrink-0" title={iconOnly ? undefined : [bot.name, ...details].join(" · ")}>
         <BotAvatar
           bot={bot}
           state={stateForBot({ ...bot, messages: visible })}
@@ -1507,6 +1521,15 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           className={cn("absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-accent", iconOnly ? "size-3" : "size-2.5")} />}
         {!teammateWait && !waiting && !working && queued && <span data-testid="queued-dot" role="status" aria-label={t("task.queued")} title={t("task.queued")}
           className={cn("absolute -right-0.5 -bottom-0.5 rounded-full border-2 border-panel bg-ink-secondary", iconOnly ? "size-3" : "size-2.5")} />}
+        {bot.chiefOfStaff && iconOnly && (
+          // icons-only rows have no name line: the crown sits on the
+          // portrait's top corner, opposite the presence dot
+          <span className="absolute -left-1 -top-1 flex rounded-full bg-raised p-[3px]">
+            <Crown size={11} strokeWidth={2.25} className="shrink-0 text-accent" role="img" aria-label={t("sidebar.bot.chiefOfStaff")} data-testid="chief-crown">
+              <title>{t("sidebar.bot.chiefOfStaff")}</title>
+            </Crown>
+          </span>
+        )}
         {onLiveCall && iconOnly && (
           // icons-only rows have no name line: the badge sits on the avatar,
           // opposite the presence dot
@@ -1518,15 +1541,8 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         )}
       </span>
       <div className={cn("min-w-0 flex-1", iconOnly && "hidden")}>
-        {title && !renaming && !quiet && (
-          // Its own line above the name: a badge or tooltip beside the name
-          // (#866, #871) always traded the name's width against the title's —
-          // stacking the two removes the competition entirely, so both can
-          // truncate independently against the full row width.
-          <div className="truncate text-[11px] font-medium leading-4 text-ink-secondary">{title}</div>
-        )}
         <div className="flex items-baseline justify-between gap-2">
-          <span className="flex min-w-0 grow items-center gap-1.5 truncate text-[14px] font-semibold text-ink">
+          <span className="flex min-w-0 grow items-center gap-1.5 truncate text-[15px] font-semibold leading-5 text-ink">
             {bot.pinned && <Pin size={12} className="shrink-0 text-ink-secondary" />}
             <RenameTitle
               key={iconOnly ? "icons" : "expanded"}
@@ -1542,16 +1558,17 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               }}
               onEditingChange={setRenaming}
               className="truncate"
-              inputClassName="w-full rounded bg-inset px-1 py-0.5 text-[14px] font-semibold"
+              inputClassName="w-full rounded bg-inset px-1 py-0.5 text-[15px] font-semibold"
             />
-            {quiet && bot.chiefOfStaff && !renaming && (
-              // quiet rows fold the Chief of Staff line into a crown right
-              // after the name; the label lives in the tooltip and for
-              // screen readers
-              <Crown size={12} className="shrink-0 text-accent" role="img" aria-label={t("sidebar.bot.chiefOfStaff")} data-testid="chief-crown">
+            {bot.chiefOfStaff && !renaming && (
+              // one small crown after the name marks the Chief of Staff in
+              // every density; the words live in the tooltip and are read out
+              <Crown size={13} strokeWidth={2.25} className="shrink-0 text-accent" role="img" aria-label={t("sidebar.bot.chiefOfStaff")} data-testid="chief-crown">
                 <title>{t("sidebar.bot.chiefOfStaff")}</title>
               </Crown>
             )}
+            {/* the role is read out with the name, not drawn */}
+            {title && !renaming && <span className="sr-only">{`, ${title}`}</span>}
             {onLiveCall && !iconOnly && !renaming && (
               <Phone className="size-3 shrink-0 text-success" role="img" aria-label={t("call.live.badge")} data-testid="live-call-badge">
                 <title>{t("call.live.badge")}</title>
@@ -1559,27 +1576,20 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
             )}
           </span>
           {selected && last && !renaming && !expanded && (
-            <span className="shrink-0 text-xs text-ink-secondary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0">
+            <span className="shrink-0 text-[12px] tabular-nums text-ink-secondary transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 touch:opacity-0">
               {formatTime(last.at)}
             </span>
           )}
           {(expanded || (quiet && !statusLine)) && unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
         </div>
-        {bot.chiefOfStaff && !renaming && !quiet && (
-          // Chief of Staff gets its own line under the name so a long name
-          // and the title badge keep the full width of the name line.
-          <span className="flex items-center gap-1 text-[11.5px] font-medium leading-4 text-accent">
-            <Crown size={11} className="shrink-0" /> {t("sidebar.bot.chiefOfStaff")}
-          </span>
-        )}
         {(!expanded || deleting) && (!quiet || statusLine) && <div className="flex items-center justify-between gap-2">
           {deleting ? (
-            <span role="status" className="flex min-w-0 items-center gap-1.5 truncate text-[11px] text-ink-secondary">
+            <span role="status" className="flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px] text-ink-secondary">
               <Loader2 size={12} className="shrink-0 animate-spin" />
               {t("sidebar.bot.deletingRow")}
             </span>
           ) : (
-            <span className="flex min-w-0 items-center gap-1.5 truncate text-[11px] text-ink-secondary">
+            <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px] text-ink-secondary">
               {working ? (
                 // the same typing dots as the chat header; sized to the text's
                 // line box so the row does not jump when work starts or ends
@@ -1588,7 +1598,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
                   <span className="sr-only">{t("sidebar.preview.working")}</span>
                 </span>
               ) : (
-                <span className="truncate">{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : preview(bot, visible, instances)}</span>
+                <span dir="auto" className="truncate">{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : preview(bot, visible, instances)}</span>
               )}
             </span>
           )}
@@ -1612,7 +1622,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
 
   return (
     <>
-    <div className="group relative" title={iconOnly ? bot.name : undefined}>
+    <div className="group relative" title={iconOnly ? [bot.name, bot.title?.trim()].filter(Boolean).join(" · ") : undefined}>
       {/* Keep this wrapper mounted while RenameTitle swaps its label for an
           input. Replacing the wrapper tree remounts RenameTitle, loses its
           editing state, and leaves the row stuck in rename mode. Omitting
@@ -1624,7 +1634,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           !renaming && iconOnly
             ? deleting
               ? t("sidebar.bot.deletingAria", { name: bot.name })
-              : `${bot.name}${onLiveCall ? ` · ${t("call.live.badge")}` : ""}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : teammateWait ? ` · ${t("sidebar.preview.waitingOnTeammate")}` : queued ? ` · ${t("task.queued")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`
+              : `${bot.name}${bot.title?.trim() ? ` · ${bot.title.trim()}` : ""}${bot.chiefOfStaff ? ` · ${t("sidebar.bot.chiefOfStaff")}` : ""}${onLiveCall ? ` · ${t("call.live.badge")}` : ""}${waiting ? ` · ${t("sidebar.preview.waiting")}` : working ? ` · ${t("chat.activity.working")}` : teammateWait ? ` · ${t("sidebar.preview.waitingOnTeammate")}` : queued ? ` · ${t("task.queued")}` : ""}${unread ? ` · ${t("task.unread")}` : ""}`
             : undefined
         }
         aria-busy={deleting || undefined}
@@ -1707,7 +1717,7 @@ export function ArchivedBotRow({
         <button
           onClick={onRestore}
           disabled={disabled || deleting}
-          className="flex min-w-[78px] items-center justify-center gap-1.5 rounded-full bg-raised px-3.5 py-2 text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-40"
+          className="flex min-w-[78px] items-center justify-center gap-2 rounded-full bg-raised h-7 px-3.5 text-[13px] font-medium leading-4 text-ink hover:bg-raised-hover disabled:opacity-40"
         >
           {restoring && <Loader2 size={13} className="animate-spin" />}
           {t("sidebar.archived.restore")}
@@ -1717,7 +1727,7 @@ export function ArchivedBotRow({
           onClick={onDelete}
           disabled={disabled || deleting}
           aria-label={t("sidebar.archived.deleteAria", { name: bot.name })}
-          className="flex items-center justify-center gap-1.5 rounded-full px-3.5 py-2 text-[12.5px] text-danger hover:bg-danger/10 disabled:opacity-40"
+          className="flex items-center justify-center gap-2 rounded-full h-7 px-3.5 text-[13px] font-medium leading-4 text-danger hover:bg-danger/10 disabled:opacity-40"
         >
           {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
           {t("common.delete")}
@@ -1828,7 +1838,7 @@ function ArchivedBotsPanel({
               <button
                 onClick={() => void restoreAll()}
                 disabled={locked}
-                className="flex items-center gap-1.5 rounded-full bg-raised px-3.5 py-2 text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-40"
+                className="flex items-center gap-2 rounded-full bg-raised h-7 px-3.5 text-[13px] font-medium leading-4 text-ink hover:bg-raised-hover disabled:opacity-40"
               >
                 {restoringAll && <Loader2 size={13} className="animate-spin" />}
                 {t("sidebar.archived.restoreAll")}
@@ -1839,7 +1849,7 @@ function ArchivedBotsPanel({
                 type="button"
                 onClick={() => setPendingDelete("all")}
                 disabled={locked}
-                className="flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[12.5px] text-danger hover:bg-danger/10 disabled:opacity-40"
+                className="flex items-center gap-2 rounded-full h-7 px-3.5 text-[13px] font-medium leading-4 text-danger hover:bg-danger/10 disabled:opacity-40"
               >
                 <Trash2 size={13} />
                 {t("sidebar.archived.deleteAll")}
@@ -1984,6 +1994,8 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const [newRoom, setNewRoom] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
   const [newFolderBotId, setNewFolderBotId] = useState<string | null>(null);
+  const [newTaskFolderBotId, setNewTaskFolderBotId] = useState<string | null>(null);
+  const newTaskFolderBot = state.bots.find((bot) => bot.id === newTaskFolderBotId);
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
   const [teamInstallUrl, setTeamInstallUrl] = useState<string | null>(null);
   const [archivedBotsOpen, setArchivedBotsOpen] = useState(false);
@@ -2699,7 +2711,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                 )}
                 {collapsed && queued.length > 0 && <button type="button" onClick={() => toggleSection(id)}
                   title={`${t("task.queued")} · ${queued.join(", ")}`} aria-label={`${t("sidebar.section.expand", { name: sectionLabel(id) })} · ${t("task.queued")} · ${queued.join(", ")}`}
-                  className="mx-3 mb-1 self-start rounded bg-raised/50 px-2 py-0.5 text-[10px] text-ink-secondary hover:text-ink">{t("task.queued")} · {queued.length}</button>}
+                  className="mx-3 mb-1 inline-flex h-7 items-center self-start rounded-full bg-raised/50 px-3 text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink">{t("task.queued")} · {queued.length}</button>}
                 {!collapsed && (
                   <>
                     {sectionChiefItems.map((bot) => <BotListItem key={bot.id} {...botRow(bot)} />)}
@@ -2773,15 +2785,11 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           />
         )}
         {density === "icons" ? (
-          <div className="flex items-center justify-center">
-            <button
-              onClick={() => dispatch({ type: "toggleAppSettings" })}
-              className="flex min-w-0 items-center justify-center rounded-xl px-2 py-2 text-left hover:bg-raised/50"
-              aria-label={t("sidebar.appSettings")}
-              title={state.config?.profile?.name?.trim() || t("sidebar.appSettings")}
-            >
-              <InitialsAvatar initials={profileInitials(state.config?.profile)} size={28} />
-            </button>
+          // Collapsed to avatars, the avatar opens the same menu as the
+          // profile row, anchored to it and kept inside the window.
+          <div className="flex flex-col items-center justify-center gap-2">
+            <UpdateIndicator />
+            <SidebarProfileMenu iconOnly />
           </div>
         ) : (
           // The place rows and the profile row are two different kinds of
@@ -2796,6 +2804,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             <div className="min-w-0 flex-1">
               <SidebarProfileMenu />
             </div>
+            <UpdateIndicator className="mx-1" />
             <SidebarAppsButton />
           </div>
         )}
@@ -2813,8 +2822,12 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             setSectionPicker({ botId, x: menu.x, y: menu.y });
           }}
           onNewFolder={setNewFolderBotId}
+          onNewTaskFolder={setNewTaskFolderBotId}
         />
       {showThreads && newFolderBotId && state.bots.find((bot) => bot.id === newFolderBotId) && <BotProjectDialog bot={state.bots.find((bot) => bot.id === newFolderBotId)!} onClose={() => setNewFolderBotId(null)} />}
+      {showThreads && newTaskFolderBot && <NewTaskFolderDialog bot={newTaskFolderBot} onClose={() => setNewTaskFolderBotId(null)} onReturnFocus={() => {
+        sidebarRef.current?.querySelector<HTMLElement>(`[data-sidebar-bot-row="${CSS.escape(newTaskFolderBot.id)}"]`)?.focus();
+      }} />}
       <ConfirmDialog
         open={confirm !== null}
         {...(confirm ? botConfirmCopy(confirm.kind, confirm.bot.name) : botConfirmCopy("archive", ""))}

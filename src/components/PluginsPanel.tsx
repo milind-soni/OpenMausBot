@@ -3,7 +3,7 @@
 // Composio API key is configured, a curated set otherwise. Icons resolve
 // logo → favicon → monogram.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2, RefreshCw, Search, TriangleAlert, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Loader2, RefreshCw, Search, Server, TriangleAlert, X } from "lucide-react";
 import { api, useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
@@ -15,6 +15,8 @@ import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
 import { connectorServiceAccess, isConnectorToolGrantShape } from "@/lib/connector-grants";
 import { BotAvatar } from "./Avatar";
+import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
+import { CATEGORY_SECTION_SIZE, catalogSections, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
 
 export interface ToolkitCard {
@@ -24,6 +26,8 @@ export interface ToolkitCard {
   logo: string | null;
   noAuth?: boolean;
   domain: string | null;
+  /** the marketplace's own categories, grouped and filtered by below */
+  categories?: string[];
 }
 
 export interface ConnectorStatus {
@@ -347,6 +351,8 @@ export function PluginsPanel() {
   const [showAllApps, setShowAllApps] = useState(false);
   const [whopConnected, setWhopConnected] = useState<boolean | null>(null);
   const [whopRefresh, setWhopRefresh] = useState(0);
+  // a marketplace category the list is narrowed to (null: every app)
+  const [category, setCategory] = useState<string | null>(null);
 
   const pollTimers = useRef(new Map<string, ReturnType<typeof setInterval>>());
   const statusGenerations = useRef(new Map<string, number>());
@@ -619,10 +625,6 @@ export function PluginsPanel() {
     .map((card, index) => ({ card, index }))
     .sort((a, b) => Number(isConnected(b.card.slug)) - Number(isConnected(a.card.slug)) || a.index - b.index)
     .map(({ card }) => card);
-  // The full catalog runs past a thousand apps. Without a search, show the
-  // first screenful so the MCP section below stays a short scroll away.
-  const capped = filter === "all" && !search && !showAllApps && visible.length > APPS_PREVIEW_COUNT;
-  const shown = capped ? visible.slice(0, APPS_PREVIEW_COUNT) : visible;
   const connectedCount = Object.values(status).filter((service) => service.connected || service.accounts?.length).length + Number(whopConnected === true);
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
@@ -632,6 +634,8 @@ export function PluginsPanel() {
     ? botsMissingConnectedApps(state.bots, state.instances)
     : [];
   const chooseFilter = (next: AppsFilter) => {
+    // a filter replaces the category view, so a stale category cannot hide the MCP section
+    setCategory(null);
     if (next === "mcp") {
       dispatch({ type: "togglePlugins", open: true, surface: "mcp" });
       return;
@@ -639,11 +643,36 @@ export function PluginsPanel() {
     setTab(next === "connected" ? "connected" : "marketplace");
     if (surface !== "apps") dispatch({ type: "togglePlugins", open: true, surface: "apps" });
   };
-  const filters: Array<{ id: AppsFilter; label: string }> = [
-    { id: "all", label: t("apps.filter.all") },
-    { id: "connected", label: `${t("apps.filter.connected")}${connectedCount > 0 ? ` ${connectedCount}` : ""}` },
-    { id: "mcp", label: t("apps.filter.mcp") },
-  ];
+
+  // Category pills, most used first. The selected one stays in view even
+  // when it ranks under More.
+  const ranked = rankCategories(cards ?? []);
+  const moreCategories = ranked.more;
+  const categoryInMore = category !== null && moreCategories.includes(category);
+  const inCategoryView = filter === "all" && category !== null;
+  const categoryCards = inCategoryView ? visible.filter((card) => inCategory(card, category)) : visible;
+  // the unfiltered, unsearched view stacks sections; any narrowing shows one list
+  const sectioned = filter === "all" && !search && category === null;
+  const sections = sectioned ? catalogSections(visible, isConnected, ranked.inline) : [];
+  const allSection = sections.find((section) => section.kind === "all");
+  const allCards = sectioned ? allSection?.cards ?? [] : categoryCards;
+  const allCapped = sectioned && !showAllApps && allCards.length > APPS_PREVIEW_COUNT;
+  const allShown = allCapped ? allCards.slice(0, APPS_PREVIEW_COUNT) : allCards;
+  const connectedCards = (cards ?? []).filter((card) => isConnected(card.slug));
+  const pickCategory = (next: string | null) => {
+    setCategory(next);
+    setTab("marketplace");
+    if (surface !== "apps") dispatch({ type: "togglePlugins", open: true, surface: "apps" });
+  };
+  const listTitle = filter === "connected"
+    ? t("connectors.section.yours")
+    : search
+      ? t("connectors.section.results")
+      : category ?? (sections.length > 1 ? t("apps.section.all") : t("connectors.section.available"));
+  const pill = "inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded-full px-3 text-[13px] font-medium leading-5 transition-colors";
+  const pillTone = (selected: boolean) => selected
+    ? "bg-ink text-app"
+    : "bg-control/70 text-ink-secondary hover:bg-raised-hover hover:text-ink";
 
   return (
     <div
@@ -661,78 +690,126 @@ export function PluginsPanel() {
         aria-modal="true"
         aria-labelledby="plugins-title"
         tabIndex={-1}
-        className="glass-surface glass-popup animate-pop-in relative flex flex-col overflow-hidden rounded-[24px]"
+        className="glass-surface glass-popup animate-pop-in relative flex max-w-[780px] flex-col overflow-hidden rounded-[24px]"
       >
-        <header className="flex flex-col gap-4 px-6 pb-3 pt-6 sm:px-8 sm:pt-7">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0">
-              <h2 id="plugins-title" className="text-[22px] font-semibold tracking-[-0.01em] text-ink">{t("apps.title")}</h2>
-              <p className="mt-1 text-[13px] text-ink-secondary">{t("apps.subtitle")}</p>
-            </div>
+        <header className="flex flex-col gap-4 px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
+          <div>
+          <div className="flex items-center justify-between gap-3">
+            <h2 id="plugins-title" className="min-w-0 truncate text-[20px] font-semibold leading-7 tracking-[-0.01em] text-ink">{t("apps.title")}</h2>
             <div className="flex shrink-0 items-center gap-1">
-              <label className="hidden h-10 w-[260px] items-center gap-2.5 rounded-xl bg-control/70 px-3.5 md:flex">
-                <Search size={16} className="shrink-0 text-ink-secondary" />
-                <input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder={t("connectors.searchPlaceholder")}
-                  aria-label={t("connectors.searchPlaceholder")}
-                  className="min-w-0 flex-1 bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
-                />
-              </label>
+              {/* How many apps are connected, and the way to just those. */}
+              <button
+                type="button"
+                data-apps-filter="connected"
+                aria-pressed={filter === "connected"}
+                onClick={() => chooseFilter(filter === "connected" ? "all" : "connected")}
+                className={cn(
+                  "inline-flex h-8 items-center gap-2 rounded-full ps-1.5 pe-2 text-[13px] font-medium leading-5 transition-colors",
+                  filter === "connected" ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+                )}
+              >
+                {connectedCards.length > 0 && (
+                  <span aria-hidden="true" className="flex -space-x-1.5 rtl:space-x-reverse">
+                    {connectedCards.slice(0, 4).map((card) => (
+                      <span key={card.slug} className="flex size-5 items-center justify-center overflow-hidden rounded-md bg-menu ring-2 ring-menu">
+                        <ServiceIcon card={card} className="size-5 rounded-md" />
+                      </span>
+                    ))}
+                  </span>
+                )}
+                <span className="whitespace-nowrap">
+                  {connectedCount > 0 ? t("apps.connectedCount", { count: connectedCount }) : t("apps.filter.connected")}
+                </span>
+                <ChevronRight size={14} aria-hidden="true" className="shrink-0 rtl:-scale-x-100" />
+              </button>
               <button
                 onClick={() => { setWhopRefresh((value) => value + 1); void loadConnectionInventory(true); }}
                 disabled={refreshing}
-                className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+                className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
                 title={t("connectors.refreshTitle")}
                 aria-label={t("connectors.refreshTitle")}
               >
-                <RefreshCw size={17} className={cn(refreshing && "animate-spin")} />
+                <RefreshCw size={16} className={cn(refreshing && "animate-spin")} />
               </button>
               <button data-tour="apps-close"
                 onClick={close}
                 aria-label={t("connectors.closeAria")}
-                className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"
+                className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
               >
-                <X size={21} />
+                <X size={18} />
               </button>
             </div>
           </div>
-          {/* A narrow window has no room in the header row for the search. */}
-          <label className="flex h-10 w-full items-center gap-2.5 rounded-xl bg-control/70 px-3.5 md:hidden">
-            <Search size={16} className="shrink-0 text-ink-secondary" />
-            <input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={t("connectors.searchPlaceholder")}
-              aria-label={t("connectors.searchPlaceholder")}
-              className="min-w-0 flex-1 bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
-            />
-          </label>
-          <div className="flex flex-wrap gap-2" role="group" aria-label={t("apps.filter.aria")}>
-            {filters.map((item) => (
+          {/* under the row, so a narrow pop-up never squeezes it into a column */}
+          <p className="mt-0.5 text-[13px] leading-5 text-ink-secondary">{t("apps.subtitle")}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-full bg-control/70 px-3.5 focus-within:ring-1 focus-within:ring-accent">
+              <Search size={15} className="shrink-0 text-ink-secondary" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={t("connectors.searchPlaceholder")}
+                aria-label={t("connectors.searchPlaceholder")}
+                className="min-w-0 flex-1 bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
+              />
+            </label>
+            {/* your own MCP servers: the secondary destination beside the search */}
+            <button
+              type="button"
+              data-apps-filter="mcp"
+              aria-pressed={filter === "mcp"}
+              onClick={() => chooseFilter(filter === "mcp" ? "all" : "mcp")}
+              className={cn(pill, "h-9 border border-hairline/40 px-3.5", filter === "mcp" ? "bg-ink text-app" : "text-ink hover:bg-raised")}
+            >
+              <Server size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">{t("apps.filter.mcp")}</span>
+              <span className="sr-only sm:hidden">{t("apps.filter.mcp")}</span>
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t("apps.categoriesAria")}>
+            <button
+              type="button"
+              data-apps-filter="all"
+              aria-pressed={filter === "all" && category === null}
+              onClick={() => { chooseFilter("all"); setCategory(null); }}
+              className={cn(pill, pillTone(filter === "all" && category === null))}
+            >
+              {t("apps.filter.all")}
+            </button>
+            {ranked.inline.map((name) => (
               <button
-                key={item.id}
+                key={name}
                 type="button"
-                data-apps-filter={item.id}
-                aria-pressed={filter === item.id}
-                onClick={() => chooseFilter(item.id)}
-                className={cn(
-                  "rounded-full px-3.5 py-1.5 text-[12.5px] font-medium transition-colors",
-                  filter === item.id ? "bg-accent text-accent-ink" : "bg-control/70 text-ink-secondary hover:bg-raised-hover hover:text-ink",
-                )}
+                data-apps-category={name}
+                aria-pressed={filter === "all" && category === name}
+                onClick={() => pickCategory(category === name ? null : name)}
+                className={cn(pill, pillTone(filter === "all" && category === name))}
               >
-                {item.label}
+                {name}
               </button>
             ))}
+            {moreCategories.length > 0 && (
+              <SidebarPopoverMenu
+                placement="below"
+                ariaLabel={t("apps.moreCategories")}
+                items={moreCategories.map((name) => ({ key: name, label: name, active: category === name, onSelect: () => pickCategory(name) }))}
+                renderTrigger={({ open }) => (
+                  <span className={cn(pill, pillTone(filter === "all" && categoryInMore), open && !categoryInMore && "bg-raised-hover text-ink")}>
+                    {categoryInMore ? category : t("apps.more")}
+                    <ChevronDown size={14} aria-hidden="true" />
+                  </span>
+                )}
+              />
+            )}
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-7 pt-2 sm:px-8">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-7 sm:px-7">
           {stale && (
             // Say which of the two things is true. Silence here is what makes a
             // remembered list indistinguishable from a confirmed one.
-            <div className="mb-2 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12.5px] text-warning">
+            <div className="mb-3 flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-[12.5px] text-warning">
               <TriangleAlert size={14} className="mt-px shrink-0" />
               <span>
                 {t("connectors.stale")}
@@ -743,8 +820,8 @@ export function PluginsPanel() {
           {setupNotice && filter !== "mcp" && (
             <div
               className={cn(
-                "mb-2 rounded-xl px-4 py-3 text-[13px]",
-                setupNotice.tone === "warning" ? "bg-warning/10 text-warning" : "glass-card text-ink-secondary",
+                "mb-3 rounded-xl px-4 py-3 text-[13px]",
+                setupNotice.tone === "warning" ? "bg-warning/10 text-warning" : "bg-control/50 text-ink-secondary",
               )}
             >
               {t(whopConnected ? "whop.otherAppsSetup" : setupNotice.key)}{" "}
@@ -764,16 +841,16 @@ export function PluginsPanel() {
             </div>
           )}
           {botsWithoutApps.length > 0 && (
-            <div className="glass-card mb-2 rounded-xl px-4 py-3 text-[12.5px] leading-relaxed text-ink-secondary">
+            <div className="mb-3 rounded-xl bg-control/50 px-4 py-3 text-[12.5px] leading-relaxed text-ink-secondary">
               <span className="font-medium text-ink">{t("connectors.perBot.title")}</span>{" "}
               {t("connectors.perBot.body")}
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <div className="mt-2 flex flex-wrap gap-2">
                 {botsWithoutApps.map((candidate) => (
                   <button
                     key={candidate.id}
                     type="button"
                     onClick={() => dispatch({ type: "updateBot", botId: candidate.id, patch: { composio: true } })}
-                    className="rounded-full bg-control px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-raised-hover"
+                    className={cn(pill, "bg-control text-ink hover:bg-raised-hover")}
                   >
                     {t("connectors.perBot.allow", { name: candidate.name })}
                   </button>
@@ -782,7 +859,7 @@ export function PluginsPanel() {
             </div>
           )}
           {configured && !remoteClient && source === "curated" && mode === "self-hosted" && filter !== "mcp" && (
-            <div className="mb-2 text-[12px] text-ink-secondary">
+            <div className="mb-3 text-[12px] text-ink-secondary">
               {t("connectors.featuredBefore")}{" "}
               <button
                 className="underline underline-offset-2 hover:text-ink"
@@ -796,80 +873,99 @@ export function PluginsPanel() {
               {t("connectors.featuredAfter")}
             </div>
           )}
-          {error && <div role="alert" className="mb-2 mt-1 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</div>}
+          {error && <div role="alert" className="mb-3 rounded-xl bg-danger/10 px-3 py-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</div>}
 
           {filter !== "mcp" && (
-            <section data-apps-grid aria-labelledby="apps-grid-title" className="@container pt-3">
-              {/* @container: the tile columns follow the pop-up's width, not the window's (3, then 2, then 1) */}
-              <div id="apps-grid-title" className="mb-3 text-[12px] font-medium text-ink-secondary">
-                {filter === "connected"
-                  ? t("connectors.section.yours")
-                  : search
-                    ? t("connectors.section.results")
-                    : t("connectors.section.available")}
-                {filter === "all" && !search && pagination
-                  && (pagination.stalled || (pagination.totalItems !== undefined && pagination.items < pagination.totalItems)) && (
-                  <span className="ml-2 font-normal">
-                    {pagination.totalItems !== undefined && pagination.items < pagination.totalItems
-                      ? t("connectors.marketplace.partialCount", {
-                        shown: pagination.items.toLocaleString(),
-                        total: pagination.totalItems.toLocaleString(),
-                      })
-                      : t("connectors.marketplace.partialStalled")}
-                    {pagination.reason
-                      ? ` — ${t("connectors.marketplace.partialReason", { reason: pagination.reason })}`
-                      : null}
-                  </span>
+            <div data-apps-grid className="@container flex flex-col gap-7 pt-1">
+              {/* @container: the columns follow the pop-up's width, not the window's (2, then 1) */}
+              {sections.filter((section) => section.kind !== "all").map((section) => section.kind === "connected" ? (
+                <AppsSection
+                  key="connected"
+                  id="apps-section-connected"
+                  title={t("apps.section.connected")}
+                  viewAll={section.cards.length > CATEGORY_SECTION_SIZE ? { label: t("apps.viewAll"), onClick: () => chooseFilter("connected") } : undefined}
+                >
+                  {section.cards.slice(0, CATEGORY_SECTION_SIZE).map((card) => renderTile(card))}
+                </AppsSection>
+              ) : (
+                <AppsSection
+                  key={section.category}
+                  id={`apps-section-${section.category}`}
+                  title={section.category}
+                  viewAll={section.more ? { label: t("apps.viewAll"), onClick: () => pickCategory(section.category) } : undefined}
+                >
+                  {section.cards.map((card) => renderTile(card))}
+                </AppsSection>
+              ))}
+              <AppsSection
+                id="apps-grid-title"
+                title={listTitle}
+                note={filter === "all" && !search && category === null && pagination
+                  && (pagination.stalled || (pagination.totalItems !== undefined && pagination.items < pagination.totalItems))
+                  ? `${pagination.totalItems !== undefined && pagination.items < pagination.totalItems
+                    ? t("connectors.marketplace.partialCount", {
+                      shown: pagination.items.toLocaleString(),
+                      total: pagination.totalItems.toLocaleString(),
+                    })
+                    : t("connectors.marketplace.partialStalled")}${pagination.reason
+                    ? ` — ${t("connectors.marketplace.partialReason", { reason: pagination.reason })}`
+                    : ""}`
+                  : undefined}
+                viewAll={allCapped ? { label: t("apps.viewAll"), onClick: () => setShowAllApps(true) } : undefined}
+                after={(
+                  <>
+                    {cards === null && (
+                      <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary">
+                        <Loader2 size={14} className="animate-spin" /> {t("connectors.loadingCatalog")}
+                      </div>
+                    )}
+                    {allCapped && (
+                      <div className="mt-4 flex justify-center">
+                        <button
+                          type="button"
+                          onClick={() => setShowAllApps(true)}
+                          className={cn(pill, "bg-control/70 px-4 text-ink hover:bg-raised-hover")}
+                        >
+                          {t("apps.showAll", { count: allCards.length.toLocaleString() })}
+                        </button>
+                      </div>
+                    )}
+                    {cards !== null && allShown.length === 0 && !(showWhop && !inCategoryView) && sections.length <= 1 && (
+                      <div className="flex min-h-40 flex-col items-center justify-center text-center">
+                        <div className="text-[14px] font-medium text-ink">
+                          {filter === "connected" ? connectedEmptyCopy.title : t("connectors.noAppsFound")}
+                        </div>
+                        <div className="mt-1 text-[12.5px] text-ink-secondary">
+                          {filter === "connected" ? connectedEmptyCopy.description : t("connectors.tryDifferentSearch")}
+                        </div>
+                        {filter === "connected" && inventoryPhase === "error" && (
+                          <button
+                            type="button"
+                            disabled={refreshing}
+                            onClick={() => void loadConnectionInventory(true)}
+                            className={cn(pill, "mt-4 bg-raised text-ink hover:bg-raised-hover disabled:opacity-50")}
+                          >
+                            <RefreshCw size={14} className={cn(refreshing && "animate-spin")} />
+                            {t("connectors.action.retry")}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
                 )}
-              </div>
-              <div className="grid grid-cols-1 gap-3 @lg:grid-cols-2 @3xl:grid-cols-3">
-                <div className={showWhop ? "contents" : "hidden"}>
+              >
+                {/* Whop is its own sign-in, not a Composio app: it stays mounted in
+                    the main list whichever chip is chosen, hidden where it does not belong. */}
+                <div className={showWhop && !inCategoryView ? "contents" : "hidden"}>
                   <McpServersPanel whopCard refreshKey={whopRefresh} onWhopConnection={setWhopConnected} />
                 </div>
-                {shown.map((card) => renderTile(card))}
-              </div>
-              {cards === null && (
-                <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary">
-                  <Loader2 size={14} className="animate-spin" /> {t("connectors.loadingCatalog")}
-                </div>
-              )}
-              {capped && (
-                <div className="mt-4 flex justify-center">
-                  <button
-                    type="button"
-                    onClick={() => setShowAllApps(true)}
-                    className="rounded-full bg-control/70 px-4 py-2 text-[12.5px] font-medium text-ink hover:bg-raised-hover"
-                  >
-                    {t("apps.showAll", { count: visible.length.toLocaleString() })}
-                  </button>
-                </div>
-              )}
-              {cards !== null && visible.length === 0 && !showWhop && (
-                <div className="flex min-h-40 flex-col items-center justify-center text-center">
-                  <div className="text-[14px] font-medium text-ink">
-                    {filter === "connected" ? connectedEmptyCopy.title : t("connectors.noAppsFound")}
-                  </div>
-                  <div className="mt-1 text-[12.5px] text-ink-secondary">
-                    {filter === "connected" ? connectedEmptyCopy.description : t("connectors.tryDifferentSearch")}
-                  </div>
-                  {filter === "connected" && inventoryPhase === "error" && (
-                    <button
-                      type="button"
-                      disabled={refreshing}
-                      onClick={() => void loadConnectionInventory(true)}
-                      className="mt-4 flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[12.5px] text-ink transition-colors hover:bg-raised-hover disabled:opacity-50"
-                    >
-                      <RefreshCw size={13} className={cn(refreshing && "animate-spin")} />
-                      {t("connectors.action.retry")}
-                    </button>
-                  )}
-                </div>
-              )}
-            </section>
+                {allShown.map((card) => renderTile(card))}
+              </AppsSection>
+            </div>
           )}
 
-          {filter !== "connected" && (
-            <div className={cn(filter === "all" && "mt-8 border-t border-hairline/30 pt-6", filter === "mcp" && "pt-3")}>
+          {filter !== "connected" && category === null && (
+            <div className={cn(filter === "all" && "mt-8 border-t border-hairline/30 pt-6", filter === "mcp" && "pt-1")}>
               <McpServersPanel embedded hideWhop={filter === "all"} />
             </div>
           )}
@@ -897,206 +993,233 @@ export function PluginsPanel() {
       ? t("connectors.selfHostOnlyReason")
       : null;
     const usedBy = connected || included ? botsUsingService(state.bots, state.instances, card.slug) : [];
+    const description = unavailableReason ?? (
+      pending
+        ? authorizationUrl
+          ? t("connectors.finishSetup")
+          : t("connectors.finishSetupOrDisconnect")
+        : failed && !accounts.length
+          ? t("connectors.authExpired")
+          : card.blurb
+    );
     return (
       <div
         key={card.slug}
         data-app-tile={card.slug}
-        className="glass-card flex min-h-[132px] flex-col rounded-2xl p-4"
+        className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40"
       >
-        <div className="flex items-start gap-3">
-          <ServiceIcon card={card} className="size-10" />
+        <div className="flex items-center gap-3">
+          <ServiceIcon card={card} className="size-10 shrink-0 rounded-[10px]" />
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[14px] font-medium text-ink">{card.label}</div>
-            <div
-              className="mt-0.5 line-clamp-1 text-[12px] text-ink-secondary"
-              title={unavailableReason ?? card.blurb}
-            >
-              {unavailableReason ?? (
-                pending
-                  ? authorizationUrl
-                    ? t("connectors.finishSetup")
-                    : t("connectors.finishSetupOrDisconnect")
-                  : failed && !accounts.length
-                    ? t("connectors.authExpired")
-                    : card.blurb
+            <div className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-[14px] font-semibold leading-5 text-ink">{card.label}</span>
+              {connected && !pending && (
+                <Check size={13} strokeWidth={2.5} className="shrink-0 text-success" aria-label={t("apps.connected")} />
+              )}
+              {usedBy.length > 0 && (
+                <span
+                  className="ms-1 flex shrink-0 -space-x-1.5 rtl:space-x-reverse"
+                  title={t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") })}
+                  aria-label={t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") })}
+                  role="img"
+                >
+                  {/* A mascot fills its whole square (a cursor's tip sits in the
+                      corner), so drawn at the ring's own size it poked out of
+                      the circle. Each one sits in a fixed disc that clips, drawn
+                      small enough that every body and uploaded image fits. */}
+                  {usedBy.slice(0, 3).map((candidate) => (
+                    <span
+                      key={candidate.id}
+                      data-used-by-avatar={candidate.id}
+                      className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-menu ring-2 ring-menu"
+                    >
+                      <BotAvatar bot={candidate} size={USED_BY_AVATAR_SIZE} animated={false} />
+                    </span>
+                  ))}
+                </span>
               )}
             </div>
+            <div className="truncate text-[12.5px] leading-[18px] text-ink-secondary" title={description}>
+              {description}
+            </div>
           </div>
-        </div>
-        <div className="mt-auto flex items-center justify-between gap-2 pt-3">
-          {connected && !pending ? (
-            <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-success">
-              <Check size={13} className="shrink-0" /> {t("apps.connected")}
-            </span>
-          ) : <span />}
-          <div className="flex min-w-0 items-center gap-2">
-            {usedBy.length > 0 && (
-              <span
-                className="flex shrink-0 -space-x-1.5"
-                title={t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") })}
-                aria-label={t("apps.usedBy", { names: usedBy.map((candidate) => candidate.name).join(", ") })}
-                role="img"
-              >
-                {/* A mascot fills its whole square (a cursor's tip sits in the
-                    corner), so drawn at the ring's own size it poked out of
-                    the circle. Each one sits in a fixed disc that clips, drawn
-                    small enough that every body and uploaded image fits. */}
-                {usedBy.slice(0, 3).map((candidate) => (
-                  <span
-                    key={candidate.id}
-                    data-used-by-avatar={candidate.id}
-                    className="flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-full bg-menu ring-2 ring-menu"
-                  >
-                    <BotAvatar bot={candidate} size={USED_BY_AVATAR_SIZE} animated={false} />
-                  </span>
-                ))}
-              </span>
-            )}
-            <button
-              type="button"
-              disabled={!configured || inventoryPhase !== "ready" || busy || included || Boolean(unavailableReason)}
-              title={unavailableReason ?? undefined}
-              onClick={() => {
-                if (pending && !failed) {
-                  const url = reusableConnectionUrl(pendingAuthorization);
-                  if (url) {
-                    setError(null);
-                    void openConnectUrl(url).catch((e) => setError(e.message));
-                  } else {
-                    // A reload or expired link cannot be resumed. The host
-                    // safely retries unfinished-only accounts; live accounts
-                    // still require an explicit new alias below.
-                    void connect(card.slug);
-                  }
+          <button
+            type="button"
+            disabled={!configured || inventoryPhase !== "ready" || busy || included || Boolean(unavailableReason)}
+            title={unavailableReason ?? undefined}
+            onClick={() => {
+              if (pending && !failed) {
+                const url = reusableConnectionUrl(pendingAuthorization);
+                if (url) {
+                  setError(null);
+                  void openConnectUrl(url).catch((e) => setError(e.message));
                 } else {
-                  setAliasSlug((current) => current === card.slug ? null : card.slug);
-                  setAliasDraft("");
+                  // A reload or expired link cannot be resumed. The host
+                  // safely retries unfinished-only accounts; live accounts
+                  // still require an explicit new alias below.
+                  void connect(card.slug);
                 }
-              }}
-              className="flex min-w-[80px] items-center justify-center gap-1.5 rounded-full bg-control px-3 py-1.5 text-[12px] text-ink transition-colors hover:bg-raised-hover disabled:opacity-40"
-            >
-              {unavailableReason ? (
-                t("connectors.selfHostOnly")
-              ) : busy ? (
-                <Loader2 size={13} className="mx-auto animate-spin" />
-              ) : (
-                connectorActionLabel(inventoryPhase, {
-                  busy,
-                  included,
-                  canContinue: Boolean(pendingAuthorization),
-                  pending,
-                  hasAccounts: accounts.length > 0,
-                  failed: Boolean(failed),
-                })
-              )}
-            </button>
-          </div>
-        </div>
-        {authorizationUrl && (
-          <a href={authorizationUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => {
-            if (!reusableConnectionUrl(pendingAuthorization)) {
-              event.preventDefault();
-              void connect(card.slug);
-            }
-          }} className="mt-2 text-[12px] text-accent-text underline underline-offset-2">
-            {t("connectors.openAuthorizationPage")}
-          </a>
-        )}
-        {accounts.length > 0 && (
-          <div className="mt-3 space-y-1.5">
-            {accounts.map((account) => {
-              const active = /^active$/i.test(account.status);
-              return (
-                <div key={account.id} className="flex items-center gap-2 rounded-lg bg-inset/60 px-2.5 py-1.5">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5 text-[12px] font-medium text-ink">
-                      {active && <Check size={12} className="shrink-0 text-success" />}
-                      <span className="truncate">{account.alias || account.id}</span>
-                    </div>
-                    <div className="mt-0.5 truncate text-[10.5px] text-ink-secondary">
-                      {account.alias ? `${account.id} · ` : ""}{account.status.toLowerCase()}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      if (!window.confirm(disconnectAccountConfirmation(card.label, account))) return;
-                      disconnectAccount(card.slug, account.id);
-                    }}
-                    className="rounded-md px-2 py-1 text-[11px] text-ink-secondary transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40"
-                    aria-label={t("connectors.disconnectAria", {
-                      account: account.alias || account.id,
-                      service: card.label,
-                    })}
-                  >
-                    {t("connectors.disconnect")}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        {(serviceStatus?.connected || included) && (() => {
-          const limited = botsWithLimitedServiceTools(state.bots, state.instances, card.slug);
-          if (!limited.length) return null;
-          const names = limited.slice(0, 4).map((candidate, index) => (
-            <span key={candidate.id}>
-              {index > 0 && ", "}
-              <button
-                type="button"
-                onClick={() => {
-                  close();
-                  dispatch({ type: "toggleSettings", open: true, botId: candidate.id, section: "access" });
-                }}
-                className="font-medium text-ink underline underline-offset-2 hover:text-accent-text"
-              >
-                {candidate.name}
-              </button>
-            </span>
-          ));
-          return (
-            <div className="mt-2 text-[11px] leading-relaxed text-ink-secondary">
-              <span>{t("connectors.grants.limited", { count: limited.length })}</span>{" "}
-              {names}
-              {limited.length > 4 && <span>{t("connectors.grants.more", { count: limited.length - 4 })}</span>}
-            </div>
-          );
-        })()}
-        {addingAccount && (
-          <form
-            className="mt-3 flex items-center gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const alias = aliasDraft.trim();
-              if (!alias) {
-                setError({ key: "connectors.aliasRequired" });
-                return;
+              } else {
+                setAliasSlug((current) => current === card.slug ? null : card.slug);
+                setAliasDraft("");
               }
-              void connect(card.slug, alias);
             }}
+            className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40"
           >
-            <input
-              autoFocus
-              value={aliasDraft}
-              maxLength={64}
-              onChange={(event) => setAliasDraft(event.target.value)}
-              placeholder={t("connectors.aliasPlaceholder")}
-              aria-label={accounts.length > 0
-                ? t("connectors.aliasAriaAnother", { service: card.label })
-                : t("connectors.aliasAriaNew", { service: card.label })}
-              className="min-w-0 flex-1 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent"
-            />
-            <button
-              type="submit"
-              disabled={busy || !aliasDraft.trim()}
-              className="rounded-lg bg-accent px-3 py-2 text-[12px] font-medium text-accent-ink disabled:opacity-40"
+            {unavailableReason ? (
+              t("connectors.selfHostOnly")
+            ) : busy ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              connectorActionLabel(inventoryPhase, {
+                busy,
+                included,
+                canContinue: Boolean(pendingAuthorization),
+                pending,
+                hasAccounts: accounts.length > 0,
+                failed: Boolean(failed),
+              })
+            )}
+          </button>
+        </div>
+        {/* everything below lines up with the name, past the icon */}
+        <div className="ps-[52px]">
+          {authorizationUrl && (
+            <a href={authorizationUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => {
+              if (!reusableConnectionUrl(pendingAuthorization)) {
+                event.preventDefault();
+                void connect(card.slug);
+              }
+            }} className="mt-1.5 inline-block text-[12px] text-accent-text underline underline-offset-2">
+              {t("connectors.openAuthorizationPage")}
+            </a>
+          )}
+          {accounts.length > 0 && (
+            <div className="mt-1.5 space-y-0.5">
+              {accounts.map((account) => {
+                const active = /^active$/i.test(account.status);
+                return (
+                  <div key={account.id} className="flex min-w-0 items-center gap-2 text-[12px] leading-5">
+                    {active ? <Check size={12} className="shrink-0 text-success" /> : <span className="size-3 shrink-0" />}
+                    <span className="min-w-0 truncate text-ink" title={`${account.alias ? `${account.id} · ` : ""}${account.status.toLowerCase()}`}>
+                      {account.alias || account.id}
+                      <span className="text-ink-secondary"> · {account.status.toLowerCase()}</span>
+                    </span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        if (!window.confirm(disconnectAccountConfirmation(card.label, account))) return;
+                        disconnectAccount(card.slug, account.id);
+                      }}
+                      className="ms-auto shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-ink-secondary transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                      aria-label={t("connectors.disconnectAria", {
+                        account: account.alias || account.id,
+                        service: card.label,
+                      })}
+                    >
+                      {t("connectors.disconnect")}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {(serviceStatus?.connected || included) && (() => {
+            const limited = botsWithLimitedServiceTools(state.bots, state.instances, card.slug);
+            if (!limited.length) return null;
+            const names = limited.slice(0, 4).map((candidate, index) => (
+              <span key={candidate.id}>
+                {index > 0 && ", "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    close();
+                    dispatch({ type: "toggleSettings", open: true, botId: candidate.id, section: "access" });
+                  }}
+                  className="font-medium text-ink underline underline-offset-2 hover:text-accent-text"
+                >
+                  {candidate.name}
+                </button>
+              </span>
+            ));
+            return (
+              <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">
+                <span>{t("connectors.grants.limited", { count: limited.length })}</span>{" "}
+                {names}
+                {limited.length > 4 && <span>{t("connectors.grants.more", { count: limited.length - 4 })}</span>}
+              </div>
+            );
+          })()}
+          {addingAccount && (
+            <form
+              className="mt-2 flex items-center gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const alias = aliasDraft.trim();
+                if (!alias) {
+                  setError({ key: "connectors.aliasRequired" });
+                  return;
+                }
+                void connect(card.slug, alias);
+              }}
             >
-              {t("connectors.action.continue")}
-            </button>
-          </form>
-        )}
+              <input
+                autoFocus
+                value={aliasDraft}
+                maxLength={64}
+                onChange={(event) => setAliasDraft(event.target.value)}
+                placeholder={t("connectors.aliasPlaceholder")}
+                aria-label={accounts.length > 0
+                  ? t("connectors.aliasAriaAnother", { service: card.label })
+                  : t("connectors.aliasAriaNew", { service: card.label })}
+                className="h-8 min-w-0 flex-1 rounded-full bg-inset px-3 text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              <button
+                type="submit"
+                disabled={busy || !aliasDraft.trim()}
+                className="inline-flex h-7 shrink-0 items-center rounded-full bg-accent px-3 text-[13px] font-medium leading-5 text-accent-ink disabled:opacity-40"
+              >
+                {t("connectors.action.continue")}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     );
   }
+}
+
+/** One block of the Apps list: a heading with an optional "View all" at the
+ * far end, then its apps in a two-column list (one column when the pop-up is
+ * narrow). */
+function AppsSection({ id, title, note, viewAll, after, children }: {
+  id: string;
+  title: string;
+  note?: string;
+  viewAll?: { label: string; onClick: () => void };
+  after?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section aria-labelledby={id} data-apps-section={id}>
+      <div className="mb-1.5 flex min-h-7 items-center justify-between gap-3 px-2">
+        <h3 id={id} className="min-w-0 truncate text-[14px] font-semibold leading-5 text-ink">
+          {title}
+          {note && <span className="ms-2 text-[12px] font-normal text-ink-secondary">{note}</span>}
+        </h3>
+        {viewAll && (
+          <button
+            type="button"
+            onClick={viewAll.onClick}
+            className="shrink-0 rounded-full px-2 text-[13px] font-medium leading-5 text-ink-secondary transition-colors hover:text-ink"
+          >
+            {viewAll.label}
+          </button>
+        )}
+      </div>
+      <div className="grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2">{children}</div>
+      {after}
+    </section>
+  );
 }

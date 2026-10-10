@@ -117,7 +117,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
             }
           }}
           title={t("room.openBot", { name: comm.withName })}
-          className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+          className="ui-pill"
         >
           <BotAvatar bot={withBot ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} animated={false} />
           <span className="max-w-[480px] truncate">{tool.name}</span>
@@ -131,8 +131,8 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
     <div className="flex justify-start">
       <div
         className={cn(
-          "flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px]",
-          tool.ok === false ? "text-danger" : "text-ink-secondary",
+          "ui-pill",
+          tool.ok === false && "text-danger",
         )}
       >
         {comm && <BotAvatar bot={state.bots.find(b => b.id === comm.withBotId) ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} animated={false} />}
@@ -1124,9 +1124,10 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
 export function GroupView({ group }: { group: Group }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  // Same Windows caption handling as ChatView: drag on the header, shift the
-  // right-hand controls below the renderer-drawn caption buttons.
-  const { dragStyle: headerDragStyle, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
+  // Same caption handling as ChatView: drag on the header (macOS and
+  // Windows), and on Windows shift the right-hand controls below the
+  // renderer-drawn caption buttons.
+  const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
   const [bulletinOpen, setBulletinOpen] = useState(false);
@@ -1305,7 +1306,7 @@ export function GroupView({ group }: { group: Group }) {
       <GlassBar edge="top" className="z-[25]">
       {/* Header: static member avatars; a ring + dot marks the working bot. */}
       <div
-        style={headerDragStyle}
+        {...headerDragProps}
         className={cn(
           // @container so the header can wrap in a narrow column. A container
           // query never matches the container itself, so the row that has to

@@ -25,3 +25,7 @@ export const TWO_SIDE_PANELS_FIT = "(min-width: 1536px)";
  * panel (420–540px) need about this much; narrower, the sidebar folds to
  * its avatar rail while a panel is open. */
 export const SIDEBAR_AND_PANEL_FIT = "(min-width: 1280px)";
+
+/** Tailwind's md: from here the sidebar sits beside the content instead of
+ * waiting behind the menu button as a drawer. */
+export const SIDEBAR_INLINE = "(min-width: 768px)";

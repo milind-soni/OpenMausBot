@@ -666,6 +666,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
   const decodeConfig = decodeAcpConfig(support.defaultCli);
   const DENY_TIMEOUT_NOTE =
     "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
+  // shown to the person: no engine slug, and what to do next
+  const QUESTION_NO_MATCH_NOTE =
+    "That answer isn't one of the choices this engine can take, so the question was closed and the turn stopped. Ask again and pick one of the options.";
 
   return {
     driverKind: DRIVER_KIND,
@@ -1301,7 +1304,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             ? options.flatMap((option) => typeof option.name === "string" && option.name.trim() ? [option.name.trim()] : [])
             : [];
           const askQuestions = isQuestion && questionChoices.length
-            ? parseAskQuestions({ questions: [{ question: summary, options: questionChoices }] }) ?? undefined
+            // an ACP question answers with one of its option ids, never text,
+            // so the card must not offer a free-text "Other" it cannot send
+            ? parseAskQuestions({ questions: [{ question: summary, options: questionChoices, custom: false }] }) ?? undefined
             : undefined;
           const requestId = newId();
           const finish = (
@@ -1338,12 +1343,25 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               remembered.add(operationKey);
               sessionAllows.set(threadId, remembered);
             }
-            if (behavior !== "cancel" && !optionId) missing(isQuestion ? "matching answer" : want);
+            if (behavior !== "cancel" && !optionId) {
+              if (!isQuestion) missing(want);
+              // a typed answer (or one an older client sent as text) that is
+              // none of the offered options: say so plainly, without the
+              // engine's internal name
+              else if (behavior === "answer") {
+                emit({ ...base(threadId, current.turnId), type: "runtime.error", message: QUESTION_NO_MATCH_NOTE });
+              }
+            }
             send({
               jsonrpc: "2.0",
               id: msg.id,
               result: optionId ? { outcome: { outcome: "selected", optionId } } : cancelled,
             });
+            // ACP only means a "cancelled" outcome as part of cancelling the
+            // prompt turn, so an agent may wait for session/cancel after it
+            // (Antigravity does, and the turn sat on Thinking). Follow the
+            // contract: end the turn instead of leaving it hanging.
+            if (!optionId && behavior !== "cancel" && session.current === current) active.get(threadId)?.interrupt();
             emit({
               ...base(threadId, current.turnId),
               type: "request.resolved",

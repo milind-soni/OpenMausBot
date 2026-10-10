@@ -12,7 +12,7 @@ import { initAnalytics } from "@/lib/analytics";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
-import { SIDEBAR_AND_PANEL_FIT, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
+import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import {
   ActivityPanel, BotSettingsDialog, ComputerPanel, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace, NewBotDialog,
@@ -23,7 +23,7 @@ import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { CloudHowTo } from "@/components/CloudHowTo";
-import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
+import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { NoEngines } from "@/components/NoEngines";
 import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
@@ -41,12 +41,15 @@ import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
+  const captionChrome = useCaptionChrome();
   const unreadCount =
     state.bots.filter((bot) => !bot.hidden && botShowsUnread(bot)).length +
     state.groups.filter((group) => group.unread).length;
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
   const sidebarAndPanelFit = useMediaQuery(SIDEBAR_AND_PANEL_FIT, true);
+  // md and up the sidebar is always in view (narrower it is a drawer)
+  const sidebarInline = useMediaQuery(SIDEBAR_INLINE, false);
   useEffect(() => {
     if (!window.ogb?.environments) return;
     // A saved server's Computer access panel, or ("copy") its Copy this computer here panel.
@@ -297,7 +300,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   return (
     <div className="flex h-full flex-col">
       {/* fixed-position popup, bottom-left — outside the layout flow */}
-      <UpdateBanner />
+      <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
       {/* The one bottom-left card at a time: the card after the update, the
           free trial's notice (here and on My Cloud), the My Cloud card, the star. */}
       <AppNotices quiet={paletteOpen || drawerOpen || Boolean(localVmWorkspaceBotId)} viewer={viewer} />
@@ -349,7 +352,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : bot ? (
         <ChatView bot={bot} />
       ) : (
-        <main className="flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+        <main className="relative flex h-full min-w-0 flex-1 flex-col items-center justify-center gap-3 bg-app text-ink-secondary">
+          <WindowDragStrip />
           <Loader2 size={20} className="animate-spin" />
           <div className="text-[14px]">
             {state.connected ? "No bots yet" : "Connecting to the bot server…"}
@@ -409,6 +413,16 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {/* mounted after the modals: same z-50 tier, so DOM order keeps the
           palette on top when one of them is open underneath */}
       <CommandPalette onOpenChange={setPaletteOpen} />
+      {/* The drawer button comes before every header in the DOM, and a later
+          drag region wins, so on a narrow window the header's drag region
+          swallowed it. This no-drag twin, after the headers, cuts the
+          button's corner back out. It paints nothing and takes no clicks. */}
+      {!calendarFocus && <span
+        aria-hidden
+        data-drawer-button-no-drag
+        style={captionChrome.noDragStyle}
+        className="pointer-events-none absolute left-3 top-3 size-[30px] md:hidden"
+      />}
       </div>
       {/* Renderer-drawn caption buttons for the overlay-less frameless
           Windows window. Deliberately the LAST child of the shell: Blink

@@ -1336,36 +1336,52 @@ export interface ToolkitCard {
   noAuth?: boolean;
   /** used for the client-side favicon fallback when logo is null/broken */
   domain: string | null;
+  /** the marketplace's own categories for this toolkit (meta.categories),
+   * which the Apps pop-up groups and filters by */
+  categories?: string[];
+}
+
+/** Category names from a toolkit's meta.categories, which the toolkits API
+ * lists as `{ id, name }` objects (older payloads: plain strings). */
+export function toolkitCategories(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const names = raw
+    .map((entry) => typeof entry === "string" ? entry : entry && typeof entry === "object" ? (entry as { name?: unknown }).name : undefined)
+    .filter((name): name is string => typeof name === "string")
+    .map((name) => name.trim().slice(0, 40))
+    .filter(Boolean);
+  const unique = [...new Set(names)].slice(0, 4);
+  return unique.length ? unique : undefined;
 }
 
 // Curated fallback — the services agentcal's connectors page ships plus the
 // long marketplace tail. Logos resolve client-side:
 // logo → favicon(domain) → monogram.
 const CURATED: ToolkitCard[] = [
-  { slug: "slack", label: "Slack", blurb: "Post updates and read channels", domain: "slack.com", logo: null },
-  { slug: "github", label: "GitHub", blurb: "Issues, pull requests, and code", domain: "github.com", logo: null },
-  { slug: "gmail", label: "Gmail", blurb: "Read and send email", domain: "gmail.com", logo: null },
-  { slug: "googlecalendar", label: "Google Calendar", blurb: "Read and create events", domain: "calendar.google.com", logo: null },
-  { slug: "googlesheets", label: "Google Sheets", blurb: "Read and update spreadsheets", domain: "sheets.google.com", logo: null },
-  { slug: "googledocs", label: "Google Docs", blurb: "Read and write documents", domain: "docs.google.com", logo: null },
-  { slug: "googledrive", label: "Google Drive", blurb: "Browse and manage files", domain: "drive.google.com", logo: null },
-  { slug: "notion", label: "Notion", blurb: "Pages and databases", domain: "notion.so", logo: null },
-  { slug: "linear", label: "Linear", blurb: "Issues and project tracking", domain: "linear.app", logo: null },
-  { slug: "sentry", label: "Sentry", blurb: "Errors and alerts", domain: "sentry.io", logo: null },
-  { slug: "posthog", label: "PostHog", blurb: "Analytics, feature flags, experiments", domain: "posthog.com", logo: null },
-  { slug: "discord", label: "Discord", blurb: "Messages and channels", domain: "discord.com", logo: null },
-  { slug: "twitter", label: "X (Twitter)", blurb: "Post and read on X", domain: "x.com", logo: null },
-  { slug: "reddit", label: "Reddit", blurb: "Browse and post", domain: "reddit.com", logo: null },
-  { slug: "zapier", label: "Zapier", blurb: "Connect 9,000+ apps", domain: "zapier.com", logo: null },
-  { slug: "hubspot", label: "HubSpot", blurb: "CRM search & updates", domain: "hubspot.com", logo: null },
-  { slug: "salesforce", label: "Salesforce", blurb: "CRM records and reports", domain: "salesforce.com", logo: null },
-  { slug: "jira", label: "Jira", blurb: "Issues and sprints", domain: "atlassian.com", logo: null },
-  { slug: "asana", label: "Asana", blurb: "Tasks and projects", domain: "asana.com", logo: null },
-  { slug: "trello", label: "Trello", blurb: "Boards and cards", domain: "trello.com", logo: null },
-  { slug: "dropbox", label: "Dropbox", blurb: "Files and folders", domain: "dropbox.com", logo: null },
-  { slug: "airtable", label: "Airtable", blurb: "Bases and records", domain: "airtable.com", logo: null },
-  { slug: "figma", label: "Figma", blurb: "Files and comments", domain: "figma.com", logo: null },
-  { slug: "stripe", label: "Stripe", blurb: "Payments and customers", domain: "stripe.com", logo: null },
+  { slug: "slack", label: "Slack", blurb: "Post updates and read channels", domain: "slack.com", logo: null, categories: ["Communication"] },
+  { slug: "github", label: "GitHub", blurb: "Issues, pull requests, and code", domain: "github.com", logo: null, categories: ["Developer tools"] },
+  { slug: "gmail", label: "Gmail", blurb: "Read and send email", domain: "gmail.com", logo: null, categories: ["Communication"] },
+  { slug: "googlecalendar", label: "Google Calendar", blurb: "Read and create events", domain: "calendar.google.com", logo: null, categories: ["Productivity"] },
+  { slug: "googlesheets", label: "Google Sheets", blurb: "Read and update spreadsheets", domain: "sheets.google.com", logo: null, categories: ["Productivity"] },
+  { slug: "googledocs", label: "Google Docs", blurb: "Read and write documents", domain: "docs.google.com", logo: null, categories: ["Productivity"] },
+  { slug: "googledrive", label: "Google Drive", blurb: "Browse and manage files", domain: "drive.google.com", logo: null, categories: ["Files"] },
+  { slug: "notion", label: "Notion", blurb: "Pages and databases", domain: "notion.so", logo: null, categories: ["Productivity"] },
+  { slug: "linear", label: "Linear", blurb: "Issues and project tracking", domain: "linear.app", logo: null, categories: ["Developer tools"] },
+  { slug: "sentry", label: "Sentry", blurb: "Errors and alerts", domain: "sentry.io", logo: null, categories: ["Developer tools"] },
+  { slug: "posthog", label: "PostHog", blurb: "Analytics, feature flags, experiments", domain: "posthog.com", logo: null, categories: ["Analytics"] },
+  { slug: "discord", label: "Discord", blurb: "Messages and channels", domain: "discord.com", logo: null, categories: ["Communication"] },
+  { slug: "twitter", label: "X (Twitter)", blurb: "Post and read on X", domain: "x.com", logo: null, categories: ["Social"] },
+  { slug: "reddit", label: "Reddit", blurb: "Browse and post", domain: "reddit.com", logo: null, categories: ["Social"] },
+  { slug: "zapier", label: "Zapier", blurb: "Connect 9,000+ apps", domain: "zapier.com", logo: null, categories: ["Automation"] },
+  { slug: "hubspot", label: "HubSpot", blurb: "CRM search & updates", domain: "hubspot.com", logo: null, categories: ["Sales and CRM"] },
+  { slug: "salesforce", label: "Salesforce", blurb: "CRM records and reports", domain: "salesforce.com", logo: null, categories: ["Sales and CRM"] },
+  { slug: "jira", label: "Jira", blurb: "Issues and sprints", domain: "atlassian.com", logo: null, categories: ["Developer tools"] },
+  { slug: "asana", label: "Asana", blurb: "Tasks and projects", domain: "asana.com", logo: null, categories: ["Productivity"] },
+  { slug: "trello", label: "Trello", blurb: "Boards and cards", domain: "trello.com", logo: null, categories: ["Productivity"] },
+  { slug: "dropbox", label: "Dropbox", blurb: "Files and folders", domain: "dropbox.com", logo: null, categories: ["Files"] },
+  { slug: "airtable", label: "Airtable", blurb: "Bases and records", domain: "airtable.com", logo: null, categories: ["Productivity"] },
+  { slug: "figma", label: "Figma", blurb: "Files and comments", domain: "figma.com", logo: null, categories: ["Design"] },
+  { slug: "stripe", label: "Stripe", blurb: "Payments and customers", domain: "stripe.com", logo: null, categories: ["Finance"] },
 ];
 
 let toolkitCache: { at: number; cards: ToolkitCard[]; identity: string; pagination: CatalogPagination } | null = null;
@@ -1499,6 +1515,7 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
           logo: t.meta?.logo ?? t.logo ?? null,
           noAuth: t.no_auth === true,
           domain: null,
+          ...(toolkitCategories(t.meta?.categories) ? { categories: toolkitCategories(t.meta?.categories) } : {}),
         }));
         const uniqueCards = cards.filter(
           (card, index) => card.slug && cards.findIndex((candidate) => candidate.slug === card.slug) === index,

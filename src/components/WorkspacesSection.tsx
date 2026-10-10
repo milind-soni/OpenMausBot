@@ -138,7 +138,7 @@ function NewWorkspaceForm({ domain, onCreated, disabled }: { domain: string; onC
       <p className="text-[11.5px] leading-relaxed text-ink-secondary">{t("workspaces.createHint")}</p>
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       <div className="flex justify-end">
-        <button type="submit" disabled={disabled || saving} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-semibold text-white hover:brightness-110 disabled:opacity-60">
+        <button type="submit" disabled={disabled || saving} className="ui-button ui-button-primary">
           {saving ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}{saving ? t("workspaces.creating") : t("workspaces.create")}
         </button>
       </div>

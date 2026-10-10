@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   phoneMenuItems,
   profileInitials,
+  profileMenuItems,
   selectPhoneDestination,
   profileLabel,
   updateBusy,
@@ -340,5 +341,45 @@ describe("Get the phone app", () => {
 
   it("is not drawn while closed", () => {
     expect(renderToStaticMarkup(createElement(PhoneAppDialog, { open: false, onClose: () => {} }))).toBe("");
+  });
+});
+
+describe("profileMenuItems", () => {
+  const noop = () => {};
+  const build = (patch: Partial<Parameters<typeof profileMenuItems>[0]> = {}) => profileMenuItems({
+    phone: [{ key: "phone-app", label: "Get the phone app", onSelect: noop }],
+    usage: true,
+    update: null,
+    account: "OpenMausBot Cloud",
+    onUsage: noop, onSettings: noop, onShortcuts: noop, onAbout: noop, onHelp: noop, onFeedback: noop, onAccount: noop,
+    ...patch,
+  });
+
+  it("groups usage and the phone, then help and settings, then the account under a divider", () => {
+    const items = build();
+    expect(items.map((item) => item.key)).toEqual(["usage", "phone-app", "support", "settings", "account"]);
+    expect(items.filter((item) => item.separatorBefore).map((item) => item.key)).toEqual(["account"]);
+    expect(items.find((item) => item.key === "support")!.submenu!.map((item) => item.key)).toEqual(["help", "feedback", "shortcuts", "about"]);
+    expect(items.find((item) => item.key === "account")!.label).toBe("OpenMausBot Cloud");
+  });
+
+  it("only offers what this window has: no usage on a remote server, no account without one", () => {
+    const items = build({ usage: false, account: null });
+    expect(items.map((item) => item.key)).toEqual(["phone-app", "support", "settings"]);
+    expect(items.some((item) => item.separatorBefore)).toBe(false);
+  });
+
+  it("keeps the update entry beside settings", () => {
+    const update = { key: "update", label: "Check for updates", onSelect: noop };
+    expect(build({ update }).map((item) => item.key)).toEqual(["usage", "phone-app", "support", "settings", "update", "account"]);
+  });
+
+  it("opens the Usage and account pages of Settings", () => {
+    const onUsage = vi.fn(), onAccount = vi.fn();
+    const items = build({ onUsage, onAccount });
+    items.find((item) => item.key === "usage")!.onSelect();
+    items.find((item) => item.key === "account")!.onSelect();
+    expect(onUsage).toHaveBeenCalledOnce();
+    expect(onAccount).toHaveBeenCalledOnce();
   });
 });

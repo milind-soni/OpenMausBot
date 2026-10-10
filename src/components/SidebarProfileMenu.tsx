@@ -18,10 +18,13 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   Check,
+  CircleUserRound,
   Download,
+  Gauge,
   Info,
   HelpCircle,
   Keyboard,
+  LifeBuoy,
   Loader2,
   RefreshCw,
   Settings as SettingsIcon,
@@ -138,6 +141,12 @@ function UpdateIcon({ phase, pending, size = 18 }: { phase: UpdatePhase; pending
   if (phase === "up-to-date") return <Check size={size} />;
   if (phase === "downloaded") return <ArrowDownToLine size={size} />;
   return <RefreshCw size={size} />;
+}
+
+/** The phases the round update button beside this row speaks for
+ * (UpdateIndicator), so the row itself stays quiet about them. */
+export function updateHasButton(phase: UpdatePhase): boolean {
+  return phase === "downloading" || phase === "preparing" || phase === "downloaded" || phase === "installing";
 }
 
 /** Whether the updater has something the profile row should say out loud.
@@ -289,7 +298,61 @@ export function phoneMenuItems({
   ];
 }
 
-export function SidebarProfileMenu() {
+/** The profile menu's rows, in its three groups: where you stand (usage,
+ * the phone), help and settings, then the account. Built here, apart from
+ * the component, so the order is tested without a store. */
+export function profileMenuItems({
+  phone,
+  usage,
+  update,
+  account,
+  onUsage,
+  onSettings,
+  onShortcuts,
+  onAbout,
+  onHelp,
+  onFeedback,
+  onAccount,
+}: {
+  phone: SidebarMenuItem[];
+  /** Settings has a Usage page here (not on a remote server's window) */
+  usage: boolean;
+  update: SidebarMenuItem | null;
+  /** the account this app signs in to (OpenMausBot Cloud), when it has one here */
+  account: string | null;
+  onUsage: () => void;
+  onSettings: () => void;
+  onShortcuts: () => void;
+  onAbout: () => void;
+  onHelp: () => void;
+  onFeedback: () => void;
+  onAccount: () => void;
+}): SidebarMenuItem[] {
+  const help: SidebarMenuItem[] = [
+    { key: "help", label: t("sidebar.menu.help"), icon: <HelpCircle size={18} />, onSelect: onHelp },
+    { key: "feedback", label: t("sidebar.menu.feedback"), icon: <DiscordIcon size={17} />, onSelect: onFeedback },
+    {
+      key: "shortcuts",
+      label: t("sidebar.menu.shortcuts"),
+      icon: <Keyboard size={18} />,
+      trailing: <ShortcutHint id="shortcuts-cheat-sheet" />,
+      onSelect: onShortcuts,
+    },
+    { key: "about", label: t("sidebar.menu.about"), icon: <Info size={18} />, separatorBefore: true, onSelect: onAbout },
+  ];
+  return [
+    ...(usage ? [{ key: "usage", label: t("settings.section.usage"), icon: <Gauge size={18} />, onSelect: onUsage }] : []),
+    ...phone,
+    { key: "support", label: t("sidebar.menu.support"), icon: <LifeBuoy size={18} />, submenu: help, onSelect: () => {} },
+    { key: "settings", label: t("sidebar.menu.settings"), icon: <SettingsIcon size={18} />, onSelect: onSettings },
+    ...(update ? [update] : []),
+    ...(account
+      ? [{ key: "account", label: account, icon: <CircleUserRound size={18} />, separatorBefore: true, onSelect: onAccount }]
+      : []),
+  ];
+}
+
+export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } = {}) {
   const { state, dispatch } = useStore();
   const phone = useSidebarPhoneStatus();
   const connectPhone = useConnectPhoneEntry(state.config?.cloudHome === true);
@@ -303,59 +366,61 @@ export function SidebarProfileMenu() {
   const profile = state.config?.profile;
   const name = profileLabel(profile);
   const connectTo = (destination: PhoneDestination) => selectPhoneDestination(destination, { bridge: cloudPhone.bridge, dispatch });
+  const remote = window.ogb?.remoteClient?.active === true;
+  // the same rule Settings uses to show its OpenMausBot Cloud page
+  const cloudAccount = !remote && Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true));
 
-  const items: SidebarMenuItem[] = [
-    ...phoneMenuItems({
+  const items = profileMenuItems({
+    phone: phoneMenuItems({
       destinations,
       connected: phone.kind === "connected",
       onConnect: connectTo,
       onGetApp: () => setPhoneAppOpen(true),
     }),
-    {
-      key: "settings",
-      label: t("sidebar.menu.settings"),
-      icon: <SettingsIcon size={18} />,
-      onSelect: () => dispatch({ type: "toggleAppSettings" }),
+    usage: !remote,
+    update: update?.item ?? null,
+    account: cloudAccount ? t("settings.section.cloudAccount") : null,
+    onUsage: () => dispatch({ type: "toggleAppSettings", open: true, section: "usage" }),
+    onSettings: () => dispatch({ type: "toggleAppSettings" }),
+    onShortcuts: () => {
+      // The menu item unmounts; let the dialog restore the profile button.
+      triggerRef.current?.closest("button")?.focus();
+      dispatch({ type: "toggleShortcuts", open: true });
     },
-    {
-      key: "shortcuts",
-      label: "Keyboard shortcuts",
-      icon: <Keyboard size={18} />,
-      trailing: <ShortcutHint id="shortcuts-cheat-sheet" />,
-      onSelect: () => {
-        // The menu item unmounts; let the dialog restore the profile button.
-        triggerRef.current?.closest("button")?.focus();
-        dispatch({ type: "toggleShortcuts", open: true });
-      },
-    },
-    ...(update ? [update.item] : []),
-    {
-      key: "about",
-      label: t("sidebar.menu.about"),
-      icon: <Info size={18} />,
-      separatorBefore: true,
-      onSelect: () => setAboutOpen(true),
-    },
-    {
-      key: "help",
-      label: t("sidebar.menu.help"),
-      icon: <HelpCircle size={18} />,
-      onSelect: () => void openExternalLink(HELP_CENTER_URL),
-    },
-    {
-      key: "feedback",
-      label: t("sidebar.menu.feedback"),
-      icon: <DiscordIcon size={17} />,
-      onSelect: () => void openExternalLink(FEEDBACK_URL),
-    },
-  ];
+    onAbout: () => setAboutOpen(true),
+    onHelp: () => void openExternalLink(HELP_CENTER_URL),
+    onFeedback: () => void openExternalLink(FEEDBACK_URL),
+    onAccount: () => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }),
+  });
+  const noteworthy = update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase);
 
   return (
     <>
       <SidebarPopoverMenu
         items={items}
         ariaLabel={name}
-        renderTrigger={({ open }) => (
+        triggerClassName={iconOnly ? "rounded-xl" : "w-full"}
+        triggerTitle={iconOnly ? name : undefined}
+        renderTrigger={({ open }) => iconOnly ? (
+          <span
+            ref={triggerRef}
+            className={cn(
+              "relative flex items-center justify-center rounded-xl px-2 py-2 transition-colors",
+              open ? "bg-raised" : "hover:bg-raised/50",
+            )}
+          >
+            <InitialsAvatar initials={profileInitials(profile)} size={28} />
+            {noteworthy && (
+              <span
+                aria-hidden
+                className={cn(
+                  "absolute end-1 top-1 size-2.5 rounded-full ring-2 ring-app",
+                  update.phase === "error" ? "bg-danger" : "bg-accent",
+                )}
+              />
+            )}
+          </span>
+        ) : (
           <span
             ref={triggerRef}
             className={cn(
@@ -364,10 +429,10 @@ export function SidebarProfileMenu() {
             )}
           >
             <InitialsAvatar initials={profileInitials(profile)} size={28} />
-            <span className="min-w-0 flex-1 truncate text-[14px] text-ink">{name}</span>
+            <span className="min-w-0 flex-1 truncate text-[14px] font-medium leading-5 text-ink">{name}</span>
             {/* an update is the one thing worth interrupting the name for, so
               * it sits on the row rather than waiting to be found in the menu */}
-            {update && updateNoteworthy(update.phase, update.pending) && (
+            {noteworthy && (
               <span
                 title={update.label}
                 aria-label={update.label}

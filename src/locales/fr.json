@@ -1592,5 +1592,8 @@
   "place.view.autoTeam.short": "Partagé",
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "Envoyer les messages avec",
-  "settings.sendKey.subtitle": "Choisissez Shift+Enter ou {key} pour qu'Enter passe plutôt à la ligne, pratique si votre méthode de saisie valide le texte avec Enter, comme pour le japonais. {key} envoie quel que soit votre choix. Sur cet appareil uniquement."
+  "settings.sendKey.subtitle": "Choisissez Shift+Enter ou {key} pour qu'Enter passe plutôt à la ligne, pratique si votre méthode de saisie valide le texte avec Enter, comme pour le japonais. {key} envoie quel que soit votre choix. Sur cet appareil uniquement.",
+  "computer.files.homeFolder": "Dossier personnel",
+  "computer.files.changeDefaultFolder": "Modifier le dossier par défaut",
+  "computer.files.pinnedFolderHint": "Cette conversation conserve son dossier actuel. Modifiez le dossier par défaut pour les nouvelles conversations."
 }

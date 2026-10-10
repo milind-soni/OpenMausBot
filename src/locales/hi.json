@@ -1592,5 +1592,8 @@
   "place.view.autoTeam.short": "साझा",
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "संदेश भेजने की कुंजी",
-  "settings.sendKey.subtitle": "Shift+Enter या {key} चुनें ताकि Enter नई पंक्ति शुरू करे — यह तब काम आता है जब आपकी इनपुट विधि Enter से टेक्स्ट पक्का करती है, जैसे जापानी इनपुट में। {key} हर विकल्प में भेजता है। सिर्फ़ इस डिवाइस पर।"
+  "settings.sendKey.subtitle": "Shift+Enter या {key} चुनें ताकि Enter नई पंक्ति शुरू करे — यह तब काम आता है जब आपकी इनपुट विधि Enter से टेक्स्ट पक्का करती है, जैसे जापानी इनपुट में। {key} हर विकल्प में भेजता है। सिर्फ़ इस डिवाइस पर।",
+  "computer.files.homeFolder": "होम फ़ोल्डर",
+  "computer.files.changeDefaultFolder": "डिफ़ॉल्ट बदलें",
+  "computer.files.pinnedFolderHint": "इस बातचीत का मौजूदा फ़ोल्डर वही रहेगा। नई बातचीत के लिए डिफ़ॉल्ट फ़ोल्डर बदलें।"
 }

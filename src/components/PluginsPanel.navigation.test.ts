@@ -108,7 +108,7 @@ describe("Apps pop-up", () => {
   it("counts Whop among connected apps", () => {
     fixture.overrides.set(18, true);
     const { html } = render();
-    expect(html).toContain("Connected 2");
+    expect(html).toContain("2 connected");
   });
   it("keeps a safe explicit authorization link and reopens without creating another account", async () => {
     const url = "https://auth.example.test/flow";
@@ -270,7 +270,8 @@ describe("Apps pop-up", () => {
     expect(html).toContain("Connect an app or your own MCP server once. Then choose which bots may use it.");
     expect(html).toContain("glass-surface");
     expect(html).toContain("@container");
-    expect(html).toContain("grid-cols-1 gap-3 @lg:grid-cols-2 @3xl:grid-cols-3");
+    // rows in two columns, one when the pop-up is narrow
+    expect(html).toContain("grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2");
     for (const slug of ["gmail", "slack", "notion"]) expect(html).toContain(`data-app-tile="${slug}"`);
     // the connected app leads the grid
     expect(html.indexOf('data-app-tile="slack"')).toBeLessThan(html.indexOf('data-app-tile="gmail"'));
@@ -295,6 +296,14 @@ describe("Apps pop-up", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "togglePlugins", open: true, surface: "apps" });
   });
 
+  it("drops a selected category when a filter is chosen, so the MCP section comes back", () => {
+    fixture.overrides.set(20, "Design");
+    expect(render().html).not.toContain("MCP inventory");
+    chip(render().nodes, "mcp").props.onClick!();
+    expect(fixture.overrides.get(20)).toBeNull();
+    expect(render().html).toContain("MCP inventory");
+  });
+
   it("shows only connected apps, and no MCP section, under Connected", () => {
     fixture.overrides.set(16, "connected");
     const { html, nodes: tree } = render();
@@ -302,7 +311,50 @@ describe("Apps pop-up", () => {
     expect(html).toContain('data-app-tile="slack"');
     expect(html).not.toContain('data-app-tile="gmail"');
     expect(html).not.toContain("MCP inventory");
-    expect(html).toContain("Connected 1");
+    expect(html).toContain("1 connected");
+  });
+
+  it("groups the catalog into connected apps, category previews and every app, with a View all per section", () => {
+    const categorized = (slug: string, category: string) => ({ ...card(slug), categories: [category] });
+    fixture.overrides.set(CARDS, [
+      categorized("slack", "Communication"),
+      categorized("gmail", "Communication"),
+      ...Array.from({ length: 5 }, (_, index) => categorized(`doc${index}`, "Productivity")),
+      categorized("figma", "Design"),
+      ...["Files", "Finance", "Social", "Analytics"].map((category) => categorized(category.toLowerCase(), category)),
+    ]);
+    const { html, nodes: tree } = render();
+    const headings = [...html.matchAll(/<h3 id="[^"]*"[^>]*>([^<]*)/g)].map((match) => match[1]);
+    expect(headings).toEqual(["Connected", "Productivity", "Communication", "Analytics", "All apps"]);
+    // the five most used categories as pills, the rest under More
+    expect(tree.filter((node) => node.props["data-apps-category"]).map((node) => node.props["data-apps-category"])).toEqual(["Productivity", "Communication", "Analytics", "Design", "Files"]);
+    expect(html).toContain('aria-label="More categories"');
+    // a category pill narrows the list to it and drops the sections
+    tree.find((node) => node.props["data-apps-category"] === "Design")!.props.onClick!();
+    const design = render();
+    expect(design.html.match(/data-app-tile="(?!whop)[^"]*"/g)).toEqual(['data-app-tile="figma"']);
+    expect([...design.html.matchAll(/<h3 id="[^"]*"[^>]*>([^<]*)/g)].map((match) => match[1])).toEqual(["Design"]);
+    expect(chip(design.nodes, "all").props["aria-pressed"]).toBe(false);
+    expect(design.nodes.find((node) => node.props["data-apps-category"] === "Design")!.props["aria-pressed"]).toBe(true);
+    // View all on a category preview opens that category
+    fixture.overrides.set(20, null);
+    const again = render();
+    // only a section with more than it previews offers View all
+    expect(again.html.match(/>View all</g)).toHaveLength(1);
+    const sections = again.nodes.filter((node) => node.props.viewAll);
+    expect(sections.map((node) => node.props.title)).toEqual(["Productivity"]);
+    (sections[0]!.props.viewAll as { onClick: () => void }).onClick();
+    expect(fixture.overrides.get(20)).toBe("Productivity");
+  });
+
+  it("pairs the search with an MCP servers pill and puts the connected count, with app icons, in the header", () => {
+    const { html, nodes: tree } = render();
+    expect(chip(tree, "mcp").props["aria-pressed"]).toBe(false);
+    const indicator = chip(tree, "connected");
+    expect(indicator.props["aria-pressed"]).toBe(false);
+    expect(html).toContain("1 connected");
+    indicator.props.onClick!();
+    expect(fixture.overrides.get(16)).toBe("connected");
   });
 
   it("caps the unsearched catalog so the MCP servers stay a short scroll away", () => {

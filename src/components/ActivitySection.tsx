@@ -110,7 +110,7 @@ export function ActivitySection() {
         <button type="button" onClick={() => void load()} disabled={loading} aria-label={t("activity.refresh")} title={t("activity.refresh")} className="rounded-md p-2 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50">
           {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
         </button>
-        <a href={`/api/admin-activity.csv${query}`} download className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[12.5px] font-medium text-ink hover:bg-control/70">
+        <a href={`/api/admin-activity.csv${query}`} download className="ui-button hover:bg-raised-hover">
           <Download size={13} aria-hidden="true" />{t("activity.export")}
         </a>
       </div>

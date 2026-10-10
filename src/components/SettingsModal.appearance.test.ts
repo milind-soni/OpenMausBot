@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import type { SendKey } from "@/lib/send-key";
+import { en, locales } from "@/locales";
 import type { AppSettingsSection } from "@/state/store";
 import type { Switch } from "./SettingsPrimitives";
 import { SECTIONS, sectionMatches, SettingsModal } from "./SettingsModal";
@@ -278,17 +279,38 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("Older team backups and shareable templates");
   });
 
-  it("uses English fallback for new keys in untranslated languages", () => {
+  it("renders Appearance and its controls in Japanese", () => {
     setLocale("ja");
     const html = render();
-    expect(html).toContain("Appearance");
-    expect(html).toContain('aria-label="Show threads"');
-    expect(html).toContain('aria-label="Pinned bots as circles"');
-    expect(html).toContain('aria-label="Universal pins"');
-    expect(html).toContain("from every group");
-    expect(html).toContain("like Grok Bot");
-    expect(html).toContain("all conversation history and running work");
-    expect(html).not.toContain("settings.threadDisplay");
+    for (const key of [
+      "settings.section.appearance", "settings.threadDisplay.show",
+      "settings.threadDisplay.subtitle", "settings.pinnedCircles.title",
+      "settings.pinnedCircles.subtitle", "settings.universalPins.title",
+      "settings.universalPins.subtitle",
+    ] as const) {
+      expect(locales.ja[key], key).toBeTruthy();
+      expect(locales.ja[key], key).not.toBe(en[key]);
+      expect(html, key).toContain(locales.ja[key]!);
+    }
+  });
+
+  it("uses English fallback for new keys in an incomplete language pack", () => {
+    locales.zz = {};
+    try {
+      setLocale("zz");
+      const html = render();
+      expect(html).toContain("Appearance");
+      expect(html).toContain('aria-label="Show threads"');
+      expect(html).toContain('aria-label="Pinned bots as circles"');
+      expect(html).toContain('aria-label="Universal pins"');
+      expect(html).toContain("from every group");
+      expect(html).toContain("like Grok Bot");
+      expect(html).toContain("all conversation history and running work");
+      expect(html).not.toContain("settings.threadDisplay");
+    } finally {
+      delete locales.zz;
+      setLocale("en");
+    }
   });
 
   it("offers desktop connections as a top-level page without exposing the list remotely", () => {

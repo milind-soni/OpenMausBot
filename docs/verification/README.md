@@ -165,6 +165,9 @@ The [rich tables fixture](rich-tables.md) checks Markdown tables and message-sco
 CSV/TSV previews, large-file virtualization, sorting, search, export and keyboard
 interaction in a disposable workspace.
 
+The [recent files fixture](computer-files.md) mounts the Files panel with synthetic
+digest rows and real message-scoped downloads from a disposable workspace.
+
 The [Data viewer fixture](data.md) checks real DuckDB loading, querying, export,
 restart persistence, result history and the full renderer's 100,000-row grid
 in a disposable workspace with synthetic data.

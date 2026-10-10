@@ -30,7 +30,7 @@ const TONE_CLASS: Record<ChipTone, string> = {
 
 export function ActivityPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
-  const { padClass } = useCaptionChrome();
+  const { padClass, dragProps } = useCaptionChrome();
   const [rows, setRows] = useState<ActivityRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const loadAbort = useRef<AbortController | null>(null);
@@ -105,7 +105,7 @@ export function ActivityPanel({ bot }: { bot: Bot }) {
 
   return (
     <aside aria-label={`${bot.name} activity`} className="animate-panel-in flex h-full w-[400px] max-w-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30">
-      <div className={cn("flex items-center justify-between px-4 py-3", padClass)}>
+      <div {...dragProps} className={cn("flex items-center justify-between px-4 py-3", padClass)}>
         <span className="flex items-center gap-2 text-[15px] font-semibold text-ink">
           <ListChecks size={16} className="text-ink-secondary" /> Activity
         </span>

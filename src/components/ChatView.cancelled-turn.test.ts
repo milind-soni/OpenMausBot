@@ -76,7 +76,7 @@ describe("a cancelled turn", () => {
 
   it("renders the provider sentence as a muted stop with Retry, and resends that message", () => {
     render({ ...bot, messages: [ask, { id: "cancel", role: "bot", kind: "text", at: 2, text: CANCELLED }] });
-    const notice = host.querySelector("[role=status]");
+    const notice = host.querySelector("[role=status]:not([data-chathead-status])");
     expect(notice?.textContent).toContain("Stopped");
     expect(notice?.className).toContain("flex-wrap");
     expect(notice?.className).not.toMatch(/\b(?:ml-|mr-|left-|right-|text-left|text-right)/);

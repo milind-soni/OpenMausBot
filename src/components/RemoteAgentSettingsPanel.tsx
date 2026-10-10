@@ -23,7 +23,7 @@ export function RemoteAgentSettingsPanel({ bot, overlay = false }: {
 }) {
   const { dispatch } = useStore();
   // Docked flush under the Windows caption corner: drop the header 16px.
-  const { padClass } = useCaptionChrome();
+  const { padClass, dragProps } = useCaptionChrome();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -82,7 +82,7 @@ export function RemoteAgentSettingsPanel({ bot, overlay = false }: {
       "animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel",
       overlay ? "md:left-auto md:w-[400px] md:shadow-2xl" : "md:relative md:z-20 md:w-[400px] md:shrink-0",
     )}>
-      <div className={cn("flex items-center justify-between px-4 py-3", padClass)}>
+      <div {...dragProps} className={cn("flex items-center justify-between px-4 py-3", padClass)}>
         <button
           onClick={close}
           aria-label="Collapse remote agent settings"

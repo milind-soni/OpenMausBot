@@ -42,6 +42,10 @@ export interface AskQuestion {
   header?: string;
   multiSelect?: boolean;
   options: AskQuestionOption[];
+  /** false when the provider can only take one of `options` back (an ACP
+   * permission-style question answers with an option id, never text). The
+   * card then offers no free-text "Other". Absent means free text is fine. */
+  custom?: false;
 }
 
 /** Durable payload on a question card. Versioned like the other card
@@ -129,6 +133,8 @@ function parseQuestion(value: unknown): AskQuestion | null {
     ...(header ? { header } : {}),
     ...(value.multiSelect === true ? { multiSelect: true } : {}),
     options,
+    // only meaningful beside options: with none, free text is the only answer
+    ...(value.custom === false && options.length ? { custom: false as const } : {}),
   };
 }
 

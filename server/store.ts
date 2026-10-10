@@ -2834,7 +2834,7 @@ export class Store {
    * model unless the caller hands it another one: a thread opened from
    * another of this bot's threads keeps the model a person picked there. */
   createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full",
-    modelSelection?: ModelSelection): TaskRecord | null {
+    modelSelection?: ModelSelection, cwd?: string): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
@@ -2844,6 +2844,9 @@ export class Store {
       title: threadTitleFrom(title),
       createdAt,
       updatedAt: createdAt,
+      // Only a new task can receive an explicit working folder. The HTTP
+      // caller validates it; subsequent turns use the existing pin unchanged.
+      ...(cwd !== undefined ? { cwd } : {}),
       ...(projectId ? { projectId } : {}),
       ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
       resumeCursors: {},

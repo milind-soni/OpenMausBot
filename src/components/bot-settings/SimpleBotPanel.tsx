@@ -15,6 +15,7 @@ import type { ApprovalMode } from "../../../shared/approval-mode";
 import { approvalModeOptionsFor } from "../ApprovalModeSelector";
 import { collectMessageFiles, splitMessageAttachments } from "../AttachmentGallery";
 import { BotAvatar } from "../Avatar";
+import { useCaptionChrome } from "../DesktopCapabilities";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
 import { ModelPicker } from "../ModelPicker";
 import { ThreadModelsLine } from "../ThreadModelsLine";
@@ -80,6 +81,7 @@ export function SimpleBotPanel({
   onAddSkill: () => void;
 }) {
   const { dispatch } = useStore();
+  const { dragProps } = useCaptionChrome();
   const [tab, setTab] = useState<"details" | "library">("details");
   const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
   const skills = useManagedSkills(bot);
@@ -114,7 +116,7 @@ export function SimpleBotPanel({
 
   return (
     <>
-      <div className={cn("flex shrink-0 items-center justify-end px-4 py-3", headerClassName)}>
+      <div {...dragProps} className={cn("flex shrink-0 items-center justify-end px-4 py-3", headerClassName)}>
         <button
           type="button"
           onClick={onClose}

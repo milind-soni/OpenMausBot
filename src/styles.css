@@ -712,7 +712,8 @@ body {
 }
 
 /* Shared action rhythm. Existing skin tokens supply the colors and radius;
-   use utilities for placement rather than inventing another button size. */
+   use utilities for placement and the control scale below for size, rather
+   than inventing another button size. */
 @layer components {
   .ui-button,
   .ui-icon-button {
@@ -728,7 +729,9 @@ body {
     transition: background-color 120ms ease, color 120ms ease;
   }
   .ui-button {
-    padding: 0.375rem 0.75rem;
+    /* 4px + 20px line + 4px + a 1px border each side = 30px, so the 32px
+       min-height decides the box and the label sits on its center. */
+    padding: 0.25rem 0.75rem;
     border: 1px solid var(--color-hairline);
     background: var(--color-control);
     color: var(--color-ink);
@@ -738,6 +741,105 @@ body {
     padding: 0.375rem;
     color: var(--color-ink-secondary);
   }
+  /* Control scale. `.ui-button` is the 32px default; the size classes step
+     it down for dense rows and inline actions. Every step keeps weight 500
+     and a line box equal to its text height plus leading, so the label sits
+     on the box center. Radii reuse the skin tokens: rounded-lg for buttons,
+     full for pills and chips. */
+  .ui-button-md {
+    min-height: 1.75rem;
+    gap: 0.375rem;
+    padding: 0.125rem 0.625rem;
+    font-size: 13px;
+    line-height: 1.25rem;
+  }
+  .ui-button-sm {
+    min-height: 1.5rem;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem;
+    font-size: 12px;
+    line-height: 1rem;
+  }
+  .ui-button-primary {
+    border-color: transparent;
+    background: var(--color-accent);
+    color: var(--color-accent-ink);
+  }
+  .ui-button-primary:enabled:hover,
+  a.ui-button-primary:hover {
+    background: var(--color-accent);
+    color: var(--color-accent-ink);
+    filter: brightness(1.1);
+  }
+  /* A pill-shaped action in the transcript: run and conversation chips,
+     "load earlier", the failed-turn Retry. Same 28px as `.ui-button-md`. */
+  .ui-pill {
+    display: inline-flex;
+    max-width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 1.75rem;
+    padding: 0.125rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--color-hairline) 40%, transparent);
+    border-radius: 9999px;
+    background: var(--color-panel);
+    color: var(--color-ink-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.25rem;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+  button.ui-pill:enabled:hover,
+  a.ui-pill:hover {
+    background: var(--color-raised);
+    color: var(--color-ink);
+  }
+  button.ui-pill:disabled { opacity: 0.6; }
+  /* A static label: a digest, a count, a status. */
+  .ui-chip {
+    display: inline-flex;
+    max-width: 100%;
+    min-width: 0;
+    align-items: center;
+    gap: 0.25rem;
+    min-height: 1.375rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1rem;
+  }
+  /* Inline code inside prose. Sized off the surrounding text so it reads at
+     the same optical size in a 15px bubble or a 13px note. It stays an
+     inline box, not inline-flex, so a long path can still wrap mid-line;
+     an inline background already centers on the glyphs, and `clone` keeps
+     the padding on every wrapped piece. */
+  .ui-code-chip {
+    padding: 0.125em 0.3em;
+    border-radius: 0.25rem;
+    background: var(--color-inset);
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    line-height: 1;
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+  /* One row of a popover menu: 36px, 14px, icon then label. */
+  .ui-menu-row {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 0.75rem;
+    min-height: 2.25rem;
+    padding: 0.5rem 0.875rem;
+    text-align: left;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 1.25rem;
+  }
+  .ui-menu-row:enabled:hover { background: color-mix(in srgb, var(--color-raised) 70%, transparent); }
+  .ui-menu-row:disabled { opacity: 0.6; }
   .ui-button:enabled:hover,
   .ui-icon-button:enabled:hover {
     background: var(--color-raised-hover);
@@ -754,7 +856,8 @@ body {
   }
   @media (prefers-reduced-motion: reduce) {
     .ui-button,
-    .ui-icon-button { transition: none; }
+    .ui-icon-button,
+    .ui-pill { transition: none; }
   }
 }
 
@@ -1872,4 +1975,20 @@ button:disabled.bg-danger {
     --color-danger: color(display-p3 0.7202 0.1738 0.2207);
     --color-warning: color(display-p3 0.5270 0.3546 0.0278);
   }
+}
+
+/* Window drag regions. A header marked by useCaptionChrome().dragProps is
+   the window's title bar on macOS and frameless Windows; every control in it
+   opts back out so it stays clickable, and so do menus and dialogs, which
+   may overlap a header from a portal later in the DOM (Blink resolves
+   regions in DOM order, so a later no-drag cuts into an earlier drag). The
+   property inherits, so a select's or input's wrapper is cut out too: its
+   chevron or icon overlay would otherwise drag over the field. A modal's
+   full-window backdrop is cut out with its dialog, so a press on it over a
+   header still closes the dialog instead of moving the window. */
+[data-window-drag] :has(> :is(select, input)),
+[data-window-drag] :is(button, a[href], input, select, textarea, label, summary, [role="button"], [role="link"], [role="tab"], [role="switch"], [role="checkbox"], [role="radio"], [role="combobox"], [role="slider"], [role="separator"], [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])),
+:is([role="menu"], [role="listbox"], [role="dialog"], [role="alertdialog"], [role="tooltip"]),
+.fixed:has(> :is([role="dialog"], [role="alertdialog"], [aria-modal="true"])) {
+  -webkit-app-region: no-drag;
 }

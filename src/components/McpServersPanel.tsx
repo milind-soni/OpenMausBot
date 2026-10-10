@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Check,
   CheckCircle2,
   ClipboardPaste,
   FlaskConical,
@@ -610,29 +611,35 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
     const result = whopServer && probe[whopServer.name];
     const failed = error || (result && !result.ok ? result.error : null);
     const pending = busy !== null || signingIn !== null;
-    return <div data-app-tile="whop" className="glass-card flex min-h-[132px] min-w-0 flex-col rounded-2xl p-4">
-      <div className="flex items-start gap-3">
+    // the same row as every other app in the Apps list (PluginsPanel)
+    return <div data-app-tile="whop" className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
+      <div className="flex items-center gap-3">
         <WhopIcon />
-        <div className="min-w-0 flex-1"><div className="text-[14px] font-medium text-ink">Whop</div><p className="mt-0.5 line-clamp-1 text-[12px] text-ink-secondary" title={t("whop.description")}>{t("whop.description")}</p></div>
-      </div>
-      <div className="mt-auto flex items-center justify-between gap-2 pt-3">
-        <span className="text-[12px] font-medium text-success">{whopConnected ? t("apps.connected") : ""}</span>
-        {signingIn ? <button type="button" onClick={() => signInAbort.current?.abort()} className="rounded-full bg-control px-3 py-1.5 text-[12px] text-ink">{t("mcp.auth.cancel")}</button> :
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[14px] font-semibold leading-5 text-ink">Whop</span>
+            {whopConnected && <Check size={13} strokeWidth={2.5} className="shrink-0 text-success" aria-label={t("apps.connected")} />}
+          </div>
+          <p className="truncate text-[12.5px] leading-[18px] text-ink-secondary" title={t("whop.description")}>{t("whop.description")}</p>
+        </div>
+        {signingIn ? <button type="button" onClick={() => signInAbort.current?.abort()} className="inline-flex h-7 shrink-0 items-center rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink">{t("mcp.auth.cancel")}</button> :
           <button type="button" aria-label={t(whopConnected ? "whop.disconnect" : "whop.connect")}
             disabled={pending || (servers !== null && !whopConnected && (Boolean(whopServer?.managedBy) || (restricted && !policy?.mcp.allowlist.length)))}
             onClick={() => void (servers === null ? load() : whopConnected && whopServer ? signOut(whopServer) : connectWhop())}
-            className="flex min-w-[80px] items-center justify-center gap-1.5 rounded-full bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-40">
-            {pending ? <Loader2 size={13} className="animate-spin" /> : servers === null ? t("connectors.action.retry") : t(whopConnected ? "connectors.disconnect" : "connectors.action.connect")}
+            className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink hover:bg-raised-hover disabled:opacity-40">
+            {pending ? <Loader2 size={14} className="animate-spin" /> : servers === null ? t("connectors.action.retry") : t(whopConnected ? "connectors.disconnect" : "connectors.action.connect")}
           </button>}
       </div>
-      {failed && <p role="alert" className="mt-3 text-[12px] text-danger">{typeof failed === "string" ? failed : t(failed.key, failed.params)}</p>}
+      <div className="ps-[52px]">
+      {failed && <p role="alert" className="mt-1.5 text-[12px] text-danger">{typeof failed === "string" ? failed : t(failed.key, failed.params)}</p>}
       {whopServer && renderSignIn(whopServer)}
-      <details className="mt-3 text-[12px] text-ink-secondary">
+      <details className="mt-1 text-[12px] text-ink-secondary">
         <summary className="cursor-pointer">{t("whop.access")}</summary>
         <p className="mt-2 leading-relaxed">{t("whop.notice")}</p>
         <p className="mt-2 leading-relaxed">{t("whop.accessHint")}</p>
         <div className="mt-2 flex flex-wrap gap-2">{(store.bots ?? []).filter((bot) => !bot.hidden).map((bot) => <button key={bot.id} type="button" onClick={() => { dispatch({ type: "togglePlugins", open: false }); dispatch({ type: "toggleSettings", open: true, section: "access", botId: bot.id }); }} className="rounded-lg bg-control px-2.5 py-1.5 text-ink hover:bg-raised-hover">{t("whop.botSettings", { name: bot.name })}</button>)}</div>
       </details>
+      </div>
     </div>;
   }
 
@@ -673,7 +680,7 @@ export function McpServersPanel({ embedded = false, whopCard = false, hideWhop =
                 setError(null);
                 setNotice(null);
               }}
-              className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[12.5px] font-medium text-ink hover:bg-raised-hover disabled:opacity-40"
+              className="ui-button"
             >
               <ClipboardPaste size={14} /> {t("mcp.import")}
             </button>

@@ -1272,7 +1272,7 @@ export type Action =
       /** Local UI recovery hook for voice flows. Never sent to the server. */
       onError?: (message: string) => void;
     }
-  | { type: "newTask"; botId: string; projectId?: string }
+  | { type: "newTask"; botId: string; projectId?: string; cwd?: string; onCreated?: () => void; onError?: (message: string) => void }
   | { type: "switchTask"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
@@ -2432,7 +2432,9 @@ export function reducer(state: AppState, action: Action): AppState {
     case "regenerateTaskTitle":
       return state;
     case "newTask":
-      return { ...state, selectedId: action.botId, activeView: "chat" };
+      // A chosen folder may fail validation. Keep the conversation beneath
+      // its dialog in place until the server confirms the new thread.
+      return action.cwd !== undefined ? state : { ...state, selectedId: action.botId, activeView: "chat" };
     case "switchTask": {
       // Older background frames are already represented by the next server
       // snapshot. Only frames racing that request need replaying over it.
@@ -2983,6 +2985,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const dispatch = useMemo(() => {
     const navigation = new Map<string, number>();
+    let selectionRevision = 0;
     const olderPagesInFlight = new Set<string>();
     let creatingBot = false;
     const showError = (e: unknown) => {
@@ -3099,6 +3102,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
+      // Deferred folder creation may select its bot only while it is still
+      // the latest navigation intent, even if the person went away and back.
+      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap"].includes(action.type)) selectionRevision++;
       // Pin before any await or optimistic state change, including legacy
       // callers such as keyboard shortcuts and voice controls.
       action = pinBotThreadAction(action, stateRef.current.bots);
@@ -3729,18 +3735,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "switchTask": {
           const revision = (navigation.get(action.botId) ?? 0) + 1;
           navigation.set(action.botId, revision);
+          const selectedAtStart = selectionRevision;
           const ready = action.type === "newTask"
             ? botPatchQueue.flush(action.botId)
             : Promise.resolve();
           // A new task's thread is empty, so only the switch needs a page.
           void ready.then(() => api<{ bot: Bot }>(action.type === "newTask"
             ? `/api/bots/${action.botId}/tasks`
-            : `/api/bots/${action.botId}/tasks/${action.threadId}?messages=${MESSAGE_PAGE_SIZE}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId } : {}) }))
+            : `/api/bots/${action.botId}/tasks/${action.threadId}?messages=${MESSAGE_PAGE_SIZE}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, cwd: action.cwd } : {}) }))
             .then((r) => {
+              if (action.type === "newTask") action.onCreated?.();
               if (!r?.bot || navigation.get(action.botId) !== revision) return;
+              const selectsAfterCreation = action.type === "newTask" && action.cwd !== undefined;
+              if (selectsAfterCreation && selectionRevision !== selectedAtStart) return;
               dispatch({ type: "taskSwitched", bot: r.bot });
+              if (selectsAfterCreation) rawDispatch({ type: "select", id: action.botId });
             })
-            .catch(showError);
+            .catch((error) => {
+              if (action.type === "newTask" && action.onError) action.onError(error instanceof Error ? error.message : String(error));
+              else showError(error);
+            });
           break;
         }
         case "renameTask":

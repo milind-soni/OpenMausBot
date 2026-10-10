@@ -1608,5 +1608,8 @@
   "place.view.autoTeam.short": "Compartilhado",
   "pro.name": "MausBot Cloud",
   "settings.sendKey.title": "Enviar mensagens com",
-  "settings.sendKey.subtitle": "Escolha Shift+Enter ou {key} para que Enter comece uma nova linha, útil quando seu método de entrada confirma o texto com Enter, como na digitação em japonês. {key} envia em qualquer opção. Só neste dispositivo."
+  "settings.sendKey.subtitle": "Escolha Shift+Enter ou {key} para que Enter comece uma nova linha, útil quando seu método de entrada confirma o texto com Enter, como na digitação em japonês. {key} envia em qualquer opção. Só neste dispositivo.",
+  "computer.files.homeFolder": "Pasta pessoal",
+  "computer.files.changeDefaultFolder": "Alterar padrão",
+  "computer.files.pinnedFolderHint": "Esta conversa mantém a pasta atual. Altere a pasta padrão para novas conversas."
 }

@@ -54,6 +54,7 @@ import { ClaudeUpdatePrompt } from "./ClaudeUpdatePrompt";
 import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
 import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
 import { failedTurnCause, signedOutEngine } from "@/lib/failed-turn";
+import { plainErrorLine } from "@/lib/plain-error";
 import { openPlaceAction, placeRowViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
 import type { PlaceRow } from "../../shared/place-view";
 import { trialCreditKind, type TrialCreditRefusal } from "../../shared/trial-credit";
@@ -239,7 +240,8 @@ export function ErrorRow({
 }: {
   message: string;
   /** A plain sentence to open with instead of `message` (FailedTurnRow's
-   * signed-out line); `message` then moves under Details. */
+   * signed-out line, or the plain line for a technical cause from
+   * src/lib/plain-error.ts); `message` then moves under Details. */
   headline?: string;
   onRetry?: () => void;
   /** The one next action a failed place names (shared/place-view.ts), in
@@ -271,7 +273,7 @@ export function ErrorRow({
         {macCuaReason &&
           <MacCuaRecoveryActions reason={message} />}
         {message.includes("subscription_sharing_usage_limit_exceeded") ? (
-          <a href={CHATGPT_USAGE_URL} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-app" onClick={(event) => {
+          <a href={CHATGPT_USAGE_URL} target="_blank" rel="noopener noreferrer" className="ui-button ui-button-md mt-2 border-transparent bg-ink text-app hover:brightness-110" onClick={(event) => {
             if (window.ogb?.openExternal) { event.preventDefault(); void openExternalLink(CHATGPT_USAGE_URL); }
           }}>{t("engineSetup.chatgpt.manageUsage")}</a>
         ) : claudeUpdateInstance ? (
@@ -289,7 +291,7 @@ export function ErrorRow({
             <button
               type="button"
               onClick={action.onClick}
-              className="mt-1.5 flex items-center gap-1.5 rounded-full border border-danger/30 px-2.5 py-1 text-[12.5px] hover:bg-danger/15"
+              className="ui-button ui-button-md mt-1.5 rounded-full border-danger/30 bg-transparent text-danger hover:bg-danger/15"
             >
               {action.label}
             </button>
@@ -298,7 +300,7 @@ export function ErrorRow({
           onRetry && (
             <button
               onClick={onRetry}
-              className="mt-1.5 flex items-center gap-1.5 rounded-full border border-danger/30 px-2.5 py-1 text-[12.5px] hover:bg-danger/15"
+              className="ui-button ui-button-md mt-1.5 rounded-full border-danger/30 bg-transparent text-danger hover:bg-danger/15"
             >
               <RefreshCw size={12} /> {t("chat.retry")}
             </button>
@@ -367,10 +369,11 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId }: {
   const credit = trialCreditKind(failedTurnCause(tool.name) ?? "");
   if (credit) return <TrialCreditFailedRow kind={credit} onRetry={onRetry} />;
   const signedOut = signedOutEngine(tool, engine);
+  const cause = failedTurnCause(tool.name) ?? tool.name;
   return (
     <ErrorRow
-      message={failedTurnCause(tool.name) ?? tool.name}
-      headline={signedOut && t("chat.error.signedOut", { name: signedOut.displayName })}
+      message={cause}
+      headline={signedOut ? t("chat.error.signedOut", { name: signedOut.displayName }) : plainErrorLine(cause)}
       onRetry={onRetry}
       setupInstance={tool.setup ? engine : undefined}
       claudeUpdateInstance={tool.claudeUpdate ? claudeUpdateTarget(engine) : undefined}
@@ -811,7 +814,7 @@ const ActivityChip = memo(function ActivityChip({ message, place = "auto" }: { m
         <button
           onClick={() => dispatch({ type: "select", id: comm.groupId })}
           title={t("chat.openConversationWith", { name: comm.withName })}
-          className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+          className="ui-pill"
         >
           <BotAvatar bot={withBot ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} animated={false} />
           <span className="max-w-[480px] truncate">{tool.name}</span>
@@ -1160,10 +1163,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // Simple mode reaches other threads from the sidebar; the header picker is Advanced only.
-  // Windows has no native caption buttons (renderer-drawn, see
-  // WindowCaptionButtons); this header is the window drag region, and the
-  // icon row shifts below the 26px-tall corner the buttons occupy.
-  const { dragStyle: headerDragStyle, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
+  // Without a native title bar (macOS inset lights, frameless Windows) this
+  // header is the window drag region. On Windows the icon row also shifts
+  // below the 26px-tall corner the renderer-drawn caption buttons occupy.
+  const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
   const advanced = useAdvancedMode();
@@ -1370,7 +1373,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       <GlassBar edge="top" className="z-[25]">
       {/* Header */}
       <div
-        style={headerDragStyle}
+        {...headerDragProps}
         className={cn(
           // @container so the chips on the right can fold to icon bubbles
           // when the column is narrow (side panel open, small window). A
@@ -1433,7 +1436,6 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
                 inputClassName="max-w-[220px] rounded-full bg-inset px-2 py-0.5 text-[14px] font-semibold"
               />
               {chiefOfStaffBadge(bot)}
-              {bot.busy && <WorkingDots className="pr-2 text-ink-secondary" />}
             </div>
           ) : (
             <button
@@ -1454,9 +1456,14 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               />
               <span className="min-w-0 truncate text-[14px] font-semibold text-ink">{bot.name}</span>
               {chiefOfStaffBadge(bot)}
-              {bot.busy && <WorkingDots className="text-ink-secondary" />}
             </button>
           )}
+          {/* The pill draws no activity of its own: the sidebar avatar's
+              presence dot, the Stop button beside the model chip and the
+              composer already say a turn is running, at every width. The
+              pill keeps one width either way, and a screen reader still
+              hears when the bot starts working. */}
+          <span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>
           {!bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">Teammates working</span>}
         </div>
         <div
@@ -1555,7 +1562,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             <div className="flex justify-center pt-2">
               <button
                 onClick={showEarlier}
-                className="rounded-full border border-hairline/40 bg-panel px-3 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink"
+                className="ui-pill"
               >
                 {t("chat.showEarlier", { count: hiddenCount })}
               </button>
@@ -1565,7 +1572,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               <button
                 onClick={loadOlder}
                 disabled={olderPending}
-                className="rounded-full border border-hairline/40 bg-panel px-3 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-60"
+                className="ui-pill"
               >
                 {olderPending ? t("chat.loadingEarlier") : t("chat.loadEarlier")}
               </button>
@@ -1598,7 +1605,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             <div className="flex justify-center">
               <button
                 onClick={showLater}
-                className="rounded-full border border-hairline/40 bg-panel px-3 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink"
+                className="ui-pill"
               >
                 {t("chat.showLater", { count: laterCount })}
               </button>
@@ -1606,7 +1613,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           )}
           {computerStarting && (
             <div className="flex justify-start">
-              <div className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
+              <div className="ui-pill">
                 <WorkingDots size={3.5} />
                 {computerStarting}
               </div>

@@ -12,6 +12,7 @@ import {
   type TeamMapSnapshot,
 } from "@/lib/team-map";
 import { cn } from "@/lib/cn";
+import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { placeOffered } from "@/lib/place";
 import { TeamCanvas } from "./TeamCanvas";
 import { TeamDialog } from "./TeamDialog";
@@ -256,6 +257,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
 
 export function TeamMapPage() {
   const { state, dispatch } = useStore();
+  const { dragProps } = useCaptionChrome();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const [snapshot, setSnapshot] = useState<TeamMapSnapshot>(EMPTY_TEAM_MAP_SNAPSHOT);
   const [error, setError] = useState<string | null>(null);
@@ -323,7 +325,7 @@ export function TeamMapPage() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-app text-ink">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline/40 px-6 py-4 max-md:pl-12">
+      <header {...dragProps} className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline/40 px-6 py-4 max-md:pl-12">
         <div>
           <div className="flex items-center gap-2.5">
             <Network size={18} className="text-ink-secondary" />

@@ -413,6 +413,7 @@ const configCalls: Array<{ method: string; params: unknown }> = [];
 // pending server→client permission request id → resolver
 let pendingPermissionId: number | null = null;
 let onPermissionAnswered: ((allowed: boolean) => void) | null = null;
+let lastPermissionCancelled = false;
 // pending server→client cursor/ask_question probe → resolver (the unsupported
 // method the driver must reject rather than guess a shape for)
 let pendingAskQuestionId: number | null = null;
@@ -628,6 +629,7 @@ function handle(msg: any) {
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined) && msg.id === pendingPermissionId) {
     pendingPermissionId = null;
     const chosen = msg.result?.outcome?.optionId;
+    lastPermissionCancelled = msg.result?.outcome?.outcome === "cancelled";
     // which option the client picked, for tests asserting allow_always
     if (process.env.FAKE_ACP_PERMISSION_ANSWER) writeFileSync(process.env.FAKE_ACP_PERMISSION_ANSWER, String(chosen ?? "cancelled"));
     onPermissionAnswered?.(typeof chosen === "string" && chosen.startsWith("allow"));
@@ -1271,6 +1273,12 @@ function handle(msg: any) {
       if (mode === "question") {
         pendingPermissionId = 9002;
         onPermissionAnswered = () => {
+          // FAKE_ACP_HOLD_ON_CANCELLED: a cancelled question leaves the prompt
+          // open until session/cancel, the way Antigravity's agent does
+          if (process.env.FAKE_ACP_HOLD_ON_CANCELLED && lastPermissionCancelled) {
+            hangingPromptId = msg.id;
+            return;
+          }
           out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "answered the question" } } } });
           complete();
         };

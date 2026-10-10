@@ -350,6 +350,8 @@ export interface UpdaterState {
     | "handed-off"
     | "error";
   version?: string;
+  /** the release's notes as published (HTML or Markdown), when the feed has them */
+  releaseNotes?: string;
   percent?: number;
   message?: string;
   /** native work may still be running; recovery requires an app restart */

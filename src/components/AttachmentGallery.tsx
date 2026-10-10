@@ -32,7 +32,7 @@ type MarkdownNode = {
   children?: MarkdownNode[];
 };
 
-function fileIdentity(path: string): string {
+export function fileIdentity(path: string): string {
   // This is only presentation deduplication, never an authorization check.
   // localFilePath has already decoded file:// once, including literal #/?
   // characters in filenames. Only raw Markdown paths have suffixes to strip.

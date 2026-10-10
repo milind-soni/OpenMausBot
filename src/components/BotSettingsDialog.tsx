@@ -57,7 +57,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   const dialogRef = useRef<HTMLElement | null>(null);
   // Windows draws its caption buttons over the top-right corner, where this
   // panel's close button sits; drop the header below them.
-  const { padClass } = useCaptionChrome();
+  const { padClass, dragProps } = useCaptionChrome();
   const [query, setQuery] = useState("");
   // Keep expansion in the store too: header deep links can arrive while
   // this panel is already mounted, including after collapsing the same row.
@@ -384,7 +384,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
             {t("botSettings.simple.back")}
           </button>
         )}
-        <div className={cn("flex shrink-0 items-center justify-between px-4 py-3", !advanced ? undefined : padClass)}>
+        <div {...dragProps} className={cn("flex shrink-0 items-center justify-between px-4 py-3", !advanced ? undefined : padClass)}>
           <span id="bot-settings-title" className="truncate text-[15px] font-semibold text-ink">
             {bot.name}
           </span>

@@ -182,7 +182,7 @@ export function ComputerPanel({
   onOpenVmWorkspace?: (botId: string) => void;
 }) {
   // Docked flush under the Windows caption corner: drop the header 16px.
-  const { padClass } = useCaptionChrome();
+  const { padClass, dragProps } = useCaptionChrome();
   // The panel is a fixed column by default; a drag handle on its left edge
   // makes it wide enough to actually read a page in the Browser tab.
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
@@ -1427,7 +1427,9 @@ export function ComputerPanel({
         className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40 focus-visible:bg-accent/60 max-md:hidden"
       />
       {/* Header: tabs centred as a segmented pill; gear and close pinned to the edges. */}
-      <div className={cn("px-4 py-3", padClass)}>
+      {/* ml-1.5 keeps the header's drag region clear of the resize handle,
+          which comes first in the DOM (a later drag region wins). */}
+      <div {...dragProps} className={cn("ml-1.5 py-3 pl-2.5 pr-4", padClass)}>
         <div className="relative flex min-h-7 items-center justify-center">
           {advanced && (
             <button

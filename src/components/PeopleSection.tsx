@@ -290,7 +290,7 @@ export function PeopleSection() {
           <option value="member">{t("people.roleMember")}</option>
           <option value="admin">{t("people.roleAdmin")}</option>
         </select>
-        <button type="submit" disabled={busy || !draft.trim()} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-semibold text-white hover:brightness-110 disabled:opacity-60">
+        <button type="submit" disabled={busy || !draft.trim()} className="ui-button ui-button-primary">
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}{t("people.invite")}
         </button>
         <button type="button" onClick={() => void load()} disabled={loading || busy} aria-label={t("people.refresh")} title={t("people.refresh")} className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"><RefreshCw size={13} className={cn(loading && "animate-spin")} /></button>

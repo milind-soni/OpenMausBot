@@ -52,6 +52,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
+import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegatedApprovalMode } from "./auto-approve.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import type { CommandAllowlistCandidate, CommandAllowlistResponse } from "../shared/command-allowlist.ts";
@@ -6237,6 +6238,8 @@ function notify(notification: Notification | null) {
 // Group threads: the fold needs to know WHO is talking — the turn engine
 // records the active member here before dispatching its turn.
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string }>();
+/** The level each running room turn was sent with (room-turn-level.ts). */
+const roomTurnLevels = createRoomTurnLevels();
 
 type RoutedBy = NonNullable<Message["routedBy"]>;
 /** Auto-room rounds the decision model routed, by thread: the named
@@ -7911,7 +7914,13 @@ bus.subscribe((event: RuntimeEvent) => {
       // A turn a guest drives on a Cloud home is Ask, room turns included,
       // and no command the owner saved answers for it.
       const guestDriven = cloudGuestDriven(event.threadId);
-      const effectiveApprovalMode = asker && !guestDriven ? approvalModeForTurn(asker, isInternalTurn(event.threadId), event.threadId) : "ask";
+      const ownApprovalMode = (who: BotRecord) => approvalModeForTurn(who, isInternalTurn(event.threadId), event.threadId);
+      // A room turn runs at the level it was sent with, which a Chief's
+      // handoff may have raised (roomTurnApprovalMode). The bot's own level
+      // would make a Full room turn ask on engines that leave requests to us.
+      const effectiveApprovalMode = !asker || guestDriven ? "ask"
+        : group && speaker?.botId === asker.id ? roomTurnLevels.forRequest(event.threadId, asker.id, () => ownApprovalMode(asker))
+          : ownApprovalMode(asker);
       // Native shell descriptors are distinct from computer/MCP permissions;
       // choosing a local desktop must not disable an exact shell grant.
       const command = permission && asker && event.requestId && !event.requiresExplicitApproval && event.command && !guestDriven
@@ -13477,9 +13486,11 @@ async function runGroupMemberTurn(
       });
       finish("timed_out");
     });
+    let releaseTurnLevel = () => {};
     const finish = (value: GroupMemberTurnOutcome) => {
       if (done) return;
       done = true;
+      releaseTurnLevel();
       deadline.stop();
       unsub();
       unregisterStall();
@@ -13527,13 +13538,17 @@ async function runGroupMemberTurn(
     // notes only in a room: a private chat reaches a room through the
     // explicit, disclosed session_search, never automatically
     const roomRecalled = cardContinuation ? "" : autoRecallPrompt(bot, threadId, resolvedLatestImages.text, { conversations: false, userName });
+    // The permission requests this turn raises are judged at the level it
+    // was sent with, a Chief's delegated level included (request.opened).
+    const turnApprovalMode = roomTurnApprovalMode(readyBot, threadId, orchestration);
+    if (!done) releaseTurnLevel = roomTurnLevels.dispatched(threadId, readyBot.id, turnApprovalMode);
     guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         botId: readyBot.id,
         text: withTurnClock(turnClockLine(Date.now(), hostTimeZone()), withRecalled(roomRecalled, text)),
         ...(roomRecalled ? { recalled: roomRecalled } : {}),
         images: turnImages,
-        approvalMode: roomTurnApprovalMode(readyBot, threadId, orchestration),
+        approvalMode: turnApprovalMode,
         toolScope: toolScopeForTurn(readyBot.id),
         ...(roomGuestConfined ? { guestConfined: true, confinedWhy: confinedWhy(threadId) } : {}),
         system: roomSystem.text,
@@ -23433,6 +23448,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      let cwd: string | undefined;
+      if (body.cwd !== undefined) {
+        // Opening a conversation is client-scoped, choosing where its file
+        // tools run has the same authority as editing the bot's folder.
+        if (!auth.scopes.includes("admin")) {
+          return json(res, 403, { error: "Choosing a working folder requires the admin scope" });
+        }
+        const checked = validateBotCwd(body.cwd);
+        if (!checked.ok) return json(res, 400, { error: checked.error });
+        if (!checked.cwd) return json(res, 400, { error: "Choose an existing working folder, or omit cwd to use the bot's default" });
+        cwd = checked.cwd;
+      }
       if (body.approvalMode !== undefined && body.approvalMode !== "ask" && body.approvalMode !== "full") {
         return json(res, 400, { error: "new task approvalMode must be ask or full" });
       }
@@ -23451,7 +23478,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (body.projectId !== undefined && (typeof body.projectId !== "string" || !store.project(bot.id, body.projectId))) {
         return json(res, 400, { error: "projectId must belong to this bot" });
       }
-      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId, undefined, body.approvalMode);
+      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId, undefined, body.approvalMode, undefined, cwd);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       // Who opened it decides who may answer its cards on a shared workspace.
       if (auth.kind === "session") threadStarters.set(task.threadId, actorKey(auth));

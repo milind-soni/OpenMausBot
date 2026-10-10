@@ -33,6 +33,8 @@ import {
 import { repairMarkdownTables } from "../lib/markdown-tables";
 import { TRANSCRIPT_WINDOW_SIZE } from "../lib/transcript-window";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
+import { githubRefFromProps, remarkGithubRefs } from "@/lib/github-refs";
+import { GITHUB_REF_ICONS, LinkHoverCard } from "@/components/LinkHoverCard";
 import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
 import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, saveFailureText, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
@@ -1033,7 +1035,9 @@ function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
   );
 }
 
-function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
+function MarkdownLink({ href, children, ...rest }: { href?: string; children?: ReactNode }) {
+  // SAFETY: react-markdown hands hast data-* attributes through as string props
+  const props = rest as Record<string, unknown>;
   const { threads, currentBotId, message, delivered } = useContext(MessageScopeContext);
   // a canonical thread link is a chip whatever text carries it;
   // a dead one keeps its label as plain text rather than handing
@@ -1047,18 +1051,37 @@ function MarkdownLink({ href, children }: { href?: string; children?: ReactNode 
     const copy = delivered && Object.hasOwn(delivered, fileName(localPath)) ? delivered[fileName(localPath)] : undefined;
     return <LocalFileLink filePath={copy ?? localPath} name={copy ? fileName(localPath) : undefined} message={message}>{children}</LocalFileLink>;
   }
+  if (!href || !/^https?:\/\//i.test(href)) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" dir="auto" className={LINK_CLASS}>
+        {children}
+      </a>
+    );
+  }
+  const github = githubRefFromProps(props, href);
+  const Icon = github ? GITHUB_REF_ICONS[github.kind] : null;
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      dir="auto"
-      className="break-words text-accent underline decoration-accent/40 hover:decoration-accent [unicode-bidi:isolate]"
-    >
-      {children}
-    </a>
+    <LinkHoverCard href={href} github={github}>
+      {(anchor) => Icon ? (
+        // a GitHub reference reads as a small pill. Left to right and
+        // isolated, so "#2547" never turns into "2547#" in a right-to-left
+        // line. The full address is the tooltip.
+        <a {...anchor} href={href} target="_blank" rel="noreferrer" dir="ltr" title={href} data-github-ref={github!.kind} className={GITHUB_REF_CLASS}>
+          <Icon size={13} aria-hidden="true" className="shrink-0 self-center text-ink-tertiary" />
+          <span>{children}</span>
+        </a>
+      ) : (
+        <a {...anchor} href={href} target="_blank" rel="noreferrer" dir="auto" className={LINK_CLASS}>
+          {children}
+        </a>
+      )}
+    </LinkHoverCard>
   );
 }
+
+const LINK_CLASS = "break-words text-accent underline decoration-accent/40 hover:decoration-accent [unicode-bidi:isolate]";
+const GITHUB_REF_CLASS =
+  "inline-flex items-baseline gap-1 whitespace-nowrap rounded-full bg-inset px-1.5 align-baseline font-mono text-[0.88em] text-ink underline decoration-ink/30 underline-offset-2 hover:decoration-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [unicode-bidi:isolate]";
 
 const MARKDOWN_COMPONENTS: Components = {
   pre: MarkdownCode,
@@ -1069,7 +1092,7 @@ const MARKDOWN_COMPONENTS: Components = {
     // but outside it — off the left edge in a right-to-left paragraph,
     // where the line ends.
     return (
-      <code dir="ltr" className="rounded bg-inset px-1 py-px text-[13px] break-words [unicode-bidi:isolate]">{children}</code>
+      <code dir="ltr" className="ui-code-chip break-words [unicode-bidi:isolate]">{children}</code>
     );
   },
   // markdown never emits a span itself (no raw HTML); the only
@@ -1176,7 +1199,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered }}>
       <div className="chat-md min-w-0 [&>*+*]:mt-2">
         <Markdown
-          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkGithubRefs, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
           rehypePlugins={mathPlugin ? [mathPlugin] : []}
           urlTransform={chatUrlTransform}
           components={MARKDOWN_COMPONENTS}

@@ -5,12 +5,13 @@
 // arrived as "Deny / Always allow / Allow once" over a question like "which
 // model should this bot run on?", which is not an answer to anything.
 //
-// One tab per question (the model names them), the model's options as rows
-// with their descriptions, an "Other" row for a reply it did not think of,
-// and a single submit that sends every answer back at once — the shape a
-// person can read at a glance and answer without scrolling back up.
-import { useMemo, useState } from "react";
-import { Check, MessageCircleQuestion } from "lucide-react";
+// The question itself is the title. Its options sit in one rounded group,
+// each row keyed by a letter (A, B, C) that is also its keyboard shortcut,
+// with a free-text field under the group for a reply the model did not
+// think of. A set of questions gets one tab each and a single submit. It
+// sits in the shared AskCard shell, and folds into one line once answered.
+import { useMemo, useState, type KeyboardEvent } from "react";
+import { Check, X } from "lucide-react";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -18,8 +19,18 @@ import {
   answerWithoutPreamble,
   formatQuestionAnswers,
   MAX_CUSTOM_ANSWER,
+  questionAnswersByQuestion,
   type AskQuestion,
 } from "../../shared/ask-question";
+import {
+  ASK_PRIMARY_BUTTON,
+  ASK_QUIET_BUTTON,
+  ASK_SMALL_PILL,
+  AskCard,
+  AskSettledLine,
+  moveChoiceFocus,
+  returnFocusToComposer,
+} from "./AskCard";
 import { ExpandableText } from "./ExpandableText";
 
 /** What each question has been answered with so far. Option labels and the
@@ -28,7 +39,7 @@ import { ExpandableText } from "./ExpandableText";
 interface Draft {
   picked: string[];
   custom: string;
-  /** "Other" is open. An empty open field is not an answer. */
+  /** the field holds an answer of their own. An empty field is not one. */
   other: boolean;
 }
 
@@ -42,6 +53,58 @@ function answersOf(draft: Draft): string[] {
 /** The tab label: the model's own header, or a number when it gave none. */
 function tabLabel(question: AskQuestion, index: number): string {
   return question.header ?? t("question.tab.numbered", { index: index + 1 });
+}
+
+/** The key that picks option `index`: A, B, C… Shown on the row and
+ * pressed on the keyboard. Latin in every locale, since it is a key. */
+export function choiceKey(index: number): string {
+  return String.fromCharCode(65 + index);
+}
+
+/** Option index for a pressed key, or -1. Plain letters only: a shortcut
+ * never fires while typing in a field or with a modifier held. */
+export function choiceIndexForKey(key: string, count: number): number {
+  if (key.length !== 1) return -1;
+  const index = key.toUpperCase().charCodeAt(0) - 65;
+  return index >= 0 && index < count && index < 26 ? index : -1;
+}
+
+/** Up to this length the question is the card's title. A longer one keeps
+ * a short title and opens below it with its own "show full question". */
+const TITLE_MAX = 160;
+
+const CHOICE_ROW =
+  "flex w-full items-center gap-3 px-3 py-2.5 text-start transition-colors focus-visible:bg-ink/[0.06] focus-visible:outline-none";
+const CHOICE_ROW_IDLE = "hover:bg-ink/[0.04]";
+const CHOICE_ROW_PICKED = "bg-ink/[0.07]";
+
+/**
+ * The one line an answered card folds into: what was asked, then what was
+ * answered. A single question names itself by its header (or its text); a
+ * set lists each header beside its answer. The answer text the server kept
+ * is read back per question, so the line never shows the model-facing
+ * Q:/A: lead-in.
+ */
+export function settledQuestionLine(
+  questions: readonly AskQuestion[],
+  answer: string | null | undefined,
+): { label: string; value: string } {
+  if (!answer) return { label: t("question.status.answered"), value: "" };
+  const byQuestion = questionAnswersByQuestion(answer, questions);
+  const flat = (text: string) => text.replace(/\s+/g, " ").trim();
+  if (questions.length === 1) {
+    const only = questions[0]!;
+    const value = byQuestion[only.question] ?? answerWithoutPreamble(answer);
+    return { label: only.header ?? only.question, value: flat(value) };
+  }
+  const parts = questions.flatMap((question, index) => {
+    const value = byQuestion[question.question];
+    return value ? [`${tabLabel(question, index)}: ${flat(value)}`] : [];
+  });
+  return {
+    label: t("question.status.answered"),
+    value: parts.length ? parts.join(" · ") : flat(answerWithoutPreamble(answer)),
+  };
 }
 
 export function QuestionCard({
@@ -92,7 +155,7 @@ export function QuestionCard({
     }
     // Single-select is a radio group: picking replaces, and picking an
     // option means the free-text answer was not the one they wanted.
-    update(currentIndex, { picked: [label], other: false });
+    update(currentIndex, { picked: [label], other: false, custom: "" });
     // Move to the next question they still owe an answer to, the way the
     // tabs would have been clicked anyway. The last one stays put so the
     // submit button is under the cursor that just chose.
@@ -100,13 +163,15 @@ export function QuestionCard({
     if (next >= 0) setActive(next);
   };
 
-  const toggleOther = () => {
+  // Typing an answer of their own replaces a single pick: the field is the
+  // answer now. A multi-select keeps its picks beside the typed one.
+  const type = (value: string) => {
     if (settled) return;
-    if (draft.other) {
-      update(currentIndex, { other: false });
-      return;
-    }
-    update(currentIndex, { other: true, ...(current.multiSelect ? {} : { picked: [] }) });
+    update(currentIndex, {
+      custom: value,
+      other: value.trim().length > 0,
+      ...(current.multiSelect || !value.trim() ? {} : { picked: [] }),
+    });
   };
 
   const submit = () => {
@@ -114,6 +179,7 @@ export function QuestionCard({
     const answer = formatQuestionAnswers(questions, questions.map((_, index) => answersOf(drafts[index] ?? EMPTY)));
     if (!answer) return;
     setSent(answer);
+    returnFocusToComposer();
     dispatch({
       type: "decideRequest",
       threadId,
@@ -126,169 +192,192 @@ export function QuestionCard({
     });
   };
 
-  return (
-    <div
-      role="group"
-      aria-label={t("question.aria.card")}
-      className={cn(
-        "w-full max-w-[840px] rounded-2xl border bg-card p-4",
-        settled ? "border-hairline/30 opacity-70" : "border-accent/40",
-      )}
-    >
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="text-[15px] font-semibold text-ink">
-          {bot ? t("question.card.named", { name: bot.name }) : t("question.card.title")}
-        </div>
-        {questions.length > 1 && !settled && (
-          <span className="shrink-0 text-[11px] tabular-nums text-ink-secondary">
-            {t("question.progress", { answered: answeredCount, count: questions.length })}
-          </span>
-        )}
-      </div>
+  if (settled) {
+    const answer = card.answeredText ?? sent;
+    // A question nobody answered (the run ended, or it was closed) is not
+    // "answered": say so, and offer nothing to expand.
+    if (!answer && card.answered && card.answered !== "answer") {
+      return (
+        <AskSettledLine ariaLabel={t("question.aria.card")} icon={<X size={13} />}>
+          {t("question.status.closed")}
+        </AskSettledLine>
+      );
+    }
+    return <SettledQuestion questions={questions} answer={answer} />;
+  }
 
+  const single = questions.length === 1;
+  const named = bot ? t("question.card.named", { name: bot.name }) : t("question.card.title");
+  // The question is the title, the way a person would ask it. A long one,
+  // or a set of them, keeps a short title and shows the text below.
+  const questionIsTitle = single && current.question.length <= TITLE_MAX;
+  const title = questionIsTitle ? current.question : single && current.header ? current.header : named;
+  const meta = !single ? t("question.progress", { answered: answeredCount, count: questions.length }) : undefined;
+  const multi = Boolean(current.multiSelect);
+  const freeText = current.custom !== false;
+
+  // A, B, C pick an option from the card itself or a choice row. Not from a
+  // text field, and not from another control (a tab), where a letter
+  // should do nothing.
+  const onCardKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (target.closest("input, textarea, select, [contenteditable]")) return;
+    if (target.closest("button, a") && !target.closest("[data-ask-choice]")) return;
+    const index = choiceIndexForKey(event.key, current.options.length);
+    if (index < 0) return;
+    event.preventDefault();
+    choose(current.options[index]!.label);
+  };
+
+  return (
+    <AskCard
+      ariaLabel={t("question.aria.card")}
+      plain
+      title={title}
+      meta={meta}
+      onKeyDown={onCardKey}
+      footer={
+        <>
+          <span className="me-auto text-[12px] text-ink-tertiary">{t("question.status.waiting")}</span>
+          <button type="button" onClick={submit} disabled={!complete} className={ASK_PRIMARY_BUTTON}>
+            {questions.length > 1 ? t("question.submitAll") : t("question.submit")}
+          </button>
+        </>
+      }
+    >
       {card.questionRequest?.origin === "output" && (
-        <div className="mt-1 text-[12px] text-ink-secondary">{t("question.origin.badge")}</div>
+        <div className="-mt-1 mb-1.5 text-[12px] text-ink-secondary">{t("question.origin.badge")}</div>
       )}
 
       {questions.length > 1 && (
-        <div role="tablist" aria-label={t("question.aria.tabs")} className="mt-3 flex flex-wrap gap-1">
+        <div role="tablist" aria-label={t("question.aria.tabs")} className="-mt-0.5 mb-2 flex flex-wrap items-center gap-2">
           {questions.map((question, index) => (
             <button
               key={`${index}-${question.question}`}
+              type="button"
               role="tab"
               aria-selected={index === currentIndex}
               onClick={() => setActive(index)}
               className={cn(
-                "flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] transition-colors",
+                ASK_SMALL_PILL,
                 index === currentIndex
-                  ? "bg-control text-ink"
-                  : "text-ink-secondary hover:bg-control/60 hover:text-ink",
+                  ? "bg-ink/[0.07] text-ink"
+                  : "text-ink-secondary hover:bg-ink/[0.07] hover:text-ink",
               )}
             >
-              {answered[index] && <Check size={12} className="text-success" />}
+              {answered[index] && <Check size={14} className="text-success" />}
               {tabLabel(question, index)}
             </button>
           ))}
         </div>
       )}
 
-      <ExpandableText text={current.question} className="mt-3 text-[15px] leading-relaxed text-ink" />
-      {current.multiSelect && !settled && (
-        <div className="mt-1 text-[12.5px] text-ink-secondary">{t("question.multiHint")}</div>
+      {!questionIsTitle && (
+        <ExpandableText text={current.question} className="mb-2.5 text-[14px] leading-relaxed text-ink" />
       )}
+      {multi && <div className="-mt-1 mb-2 text-[12px] text-ink-tertiary">{t("question.multiHint")}</div>}
 
-      {!settled && (
+      {current.options.length > 0 && (
         <div
-          role={current.multiSelect ? "group" : "radiogroup"}
+          role={multi ? "group" : "radiogroup"}
           aria-label={current.question}
-          className="mt-3 overflow-hidden rounded-lg border border-hairline/40"
+          onKeyDown={moveChoiceFocus}
+          // one rounded group with hairlines between the rows
+          // (an ink tint rather than `hairline`, which vanishes on the
+          // composer surface in the dark skins)
+          className="divide-y divide-ink/[0.12] overflow-hidden rounded-2xl border border-ink/[0.12]"
         >
           {current.options.map((option, index) => {
             const picked = draft.picked.includes(option.label);
             return (
               <button
                 key={option.label}
-                role={current.multiSelect ? "checkbox" : "radio"}
+                type="button"
+                data-ask-choice=""
+                role={multi ? "checkbox" : "radio"}
                 aria-checked={picked}
+                aria-keyshortcuts={choiceKey(index)}
                 onClick={() => choose(option.label)}
-                className={cn(
-                  "flex w-full items-start gap-3 px-3 py-2.5 text-left",
-                  index > 0 && "border-t border-hairline/40",
-                  // `raised` is the same value as the card in the light
-                  // skins; `raised-hover` is the one tone every skin
-                  // guarantees stands off a surface.
-                  picked ? "bg-raised-hover" : "hover:bg-raised-hover/60",
-                )}
+                // the row follows the chat's direction, so the key badge
+                // sits at the start and mirrors in a right-to-left chat
+                className={cn(CHOICE_ROW, picked ? CHOICE_ROW_PICKED : CHOICE_ROW_IDLE)}
               >
-                <Marker checked={picked} multi={Boolean(current.multiSelect)} />
-                <span className="min-w-0">
-                  <span className="block text-[14.5px] font-medium text-ink">{option.label}</span>
+                <KeyBadge letter={choiceKey(index)} picked={picked} />
+                <span className="min-w-0 flex-1">
+                  {/* plaintext bidi: each label orders its own script, while
+                      it still lines up at the row's start beside the badge */}
+                  <span className="block break-words text-[15px] leading-6 text-ink [unicode-bidi:plaintext]">{option.label}</span>
                   {option.description && (
-                    <span className="block text-[13px] leading-snug text-ink-secondary">{option.description}</span>
+                    <span className="block break-words text-[13px] leading-snug text-ink-secondary [unicode-bidi:plaintext]">{option.description}</span>
                   )}
                 </span>
+                {multi && picked && <Check size={16} strokeWidth={2.5} aria-hidden="true" className="shrink-0 text-accent-text" />}
               </button>
             );
           })}
-          <button
-            role={current.multiSelect ? "checkbox" : "radio"}
-            aria-checked={draft.other}
-            onClick={toggleOther}
-            className={cn(
-              "flex w-full items-center gap-3 px-3 py-2.5 text-left",
-              current.options.length > 0 && "border-t border-hairline/40",
-              draft.other ? "bg-raised-hover" : "hover:bg-raised-hover/60",
-            )}
-          >
-            <Marker checked={draft.other} multi={Boolean(current.multiSelect)} />
-            <span className="text-[14.5px] text-ink">{t("question.other")}</span>
-          </button>
-          {draft.other && (
-            <div className="border-t border-hairline/40 px-3 py-2.5">
-              <input
-                autoFocus
-                dir="auto"
-                value={draft.custom}
-                maxLength={MAX_CUSTOM_ANSWER}
-                onChange={(event) => update(currentIndex, { custom: event.target.value })}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && complete) submit();
-                }}
-                placeholder={t("question.otherPlaceholder")}
-                className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14.5px] text-ink placeholder:text-ink-secondary focus:outline-none"
-              />
-            </div>
+        </div>
+      )}
+      {/* an options-only question (an ACP engine answers with an option
+          id, never text) has no free-text answer it could send */}
+      {freeText && (
+        <input
+          dir="auto"
+          value={draft.custom}
+          maxLength={MAX_CUSTOM_ANSWER}
+          aria-label={current.options.length ? t("question.otherPlaceholder") : current.question}
+          onChange={(event) => type(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing && complete) submit();
+          }}
+          placeholder={t("question.otherPlaceholder")}
+          className={cn(
+            "block h-11 w-full rounded-xl border border-ink/[0.12] bg-inset px-3 text-[15px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70",
+            current.options.length > 0 && "mt-2.5",
           )}
-        </div>
+        />
       )}
-
-      {settled ? (
-        <div className="mt-3 flex items-start gap-1.5 text-[13px] text-ink-secondary">
-          <Check size={14} className="mt-0.5 shrink-0 text-success" />
-          <span className="whitespace-pre-wrap break-words">
-            {(() => {
-              const answer = card.answeredText ?? sent;
-              return answer ? answerWithoutPreamble(answer) : t("question.status.answered");
-            })()}
-          </span>
-        </div>
-      ) : (
-        <div className="mt-3 flex items-center justify-end gap-3">
-          <span className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-            <MessageCircleQuestion size={14} className="text-accent" />
-            {t("question.status.waiting")}
-          </span>
-          <button
-            onClick={submit}
-            disabled={!complete}
-            className="rounded-full bg-accent px-3.5 py-1.5 text-[13.5px] font-medium text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {questions.length > 1 ? t("question.submitAll") : t("question.submit")}
-          </button>
-        </div>
-      )}
-    </div>
+    </AskCard>
   );
 }
 
-/** The radio dot / checkbox tick. Drawn rather than an <input> so the whole
- * row stays one button and the hit target is the row, not the 16px circle. */
-function Marker({ checked, multi }: { checked: boolean; multi: boolean }) {
+/** The answered card: one line, with the whole answer one tap away. */
+function SettledQuestion({ questions, answer }: { questions: readonly AskQuestion[]; answer: string | null }) {
+  const [open, setOpen] = useState(false);
+  const line = settledQuestionLine(questions, answer);
+  const full = answer ? answerWithoutPreamble(answer) : "";
   return (
-    <span
-      aria-hidden
-      className={cn(
-        "mt-0.5 flex size-4 shrink-0 items-center justify-center border",
-        multi ? "rounded-[5px]" : "rounded-full",
-        checked ? "border-accent bg-accent" : "border-hairline",
+    <AskSettledLine
+      ariaLabel={t("question.aria.card")}
+      action={full && (
+        <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className={ASK_QUIET_BUTTON}>
+          {open ? t("question.hideDetails") : t("question.details")}
+        </button>
+      )}
+      detail={open && full && (
+        <div dir="auto" className="ms-[19px] mt-1.5 whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 text-[12.5px] leading-relaxed text-ink-secondary">
+          {full}
+        </div>
       )}
     >
-      {checked &&
-        (multi ? (
-          <Check size={11} className="text-white" strokeWidth={3} />
-        ) : (
-          <span className="size-1.5 rounded-full bg-white" />
-        ))}
+      <span>{line.label}</span>
+      {line.value && <span className="text-ink-secondary"> · {line.value}</span>}
+    </AskSettledLine>
+  );
+}
+
+/** The letter that picks a row. Small and neutral, a touch stronger when
+ * its row is the pick. */
+function KeyBadge({ letter, picked }: { letter: string; picked: boolean }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        "flex size-6 shrink-0 items-center justify-center rounded-md text-[12px] font-medium leading-none transition-colors",
+        picked ? "bg-ink/[0.16] text-ink" : "bg-ink/[0.08] text-ink-secondary",
+      )}
+    >
+      {letter}
     </span>
   );
 }

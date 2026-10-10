@@ -639,6 +639,26 @@ describe("ChatMarkdown attachments", () => {
     expect(html).not.toContain("C:/Users/Maus/report.md");
   });
 
+  it("keeps delivered-file downloads scoped alongside GitHub reference pills", () => {
+    const save = vi.spyOn(AttachmentPreview, "useLocalFileSave");
+    const message = { threadId: "thread-1", messageId: "message-1" };
+    try {
+      const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+        text: "See https://github.com/a/app/pull/7 and [report.pdf](/work/report.pdf).",
+        message,
+        delivered: { "report.pdf": "/store/delivered-report.pdf" },
+      }));
+      expect(html).toContain('data-github-ref="pull"');
+      expect(html).toContain("<span>#7</span>");
+      expect(html).toContain('title="Save a copy"');
+      expect(save).toHaveBeenCalledWith("/store/delivered-report.pdf", "report.pdf", message);
+      expect(html).not.toContain("/store/delivered-report.pdf");
+      expect(html).not.toContain("/work/report.pdf");
+    } finally {
+      save.mockRestore();
+    }
+  });
+
   it("routes a backslash Windows path through the scoped file handlers, every backslash intact", () => {
     const save = vi.spyOn(AttachmentPreview, "useLocalFileSave");
     const preview = vi.spyOn(AttachmentPreview, "MarkdownImagePreview");

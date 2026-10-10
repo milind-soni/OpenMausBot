@@ -2,7 +2,8 @@ import { Children, createElement, isValidElement, type EffectCallback, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ManagedDesktopBridge, ManagedDesktopState } from "../../electron/managed-desktop.mjs";
-import { setLocale } from "@/lib/i18n";
+import { setLocale, t } from "@/lib/i18n";
+import { locales } from "@/locales";
 
 const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], updating: false,
   store: { bots: [] as unknown[], instances: [] as unknown[], dispatch: (() => {}) as (action: unknown) => void, flushBotPatches: (async () => null) as (botId: string) => Promise<unknown> } }));
@@ -236,15 +237,22 @@ describe("optional desktop Organisation settings", () => {
     expect(render().html).not.toContain("ABCDE-FGHIJ");
   });
 
-  it("shows safe errors and a usable empty-model state with English fallback", async () => {
-    setLocale("ja");
-    await ready({ ...connected, providers: [] });
-    expect(render().html).toContain("No company models are available yet");
-    vi.mocked(bridge.refresh).mockRejectedValueOnce(new Error("Private /path token-secret"));
-    button("Refresh").props.onClick!(); await flush();
-    expect(render().html).toContain("Could not complete this action");
-    expect(render().html).not.toContain("token-secret");
-    expect(render().html).not.toContain("organization.noModels");
+  it.each(["ja", "zz"])("shows safe errors and a usable empty-model state in %s", async (locale) => {
+    // Test fallback with a genuinely incomplete pack, not a shipped translation.
+    locales.zz = {};
+    try {
+      setLocale(locale);
+      await ready({ ...connected, providers: [] });
+      expect(render().html).toContain(t("organization.noModels"));
+      vi.mocked(bridge.refresh).mockRejectedValueOnce(new Error("Private /path token-secret"));
+      button(t("organization.refresh")).props.onClick!(); await flush();
+      expect(render().html).toContain(t("organization.actionFailed"));
+      expect(render().html).not.toContain("token-secret");
+      expect(render().html).not.toContain("organization.noModels");
+    } finally {
+      delete locales.zz;
+      setLocale("en");
+    }
   });
 
   it("keeps an action error across same-status heartbeats and clears it after a real status change", async () => {

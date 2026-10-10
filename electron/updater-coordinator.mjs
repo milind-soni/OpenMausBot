@@ -6,6 +6,19 @@
 // describing what is left to do, which the card renders.
 import { updateErrorMessage, updateErrorNeedsPerson } from "./update-errors.mjs";
 
+/** electron-updater's release notes as one string for the renderer: the
+ * GitHub provider gives the release body (HTML), a multi-release feed an
+ * array of { version, note }. Capped, because it rides every state broadcast. */
+export function releaseNotesText(notes) {
+  const text = typeof notes === "string"
+    ? notes
+    : Array.isArray(notes)
+      ? notes.map((entry) => (typeof entry?.note === "string" ? entry.note : "")).filter(Boolean).join("\n")
+      : "";
+  const trimmed = text.trim();
+  return trimmed ? trimmed.slice(0, 8000) : undefined;
+}
+
 export function createUpdaterCoordinator(updater, setState, { handOffInstall = null, nativeStaging = false } = {}) {
   let checkOperation = null;
   // Set from downloadUpdate's resolution: the paths electron-updater staged.
@@ -75,7 +88,12 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
   // person asked for this check, or when only they can fix it (routeError).
   updater.on("update-available", (info) => {
     if (checkOwnsState()) {
-      download(Boolean(checkOperation?.manual), { version: info?.version, percent: undefined, message: undefined });
+      download(Boolean(checkOperation?.manual), {
+        version: info?.version,
+        releaseNotes: releaseNotesText(info?.releaseNotes),
+        percent: undefined,
+        message: undefined,
+      });
     }
   });
   updater.on("update-not-available", () => {

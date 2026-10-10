@@ -28,7 +28,14 @@ function friendlyError(message?: string): string {
   return message.split("\n")[0].slice(0, 140);
 }
 
-export function UpdateBanner() {
+type UpdateBannerProps = {
+  /** The sidebar is in view, so its round update button (UpdateIndicator)
+   * already offers the ready update and its restart. The popup then keeps
+   * to what that button does not cover: a hand-off to finish or a failure. */
+  sidebarIndicator?: boolean;
+};
+
+export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
   const s = useUpdaterState();
   // dismissal is per status+version, so the popup returns for the next update
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -40,6 +47,7 @@ export function UpdateBanner() {
   useEffect(() => setPending(null), [status]);
 
   if (!s || s.status === "idle" || s.status === "checking" || s.status === "downloading" || s.status === "preparing") return null;
+  if (sidebarIndicator && (s.status === "downloaded" || s.status === "installing")) return null;
   const key = `${s.status}:${s.version ?? ""}`;
   if (dismissed === key) return null;
   const updater = window.ogb!.updater!;

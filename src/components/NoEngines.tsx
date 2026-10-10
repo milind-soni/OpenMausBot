@@ -10,6 +10,7 @@ import { useStore } from "@/state/store";
 import { EngineGroupLabel } from "@/components/EngineGroupLabel";
 import { EngineSetup, installCommandFor } from "@/components/EngineSetup";
 import { InstanceProviderMark } from "@/components/ProviderIcons";
+import { WindowDragStrip } from "@/components/DesktopCapabilities";
 import { splitEngineRail } from "@/lib/engine-rail";
 import { t } from "@/lib/i18n";
 import { brand } from "../lib/brand";
@@ -29,7 +30,8 @@ export function NoEngines() {
 
   if (remoteClient) {
     return (
-      <main className="flex h-full min-w-0 flex-1 items-center justify-center bg-app px-6">
+      <main className="relative flex h-full min-w-0 flex-1 items-center justify-center bg-app px-6">
+        <WindowDragStrip />
         <div className="max-w-[520px] rounded-2xl border border-hairline/40 bg-card p-6 text-center">
           <h1 className="text-[20px] font-semibold text-ink">The host needs an agent engine</h1>
           <p className="mt-2 text-[13.5px] leading-relaxed text-ink-secondary">
@@ -59,7 +61,8 @@ export function NoEngines() {
     });
 
   return (
-    <main className="flex h-full min-w-0 flex-1 flex-col overflow-y-auto bg-app">
+    <main className="relative flex h-full min-w-0 flex-1 flex-col overflow-y-auto bg-app">
+      <WindowDragStrip />
       <div className="mx-auto w-full max-w-[560px] px-6 py-12">
         <h1 className="text-[20px] font-semibold text-ink">{t("noEngines.title")}</h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-secondary">

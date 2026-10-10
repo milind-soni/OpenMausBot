@@ -12,10 +12,10 @@ vi.mock("../lib/brand", () => ({ brand: () => ({ name: "OpenMausBot" }) }));
 import { UpdateBanner } from "./UpdateBanner";
 
 afterEach(() => vi.unstubAllGlobals());
-function render(state: UpdaterState, window: object = { ogb: { updater: {} } }) {
+function render(state: UpdaterState, window: object = { ogb: { updater: {} } }, sidebarIndicator = false) {
   fixture.state = state;
   vi.stubGlobal("window", window);
-  return renderToStaticMarkup(createElement(UpdateBanner));
+  return renderToStaticMarkup(createElement(UpdateBanner, { sidebarIndicator }));
 }
 
 const LOCAL = "http://127.0.0.1:8799";
@@ -104,5 +104,15 @@ describe("UpdateBanner", () => {
     expect(html).toContain("Free some space");
     expect(html).toContain("Quit and reopen OpenMausBot");
     expect(html).not.toContain("Try again</button>");
+  });
+
+  it("leaves the ready update to the sidebar's update button while the sidebar is in view", () => {
+    expect(render({ status: "downloaded", version: "1.2.3", installMode: "restart" }, undefined, true)).toBe("");
+    expect(render({ status: "installing", version: "1.2.3" }, undefined, true)).toBe("");
+    // a drawer-hidden sidebar keeps the popup as before
+    expect(render({ status: "downloaded", version: "1.2.3", installMode: "restart" }, undefined, false)).toContain("Restart");
+    // what the button does not cover still pops up
+    expect(render({ status: "handed-off", version: "1.2.3", installMode: "handoff", command: "sudo apt install ./x.deb" }, undefined, true)).toContain("Finish in a terminal");
+    expect(render({ status: "error", message: "boom" }, undefined, true)).toContain("Update failed");
   });
 });

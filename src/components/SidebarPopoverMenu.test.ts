@@ -7,8 +7,10 @@ vi.mock("./MenuMotion", () => ({ useMenuMotion: () => ({ shown: true, exitProps:
 vi.mock("@/hooks/use-popover-dismiss", () => ({ usePopoverDismiss: () => {} }));
 import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 
+// The inline "below" sheet: the anchored "above" one renders in a portal
+// (SidebarPopoverMenu.anchored.test.ts drives that one in a DOM).
 const render = (items: Parameters<typeof SidebarPopoverMenu>[0]["items"]) =>
-  renderToStaticMarkup(createElement(SidebarPopoverMenu, { items, ariaLabel: "Menu", renderTrigger: () => "trigger" }));
+  renderToStaticMarkup(createElement(SidebarPopoverMenu, { items, ariaLabel: "Menu", placement: "below", renderTrigger: () => "trigger" }));
 
 it("draws an item's second line (where it connects) and third line (a note) under its label", () => {
   const html = render([

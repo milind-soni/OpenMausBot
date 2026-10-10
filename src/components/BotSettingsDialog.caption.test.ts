@@ -18,10 +18,11 @@ import { DesktopCapabilitiesProvider } from "./DesktopCapabilities";
 
 const bot = { id: "bot-1", name: "Maily" } as never as Bot;
 // The provider reads window.ogb.platform on render, so each case sees its stub.
-const header = () => {
+const headerTag = () => {
   const html = renderToStaticMarkup(createElement(DesktopCapabilitiesProvider, null, createElement(BotSettingsDialog, { bot })));
-  return html.match(/<div class="([^"]*)"><span id="bot-settings-title"/)?.[1] ?? "";
+  return html.match(/<div[^>]*>(?=<span id="bot-settings-title")/)?.[0] ?? "";
 };
+const header = () => headerTag().match(/class="([^"]*)"/)?.[1] ?? "";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -37,4 +38,14 @@ describe("bot settings caption inset", () => {
     expect(classes).toContain("py-3");
     expect(classes).not.toContain("pt-[28px]");
   });
+
+  it.each([["darwin", true], ["win32", true], ["linux", false]] as const)(
+    "makes the header a window drag region on %s: %s",
+    (platform, drags) => {
+      vi.stubGlobal("window", { ogb: { platform } });
+      const tag = headerTag();
+      expect(tag.includes("data-window-drag")).toBe(drags);
+      expect(tag.includes("-webkit-app-region:drag")).toBe(drags);
+    },
+  );
 });

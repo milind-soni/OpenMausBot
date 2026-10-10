@@ -2242,6 +2242,18 @@ describe("Store task working folder", () => {
     expect(store.pinTaskCwd(bot.id, next.threadId)).toBe("/tmp/project-b");
   });
 
+  it("persists a new task's explicit folder before its first turn without changing the bot default", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ cwd: "/tmp/default-project" });
+    const task = store.createTask(bot.id, "Explicit project", true, undefined, undefined, undefined, undefined, "/tmp/chosen-project")!;
+    expect(task.cwd).toBe("/tmp/chosen-project");
+    expect(bot.cwd).toBe("/tmp/default-project");
+    const reloaded = new Store(selection);
+    reloaded.patchBot(bot.id, { cwd: "/tmp/later-project" });
+    expect(reloaded.pinTaskCwd(bot.id, task.threadId)).toBe("/tmp/chosen-project");
+    expect(reloaded.createTask(bot.id)?.cwd).toBeUndefined();
+  });
+
   it("pins a private-only conversation to its own folder when it first runs, and never moves one that already ran elsewhere", () => {
     const store = new Store(selection);
     const bot = store.createBot();

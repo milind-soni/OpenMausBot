@@ -36,6 +36,12 @@ const REAL_INPUT = {
 };
 
 describe("parseAskQuestions", () => {
+  it("keeps an options-only flag only where there are options", () => {
+    expect(parseAskQuestions({ questions: [{ question: "Pick", options: ["A", "B"], custom: false }] })?.[0]).toMatchObject({ custom: false });
+    expect(parseAskQuestions({ questions: [{ question: "Name it", options: [], custom: false }] })?.[0]).not.toHaveProperty("custom");
+    expect(parseAskQuestions({ questions: [{ question: "Pick", options: ["A"], custom: true }] })?.[0]).not.toHaveProperty("custom");
+  });
+
   it("reads the questions out of a real tool input", () => {
     expect(parseAskQuestions(REAL_INPUT)).toEqual([
       {
