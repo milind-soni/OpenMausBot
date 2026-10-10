@@ -312,6 +312,13 @@ export async function fetchHermesAcpModels(
     };
     timer = setTimeout(() => done([]), hermesAcpModelsTimeoutMs(env));
     child.once("error", () => done([]));
+    // The probe writes to the child's stdin, and a child that has already
+    // exited makes that socket emit EPIPE. `write`'s callback reports the
+    // error but the socket emits it as well, and an unhandled 'error' event
+    // on a stream takes the whole harness down — observed crashing the server
+    // at startup on a machine with Hermes installed. Swallow it here: the
+    // write callback and the close handler already settle the probe.
+    child.stdin?.on("error", () => done([]));
     child.once("close", () => {
       if (hardKillTimer) clearTimeout(hardKillTimer);
       done([]);
