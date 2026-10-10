@@ -122,19 +122,19 @@ export function DecisionModelSettings() {
 
   return (
     <>
-      <p className="text-[13px] leading-relaxed text-ink-secondary">{t("decider.intro")}</p>
-      <div>
-        <SettingRow title={t("decider.master")} subtitle={configured ? undefined : t("decider.masterNeedsKey")}>
-          <Switch
-            data-testid="decider-master"
-            aria-label={t("decider.master")}
-            checked={enabled}
-            disabled={!configured || switching || !state.config}
-            onClick={() => void patch({ enabled: !enabled })}
-            className="cursor-pointer"
-          />
-        </SettingRow>
-      </div>
+      <section className="space-y-2 px-4">
+        <p className="text-[13px] leading-relaxed text-ink-secondary">{t("decider.intro")}</p>
+      </section>
+      <SettingRow title={t("decider.master")} subtitle={configured ? undefined : t("decider.masterNeedsKey")}>
+        <Switch
+          data-testid="decider-master"
+          aria-label={t("decider.master")}
+          checked={enabled}
+          disabled={!configured || switching || !state.config}
+          onClick={() => void patch({ enabled: !enabled })}
+          className="cursor-pointer"
+        />
+      </SettingRow>
 
       <Card title={t("decider.key.label")}>
         <div role="status" className="mb-2 flex items-center gap-2 text-[13px] text-ink-secondary">

@@ -51,7 +51,7 @@ export function AutomaticRecoverySettings() {
           <label htmlFor="automatic-recovery-engine" className="block text-[13px] font-medium text-ink">{t("settings.recovery.engine")}</label>
           <select id="automatic-recovery-engine" value={value.backup?.instanceId ?? ""} disabled={saving || !value.enabled}
             onChange={(event) => change({ enabled: value.enabled, ...(event.target.value ? { backup: { instanceId: event.target.value, model: "" } } : {}) })}
-            className="mt-2 w-full min-w-0 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink disabled:opacity-50">
+            className="mt-2 w-full min-w-0 cursor-pointer rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink disabled:opacity-50">
             <option value="">{t("settings.recovery.chooseEngine")}</option>
             {value.backup && !engine && <option value={value.backup.instanceId} disabled>{t("settings.recovery.unavailable", { name: value.backup.instanceId })}</option>}
             {engines.map((instance) => <option key={instance.instanceId} value={instance.instanceId}
@@ -62,7 +62,7 @@ export function AutomaticRecoverySettings() {
           <label htmlFor="automatic-recovery-model" className="block text-[13px] font-medium text-ink">{t("settings.recovery.model")}</label>
           <select id="automatic-recovery-model" value={value.backup?.model ?? ""} disabled={saving || !value.enabled || !engine}
             onChange={(event) => change({ enabled: value.enabled, backup: { instanceId: engine!.instanceId, model: event.target.value } })}
-            className="mt-2 w-full min-w-0 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink disabled:opacity-50">
+            className="mt-2 w-full min-w-0 cursor-pointer rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink disabled:opacity-50">
             <option value="">{t("settings.recovery.chooseModel")}</option>
             {value.backup?.model && !ready && <option value={value.backup.model} disabled>{t("settings.recovery.unavailable", { name: value.backup.model })}</option>}
             {models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
@@ -72,7 +72,7 @@ export function AutomaticRecoverySettings() {
       <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("settings.recovery.charges")}</p>
       {value.enabled && !ready && <p className="mt-2 text-[12px] text-ink-secondary">{t("settings.recovery.required")}</p>}
       <button type="button" disabled={!draft || saving || (value.enabled && !ready)} onClick={() => void save()}
-        className="mt-3 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white disabled:opacity-50">{saving ? t("settings.threads.saving") : t("common.save")}</button>
+        className="mt-3 cursor-pointer rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white disabled:opacity-50">{saving ? t("settings.threads.saving") : t("common.save")}</button>
       {saving && <span role="status" className="sr-only">{t("settings.threads.saving")}</span>}
       {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
     </Card>
