@@ -7,21 +7,22 @@ import { describe, expect, it } from "vitest";
 
 import { acpPermissionCommand, permissionCommand } from "./permission-command.ts";
 
-const CWD = "/home/rahul/work";
+const CWD = "/home/user/work";
 
 describe("acpPermissionCommand", () => {
   it("reads Antigravity's CommandLine/Cwd", () => {
-    // The real frame, from a request.opened event on 2026-10-10. Before this
-    // was handled the function returned undefined for every Antigravity shell
-    // request, so those bots reported no command at all and no saved-command
-    // rule could ever match one.
+    // The field names and the shape are from a real request.opened event
+    // observed on 2026-10-10; only the paths are generalised. Until this
+    // spelling was handled the function returned undefined for every
+    // Antigravity shell request, so those bots reported no command at all
+    // and no saved-command rule could ever match one.
     expect(acpPermissionCommand({
-      CommandLine: "ls -la /home/rahul/agent-workspace/00-core/",
-      Cwd: "/home/rahul/.openmausbot/task-workspaces/fc432790/4b7437fe",
+      CommandLine: "ls -la /home/user/workspace/notes/",
+      Cwd: "/home/user/.openmausbot/task-workspaces/fc432790/4b7437fe",
       WaitMsBeforeAsync: 5000,
     }, undefined)).toEqual({
-      command: "ls -la /home/rahul/agent-workspace/00-core/",
-      cwd: "/home/rahul/.openmausbot/task-workspaces/fc432790/4b7437fe",
+      command: "ls -la /home/user/workspace/notes/",
+      cwd: "/home/user/.openmausbot/task-workspaces/fc432790/4b7437fe",
     });
   });
 
