@@ -131,6 +131,14 @@ export type RuntimeEvent = RuntimeEventBase &
          * Used for exact-command grants; never reconstructed from a display
          * summary, tool title, or argv. Absent when either value is unknown. */
         command?: { command: string; cwd: string };
+        /** The native tool identity, for a grant to key on. `tool` above is
+         * ACP's *category* (execute/edit/other), so every connected-app call
+         * arrives as "other" and is useless for identity. This is
+         * `toolCall.title`, taken raw — never `summary`, which the shell path
+         * replaces with the command line. It is the agent's own label, so it
+         * is weaker evidence than `innerToolSlugs` below; that is one reason
+         * a multiplexer is never granted by its name. */
+        toolSlug?: string;
         /** A tool that runs another tool named in its own arguments
          * (Composio's execute tools). Its NAME is then not an identity any
          * grant may key on: allowing `COMPOSIO_MULTI_EXECUTE_TOOL` by name

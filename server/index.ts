@@ -8000,7 +8000,10 @@ bus.subscribe((event: RuntimeEvent) => {
           toolPolicyAllowed: Boolean(
             toolPolicyAllow.length && !guestDriven &&
             toolPolicyVerdict({
-              tool: event.tool,
+              // event.tool is ACP's category ("other" for every connected-app
+              // call); the native identity is toolSlug. Absent means unknown,
+              // which matches nothing on the list and so asks.
+              tool: event.toolSlug ?? event.tool,
               innerToolSlugs: event.innerToolSlugs,
               allowedToolSlugs: toolPolicyAllow,
             }).decision === "allow",

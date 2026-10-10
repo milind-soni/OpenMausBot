@@ -1295,6 +1295,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           const tool = kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool";
           const isShellCommand = !isQuestion && kind === "execute" && !/^mcp(?:__|[.:])/i.test(String(toolCall.title ?? ""));
+          // The only identity ACP gives a non-shell tool call. Read before
+          // `summary`, which the shell path replaces with the command line.
+          const nativeToolTitle = typeof toolCall.title === "string" && toolCall.title.trim()
+            ? toolCall.title.trim().slice(0, 200)
+            : undefined;
+          // Always attempted: a call is multiplexed because its arguments name
+          // inner tools, not because of what the wrapper is called.
+          const multiplexedSlugs = isQuestion ? undefined : innerToolSlugsOf(toolCall.rawInput);
           const rawSummary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool);
           const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200);
           // One structured question beside the flat choices: the richer card
@@ -1387,10 +1395,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             tool,
             summary,
             command: isShellCommand ? acpPermissionCommand(toolCall.rawInput, commandCwd) : undefined,
-            // Read from the native input, for the same reason the command
-            // above is: a display summary is not what the bot asked to run.
-            ...(toolMultiplexes(tool)
-              ? { toolMultiplexes: true, innerToolSlugs: innerToolSlugsOf(toolCall.rawInput) }
+            // `tool` above is ACP's category, so gating this on it read
+            // "other" for every connected-app call and never looked at the
+            // input at all. Measured 2026-10-10: the policy was correct code
+            // on a path that never ran, REVIEW-CHECKLIST class 1.2 — the same
+            // defect this file shipped once before with CommandLine.
+            ...(nativeToolTitle ? { toolSlug: nativeToolTitle } : {}),
+            ...(multiplexedSlugs || toolMultiplexes(nativeToolTitle ?? "")
+              ? { toolMultiplexes: true, innerToolSlugs: multiplexedSlugs }
               : {}),
             requiresExplicitApproval: isShellCommand && (
               toolCall.rawInput?.dangerouslyDisableSandbox === true || toolCall.rawInput?.sandbox_permissions === "require_escalated"
