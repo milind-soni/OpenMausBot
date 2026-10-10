@@ -8,6 +8,12 @@ export function cloudBackendChangeError(botBusy: boolean, activeVpsThread: boole
   return botBusy || activeVpsThread ? CLOUD_BACKEND_CHANGE_ERROR : null;
 }
 
+export const VPS_ALIAS_CHANGE_ERROR = "stop the active VPS turn before changing the SSH config alias";
+
+export function vpsAliasChangeError(currentAlias: string | null, nextAlias: string | null, activeVpsThread: boolean): string | null {
+  return activeVpsThread && currentAlias !== nextAlias ? VPS_ALIAS_CHANGE_ERROR : null;
+}
+
 export interface CloudResourceIdentity {
   boxId: string;
   name: string;

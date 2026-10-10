@@ -62,7 +62,7 @@ describe("Settings → Connections", () => {
       vps: { configured: false, sshAlias: "" },
       rooms: { turnTimeoutMinutes: 10 },
       mcp: { callTimeoutMinutes: 10 },
-      localVm: { mode: "shared", maxInstances: 1 },
+      localVm: { source: "managed", mode: "shared", maxInstances: 1, sshAlias: "" },
       cloudHome: true,
     });
     const { SettingsModal } = await import("./SettingsModal");

@@ -44,6 +44,8 @@ export interface BridgeLiveness {
   args: string[];
 }
 
+export const MAX_MCP_LINE_CHARS = 16 * 1024 * 1024;
+
 /** Run the liveness command; alive means "exited 0 within the timeout". A
  * separate bounded command checks the transport without waiting for an
  * answer on the possibly wedged MCP stream. */
@@ -74,6 +76,16 @@ export interface WatchdogHandle {
   /** Any traffic in either direction — resets the inactivity window. */
   touch: () => void;
   stop: () => void;
+}
+
+export interface LineSplitter {
+  push: (chunk: Buffer | string) => void;
+  flush: () => void;
+}
+
+export interface LineSplitterOptions {
+  maxLineChars?: number;
+  onOverflow?: () => void;
 }
 
 /** Inactivity → probe → (only then) declare dead. Traffic arriving while a
@@ -144,29 +156,48 @@ export interface BridgeOptions {
 
 /** Collect a byte stream into complete newline-terminated lines. MCP's
  * stdio transport is one JSON-RPC frame per line, so line boundaries are
- * the only safe place to inspect — or inject — anything. */
-export function createLineSplitter(onLine: (line: string) => void): {
-  push: (chunk: Buffer | string) => void;
-  flush: () => void;
-} {
+ * the only safe place to inspect — or inject — anything. An unterminated
+ * frame is still bounded so a dead or hostile peer cannot grow this buffer
+ * without limit. */
+export function createLineSplitter(onLine: (line: string) => void, options: LineSplitterOptions = {}) {
+  const maxLineChars = options.maxLineChars ?? MAX_MCP_LINE_CHARS;
   let pending = "";
+  let overflowed = false;
   const decoder = new StringDecoder("utf8");
-  return {
+  const overflow = () => {
+    if (overflowed) return;
+    overflowed = true;
+    pending = "";
+    options.onOverflow?.();
+  };
+  const emit = (line: string) => {
+    if (line.length > maxLineChars) {
+      overflow();
+      return;
+    }
+    onLine(line);
+  };
+  const splitter: LineSplitter = {
     push(chunk) {
-      pending += typeof chunk === "string" ? chunk : decoder.write(chunk);
+      if (overflowed) return;
+      pending += Buffer.isBuffer(chunk) ? decoder.write(chunk) : chunk;
       let newline: number;
       while ((newline = pending.indexOf("\n")) !== -1) {
         const line = pending.slice(0, newline);
         pending = pending.slice(newline + 1);
-        onLine(line);
+        emit(line);
+        if (overflowed) return;
       }
+      if (pending.length > maxLineChars) overflow();
     },
     flush() {
+      if (overflowed) return;
       pending += decoder.end();
-      if (pending) onLine(pending);
+      if (pending) emit(pending);
       pending = "";
     },
   };
+  return splitter;
 }
 
 /** The gate itself, factored free of process wiring so a test can drive it

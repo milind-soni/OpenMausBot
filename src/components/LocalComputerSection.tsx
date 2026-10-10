@@ -24,7 +24,8 @@ import { useStore } from "@/state/store";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
 
-interface Status {
+interface ManagedStatus {
+  source: "managed";
   platform: string;
   runtime: string | null;
   available: string[];
@@ -62,6 +63,25 @@ interface Status {
   };
 }
 
+interface ExistingStatus {
+  source: "existing";
+  configured: boolean;
+  sshAlias: string | null;
+  ssh: "not-configured" | "connected" | "unreachable";
+  os: "unknown" | "linux" | "unsupported";
+  driver: "unknown" | "compatible" | "missing" | "incompatible";
+  mcp: "unknown" | "ready" | "failed";
+  tools: string[];
+  desktopReady: boolean;
+  ready: boolean;
+  problem: string | null;
+  errorCode: string | null;
+  driver_version: string;
+  viewer_url: "";
+  watch_only: true;
+}
+
+type Status = ManagedStatus | ExistingStatus;
 export interface LocalVmInventoryInstance {
   botId: string;
   name: string;
@@ -923,6 +943,7 @@ export function LocalVmIdleTimeoutSetting({
 }
 
 export function LocalComputerSection() {
+  const { state, dispatch } = useStore();
   // An OMB Cloud home has no Local VM (shared/cloud-home.ts): it neither
   // checks for one nor explains how to set one up.
   const cloudHome = useStore().state.config?.cloudHome === true;
@@ -934,6 +955,30 @@ export function LocalComputerSection() {
   const [error, setError] = useState<string | null>(null);
   const [policyPending, setPolicyPending] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [source, setSource] = useState<"managed" | "existing">("managed");
+  const [alias, setAlias] = useState("");
+
+  const refresh = useCallback(async (signal?: AbortSignal, _force = false) => {
+    // _force is a leftover of the pre-merge refresh query: the server now
+    // always returns fresh status, so callers' `true` is accepted but inert.
+    const response = await fetch(...computerInventoryRequest("status", signal));
+    const body = await response.json().catch(() => ({}));
+    // The poll loop can be cleaned up mid-flight; a resolved-but-stale read
+    // must never overwrite the state of whoever unmounted us.
+    if (signal?.aborted) return;
+    if (!response.ok) throw new Error(body.error ?? t("vm.err.status", { code: response.status }));
+    let nextStatus: Status;
+    if (body.source === "existing") {
+      // SAFETY: the local-computer endpoint returns the discriminated ExistingStatus contract.
+      nextStatus = body as ExistingStatus;
+    } else {
+      // SAFETY: the local-computer endpoint returns the managed status fields under this branch.
+      nextStatus = { source: "managed", ...body } as ManagedStatus;
+    }
+    setStatus(nextStatus);
+    setError(null);
+    return nextStatus;
+  }, []);
   const [inventory, setInventory] = useState<LocalVmInventoryInstance[]>([]);
   const [inventoryMax, setInventoryMax] = useState(2);
   const [inventoryLoading, setInventoryLoading] = useState(false);
@@ -959,18 +1004,6 @@ export function LocalComputerSection() {
   const [vpsRemovingName, setVpsRemovingName] = useState<string | null>(null);
   const [vpsRefreshKey, setVpsRefreshKey] = useState(0);
   const [announcement, setAnnouncement] = useState("");
-
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch(...computerInventoryRequest("status", signal));
-    const body = await response.json().catch(() => ({}));
-    // The poll loop can be cleaned up mid-flight; a resolved-but-stale read
-    // must never overwrite the state of whoever unmounted us.
-    if (signal?.aborted) return;
-    if (!response.ok) throw new Error(body.error ?? t("vm.err.status", { code: response.status }));
-    setStatus(body as Status);
-    setError(null);
-    return body as Status;
-  }, []);
 
   const refreshInventory = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch(...computerInventoryRequest("local-vms", signal));
@@ -1022,14 +1055,26 @@ export function LocalComputerSection() {
   }, []);
 
   useEffect(() => {
+    const configuredSource = state.config?.localVm.source ?? status?.source;
+    if (configuredSource) setSource(configuredSource);
+  }, [state.config?.localVm.source, status?.source]);
+
+  const existingStatusAlias = status?.source === "existing" ? status.sshAlias ?? "" : null;
+
+  useEffect(() => {
+    if (state.config?.localVm.sshAlias !== undefined) setAlias(state.config.localVm.sshAlias);
+    else if (existingStatusAlias !== null) setAlias(existingStatusAlias);
+  }, [state.config?.localVm.sshAlias, existingStatusAlias]);
+
+  useEffect(() => {
     if (cloudHome) return;
     let active = true;
     let timer: number | undefined;
     let controller: AbortController | undefined;
-    const poll = async () => {
+    const poll = async (force = false) => {
       controller = new AbortController();
       try {
-        await refresh(controller.signal);
+        await refresh(controller.signal, force);
       } catch (e) {
         if (active && !(e instanceof DOMException && e.name === "AbortError")) {
           setStatus(null);
@@ -1038,20 +1083,21 @@ export function LocalComputerSection() {
       } finally {
         if (active) {
           setLoading(false);
-          timer = window.setTimeout(() => void poll(), 5000);
+          timer = window.setTimeout(() => void poll(), source === "existing" ? 30_000 : 5000);
         }
       }
     };
-    void poll();
+    void poll(refreshKey > 0);
     return () => {
       active = false;
       controller?.abort();
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [cloudHome, refresh, refreshKey]);
+  }, [refresh, refreshKey, source]);
 
   useEffect(() => {
-    if (status?.mode !== "per-bot") {
+    const managed = status?.source === "managed" ? status : null;
+    if (managed?.mode !== "per-bot") {
       setInventory([]);
       setInventoryLoading(false);
       setInventoryError(null);
@@ -1070,7 +1116,7 @@ export function LocalComputerSection() {
         if (!controller.signal.aborted) setInventoryLoading(false);
       });
     return () => controller.abort();
-  }, [inventoryRefreshKey, refreshInventory, status?.mode]);
+  }, [inventoryRefreshKey, refreshInventory, status]);
 
   // Boat account listing is deliberately not polled. It can be expensive and
   // Settings must remain an observation-only surface until the person clicks
@@ -1115,6 +1161,8 @@ export function LocalComputerSection() {
       signal,
     });
     const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error ?? `${action} failed`);
+    // SAFETY: local-computer lifecycle endpoints return the same discriminated status contract as refresh().
     const errorKeys: Record<Exclude<Action, "recreate">, LocaleKey> = {
       pull: "vm.err.prepare",
       run: "vm.err.create",
@@ -1124,8 +1172,11 @@ export function LocalComputerSection() {
     };
     if (!response.ok) throw new Error(body.error ?? t(errorKeys[action]));
     signal.throwIfAborted();
-    setStatus(body as Status);
-    return body as Status;
+    // SAFETY: lifecycle routes serve the managed VM only (409 for an
+    // Existing VM source), so the managed shape holds here.
+    const next = body as ManagedStatus;
+    setStatus(next);
+    return next;
   };
 
   const confirmAction = (message: string) => window.ogb?.confirm ? window.ogb.confirm(message) : window.confirm(message);
@@ -1139,7 +1190,7 @@ export function LocalComputerSection() {
     try {
       if (action === "remove" && !(await confirmAction(t("vm.confirm.deleteShared")))) return;
       if (action === "recreate" && !(await confirmAction(t("vm.confirm.recreate")))) return;
-      let result: Status;
+      let result: ManagedStatus;
       if (action === "recreate") {
         await post("remove", controller.signal);
         result = await post("run", controller.signal);
@@ -1147,9 +1198,12 @@ export function LocalComputerSection() {
         result = await post(action, controller.signal);
       }
       if (action === "run" || action === "start" || action === "recreate") {
+        // SAFETY: lifecycle actions serve the managed VM only; refresh()
+        // returns the discriminated union, and the existing branch 409s
+        // server-side, so the managed shape holds here.
         result = await waitForLocalVmReady(
           result,
-          async () => (await refresh(controller.signal)) ?? result,
+          async () => ((await refresh(controller.signal)) ?? result) as ManagedStatus,
           controller.signal,
         );
         if (!result.ready) throw new Error(result.problem ?? t("vm.err.start"));
@@ -1171,7 +1225,7 @@ export function LocalComputerSection() {
     }
   };
 
-  const savePolicy = async (mode: Status["mode"], maxInstances: number) => {
+  const savePolicy = async (mode: ManagedStatus["mode"], maxInstances: number) => {
     setPolicyPending(true);
     setError(null);
     try {
@@ -1191,6 +1245,189 @@ export function LocalComputerSection() {
     }
   };
 
+  const saveSource = async (nextSource: "managed" | "existing") => {
+    if (policyPending || nextSource === source) return;
+    setPolicyPending(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/config", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ localVm: { source: nextSource } }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "Could not change the Local VM source");
+      dispatch({ type: "configStatus", config: body });
+      setSource(nextSource);
+      await refresh(undefined, true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPolicyPending(false);
+    }
+  };
+
+  const saveAlias = async () => {
+    if (policyPending) return;
+    setPolicyPending(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/config", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ localVm: { sshAlias: alias.trim() } }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error ?? "Could not save the Existing VM SSH alias");
+      dispatch({ type: "configStatus", config: body });
+      setAlias(body.localVm?.sshAlias ?? alias.trim());
+      await refresh(undefined, true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPolicyPending(false);
+    }
+  };
+
+  const existingStatus = status?.source === "existing" ? status : null;
+  if (source === "existing") {
+    const savedAlias = Boolean(alias.trim() || existingStatus?.sshAlias);
+    return (
+      <>
+        <Card
+          title="Local VM"
+          subtitle="Connect OpenMausBot to one Linux VM that you own through an SSH config alias. OpenMausBot never creates, starts, stops, replaces, or deletes this VM."
+        >
+          <div className="flex overflow-hidden rounded-lg border border-hairline/40">
+            {(["managed", "existing"] as const).map((value, index) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={source === value}
+                disabled={policyPending}
+                onClick={() => void saveSource(value)}
+                className={cn(
+                  "flex-1 px-3 py-2 text-[13px] disabled:opacity-50",
+                  index > 0 && "border-l border-hairline/40",
+                  source === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
+                )}
+              >
+                {value === "managed" ? "Managed VM" : "Existing VM"}
+              </button>
+            ))}
+          </div>
+          {error && <div className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
+        </Card>
+
+        <Card
+          title="SSH connection"
+          subtitle="Use a host entry from your normal SSH config and agent. Only the alias is saved; OpenMausBot does not store keys, passwords, options, or commands."
+        >
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={alias}
+              onChange={(event) => setAlias(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && void saveAlias()}
+              placeholder="my-linux-vm"
+              aria-label="Existing VM SSH config alias"
+              autoComplete="off"
+              className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => void saveAlias()}
+              disabled={policyPending || (!alias.trim() && !savedAlias)}
+              className={cn(
+                "flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg py-2 text-[13px] disabled:cursor-not-allowed disabled:opacity-50",
+                !alias.trim() && savedAlias ? "bg-raised text-danger hover:bg-raised-hover" : "bg-raised text-ink hover:bg-raised-hover",
+              )}
+            >
+              {policyPending ? <Loader2 size={13} className="animate-spin" /> : !alias.trim() && savedAlias ? "Clear" : <><Check size={13} />Save</>}
+            </button>
+          </div>
+          <div className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">
+            Alias names may contain letters, numbers, dots, dashes, and underscores. The remote command is fixed to <code>cua-driver mcp</code>.
+          </div>
+        </Card>
+
+        <Card title="Existing VM readiness" subtitle="The VM is usable only after SSH, Linux, the pinned CUA Driver, MCP tools, and a complete desktop image all pass." >
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={cn(
+                "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px]",
+                existingStatus?.ready ? "bg-success/15 text-success" : "bg-raised text-ink-secondary",
+              )}
+            >
+              {loading ? <Loader2 size={12} className="animate-spin" /> : existingStatus?.ready ? <Check size={12} /> : <Circle size={9} />}
+              {loading ? "Checking…" : existingStatus?.ready ? "Ready · watch-only preview" : existingStatus?.problem ?? "Not ready"}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                setRefreshKey((key) => key + 1);
+              }}
+              disabled={loading || policyPending}
+              className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
+            >
+              <RefreshCw size={12} /> Re-check
+            </button>
+          </div>
+          <div className="mt-4 flex flex-col gap-3">
+            <Step n={1} title="SSH config alias saved" done={Boolean(existingStatus?.sshAlias)}>
+              <div className="text-[12.5px] text-ink-secondary">Enter the alias for the Linux VM above, then save it.</div>
+            </Step>
+            <Step n={2} title="SSH connection" done={existingStatus?.ssh === "connected"}>
+              {existingStatus?.errorCode === "ssh-missing" && (
+                <div className="text-[12.5px] text-danger">Install OpenSSH so the <code>ssh</code> command is available in OpenMausBot&apos;s PATH, then re-check.</div>
+              )}
+              {existingStatus?.ssh === "unreachable" && existingStatus.errorCode !== "ssh-missing" && (
+                <div className="text-[12.5px] text-danger">Check the SSH alias, host key, and SSH agent, then re-check.</div>
+              )}
+            </Step>
+            <Step n={3} title="Linux guest" done={existingStatus?.os === "linux"}>
+              {existingStatus?.os === "unsupported" && <div className="text-[12.5px] text-danger">The Existing VM must report Linux.</div>}
+            </Step>
+            <Step n={4} title={`CUA Driver ${existingStatus?.driver_version ?? "0.20.0"}`} done={existingStatus?.driver === "compatible"}>
+              {existingStatus?.driver === "missing" && <div className="text-[12.5px] text-danger">Install the pinned CUA Driver in the VM and re-check.</div>}
+              {existingStatus?.driver === "incompatible" && <div className="text-[12.5px] text-danger">The VM has a different CUA Driver version than this OpenMausBot build.</div>}
+            </Step>
+            <Step n={5} title="CUA MCP tools" done={existingStatus?.mcp === "ready"}>
+              {existingStatus?.mcp === "failed" && <div className="text-[12.5px] text-danger">The CUA MCP bridge did not become ready.</div>}
+            </Step>
+            <Step n={6} title="Desktop capture" done={Boolean(existingStatus?.desktopReady)}>
+              {existingStatus?.desktopReady === false && existingStatus?.mcp === "ready" && <div className="text-[12.5px] text-danger">CUA could not return a complete desktop image.</div>}
+            </Step>
+          </div>
+          {existingStatus?.ready && (
+            <div className="mt-4 rounded-lg bg-raised px-3 py-2 text-[12px] leading-relaxed text-ink-secondary">
+              The bot Computer panel can show a watch-only preview. Live viewer access and Take Control are intentionally unavailable for an Existing VM.
+            </div>
+          )}
+        </Card>
+      </>
+    );
+  }
+
+  const managedStatus = status?.source === "managed" ? status : null;
+  const c = managedStatus?.commands;
+  const ready = managedStatus?.ready === true;
+  const existing = managedStatus?.container !== "missing";
+  const needsRecreate = Boolean(
+    existing &&
+      (managedStatus?.container === "stopped" ||
+        !managedStatus?.imageMatches ||
+        !managedStatus?.managed ||
+        managedStatus?.network === "unsafe" ||
+        managedStatus?.security === "unsafe" ||
+        managedStatus?.persistence === "unsafe"),
+  );
+  const unavailable = !loading && !status;
+  const host = managedStatus?.platform === "darwin" ? t("vm.host.mac") : t("vm.host.computer");
+  const perBot = managedStatus?.mode === "per-bot";
+  const perBotRuntimeUnsupported = perBot && managedStatus?.runtime === "container";
+  const headerReady = perBot ? Boolean(managedStatus?.daemonUp && managedStatus?.image && !perBotRuntimeUnsupported) : ready;
   const saveIdleTimeout = async (idleTimeoutMinutes: number) => {
     const response = await fetch("/api/config", {
       method: "PATCH",
@@ -1343,23 +1580,6 @@ export function LocalComputerSection() {
     }
   };
 
-  const c = status?.commands;
-  const ready = status?.ready === true;
-  const existing = status?.container !== "missing";
-  const needsRecreate = Boolean(
-    existing &&
-      (!status?.imageMatches ||
-        !status?.managed ||
-        status?.network === "unsafe" ||
-        status?.security === "unsafe" ||
-        status?.persistence === "unsafe"),
-  );
-  const unavailable = !loading && !status;
-  const host = status?.platform === "darwin" ? t("vm.host.mac") : t("vm.host.computer");
-  const perBot = status?.mode === "per-bot";
-  const perBotRuntimeUnsupported = perBot && status?.runtime === "container";
-  const headerReady = perBot ? Boolean(status?.daemonUp && status?.image && !perBotRuntimeUnsupported) : ready;
-
   return (
     <>
       <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</p>
@@ -1396,6 +1616,24 @@ export function LocalComputerSection() {
           ? t("vm.main.perBotSubtitle", { host })
           : t("vm.main.sharedSubtitle", { host })}
       >
+        <div className="mb-4 flex overflow-hidden rounded-lg border border-hairline/40">
+          {(["managed", "existing"] as const).map((value, index) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={source === value}
+              disabled={policyPending || pending !== null}
+              onClick={() => void saveSource(value)}
+              className={cn(
+                "flex-1 px-3 py-2 text-[13px] disabled:opacity-50",
+                index > 0 && "border-l border-hairline/40",
+                source === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
+              )}
+            >
+              {value === "managed" ? "Managed VM" : "Existing VM"}
+            </button>
+          ))}
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <span
             aria-live="polite"
@@ -1415,7 +1653,7 @@ export function LocalComputerSection() {
                     ? t("vm.main.perBotUnsupported")
                   : ready
                     ? t("vm.main.ready")
-                    : (status?.problem ?? t("vm.main.notReady"))}
+                    : (managedStatus?.problem ?? t("vm.main.notReady"))}
           </span>
           <button
             onClick={() => {
@@ -1430,7 +1668,7 @@ export function LocalComputerSection() {
           </button>
           {ready && !perBot && (
             <a
-              href={status?.viewer_url ?? c?.view}
+              href={managedStatus?.viewer_url ?? c?.view}
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink hover:bg-control"
@@ -1452,11 +1690,12 @@ export function LocalComputerSection() {
               key={mode}
               type="button"
               disabled={!status || policyPending}
-              onClick={() => void savePolicy(mode, status?.max_instances ?? 2)}
+              aria-pressed={managedStatus?.mode === mode}
+              onClick={() => void savePolicy(mode, managedStatus?.max_instances ?? 2)}
               className={cn(
                 "flex-1 px-3 py-2 text-[13px] disabled:opacity-50",
                 index > 0 && "border-l border-hairline/40",
-                status?.mode === mode ? "bg-control text-ink" : "text-ink-secondary hover:text-ink",
+                managedStatus?.mode === mode ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
               )}
             >
               {mode === "shared" ? t("vm.isolation.shared") : t("vm.isolation.perBot")}
@@ -1472,17 +1711,18 @@ export function LocalComputerSection() {
             </div>
             <select
               aria-label={t("vm.isolation.maxAria")}
-              value={status?.max_instances ?? 2}
+              value={managedStatus?.max_instances ?? 2}
               disabled={!status || policyPending}
-              onChange={(event) => void savePolicy(status?.mode ?? "shared", Number(event.target.value))}
+              onChange={(event) => void savePolicy(managedStatus?.mode ?? "shared", Number(event.target.value))}
               className="rounded-lg border border-hairline/40 bg-control px-2.5 py-1.5 text-[13px] text-ink disabled:opacity-50"
             >
               {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </div>
         )}
+        {policyPending && <div className="mt-2 flex items-center gap-1.5 text-[12px] text-ink-secondary"><Loader2 size={12} className="animate-spin" /> Saving…</div>}
         <LocalVmIdleTimeoutSetting
-          minutes={status ? Math.round(status.idle_timeout_ms / 60_000) : DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
+          minutes={managedStatus ? Math.round(managedStatus.idle_timeout_ms / 60_000) : DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES}
           disabled={!status || policyPending}
           onSave={saveIdleTimeout}
         />
@@ -1491,7 +1731,7 @@ export function LocalComputerSection() {
 
       <Card title={t("vm.setup.title")} subtitle={t("vm.setup.subtitle")}>
         <div className="flex flex-col gap-4">
-          <Step n={1} title={t("vm.setup.step1")} done={Boolean(status?.runtime)}>
+          <Step n={1} title={t("vm.setup.step1")} done={Boolean(managedStatus?.runtime)}>
             <div className="text-[13px] leading-relaxed text-ink-secondary">
               {t("vm.setup.step1Detail")}
             </div>
@@ -1507,21 +1747,21 @@ export function LocalComputerSection() {
           <Step
             n={2}
             title={
-              status?.runtime && !status.daemonUp
-                ? t("vm.setup.step2Open", { runtime: status.runtime })
+              managedStatus?.runtime && !managedStatus.daemonUp
+                ? t("vm.setup.step2Open", { runtime: managedStatus.runtime })
                 : t("vm.setup.step2")
             }
-            done={Boolean(status?.daemonUp)}
+            done={Boolean(managedStatus?.daemonUp)}
           >
-            {!status?.runtime ? null : c?.runtimeStart ? (
+            {!managedStatus?.runtime ? null : c?.runtimeStart ? (
               <CommandLine command={c.runtimeStart} />
             ) : (
               <div className="text-[13px] text-ink-secondary">{t("vm.setup.step2Detail")}</div>
             )}
           </Step>
 
-          <Step n={3} title={t("vm.setup.step3")} done={Boolean(status?.image)}>
-            {status?.daemonUp && (
+          <Step n={3} title={t("vm.setup.step3")} done={Boolean(managedStatus?.image)}>
+            {managedStatus?.daemonUp && (
               <ActionButton action="pull" pending={pending} onClick={() => void act("pull")}>{t("vm.setup.prepare")}</ActionButton>
             )}
             {c?.pull && <details className="text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("vm.setup.showPull")}</summary><div className="mt-2"><CommandLine command={c.pull} /></div></details>}
@@ -1548,9 +1788,9 @@ export function LocalComputerSection() {
               <>
                 <div className="flex gap-2 text-[13px] text-warning">
                   <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-                  <span>{status?.problem}</span>
+                  <span>{managedStatus?.problem}</span>
                 </div>
-                {status?.image ? (
+                {managedStatus?.image ? (
                   <ActionButton action="recreate" pending={pending} onClick={() => void act("recreate")} danger>
                     <RotateCcw size={13} /> {t("vm.setup.recreate")}
                   </ActionButton>
@@ -1558,14 +1798,14 @@ export function LocalComputerSection() {
                   <div className="text-[13px] text-ink-secondary">{t("vm.setup.prepareFirst")}</div>
                 )}
               </>
-            ) : status?.container === "stopped" ? (
+            ) : managedStatus?.container === "stopped" ? (
               <>
-                <p className="text-[13px] text-ink-secondary">{t(status.stop_reason === "idle" ? "vm.stopped.idle" : "vm.stopped.detail")}</p>
+                <p className="text-[13px] text-ink-secondary">{t(managedStatus.stop_reason === "idle" ? "vm.stopped.idle" : "vm.stopped.detail")}</p>
                 <ActionButton action="start" pending={pending} onClick={() => void act("start")}>{t("vm.setup.start")}</ActionButton>
               </>
-            ) : status?.container === "running" ? (
+            ) : managedStatus?.container === "running" ? (
               <div className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={13} className="animate-spin" /> {t("vm.setup.waiting")}</div>
-            ) : status?.image ? (
+            ) : managedStatus?.image ? (
               <>
                 <ActionButton action="run" pending={pending} onClick={() => void act("run")}>{t("vm.setup.start")}</ActionButton>
                 <p className="text-[13px] leading-relaxed text-ink-secondary">{t("vm.setup.idleHint")}</p>
@@ -1579,7 +1819,7 @@ export function LocalComputerSection() {
       {perBot && (
         <LocalVmInventoryCard
           instances={inventory}
-          maxInstances={inventoryMax || status?.max_instances || 2}
+          maxInstances={inventoryMax || managedStatus?.max_instances || 2}
           loading={inventoryLoading}
           deletingBotId={deletingBotId}
           error={inventoryError}
@@ -1602,13 +1842,13 @@ export function LocalComputerSection() {
         title={t("vm.safety.title")}
         subtitle={
           perBot
-            ? t("vm.safety.perBot", { path: status?.workspace_guest_path ?? "/home/cua/workspace" })
-            : t("vm.safety.shared", { path: status?.workspace_guest_path ?? "/home/cua/workspace" })
+            ? t("vm.safety.perBot", { path: managedStatus?.workspace_guest_path ?? "/home/cua/workspace" })
+            : t("vm.safety.shared", { path: managedStatus?.workspace_guest_path ?? "/home/cua/workspace" })
         }
       >
         {existing && (
           <div className="flex flex-wrap gap-2">
-            {status?.container === "running" && (
+            {managedStatus?.container === "running" && (
               <ActionButton action="stop" pending={pending} onClick={() => void act("stop")}>
                 <Square size={12} /> {t("vm.safety.stop")}
               </ActionButton>
@@ -1620,11 +1860,11 @@ export function LocalComputerSection() {
         )}
         <div className="mt-3 break-all text-[11px] text-ink-secondary">
           {t("vm.safety.workspace", {
-            path: status?.workspace_path ?? t("vm.safety.notCreated"),
-            driver: status?.driver_version ?? "0.20.0",
-            image: status?.image_ref ?? t("vm.safety.notPrepared"),
+            path: managedStatus?.workspace_path ?? t("vm.safety.notCreated"),
+            driver: managedStatus?.driver_version ?? "0.20.0",
+            image: managedStatus?.image_ref ?? t("vm.safety.notPrepared"),
           })}
-          {status?.base_image_ref ? <> · {t("vm.safety.baseImage", { image: status.base_image_ref })}</> : null}
+          {managedStatus?.base_image_ref ? <> · {t("vm.safety.baseImage", { image: managedStatus.base_image_ref })}</> : null}
         </div>
       </Card>
       </>}

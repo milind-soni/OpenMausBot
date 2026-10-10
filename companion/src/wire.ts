@@ -12,10 +12,10 @@
 // either way.
 //
 // `sshAlias` is the same story with a different payload: the harness's config
-// status echoes the self-hosted VPS alias — a label naming one of the user's
-// servers — inside `vps`, on both GET /api/config and the `config` SSE frame.
-// The phone only ever renders configured-or-not, so it gets exactly that:
-// `{configured: true}` survives, the host label does not.
+// status echoes self-hosted VPS and user-managed Local VM aliases — labels
+// naming one of the user's servers — inside `vps` or `localVm`, on both GET
+// /api/config and the `config` SSE frame. The phone only ever renders
+// configured-or-not, so it gets the surrounding status without the host label.
 
 /** Keys that are the harness's business, never a device's. */
 const WITHHELD_KEYS = new Set(["resumeCursors", "sshAlias"]);

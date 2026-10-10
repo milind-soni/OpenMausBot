@@ -141,6 +141,7 @@ const mcpConfigSchema = z.object({
  * desktops in per-bot mode, or the pool's seat count in pool mode; it is
  * not a total across modes. Default stays "shared". */
 const localVmConfigSchema = z.object({
+  source: z.enum(["managed", "existing"]).optional(),
   mode: z.enum(["shared", "per-bot", "pool"]).optional(),
   maxInstances: z
     .number()
@@ -148,6 +149,9 @@ const localVmConfigSchema = z.object({
     .min(MIN_LOCAL_VM_MAX_INSTANCES)
     .max(MAX_LOCAL_VM_MAX_INSTANCES)
     .optional(),
+  sshAlias: z.string().refine((value) => value === "" || isValidSshAlias(value), {
+    message: "must be a simple SSH config alias",
+  }).optional(),
   idleTimeoutMinutes: z
     .number()
     .int()
@@ -646,10 +650,18 @@ export interface AppConfig {
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
-  /** Shared preserves the historical singleton. Per-bot gives every bot a
-   * separate container, durable workspace, viewer and lease. Pool runs N
-   * seats shared by all conversations, with per-thread affinity (#1654). */
-  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number };
+  /** Managed preserves the historical container-backed Local VM. Existing is
+   * one user-owned Linux VM reached through a validated SSH alias. Shared
+   * preserves the historical singleton. Per-bot gives every bot a separate
+   * container, durable workspace, viewer and lease. Pool runs N seats shared
+   * by all conversations, with per-thread affinity (#1654). */
+  localVm?: {
+    source?: "managed" | "existing";
+    mode?: "shared" | "per-bot" | "pool";
+    maxInstances?: number;
+    idleTimeoutMinutes?: number;
+    sshAlias?: string;
+  };
   /** Opt-in product experiments. Every flag defaults to disabled. */
   features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; llmThreadTitles?: boolean; autoRecall?: boolean; routinesInConversation?: boolean; skillsLibrary?: boolean };
   /** First-run progress; see onboardingConfigSchema. */
@@ -846,6 +858,17 @@ export function localVmMaxInstances(cfg: AppConfig): number {
   return cfg.localVm?.maxInstances ?? DEFAULT_LOCAL_VM_MAX_INSTANCES;
 }
 
+export function localVmSource(cfg: AppConfig): "managed" | "existing" {
+  return cfg.localVm?.source === "existing" ? "existing" : "managed";
+}
+
+export function localVmSshAlias(cfg: AppConfig): string | null {
+  return isValidSshAlias(cfg.localVm?.sshAlias) ? cfg.localVm.sshAlias : null;
+}
+
+export function skillRecorderEnabled(cfg: AppConfig): boolean {
+  return (cfg.features as { skillRecorder?: boolean } | undefined)?.skillRecorder === true;
+}
 export function localVmIdleTimeoutMinutes(cfg: AppConfig): number {
   return cfg.localVm?.idleTimeoutMinutes ?? DEFAULT_LOCAL_VM_IDLE_TIMEOUT_MINUTES;
 }

@@ -65,6 +65,7 @@ const ENTRY_POINTS = [
   "hooks/omb-hook.ts",
   "container-mcp.ts",
   "vps-container-mcp.ts",
+  "existing-vm-mcp.ts",
   "permission-proxy.ts",
   "connector-proxy.ts",
   "mcp-gate.ts",

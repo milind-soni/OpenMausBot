@@ -675,6 +675,9 @@ export interface ConfigStatus {
   box: { configured: boolean; included?: boolean };
   vps: { configured: boolean; sshAlias: string };
   rooms: { turnTimeoutMinutes: number };
+  localVm:
+    | { source: "managed"; mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number; sshAlias: string }
+    | { source: "existing"; sshAlias: string };
   /** Per-call ceiling (minutes) for a bot's MCP tools. Absent from servers
    * older than the setting; read it with mcpCallTimeoutMinutes(). */
   mcp?: { callTimeoutMinutes: number };
@@ -682,7 +685,6 @@ export interface ConfigStatus {
   newBots?: { effort?: EffortLevel };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
-  localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number };
   /** `providerKeys`: names of the keys saved for OpenCode's other
    * providers, never the keys. */
   opencodeGo?: { configured: boolean; providerKeys?: string[] };
