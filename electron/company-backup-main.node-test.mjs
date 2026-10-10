@@ -76,7 +76,7 @@ function fixture() {
     companyBackupState: { busy: false }, serverProc: {}, serverReady: true,
     desktopRemoteAccess: null, mainWindow: { webContents: contents, isDestroyed: () => false },
     rendererOrigin: () => ORIGIN, environmentsState: { environments: [], activeId: "local" },
-    activeEnvironment: environments.activeEnvironment, workspaceSenderAllowed: environments.workspaceSenderAllowed,
+    activeEnvironment: environments.activeEnvironment, activeRemote: environments.activeRemote, workspaceSenderAllowed: environments.workspaceSenderAllowed,
     localOnly: localOrigin.localOnly, ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), on: (channel, handler) => handlers.set(channel, handler) },
     SERVER_PORT: 48799, DESKTOP_MUTATION_HEADER: "x-fixture-desktop-mutation", desktopMutationToken: "synthetic-local-only",
     fetch: async (url, options) => {

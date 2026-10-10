@@ -15,6 +15,7 @@ export function createServerSupervisor({
   let current = null;
   let readySince = null;
   let stopped = false;
+  let paused = false;
   let attempts = 0;
   let timer = null;
   let shutdownPromise = null;
@@ -29,7 +30,7 @@ export function createServerSupervisor({
   }
 
   function schedule() {
-    if (stopped) return;
+    if (stopped || paused) return;
     if (attempts === retryDelaysMs.length) {
       onExhausted();
       return;
@@ -38,6 +39,7 @@ export function createServerSupervisor({
     log(`server recovery attempt ${attempts}/${retryDelaysMs.length} in ${delay}ms`);
     timer = setTimeout(async () => {
       timer = null;
+      if (paused) return;
       let result;
       try {
         result = await restart();
@@ -47,7 +49,7 @@ export function createServerSupervisor({
         // a sibling. The caller must reap failed probes before returning.
         result = { abort: current !== null };
       }
-      if (stopped) return;
+      if (stopped || paused) return;
       if (result?.proc && ready(result.proc)) return;
       if (result?.abort) onExhausted();
       else schedule();
@@ -70,6 +72,20 @@ export function createServerSupervisor({
     });
   }
 
+  // A deliberate child stop (an environment switch) is not an outage: pause
+  // drops any queued retry and holds recovery off until resume(). Exits and
+  // onUnavailable still publish while paused; only scheduling is gated.
+  function pause() {
+    if (stopped) return;
+    paused = true;
+    clearTimeout(timer);
+    timer = null;
+  }
+
+  function resume() {
+    paused = false;
+  }
+
   function shutdown() {
     if (shutdownPromise) return shutdownPromise;
     stopped = true;
@@ -83,5 +99,5 @@ export function createServerSupervisor({
     return shutdownPromise;
   }
 
-  return { watch, ready, isCurrent, shutdown };
+  return { watch, ready, isCurrent, pause, resume, shutdown };
 }

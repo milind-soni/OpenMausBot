@@ -48,7 +48,7 @@ test("the machine is listed under Servers once, never renamed and never made act
   assert.equal(withCloudHome(local, null, () => "x"), local);
   assert.equal(withCloudHome(local, { status: "provisioning", origin }, () => "x"), local);
   const listed = withCloudHome(local, { status: "ready", origin }, () => "cloud-1");
-  assert.deepEqual(listed, { environments: [{ id: "cloud-1", name: CLOUD_HOME_NAME, origin }], activeId: environments.LOCAL_ID });
+  assert.deepEqual(listed, { environments: [{ id: "cloud-1", kind: "remote", name: CLOUD_HOME_NAME, origin }], activeId: environments.LOCAL_ID });
   const renamed = { ...listed, environments: [{ ...listed.environments[0], name: "Work cloud" }] };
   assert.equal(withCloudHome(renamed, { status: "stopped", origin }, () => "cloud-2"), renamed);
 });

@@ -301,14 +301,17 @@ const bridge = {
     },
   },
 
-  /** Saved servers and the active one (Server menu). Switching, adding and
-   * forgetting are local-only: a remote page may read the list but not change
-   * where this window goes. */
+  /** Saved servers, this computer's named local environments, and the active
+   * one (Server menu). Switching, creating, adding and forgetting are
+   * local-only: a remote page may read the list but not change where this
+   * window goes. */
   environments: {
     state: () => ipcRenderer.invoke("environments:state"),
     switch: (id) => ipcRenderer.invoke("environments:switch", id),
     addFromLink: (link, name) => ipcRenderer.invoke("environments:add-from-link", link, name),
-    forget: (id) => ipcRenderer.invoke("environments:forget", id),
+    create: (name, dataDir) => ipcRenderer.invoke("environments:create", name, dataDir),
+    pickDir: () => ipcRenderer.invoke("environments:pick-dir"),
+    forget: (id, purge) => ipcRenderer.invoke("environments:forget", id, purge === true),
     /** Settings → Servers, on a saved server's Computer access panel, or
      * ("copy") its Copy this computer here panel. */
     onOpenSettings: (cb) => {
