@@ -1078,7 +1078,7 @@ export function SettingsModal() {
   };
 
   const blockHeading = (labelKey: LocaleKey) => (
-    <h3 className="px-1 text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-secondary">{t(labelKey)}</h3>
+    <h3 className="px-4 text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-secondary">{t(labelKey)}</h3>
   );
 
   return (
@@ -1177,7 +1177,7 @@ export function SettingsModal() {
         </nav>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:pl-8">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 py-3 pl-7 pr-3 sm:pl-9">
             {advanced ? (
               <select
                 aria-label={t("settings.title")}
