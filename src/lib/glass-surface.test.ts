@@ -31,7 +31,9 @@ describe("glass surface", () => {
     expect(surface).toContain("var(--color-ink) 10%");
     expect(surface).toMatch(/inset 0 1px 0/);
     expect(rule(".glass-card")).toContain("var(--color-card) 60%");
-    expect(rule(".glass-scrim")).toContain("backdrop-filter");
+    const scrim = rule(".glass-scrim");
+    expect(scrim).toContain("background: color-mix(in srgb, black 28%, transparent)");
+    expect(scrim).not.toMatch(/(?:-webkit-)?backdrop-filter\s*:/);
     for (const selector of [".glass-surface", ".glass-card", ".glass-scrim", ".glass-rail"]) {
       expect(rule(selector), selector).not.toMatch(/#[0-9a-f]{3,8}\b/i);
     }

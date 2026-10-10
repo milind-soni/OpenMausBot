@@ -909,11 +909,10 @@ body {
 .glass-rail {
   background: color-mix(in srgb, var(--color-app) 22%, transparent);
 }
-/* Behind a glass pop-up: dim a little and blur, never black out. */
+/* Behind a glass pop-up: dim without adding a second, full-window blur pass.
+   The pop-up surface provides the glass blur over the content it covers. */
 .glass-scrim {
   background: color-mix(in srgb, black 28%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
 }
 @media (prefers-reduced-transparency: reduce) {
   .glass-surface {
@@ -926,8 +925,6 @@ body {
   .glass-rail { background: var(--color-app); }
   .glass-scrim {
     background: color-mix(in srgb, black 50%, transparent);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
 }
 @media (forced-colors: active) {
