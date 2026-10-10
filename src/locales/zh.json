@@ -2537,5 +2537,8 @@
   "place.view.ccAtOnce.short": "使用中",
   "place.view.localUnavailable.short": "尚未就绪",
   "place.view.autoTeam.short": "共享",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "computer.files.homeFolder": "主目录",
+  "computer.files.changeDefaultFolder": "更改默认目录",
+  "computer.files.pinnedFolderHint": "此对话会继续使用当前文件夹。可更改新对话使用的默认文件夹。"
 }

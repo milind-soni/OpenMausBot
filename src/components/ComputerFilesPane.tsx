@@ -85,6 +85,11 @@ export function ComputerFilesPane({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const home = capabilities.host.homeDir;
+  const task = bot.tasks?.find((candidate) => candidate.threadId === bot.threadId);
+  // Match Access settings: absent means not pinned yet; null is a legacy
+  // home-folder session, which must not inherit a later bot default.
+  const pinned = task?.cwd;
+  const cwd = pinned === undefined ? bot.cwd : pinned;
   const files = recentChangedFiles(bot);
   const shared = useMemo(() => sharedFileReferences(bot), [bot.messages, bot.activeLeafId, bot.threadId, bot.tasks, bot.cwd]);
   return (
@@ -93,8 +98,8 @@ export function ComputerFilesPane({ bot }: { bot: Bot }) {
         <div className="text-[13px] font-medium text-ink">{t("computer.files.folder")}</div>
         <div className="mt-2 flex items-center gap-2">
           <FolderOpen size={15} className="shrink-0 text-ink-secondary" aria-hidden="true" />
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink" title={bot.cwd ?? undefined}>
-            {bot.cwd ? shortPath(bot.cwd, home) : t("computer.files.privateFolder", { name: bot.name })}
+          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink" title={cwd ?? undefined}>
+            {cwd ? shortPath(cwd, home) : cwd === null ? t("computer.files.homeFolder") : t("computer.files.privateFolder", { name: bot.name })}
           </span>
           <button
             type="button"
@@ -106,9 +111,10 @@ export function ComputerFilesPane({ bot }: { bot: Bot }) {
             }}
             className="shrink-0 rounded-lg bg-control px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover"
           >
-            {t("computer.files.changeFolder")}
+            {t(pinned === undefined ? "computer.files.changeFolder" : "computer.files.changeDefaultFolder")}
           </button>
         </div>
+        {pinned !== undefined && <p className="mt-2 text-[12px] leading-5 text-ink-secondary">{t("computer.files.pinnedFolderHint")}</p>}
       </div>
       <div className="mt-3 rounded-xl bg-card p-4">
         <div className="text-[13px] font-medium text-ink">{t("computer.files.recent")}</div>

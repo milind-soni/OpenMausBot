@@ -3792,5 +3792,8 @@
   "place.view.ccToolsOff.line": "{bot} 可使用的項目不包含電腦。",
   "place.view.ccSignIn.short": "請先登入",
   "place.view.ccSignIn.line": "請先登入 {engine}。{bot} 在雲端電腦上也會使用它。",
-  "place.view.ccSignIn.lineMyCloud": "請先在 My Cloud 上登入 {engine}。{bot} 在雲端電腦上也會使用它。"
+  "place.view.ccSignIn.lineMyCloud": "請先在 My Cloud 上登入 {engine}。{bot} 在雲端電腦上也會使用它。",
+  "computer.files.homeFolder": "家目錄",
+  "computer.files.changeDefaultFolder": "變更預設資料夾",
+  "computer.files.pinnedFolderHint": "這段對話會繼續使用目前的資料夾。您可以變更新對話使用的預設資料夾。"
 }

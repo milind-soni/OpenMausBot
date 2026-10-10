@@ -60,3 +60,30 @@ describe("SecretRequestCard superseded requests", () => {
     expect(html).not.toContain("Waiting to resume safely");
   });
 });
+
+describe("SecretRequestCard ask card", () => {
+  it("waits as a compact ask card with a masked field", () => {
+    const html = view({});
+    expect(html).toContain('data-ask-card="pending"');
+    expect(html).toContain("text-accent-text");
+    expect(html).toContain('type="password"');
+    expect(html).toContain('autoComplete="new-password"');
+  });
+
+  it("folds into one line that names the key once it is saved and the bot resumed", () => {
+    const html = view({ provided: true, resumed: true });
+    expect(html).toContain('data-ask-card="settled"');
+    expect(html).toContain("OpenAI API key saved securely");
+    expect(html).toContain("Bot resumed without seeing the key");
+    expect(html).not.toContain("<input");
+    expect(html).not.toContain("<form");
+  });
+
+  it("keeps a retry on the line when resuming after the save failed", () => {
+    const html = view({ provided: true, error: "The bot could not be resumed." });
+    expect(html).toContain('data-ask-card="settled"');
+    expect(html).toContain("Try again");
+    expect(html).toContain("The bot could not be resumed.");
+    expect(html).not.toContain('type="password"');
+  });
+});

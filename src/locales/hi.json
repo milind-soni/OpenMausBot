@@ -1590,5 +1590,8 @@
   "place.view.ccAtOnce.short": "इस्तेमाल में",
   "place.view.localUnavailable.short": "तैयार नहीं",
   "place.view.autoTeam.short": "साझा",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "computer.files.homeFolder": "होम फ़ोल्डर",
+  "computer.files.changeDefaultFolder": "डिफ़ॉल्ट बदलें",
+  "computer.files.pinnedFolderHint": "इस बातचीत का मौजूदा फ़ोल्डर वही रहेगा। नई बातचीत के लिए डिफ़ॉल्ट फ़ोल्डर बदलें।"
 }

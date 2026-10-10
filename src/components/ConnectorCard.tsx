@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2, PlugZap, RefreshCw, X } from "lucide-react";
+import { Loader2, PlugZap, RefreshCw } from "lucide-react";
 
 import { api, type Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
+import { cn } from "@/lib/cn";
+import { ASK_PRIMARY_BUTTON, ASK_QUIET_BUTTON, AskCard, AskSettledLine } from "./AskCard";
+
+// An app the bot needs you to sign in to. It waits in the shared ask card
+// with one Connect securely button that opens the existing sign-in flow, and
+// folds into one line once the app is connected.
 
 export function ConnectorCard({ botId, threadId, message }: { botId: string; threadId: string; message: Message }) {
   const connector = message.connector!;
@@ -119,87 +125,64 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
   const authorizing = connector.status === "authorizing";
   const error = localError ?? connector.error;
 
+  if (connected) {
+    return (
+      <AskSettledLine
+        ariaLabel={connector.label}
+        action={!connector.resumed && (
+          <button type="button" onClick={() => void resume()} disabled={busy} className={cn(ASK_QUIET_BUTTON, "text-accent-text")}>
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            {t("connectors.card.continueTask")}
+          </button>
+        )}
+        detail={error && <p role="alert" className="ms-[19px] mt-1 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</p>}
+      >
+        <span className="text-ink-secondary" title={connector.resumed ? t("connectors.card.resumed") : t("connectors.card.paused")}>
+          {connector.label}
+        </span>
+        <span> · {t("connectors.card.connected")}{connector.resumed && ` · ${t("connectors.card.continuing")}`}</span>
+      </AskSettledLine>
+    );
+  }
+
   return (
-    <div className="flex w-full justify-start">
-      <div data-tour="connector" className="w-full max-w-[520px] overflow-hidden rounded-2xl border border-hairline/50 bg-card shadow-sm">
-        <div className="flex items-start gap-3 p-4">
-          <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-control text-[16px] font-semibold text-ink">
-            {connector.label.slice(0, 1).toUpperCase() || <PlugZap size={19} />}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate text-[14px] font-semibold text-ink">{connector.label}</span>
-              {connected && (
-                <span className="flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-[11px] font-medium text-success">
-                  <Check size={11} /> {t("connectors.card.connected")}
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">
-              {connected
-                ? connector.resumed
-                  ? t("connectors.card.resumed")
-                  : t("connectors.card.paused")
-                : connector.description}
-            </p>
-            {!connected && (
-              <p className="mt-1 text-[11.5px] text-ink-tertiary">
-                {t("connectors.card.signInHint")}
-              </p>
-            )}
-            {error && <p className="mt-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</p>}
-            {!connected && authorizationUrl && (
-              <a href={authorizationUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => {
-                if (!reusableConnectionUrl(pendingAuthorization)) {
-                  event.preventDefault();
-                  void connect();
-                }
-              }} className="mt-2 inline-block text-[12px] text-accent-text underline underline-offset-2">
-                {t("connectors.openAuthorizationPage")}
-              </a>
-            )}
-          </div>
-          {!connected && (
-            <button onClick={dismiss} aria-label={t("connectors.card.notNow")} title={t("connectors.card.notNow")} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink">
-              <X size={15} />
-            </button>
-          )}
-        </div>
-        <div className="flex items-center justify-between border-t border-hairline/40 bg-panel/40 px-4 py-2.5">
-          <div className="flex items-center gap-1.5 text-[11.5px] text-ink-secondary">
-            {authorizing ? <Loader2 size={12} className="animate-spin" /> : <PlugZap size={12} />}
+    <AskCard
+      tour="connector"
+      ariaLabel={connector.label}
+      icon={<PlugZap size={15} />}
+      title={connector.label}
+      explanation={connector.description}
+      onDismiss={dismiss}
+      dismissLabel={t("connectors.card.notNow")}
+      footer={
+        <>
+          <span className="me-auto flex min-w-0 items-center gap-1.5 text-[12px] text-ink-tertiary">
+            {authorizing && <Loader2 size={12} className="shrink-0 animate-spin" />}
+            {authorizing ? t("connectors.card.waiting") : t("connectors.card.requested")}
+          </span>
+          <button type="button" onClick={() => void connect()} disabled={busy} className={ASK_PRIMARY_BUTTON}>
+            {busy || authorizing ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
             {authorizing
-              ? t("connectors.card.waiting")
-              : connected
-                ? t("connectors.card.readyToUse")
-                : t("connectors.card.requested")}
-          </div>
-          {!connected ? (
-            <button
-              onClick={() => void connect()}
-              disabled={busy}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {busy || authorizing ? <Loader2 size={13} className="animate-spin" /> : <PlugZap size={13} />}
-              {authorizing
-                ? t("connectors.card.openAgain")
-                : connector.status === "failed"
-                  ? t("connectors.card.tryAgain")
-                  : t("connectors.card.connectSecurely")}
-            </button>
-          ) : !connector.resumed ? (
-            <button
-              onClick={() => void resume()}
-              disabled={busy}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-50"
-            >
-              {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />} {t("connectors.card.continueTask")}
-            </button>
-          ) : (
-            <span className="flex items-center gap-1 text-[12px] font-medium text-success"><Check size={13} /> {t("connectors.card.continuing")}</span>
-          )}
-        </div>
-      </div>
-    </div>
+              ? t("connectors.card.openAgain")
+              : connector.status === "failed"
+                ? t("connectors.card.tryAgain")
+                : t("connectors.card.connectSecurely")}
+          </button>
+        </>
+      }
+    >
+      <p className="text-[11.5px] text-ink-tertiary">{t("connectors.card.signInHint")}</p>
+      {error && <p role="alert" className="mt-1.5 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</p>}
+      {authorizationUrl && (
+        <a href={authorizationUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => {
+          if (!reusableConnectionUrl(pendingAuthorization)) {
+            event.preventDefault();
+            void connect();
+          }
+        }} className="mt-1.5 inline-block text-[12px] text-accent-text underline underline-offset-2">
+          {t("connectors.openAuthorizationPage")}
+        </a>
+      )}
+    </AskCard>
   );
 }

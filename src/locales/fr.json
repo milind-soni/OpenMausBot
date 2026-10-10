@@ -1590,5 +1590,8 @@
   "place.view.ccAtOnce.short": "En cours d’utilisation",
   "place.view.localUnavailable.short": "Pas prêt",
   "place.view.autoTeam.short": "Partagé",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "computer.files.homeFolder": "Dossier personnel",
+  "computer.files.changeDefaultFolder": "Modifier le dossier par défaut",
+  "computer.files.pinnedFolderHint": "Cette conversation conserve son dossier actuel. Modifiez le dossier par défaut pour les nouvelles conversations."
 }

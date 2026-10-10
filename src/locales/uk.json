@@ -2136,5 +2136,8 @@
   "place.view.ccAtOnce.short": "Використовується",
   "place.view.localUnavailable.short": "Не готово",
   "place.view.autoTeam.short": "Спільний",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "computer.files.homeFolder": "Домашня папка",
+  "computer.files.changeDefaultFolder": "Змінити типову папку",
+  "computer.files.pinnedFolderHint": "Ця розмова зберігає свою поточну папку. Змініть типову папку для нових розмов."
 }

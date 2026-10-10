@@ -1608,5 +1608,8 @@
   "place.view.ccAtOnce.short": "In Benutzung",
   "place.view.localUnavailable.short": "Nicht bereit",
   "place.view.autoTeam.short": "Gemeinsam",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "computer.files.homeFolder": "Home-Ordner",
+  "computer.files.changeDefaultFolder": "Standard ändern",
+  "computer.files.pinnedFolderHint": "Diese Unterhaltung behält ihren aktuellen Ordner. Ändere den Standardordner für neue Unterhaltungen."
 }

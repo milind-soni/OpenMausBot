@@ -146,50 +146,66 @@ describe("BotListItem", () => {
     expect(markup).not.toContain('aria-label="Archive Atlas"');
   });
 
-  it("shows the Chief of Staff label on its own line under the name", () => {
-    const withTitle = renderRow(bot({ chiefOfStaff: true, title: "Developer" }));
-    expect(withTitle).toContain("Chief of Staff</span>");
-    // the label sits after the name line, never inside it
-    expect(withTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withTitle.indexOf(">Atlas<"));
-
-    const withoutTitle = renderRow(bot({ chiefOfStaff: true }));
-    expect(withoutTitle).toContain("Chief of Staff</span>");
-    expect(withoutTitle.indexOf("Chief of Staff</span>")).toBeGreaterThan(withoutTitle.indexOf(">Atlas<"));
+  it("marks the Chief of Staff with one crown after the name, not a line of its own", () => {
+    const markup = renderRow(bot({ chiefOfStaff: true, title: "Developer" }));
+    expect(markup).toContain('data-testid="chief-crown"');
+    expect(markup).toContain('aria-label="Chief of Staff"');
+    expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+    // no "Chief of Staff" label line under the name
+    expect(markup).not.toContain("Chief of Staff</span>");
+    // the words stay in the portrait's tooltip
+    expect(markup).toContain('title="Atlas · Developer · Chief of Staff"');
 
     expect(renderRow(bot())).not.toContain("Chief of Staff");
   });
 
-  // matches the title line's own class list (see Sidebar.tsx) — used to
-  // assert the marker element itself is present or absent, since checking
-  // for the title text alone can pass by accident when there's no title.
+  it("keeps the title in an icons-only row's name and tooltip", () => {
+    const icons = renderRow(bot({ chiefOfStaff: true, title: "  Developer " }), false, "icons");
+    expect(icons).toContain('aria-label="Atlas · Developer · Chief of Staff"');
+    expect(icons).toContain('title="Atlas · Developer"');
+    const untitled = renderRow(bot(), false, "icons");
+    expect(untitled).toContain('aria-label="Atlas"');
+    expect(untitled).toContain('title="Atlas"');
+  });
+
+  // the title line the row used to draw above the name
   const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
 
-  it("shows the bot's title on its own line above the name, not a badge beside it", () => {
-    // #866 / #871: a badge next to the name always had to fight the name for
-    // width — a long name crushed the badge, and a long title crushed a long
-    // name right back. Its own line above the name never competes with it.
+  it("keeps the bot's title out of the row and reads it out with the name", () => {
     const markup = renderRow(bot({ title: "Developer" }));
-
-    expect(titleLine.exec(markup)?.[1]).toBe("Developer");
-    expect(markup.indexOf(">Developer<")).toBeLessThan(markup.indexOf(">Atlas<"));
+    expect(titleLine.test(markup)).toBe(false);
+    expect(markup).not.toContain(">Developer<");
+    expect(markup).toContain('<span class="sr-only">, Developer</span>');
+    expect(markup).toContain('title="Atlas · Developer"');
     // the rename hint is unrelated to the bot's title
     expect(markup).toContain('title="Double-click to rename"');
 
-    expect(titleLine.test(renderRow(bot()))).toBe(false);
-    expect(titleLine.test(renderRow(bot({ title: "  " })))).toBe(false);
+    expect(renderRow(bot())).not.toContain('class="sr-only">, ');
+    expect(renderRow(bot({ title: "  " }))).not.toContain('class="sr-only">, ');
   });
 
-  it("keeps the title line's own truncate class instead of a shared-line width cap", () => {
-    // renderToStaticMarkup keeps the full text regardless of CSS, so this
-    // can't observe an actual ellipsis — it asserts the title line still
-    // carries `truncate` (so a too-long title clips on its own line) and,
-    // unlike the #871 badge, never a max-width cap shared with the name.
-    const longTitle = "Meta-Agent — opensource team maintainer";
-    const markup = renderRow(bot({ name: "Team Maintainer", title: longTitle }));
+  it("gives the Chief of Staff the same row as every other bot", () => {
+    const portrait = (markup: string) => /width="(\d+)px" height="\d+px"/.exec(markup)?.[1];
+    const rowClass = (markup: string) => /data-sidebar-bot-row="atlas" class="([^"]*)"/.exec(markup)?.[1];
+    const chief = renderRow(bot({ chiefOfStaff: true, title: "Chief of staff" }));
+    const plain = renderRow(bot({ title: "Developer" }));
+    expect(portrait(chief)).toBe(portrait(plain));
+    expect(rowClass(chief)).toBe(rowClass(plain));
+  });
 
-    expect(titleLine.exec(markup)?.[1]).toBe(longTitle);
-    expect(markup).toContain(">Team Maintainer<");
-    expect(markup).not.toContain("max-w-[45%]");
+  it("reads the name at 15px semibold and the preview at 13px", () => {
+    const markup = renderRow(bot({ messages: [{ id: "b1", role: "bot", kind: "text", text: "All set.", at: 1 }] as Bot["messages"] }));
+    expect(markup).toMatch(/class="[^"]*text-\[15px\] font-semibold[^"]*"/);
+    expect(markup).toMatch(/class="[^"]*truncate text-\[13px\][^"]*text-ink-secondary[^"]*"/);
+  });
+
+  it("previews the last reply as plain text, without its markdown", () => {
+    const markup = renderRow(bot({
+      messages: [{ id: "b1", role: "bot", kind: "text", text: "I read **[Prudctual/OpenMausBot](https://github.com/Prudctual/OpenMausBot)**. Run `pnpm install` first.", at: 1 }] as Bot["messages"],
+    }));
+    expect(markup).toContain(">I read Prudctual/OpenMausBot. Run pnpm install first.<");
+    expect(markup).not.toContain("**");
+    expect(markup).not.toContain("](https://");
   });
 
   it("shows typing dots instead of preview text while the bot works", () => {
@@ -356,9 +372,13 @@ describe("bot deletion feedback", () => {
       expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
     });
 
-    it("changes nothing when off", () => {
-      expect(renderRow(bot({ title: "Developer", chiefOfStaff: true }))).toContain("Chief of Staff</span>");
-      expect(renderRow(bot({ title: "Developer", chiefOfStaff: true }))).not.toContain('data-testid="chief-crown"');
+    it("draws the same crown as a full row", () => {
+      const quiet = renderRow(bot({ title: "Developer", chiefOfStaff: true }), true);
+      const full = renderRow(bot({ title: "Developer", chiefOfStaff: true }));
+      for (const markup of [quiet, full]) {
+        expect(markup.match(/data-testid="chief-crown"/g)).toHaveLength(1);
+        expect(markup).not.toContain("Chief of Staff</span>");
+      }
     });
   });
 });
