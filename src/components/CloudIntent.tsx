@@ -20,6 +20,7 @@ import { dismissCloudIntent, markIntentSent, reopenCloudIntent, setPendingIntent
 import { cn } from "@/lib/cn";
 import { restoreComposerDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
+import { sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
 import type { MausMotion, MausState } from "@/lib/mascot";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import type { LocaleKey } from "@/locales";
@@ -83,6 +84,7 @@ export function CloudIntent() {
   const [indent, setIndent] = useState(0);
   const ready = state.instances.some(engineReady);
   const record = state.config?.onboarding;
+  const sendKey = useSendKey();
 
   // One frame late, as in WelcomeFlow: a motion issued in the mounting commit is lost.
   useEffect(() => {
@@ -138,7 +140,7 @@ export function CloudIntent() {
   }, [state.selectedId]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+    if (sendsMessage(event.nativeEvent, sendKey)) {
       event.preventDefault();
       submit();
     }
@@ -203,7 +205,7 @@ export function CloudIntent() {
               onClick={submit}
               disabled={!filled}
               aria-label={t("cloudIntent.send")}
-              title={t("cloudIntent.send")}
+              title={`${t("cloudIntent.send")} (${sendKeyLabel(sendKey)})`}
               className={cn(
                 "absolute bottom-3 right-3 flex size-8 items-center justify-center rounded-full transition-[background-color,color,transform] duration-150 ease-out active:scale-95",
                 filled ? "bg-accent text-white" : "bg-raised text-ink-secondary",

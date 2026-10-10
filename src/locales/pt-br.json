@@ -607,8 +607,8 @@
   "composer.placeholder.approval": "Responda à aprovação acima para continuar",
   "composer.placeholder.attaching": "Anexando arquivos…",
   "composer.placeholder.listening": "Ouvindo…",
-  "composer.placeholder.steer": "{name} está trabalhando — Enter envia isto para dentro do turno em andamento",
-  "composer.placeholder.queueGroup": "{name} está trabalhando — Enter põe sua mensagem na fila",
+  "composer.placeholder.steer": "{name} está trabalhando — {key} envia isto para dentro do turno em andamento",
+  "composer.placeholder.queueGroup": "{name} está trabalhando — {key} põe sua mensagem na fila",
   "composer.placeholder.queue": "{name} está trabalhando — envia quando este turno terminar",
   "composer.placeholder.goal": "Descreva o que {name} deve concluir junto",
   "composer.placeholder.group": "Mensagem para {name} — {hint}",
@@ -1606,5 +1606,8 @@
   "place.view.ccAtOnce.short": "Em uso",
   "place.view.localUnavailable.short": "Não está pronto",
   "place.view.autoTeam.short": "Compartilhado",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "settings.sendKey.title": "Enviar mensagens com",
+  "settings.sendKey.subtitle": "Escolha Shift+Enter ou {key} para que Enter comece uma nova linha, útil quando seu método de entrada confirma o texto com Enter, como na digitação em japonês. {key} envia em qualquer opção. Só neste dispositivo.",
+  "settings.sendKey.option": "{key} ({newLine} para nova linha)"
 }

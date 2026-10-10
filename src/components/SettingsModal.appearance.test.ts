@@ -2,6 +2,7 @@ import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
+import type { SendKey } from "@/lib/send-key";
 import type { AppSettingsSection } from "@/state/store";
 import type { Switch } from "./SettingsPrimitives";
 import { SettingsModal } from "./SettingsModal";
@@ -16,6 +17,8 @@ const fixture = vi.hoisted(() => ({
   setSidebarDensity: vi.fn(),
   notificationSounds: true,
   setNotificationSounds: vi.fn(),
+  sendKey: "enter" as SendKey,
+  setSendKey: vi.fn(),
   advancedMode: false,
   setAdvancedMode: vi.fn(),
   api: vi.fn(),
@@ -48,6 +51,11 @@ vi.mock("@/lib/notification-preferences", () => ({
   useNotificationSounds: () => fixture.notificationSounds,
   setNotificationSounds: fixture.setNotificationSounds,
 }));
+vi.mock("@/lib/send-key", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/send-key")>(),
+  useSendKey: () => fixture.sendKey,
+  setSendKey: fixture.setSendKey,
+}));
 vi.mock("@/lib/interface-mode", () => ({
   useAdvancedMode: () => fixture.advancedMode,
   setAdvancedMode: fixture.setAdvancedMode,
@@ -71,6 +79,7 @@ beforeEach(() => {
   fixture.showRunCard = true;
   fixture.sidebarDensity = "comfortable";
   fixture.notificationSounds = true;
+  fixture.sendKey = "enter";
   // these pin the Advanced rail; Simple has its own suite (SettingsModal.simple.test.ts)
   fixture.advancedMode = true;
   fixture.switches = [];
@@ -168,6 +177,40 @@ describe("Settings → Appearance", () => {
     expect(fixture.setSidebarDensity).not.toHaveBeenCalled();
     expect(fixture.api).not.toHaveBeenCalled();
     expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["enter", "Enter (Shift+Enter for a new line)"],
+    ["shift-enter", "Shift+Enter (Enter for a new line)"],
+    ["mod-enter", "Ctrl+Enter (Enter for a new line)"],
+  ] as const)("shows the saved send key (%s) on this device only", (sendKey, label) => {
+    fixture.sendKey = sendKey;
+    const html = render();
+    expect(html).toContain("Send messages with");
+    expect(html).toContain('aria-label="Send messages with"');
+    expect(html).toContain("Choose Shift+Enter or Ctrl+Enter so Enter starts a new line");
+    expect(html).toContain("as Japanese input does. Ctrl+Enter sends whichever you choose.");
+    expect(html).toContain(`<option value="${sendKey}" selected="">${label}</option>`);
+    const options = [...html.matchAll(/<option value="(enter|shift-enter|mod-enter)"[^>]*>([^<]*)</g)].map((match) => [match[1], match[2]]);
+    expect(options).toEqual([
+      ["enter", "Enter (Shift+Enter for a new line)"],
+      ["shift-enter", "Shift+Enter (Enter for a new line)"],
+      ["mod-enter", "Ctrl+Enter (Enter for a new line)"],
+    ]);
+    expect(fixture.setSendKey).not.toHaveBeenCalled();
+    expect(fixture.api).not.toHaveBeenCalled();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("asks Japanese speakers in Japanese, with the key named for this computer", () => {
+    setLocale("ja");
+    fixture.sendKey = "shift-enter";
+    const html = render();
+    expect(html).toContain("メッセージの送信キー");
+    expect(html).toContain("日本語入力のように Enter で変換を確定する場合は、Shift+Enter か Ctrl+Enter を選ぶと Enter で改行できます。");
+    expect(html).toContain(">Enter（Shift+Enter で改行）</option>");
+    expect(html).toContain('<option value="shift-enter" selected="">Shift+Enter（Enter で改行）</option>');
+    expect(html).toContain(">Ctrl+Enter（Enter で改行）</option>");
   });
 
   it("offers the run card visibility toggle in Appearance", () => {

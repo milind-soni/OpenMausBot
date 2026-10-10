@@ -4,10 +4,11 @@ import { Keyboard, Search, X } from "lucide-react";
 import {
   filterShortcutGroups,
   isMacPlatform,
-  SHORTCUT_GROUPS,
+  shortcutGroupsFor,
   shortcutKeysForPlatform,
   type ShortcutItem,
 } from "@/lib/keyboard-shortcuts";
+import { useSendKey } from "@/lib/send-key";
 
 /** Props for the KeyboardShortcutsModal component. */
 export interface KeyboardShortcutsModalProps {
@@ -49,6 +50,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const isMac = isMacPlatform();
+  const sendKey = useSendKey();
 
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
@@ -62,7 +64,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
 
   if (!open) return null;
 
-  const groups = filterShortcutGroups(SHORTCUT_GROUPS, query, isMac);
+  const groups = filterShortcutGroups(shortcutGroupsFor(sendKey), query, isMac);
 
   return (
     <dialog

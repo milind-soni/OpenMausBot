@@ -9,6 +9,7 @@ import {
   type CitationAttachment,
 } from "@/lib/citations";
 import { captureCitationSelection, citationTabShortcut } from "@/lib/citations-dom";
+import { sendsMessage, useSendKey } from "@/lib/send-key";
 
 type Point = { left: number; top: number };
 
@@ -36,6 +37,7 @@ function CitationEditor({
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [comment, setComment] = useState(citation.comment ?? "");
+  const sendKey = useSendKey();
   const tooLong = comment.length > CITATION_MAX_COMMENT_LENGTH;
   useLayoutEffect(() => {
     const update = () => {
@@ -82,7 +84,7 @@ function CitationEditor({
         placeholder="Add an optional comment…"
         onChange={(event) => setComment(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+          if (sendsMessage(event.nativeEvent, sendKey)) {
             event.preventDefault();
             if (!tooLong) onSave(withCitationComment(citation, comment));
           }

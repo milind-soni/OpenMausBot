@@ -517,8 +517,8 @@
   "composer.placeholder.approval": "जारी रखने के लिए ऊपर की मंज़ूरी का जवाब दें",
   "composer.placeholder.attaching": "फ़ाइलें संलग्न हो रही हैं…",
   "composer.placeholder.listening": "सुन रहे हैं…",
-  "composer.placeholder.steer": "{name} काम कर रहा है — Enter इसे चालू बारी में भेजता है",
-  "composer.placeholder.queueGroup": "{name} काम कर रहा है — Enter आपका संदेश कतार में रखता है",
+  "composer.placeholder.steer": "{name} काम कर रहा है — {key} इसे चालू बारी में भेजता है",
+  "composer.placeholder.queueGroup": "{name} काम कर रहा है — {key} आपका संदेश कतार में रखता है",
   "composer.placeholder.queue": "{name} काम कर रहा है — यह बारी खत्म होते ही भेजा जाएगा",
   "composer.placeholder.goal": "बताइए कि {name} को साथ मिलकर क्या पूरा करना है",
   "composer.placeholder.group": "{name} को संदेश — {hint}",
@@ -1590,5 +1590,8 @@
   "place.view.ccAtOnce.short": "इस्तेमाल में",
   "place.view.localUnavailable.short": "तैयार नहीं",
   "place.view.autoTeam.short": "साझा",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "settings.sendKey.title": "संदेश भेजने की कुंजी",
+  "settings.sendKey.subtitle": "Shift+Enter या {key} चुनें ताकि Enter नई पंक्ति शुरू करे — यह तब काम आता है जब आपकी इनपुट विधि Enter से टेक्स्ट पक्का करती है, जैसे जापानी इनपुट में। {key} हर विकल्प में भेजता है। सिर्फ़ इस डिवाइस पर।",
+  "settings.sendKey.option": "{key} (नई पंक्ति के लिए {newLine})"
 }

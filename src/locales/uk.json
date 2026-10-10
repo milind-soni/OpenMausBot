@@ -675,8 +675,8 @@
   "composer.placeholder.approval": "Дайте відповідь на погодження вище, щоб продовжити",
   "composer.placeholder.attaching": "Прикріплюємо файли…",
   "composer.placeholder.listening": "Слухаю…",
-  "composer.placeholder.steer": "{name} працює — Enter надішле це в поточний запит",
-  "composer.placeholder.queueGroup": "{name} працює — Enter поставить повідомлення в чергу",
+  "composer.placeholder.steer": "{name} працює — {key} надішле це в поточний запит",
+  "composer.placeholder.queueGroup": "{name} працює — {key} поставить повідомлення в чергу",
   "composer.placeholder.queue": "{name} працює — надішлеться, коли запит завершиться",
   "composer.placeholder.goal": "Опишіть, що {name} має завершити разом",
   "composer.placeholder.group": "Повідомлення для {name} — {hint}",
@@ -904,7 +904,7 @@
   "onboarding.tour.skip": "Пропустити тур",
   "onboarding.tour.finish": "Завершити",
   "onboarding.tour.next": "Далі",
-  "onboarding.tour.composer": "Тут ви розмовляєте з ботами. Введіть будь-що і натисніть Enter. Кожен чат — справжній агент на вашій машині.",
+  "onboarding.tour.composer": "Тут ви розмовляєте з ботами. Введіть будь-що і натисніть {key}. Кожен чат — справжній агент на вашій машині.",
   "onboarding.tour.model": "Кожен бот має власний мозок. Цей чіп показує модель; клацніть, щоб переключити, навіть посеред розмови.",
   "onboarding.tour.computer": "У ботів є руки. Ця кнопка відкриває панель Комп'ютер, де ви спостерігаєте роботу бота. Давайте відкриємо.",
   "onboarding.tour.tools": "Меню Інструменти. За ним ховаються підключені застосунки, автоматизації та мапа команди. Давайте відкриємо.",
@@ -2136,5 +2136,8 @@
   "place.view.ccAtOnce.short": "Використовується",
   "place.view.localUnavailable.short": "Не готово",
   "place.view.autoTeam.short": "Спільний",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "settings.sendKey.title": "Клавіша надсилання повідомлень",
+  "settings.sendKey.subtitle": "Оберіть Shift+Enter або {key}, щоб Enter починав новий рядок, — зручно, коли метод введення підтверджує текст клавішею Enter, як-от під час введення японською. {key} надсилає за будь-якого вибору. Лише на цьому пристрої.",
+  "settings.sendKey.option": "{key} ({newLine} — новий рядок)"
 }

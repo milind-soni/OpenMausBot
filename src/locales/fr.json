@@ -517,8 +517,8 @@
   "composer.placeholder.approval": "Répondez à l'autorisation ci-dessus pour continuer",
   "composer.placeholder.attaching": "Ajout des fichiers…",
   "composer.placeholder.listening": "À l'écoute…",
-  "composer.placeholder.steer": "{name} travaille — Entrée envoie ceci dans le tour en cours",
-  "composer.placeholder.queueGroup": "{name} travaille — Entrée met votre message en file",
+  "composer.placeholder.steer": "{name} travaille — {key} envoie ceci dans le tour en cours",
+  "composer.placeholder.queueGroup": "{name} travaille — {key} met votre message en file",
   "composer.placeholder.queue": "{name} travaille — envoi à la fin de ce tour",
   "composer.placeholder.goal": "Décrivez ce que {name} doit terminer ensemble",
   "composer.placeholder.group": "Message à {name} — {hint}",
@@ -1590,5 +1590,8 @@
   "place.view.ccAtOnce.short": "En cours d’utilisation",
   "place.view.localUnavailable.short": "Pas prêt",
   "place.view.autoTeam.short": "Partagé",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "settings.sendKey.title": "Envoyer les messages avec",
+  "settings.sendKey.subtitle": "Choisissez Shift+Enter ou {key} pour qu'Enter passe plutôt à la ligne, pratique si votre méthode de saisie valide le texte avec Enter, comme pour le japonais. {key} envoie quel que soit votre choix. Sur cet appareil uniquement.",
+  "settings.sendKey.option": "{key} ({newLine} pour aller à la ligne)"
 }

@@ -7,6 +7,7 @@ import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
 import {
   draftRevision,
   appendDraftAttachments,
@@ -132,6 +133,9 @@ export function Composer({
   // Simple leaves where a conversation works to its bot's Works on (Auto by
   // default); pinning a place per conversation is an Advanced control.
   const advanced = useAdvancedMode();
+  // Enter, Shift+Enter or Ctrl/⌘+Enter, from Settings → Appearance; the hints name it.
+  const sendKey = useSendKey();
+  const sendLabel = sendKeyLabel(sendKey);
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers members plus @everyone; explicit mentions override the room's
@@ -1157,8 +1161,8 @@ export function Composer({
               onEditLast();
               return;
             }
-            // Shift+Enter inserts a newline; plain Enter sends
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            // the chosen send key sends; any other Enter is a new line
+            if (sendsMessage(e.nativeEvent, sendKey)) {
               e.preventDefault();
               // The second Enter of the gesture: the chip above is waiting,
               // the composer is empty, and the window is open — steer the
@@ -1192,11 +1196,11 @@ export function Composer({
               ? t("composer.placeholder.listening")
               : busy && canSteer
                 ? pendingCount > 0
-                  ? t("composer.placeholder.steerQueued", { name: busyName })
-                  : t("composer.placeholder.steer", { name: busyName })
+                  ? t("composer.placeholder.steerQueued", { name: busyName, key: sendLabel })
+                  : t("composer.placeholder.steer", { name: busyName, key: sendLabel })
               : busy
                 ? group
-                  ? t("composer.placeholder.queueGroup", { name: busyName })
+                  ? t("composer.placeholder.queueGroup", { name: busyName, key: sendLabel })
                   : t("composer.placeholder.queue", { name: busyName })
                 : group
                   ? channelMode === "goal"
@@ -1258,7 +1262,7 @@ export function Composer({
                   ? t("composer.send.steer")
                   : busy
                     ? t("composer.send.queueHint")
-                    : t("chat.send")
+                    : `${t("chat.send")} (${sendLabel})`
             }
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full text-white",

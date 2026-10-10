@@ -604,8 +604,8 @@
   "composer.placeholder.approval": "Beantworte die Freigabe oben, um fortzufahren",
   "composer.placeholder.attaching": "Dateien werden angehängt…",
   "composer.placeholder.listening": "Höre zu…",
-  "composer.placeholder.steer": "{name} arbeitet — Enter schickt das in den laufenden Zug",
-  "composer.placeholder.queueGroup": "{name} arbeitet — Enter stellt deine Nachricht in die Warteschlange",
+  "composer.placeholder.steer": "{name} arbeitet — {key} schickt das in den laufenden Zug",
+  "composer.placeholder.queueGroup": "{name} arbeitet — {key} stellt deine Nachricht in die Warteschlange",
   "composer.placeholder.queue": "{name} arbeitet — wird gesendet, wenn dieser Zug endet",
   "composer.placeholder.goal": "Beschreib, was {name} gemeinsam fertigstellen soll",
   "composer.placeholder.group": "Nachricht an {name} — {hint}",
@@ -1608,5 +1608,8 @@
   "place.view.ccAtOnce.short": "In Benutzung",
   "place.view.localUnavailable.short": "Nicht bereit",
   "place.view.autoTeam.short": "Gemeinsam",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "settings.sendKey.title": "Nachrichten senden mit",
+  "settings.sendKey.subtitle": "Wähle Shift+Enter oder {key}, damit Enter stattdessen eine neue Zeile beginnt – praktisch, wenn deine Eingabemethode Text mit Enter bestätigt, wie bei japanischer Eingabe. {key} sendet bei jeder Wahl. Nur auf diesem Gerät.",
+  "settings.sendKey.option": "{key} ({newLine} für eine neue Zeile)"
 }

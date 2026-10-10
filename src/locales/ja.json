@@ -517,8 +517,9 @@
   "composer.placeholder.approval": "続けるには上の承認に答えてください",
   "composer.placeholder.attaching": "ファイルを添付中…",
   "composer.placeholder.listening": "聞き取り中…",
-  "composer.placeholder.steer": "{name} が作業中です — Enter で実行中のターンに送ります",
-  "composer.placeholder.queueGroup": "{name} が作業中です — Enter でメッセージを順番待ちにします",
+  "composer.placeholder.steer": "{name} が作業中です — {key} で実行中のターンに送ります",
+  "composer.placeholder.steerQueued": "{name} が作業中です — もう一度 {key} を押すと、順番待ちのメッセージを実行中のターンに送ります",
+  "composer.placeholder.queueGroup": "{name} が作業中です — {key} でメッセージを順番待ちにします",
   "composer.placeholder.queue": "{name} が作業中です — このターンが終わったら送信します",
   "composer.placeholder.goal": "{name} が一緒に仕上げる内容を書いてください",
   "composer.placeholder.group": "{name} へのメッセージ — {hint}",
@@ -1592,5 +1593,8 @@
   "place.view.ccAtOnce.short": "使用中",
   "place.view.localUnavailable.short": "準備できていません",
   "place.view.autoTeam.short": "共有",
-  "pro.name": "MausBot Cloud"
+  "pro.name": "MausBot Cloud",
+  "settings.sendKey.title": "メッセージの送信キー",
+  "settings.sendKey.subtitle": "日本語入力のように Enter で変換を確定する場合は、Shift+Enter か {key} を選ぶと Enter で改行できます。どの設定でも {key} で送信できます。この端末だけの設定です。",
+  "settings.sendKey.option": "{key}（{newLine} で改行）"
 }

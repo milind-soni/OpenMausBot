@@ -11,6 +11,7 @@ import { ANCHOR_EFFECTS, currentStep, stepNumber, TOUR_STEPS, withTourFinished, 
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
 import { hintSeenPatch } from "@/lib/onboarding";
+import { sendKeyLabel, useSendKey } from "@/lib/send-key";
 import type { LocaleKey } from "@/locales";
 import { api, useStore } from "@/state/store";
 import { Spotlight } from "./Spotlight";
@@ -28,7 +29,8 @@ const MASCOT: Record<TourStep["id"], MausState> = {
   "tour.done": "celebrate",
 };
 
-const copy = (id: TourStep["id"]) => t(`onboarding.tour.${id.slice(5)}` as LocaleKey);
+// {key}: the composer step names the send key chosen in Settings.
+const copy = (id: TourStep["id"], key: string) => t(`onboarding.tour.${id.slice(5)}` as LocaleKey, { key });
 
 function visible(anchor: string): HTMLElement | null {
   const all = Array.from(document.querySelectorAll<HTMLElement>(`[data-tour="${anchor}"]`));
@@ -60,6 +62,7 @@ export function GuidedTour() {
   const [failed, setFailed] = useState(false);
   const entered = useRef<string | null>(null);
   const [fallback, setFallback] = useState<string | null>(null);
+  const sendKey = useSendKey();
 
   useEffect(() => {
     if (!state.tourOpen) return;
@@ -207,7 +210,7 @@ export function GuidedTour() {
       secondary={closing ? undefined : { label: t("onboarding.tour.skip"), onClick: finish }}
       onDone={finish}
     >
-      {copy(step.id)}
+      {copy(step.id, sendKeyLabel(sendKey))}
       {failed && <p role="alert" className="mt-2 text-danger">{t("onboarding.tour.error")}</p>}
     </Spotlight>
   );
