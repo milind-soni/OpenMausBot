@@ -60,7 +60,8 @@ import { normalizeState } from "@/lib/mascot";
 import { goalCoordinatorForComposer, groupComposerHint, jevRoomRoutingOn, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
-import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { speechBridge, speechEndNote } from "@/lib/stt/bridge";
+import { useSpeechCapabilities } from "@/lib/stt/useSpeechCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
 import { useThreadRefs } from "./ThreadRefs";
 import {
@@ -125,7 +126,7 @@ export function Composer({
   const { state, dispatch } = useStore();
   const ownerOrAdmin = useOwnerOrAdmin();
   const { threads, currentBotId } = useThreadRefs();
-  const { capabilities } = useDesktopCapabilities();
+  const { capabilities } = useSpeechCapabilities();
   // Simple leaves where a conversation works to its bot's Works on (Auto by
   // default); pinning a place per conversation is an Advanced control.
   const advanced = useAdvancedMode();
@@ -754,43 +755,42 @@ export function Composer({
   // helper runs; the final transcript stays in the box, ready to edit/send
   useEffect(() => {
     if (!recording) return;
-    const bridge = window.ogb;
+    const bridge = speechBridge();
     if (!bridge) {
       setRecording(false);
       return;
     }
     setSpeechError(null);
-    const offTranscript = bridge.onSpeechTranscript((line) => {
+    const offTranscript = bridge.onTranscript((line) => {
       if (typeof line.text === "string") {
         const base = baseText.current;
         editText(base ? `${base} ${line.text}` : line.text);
       }
     });
-    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
+    const offEnd = bridge.onEnd((info) => {
       setRecording(false);
-      if (code === 2) {
+      if (info.code === 2) {
         setSpeechError(t("composer.dictation.macOnly"));
-      } else if (code === 1) {
-        setSpeechError(t(
-          reason === "dictation-disabled"
-            ? "composer.dictation.disabled"
-            : reason === "speech-not-authorized"
-              ? "composer.dictation.permission"
-              : "composer.dictation.failed",
-        ));
+      } else if (info.code === 1) {
+        setSpeechError(speechEndNote(info) ?? t("composer.dictation.permission"));
       }
     });
-    void bridge.speechStart();
+    void bridge.start();
     return () => {
       offTranscript();
       offEnd();
-      void bridge.speechStop();
+      void bridge.stop();
     };
   }, [recording, editText]);
 
   const toggleMic = () => {
-    if (!capabilities.dictation.available || !window.ogb) {
+    const bridge = speechBridge();
+    if (!capabilities.dictation.available || !bridge) {
       setSpeechError(t("composer.dictation.unavailable"));
+      return;
+    }
+    if (recording && bridge.kind === "universal") {
+      void bridge.finish();
       return;
     }
     baseText.current = text.trim();
@@ -1194,7 +1194,7 @@ export function Composer({
             <Square size={14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && !hasContent && capabilities.dictation.available && (
+        {!locked && !busy && (!hasContent || recording) && capabilities.dictation.available && (
           <button
             onClick={toggleMic}
             aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}

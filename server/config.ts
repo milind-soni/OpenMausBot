@@ -520,6 +520,24 @@ const appConfigSchema = z.object({
       .optional(),
     jobs: z.object({ roomRouting: z.boolean().optional() }).optional(),
   }).optional(),
+  /** Speech recognition for platforms without the native macOS recognizer. */
+  stt: z.object({
+    provider: z.enum(["openai", "groq", "xai", "local"]).optional(),
+    openaiKey: optionalText,
+    groqKey: optionalText,
+    baseUrl: z.string().trim().max(2048).refine((value) => {
+      if (!value) return true;
+      try {
+        const parsed = new URL(value);
+        const loopback = parsed.hostname === "localhost" || parsed.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(parsed.hostname);
+        return parsed.protocol === "https:" || (parsed.protocol === "http:" && loopback);
+      } catch {
+        return false;
+      }
+    }, "the speech server address must use HTTPS, or HTTP on loopback (localhost/127.0.0.1)").optional(),
+    model: optionalText,
+    language: optionalText,
+  }).optional(),
   /** Live calls: an OpenAI project key for GPT-Live, kept apart from every
    * other OpenAI credential so a Live call never bills an image or engine key
    * the user did not hand to it. `voice` is a GPT-Live built-in voice name. */
@@ -638,6 +656,7 @@ export interface AppConfig {
   tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel };
   /** The decision model; see the schema above and server/decider. */
   decider?: { enabled?: boolean; provider?: "jev" | "off"; key?: string; baseUrl?: string; jobs?: { roomRouting?: boolean } };
+  stt?: { provider?: "openai" | "groq" | "xai" | "local"; openaiKey?: string; groqKey?: string; baseUrl?: string; model?: string; language?: string };
   imageGen?: ImageGenerationConfig;
   live?: { key?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number };
   profile?: { name?: string; email?: string; aboutMe?: string };
@@ -940,6 +959,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "tts",
   // no engine reads it: the harness asks it before a turn starts
   "decider",
+  "stt",
   "imageGen",
   "live",
   "vps",
@@ -1078,6 +1098,9 @@ export function loadConfig(): AppConfig {
   if (process.env.OMB_FISH_AUDIO_API_KEY !== undefined) cfg.tts.fishKey = process.env.OMB_FISH_AUDIO_API_KEY;
   cfg.decider = { ...cfg.decider };
   if (process.env.OMB_JEV_API_KEY !== undefined) cfg.decider.key = process.env.OMB_JEV_API_KEY;
+  cfg.stt = { ...cfg.stt };
+  if (process.env.OMB_OPENAI_STT_KEY !== undefined) cfg.stt.openaiKey = process.env.OMB_OPENAI_STT_KEY;
+  if (process.env.OMB_GROQ_STT_KEY !== undefined) cfg.stt.groqKey = process.env.OMB_GROQ_STT_KEY;
   cfg.live = { ...cfg.live };
   if (process.env.OMB_OPENAI_LIVE_KEY !== undefined) cfg.live.key = process.env.OMB_OPENAI_LIVE_KEY;
   cfg.imageGen = { ...cfg.imageGen };
@@ -1142,6 +1165,8 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
     [patch.decider?.key, "OMB_JEV_API_KEY"],
+    [patch.stt?.openaiKey, "OMB_OPENAI_STT_KEY"],
+    [patch.stt?.groqKey, "OMB_GROQ_STT_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
     [patch.live?.key, "OMB_OPENAI_LIVE_KEY"],
@@ -1365,7 +1390,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "stt", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

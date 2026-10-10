@@ -8,6 +8,7 @@
 // two would deadlock over the speaker otherwise.
 import { useSyncExternalStore } from "react";
 
+import { speechBridge } from "./stt/bridge";
 import { speaker } from "./tts";
 
 let current: string | null = null;
@@ -29,7 +30,7 @@ export function startCall(targetId: string) {
   // in the desktop app (My Cloud) has no speech bridge (electron/preload.cjs
   // REMOTE_SAFE): nothing listens there, and its Live call goes on.
   speaker.stop();
-  void window.ogb?.speechStop?.();
+  void speechBridge()?.stop();
   current = targetId;
   notify();
 }
@@ -41,7 +42,9 @@ export function endCall(targetId?: string): boolean {
   if (current === null) return false;
   current = null;
   speaker.stop();
-  void window.ogb?.speechStop?.();
+  // hang-up closes the device; between turns the universal engine keeps it
+  // open but gated, and release() is what ends that
+  speechBridge()?.release();
   notify();
   return true;
 }

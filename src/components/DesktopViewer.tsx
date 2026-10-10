@@ -78,7 +78,7 @@ export function DesktopViewer() {
         client.scaleViewport = true;
         client.background = "var(--color-inset)";
         client.focusOnClick = panelRef.current === null;
-        client.addEventListener("clipboard", event => { if (!controller.signal.aborted) setClipboard(event.detail.text); });
+        client.addEventListener("clipboard", (event: CustomEvent<{ text: string }>) => { if (!controller.signal.aborted) setClipboard(event.detail.text); });
         deadline = setTimeout(() => {
           client?.disconnect();
           setConnection("disconnected");

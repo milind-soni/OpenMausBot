@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { currentCall } from "./call";
+import { speechBridge } from "./stt/bridge";
 
 type ModifierEvent = Pick<KeyboardEvent, "altKey" | "ctrlKey" | "code" | "repeat">;
 
@@ -30,14 +31,15 @@ export function usePushToTalk(targetId: string, enabled: boolean, onError: () =>
   }, [enabled]);
 
   useEffect(() => {
-    const bridge = window.ogb;
-    if (!bridge?.speechFinish) return;
+    const bridge = speechBridge();
+    // Older macOS shells lack speechFinish; push-to-talk needs it.
+    if (!bridge || (bridge.kind === "native" && !window.ogb?.speechFinish)) return;
 
     const finish = () => {
       if (!held.current) return;
       held.current = false;
       setActive(false);
-      void bridge.speechFinish?.();
+      void bridge.finish();
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -51,7 +53,7 @@ export function usePushToTalk(targetId: string, enabled: boolean, onError: () =>
       event.preventDefault();
       held.current = true;
       setActive(true);
-      void bridge.speechStart().catch(() => {
+      void bridge.start().catch(() => {
         held.current = false;
         setActive(false);
         onErrorRef.current();

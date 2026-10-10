@@ -31,6 +31,13 @@ export function callCapabilityHelp(
       case "remote-server":
         return capabilities.host.platform === "darwin" ? TURNS_ON_THIS_COMPUTER : TURNS_NEED_MAC;
       case "desktop-app-required":
+        return TURNS_NEED_MAC;
+      case "stt-setup-required":
+        return {
+          label: "Set up speech recognition to call",
+          reason:
+            "Choose a speech recognition provider under Voice in this agent's settings. A local Whisper server keeps your audio on this computer.",
+        };
       case "unsupported-platform":
         return TURNS_NEED_MAC;
       default:
