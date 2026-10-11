@@ -9182,6 +9182,46 @@ describe("harness HTTP API", () => {
     }
   }, 60_000);
 
+  it.each(["direct", "room"] as const)("loads the browser tools up front only when the browser is the conversation's place in %s turns", async (target) => {
+    // Behind Claude's tool search, the first browser action costs a model
+    // step. Works on: Browser preloads them. Auto, which only falls back to
+    // the browser, keeps them deferred, so turns that never browse stay small.
+    const bots: string[] = [];
+    const rooms: string[] = [];
+    const mounted = async (computer: "browser" | undefined) => {
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      bots.push(bot.id);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        approvalMode: "auto",
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        ...(computer ? { computer } : {}),
+      })).status).toBe(200);
+      let path = `/api/bots/${bot.id}/messages`;
+      if (target === "room") {
+        const room = (await api("POST", "/api/groups", { name: `Browser preload ${bots.length}`, memberIds: [bot.id] })).body.group;
+        rooms.push(room.id);
+        expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
+        path = `/api/groups/${room.id}/messages`;
+      }
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", path, { text: "Check the website." })).status).toBe(202);
+      const dump = await readJsonFileWhenReady(fakeClaudeDump) as { mcpConfig: { mcpServers: { browser?: { alwaysLoad?: boolean } } } };
+      expect(dump.mcpConfig.mcpServers.browser).toBeDefined();
+      return dump.mcpConfig.mcpServers.browser!;
+    };
+    try {
+      expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+      expect((await mounted(undefined)).alwaysLoad).toBeUndefined();
+      expect((await mounted("browser")).alwaysLoad).toBe(true);
+    } finally {
+      for (const id of rooms) await api("POST", `/api/groups/${id}/interrupt`, {}).catch(() => undefined);
+      for (const id of bots) await api("POST", `/api/bots/${id}/interrupt`, {}).catch(() => undefined);
+      await api("PATCH", "/api/config", { features: { browser: false } }).catch(() => undefined);
+      for (const id of rooms) await api("DELETE", `/api/groups/${id}`).catch(() => undefined);
+      for (const id of bots) await api("DELETE", `/api/bots/${id}`).catch(() => undefined);
+    }
+  }, 60_000);
+
   it.each(["direct", "room"] as const)("resolves the same computer paragraph in the settings preview and %s turns", async (target) => {
     // The paragraph a plan earns is decided once, by the shared resolver:
     // what the preview shows and what a dispatched turn says cannot drift.

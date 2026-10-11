@@ -1564,7 +1564,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         allowed.push("mcp__phone");
       }
       if (turn.integrations?.browser) {
-        mcpServers.browser = { ...turn.integrations.browser };
+        // Behind tool search, the first browser action costs a ToolSearch
+        // model step. Load the tools up front when browsing is the point.
+        mcpServers.browser = turn.preloadBrowserTools
+          ? { ...turn.integrations.browser, alwaysLoad: true }
+          : { ...turn.integrations.browser };
         allowed.push("mcp__browser");
       }
       if (turn.integrations?.data) {
