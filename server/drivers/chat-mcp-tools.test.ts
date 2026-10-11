@@ -323,6 +323,30 @@ describe("Chat MCP session", () => {
   });
 });
 
+describe("Chat MCP approvals by server", () => {
+  it("asks nothing for OpenMausBot's agents server, and grants no session-wide allow on the person's computer", async () => {
+    const agents = fixture(); const audit = fixture(); const computer = fixture();
+    const session = await mountChatTools({
+      agents: agents.server, custom: { audit: audit.server },
+      localComputer: { ...computer.server, scope: "local-computer" },
+    }, agents.controller.signal, true);
+    sessions.push(session);
+    expect(session.definitions.map((tool) => tool.function.name).sort()).toEqual(["agents_write", "audit_write", "computer_write"]);
+    expect(session.view("agents_write", { value: "x" })).toEqual({ title: "agents_write", input: { value: "x" }, ask: false });
+    expect(session.view("audit_write", { value: "x" })).toEqual({ title: "audit_write", input: { value: "x" }, ask: true, grant: '["audit","write"]' });
+    expect(session.view("computer_write", { value: "x" })).toEqual({ title: "computer_write", input: { value: "x" }, ask: true });
+  });
+
+  it("knows the harness's mounts by what the harness passed, not by a server's name", async () => {
+    const lookalike = fixture(); const vm = fixture();
+    const session = await mountChatTools({ custom: { agents: lookalike.server }, localComputer: vm.server }, lookalike.controller.signal, true);
+    sessions.push(session);
+    expect(session.view("agents_write", { value: "x" })).toMatchObject({ ask: true, grant: '["agents","write"]' });
+    // an isolated VM is not the person's own computer
+    expect(session.view("computer_write", { value: "x" })).toMatchObject({ ask: true, grant: '["computer","write"]' });
+  });
+});
+
 describe("Chat MCP tool directory", () => {
   const catalog = whopLikeCatalog(300);
   async function mountWhop(toolScope?: ToolScope) {
@@ -344,7 +368,8 @@ describe("Chat MCP tool directory", () => {
       // searching runs no tool of the server, so no card; call_tool shows its target
       expect(session.view("whop_search_tools", { query: "list payments" })).toEqual({ title: "whop_search_tools", input: { query: "list payments" }, ask: false });
       const args = { name: "payments_list", arguments: { company_id: "biz_1" } };
-      expect(session.view("whop_call_tool", args)).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true });
+      // "Always allow this session" covers the tool call_tool runs, not call_tool
+      expect(session.view("whop_call_tool", args)).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: '["whop","payments_list"]' });
       await expect(session.execute("whop_call_tool", args, controller.signal)).resolves.toMatchObject({ ok: true, text: "remote execution recorded" });
       expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
       // a mistake the directory answers with guidance runs nothing and fails nothing
@@ -383,7 +408,7 @@ describe("Chat MCP tool directory", () => {
       const session = await mountChatTools({ custom: { whop: { type: "http", url: remote.url, headers: {} } } }, controller.signal);
       sessions.push(session);
       expect(session.definitions.map((tool) => tool.function.name)).toEqual(whopLikeCatalog(5).map((tool) => `whop_${tool.name.replace("-", "_")}`));
-      expect(session.view("whop_payments_list", { company_id: "biz_1" })).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true });
+      expect(session.view("whop_payments_list", { company_id: "biz_1" })).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: '["whop","payments_list"]' });
     } finally { await remote.close(); }
   });
 });

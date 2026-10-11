@@ -25,6 +25,7 @@ import { cloudHomeLendingRefusal, createCloudRoutineAuthors, ownerOnlyConversati
 import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
+import { queuedBehindPersonText, settledWaitingChip, UnansweredApprovals } from "./waiting-on-person.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput, requestSourceForCard } from "./guarded-requests.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -2861,12 +2862,6 @@ function botAtThreadCapacity(botId: string): boolean {
   return store.tasks(botId).filter((task) => threadBusy(botId, task.threadId)).length >= maxConcurrentBotThreads(cfg);
 }
 
-/** A card waiting on the person still owns fresh coordinated work, even
- * when another thread slot is free. A sibling that is only working does not. */
-function recipientAwaitingPerson(botId: string, exceptThreadId: string): boolean {
-  return store.tasks(botId).some((task) => task.threadId !== exceptThreadId && task.activity === "waiting-on-you");
-}
-
 function hasDirectDispatch(botId: string): boolean {
   return [...directTurnDispatchClaims.values()].some((claim) => claim.botId === botId);
 }
@@ -5069,25 +5064,67 @@ function outstandingAssignmentsPrompt(threadId: string): string {
     requestId: node.id,
     bot: store.bot(node.botId)?.name ?? "Teammate",
     assignment: node.text.slice(0, 1_000),
-    status: node.status === "queued" ? "waiting for that teammate to be free"
+    status: node.status === "queued" ? queuedStatus(node)
       : openPersonCard(node.threadId) ? "stopped on a card waiting for the person's approval or answer in that teammate's thread; tell the person to open it"
       : "working on it now",
   }));
   return ` Assignments you already sent are still outstanding, and nothing in this conversation cancelled them: ${JSON.stringify(listed)}. Do not resend them, do not poll or wait for them, and do not tell the user they were lost. Each result returns to this conversation on its own and resumes you then. To change or add to one, send the change to the same teammate with coordinate_bots; it runs after the current work. Answer the message above with that work still in flight.`;
 }
 
+/** The card that keeps queued work from starting: its teammate has no free
+ * slot, and one of the threads holding one waits on the person. Only the
+ * person frees that slot; every other wait frees itself. */
+function queuedBehindPerson(node: RoomHandoff): { threadId: string; kind: "approval" | "question" | "review"; title: string } | undefined {
+  if (node.groupId || node.status !== "queued" || threadBusy(node.botId, node.threadId) || !botAtThreadCapacity(node.botId)) return undefined;
+  for (const task of store.tasks(node.botId)) {
+    if (task.threadId === node.threadId || task.activity !== "waiting-on-you") continue;
+    const card = openPersonCard(task.threadId);
+    if (card) return { threadId: task.threadId, kind: card.kind, title: task.title };
+  }
+  return undefined;
+}
+
+function queuedStatus(node: RoomHandoff): string {
+  const card = queuedBehindPerson(node);
+  return card ? `waiting for a free slot: that teammate is waiting on the person's ${card.kind === "question" ? "answer" : card.kind} in its thread ${JSON.stringify(card.title)}; tell the person to open it`
+    : "waiting for that teammate to be free";
+}
+
+/** Queued work already told why it waits, by node id; pruned to the nodes
+ * still queued whenever another is added. */
+const queuedBehindPersonNoted = new Set<string>();
+
+/** Tell the conversation that sent this work, once, that it waits on the
+ * person's card in another of its teammate's threads: from there the wait
+ * looks like a teammate that never starts. */
+function noteQueuedBehindPerson(node: RoomHandoff): void {
+  if (queuedBehindPersonNoted.has(node.id)) return;
+  const card = queuedBehindPerson(node);
+  const parent = node.parentId ? roomHandoffs.nodes.get(node.parentId) : undefined;
+  const bot = store.bot(node.botId);
+  if (!card || !parent || !bot) return;
+  for (const id of queuedBehindPersonNoted) if (roomHandoffs.nodes.get(id)?.status !== "queued") queuedBehindPersonNoted.delete(id);
+  queuedBehindPersonNoted.add(node.id);
+  store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
+    from: { botId: bot.id, name: bot.name, color: bot.color },
+    tool: { name: queuedBehindPersonText(bot.name, card.kind, card.title) },
+    threadRef: { botId: bot.id, threadId: card.threadId, title: card.title },
+  });
+}
+
 const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
   validate: (node, parent) => roomHandoffProblem(node, parent) ??
     (parent && store.bot(parent.botId)?.approvePeerComms && !fullAccessForSource(parent.botId, parent.threadId) && !node.approvalGranted ? "Sender now requires peer approval; submit a new approved request" : undefined),
-  // A free slot admits fresh work beside a sibling that is actually running
-  // (#1589). A card waiting on the person still holds fresh work (#1128).
-  // An owed resume is not fresh work, so a sibling card must not starve it
-  // (#1278). Never overlap the addressed thread, exceed capacity, or race a
-  // group turn.
+  // Delegations' admission (canAdmitDirectTurn): a free slot admits work
+  // beside a sibling that is running (#1589) or waiting on the person, so a
+  // card holds only its own thread. Never overlap the addressed thread,
+  // exceed capacity, or race a group turn. Work that waits for a slot such
+  // a card holds says so, once, where it was sent.
   busy: n => {
     if (n.groupId) return Boolean(store.bot(n.botId)?.busy || (store.group(n.groupId) && groupIsWorking(store.group(n.groupId)!)));
-    const slot = threadBusy(n.botId, n.threadId) || botAtThreadCapacity(n.botId) || Boolean(activeGroupTurnForBot(n.botId));
-    return n.status === "resume" ? slot : slot || recipientAwaitingPerson(n.botId, n.threadId);
+    if (canAdmitDirectTurn(n.botId, n.threadId)) return false;
+    noteQueuedBehindPerson(n);
+    return true;
   },
   changed: (groupIds, directThreadIds) => {
     for (const id of groupIds) {
@@ -6024,6 +6061,10 @@ onSteeredQueueChange(() => broadcast({ kind: "bot.queued", queues: publicBotQueu
 // once can collide on a bare id and patch each other's messages.
 const toolMessageByItem = new Map<string, string>(); // threadId:itemId -> messageId
 const askMessageByRequest = new Map<string, string>(); // threadId:requestId -> messageId
+/** Approvals nobody answered, kept for the result of the turn that asked
+ * them: the direct coordination outcome, a delegation's reply and a room
+ * member's reply each carry the note to whoever awaits that turn. */
+const unansweredApprovals = new UnansweredApprovals();
 // Only native, live permission metadata can become a remembered grant. Never
 // rebuild executable authority from an imported transcript or display summary.
 const pendingCommandRules = new Map<string, { botId: string; candidate: CommandAllowlistCandidate }>();
@@ -6071,7 +6112,9 @@ async function answerRequest(
   let outcome: RequestOutcome = "unavailable";
   if (instance) {
     try {
-      outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior, message, always: always && behavior === "allow" });
+      // Only a card that offered "Always allow this session" can keep one:
+      // never a guest's turn, a sandbox widening or the person's own computer.
+      outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior, message, always: always && behavior === "allow" && card?.allowSession === true });
     } catch {
       outcome = "unavailable";
     }
@@ -6403,7 +6446,8 @@ bus.subscribe((event: RuntimeEvent) => {
     if (event.turnId && store.botByThread(event.threadId)) {
       const reply = store.messagesFor(event.threadId).findLast(message =>
         message.role === "bot" && message.kind === "text" && message.turnId === event.turnId);
-      const outcome = { ok: event.ok, text: (reply?.text || event.stopReason || "The bot finished without a text reply").slice(0, 12_000) };
+      const outcome = { ok: event.ok, text: unansweredApprovals.annotate(event.threadId, event.turnId,
+        (reply?.text || event.stopReason || "The bot finished without a text reply").slice(0, 12_000), event.ok) };
       const owner = directFollowupTurns.complete(event.threadId, event.turnId, outcome);
       if (owner) {
         settleDirectCoordination(owner.generation, outcome);
@@ -8102,7 +8146,7 @@ bus.subscribe((event: RuntimeEvent) => {
     }
     case "request.resolved": {
       if (event.requestId) pendingCommandRules.delete(`${event.threadId}:${event.requestId}`);
-      if (event.requestId) settleWaitingOnPersonChips(event.threadId, event.requestId);
+      if (event.requestId) settleWaitingOnPersonChips(event.threadId, event);
       // answered (by whoever): the turn is working again, unless it settled
       const waiting = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       if (bot && store.taskByThread(bot.id, event.threadId)?.activity === "waiting-on-you") {
@@ -8112,6 +8156,12 @@ bus.subscribe((event: RuntimeEvent) => {
       if (messageId) {
         const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
         if (existing?.card && !existing.card.answered) {
+          // Nobody answered this approval: the engine denied it on its own
+          // timer and the turn goes on without the action. Kept for the
+          // turn's result, so its requester does not read it as done.
+          if (event.source === "timeout" && existing.card.requestType === "permission") {
+            unansweredApprovals.record(event.threadId, event.turnId, existing.card.tool, existing.card.subtitle);
+          }
           if (shouldSettleRequestCard(existing.card, event.source)) {
             store.patchMessage(event.threadId, messageId, {
               card: {
@@ -8464,7 +8514,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const delegationFailureName = !event.ok && event.stopReason?.trim()
         ? `Delegated turn did not finish — ${event.stopReason.trim().slice(0, 120)}`
         : undefined;
-      finalizeDelegationWatch(event.threadId, event.ok, reply, delegationFailureName);
+      finalizeDelegationWatch(event.threadId, event.ok, unansweredApprovals.annotate(event.threadId, event.turnId, reply, event.ok), delegationFailureName);
       // group busy/unread settle in the group turn engine, which knows
       // whether more member turns are queued behind this one
       break;
@@ -8531,16 +8581,17 @@ function showWaitingOnPersonChip(threadId: string, requestId: string, asker: Bot
   waitingOnPersonChips.set(`${threadId}:${requestId}`, { threadId: delegator.threadId, messageId: chip.id, name: asker.name, kind });
 }
 
-/** Settle the chip for one answered card, or every chip for this thread once
- * its turn ends (a card nobody answered can no longer be answered). */
-function settleWaitingOnPersonChips(threadId: string, requestId?: string) {
+/** Settle the chip for one resolved card with what actually happened to it
+ * (waiting-on-person.ts), or every chip for this thread once its turn ends:
+ * a card nobody answered by then closed unanswered, and its step never ran. */
+function settleWaitingOnPersonChips(threadId: string, resolved?: Extract<RuntimeEvent, { type: "request.resolved" }>) {
   for (const [key, chip] of waitingOnPersonChips) {
-    if (requestId ? key !== `${threadId}:${requestId}` : !key.startsWith(`${threadId}:`)) continue;
+    if (resolved ? key !== `${threadId}:${resolved.requestId}` : !key.startsWith(`${threadId}:`)) continue;
     waitingOnPersonChips.delete(key);
     const existing = store.messagesFor(chip.threadId).find((message) => message.id === chip.messageId);
     if (!existing?.tool) continue;
     store.patchMessage(chip.threadId, chip.messageId, {
-      tool: { ...existing.tool, name: requestId ? `@${chip.name} got your ${chip.kind}` : `@${chip.name} is no longer waiting on your ${chip.kind}`, ok: true },
+      tool: { ...existing.tool, ...settledWaitingChip(chip.name, chip.kind, resolved?.behavior ?? "deny", resolved?.source ?? "system") },
     });
   }
 }
@@ -13637,7 +13688,7 @@ async function runGroupMemberTurn(
   if (!retainRoomVmLease) releaseRoomVmLease();
   roomHandoffSourceSucceeded = outcome === "settled";
   if (orchestration) {
-    orchestration.result.replyText = replyText.trim();
+    orchestration.result.replyText = unansweredApprovals.annotate(threadId, providerTurnId, replyText.trim(), outcome === "settled");
     orchestration.result.outcome = outcome;
   }
   // A timed-out provider still owns the room thread until its interrupt

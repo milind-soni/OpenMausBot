@@ -8439,7 +8439,7 @@ describe("harness HTTP API", () => {
         mcpConfig: z.object({ mcpServers: z.object({ ogb: z.object({ args: z.array(z.string()) }) }) }),
       }).parse(await readJsonFileWhenReady(fakeClaudeDump));
       const socketPath = dump.mcpConfig.mcpServers.ogb.args[1];
-      const raise = async (id: string, command: string) => {
+      const raise = async (id: string, command: string, extra: Record<string, unknown> = {}) => {
         const conn = connect(socketPath);
         conns.push(conn);
         const answered = new Promise<{ behavior: string; always?: boolean }>((resolve) => {
@@ -8454,7 +8454,7 @@ describe("harness HTTP API", () => {
           conn.on("connect", resolve);
           conn.on("error", reject);
         });
-        conn.write(JSON.stringify({ t: "ask", id, tool: "Bash", input: { command } }) + "\n");
+        conn.write(JSON.stringify({ t: "ask", id, tool: "Bash", input: { command, ...extra } }) + "\n");
         return answered;
       };
       type Msg = { kind: string; tool?: { name: string }; card?: { title: string; subtitle: string; requestId?: string; held?: string; heldCode?: string; allowKey?: string; allowSession?: boolean; answered?: string } };
@@ -8490,6 +8490,17 @@ describe("harness HTTP API", () => {
       const plain = await second;
       expect(plain).toMatchObject({ behavior: "allow" });
       expect(plain).not.toHaveProperty("always");
+
+      // A card that offers no session allow keeps none, whatever the answer
+      // claims: widening the sandbox is allowed once at most.
+      const widen = raise("ask-widen", "ls /", { dangerouslyDisableSandbox: true });
+      await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "ls /")?.card?.title).toBe("Approval needed");
+      const widenCard = (await messages()).find((m) => m.card?.subtitle === "ls /")!.card!;
+      expect(widenCard.allowSession).toBeUndefined();
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: widenCard.requestId, behavior: "allow", always: true })).status).toBe(200);
+      const once = await widen;
+      expect(once).toMatchObject({ behavior: "allow" });
+      expect(once).not.toHaveProperty("always");
     } finally {
       for (const conn of conns) conn.destroy();
       await api("POST", `/api/bots/${bot.id}/interrupt`);

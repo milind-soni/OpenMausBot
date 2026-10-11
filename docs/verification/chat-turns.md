@@ -160,16 +160,25 @@ the pending job to catch up.
 
 ```sh
 pnpm exec vitest run server/delegations.test.ts server/peer-roster.test.ts server/drivers/agents-proxy.test.ts
-pnpm exec vitest run server/independent-threads-api.test.ts -t "queues coordinated work behind a peer's approval"
+pnpm exec vitest run server/independent-threads-api.test.ts -t "holds coordinated work behind a peer's approval"
+pnpm exec vitest run server/independent-threads-api.test.ts -t "unanswered|what became of each teammate approval"
 pnpm exec vitest run server/comms.test.ts
 ```
 
 The mailbox API fixture uses the isolated launcher and per-model fake-engine
-gates. A peer waits on a real approval-broker card. That card keeps fresh
-coordinated work queued even when the peer still has a free thread slot. A
-spare slot admits work only beside a sibling that is actually running.
-Approving the card releases the queued work, and one attributed result
-returns to the Chief without another user prompt. Exact
+gates. A peer waits on a real approval-broker card. A card holds only its own
+thread: fresh coordinated work waits only while the card's thread holds the
+peer's last free slot, and then the Chief's conversation says once whose card
+it waits behind and where, as does the Chief's prompt. With a slot free, the
+work starts beside the open card. Approving the card lets its own turn go on,
+and one attributed result returns to the Chief without another user prompt.
+The approval cases follow a teammate's cards through the broker's own course:
+the Chief's chip says denied, or that nobody answered and the step did not run,
+never "got your approval". The fixture fires the broker's fifteen-minute
+deadline through a marker file (`server/testing/approval-clock-hooks.mjs`,
+loaded only when `OMB_TEST_APPROVAL_CLOCK=1` reaches the isolated launcher).
+The result a Chief's coordination, a routine's delegation and a room's
+coordinator each read then leads with the action that did not run. Exact
 control commands, waits, transcripts and the server log path are retained in
 the fixture's `.log.json` evidence, without capability tokens. Queue-unit
 tests cover expiry, multi-job restart recovery, repeated busy periods and

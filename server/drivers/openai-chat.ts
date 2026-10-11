@@ -311,6 +311,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
    * the stored text would rewrite history the provider has cached. In memory
    * only: after a restart a thread replays as stored, as it always did. */
   const delivered = new Map<string, DeliveredUserMessage[]>();
+  /** "Always allow this session" grants by thread: the exact tools a person
+   * allowed for the rest of the conversation. This runtime has no native
+   * session, so the conversation's lives as long as this instance does, as
+   * an ACP agent's does with its process; none survives a restart. */
+  const sessionGrants = new Map<string, Set<string>>();
 
   const emit = (event: RuntimeEvent) => {
     for (const listener of Array.from(listeners)) listener(event);
@@ -585,11 +590,18 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       dir, source: options.nativeLog.source,
       msg: JSON.parse(JSON.stringify(msg, (_key, part) => typeof part === "string" ? safeText(part) : part)),
     });
+    const granted = sessionGrants.get(turn.threadId) ?? new Set<string>();
+    sessionGrants.delete(turn.threadId);
+    sessionGrants.set(turn.threadId, granted);
+    if (sessionGrants.size > MAX_DELIVERED_THREADS) sessionGrants.delete(sessionGrants.keys().next().value!);
     const approval = createChatToolApproval({
       signal: abort.signal,
+      // A guest's turn neither uses the owner's grants nor keeps one: its
+      // cards offer allow once only (index.ts request.opened).
+      granted: turn.guestConfined ? undefined : granted,
       open: (ask) => emit({
         ...base(turn.threadId, turnId), type: "request.opened", requestType: "permission",
-        requestId: ask.id, tool: ask.tool, summary: ask.summary, allowSession: false,
+        requestId: ask.id, tool: ask.tool, summary: ask.summary, allowSession: ask.grant !== undefined,
       }),
       resolved: (ask, allowed, source) => emit({
         ...base(turn.threadId, turnId), type: "request.resolved", requestId: ask.id,
@@ -823,7 +835,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 // an OpenAI-compatible engine stops for a card, and a Chief's
                 // delegated Full access cannot help either.
                 const allowed = turn.approvalMode === "full" || !shown.ask
-                  || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.");
+                  || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.", shown.grant);
                 abort.signal.throwIfAborted();
                 emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
                   title: shown.title, ...(shownPreview ? { input: shownPreview } : {}),
@@ -941,8 +953,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         // user message mid-turn: park it, deliver before the next completion.
         queueing: true,
         // No shell and no file tool on the host at all: only MCP tools, each
-        // call a card in Ask (the Boat's `exec` runs on the Boat). A guest's
-        // turn is as confined as it gets.
+        // call a card in Ask unless "Always allow this session" covers it,
+        // and the harness's own agents tools none, as on Claude and Codex
+        // (the Boat's `exec` runs on the Boat). A guest's turn is as confined
+        // as it gets.
         guestTurns: "confined" },
       sendTurn,
       interruptTurn: async (threadId, turnId) => {
@@ -952,7 +966,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         await turn.done;
       },
       respondToRequest: async (threadId, requestId, decision) =>
-        active.get(threadId)?.approval.answer(requestId, decision.behavior, decision.message) ?? "unavailable",
+        active.get(threadId)?.approval.answer(requestId, decision.behavior, decision.message, decision.always) ?? "unavailable",
       steer: async (threadId, text) => {
         // This engine has no external session to respect — parking the
         // words in the live turn's entry IS delivery into the loop, so a

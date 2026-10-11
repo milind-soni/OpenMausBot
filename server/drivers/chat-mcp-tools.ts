@@ -18,9 +18,11 @@ export interface ChatToolDefinition {
 }
 export interface ChatToolResult { text: string; ok: boolean; images?: ChatImagePart[] }
 /** How one call is shown to the person: the tool named on its approval card
- * and in the transcript, the input previewed there, and whether a card is
- * needed at all. */
-export interface ChatToolCallView { title: string; input: Record<string, unknown>; ask: boolean }
+ * and in the transcript, the input previewed there, whether a card is needed
+ * at all, and what "Always allow this session" on that card keeps allowed:
+ * the exact tool on its exact server. No grant for the person's own
+ * computer, which no engine lets a session-wide allow cover. */
+export interface ChatToolCallView { title: string; input: Record<string, unknown>; ask: boolean; grant?: string }
 /** The transport cannot safely continue this turn. A dispatched operation may
  * already have taken effect, so callers must not retry it through a new round. */
 export class ChatToolSessionError extends Error {}
@@ -28,7 +30,10 @@ export interface ChatToolSession {
   definitions: ChatToolDefinition[];
   validate(name: string, args: unknown): void;
   /** A searched server's search_tools and describe_tool read only its
-   * catalog, so they need no card; call_tool is shown as the tool it runs. */
+   * catalog, so they need no card; call_tool is shown as the tool it runs.
+   * OpenMausBot's own agents server needs none either, as on Claude
+   * (pre-allowed mcp__agents) and Codex (auto-approved mount): the harness
+   * authorizes each of its routes itself. */
   view(name: string, args: Record<string, unknown>): ChatToolCallView;
   execute(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<ChatToolResult>;
   close(): Promise<void>;
@@ -277,7 +282,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const cancel = () => { void close().catch(() => {}); };
   signal.addEventListener("abort", cancel, { once: true });
   const definitions: ChatToolDefinition[] = [];
-  const registered = new Map<string, { client: ChatMcpClient; server: string; builtInBrowser: boolean; name: string; schema: ValidateFunction; searched: boolean }>();
+  const registered = new Map<string, { client: ChatMcpClient; server: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; name: string; schema: ValidateFunction; searched: boolean }>();
   try {
     if (signal.aborted) throw aborted();
     // Start independent servers concurrently; consume results in config order
@@ -295,11 +300,14 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       // A searched URL server answers over the internet: its initialize and
       // whole tools/list get the URL budget; command servers keep theirs.
       const tools = await client.tools(signal, include, searchable.has(name) ? REMOTE_MCP_STARTUP_MS : STARTUP_MS);
-      return { name, client, builtInBrowser: descriptor === integrations?.browser, tools };
+      // Harness mounts are known by the descriptor the harness passed, never
+      // by a name a configured server could also claim.
+      return { name, client, builtInBrowser: descriptor === integrations?.browser, agents: descriptor === integrations?.agents,
+        hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", tools };
     }));
     for (const mount of mounts) {
       if (mount.status === "rejected") throw mount.reason;
-      const { name: server, client, builtInBrowser, tools } = mount.value;
+      const { name: server, client, builtInBrowser, agents, hostComputer, tools } = mount.value;
       const originalNames = new Set<string>();
       for (const tool of tools) {
         if (!object(tool) || typeof tool.name !== "string" || !tool.name.trim() || originalNames.has(tool.name)) throw new Error("MCP server advertised an invalid or duplicate tool name");
@@ -320,7 +328,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         const base = chatToolName(server, tool.name);
         let name = base;
         for (let index = 2; registered.has(name); index += 1) { const suffix = `_${index}`; name = base.slice(0, 64 - suffix.length) + suffix; }
-        registered.set(name, { client, server, builtInBrowser, name: tool.name, schema, searched: searchable.has(server) });
+        registered.set(name, { client, server, builtInBrowser, agents, hostComputer, name: tool.name, schema, searched: searchable.has(server) });
         definitions.push({ type: "function", function: { name, description, parameters } });
         if (Buffer.byteLength(JSON.stringify(definitions)) > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
       }
@@ -347,9 +355,10 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const view = (name: string, args: Record<string, unknown>): ChatToolCallView => {
     const tool = registered.get(name);
     const runs = tool ? target(tool, args) : name;
-    if (runs === undefined) return { title: name, input: args, ask: false };
-    if (!tool?.searched || tool.name !== CALL_TOOL) return { title: name, input: args, ask: true };
-    return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true };
+    if (runs === undefined || tool?.agents) return { title: name, input: args, ask: false };
+    const grant = tool && !tool.hostComputer ? JSON.stringify([tool.server, runs]) : undefined;
+    if (!tool?.searched || tool.name !== CALL_TOOL) return { title: name, input: args, ask: true, ...(grant ? { grant } : {}) };
+    return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
   };
   return {
     definitions, validate, view, close,
