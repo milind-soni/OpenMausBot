@@ -2,7 +2,8 @@
 //
 // Local is the server this app spawns; a remote environment is a server the
 // user paired with. The app switches by loading that server's own UI, so an
-// environment is just {id, name, origin}. The session credential is the
+// environment is just {id, name, origin} (plus `microphone: true` once the
+// person allowed it a Live call). The session credential is the
 // HttpOnly cookie the /pair page set for that origin, held by Chromium's
 // cookie jar, never by this file.
 const LOCAL_ID = "local";
@@ -151,7 +152,8 @@ function parseEnvironments(raw) {
     if (!origin || !id || id === LOCAL_ID || seen.has(id) || seen.has(origin)) continue;
     seen.add(id);
     seen.add(origin);
-    environments.push({ id, name: cleanName(entry?.name, nameFromOrigin(origin)), origin });
+    // `microphone: true` only once the person allowed this server a Live call.
+    environments.push({ id, name: cleanName(entry?.name, nameFromOrigin(origin)), origin, ...(entry?.microphone === true ? { microphone: true } : {}) });
   }
   const activeId = typeof value?.activeId === "string" && environments.some((e) => e.id === value.activeId) ? value.activeId : LOCAL_ID;
   return { environments, activeId };
@@ -181,6 +183,13 @@ function withoutEnvironment(state, id) {
   return { environments, activeId: state.activeId === id ? LOCAL_ID : state.activeId };
 }
 
+/** The person allowed this saved server the microphone (asked on its first
+ * Live call); forgetting the server drops the record and the answer with it. */
+function withMicrophone(state, id) {
+  if (!state.environments.some((e) => e.id === id)) return state;
+  return { ...state, environments: state.environments.map((e) => (e.id === id ? { ...e, microphone: true } : e)) };
+}
+
 function withActive(state, id) {
   if (id !== LOCAL_ID && !state.environments.some((e) => e.id === id)) return state;
   return { ...state, activeId: id };
@@ -206,6 +215,7 @@ module.exports = {
   serializeEnvironments,
   withActive,
   withEnvironment,
+  withMicrophone,
   withoutEnvironment,
   workspaceMenuTemplate,
   workspaceNavigationAllowed,

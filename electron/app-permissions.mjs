@@ -16,11 +16,13 @@
 // person's own page hearing it. Any other server's page stays refused.
 //
 // A second, separate exception: the paired remote server open in the main
-// window may use the microphone (for a Live call) and write the clipboard (the
-// copy button), and nothing else. Pairing takes a code the server printed for
-// the person, so it is their own server, as personal as their Cloud. Both
-// microphones follow the one rule in mainFrameMicrophoneAllowed; both clipboard
-// writes follow the one rule in remoteClipboardWriteAllowed.
+// window may write the clipboard (the copy button) and, once the person said
+// yes to that server's first microphone request, use the microphone for a Live
+// call; nothing else. A saved server is not necessarily the person's own (an
+// address is saved before pairing, and a chat-only code can come from someone
+// else), so its microphone is asked, never assumed. Both microphones follow the
+// one rule in mainFrameMicrophoneAllowed; both clipboard writes follow the one
+// rule in remoteClipboardWriteAllowed.
 
 const ALLOWED_APP_PERMISSIONS = new Set([
   "notifications",
@@ -72,9 +74,9 @@ export function appPermissionAllowed(permission, requestingUrlOrOrigin, renderer
 }
 
 /**
- * Whether the person's own Cloud, or the active paired server, may use the
- * microphone: only in the main frame, only at the exact origin the verified
- * Cloud sign-in or the active saved environment reports. Never the camera,
+ * Whether the person's own Cloud, or the active saved server they allowed, may
+ * use the microphone: only in the main frame, only at the exact origin the
+ * verified Cloud sign-in or the active saved environment reports. Never the camera,
  * screen capture or notifications; clipboard writes are the separate rule in
  * remoteClipboardWriteAllowed, and neither page ever reads the clipboard.
  *
@@ -123,25 +125,32 @@ export function remoteClipboardWriteAllowed(permission, requestingUrlOrOrigin, a
  * The session's permission handlers. This computer's own page gets
  * appPermissionAllowed; the Cloud gets the microphone and clipboard writes,
  * and only while it is the page open in the main window; the active remote
- * server, in that same window, gets the same two.
+ * server, in that same window, gets clipboard writes, and the microphone once
+ * the person allowed it.
  *
  * @param {{ rendererOrigin: () => string, mainContents: () => unknown, cloudHomeOrigin: () => string | null,
- *   cloudHomeRestoring?: () => Promise<unknown> | null, activeRemoteOrigin?: () => string | null }} context
+ *   cloudHomeRestoring?: () => Promise<unknown> | null, activeRemoteOrigin?: () => string | null,
+ *   activeRemoteMicrophone?: () => boolean, askRemoteMicrophone?: (origin: string) => Promise<unknown> | null }} context
  *   `mainContents`: the main window's webContents, or null; `cloudHomeOrigin`:
  *   the person's own Cloud (cloud-home.mjs myCloudOrigin), asked on every
  *   request so signing out takes the microphone and clipboard away at once;
  *   `cloudHomeRestoring`: while the saved Cloud sign-in is still restoring
  *   (the first seconds after launch), a wait for it, which main caps; null after;
  *   `activeRemoteOrigin`: the active saved environment's origin, or null on
- *   this computer, asked on every request so a server switch withdraws it.
+ *   this computer, asked on every request so a server switch withdraws it;
+ *   `activeRemoteMicrophone`: whether the person allowed that server the
+ *   microphone, also asked on every request; `askRemoteMicrophone`: on a
+ *   microphone request the person has not answered yet, a wait for their
+ *   answer (main's dialog), or null when there is nothing to ask.
  */
-export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeOrigin, cloudHomeRestoring = () => null, activeRemoteOrigin = () => null }) {
+export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeOrigin, cloudHomeRestoring = () => null, activeRemoteOrigin = () => null,
+  activeRemoteMicrophone = () => false, askRemoteMicrophone = () => null }) {
   // The main window's page asking for the microphone: its Cloud's own ask, if it is the Cloud.
   const asksAsCloud = (contents, permission, requesting, details) =>
     Boolean(contents) && contents === mainContents() && mainFrameMicrophoneAllowed(permission, requesting, requesting, details);
-  // The active remote server's page, in the main window's own main frame,
-  // asking for the microphone; read per request so a server switch withdraws it.
-  const activeRemoteMicrophone = (contents, permission, requesting, details) =>
+  // The main window's page asking for the microphone as the active remote
+  // server; read per request so a server switch withdraws it.
+  const asksAsRemote = (contents, permission, requesting, details) =>
     Boolean(contents) && contents === mainContents() && mainFrameMicrophoneAllowed(permission, requesting, activeRemoteOrigin(), details);
   // The active remote server's page, or the person's own Cloud, in the main
   // window's own main frame, writing the clipboard: one rule for both.
@@ -152,18 +161,24 @@ export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeO
   const allowed = (contents, permission, requesting, details) =>
     appPermissionAllowed(permission, requesting, rendererOrigin(), details) ||
     (asksAsCloud(contents, permission, requesting, details) && mainFrameMicrophoneAllowed(permission, requesting, cloudHomeOrigin(), details)) ||
-    activeRemoteMicrophone(contents, permission, requesting, details) ||
+    (asksAsRemote(contents, permission, requesting, details) && activeRemoteMicrophone() === true) ||
     clipboardWrite(contents, permission, requesting, details);
   return {
     // Only a request may wait (Electron answers it through the callback). A
     // Cloud page that asks before the saved sign-in has restored is decided
-    // once it has, never refused for being early; anything else at once.
+    // once it has, never refused for being early; a saved server's first
+    // microphone request once the person answered; anything else at once.
+    // Either way the answer is the rule again afterwards, so a switch made
+    // meanwhile still refuses.
     request: (contents, permission, callback, details) => {
       const requesting = details?.requestingUrl ?? contents?.getURL?.() ?? "";
       if (allowed(contents, permission, requesting, details)) return callback(true);
-      const restoring = asksAsCloud(contents, permission, requesting, details) ? cloudHomeRestoring() : null;
-      if (!restoring) return callback(false);
-      void Promise.resolve(restoring).catch(() => {}).then(() => callback(allowed(contents, permission, requesting, details)));
+      // The active server's own ask first: asksAsCloud holds for any main-window page.
+      const waiting = asksAsRemote(contents, permission, requesting, details) ? askRemoteMicrophone(activeRemoteOrigin())
+        : asksAsCloud(contents, permission, requesting, details) ? cloudHomeRestoring()
+        : null;
+      if (!waiting) return callback(false);
+      void Promise.resolve(waiting).catch(() => {}).then(() => callback(allowed(contents, permission, requesting, details)));
     },
     check: (contents, permission, requestingOrigin, details) =>
       allowed(contents, permission, requestingOrigin || contents?.getURL?.() || "", details),
