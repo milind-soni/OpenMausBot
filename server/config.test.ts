@@ -754,6 +754,44 @@ describe("saving the newer sections", () => {
 });
 
 describe("default fleet", () => {
+  it("adds Groq to product fleets and keeps its workspace key away from other accounts", () => {
+    const cfg: AppConfig = { groq: { key: "groq-workspace", url: "https://proxy.example.test/openai/v1" }, instances: {
+      codex: { driver: "codex" },
+      groqProxy: { driver: "groq", config: { url: "https://another.example.test/v1" } },
+      groqOwn: { driver: "groq", environment: { GROQ_API_KEY: "groq-own" } },
+    } };
+    const map = instanceConfigs(cfg);
+    expect(map.groq).toEqual({ driver: "groq", config: { url: cfg.groq!.url }, environment: { GROQ_API_KEY: "groq-workspace" } });
+    expect(map.codex.environment).toEqual({});
+    expect(map.groqProxy.environment).toEqual({});
+    expect(map.groqOwn.environment).toEqual({ GROQ_API_KEY: "groq-own" });
+    expect(cfg.instances).not.toHaveProperty("groq");
+    expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("groq");
+  });
+
+  it("preserves an existing compatible account named Groq when adding the built-in provider", () => {
+    const map = instanceConfigs({ groq: { key: "workspace-key" }, instances: {
+      codex: { driver: "codex" },
+      groq: { driver: "openai-compat", config: { url: "https://existing.example.test/v1" }, environment: { OPENAI_COMPAT_API_KEY: "own-key" } },
+    } });
+    expect(map.groq).toEqual({ driver: "openai-compat", config: { url: "https://existing.example.test/v1" }, environment: { OPENAI_COMPAT_API_KEY: "own-key" } });
+  });
+
+  it("accepts clearing a Groq key and removes it from child environments", () => {
+    expect(parseConfigPatch({ groq: { key: "" } })).toEqual({ groq: { key: "" } });
+    const env = { OMB_GROQ_API_KEY: "groq-fixture", KEEP: "yes" };
+    stripWorkspaceCredentialEnv(env);
+    expect(env).toEqual({ KEEP: "yes" });
+  });
+
+  it("keeps OpenCode's existing Groq key separate from the built-in Groq key", () => {
+    const map = instanceConfigs({ groq: { key: "groq-workspace" },
+      opencodeGo: { providerKeys: { GROQ_API_KEY: "groq-opencode" } } });
+    expect(map.groq.environment).toEqual({ GROQ_API_KEY: "groq-workspace" });
+    expect(map.opencodeGo.environment).toEqual({ GROQ_API_KEY: "groq-opencode" });
+    expect(map.codex.environment).toEqual({});
+  });
+
   it("adds a separate ChatGPT plan account without copying Codex credentials", () => {
     const cfg: AppConfig = { instances: { codex: { driver: "codex", config: { cli: "/fixture/codex" }, environment: { CODEX_HOME: "/other-account", OPENAI_API_KEY: "not-for-plan" } } } };
     expect(instanceConfigs(cfg).chatgpt).toMatchObject({ driver: "codex", displayName: "ChatGPT plan", config: { cli: "/fixture/codex", authMode: "chatgpt-plan" }, environment: {} });
@@ -1326,6 +1364,7 @@ describe("legacy feature flag migration", () => {
 describe("credential env preference", () => {
   const VARS = [
     "XAI_API_KEY",
+    "OMB_GROQ_API_KEY",
     "OPENAI_COMPAT_API_KEY",
     "OPENAI_COMPAT_URL",
     "OPENAI_COMPAT_MODEL",
@@ -1683,6 +1722,17 @@ describe("credential env preference", () => {
     expect(process.env.BOX_TOKEN).toBeUndefined();
     expect(process.env.OMB_TTS_KEY).toBeUndefined();
     expect(process.env.OMB_FISH_AUDIO_API_KEY).toBeUndefined();
+  });
+
+  it("saves and clears the built-in Groq key without changing an operator's Groq key", () => {
+    vi.stubEnv("GROQ_API_KEY", "groq-operator");
+    try {
+      syncCredentialEnv({ groq: { key: "groq-workspace" } });
+      expect(loadConfig().groq?.key).toBe("groq-workspace");
+      syncCredentialEnv({ groq: { key: "" } });
+      expect(loadConfig().groq?.key).toBeUndefined();
+      expect(process.env.GROQ_API_KEY).toBe("groq-operator");
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it("syncCredentialEnv updates Fish Audio without replacing ElevenLabs", () => {
