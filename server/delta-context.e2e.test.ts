@@ -2,6 +2,8 @@
 // launcher and the repository's fake engines: what each provider turn
 // actually received, counted by unique sentinels.
 import { spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -12,6 +14,7 @@ import { launchVerificationServer, runControlOmb, verificationServerEnvironment 
 import { request } from "../scripts/mcp-server.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { openSse } from "./testing/sse.ts";
 import { withoutTurnClock } from "./testing/turn-clock-text.ts";
 
 const count = (text: string, needle: string) => text.split(needle).length - 1;
@@ -518,10 +521,11 @@ it("records a Codex handoff whose turn completes before turn/start is acknowledg
 }, { codex: { FAKE_CODEX_COMPLETE_BEFORE_ACK: "1" } }), hostTimeout(90_000));
 
 // A result that arrives after a restart, for a stored conversation with or
-// without a record of what its session received.
+// without a record of what its session received: the teammate turn the
+// restart cut runs again and reports to the stopped Chief.
 const resultAcrossRestart = async (f: any, stripRecord: boolean) => {
   await warmUp(f);
-  f.plan[f.lead.id] = { reply: "never finishes", gateFile: f.gate("never") };
+  f.plan[f.lead.id] = { reply: "RESULT_AFTER_RESTART", gateFile: f.gate("after-restart") };
   f.plan[f.chief.id] = f.delegate("build", [f.lead], "Build the export");
   await f.send("Please have Engineering build the export.");
   await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 15_000 }).toBe("running");
@@ -533,6 +537,7 @@ const resultAcrossRestart = async (f: any, stripRecord: boolean) => {
     if (!stripRecord) return;
     for (const task of bots.find((b: any) => b.id === f.chief.id).tasks) { delete task.handedMessages; delete task.handedWatermarks; }
   }, "SIGTERM", { FAKE_CLAUDE_HOLD_VERSION: versionGate, FAKE_CLAUDE_PROBE_LOG: probeLog });
+  f.open(f.gate("after-restart"));
   try {
     await expect.poll(() => existsSync(probeLog) && readFileSync(probeLog, "utf8").includes("version "), { timeout: 10_000 }).toBe(true);
     // Hold the capability probe across room-handoff ticks, as on a loaded host.
@@ -549,22 +554,184 @@ const resultAcrossRestart = async (f: any, stripRecord: boolean) => {
 
 it("replays once for a stored conversation without a handoff record when a result arrives after restart", () => fixture(async (f) => {
   const turn = await resultAcrossRestart(f, true);
-  expect(count(f.prompt(turn), "Interrupted by server restart")).toBe(1);
+  expect(count(f.prompt(turn), "RESULT_AFTER_RESTART")).toBe(1);
   expect(f.prompt(turn)).toContain("ORCHID_7Q");
   expect(f.launches().at(-1).resume).toBeNull();
   const rebuilt = f.nativeSession();
   f.plan[f.chief.id] = { reply: "ok" };
   await f.send("Thanks.");
   await f.wait();
-  expect(count(f.prompt(f.turns().at(-1)), "Interrupted by server restart")).toBe(0);
+  expect(count(f.prompt(f.turns().at(-1)), "RESULT_AFTER_RESTART")).toBe(0);
   expect(f.nativeSession()).toBe(rebuilt);
 }), hostTimeout(90_000));
 
 it("keeps resuming a stored conversation with a handoff record when a result arrives after restart", () => fixture(async (f) => {
   const turn = await resultAcrossRestart(f, false);
-  expect(count(f.prompt(turn), "Interrupted by server restart")).toBe(1);
+  expect(count(f.prompt(turn), "RESULT_AFTER_RESTART")).toBe(1);
   expect(f.prompt(turn)).not.toContain("ORCHID_7Q");
   expect(f.launches().at(-1).resume).not.toBeNull();
+}), hostTimeout(90_000));
+
+// A restart while a Chief waits on teammates, by a quit or update (SIGTERM)
+// or a crash (SIGKILL): each teammate turn it cut runs again once, in its own
+// conversation, told to check what it already did; the Chief resumes once,
+// told so, and gives its one final answer with the job's one notification.
+// Ops runs in process (OpenAI-compatible), so a quit's teardown settles its
+// turn before exit; Engineering's CLI is simply killed. Both read the same.
+it.each(["SIGTERM", "SIGKILL"] as const)("runs each teammate turn a restart cut again once, in place, and resumes the Chief told so (%s)", (signal) => fixture(async (f) => {
+  const chats: string[] = [];
+  const upstream = createServer(async (req, res) => {
+    if (req.url === "/v1/models") { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "fixture-model" }] })); return; }
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const content = JSON.parse(body).messages.filter((m: any) => m.role === "user").at(-1)?.content;
+    chats.push(typeof content === "string" ? content : JSON.stringify(content));
+    if (chats.length === 1) return; // never answered: still running when the server stops
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "OPS_RESUMED_RESULT" }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`);
+  });
+  await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+  try {
+    await f.api("/api/config", { openaiCompat: { key: "synthetic-fixture-key", url: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`, model: "fixture-model" } }, "PATCH");
+    await f.cli("set-model", "--bot", f.ops.id, "--instance", "openaiCompat", "--model", "fixture-model");
+    await warmUp(f);
+    // Engineering has visibly acted when the restart cuts it, as a real
+    // turn mid-work has: its session is then the one the rerun resumes.
+    f.plan[f.lead.id] = { progress: "LEAD_WORKING", reply: "LEAD_RESUMED_RESULT", gateFile: f.gate("lead") };
+    f.plan[f.chief.id] = f.delegate("build", [f.lead, f.ops], "Build the export", { resumeReply: "RESTART_REVIEWED" });
+    await f.send("Please have Engineering and Ops build the export.");
+    await expect.poll(() => f.nodes().filter((node: any) => node.parentId).map((node: any) => node.status), { timeout: 15_000 }).toEqual(["running", "running"]);
+    await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status, { timeout: 15_000 }).toBe("waiting");
+    await expect.poll(() => chats.length, { timeout: 15_000 }).toBe(1);
+    const workThreads = Object.fromEntries(f.nodes().filter((node: any) => node.parentId).map((node: any) => [node.botId, node.threadId]));
+    await expect.poll(async () => (await f.messages(workThreads[f.lead.id])).some((m: any) => m.text?.includes("LEAD_WORKING")), { timeout: 15_000 }).toBe(true);
+    // The person's own turn with another bot is cut at the same moment.
+    f.plan[f.qa.id] = { reply: "never answered", gateFile: f.gate("qa-never") };
+    f.save();
+    await f.api(`/api/bots/${f.qa.id}/messages`, { text: "Check the release notes.", threadId: f.qa.activeTaskId });
+    await expect.poll(() => f.consumed(f.qa.id), { timeout: 15_000 }).toBe(1);
+    const leadSession = f.nativeSession(f.lead.id);
+    const chiefTurns = f.turns().length;
+
+    await f.restart(() => {}, signal);
+    const stream = await openSse(`${f.session.info.url}/api/events`);
+    try {
+      f.open(f.gate("lead"));
+      await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "RESTART_REVIEWED"), { timeout: 30_000 }).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      // The job's one notification, as a job no restart touched sends.
+      expect(stream.frames.filter((frame) => frame.kind === "notify").map((frame) => [frame.notification?.kind, frame.notification?.body]))
+        .toEqual([["delegation-settled", "Results in from Engineering lead, Ops"]]);
+    } finally {
+      stream.close();
+    }
+    // Engineering ran again once, in the native session it was cut in.
+    expect(f.launches(f.lead.id).at(-1).resume).toBe(leadSession);
+    expect(f.turns(f.lead.id).map((turn: any) => f.prompt(turn).includes("this turn continues it"))).toEqual([true]);
+    expect(f.prompt(f.turns(f.lead.id)[0])).toContain("Build the export");
+    // Ops too, from its own transcript.
+    expect(chats).toHaveLength(2);
+    expect(chats[1]).toContain("this turn continues it");
+    // The Chief resumed once, with both results and what the restart did.
+    expect(f.turns()).toHaveLength(chiefTurns + 1);
+    const review = f.prompt(f.turns().at(-1));
+    expect(f.turns().at(-1).resumed).toBe(true);
+    expect(review).toContain("A restart cut these teammates' turns: Engineering lead (resumed once in place and told to check what it had already done); Ops (resumed once in place and told to check what it had already done).");
+    expect(review).toContain("LEAD_RESUMED_RESULT");
+    expect(review).toContain("OPS_RESUMED_RESULT");
+    expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
+    // Its chat says what happened, and nothing failed.
+    const chiefRows = (await f.messages()).map((m: any) => m.tool?.name).filter(Boolean);
+    expect(chiefRows).toEqual(expect.arrayContaining(["Engineering lead was cut off by a restart; resumed", "Ops was cut off by a restart; resumed",
+      "Engineering lead replied", "Ops replied", "Resumed with Engineering lead, Ops results after a restart, reviewing"]));
+    expect(chiefRows.filter((name: string) => name.startsWith("error:") || name.includes("failed"))).toEqual([]);
+    for (const [botId, threadId] of Object.entries(workThreads)) {
+      expect((await f.messages(threadId)).filter((m: any) => m.tool?.name === "Resumed after a restart"), botId).toHaveLength(1);
+    }
+    // A person's own turn is not run again; a quit or update says in its
+    // conversation that it was cut (a crash cannot, nor can Windows' kill).
+    // That line is all: no unread mark, no notification.
+    expect(f.launches(f.qa.id)).toHaveLength(1);
+    const said = signal === "SIGTERM" && process.platform !== "win32";
+    expect((await f.messages(f.qa.activeTaskId)).filter((m: any) => m.tool?.name === "error: turn interrupted — OpenMausBot restarted")).toHaveLength(said ? 1 : 0);
+    expect((await f.api("/api/bots")).bots.find((b: any) => b.id === f.qa.id).tasks
+      .find((task: any) => task.threadId === f.qa.activeTaskId).unread).toBe(false);
+  } finally {
+    upstream.closeAllConnections();
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+}), hostTimeout(120_000));
+
+// A crash while the Chief's own turn still runs after it sent work: that
+// turn is not run again; the Chief resumes once its work settles, told its
+// turn was cut, and the teammate that finished is not run again either.
+it("resumes a Chief whose own turn a restart cut after it sent work, once that work settles", () => fixture(async (f) => {
+  await warmUp(f);
+  f.plan[f.lead.id] = { reply: "LEAD_DONE_BEFORE_RESTART" };
+  f.plan[f.chief.id] = f.delegate("build", [f.lead], "Build the export", { gateFile: f.gate("chief"), resumeReply: "CUT_REVIEWED" });
+  await f.send("Please have Engineering build the export.");
+  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("completed");
+  expect(f.nodes().find((node: any) => !node.parentId)?.status).toBe("source");
+  const chiefTurns = f.turns().length;
+  await f.restart(() => {}, "SIGKILL");
+  f.open(f.gate("chief"));
+  await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "CUT_REVIEWED"), { timeout: 30_000 }).toBe(true);
+  expect(f.turns()).toHaveLength(chiefTurns + 1);
+  expect(f.turns().at(-1).resumed).toBe(true);
+  expect(f.prompt(f.turns().at(-1))).toContain("OpenMausBot restarted before your previous turn here finished, after it sent work to teammates.");
+  expect(f.prompt(f.turns().at(-1))).toContain("LEAD_DONE_BEFORE_RESTART");
+  expect(f.turns(f.lead.id)).toHaveLength(1);
+  expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
+}), hostTimeout(90_000));
+
+// A crash while the Chief reviews its teammates' results: the review runs
+// again once, told so, with the same results, and the person is not
+// notified a second time for results they were already told about.
+it("runs a Chief's review a restart cut again once, without notifying again", () => fixture(async (f) => {
+  await warmUp(f);
+  f.plan[f.lead.id] = { reply: "LEAD_RESULT_FOR_REVIEW" };
+  f.plan[f.chief.id] = { turns: [{}, f.delegate("build", [f.lead], "Build the export"), { reply: "REVIEW_RERUN_DONE", gateFile: f.gate("review") }] };
+  await f.send("Please have Engineering build the export.");
+  await expect.poll(async () => (await f.messages()).some((m: any) => m.tool?.name === "Resumed with Engineering lead results, reviewing"), { timeout: 20_000 }).toBe(true);
+  await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  const chiefTurns = f.turns().length;
+  await f.restart(() => {}, "SIGKILL");
+  const stream = await openSse(`${f.session.info.url}/api/events`);
+  try {
+    f.open(f.gate("review"));
+    await expect.poll(async () => (await f.messages()).filter((m: any) => m.text === "REVIEW_RERUN_DONE").length, { timeout: 30_000 }).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(stream.frames.filter((frame) => frame.kind === "notify")).toEqual([]);
+  } finally {
+    stream.close();
+  }
+  expect(f.turns()).toHaveLength(chiefTurns + 1);
+  expect(f.turns().at(-1).resumed).toBe(true);
+  expect(f.prompt(f.turns().at(-1))).toContain("this turn continues it");
+  expect(count(f.prompt(f.turns().at(-1)), "LEAD_RESULT_FOR_REVIEW")).toBe(1);
+  expect(f.turns(f.lead.id)).toHaveLength(1);
+  expect((await f.messages()).filter((m: any) => m.tool?.name === "Resumed with Engineering lead results after a restart, reviewing")).toHaveLength(1);
+}), hostTimeout(90_000));
+
+// ...and a second crash during that one rerun ends it: never a third run,
+// and its conversation says why, once, where the person reads it.
+it("ends a Chief's review a second restart cuts, and says so in its conversation", () => fixture(async (f) => {
+  await warmUp(f);
+  f.plan[f.lead.id] = { reply: "LEAD_RESULT_FOR_REVIEW" };
+  f.plan[f.chief.id] = { turns: [{}, f.delegate("build", [f.lead], "Build the export"), { reply: "NEVER_SENT", gateFile: f.gate("review") }] };
+  await f.send("Please have Engineering build the export.");
+  await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status, { timeout: 20_000 }).toBe("running");
+  await f.restart(() => {}, "SIGKILL");
+  await expect.poll(() => f.nodes().find((node: any) => !node.parentId), { timeout: 20_000 }).toMatchObject({ status: "running", restart: "rerun" });
+  await expect.poll(() => f.consumed(), { timeout: 20_000 }).toBe(4); // warm-up, delegation, review, its rerun
+  await f.restart(() => {}, "SIGKILL");
+  const ended = "error: Interrupted by another OpenMausBot restart after resuming once; not resumed again. Some of its steps may already have taken effect.";
+  await expect.poll(async () => (await f.messages()).filter((m: any) => m.tool?.name === ended).length, { timeout: 20_000 }).toBe(1);
+  expect(f.nodes().find((node: any) => !node.parentId)).toMatchObject({ status: "failed", reported: true });
+  f.open(f.gate("review"));
+  await new Promise((resolve) => setTimeout(resolve, 750));
+  expect(f.consumed()).toBe(4);
+  expect((await f.messages()).some((m: any) => m.text === "NEVER_SENT")).toBe(false);
 }), hostTimeout(90_000));
 
 // ── Session replacement: the record describes one native session ──
