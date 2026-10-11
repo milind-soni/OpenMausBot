@@ -59,6 +59,15 @@ export function groupComposerHint(group: Group, members: Bot[], { jevOn = true }
 /** Same routing sendGroup uses: explicit @mentions win, otherwise the
  * room's default responder. Keep this aligned with server/store.ts
  * `roomResponders` / `mentionedBots`. */
+/** Whether a room's open task is working, which locks its composer. Its
+ * tasks run side by side, so the task's own work counts; the room's flag,
+ * which counts every task (a background goal's too), stands in only when no
+ * task list came (a bot-to-bot channel's one conversation). */
+export function openTaskWorking(group: Pick<Group, "threadId" | "working" | "tasks">): boolean {
+  const task = group.tasks?.find((candidate) => candidate.threadId === group.threadId);
+  return task ? Boolean(task.working) : Boolean(group.working);
+}
+
 export function roomRespondersForComposer<T extends { id: string; name: string; hidden?: boolean }>(
   text: string,
   members: T[],
