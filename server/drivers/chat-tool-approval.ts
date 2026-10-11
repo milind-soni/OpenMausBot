@@ -3,14 +3,16 @@
 import { newId, type RequestOutcome } from "../contracts.ts";
 import type { AskQuestion } from "../../shared/ask-question.ts";
 
-interface Ask { id: string; tool: string; summary: string }
+/** `grant`: what "Always allow this session" on this card would keep allowed
+ * (ChatToolCallView.grant). Absent when the card can only allow once. */
+interface Ask { id: string; tool: string; summary: string; grant?: string }
 type Source = "user" | "timeout" | "system";
 
 interface Card {
   kind: "permission" | "question";
   ask: Ask;
   /** Exactly-once: a second finish is a no-op because the card left the map. */
-  finish(source: Source, decision?: { allowed?: boolean; message?: string }): void;
+  finish(source: Source, decision?: { allowed?: boolean; always?: boolean; message?: string }): void;
 }
 
 export function createChatToolApproval(options: {
@@ -19,14 +21,19 @@ export function createChatToolApproval(options: {
   resolved(ask: Ask, allowed: boolean, source: Source): void;
   openQuestion(ask: Ask, questions: AskQuestion[]): void;
   resolvedQuestion(ask: Ask, answered: boolean, source: Source): void;
+  /** The conversation's "Always allow this session" grants. The driver keeps
+   * the set across the conversation's turns; an ask it covers is allowed
+   * without a card, as Claude and ACP agents do with their own. */
+  granted?: Set<string>;
   timeoutMs?: number;
 }) {
   const pending = new Map<string, Card>();
   let closed = false;
   return {
-    ask(tool: string, summary: string): Promise<boolean> {
+    ask(tool: string, summary: string, grant?: string): Promise<boolean> {
       if (closed || options.signal.aborted) return Promise.resolve(false);
-      const ask = { id: newId(), tool, summary };
+      if (grant !== undefined && options.granted?.has(grant)) return Promise.resolve(true);
+      const ask: Ask = { id: newId(), tool, summary, ...(grant !== undefined && options.granted ? { grant } : {}) };
       return new Promise((resolve) => {
         let timer: ReturnType<typeof setTimeout>;
         const card: Card = {
@@ -37,6 +44,7 @@ export function createChatToolApproval(options: {
             clearTimeout(timer);
             options.signal.removeEventListener("abort", abort);
             const allowed = decision?.allowed === true;
+            if (allowed && decision?.always && ask.grant !== undefined) options.granted?.add(ask.grant);
             options.resolved(ask, allowed, source);
             resolve(allowed);
           },
@@ -77,7 +85,7 @@ export function createChatToolApproval(options: {
         options.openQuestion(ask, questions);
       });
     },
-    answer(id: string, behavior: "allow" | "deny" | "answer", message?: string): RequestOutcome {
+    answer(id: string, behavior: "allow" | "deny" | "answer", message?: string, always?: boolean): RequestOutcome {
       const card = pending.get(id);
       if (!card || options.signal.aborted) return "unavailable";
       if (behavior === "deny") {
@@ -87,7 +95,7 @@ export function createChatToolApproval(options: {
       if (card.kind === "permission") {
         // An answer is not a permission: only allow or deny settles it.
         if (behavior !== "allow") return "unavailable";
-        card.finish("user", { allowed: true });
+        card.finish("user", { allowed: true, always: always === true });
         return "allowed-once";
       }
       // And an allow is not an answer: a question settles only on a real

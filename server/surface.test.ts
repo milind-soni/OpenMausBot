@@ -4,6 +4,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  browserIsThePlace,
   cloudPlaceRefusal,
   computerToolsRefusal,
   parseSurface,
@@ -12,6 +13,19 @@ import {
   surfaceOfComputerKind,
   surfacePrompt,
 } from "./surface.ts";
+
+describe("browserIsThePlace", () => {
+  it("is true only where the conversation works on the built-in browser", () => {
+    expect(browserIsThePlace(resolveSurface({ destination: "browser", browserOn: true }))).toBe(true);
+    // An Auto conversation whose first turn landed on the browser.
+    expect(browserIsThePlace(resolveSurface({ destination: undefined, pinnedSurface: "browser", browserOn: true }))).toBe(true);
+    // Auto only falls back to the browser when no computer is reached.
+    expect(browserIsThePlace(resolveSurface({ destination: undefined, browserOn: true }))).toBe(false);
+    expect(browserIsThePlace(resolveSurface({ destination: "browser", browserOn: false }))).toBe(false);
+    expect(browserIsThePlace(resolveSurface({ destination: "local", browserOn: true }))).toBe(false);
+    expect(browserIsThePlace(resolveSurface({ destination: "off", browserOn: true }))).toBe(false);
+  });
+});
 
 describe("resolveSurface", () => {
   it("browser destination mounts only the built-in browser", () => {

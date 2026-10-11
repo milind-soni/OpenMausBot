@@ -393,6 +393,10 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   if (parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE) {
     childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE = parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE;
   }
+  // Unanswered-approval e2e: the Claude broker's deadline fires on a marker
+  // file in the fixture's home instead of after 15 minutes
+  // (approval-clock-hooks.mjs).
+  if (parentEnv.OMB_TEST_APPROVAL_CLOCK === "1") childEnv.OMB_TEST_APPROVAL_CLOCK = "1";
   // Desktop mode: the server runs as the desktop app runs it, and the owner
   // capability the app would hand it is this one (see desktop-parent.mjs).
   if (parentEnv.OMB_TEST_DESKTOP_OWNER_TOKEN) {
@@ -479,6 +483,9 @@ export async function launchVerificationServer(
   }
   if (childEnv.OMB_TEST_DESKTOP_OWNER_TOKEN) {
     serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "desktop-parent.mjs")).href);
+  }
+  if (childEnv.OMB_TEST_APPROVAL_CLOCK === "1") {
+    serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "approval-clock-hooks.mjs")).href);
   }
   serverArgs.push(join(ROOT, "server", "index.ts"));
   const child = spawn(process.execPath, serverArgs, {

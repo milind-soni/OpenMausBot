@@ -323,6 +323,51 @@ describe("Chat MCP session", () => {
   });
 });
 
+/** "Always allow this session" names the tool on its server as launched. */
+const grantFor = (server: string, tool: string) => expect.stringMatching(new RegExp(`^\\["${server}","[0-9a-f]{64}","${tool}"\\]$`));
+
+describe("Chat MCP approvals by server", () => {
+  it("asks nothing for OpenMausBot's agents server, and grants no session-wide allow on the person's computer", async () => {
+    const agents = fixture(); const audit = fixture(); const computer = fixture();
+    const session = await mountChatTools({
+      agents: agents.server, custom: { audit: audit.server },
+      localComputer: { ...computer.server, scope: "local-computer" },
+    }, agents.controller.signal, true);
+    sessions.push(session);
+    expect(session.definitions.map((tool) => tool.function.name).sort()).toEqual(["agents_write", "audit_write", "computer_write"]);
+    expect(session.view("agents_write", { value: "x" })).toEqual({ title: "agents_write", input: { value: "x" }, ask: false });
+    expect(session.view("audit_write", { value: "x" })).toEqual({ title: "audit_write", input: { value: "x" }, ask: true, grant: grantFor("audit", "write") });
+    expect(session.view("computer_write", { value: "x" })).toEqual({ title: "computer_write", input: { value: "x" }, ask: true });
+  });
+
+  it("ties an allow to the server as launched: the same server keeps it, a changed one under the same name does not", async () => {
+    const audit = fixture(); const other = fixture();
+    const grant = async (server: typeof audit.server) => {
+      const session = await mountChatTools({ custom: { audit: server } }, audit.controller.signal);
+      sessions.push(session);
+      return session.view("audit_write", { value: "x" }).grant;
+    };
+    const first = await grant(audit.server);
+    expect(first).toEqual(grantFor("audit", "write"));
+    // a later turn mounts the same server again
+    expect(await grant({ ...audit.server, env: { ...audit.server.env } })).toBe(first);
+    // the person pointed "audit" at another command, or changed its credential
+    expect(await grant(other.server)).not.toBe(first);
+    expect(await grant({ ...audit.server, env: { ...audit.server.env, AUDIT_TOKEN: "rotated" } })).not.toBe(first);
+    // and the hash keeps no credential
+    expect(first).not.toContain("rotated");
+  });
+
+  it("knows the harness's mounts by what the harness passed, not by a server's name", async () => {
+    const lookalike = fixture(); const vm = fixture();
+    const session = await mountChatTools({ custom: { agents: lookalike.server }, localComputer: vm.server }, lookalike.controller.signal, true);
+    sessions.push(session);
+    expect(session.view("agents_write", { value: "x" })).toMatchObject({ ask: true, grant: grantFor("agents", "write") });
+    // an isolated VM is not the person's own computer
+    expect(session.view("computer_write", { value: "x" })).toMatchObject({ ask: true, grant: grantFor("computer", "write") });
+  });
+});
+
 describe("Chat MCP tool directory", () => {
   const catalog = whopLikeCatalog(300);
   async function mountWhop(toolScope?: ToolScope) {
@@ -344,7 +389,8 @@ describe("Chat MCP tool directory", () => {
       // searching runs no tool of the server, so no card; call_tool shows its target
       expect(session.view("whop_search_tools", { query: "list payments" })).toEqual({ title: "whop_search_tools", input: { query: "list payments" }, ask: false });
       const args = { name: "payments_list", arguments: { company_id: "biz_1" } };
-      expect(session.view("whop_call_tool", args)).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true });
+      // "Always allow this session" covers the tool call_tool runs, not call_tool
+      expect(session.view("whop_call_tool", args)).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: grantFor("whop", "payments_list") });
       await expect(session.execute("whop_call_tool", args, controller.signal)).resolves.toMatchObject({ ok: true, text: "remote execution recorded" });
       expect(remote.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1" } }]);
       // a mistake the directory answers with guidance runs nothing and fails nothing
@@ -383,7 +429,7 @@ describe("Chat MCP tool directory", () => {
       const session = await mountChatTools({ custom: { whop: { type: "http", url: remote.url, headers: {} } } }, controller.signal);
       sessions.push(session);
       expect(session.definitions.map((tool) => tool.function.name)).toEqual(whopLikeCatalog(5).map((tool) => `whop_${tool.name.replace("-", "_")}`));
-      expect(session.view("whop_payments_list", { company_id: "biz_1" })).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true });
+      expect(session.view("whop_payments_list", { company_id: "biz_1" })).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: grantFor("whop", "payments_list") });
     } finally { await remote.close(); }
   });
 });

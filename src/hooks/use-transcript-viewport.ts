@@ -26,12 +26,15 @@ import {
 } from "@/lib/transcript-window";
 import { useStore } from "@/state/store";
 
+export const AUTO_EXPAND_TOP_THRESHOLD = 250;
+
 export function useTranscriptViewport<T extends { id: string; role?: string }>({
   ownerId,
   threadId,
   messages,
   pinOn,
   transcriptShown = true,
+  hasMore = false,
 }: {
   /** The bot or room. Opening another conversation — another owner, or
    * another thread of this owner — re-arms bottom-follow. */
@@ -44,10 +47,13 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   pinOn: DependencyList;
   /** False while something else covers the transcript (a room's set-up form). */
   transcriptShown?: boolean;
+  /** True when older messages remain on the server before messages[0]. */
+  hasMore?: boolean;
 }) {
   const { state, dispatch } = useStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
 
   // Scroll pinning: follow the bottom while the user hasn't scrolled away.
   // Follow breaks ONLY on an upward user gesture (wheel/touch/scrollbar/
@@ -150,6 +156,8 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   // taken in, and transcriptKey is a dependency so a switch drops a capture
   // from the thread being left instead of shifting the new one.
   const preExpandHeight = useRef<{ key: string; height: number } | null>(null);
+  const expandingRef = useRef(false);
+
   const holdRowForPrepend = () => {
     preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
     // reading scrollback: a mid-expand stream event must not pin the bottom
@@ -159,13 +167,20 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   useLayoutEffect(() => {
     const el = scrollRef.current;
     const captured = preExpandHeight.current;
-    if (!captured || !el) return;
+    if (!captured || !el) {
+      expandingRef.current = false;
+      return;
+    }
     preExpandHeight.current = null;
-    if (captured.key !== transcriptKey) return;
+    if (captured.key !== transcriptKey) {
+      expandingRef.current = false;
+      return;
+    }
     el.scrollTop += el.scrollHeight - captured.height;
     // keep the resume-follow heuristic from reading the restore as a
     // downward user scroll
     previousScrollTop.current = el.scrollTop;
+    expandingRef.current = false;
   }, [transcriptWindow.start, oldestId, transcriptKey]);
 
   const showEarlier = () => {
@@ -185,6 +200,43 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     holdRowForPrepend();
     dispatch({ type: "loadOlderMessages", threadId });
   };
+
+  useEffect(() => {
+    if (!olderPending) expandingRef.current = false;
+  }, [olderPending]);
+
+  // Seamless reverse infinite scroll: automatically reveals earlier messages
+  // when scrolling up near the top.
+  const triggerAutoEarlier = useCallback(() => {
+    if (expandingRef.current) return;
+    if (hiddenCount > 0) {
+      expandingRef.current = true;
+      holdRowForPrepend();
+      const start = expandWindowStart(startIndex);
+      setTranscriptWindow((w) => ({ ...w, start }));
+    } else if (hasMore && !olderPending) {
+      expandingRef.current = true;
+      holdRowForPrepend();
+      dispatch({ type: "loadOlderMessages", threadId });
+    }
+  }, [hiddenCount, startIndex, hasMore, olderPending, threadId, dispatch, transcriptKey]);
+
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    const root = scrollRef.current;
+    if (!sentinel || !root || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry?.isIntersecting && !followRef.current) {
+          triggerAutoEarlier();
+        }
+      },
+      { root, rootMargin: "250px 0px 0px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [triggerAutoEarlier]);
 
   // keyboard is a scroll gesture too (upstream lesson): PageUp/Home/ArrowUp
   // break follow like an upward wheel; the at-end onScroll check re-arms it.
@@ -221,16 +273,30 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
       if (el && e.target === el && e.nativeEvent.offsetX >= el.clientWidth) setBottomFollow(false);
     },
     onWheel: (e: WheelEvent<HTMLDivElement>) => {
-      if (e.deltaY < 0) setBottomFollow(false);
-      else if (atEnd()) setBottomFollow(true);
+      if (e.deltaY < 0) {
+        setBottomFollow(false);
+        const el = scrollRef.current;
+        if (el && el.scrollTop <= AUTO_EXPAND_TOP_THRESHOLD) {
+          triggerAutoEarlier();
+        }
+      } else if (atEnd()) {
+        setBottomFollow(true);
+      }
     },
     onTouchStart: (e: TouchEvent<HTMLDivElement>) => {
       touchY.current = e.touches[0]?.clientY ?? 0;
     },
     onTouchMove: (e: TouchEvent<HTMLDivElement>) => {
       const y = e.touches[0]?.clientY ?? 0;
-      if (y > touchY.current + 4) setBottomFollow(false);
-      else if (atEnd()) setBottomFollow(true);
+      if (y > touchY.current + 4) {
+        setBottomFollow(false);
+        const el = scrollRef.current;
+        if (el && el.scrollTop <= AUTO_EXPAND_TOP_THRESHOLD) {
+          triggerAutoEarlier();
+        }
+      } else if (atEnd()) {
+        setBottomFollow(true);
+      }
     },
     onScroll: () => {
       const el = scrollRef.current;
@@ -243,19 +309,25 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
         distanceFromBottom: el.scrollHeight - scrollTop - el.clientHeight,
       });
       previousScrollTop.current = scrollTop;
-      if (resume) setBottomFollow(true);
+      if (resume) {
+        setBottomFollow(true);
+      } else if (!followRef.current && scrollTop <= AUTO_EXPAND_TOP_THRESHOLD) {
+        triggerAutoEarlier();
+      }
     },
   };
 
   return {
     scrollRef,
     transcriptRef,
+    topSentinelRef,
     transcriptKey,
     following: follow,
     windowedMessages,
     hiddenCount,
     laterCount,
     olderPending,
+    hasEarlier: hiddenCount > 0 || Boolean(hasMore),
     showEarlier,
     showLater,
     loadOlder,

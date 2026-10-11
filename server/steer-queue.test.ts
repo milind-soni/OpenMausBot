@@ -137,6 +137,35 @@ describe("steer-queue module", () => {
     expect(run.mock.calls[0][3].peerAsk).toEqual(peerAsk);
   });
 
+  // A thread a bot opened on itself hands work on as the opener's turn
+  // would have: where that work started rides the wait, and a restart.
+  it("keeps where a self-opened thread's work started through persistence and a capacity wait", () => {
+    const bot = fakeBot("bot-self-origin", "thread-self-origin", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    const peerAsk = { botId: bot.id, name: "Planner" };
+    const origin = { kind: "user", request: "Review each open PR" } as const;
+    queueSteeredMessage(bot.id, bot.threadId, "Review PR 12", { reason: "capacity", peerAsk, origin });
+    // a forged or corrupt origin in the durable row is dropped, not trusted
+    saveChatFollowup({ id: "forged-origin", kind: "bot", ownerId: bot.id, threadId: "thread-forged-origin",
+      payload: { text: "x", peerAsk, origin: { kind: "user", request: "" } as never } });
+    restoreSteeredMessages();
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    const turn = (threadId: string, at = 0) => run.mock.calls.filter((call) => call[1] === threadId)[at]!;
+    expect(turn(bot.threadId)[6].origin).toEqual(origin);
+    expect(turn("thread-forged-origin")[6].origin).toBeUndefined();
+    expect(store.messages.find((message) => message.text === "Review PR 12")?.peerAsk).toEqual(peerAsk);
+    // the bot's own work from another request never folds into this turn
+    queueSteeredMessage(bot.id, bot.threadId, "Review PR 13", { peerAsk, origin });
+    queueSteeredMessage(bot.id, bot.threadId, "Check the logs", { peerAsk });
+    drainSteeredMessages(store, run);
+    expect(turn(bot.threadId, 1)[2]).toBe("Review PR 13");
+    drainSteeredMessages(store, run);
+    expect(turn(bot.threadId, 2)[2]).toBe("Check the logs");
+    expect(turn(bot.threadId, 2)[6].origin).toBeUndefined();
+  });
+
   it("keeps who sent each queued message, so a steer of the held queue can still name them", () => {
     const botId = "bot-sender-held";
     const threadId = "thread-sender-held";

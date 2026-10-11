@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  DATA_DIR, loadConfig, parseConfigPatch, parseStoredConfig, providerReloadKeys, saveConfig, stripWorkspaceCredentialEnv, syncCredentialEnv,
+  changedInstanceIds, DATA_DIR, instanceConfigs, loadConfig, parseConfigPatch, parseStoredConfig, saveConfig, stripWorkspaceCredentialEnv, syncCredentialEnv,
 } from "../config.ts";
 import { createDecider, deciderSavePatch, describeDecider } from "./index.ts";
 
@@ -19,7 +19,8 @@ describe("decider config", () => {
   afterEach(() => { delete process.env.OMB_JEV_API_KEY; });
 
   it("saving decision-model settings never reloads the engine fleet", () => {
-    expect(providerReloadKeys({ decider: { enabled: true, key: KEY, jobs: { roomRouting: false } } })).toEqual([]);
+    const decider = { enabled: true, key: KEY, jobs: { roomRouting: false } };
+    expect(changedInstanceIds(instanceConfigs({}), instanceConfigs({ decider }))).toEqual([]);
   });
 
   it("engines never inherit the key, nor Cloud Pro's included token", () => {

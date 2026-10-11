@@ -59,6 +59,8 @@ interface CompletionJson {
   error?: unknown;
   base_resp?: { status_code?: unknown; status_msg?: unknown };
   usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; cost?: number };
+  /** Groq reports streaming usage in its final x_groq envelope. */
+  x_groq?: { usage?: CompletionJson["usage"] };
 }
 
 /** The message of a JSON error body a provider returned with HTTP 200.
@@ -122,6 +124,8 @@ const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
   usage
     ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0 }
     : null;
+
+const completionUsage = (json: CompletionJson) => json.usage ?? json.x_groq?.usage;
 
 const asError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
@@ -311,6 +315,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
    * the stored text would rewrite history the provider has cached. In memory
    * only: after a restart a thread replays as stored, as it always did. */
   const delivered = new Map<string, DeliveredUserMessage[]>();
+  /** "Always allow this session" grants by thread and bot: the exact tools a
+   * person allowed one bot for the rest of the conversation. A room runs
+   * every member on the room's thread, and one bot's allow is not another's.
+   * This runtime has no native session, so the conversation's lives as long
+   * as this instance does, as an ACP agent's does with its process; none
+   * survives a restart. Not cleared on `sessionReset`: with no cursor to
+   * resume, the harness sends that on nearly every turn of this runtime. */
+  const sessionGrants = new Map<string, Set<string>>();
 
   const emit = (event: RuntimeEvent) => {
     for (const listener of Array.from(listeners)) listener(event);
@@ -375,15 +387,16 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
       if (!stream || response.headers.get("content-type")?.includes("application/json")) {
         const json = await response.json() as CompletionJson;
+        const tokenUsage = completionUsage(json);
         if (onUsage) {
           activeSignal.throwIfAborted();
           const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
           onUsage({
             model: typeof json.model === "string" && json.model.trim() ? json.model : model,
-            input: count(json.usage?.prompt_tokens),
-            output: count(json.usage?.completion_tokens),
-            cachedInput: count(json.usage?.prompt_tokens_details?.cached_tokens),
-            costUsd: count(json.usage?.cost),
+            input: count(tokenUsage?.prompt_tokens),
+            output: count(tokenUsage?.completion_tokens),
+            cachedInput: count(tokenUsage?.prompt_tokens_details?.cached_tokens),
+            costUsd: count(tokenUsage?.cost),
           });
         }
         const bodyError = completionError(json, "completion error");
@@ -405,7 +418,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           reasoning: options.reasoning && typeof reasoning === "string"
             ? reasoning
             : "",
-          usage: usageFrom(json.usage),
+          usage: usageFrom(tokenUsage),
           toolCalls: calls.finish(finishReason, false),
           finishReason,
           protocolReasoning: typeof reasoning === "string" ? reasoning : "",
@@ -468,7 +481,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           text += contentDelta;
           onDelta?.(contentDelta, "assistant_text");
         }
-        if (chunk.usage) usage = usageFrom(chunk.usage);
+        const tokenUsage = completionUsage(chunk);
+        if (tokenUsage) usage = usageFrom(tokenUsage);
         return false;
       };
       try {
@@ -585,11 +599,19 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       dir, source: options.nativeLog.source,
       msg: JSON.parse(JSON.stringify(msg, (_key, part) => typeof part === "string" ? safeText(part) : part)),
     });
+    const grantsKey = JSON.stringify([turn.threadId, turn.botId ?? null]);
+    const granted = sessionGrants.get(grantsKey) ?? new Set<string>();
+    sessionGrants.delete(grantsKey);
+    sessionGrants.set(grantsKey, granted);
+    if (sessionGrants.size > MAX_DELIVERED_THREADS) sessionGrants.delete(sessionGrants.keys().next().value!);
     const approval = createChatToolApproval({
       signal: abort.signal,
+      // A guest's turn neither uses the owner's grants nor keeps one: its
+      // cards offer allow once only (index.ts request.opened).
+      granted: turn.guestConfined ? undefined : granted,
       open: (ask) => emit({
         ...base(turn.threadId, turnId), type: "request.opened", requestType: "permission",
-        requestId: ask.id, tool: ask.tool, summary: ask.summary, allowSession: false,
+        requestId: ask.id, tool: ask.tool, summary: ask.summary, allowSession: ask.grant !== undefined,
       }),
       resolved: (ask, allowed, source) => emit({
         ...base(turn.threadId, turnId), type: "request.resolved", requestId: ask.id,
@@ -823,7 +845,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 // an OpenAI-compatible engine stops for a card, and a Chief's
                 // delegated Full access cannot help either.
                 const allowed = turn.approvalMode === "full" || !shown.ask
-                  || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.");
+                  || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.", shown.grant);
                 abort.signal.throwIfAborted();
                 emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,
                   title: shown.title, ...(shownPreview ? { input: shownPreview } : {}),
@@ -941,8 +963,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         // user message mid-turn: park it, deliver before the next completion.
         queueing: true,
         // No shell and no file tool on the host at all: only MCP tools, each
-        // call a card in Ask (the Boat's `exec` runs on the Boat). A guest's
-        // turn is as confined as it gets.
+        // call a card in Ask unless "Always allow this session" covers it,
+        // and the harness's own agents tools none, as on Claude and Codex
+        // (the Boat's `exec` runs on the Boat). A guest's turn is as confined
+        // as it gets.
         guestTurns: "confined" },
       sendTurn,
       interruptTurn: async (threadId, turnId) => {
@@ -952,7 +976,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         await turn.done;
       },
       respondToRequest: async (threadId, requestId, decision) =>
-        active.get(threadId)?.approval.answer(requestId, decision.behavior, decision.message) ?? "unavailable",
+        active.get(threadId)?.approval.answer(requestId, decision.behavior, decision.message, decision.always) ?? "unavailable",
       steer: async (threadId, text) => {
         // This engine has no external session to respect — parking the
         // words in the live turn's entry IS delivery into the loop, so a

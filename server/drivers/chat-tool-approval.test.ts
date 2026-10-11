@@ -81,6 +81,60 @@ describe("chat tool approval lifecycle", () => {
   });
 });
 
+describe("Always allow this session", () => {
+  it("keeps an allow for the exact tool the card named, for the conversation's later asks", async () => {
+    const granted = new Set<string>();
+    const open = vi.fn();
+    const resolved = vi.fn();
+    const gate = createChatToolApproval({ signal: new AbortController().signal, open, resolved, openQuestion: vi.fn(), resolvedQuestion: vi.fn(), granted });
+    const first = gate.ask("audit_write", "Write the fixture receipt", '["audit","write"]');
+    const request = open.mock.calls[0][0];
+    expect(request).toMatchObject({ grant: '["audit","write"]' });
+
+    expect(gate.answer(request.id, "allow", undefined, true)).toBe("allowed-once");
+    await expect(first).resolves.toBe(true);
+    expect(granted).toEqual(new Set(['["audit","write"]']));
+
+    // the same tool asks nothing more, in this turn or a later one sharing the set
+    await expect(gate.ask("audit_write", "Write another receipt", '["audit","write"]')).resolves.toBe(true);
+    const later = createChatToolApproval({ signal: new AbortController().signal, open, resolved, openQuestion: vi.fn(), resolvedQuestion: vi.fn(), granted });
+    await expect(later.ask("audit_write", "Write a third receipt", '["audit","write"]')).resolves.toBe(true);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(resolved).toHaveBeenCalledTimes(1);
+
+    // another tool, and a call that names no grant, still ask
+    void later.ask("audit_delete", "Delete the receipt", '["audit","delete"]');
+    void later.ask("computer_click", "Click on the person's screen");
+    expect(open).toHaveBeenCalledTimes(3);
+    expect(open.mock.calls[2][0]).not.toHaveProperty("grant");
+    later.close();
+  });
+
+  it("keeps nothing for an allow once, a denial, a timeout or a gate without a conversation's set", async () => {
+    vi.useFakeTimers();
+    const granted = new Set<string>();
+    const open = vi.fn();
+    const gate = createChatToolApproval({ signal: new AbortController().signal, open, resolved: vi.fn(), openQuestion: vi.fn(), resolvedQuestion: vi.fn(), granted, timeoutMs: 100 });
+    const once = gate.ask("audit_write", "Write", '["audit","write"]');
+    expect(gate.answer(open.mock.calls[0][0].id, "allow")).toBe("allowed-once");
+    await expect(once).resolves.toBe(true);
+    const denied = gate.ask("audit_write", "Write", '["audit","write"]');
+    expect(gate.answer(open.mock.calls[1][0].id, "deny", undefined, true)).toBe("rejected");
+    await expect(denied).resolves.toBe(false);
+    const expired = gate.ask("audit_write", "Write", '["audit","write"]');
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(expired).resolves.toBe(false);
+    expect(granted.size).toBe(0);
+
+    const setless = vi.fn();
+    const oneShot = createChatToolApproval({ signal: new AbortController().signal, open: setless, resolved: vi.fn(), openQuestion: vi.fn(), resolvedQuestion: vi.fn() });
+    const answer = oneShot.ask("audit_write", "Write", '["audit","write"]');
+    expect(setless.mock.calls[0][0]).not.toHaveProperty("grant");
+    expect(oneShot.answer(setless.mock.calls[0][0].id, "allow", undefined, true)).toBe("allowed-once");
+    await expect(answer).resolves.toBe(true);
+  });
+});
+
 describe("chat tool question lifecycle", () => {
   it("resolves the person's reply verbatim and registers before publishing", async () => {
     const reply = "The user answered your questions.\n\nQ: Ship the fixture?\nA: Yes";

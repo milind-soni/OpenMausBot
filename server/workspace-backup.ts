@@ -820,6 +820,16 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
     if (!record(value)) throw new Error("Invalid calendar definitions in workspace backup.");
     if (Array.isArray(value.calls)) for (const call of value.calls) if (record(call)) call.nextRunAt = null;
   });
+  // A restart runs a cut teammate turn again once (room-handoffs.ts); a
+  // restore is not a restart, so its copy of unsettled work ends here instead.
+  changeJson("room-handoffs.json", (value) => {
+    if (Array.isArray(value)) for (const node of value) {
+      if (!record(node) || ["completed", "failed", "cancelled"].includes(String(node.status))) continue;
+      node.status = "failed";
+      node.result = "Not resumed after workspace restore.";
+      delete node.restart;
+    }
+  });
   if (existsSync(join(prepared, "delegations.json"))) writeJson(join(prepared, "delegations.json"), {});
   if (existsSync(join(prepared, "browser-cleanups.json"))) writeJson(join(prepared, "browser-cleanups.json"), []);
   for (const entry of manifest.entries) {

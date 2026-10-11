@@ -5,14 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "./schema.ts";
 
 import { cacheUntilConfigChanges,
+  changedInstanceIds,
   customMcpServers,
+  engineLaunches,
   DATA_DIR,
   ensureDirs,
   instanceConfigs,
   isValidSshAlias,
   loadBrowserProfileIdAliases,
   loadConfig,
-  providerReloadKeys,
   localVmIdleTimeoutMinutes,
   localVmMaxInstances,
   localVmMode,
@@ -50,6 +51,10 @@ import { cacheUntilConfigChanges,
   type AppConfig,
 } from "./config.ts";
 
+/** The engines a settings save would replace: `patch` applied over `cfg`. */
+const reloaded = (patch: object, cfg: AppConfig = {}) =>
+  changedInstanceIds(engineLaunches(instanceConfigs(cfg), {}), engineLaunches(instanceConfigs({ ...cfg, ...patch } as AppConfig), {}));
+
 describe("configuration boundaries", () => {
   it("requires an explicit backup to opt into automatic recovery without reloading engines", () => {
     expect(parseStoredConfig({}).automaticRecovery).toBeUndefined();
@@ -57,7 +62,7 @@ describe("configuration boundaries", () => {
     const automaticRecovery = { enabled: true, backup: { instanceId: "codex", model: "backup", effort: "high" } };
     expect(parseStoredConfig({ automaticRecovery }).automaticRecovery).toEqual(automaticRecovery);
     expect(parseConfigPatch({ automaticRecovery }).automaticRecovery).toEqual(automaticRecovery);
-    expect(providerReloadKeys({ automaticRecovery })).toEqual([]);
+    expect(reloaded({ automaticRecovery })).toEqual([]);
     const invalidSettings: JsonValue[] = [{ enabled: true }, { backup: { instanceId: "codex", model: "m" } },
       { enabled: "true" }, { enabled: true, backup: { instanceId: "", model: "m" } },
       { enabled: true, backup: { instanceId: "codex", model: "m", effort: "high", variant: "v" } },
@@ -71,14 +76,14 @@ describe("configuration boundaries", () => {
     expect(parseConfigPatch({ profile })).toEqual({ profile });
     expect(parseStoredConfig({ profile })).toEqual({ profile });
     expect(parseConfigPatch({ profile: { aboutMe: "" } })).toEqual({ profile: { aboutMe: "" } });
-    expect(providerReloadKeys({ profile })).toEqual([]);
+    expect(reloaded({ profile })).toEqual([]);
     expect(() => parseConfigPatch({ profile: { aboutMe: "x".repeat(24_001) } })).toThrow();
   });
   it("validates context budgets and keeps changes independent of provider reload", () => {
     const context = { autoCompact: false, compactAt: 0.7, rebuildBytes: 32_000 };
     expect(parseStoredConfig({ context })).toEqual({ context });
     expect(parseConfigPatch({ context })).toEqual({ context });
-    expect(providerReloadKeys({ context })).toEqual([]);
+    expect(reloaded({ context })).toEqual([]);
     for (const value of [0, -1, "10", null, Infinity]) {
       expect(() => parseConfigPatch({ context: { compactAt: value } })).toThrow();
     }
@@ -754,6 +759,44 @@ describe("saving the newer sections", () => {
 });
 
 describe("default fleet", () => {
+  it("adds Groq to product fleets and keeps its workspace key away from other accounts", () => {
+    const cfg: AppConfig = { groq: { key: "groq-workspace", url: "https://proxy.example.test/openai/v1" }, instances: {
+      codex: { driver: "codex" },
+      groqProxy: { driver: "groq", config: { url: "https://another.example.test/v1" } },
+      groqOwn: { driver: "groq", environment: { GROQ_API_KEY: "groq-own" } },
+    } };
+    const map = instanceConfigs(cfg);
+    expect(map.groq).toEqual({ driver: "groq", config: { url: cfg.groq!.url }, environment: { GROQ_API_KEY: "groq-workspace" } });
+    expect(map.codex.environment).toEqual({});
+    expect(map.groqProxy.environment).toEqual({});
+    expect(map.groqOwn.environment).toEqual({ GROQ_API_KEY: "groq-own" });
+    expect(cfg.instances).not.toHaveProperty("groq");
+    expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("groq");
+  });
+
+  it("preserves an existing compatible account named Groq when adding the built-in provider", () => {
+    const map = instanceConfigs({ groq: { key: "workspace-key" }, instances: {
+      codex: { driver: "codex" },
+      groq: { driver: "openai-compat", config: { url: "https://existing.example.test/v1" }, environment: { OPENAI_COMPAT_API_KEY: "own-key" } },
+    } });
+    expect(map.groq).toEqual({ driver: "openai-compat", config: { url: "https://existing.example.test/v1" }, environment: { OPENAI_COMPAT_API_KEY: "own-key" } });
+  });
+
+  it("accepts clearing a Groq key and removes it from child environments", () => {
+    expect(parseConfigPatch({ groq: { key: "" } })).toEqual({ groq: { key: "" } });
+    const env = { OMB_GROQ_API_KEY: "groq-fixture", KEEP: "yes" };
+    stripWorkspaceCredentialEnv(env);
+    expect(env).toEqual({ KEEP: "yes" });
+  });
+
+  it("keeps OpenCode's existing Groq key separate from the built-in Groq key", () => {
+    const map = instanceConfigs({ groq: { key: "groq-workspace" },
+      opencodeGo: { providerKeys: { GROQ_API_KEY: "groq-opencode" } } });
+    expect(map.groq.environment).toEqual({ GROQ_API_KEY: "groq-workspace" });
+    expect(map.opencodeGo.environment).toEqual({ GROQ_API_KEY: "groq-opencode" });
+    expect(map.codex.environment).toEqual({});
+  });
+
   it("adds a separate ChatGPT plan account without copying Codex credentials", () => {
     const cfg: AppConfig = { instances: { codex: { driver: "codex", config: { cli: "/fixture/codex" }, environment: { CODEX_HOME: "/other-account", OPENAI_API_KEY: "not-for-plan" } } } };
     expect(instanceConfigs(cfg).chatgpt).toMatchObject({ driver: "codex", displayName: "ChatGPT plan", config: { cli: "/fixture/codex", authMode: "chatgpt-plan" }, environment: {} });
@@ -1171,7 +1214,8 @@ describe("saving OpenCode provider keys", () => {
     expect(parseConfigPatch({ opencodeGo: { providerKeys: { VENICE_API_KEY: "v", GROQ_API_KEY: "" } } }))
       .toEqual({ opencodeGo: { providerKeys: { VENICE_API_KEY: "v", GROQ_API_KEY: "" } } });
     expect(() => parseConfigPatch({ opencodeGo: { providerKeys: { VENICE_API_KEY: 42 } } })).toThrow("opencodeGo.providerKeys");
-    expect(providerReloadKeys({ opencodeGo: { providerKeys: {} } })).toEqual(["opencodeGo"]);
+    expect(reloaded({ opencodeGo: { providerKeys: { VENICE_API_KEY: "v" } } })).toEqual(["opencodeGo"]);
+    expect(reloaded({ opencodeGo: { providerKeys: {} } })).toEqual([]);
   });
 });
 
@@ -1326,6 +1370,7 @@ describe("legacy feature flag migration", () => {
 describe("credential env preference", () => {
   const VARS = [
     "XAI_API_KEY",
+    "OMB_GROQ_API_KEY",
     "OPENAI_COMPAT_API_KEY",
     "OPENAI_COMPAT_URL",
     "OPENAI_COMPAT_MODEL",
@@ -1685,6 +1730,17 @@ describe("credential env preference", () => {
     expect(process.env.OMB_FISH_AUDIO_API_KEY).toBeUndefined();
   });
 
+  it("saves and clears the built-in Groq key without changing an operator's Groq key", () => {
+    vi.stubEnv("GROQ_API_KEY", "groq-operator");
+    try {
+      syncCredentialEnv({ groq: { key: "groq-workspace" } });
+      expect(loadConfig().groq?.key).toBe("groq-workspace");
+      syncCredentialEnv({ groq: { key: "" } });
+      expect(loadConfig().groq?.key).toBeUndefined();
+      expect(process.env.GROQ_API_KEY).toBe("groq-operator");
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("syncCredentialEnv updates Fish Audio without replacing ElevenLabs", () => {
     process.env.OMB_TTS_KEY = "eleven-kept";
     process.env.OMB_FISH_AUDIO_API_KEY = "fish-old";
@@ -1856,11 +1912,39 @@ describe("customMcpServers", () => {
   });
 });
 
-describe("providerReloadKeys", () => {
-  it("rebuilds the fleet only for sections a driver reads", () => {
-    expect(providerReloadKeys({ claude: { model: "x" }, profile: { name: "me" } })).toEqual(["claude"]);
-    expect(providerReloadKeys({ onboarding: { hintsSeen: ["tour.composer"] } })).toEqual([]);
-    expect(providerReloadKeys({ profile: {}, language: "de", tts: {}, features: {} })).toEqual([]);
+describe("changedInstanceIds", () => {
+  it("replaces only the engines whose launch config a save changed", () => {
+    const saved: AppConfig = { mistral: { key: "m1" }, openaiCompat: { key: "c1", url: "https://compat.example/v1" } };
+    // The same values saved again change no engine, so no turn is interrupted.
+    expect(reloaded({ mistral: { key: "m1" }, openaiCompat: { key: "c1", url: "https://compat.example/v1" } }, saved)).toEqual([]);
+    // A key reaches the engines that read it and no others.
+    expect(reloaded({ mistral: { key: "m2" } }, saved)).toEqual(["mistral"]);
+    expect(reloaded({ openaiCompat: { key: "c2", url: "https://compat.example/v1" } }, saved)).toEqual(["openaiCompat"]);
+    expect(reloaded({ openaiCompat: { key: "c1", url: "https://other.example/v1" } }, saved)).toEqual(["openaiCompat"]);
+    expect(reloaded({ anthropic: { key: "a" } }, saved)).toEqual(["claude"]);
+  });
+  it("replaces nothing for sections no driver reads", () => {
+    expect(reloaded({ onboarding: { hintsSeen: ["tour.composer"] } })).toEqual([]);
+    expect(reloaded({ profile: {}, language: "de", tts: {}, features: {} })).toEqual([]);
+    expect(reloaded({ box: { token: "boat" }, composio: { apiKey: "c" }, budgets: { monthlyUsd: 5 } })).toEqual([]);
+  });
+  // An instance on its own address is injected no workspace key, yet its
+  // driver still reads the saved one from the env syncCredentialEnv keeps.
+  it("replaces an engine whose driver reads a saved key from the env", () => {
+    const own = instanceConfigs({ instances: { own: { driver: "mistral", config: { url: "http://127.0.0.1:9/v1" } } }, mistral: { key: "m1" } });
+    expect(own.own!.environment?.MISTRAL_API_KEY).toBeUndefined();
+    expect(changedInstanceIds(engineLaunches(own, { MISTRAL_API_KEY: "m1" }), engineLaunches(own, { MISTRAL_API_KEY: "m1" }))).toEqual([]);
+    expect(changedInstanceIds(engineLaunches(own, { MISTRAL_API_KEY: "m1" }), engineLaunches(own, { MISTRAL_API_KEY: "m2" }))).toEqual(["own"]);
+    // OpenAI's and OpenRouter's own instances read only their own keys.
+    const fleet = instanceConfigs({});
+    const compat = (env: Record<string, string>) => changedInstanceIds(engineLaunches(fleet, {}), engineLaunches(fleet, env));
+    expect(compat({ OPENAI_COMPAT_URL: "https://compat.example/v1" })).toEqual(["openaiCompat"]);
+    expect(compat({ OMB_OPENAI_API_KEY: "o" })).toEqual(["openai"]);
+    expect(compat({ BOX_TOKEN: "boat", COMPOSIO_API_KEY: "c" })).toEqual([]);
+  });
+  it("names an engine that was added or removed", () => {
+    expect(changedInstanceIds({ a: { driver: "fake" } }, { b: { driver: "fake" } })).toEqual(["a", "b"]);
+    expect(changedInstanceIds({ a: { driver: "fake", config: { x: 1 } } }, { a: { driver: "fake", config: { x: 1 } } })).toEqual([]);
   });
 });
 
@@ -1898,7 +1982,7 @@ describe("live settings", () => {
     expect(parseConfigPatch({ live: { idleMinutes: 60, readTypedReplies: false } })).toMatchObject({ live: { idleMinutes: 60, readTypedReplies: false } });
   });
   it("does not reload providers for live changes", () => {
-    expect(providerReloadKeys({ live: { idleMinutes: 3 } } as never)).toEqual([]);
+    expect(reloaded({ live: { idleMinutes: 3 } })).toEqual([]);
   });
 
   describe("saving settings from PATCH /api/live/settings", () => {

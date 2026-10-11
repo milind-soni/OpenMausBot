@@ -1,5 +1,5 @@
 import { killCliTree, spawnCli } from "./procs.ts";
-import { DEFAULT_BROWSER_RESULT_BUDGET, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments } from "./browser-tool-shape.ts";
+import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, OBSERVE_PAGE_SCRIPT, parsePageState, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments, type PageState } from "./browser-tool-shape.ts";
 
 export interface BrowserSpawnSpec {
   command: string;
@@ -18,6 +18,12 @@ const BROWSER_RESTART_TOOL_SPEC = {
   inputSchema: { type: "object", properties: {}, additionalProperties: false },
 };
 const BROWSER_INTERRUPTED = `The browser engine is stuck. Press Restart in the Browser panel, or call ${BROWSER_RESTART_TOOL}, before using browser tools again.`;
+/** Actions whose result also says what changed on the page, so the model
+ * need not spend a step reading it back. */
+const PAGE_ACTIONS: ReadonlySet<string> = new Set([
+  "agent_browser_click", "agent_browser_fill", "agent_browser_type", "agent_browser_press",
+  "agent_browser_check", "agent_browser_uncheck", "agent_browser_select",
+]);
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 16_777_216;
 /** Startup, not per-request work: a cold engine spawn can exceed a tight
@@ -351,6 +357,26 @@ export class BrowserRuntime {
         // The model sees slimmed schemas and text-only, bounded results; the
         // launch/session parameters OMB owns never reach the engine from a call.
         const request = method === "tools/call" ? stripHarnessOwnedArguments(params) : params;
+        const toolName = request && typeof request === "object" && typeof (request as { name?: unknown }).name === "string" ? (request as { name: string }).name : undefined;
+        // Read the page around an action with eval, not a snapshot: a
+        // snapshot renumbers every @eN ref the model holds. A failed read only
+        // leaves the change out; a lost transport still engages recovery.
+        const observePage = async (): Promise<PageState | null> => {
+          try {
+            return parsePageState(await entry.client.rpc("tools/call", {
+              name: "agent_browser_eval", arguments: { script: OBSERVE_PAGE_SCRIPT, timeoutMs: 5_000 },
+            }));
+          } catch (error) {
+            if (error instanceof TransportError) throw error;
+            return null;
+          }
+        };
+        let before: PageState | null = null;
+        if (method === "tools/call" && toolName !== undefined && PAGE_ACTIONS.has(toolName)) {
+          before = await observePage();
+          beforeDispatch?.();
+          if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+        }
         let result = await entry.client.rpc(method, request);
         beforeDispatch?.(); // A turn revoked while the tool ran receives no result.
         if (method === "tools/list") {
@@ -358,7 +384,16 @@ export class BrowserRuntime {
           this.toolLists.set(session, tools);
           return tools;
         }
-        const toolName = request && typeof request === "object" && typeof (request as { name?: unknown }).name === "string" ? (request as { name: string }).name : undefined;
+        if (before && result && typeof result === "object" && (result as { isError?: boolean }).isError !== true &&
+            this.gate(session).owner === null) {
+          const after = await observePage();
+          beforeDispatch?.();
+          if (after) {
+            const action = result as { content?: unknown[] };
+            const change = { type: "text", text: describePageChange(before, after) };
+            result = { ...action, content: [...(Array.isArray(action.content) ? action.content : []), change] };
+          }
+        }
         if (toolName === "agent_browser_open" && result && typeof result === "object" &&
             (result as { isError?: boolean }).isError !== true) {
           // Navigation alone does not prove that the requested page loaded.

@@ -12,7 +12,7 @@ import { removeTempDir } from "./testing/cleanup.ts";
 vi.mock("node:fs", { spy: true });
 vi.resetModules();
 const spied = await import("node:fs");
-const { RoomHandoffs } = await import("./room-handoffs.ts");
+const { RoomHandoffs, ROOM_HANDOFF_CUT_TWICE } = await import("./room-handoffs.ts");
 
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -109,16 +109,27 @@ describe("room handoff saves", () => {
     expect(statusOnDisk(node.id)?.status).toBe("running");
   });
 
-  it("fails children that were running at a restart and never runs them again", () => {
-    const { file, handoffs, node, run } = failing();
+  it("saves a child a restart cut as owed once before it runs again, and as ended when a second restart cuts that run", async () => {
+    const { file, handoffs, node, run, statusOnDisk } = failing();
     handoffs.tick();
     expect(run).toHaveBeenCalledTimes(1);
 
-    const rerun = vi.fn(async () => ({ ok: true, text: "again" }));
-    const restarted = new RoomHandoffs(file, { validate: () => undefined, busy: () => false, run: rerun, report: vi.fn(), changed: () => {} });
-    expect(restarted.nodes.get(node.id)).toMatchObject({ status: "failed", result: expect.stringContaining("server restart") });
-    restarted.tick();
-    expect(rerun).not.toHaveBeenCalled();
+    const boot = () => {
+      const hooks: RoomHandoffHooks = { validate: () => undefined, busy: () => false,
+        run: vi.fn(() => new Promise<{ ok: boolean; text: string }>(() => {})), report: vi.fn(), changed: () => {} };
+      return { hooks, engine: new RoomHandoffs(file, hooks) };
+    };
+    const second = boot();
+    // On disk before anything runs: a crash now still runs it, once.
+    expect(statusOnDisk(node.id)).toMatchObject({ status: "queued", restart: "rerun", restarts: 1 });
+    second.engine.tick();
+    expect(second.hooks.run).toHaveBeenCalledTimes(1);
+    expect(statusOnDisk(node.id)).toMatchObject({ status: "running", restart: "rerun" });
+
+    const third = boot();
+    expect(statusOnDisk(node.id)).toMatchObject({ status: "failed", result: ROOM_HANDOFF_CUT_TWICE });
+    third.engine.tick(); await flush(); third.engine.tick();
+    expect(vi.mocked(third.hooks.run).mock.calls.map(([woken, resumed]) => [woken.id, resumed])).toEqual([["turn", true]]);
   });
 
   it("keeps a settlement whose write failed and saves it on the next tick", async () => {

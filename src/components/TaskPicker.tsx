@@ -4,7 +4,7 @@
 // the only clean slate is a second bot. A task is a real boundary — its
 // own transcript and its own provider session — so sensitive work, a
 // long job and a quick question can sit side by side under one agent.
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, Check, ChevronDown, FolderInput, Pencil, Pin, PinOff, Plus, Search, Trash2 } from "lucide-react";
 import { useStore, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -484,11 +484,17 @@ export function TaskPicker({ bot }: { bot: Bot }) {
  * transcript is the private bot-to-bot exchange rather than user work. */
 export function GroupTaskPicker({ group }: { group: Group }) {
   const { dispatch } = useStore();
+  const tasks = useMemo(() => {
+    return (group.tasks ?? []).map((task) => ({
+      ...task,
+      busy: Boolean(task.working || task.busyBotId),
+    }));
+  }, [group.tasks]);
   return (
     <ConversationTaskPicker
       threadId={group.threadId}
-      tasks={orderedThreadList(group.tasks ?? [])}
-      busy={Boolean(group.working || group.busyBotId)}
+      tasks={orderedThreadList(tasks)}
+      busy={false}
       onNew={() => dispatch({ type: "newGroupTask", groupId: group.id })}
       onSwitch={(threadId) => dispatch({ type: "switchGroupTask", groupId: group.id, threadId })}
       onRename={(threadId, title) => dispatch({ type: "renameGroupTask", groupId: group.id, threadId, title })}

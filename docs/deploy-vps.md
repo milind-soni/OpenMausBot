@@ -270,7 +270,7 @@ same release without an npm install prompt or an implicit upgrade.
   desired release as `npx --yes openmausbot@X.Y.Z serve --tunnel`.
 - **Path B:** `cd OpenMausBot/deploy && docker compose pull omb && docker compose up -d`.
 
-Routines and queued work survive a restart; a turn running at that moment does not, so update between runs.
+Routines and queued work survive a restart. A teammate turn running at that moment runs again once at the next start, told to check what it already did, and the bot that asked for it is told. A person's own turn and a running routine are not run again: the conversation says it was interrupted. Update between runs where you can.
 
 ## Back up
 

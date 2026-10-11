@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
-import { DEFAULT_BROWSER_RESULT_BUDGET, HARNESS_OWNED_BROWSER_PARAMS, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments } from "./browser-tool-shape.ts";
+import { DEFAULT_BROWSER_RESULT_BUDGET, describePageChange, HARNESS_OWNED_BROWSER_PARAMS, parsePageState, shapeBrowserToolResult, slimBrowserToolList, stripHarnessOwnedArguments, withoutLifecycle } from "./browser-tool-shape.ts";
 
 const snapshotTool = {
   name: "agent_browser_snapshot",
@@ -92,5 +92,43 @@ describe("browser tool shaping", () => {
   it("tells the bot that opening a page already returns its refs", () => {
     expect(BUILT_IN_BROWSER_SYSTEM_PROMPT).toContain("agent_browser_open already returns the loaded page's snapshot with current refs");
     expect(BUILT_IN_BROWSER_SYSTEM_PROMPT).not.toContain("Take a fresh snapshot after navigation");
+  });
+
+  it("drops the engine's lifecycle block and keeps a relaunch", () => {
+    const action = (relaunchedBrowser: boolean) => JSON.stringify({
+      data: { filled: "@e4", lifecycle: { launched: false, relaunchedBrowser, reused: true, launchHash: 5915462868 } },
+      error: null, success: true,
+    }, null, 2);
+    expect(JSON.parse(withoutLifecycle(action(false)))).toEqual({ data: { filled: "@e4" }, error: null, success: true });
+    expect(JSON.parse(withoutLifecycle(action(true))).data).toEqual({ filled: "@e4", browserRelaunched: true });
+    expect(withoutLifecycle(action(false)).length).toBeLessThan(80);
+    // Snapshots, page text and errors are not action results.
+    for (const text of ["- button \"Say hello\" [ref=e5]", "Element not found", "{\"data\":{\"title\":\"x\"}}"]) expect(withoutLifecycle(text)).toBe(text);
+    const shaped = shapeBrowserToolResult({ content: [{ type: "text", text: action(false) }] }) as { content: Array<{ text: string }> };
+    expect(shaped.content[0].text).not.toContain("lifecycle");
+  });
+
+  it("reads the page state eval returns as a JSON string", () => {
+    const state = { url: "https://example.test/", title: "Example", text: "Ready" };
+    expect(parsePageState({ content: [{ type: "text", text: JSON.stringify(JSON.stringify(state)) }] })).toEqual(state);
+    expect(parsePageState({ content: [{ type: "text", text: JSON.stringify(state) }] })).toEqual(state);
+    expect(parsePageState({ isError: true, content: [{ type: "text", text: JSON.stringify(JSON.stringify(state)) }] })).toBeNull();
+    expect(parsePageState({ content: [{ type: "text", text: "\"not a page\"" }] })).toBeNull();
+  });
+
+  it("describes a page change by its visible text, or by where the page went", () => {
+    const page = (text: string, url = "https://shop.test/order", title = "Order") => ({ url, title, text });
+    expect(describePageChange(page("Order\nNot submitted"), page("Order\nOrder placed. Confirmation number: C-9719")))
+      .toBe('Text that appeared on the page: "Order placed. Confirmation number: C-9719". Text that disappeared: "Not submitted".');
+    expect(describePageChange(page("Order\nReady"), page("Order\nReady"))).toBe("The visible text of the page did not change.");
+    // A repeated line counts once per occurrence.
+    expect(describePageChange(page("Item"), page("Item\nItem"))).toBe('Text that appeared on the page: "Item".');
+    expect(describePageChange(page("Search"), page("Ada Lovelace was born in 1815.", "https://en.wikipedia.org/wiki/Ada_Lovelace", "Ada Lovelace - Wikipedia")))
+      .toBe('The page is now https://en.wikipedia.org/wiki/Ada_Lovelace ("Ada Lovelace - Wikipedia"). Refs from earlier snapshots do not apply to it; take a snapshot before acting on refs.');
+    const many = Array.from({ length: 50 }, (_, index) => `Row ${index}`).join("\n");
+    const summary = describePageChange(page(""), page(many));
+    expect(summary).toContain('"Row 19"');
+    expect(summary).not.toContain('"Row 20"');
+    expect(summary).toContain("and 30 more lines");
   });
 });

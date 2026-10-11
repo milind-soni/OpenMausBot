@@ -334,6 +334,8 @@ const WAKE_HORIZON_MS = 60 * 60_000;
 /** How long a run may sit deferred behind a busy target before the user
  * hears about it once. Surfacing only; dispatch semantics stay unchanged. */
 export const ROUTINE_DEFERRAL_NOTICE_MS = 30 * 60_000;
+/** Why a run still going when the server stopped failed at the next start. */
+export const ROUTINE_RESTARTED = "OpenMausBot restarted while this routine was running";
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const LOCAL_DAY_MS = 24 * 60 * 60_000;
 const INTERVAL_RESTRICTION_SEARCH_MS = 9 * LOCAL_DAY_MS;
@@ -911,7 +913,7 @@ export class RoutineManager {
       if (run.status === "running" || run.status === "waiting") {
         run.status = "failed";
         if (run.target === "room-goal") run.goalStatus = "failed";
-        run.error = "OpenMausBot restarted while this routine was running";
+        run.error = ROUTINE_RESTARTED;
         run.attention = undefined;
         run.finishedAt = this.now();
         recovered.push(cloneRun(run));
