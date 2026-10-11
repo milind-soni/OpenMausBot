@@ -325,6 +325,13 @@ it("stops an active downstream turn when the source group is interrupted", () =>
   f.plan[f.target.id].delayMs = 10_000;
   await f.start();
   await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 10_000 }).toBe("running");
+  // With its hand-off out in another room, the job is still the source
+  // task's: that task reads working with no turn of its own running.
+  await expect.poll(async () => {
+    const { bots, groups } = await f.api("/api/bots?messages=0");
+    const task = groups.find((g: any) => g.id === f.source.id)?.tasks?.find((t: any) => t.threadId === f.source.activeTaskId);
+    return { senderBusy: bots.find((b: any) => b.id === f.sender.id)?.busy, taskWorking: task?.working };
+  }, { timeout: 10_000 }).toEqual({ senderBusy: false, taskWorking: true });
   await f.cli("interrupt", "--channel", f.source.id);
   await expect.poll(async () => {
     const { bots } = await f.api("/api/bots"); return bots.find((b: any) => b.id === f.target.id)?.busy;

@@ -1,8 +1,26 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { setLocale } from "./i18n";
-import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForComposer } from "./group-routing";
-import type { GroupDefaultResponder } from "@/state/store";
+import { goalCoordinatorForComposer, groupComposerHint, openTaskWorking, roomRespondersForComposer } from "./group-routing";
+import type { Group, GroupDefaultResponder } from "@/state/store";
+
+describe("openTaskWorking", () => {
+  const tasks = [
+    { threadId: "goal", title: "Weekly report", createdAt: 1, working: true },
+    { threadId: "chat", title: "Questions", createdAt: 2, working: false },
+  ] as Group["tasks"];
+
+  it("locks a task's composer on its own work, not a background task's", () => {
+    // the room counts the background goal; the open task is idle
+    expect(openTaskWorking({ threadId: "chat", working: true, tasks })).toBe(false);
+    expect(openTaskWorking({ threadId: "goal", working: true, tasks })).toBe(true);
+  });
+
+  it("reads the room's flag when no task list came", () => {
+    expect(openTaskWorking({ threadId: "dm", working: true })).toBe(true);
+    expect(openTaskWorking({ threadId: "dm", working: false })).toBe(false);
+  });
+});
 
 describe("roomRespondersForComposer", () => {
   const members = [
