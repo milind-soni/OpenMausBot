@@ -49,6 +49,12 @@ describe("provider key rows", () => {
     expect(render(createElement(ApiKeyRow, { section: "openrouter", testProvider: "openrouter" }))).toContain("sk-or-v1-…");
 
     expect(render(createElement(ApiKeyRow, { section: "xai", testProvider: "xai" }))).toContain("xAI API key");
+    const groq = render(createElement(ApiKeyRow, { section: "groq", testProvider: "groq" }));
+    expect(groq).toContain("Groq API key");
+    expect(groq).toContain('type="password"');
+    expect(groq).toContain('value=""');
+    expect(groq).not.toContain("Connected");
+    expect(groq).not.toContain(">Test<");
   });
 
   it("saves on paste instead of a Save button, and keeps key effects in view", () => {

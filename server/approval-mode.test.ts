@@ -54,7 +54,7 @@ describe("approval modes", () => {
   // (createOpenAIChatRuntime answers its own gate), so it IS offered. Without
   // it these engines had no level that ever stops asking, and a Chief's
   // delegated Full access could not reach them either.
-  it.each(["grok", "openai-compat", "minimax"])("offers harness-implemented Full on %s, but never native Auto", (driver) => {
+  it.each(["grok", "openai-compat", "minimax", "groq"])("offers harness-implemented Full on %s, but never native Auto", (driver) => {
     expect(supportsApprovalMode(driver, "ask")).toBe(true);
     expect(supportsApprovalMode(driver, "auto")).toBe(true);
     expect(supportsApprovalMode(driver, "full")).toBe(true);

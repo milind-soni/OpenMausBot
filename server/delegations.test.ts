@@ -34,6 +34,7 @@ import {
   _pendingCount,
 } from "./delegations.ts";
 import { cancelPeerApprovalsForThread, peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
+import type { WorkOrigin } from "./peer-provenance.ts";
 import { Store, type BotRecord, type GroupRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
@@ -248,17 +249,21 @@ describe("drainDelegations", () => {
   });
 
   it("runs the target's turn via runTarget and mirrors the exchange", async () => {
-    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
-    drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", reason: "needs a check", depth: 0 }, 1);
+    const origins: WorkOrigin[] = [];
+    drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth, ...rest) => {
       runTargetCalls.push({ toBotId, message, commsDepth });
+      origins.push(rest.at(-1) as WorkOrigin);
     });
 
     await waitFor(() => runTargetCalls.length === 1);
     const call = runTargetCalls[0]!;
     expect(call.toBotId).toBe(target.id);
     expect(call.commsDepth).toBe(1);
-    expect(call.message).toContain("Delegated by @");
-    expect(call.message).toContain("do this");
+    // the sender's words and reason exactly; the harness writes the note
+    // at dispatch, and a queue that recorded no origin is outside work
+    expect(call.message).toBe("do this\n\n[Reason: needs a check]");
+    expect(origins).toEqual([{ kind: "outside" }]);
 
     // Both 1:1 threads picked up their comm chips, attributed to the
     // source/target bot respectively, linking to the same channel.
@@ -1520,6 +1525,17 @@ describe("originating group routing", () => {
     expect(runTargetCalls[0]!.channel?.id).toBe(group.id);
   });
 
+  it("survives persistence: a loaded delegation keeps where its work started", async () => {
+    const user: WorkOrigin = { kind: "user", request: "Ship the CSV export" };
+    queueDelegation(commsBus, from, { toBotId: target.id, message: "for the user", depth: 0, origin: user }, 1);
+    _resetPending();
+    _loadPending();
+    const origins: unknown[] = [];
+    drainDelegations(commsBus, approvalBus, from.threadId, (...args: unknown[]) => { origins.push(args.at(-1)); });
+    await waitFor(() => origins.length === 1);
+    expect(origins).toEqual([user]);
+  });
+
   it("drains each shared-group item under the bot that queued it", async () => {
     const other = store.createBot();
     store.patchBot(other.id, { name: "Other" });
@@ -1527,14 +1543,13 @@ describe("originating group routing", () => {
     queueDelegation(commsBus, from, { toBotId: target.id, message: "from A", depth: 0 }, 1, group.threadId);
     queueDelegation(commsBus, other, { toBotId: target.id, message: "from B", depth: 0 }, 1, group.threadId);
 
-    const seen: { message: string }[] = [];
-    drainDelegations(commsBus, approvalBus, group.threadId, (_to, message) => {
-      seen.push({ message });
+    const seen: { message: string; sender: string }[] = [];
+    drainDelegations(commsBus, approvalBus, group.threadId, (_to, message, _depth, _source, _channel, _task, sender) => {
+      seen.push({ message, sender });
     });
     await waitFor(() => seen.length === 2);
 
-    expect(seen[0]!.message).toContain(`[Delegated by @${from.name},`);
-    expect(seen[1]!.message).toContain("[Delegated by @Other,");
+    expect(seen).toEqual([{ message: "from A", sender: from.id }, { message: "from B", sender: other.id }]);
     expect(store.dmGroup(from.id, target.id)).toBeUndefined();
   });
 

@@ -108,6 +108,12 @@ export function resolveSurface(input: {
   return { computer: undefined, browser: browserOn, pinned: null, note: "" };
 }
 
+/** The conversation works on the built-in browser: its Works on is Browser,
+ * or it is pinned there. Auto without a pin only falls back to the browser. */
+export function browserIsThePlace(plan: SurfacePlan): boolean {
+  return plan.computer === "off" && plan.browser;
+}
+
 /** Why this engine can't work on the cloud computer, as a failed place, or
  * null when it can (shared/cloud-computer.ts holds the rule). Checked before
  * anything is provisioned, so a turn that cannot run never creates or wakes

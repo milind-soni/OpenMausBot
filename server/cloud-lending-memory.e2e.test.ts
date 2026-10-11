@@ -621,9 +621,12 @@ it("a provider reload judges a running turn in a conversation a guest left behin
   await toolsFor(() => say(owner, bot, "Save a note.", guests));
   appendFileSync(ws(bot, "MEMORY.md"), `\n- ${INJECTED}\n`);
   const before = log.length;
-  const patched = await api("PATCH", "/api/config", { token: owner, body: { defaultModelSelection: { instanceId: "done", model: "claude-sonnet-5" } } });
+  // A save reloads only the engines it changes: a workspace Anthropic key
+  // reaches every Claude engine, the held one among them.
+  const patched = await api("PATCH", "/api/config", { token: owner, body: { anthropic: { key: "fixture-reload-key" } } });
   expect(patched.status, JSON.stringify(patched.body)).toBe(200);
   await expect.poll(() => log.slice(before), { timeout: 15_000 }).toContain(`memory of bot ${bot.id} changed`);
+  expect((await api("PATCH", "/api/config", { token: owner, body: { anthropic: { key: "" } } })).status).toBe(200);
 }, 60_000);
 
 it("a routine a guest left behind reports into a conversation of its own, and its reports are never the owner's words", async () => {

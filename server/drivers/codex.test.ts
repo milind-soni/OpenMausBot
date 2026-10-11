@@ -328,7 +328,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       expect(recorder.events.filter(event => event.type === "runtime.error")).toEqual([]);
       const seen = JSON.parse(readFileSync(dump, "utf8"));
       const config = seen.calls.find((call: { method: string }) => call.method === (resumeCursor ? "thread/resume" : "thread/start")).params.config.mcp_servers;
-      expect(config.agents.default_tools_approval_mode).toBe("auto");
+      // OpenMausBot's own coordination tools never ask; a person's own server still does.
+      expect(config.agents.default_tools_approval_mode).toBe("approve");
       expect(config.notes.default_tools_approval_mode).toBe("prompt");
       for (const [name, tool] of [["agents", "list_bots"], ["notes", "read_notes"]]) {
         const spec = config[name!];
@@ -1554,7 +1555,8 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv.join(" ")).toContain("mcp_servers.agents.command");
-    expect(seen.argv).toContain('mcp_servers.agents.default_tools_approval_mode="auto"');
+    // Coordination never raises a card: "auto" would quiet only read-only tools.
+    expect(seen.argv).toContain('mcp_servers.agents.default_tools_approval_mode="approve"');
     expect(seen.argv.join(" ")).toContain("/tmp/agents-proxy.js");
     expect(seen.argv.join(" ")).toContain("OMB_COMMS_TOKEN");
     expect(seen.argv.join(" ")).not.toContain("peer-comms-secret");
@@ -1591,7 +1593,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(seen.argv).toContain("features.computer_use=false");
     expect(seen.argv.some((arg: string) => arg.startsWith("web_search="))).toBe(false);
     expect(seen.argv).toContain('plugins={ "browser@openai-bundled" = { enabled = false }, "computer-use@openai-bundled" = { enabled = false }, "unified-computer-use@openai-bundled" = { enabled = false } }');
+    // The browser keeps its approvals: only coordination is pre-approved.
     expect(seen.argv).toContain('mcp_servers.browser.default_tools_approval_mode="auto"');
+    expect(seen.argv).not.toContain('mcp_servers.browser.default_tools_approval_mode="approve"');
     expect(seen.argv.join(" ")).toContain("/tmp/harness-mcp-proxy.js");
     expect(seen.argv.join(" ")).not.toContain("browser-capability-secret");
     expect(seen.env.OMB_MCP_TOKEN).toBe("browser-capability-secret");
