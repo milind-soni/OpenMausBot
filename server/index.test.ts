@@ -2857,14 +2857,27 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("keeps bot-to-bot channels single-threaded and blocks task changes on an open approval", async () => {
+  it("keeps bot-to-bot channels single-threaded and lets another task start beside an open approval", async () => {
     const dm = await api("POST", "/api/groups/test-dm/tasks", {});
     expect(dm.status).toBe(400);
     expect(dm.body.error).toMatch(/one canonical conversation/i);
 
-    const blocked = await api("POST", "/api/groups/test-stranded-room/tasks", {});
-    expect(blocked.status).toBe(409);
-    expect(blocked.body.error).toMatch(/waiting on you/i);
+    // A card holds only its own task: the person can start another while it
+    // waits, and the card stays in its task to be answered there.
+    const created = await api("POST", "/api/groups/test-stranded-room/tasks", {});
+    expect(created.status).toBe(201);
+    const taskThreadId = created.body.task.threadId as string;
+    expect(taskThreadId).not.toBe("test-stranded-room-thread");
+    try {
+      const back = await api("POST", "/api/groups/test-stranded-room/tasks/test-stranded-room-thread", {});
+      expect(back.status).toBe(200);
+      const card = back.body.group.messages.find((message: { id: string }) => message.id === "stranded-card")?.card;
+      expect(card?.requestId).toBe("stranded-request");
+      expect(card.answered).toBeFalsy();
+    } finally {
+      await api("POST", "/api/groups/test-stranded-room/tasks/test-stranded-room-thread", {});
+      await api("DELETE", `/api/groups/test-stranded-room/tasks/${taskThreadId}`);
+    }
   });
 
   it("keeps Chief room changes behind pending user approvals", async () => {
@@ -7037,15 +7050,23 @@ describe("harness HTTP API", () => {
       await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.groups.find(
         (candidate: { id: string }) => candidate.id === room.id,
       )?.working).toBe(true);
-      const rejected = await held.finish();
-      expect(rejected.status).toBe(409);
-      expect(rejected.body.error).toMatch(/working/i);
+      const finished = await held.finish();
       const current = (await api("GET", "/api/bots?messages=0")).body.groups.find(
         (candidate: { id: string }) => candidate.id === room.id,
       );
-      expect(current.threadId).toBe(room.threadId);
-      expect(current.tasks).toHaveLength(1);
-      expect(current.tasks[0].title).not.toBe("Delayed task");
+      const running = current.tasks.find((task: { threadId: string }) => task.threadId === room.threadId);
+      expect(running.working).toBe(true);
+      if (method === "POST") {
+        // Each task has its own queue: a new one starts beside the running one.
+        expect(finished.status).toBe(201);
+        expect(current.tasks).toHaveLength(2);
+      } else {
+        // Renaming the running task still waits for it, checked after the body.
+        expect(finished.status).toBe(409);
+        expect(finished.body.error).toMatch(/running/i);
+        expect(current.tasks).toHaveLength(1);
+        expect(running.title).not.toBe("Delayed task");
+      }
     } finally {
       held.close();
       await api("POST", `/api/groups/${room.id}/interrupt`, {});
@@ -9923,7 +9944,7 @@ describe("harness HTTP API", () => {
       // and structural guards therefore cannot see a false idle window.
       const immediate = (await api("GET", "/api/bots?messages=0")).body;
       expect(immediate.groups.find((group: { id: string }) => group.id === room.id)?.working).toBe(true);
-      expect((await api("POST", `/api/groups/${room.id}/tasks`, { title: "Too soon" })).status).toBe(409);
+      expect((await api("PATCH", `/api/groups/${room.id}/tasks/${room.threadId}`, { title: "Too soon" })).status).toBe(409);
       expect((await api("PATCH", `/api/groups/${room.id}`, { memberIds: [first.id] })).status).toBe(409);
 
       const interrupted = await api("POST", `/api/groups/${room.id}/interrupt`, {
