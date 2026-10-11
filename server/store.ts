@@ -1019,7 +1019,7 @@ export class Store {
    * the stamp takes its newest line a person sent from an app. Without it a
    * bot's main thread (server/main-thread.ts) is whichever thread is
    * selected until someone writes again: often the oldest one, where
-   * v0.1.98 to v0.1.104 reported, left selected by its activity row. */
+   * v0.1.98 to v0.1.107 reported, left selected by its activity row. */
   private fillTaskAskedAts(): void {
     const tasks = this.bots.flatMap((bot) => bot.tasks ?? []).filter((task) => task.askedAt === undefined && !task.routineRunId);
     const asked = mdb.latestPersonLineAts(tasks.map((task) => task.threadId));

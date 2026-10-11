@@ -833,7 +833,7 @@ it("the upgrade clears the oldest thread saved on an owner's routine also where 
     };
     edit("thread-starters.json", (starters) => { starters[bot.threadId] = phone; });
     edit("cloud-owner.json", (record) => { record.adoptedKeys.push(phone); });
-    // Saved on the routine as v0.1.98 to v0.1.104 did, as if chosen.
+    // Saved on the routine as v0.1.98 to v0.1.107 did, as if chosen.
     edit("routines.json", (file) => { delete file.frozenResultsCleared; });
   });
   const routine = ((await api("GET", "/api/routines", { token: owner })).body.routines as any[]).find((candidate) => candidate.id === created.body.routine.id);

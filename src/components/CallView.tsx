@@ -20,7 +20,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AudioLines, Check, ChevronDown, Loader2, Phone, PhoneOff, X } from "lucide-react";
 
-import { useStore, visibleMessages, type Bot } from "@/state/store";
+import { useShowThreads } from "@/lib/thread-preferences";
+import { openBot, useStore, visibleMessages, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
@@ -96,6 +97,7 @@ export function CallTargetButton({
   onStart: (mode: CallMode) => void;
 }) {
   const { state, dispatch } = useStore();
+  const showThreads = useShowThreads();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const media = useLiveMedia();
   const liveThreadId = liveCapable ? threadId : undefined;
@@ -384,7 +386,7 @@ export function CallTargetButton({
                 setHelpOpen(false);
                 if (remoteClient) {
                   // In a room the agent is a member: open its chat first.
-                  if (setupBot.id !== targetId) dispatch({ type: "select", id: setupBot.id });
+                  if (setupBot.id !== targetId) openBot(dispatch, setupBot, showThreads);
                   dispatch({ type: "toggleSettings", open: true, section: "voice" });
                   return;
                 }

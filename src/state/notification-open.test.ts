@@ -16,6 +16,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ServerFrame } from "../../shared/wire";
 import type { Action, AppState, BotAnnouncement } from "./store";
+import { LAST_CONVERSATION_KEY } from "@/lib/last-conversation";
 
 class FixtureEventSource {
   static opened: FixtureEventSource[] = [];
@@ -53,6 +54,8 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const requests: Array<{ path: string; body?: string }> = [];
 /** Scout as the server keeps it: where it is, and what is unread. */
 let server: BotAnnouncement;
+/** The bot the app opens on at launch: the first one, nothing remembered. */
+let firstBot = "other";
 let state: AppState;
 let dispatch: (action: Action) => void;
 
@@ -77,11 +80,21 @@ function Probe() {
 }
 
 beforeAll(() => {
+  // Use persistent browser-like storage even on Node versions without it.
+  const saved = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => saved.get(key) ?? null,
+    setItem: (key: string, value: string) => saved.set(key, value),
+    removeItem: (key: string) => saved.delete(key),
+  });
   vi.stubGlobal("EventSource", FixtureEventSource);
   vi.stubGlobal("Notification", FixtureNotification);
   vi.stubGlobal("fetch", (path: string, init?: RequestInit) => {
     requests.push({ path, ...(typeof init?.body === "string" ? { body: init.body } : {}) });
-    if (path.startsWith("/api/bots?")) return Promise.resolve(json({ bots: [elsewhere, server].map((bot) => ({ ...bot, messages: [] })), groups: [] }));
+    if (path.startsWith("/api/bots?")) {
+      const bots = [elsewhere, server].sort((bot) => bot.id === firstBot ? -1 : 0);
+      return Promise.resolve(json({ bots: bots.map((bot) => ({ ...bot, messages: [] })), groups: [] }));
+    }
     const switched = path.match(/^\/api\/bots\/scout\/tasks\/([\w-]+)/);
     if (switched && init?.method === "POST") {
       if (!server.tasks!.some((task) => task.threadId === switched[1])) return Promise.resolve(json({ error: "no such task" }, 404));
@@ -103,9 +116,11 @@ beforeAll(() => {
   });
 });
 afterAll(() => vi.unstubAllGlobals());
-// Each test starts from the app as it opens: in the other bot's chat.
-beforeEach(async () => {
+/** The app as it opens, on the conversation it remembers. */
+async function launch() {
   server = structuredClone(scout);
+  // A previous scenario must not decide which bot this launch restores.
+  localStorage.setItem(LAST_CONVERSATION_KEY, firstBot);
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -113,6 +128,13 @@ beforeEach(async () => {
   await settle();
   stream().send({ kind: "hello", resumed: false, cursor: "run:0" });
   await settle();
+}
+// Each test starts from the app as it opens: in the other bot's chat.
+beforeEach(async () => {
+  firstBot = "other";
+  await launch();
+  expect(state.selectedId).toBe("other");
+  expect(server.threadId).toBe("left-behind");
   requests.length = 0;
   FixtureNotification.shown.length = 0;
 });
@@ -201,5 +223,35 @@ describe("opening a bot with threads hidden", () => {
     expect(reads()).toEqual(["finished"]);
     expect(unread("left-behind")).toBe(true);
     expect(state.focusMessage).toMatchObject({ threadId: "finished", messageId: "hit" });
+  });
+});
+
+describe("launching the app on a bot", () => {
+  /** Quit while Scout was on screen, left on the thread a reply waits in. */
+  async function relaunch(shown: boolean) {
+    flushSync(() => root.unmount());
+    flushSync(() => { setAdvancedMode(true); setShowThreads(shown); });
+    firstBot = "scout";
+    requests.length = 0;
+    await launch();
+  }
+
+  it("opens its main thread while threads are hidden, leaving the reply the bot was left on unread", async () => {
+    await relaunch(false);
+    expect(state.selectedId).toBe("scout");
+    const switches = sent().filter((request) => request.startsWith("/api/bots/scout/tasks/"));
+    expect(switches).toHaveLength(1);
+    expect(switches[0]).toMatch(/^\/api\/bots\/scout\/tasks\/main-chat\b/);
+    expect(reads()).toEqual([]);
+    expect(scoutNow().threadId).toBe("main-chat");
+    expect(unread("left-behind")).toBe(true);
+    expect(threadsWhenTreeHidden(scoutNow(), {}).map((task) => task.threadId)).toContain("left-behind");
+  });
+
+  it("keeps the bot where it was while threads are shown, as it always has", async () => {
+    await relaunch(true);
+    expect(state.selectedId).toBe("scout");
+    expect(sent().some((request) => request.startsWith("/api/bots/scout/tasks/"))).toBe(false);
+    expect(scoutNow().threadId).toBe("left-behind");
   });
 });

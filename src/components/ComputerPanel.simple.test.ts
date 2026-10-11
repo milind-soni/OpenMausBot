@@ -14,9 +14,10 @@ const fixture = vi.hoisted(() => {
   const ogb: Record<string, unknown> = {};
   vi.stubGlobal("window", { ogb });
   vi.stubGlobal("document", { visibilityState: "visible" });
-  vi.stubGlobal("localStorage", { getItem: (key: string) => key.startsWith("omb-computer-panel-view") ? view.current : null, setItem: () => {} });
+  vi.stubGlobal("localStorage", { getItem: (key: string) => key.startsWith("omb-computer-panel-view") ? view.current : key === "omb-computer-panel-width" ? String(fixture.width) : null, setItem: () => {} });
   return {
     advanced: false,
+    width: 400,
     view,
     ogb,
     platform: "darwin" as "darwin" | "win32" | "linux",
@@ -170,6 +171,7 @@ const grid = (rendered: ReturnType<typeof render>) => {
 };
 
 beforeEach(() => {
+  fixture.width = 400;
   fixture.advanced = false;
   fixture.view.current = "computer";
   fixture.platform = "darwin";
@@ -189,13 +191,28 @@ beforeEach(() => {
 });
 
 describe("Computer panel tabs", () => {
-  it("centres the tabs as a pill with close pinned right, in both modes", () => {
+  it.each([
+    { width: 480, android: false, columns: 2 },
+    { width: 560, android: true, columns: 2 },
+    { width: 620, android: false, columns: 4 },
+    { width: 760, android: true, columns: 5 },
+  ])("leaves room for tab labels at $width px", ({ width, android, columns }) => {
+    fixture.width = width;
+    fixture.advanced = true;
+    fixture.android = android;
+    const bar = render(makeBot()).nodes.find((node) => node.props["data-testid"] === "computer-tabs")!;
+    expect(bar.props.style).toMatchObject({ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` });
+    const buttons = nodes(bar.props.children).filter((node) => node.type === "button");
+    expect(String(buttons.at(-1)!.props.className).includes("col-span-2")).toBe(android && columns === 2);
+  });
+
+  it("centres the tabs as an even grid with close pinned right, in both modes", () => {
     for (const advanced of [false, true]) {
       fixture.advanced = advanced;
       fixture.values = [];
       const rendered = render(makeBot());
       const bar = rendered.nodes.find((node) => node.props["data-testid"] === "computer-tabs")!;
-      expect(String(bar.props.className).split(" ")).toEqual(expect.arrayContaining(["justify-center", "rounded-full", "mx-9"]));
+      expect(String(bar.props.className).split(" ")).toEqual(expect.arrayContaining(["grid", "rounded-2xl", "mx-9"]));
       const row = rendered.nodes.find((node) => Children.toArray(node.props.children)
         .some((child) => isValidElement(child) && (child as Node).props["data-testid"] === "computer-tabs"))!;
       expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining(["relative", "flex", "justify-center"]));

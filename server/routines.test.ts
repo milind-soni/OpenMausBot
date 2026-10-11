@@ -669,10 +669,10 @@ describe("persistent routine results destinations", () => {
     expect(h.created()).toBe(0);
   });
 
-  it("clears the default v0.1.98 to v0.1.104 saved as a destination once, and keeps a later pick of that thread", () => {
+  it("clears the default v0.1.98 to v0.1.107 saved as a destination once, and keeps a later pick of that thread", () => {
     const h = resultsHarness();
     h.visible.set("first-chat", "maus-1");
-    h.options.frozenResultsThread = (botId) => botId === "maus-1" ? "first-chat" : undefined;
+    h.options.frozenResultsThread = (botId, threadId) => botId === "maus-1" && threadId === "first-chat";
     const frozen = h.manager.create({ ...input(), resultsThreadId: "first-chat" });
     const chosen = h.manager.create({ ...input(), name: "Chosen report", resultsThreadId: "chosen" });
     const saved = JSON.parse(readFileSync(h.options.file!, "utf8"));

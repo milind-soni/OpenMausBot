@@ -15,7 +15,8 @@ import { CheckCircle2, ChevronRight, Loader2, Phone, X } from "lucide-react";
 
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
+import { useShowThreads } from "@/lib/thread-preferences";
+import { openBot, useStore, type Bot } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 import { VoiceSettings } from "./VoiceSettings";
 import { useBotSettingsDerived } from "./bot-settings/useBotSettingsDerived";
@@ -47,6 +48,7 @@ export function VoiceSetupDialog({
   returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const { state, dispatch } = useStore();
+  const showThreads = useShowThreads();
   // The patch the bot settings' Voice section hands the same card.
   const { patch } = useBotSettingsDerived(bot);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -112,7 +114,7 @@ export function VoiceSetupDialog({
   // member, so open its chat first, as the call help always did.
   const openAllSettings = () => {
     close();
-    if (state.selectedId !== bot.id) dispatch({ type: "select", id: bot.id });
+    if (state.selectedId !== bot.id) openBot(dispatch, bot, showThreads);
     dispatch({ type: "toggleSettings", open: true, section: "voice" });
   };
 

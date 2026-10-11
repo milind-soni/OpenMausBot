@@ -1452,8 +1452,10 @@ export function botOpensTo(bot: Pick<NotificationThreadOwner, "threadId" | "main
 }
 
 /** Open a bot itself: its row, its pinned circle, the palette, the + menu,
- * ⌘1–9, the team map, a link to the bot, or the bot a dead thread link
- * falls back to. It opens where botOpensTo says. */
+ * ⌘1–9, the team map, a link to the bot, the bot a dead thread link falls
+ * back to, the bot the app reopens at launch, Edit profile, a restored bot,
+ * the next one after archiving, its computer from the workspace view, or
+ * its voice settings from a room. It opens where botOpensTo says. */
 export function openBot(
   dispatch: (action: Action) => void,
   bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks">,
@@ -3917,6 +3919,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     return wrapped;
   }, [botPatchQueue]);
+
+  // The app opens the bot it remembers as that bot's row would (openBot):
+  // with threads hidden at its main thread, not at a thread an activity row
+  // or a notification left it on, where the person's next words would make
+  // that thread theirs and leave their own conversation behind. Once, at the
+  // first snapshot. With threads shown the bot stays where it was.
+  const launched = useRef(false);
+  useEffect(() => {
+    if (!state.hydrated || launched.current) return;
+    launched.current = true;
+    const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
+    if (bot && state.activeView === "chat" && botOpensTo(bot, showThreads) !== bot.threadId) openBot(dispatch, bot, showThreads);
+  }, [state.hydrated, state.bots, state.selectedId, state.activeView, showThreads, dispatch]);
 
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {

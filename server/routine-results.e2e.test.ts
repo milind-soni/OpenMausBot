@@ -307,12 +307,12 @@ it("after the upgrade, reports into and opens the conversation the person last w
     const { task } = await f.api("POST", `/api/bots/${bot.id}/tasks`, { title: "Their chat" }, 201);
     const theirs = task.threadId as string;
     // They talk in their own chat from the app, then an activity row leaves
-    // the bot on the oldest thread, where v0.1.98 to v0.1.104 reported.
+    // the bot on the oldest thread, where v0.1.98 to v0.1.107 reported.
     await f.api("POST", `/api/bots/${bot.id}/messages`, { threadId: theirs, text: "Good morning.", sendId: randomUUID() }, 202);
     expect((await f.control("wait", "--bot", bot.id, "--task", theirs, "--timeout", "20")).status).toBe("settled");
     await f.api("POST", `/api/bots/${bot.id}/tasks/${oldest}?messages=0`);
     const routine = await f.routine(bot.id);
-    // Their data as v0.1.98 to v0.1.104 left it: the oldest thread saved on
+    // Their data as v0.1.98 to v0.1.107 left it: the oldest thread saved on
     // the routine as if chosen, and no askedAt yet.
     await f.restart((file) => {
       delete file.frozenResultsCleared;
@@ -333,20 +333,30 @@ it("after the upgrade, reports into and opens the conversation the person last w
   }
 }, 90_000);
 
-it("clears the oldest thread v0.1.98 to v0.1.104 saved as a routine's destination, once", async () => {
+it("clears the oldest thread v0.1.98 to v0.1.107 saved as a routine's destination, once, also one archived since", async () => {
   const f = await resultsFixture();
   try {
     const { bot } = await f.control("new-bot", "--name", "Frozen destination");
     const oldest = bot.activeTaskId as string;
     const { task } = await f.api("POST", `/api/bots/${bot.id}/tasks`, { title: "Later chat" }, 201);
     const routine = await f.routine(bot.id);
+    // Those versions kept reporting into the thread they saved after it was
+    // archived, and today's oldest open thread is another.
+    const { bot: tidied } = await f.control("new-bot", "--name", "Archived destination");
+    const archived = tidied.activeTaskId as string;
+    const { task: kept } = await f.api("POST", `/api/bots/${tidied.id}/tasks`, { title: "Kept chat" }, 201);
+    const tidiedRoutine = await f.routine(tidied.id);
+    await f.api("PATCH", `/api/bots/${tidied.id}/tasks/${archived}`, { archivedAt: Date.now() });
     // What those versions left: the oldest thread saved as if chosen.
     await f.restart((file) => {
       delete file.frozenResultsCleared;
       file.routines.find((candidate: any) => candidate.id === routine).resultsThreadId = oldest;
+      file.routines.find((candidate: any) => candidate.id === tidiedRoutine).resultsThreadId = archived;
     });
     expect(await f.destination(routine)).toBeUndefined();
     expect(await f.report(routine)).toBe(task.threadId);
+    expect(await f.destination(tidiedRoutine)).toBeUndefined();
+    expect(await f.report(tidiedRoutine)).toBe(kept.threadId);
     // Picked after the upgrade, the oldest thread is a person's choice.
     expect((await f.api("PATCH", `/api/routines/${routine}`, { resultsThreadId: oldest })).routine.resultsThreadId).toBe(oldest);
     await f.restart();

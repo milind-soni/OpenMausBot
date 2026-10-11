@@ -2644,9 +2644,10 @@ function createWindow({ deferNavigation = false } = {}) {
 }
 
 // Local-control screen preview — served from the main process so the Screen
-// Recording permission prompt attributes to the app, never the server
+// Recording permission prompt attributes to the app, never the server.
+// Windows captures without a permission step; Linux has its own preview.
 ipcMain.handle("screen:frame", localOnly("screen:frame", async () => {
-  if (process.platform !== "darwin") return null;
+  if (process.platform !== "darwin" && process.platform !== "win32") return null;
   const sources = await desktopCapturer.getSources({
     types: ["screen"],
     thumbnailSize: { width: 1280, height: 800 },

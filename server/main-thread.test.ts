@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mainThread, oldestThread } from "./main-thread.ts";
+import { mainThread, oldestThread, wasOldestThread } from "./main-thread.ts";
 
 const first = { threadId: "first", createdAt: 1 };
 const later = { threadId: "later", createdAt: 2 };
@@ -41,5 +41,21 @@ describe("the oldest thread", () => {
     expect(oldestThread([latest, later, { ...first, routineRunId: "run" }])).toBe("later");
     expect(oldestThread([latest, { ...first, archivedAt: 4 }])).toBe("latest");
     expect(oldestThread([{ ...latest, archivedAt: 6 }, { ...later, archivedAt: 5 }])).toBe("later");
+  });
+});
+
+describe("a thread saved on a routine as the oldest one", () => {
+  it("is a conversation no open thread is older than, open still or archived since", () => {
+    expect(wasOldestThread([latest, later, first], "first")).toBe(true);
+    // Archived after it was saved: today's oldest open thread is another.
+    expect(wasOldestThread([latest, later, { ...first, archivedAt: 9 }], "first")).toBe(true);
+    expect(wasOldestThread([latest, { ...later, archivedAt: 9 }, { ...first, archivedAt: 8 }], "later")).toBe(true);
+    // An older open thread means a person chose this one.
+    expect(wasOldestThread([latest, later, first], "later")).toBe(false);
+    expect(wasOldestThread([latest, { ...later, archivedAt: 9 }, first], "later")).toBe(false);
+    // An older routine run is no conversation; a run, a deleted thread never.
+    expect(wasOldestThread([latest, later, { ...first, routineRunId: "run" }], "later")).toBe(true);
+    expect(wasOldestThread([latest, { ...later, routineRunId: "run" }], "later")).toBe(false);
+    expect(wasOldestThread([latest, later], "deleted")).toBe(false);
   });
 });

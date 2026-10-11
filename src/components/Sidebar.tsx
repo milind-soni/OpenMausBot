@@ -859,6 +859,12 @@ export function BotContextMenu({
     : visibleBotCount <= 1
       ? t("sidebar.bot.archiveBlockedLast")
       : undefined;
+  // Another bot opens behind its settings as its row would (openBot); the
+  // bot on screen stays on the thread it shows.
+  const openForSettings = () => {
+    if (state.selectedId === bot.id) dispatch({ type: "select", id: bot.id });
+    else openBot(dispatch, bot, showThreads);
+  };
   const item = (
     icon: React.ReactNode,
     label: string,
@@ -910,7 +916,7 @@ export function BotContextMenu({
           onMoveToSection(bot.id);
         }),
         item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.editProfile"), () => {
-          dispatch({ type: "select", id: bot.id });
+          openForSettings();
           dispatch({ type: "toggleSettings", open: true });
         }),
         item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
@@ -946,7 +952,7 @@ export function BotContextMenu({
         ),
         divider("d1"),
         item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.editProfile"), () => {
-          dispatch({ type: "select", id: bot.id });
+          openForSettings();
           dispatch({ type: "toggleSettings", open: true, section: "identity" });
         }),
         item(<Copy size={16} className="text-ink-secondary" />, t("sidebar.bot.duplicate"), () =>
@@ -1738,7 +1744,7 @@ export function ArchivedBotRow({
   );
 }
 
-function ArchivedBotsPanel({
+export function ArchivedBotsPanel({
   bots,
   onClose,
   onRestored,
@@ -1748,6 +1754,7 @@ function ArchivedBotsPanel({
   onRestored: (message: string) => void;
 }) {
   const { state, dispatch } = useStore();
+  const showThreads = useShowThreads();
   const dialogRef = useRef<HTMLDivElement>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [restoringAll, setRestoringAll] = useState(false);
@@ -1778,7 +1785,7 @@ function ArchivedBotsPanel({
         body: JSON.stringify({ hidden: false }),
       });
       dispatch({ type: "botPatched", bot: response.bot });
-      dispatch({ type: "select", id: bot.id });
+      openBot(dispatch, response.bot, showThreads);
       onRestored(t("sidebar.archived.restored", { name: bot.name }));
       if (bots.length === 1) onClose();
     } catch (cause) {
@@ -1801,8 +1808,8 @@ function ArchivedBotsPanel({
         ),
       );
       for (const response of responses) dispatch({ type: "botPatched", bot: response.bot });
-      const first = bots[0];
-      if (first) dispatch({ type: "select", id: first.id });
+      const first = responses[0]?.bot;
+      if (first) openBot(dispatch, first, showThreads);
       onRestored(
         bots.length === 1
           ? t("sidebar.archived.restoredOne")
@@ -2115,7 +2122,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       dispatch({ type: "botPatched", bot: response.bot });
       if (state.selectedId === bot.id) {
         const next = activeBots.find((candidate) => candidate.id !== bot.id);
-        if (next) dispatch({ type: "select", id: next.id });
+        if (next) openBot(dispatch, next, showThreads);
       }
       setTeamFeedback({
         error: false,
@@ -2135,7 +2142,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         body: JSON.stringify({ hidden: false }),
       });
       dispatch({ type: "botPatched", bot: response.bot });
-      dispatch({ type: "select", id: bot.id });
+      openBot(dispatch, response.bot, showThreads);
       setTeamFeedback({ error: false, text: t("sidebar.archived.restored", { name: bot.name }) });
     } catch (cause) {
       setTeamFeedback({ error: true, text: cause instanceof Error ? cause.message : String(cause) });

@@ -330,7 +330,7 @@ import {
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
-import { mainThread, oldestThread } from "./main-thread.ts";
+import { mainThread, wasOldestThread } from "./main-thread.ts";
 import { computerKindForResource, ManagedDesktopPolicy, type ComputerKind } from "./managed-policy.ts";
 import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS_ERROR } from "./hosted-models.ts";
 import {
@@ -12125,10 +12125,7 @@ routines = new RoutineManager({
   // Those versions saved it only where a routine might report into the main
   // thread: never one someone else opened, which a guest's routine's own
   // results conversation is.
-  frozenResultsThread: (botId) => {
-    const oldest = oldestThread(store.tasks(botId));
-    return oldest && !cloudGuestOpened(oldest) ? oldest : undefined;
-  },
+  frozenResultsThread: (botId, threadId) => wasOldestThread(store.tasks(botId), threadId) && !cloudGuestOpened(threadId),
   discardResultsThread: (botId, threadId) => {
     const task = store.taskByThread(botId, threadId);
     if (task && !task.busy && !task.routineRunId && store.messagesFor(threadId).length === 0) {

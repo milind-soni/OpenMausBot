@@ -1370,9 +1370,19 @@ export function ComputerPanel({
     && liveTask.surface !== profileBot.computer ? liveTask.surface : undefined;
 
   const tabClass = (active: boolean) => cn(
-    "flex items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] transition-colors",
+    "flex min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 py-1 text-[12.5px] transition-colors [&>svg]:shrink-0",
     active ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
   );
+  // The tab count is always 4 or 5 (computer/browser/data plus
+  // routines[/android] or files), so the bar only ever needs a full row
+  // or a regular 2-column grid — never a ragged 3+1 wrap.
+  const tabCount = 3 + (advanced ? 1 : 0) + (advanced && androidConnected ? 1 : 0) + (!advanced ? 1 : 0);
+  const measuredWidth = separatorWidth ?? panelWidth;
+  // Reserve header margins/padding as well as the icon and label in each cell.
+  const narrowTabs = measuredWidth < (tabCount > 4 ? 760 : 620);
+  // With an odd count the narrow grid's final row holds one tab; stretch
+  // it across both columns so the bar stays a tidy rectangle.
+  const lastTabSpan = narrowTabs && tabCount % 2 === 1 ? "col-span-2" : "";
 
   const emptyState = {
     checking: t("computer.phase.checking"),
@@ -1426,7 +1436,7 @@ export function ComputerPanel({
         onPointerCancel={onResizeEnd}
         className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40 focus-visible:bg-accent/60 max-md:hidden"
       />
-      {/* Header: tabs centred as a segmented pill; gear and close pinned to the edges. */}
+      {/* Header: tabs centred as a segmented control; gear and close pinned to the edges. */}
       {/* ml-1.5 keeps the header's drag region clear of the resize handle,
           which comes first in the DOM (a later drag region wins). */}
       <div {...dragProps} className={cn("ml-1.5 py-3 pl-2.5 pr-4", padClass)}>
@@ -1447,7 +1457,10 @@ export function ComputerPanel({
               <Settings size={18} />
             </button>
           )}
-          <div className="mx-9 flex min-w-0 flex-wrap justify-center gap-0.5 rounded-full bg-inset p-0.5" data-tour="computer-tabs" data-testid="computer-tabs" aria-label="Bot panel view">
+          <div
+            className="mx-9 grid w-full min-w-0 flex-1 gap-1 rounded-2xl bg-inset p-1"
+            style={{ gridTemplateColumns: narrowTabs ? "repeat(2, minmax(0, 1fr))" : `repeat(${tabCount}, minmax(0, 1fr))` }}
+            data-tour="computer-tabs" data-testid="computer-tabs" aria-label="Bot panel view">
             <button
               onClick={() => selectPanelView("computer")}
               aria-pressed={panelView === "computer"}
@@ -1492,7 +1505,7 @@ export function ComputerPanel({
               data-tour="computer-data"
               onClick={() => selectPanelView("data")}
               aria-pressed={panelView === "data"}
-              className={tabClass(panelView === "data")}
+              className={cn(tabClass(panelView === "data"), advanced && lastTabSpan)}
             >
               <Database size={13} /> {t("computer.tab.data")}
             </button>
