@@ -403,6 +403,85 @@ it("keeps the person's request on work a send_to_bot recipient hands on", () => 
   expect(f.prompt(f.turns(f.qa.id)[0])).toContain(`[Assigned by @${f.lead.name}, another bot in this OpenMausBot workspace — ${request}`);
 }), hostTimeout(60_000));
 
+// "Review each open PR": one thread per job, opened on the Chief itself.
+// What each hands a teammate is still the person's request, whether the
+// thread ran at once or waited in the composer queue for a free slot.
+it("keeps the person's request on work a thread the bot opened on itself hands on, running or queued", () => fixture(async (f) => {
+  f.plan[f.lead.id] = { reply: "LEAD_DONE" };
+  const round = async (ask: string, job: string) => {
+    f.plan[f.chief.id] = {
+      steps: [{ tool: "start_thread", arguments: { title: job, message: `${job} review the export` } }], reply: "Opened",
+      byPrompt: [{ promptIncludes: `${job} review the export`, plan: f.delegate(job.toLowerCase(), [f.lead], `${job}_BRIEF check the export`) }],
+    };
+    await f.send(ask);
+    await f.wait();
+    const handed = () => f.turns(f.lead.id).filter((turn: any) => f.prompt(turn).includes(`${job}_BRIEF`));
+    await expect.poll(() => handed().length, { timeout: 30_000 }).toBe(1);
+    return f.prompt(handed()[0]);
+  };
+  // a free slot: the opened thread runs beside the turn that opened it
+  const running = await round("PERSON_RUNNING please get the export reviewed", "JOB_RUNNING");
+  expect(running).toContain(`[Assigned by @${f.chief.name}, another bot in this OpenMausBot workspace — for the user's request "PERSON_RUNNING please get the export reviewed". This is your task`);
+  // no free slot: it waits in the queue, and its lineage waits with it
+  await f.api("/api/config", { threads: { maxConcurrentPerBot: 1 } }, "PATCH");
+  const queued = await round("PERSON_QUEUED please get the export reviewed", "JOB_QUEUED");
+  expect(queued).toContain(`[Assigned by @${f.chief.name}, another bot in this OpenMausBot workspace — for the user's request "PERSON_QUEUED please get the export reviewed". This is your task`);
+  expect(`${running}${queued}`).not.toMatch(/untrusted|cannot trace/);
+}), hostTimeout(120_000));
+
+// A card answer continues the request that raised it while that request is
+// still the conversation's own. Once the person has moved on, the line the
+// card hangs off proves nothing: a routine's or a webhook's run stores its
+// prompt as a plain user line too.
+it("keeps the person's request on work handed on after a card answer, and only while that request stands", () => fixture(async (f) => {
+  const seen = new Set<string>();
+  const card = async () => {
+    let id = "";
+    await expect.poll(async () => {
+      id = (await f.messages()).find((m: any) => m.card?.teamSetupRequest && !seen.has(m.card.requestId))?.card.requestId ?? "";
+      return id;
+    }, { timeout: 20_000 }).not.toBe("");
+    seen.add(id);
+    return id;
+  };
+  const deny = async (requestId: string) => {
+    f.save();
+    const response = await fetch(`${f.session.info.url}/api/threads/${f.thread}/respond`, { method: "POST",
+      headers: { "content-type": "application/json", origin: f.session.info.url }, body: JSON.stringify({ requestId, behavior: "deny" }) });
+    expect(response.status, await response.clone().text()).toBeLessThan(300);
+  };
+  const briefed = async (brief: string) => {
+    const handed = () => f.turns(f.lead.id).filter((turn: any) => f.prompt(turn).includes(brief));
+    await expect.poll(() => handed().length, { timeout: 30_000 }).toBe(1);
+    return f.prompt(handed()[0]);
+  };
+  f.plan[f.lead.id] = { reply: "LEAD_DONE" };
+  const propose = (key: string, brief: string) => ({
+    steps: [{ tool: "propose_bot_deletion", arguments: { bot_id: f.ops.id, reason: "No longer needed" } }], reply: "Proposed",
+    byPrompt: [{ promptIncludes: "team setup decision", plan: f.delegate(key, [f.lead], brief) }],
+  });
+
+  f.plan[f.chief.id] = propose("after-card", "CARD_ONE_BRIEF check the team");
+  // a turn that leaves a card waits on the person ("needs-user"), idle
+  await f.send("PERSON_CARD_ONE please tidy the team");
+  const first = await card();
+  await f.idle();
+  await deny(first);
+  expect(await briefed("CARD_ONE_BRIEF")).toContain(`[Assigned by @${f.chief.name}, another bot in this OpenMausBot workspace — for the user's request "PERSON_CARD_ONE please tidy the team". This is your task`);
+
+  f.plan[f.chief.id] = propose("late-card", "CARD_TWO_BRIEF check the team");
+  await f.send("PERSON_CARD_TWO please tidy the team again");
+  const late = await card();
+  await f.idle();
+  f.plan[f.chief.id] = { reply: "Hi", byPrompt: propose("late-card", "CARD_TWO_BRIEF check the team").byPrompt };
+  await f.send("PERSON_LATER just say hi");
+  await f.idle();
+  await deny(late);
+  const after = await briefed("CARD_TWO_BRIEF");
+  expect(after).toContain(`[Assigned by @${f.chief.name}, another bot in this OpenMausBot workspace — OpenMausBot cannot trace this work to the user's own request`);
+  expect(after).not.toMatch(/PERSON_CARD_TWO|PERSON_LATER|for the user's request/);
+}), hostTimeout(120_000));
+
 it("resets Claude's native context on edit, then resumes only the replacement branch", () => fixture(async (f) => {
   await warmUp(f, "KEEP_CONTEXT: work only in the test workspace.");
   f.plan[f.chief.id] = { reply: "ABANDONED_REPLY" };

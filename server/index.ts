@@ -274,7 +274,7 @@ import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type C
 import { readMessageText, recallMessages, recentMessages, searchMessagesAsync, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
-import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentText, type Incident, type IncidentKind } from "./incidents.ts";
+import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentRequest, incidentText, type Incident, type IncidentKind } from "./incidents.ts";
 
 /** A session_read answer competes with the transcript for the context
  * window; a computer-use turn's output can run to hundreds of KB. */
@@ -945,9 +945,9 @@ function threadPersonKey(threadId: string): string | undefined {
  * from the harness's own records, never from model text. A coordinated
  * turn's tree keeps its root's origin, however deep. Any other turn has the
  * origin #1606's record of its request settled on when that request was
- * admitted (startTurn), and only while that record still owns this exact
- * generation. An external runtime, a room turn, a stopped request or a
- * Cloud guest's turn has none. */
+ * admitted (startTurn: a Cloud guest's is outside there), and only while
+ * that record still owns this exact generation. An external runtime, a
+ * room turn or a stopped request has none. */
 function turnOrigin(capability: Pick<InternalCapability, "threadId" | "generation" | "roomHandoffId" | "externalRuntime">): WorkOrigin {
   if (capability.externalRuntime) return OUTSIDE;
   if (capability.roomHandoffId) {
@@ -955,7 +955,7 @@ function turnOrigin(capability: Pick<InternalCapability, "threadId" | "generatio
     return (node && roomHandoffs.nodes.get(node.rootId)?.origin) ?? OUTSIDE;
   }
   const owner = directRequestOwners.get(capability.threadId);
-  if (!owner?.origin || owner.stopped || !owner.generations.has(capability.generation) || cloudGuestDriven(capability.threadId)) return OUTSIDE;
+  if (!owner?.origin || owner.stopped || !owner.generations.has(capability.generation)) return OUTSIDE;
   return owner.origin;
 }
 
@@ -8653,13 +8653,13 @@ function wakeDelegationSource(source: BotRecord, threadId: string, targetName: s
 // reads one place. Policy in server/incidents.ts.
 const incidentLedger = new IncidentLedger();
 
-/** What the broken thread was about: the last line the person (or the
- * requester) sent there, and the last thing the bot said. */
+/** What the broken thread was about: the last thing asked there
+ * (incidentRequest), and the last thing the bot said. */
 function incidentContext(threadId: string): { lastRequest: string | null; lastReply: string | null } {
-  const messages = [...store.messagesFor(threadId)].reverse();
+  const messages = store.messagesFor(threadId);
   return {
-    lastRequest: messages.find((message) => message.role === "user" && message.kind === "text" && message.text)?.text ?? null,
-    lastReply: messages.find((message) => message.role === "bot" && message.kind === "text" && message.text)?.text ?? null,
+    lastRequest: incidentRequest(messages),
+    lastReply: messages.findLast((message) => message.role === "bot" && message.kind === "text" && message.text)?.text ?? null,
   };
 }
 
@@ -9240,7 +9240,7 @@ function drainQueuedSends() {
       // The drained turn is booked to whoever sent the first waiting line.
       void startTurn(botId, prompt, {
         threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve,
-        trigger: queuedTurnTrigger(head),
+        trigger: queuedTurnTrigger(head), ...(head.origin ? { origin: head.origin } : {}),
       }).catch((err) => {
         store.appendMessage(threadId, {
           role: "bot", kind: "activity",
@@ -9621,12 +9621,14 @@ const MAX_THREADS_OPENED_PER_TURN = 5;
  * person's message would: it runs now if the bot has a free slot, and
  * otherwise waits in the same composer queue, in line behind whatever the
  * bot already has waiting. Its provenance survives the queue: this is the
- * bot's own request, not a new human request authorizing recursive fan-out. */
+ * bot's own request, not a new human request authorizing recursive fan-out,
+ * and the work it hands on keeps where the opener's work started. */
 async function startOrQueueOpenedThread(
   botId: string,
   threadId: string,
   text: string,
   unattended: boolean,
+  origin: WorkOrigin,
 ): Promise<{ state: "running" } | { state: "queued"; position: number } | { state: "failed"; error: string }> {
   const peerAsk = { botId, name: store.bot(botId)!.name, unattended: unattended || undefined };
   const decision = admit("opened-thread", {}, {
@@ -9641,11 +9643,12 @@ async function startOrQueueOpenedThread(
       reason: decision.reason,
       unattended,
       peerAsk,
+      origin,
     });
     return { state: "queued", position: queuedThreadPosition(botId, threadId) ?? 1 };
   }
   try {
-    await startTurn(botId, text, { threadId, unattended, peerAsk });
+    await startTurn(botId, text, { threadId, unattended, peerAsk, origin });
     return { state: "running" };
   } catch (error) {
     const why = error instanceof Error ? error.message : String(error);
@@ -9878,7 +9881,8 @@ async function startTurn(
      * client option and never inferred from the latest user on the thread. */
     requestMessageId?: string;
     /** Harness-only: where the work this turn is handed started, from the
-     * delegation or the coordinated tree that hands it over (turnOrigin). */
+     * delegation, the coordinated tree or the opened thread that hands it
+     * over (turnOrigin). */
     origin?: WorkOrigin;
     /** A single tool-requested surface change continues the same human ask. */
     computerSelectionContinuation?: boolean;
@@ -10114,15 +10118,18 @@ async function startTurn(
     ? previousRequest.generations : new Set<string>();
   if (requestGenerations.size >= 500) { requestGenerations.clear(); requestMessageId = undefined; }
   requestGenerations.add(dispatchClaimId);
-  // Settled once, for everything this request hands on: a continuation
-  // without a proven line (a wake, a resume after the person acted) keeps
-  // the origin of the request it continues, never the latest user line's.
+  // Settled once, for everything this request hands on. A continuation (a
+  // card answer, a wake, a resume after the person acted, a surface change)
+  // keeps the origin of the request it continues while that record is
+  // still its own, and never re-reads a stored line: nothing on one says a
+  // routine or a webhook wrote it.
+  const continuation = Boolean(opts?.cardContinuation || opts?.computerSelectionContinuation);
   const continued = previousRequest && !previousRequest.stopped &&
     (requestMessageId ? previousRequest.messageId === requestMessageId : opts?.cardContinuation) ? previousRequest.origin : undefined;
-  const origin = requestWorkOrigin({ trigger: opts?.automationSource, handed: opts?.origin, continued,
-    line: requestMessageId === userMessage.id ? userMessage : store.messagesFor(threadId).find(message => message.id === requestMessageId) });
+  const requestOrigin = requestWorkOrigin({ trigger: opts?.automationSource, guest: guestConfined, handed: opts?.origin, continued,
+    line: !continuation && requestMessageId === userMessage.id ? userMessage : undefined });
   directRequestOwners.set(threadId, { generation: dispatchClaimId, messageId: requestMessageId,
-    generations: requestGenerations, turnId: null, ...(opts?.automationSource ? { automation: opts.automationSource } : {}), origin });
+    generations: requestGenerations, turnId: null, ...(opts?.automationSource ? { automation: opts.automationSource } : {}), origin: requestOrigin });
   // On a Cloud home, a turn that is not provably the owner's leaves this
   // bot's memory "pending" until it ends (server/lending-memory.ts).
   if (CLOUD_HOME && cloudHomeLendingRefusal(cloudLendingTurn({ botId, threadId, generation: dispatchClaimId })) !== null) noteForeignTurn(botId, threadId, dispatchClaimId);
@@ -18894,7 +18901,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           // reads it, so a later turn in that thread never mistakes the
           // request for the person's.
           const opening = `[Thread you opened yourself${sourceTitle ? ` from #${sourceTitle}` : ""}. The request below is your own words, not the person's: do the work here and end with a clear result they can read.]\n\n${message}`;
-          const outcome = await startOrQueueOpenedThread(from.id, task.threadId, opening, isUnattended(from.id, fromThreadId));
+          const outcome = await startOrQueueOpenedThread(from.id, task.threadId, opening, isUnattended(from.id, fromThreadId), turnOrigin(internalCapability));
           return json(res, 201, {
             threadId: task.threadId,
             title: task.title,
