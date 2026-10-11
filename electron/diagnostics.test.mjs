@@ -110,6 +110,21 @@ describe("buildDiagnosticsReport", () => {
     }
   });
 
+  it("masks Groq keys in diagnostic log exports while retaining useful status", () => {
+    const key = `gsk_${"a".repeat(48)}`;
+    const otherKey = `gsk_${"b".repeat(48)}`;
+    const workspaceKey = "opaque-groq-fixture-key";
+    const report = buildDiagnosticsReport({
+      appInfo,
+      configSummary: { groq: { configured: true } },
+      logTail: `Groq HTTP 401: invalid key ${key}\nspawn env OMB_GROQ_API_KEY=${workspaceKey}`,
+      updaterLogTail: `upstream rejected ${otherKey}`,
+    });
+    for (const secret of [key, otherKey, workspaceKey]) expect(report).not.toContain(secret);
+    expect(report).toContain("groq.configured=true");
+    expect(report).toContain("Groq HTTP 401");
+  });
+
   it("includes privacy-safe desktop crash metadata separately from the server log", () => {
     const desktopLogTail =
       "[2026-08-31T11:00:00.000Z] event=render-process-gone surface=main-window reason=crashed exitCode=5";

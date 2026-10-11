@@ -115,6 +115,8 @@ let boatStubPort = 0;
 const boatRouteCalls: Array<{ method: string; path: string }> = [];
 const boatPromptBodies: Array<Record<string, unknown>> = [];
 let boatSlowRequestCount = 0;
+/** Holds a "box_slow" credential check open until released; unset, it takes 150 ms. */
+let boatSlowHold: Promise<void> | null = null;
 let managedBoatRows: Array<Record<string, unknown>> = [];
 let managedBoatListRowsOverride: Array<Record<string, unknown>> | null = null;
 let managedBoatListStatus = 200;
@@ -964,7 +966,7 @@ beforeAll(async () => {
       && new URL(req.url ?? "/", "http://box.invalid").pathname === "/boxes"
     ) {
       boatSlowRequestCount += 1;
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await (boatSlowHold ?? new Promise((resolve) => setTimeout(resolve, 150)));
     }
     if (
       req.headers.authorization === "Bearer box_route" ||
@@ -7880,6 +7882,10 @@ describe("harness HTTP API", () => {
 
   it("excludes new Boat turns, lifecycle actions, and bot deletion while a token change validates", async () => {
     let botId = "";
+    // The check stays open until every refusal below is seen: a save that
+    // reloads no engine is over in moments.
+    let release = () => {};
+    boatSlowHold = new Promise<void>((resolve) => { release = resolve; });
     try {
       expect((await api("PUT", "/api/config", { box: { token: "" } })).status).toBe(200);
       const bot = (await api("POST", "/api/bots")).body.bot;
@@ -7896,11 +7902,14 @@ describe("harness HTTP API", () => {
       expect(turn.status).toBe(409);
       expect(turn.body.error).toMatch(/Boat account settings are being updated/i);
       expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(409);
+      release();
       expect((await changing).status).toBe(200);
 
       expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
       botId = "";
     } finally {
+      release();
+      boatSlowHold = null;
       if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
       await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
     }
@@ -9179,6 +9188,46 @@ describe("harness HTTP API", () => {
       await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
       if (room) await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
+  }, 60_000);
+
+  it.each(["direct", "room"] as const)("loads the browser tools up front only when the browser is the conversation's place in %s turns", async (target) => {
+    // Behind Claude's tool search, the first browser action costs a model
+    // step. Works on: Browser preloads them. Auto, which only falls back to
+    // the browser, keeps them deferred, so turns that never browse stay small.
+    const bots: string[] = [];
+    const rooms: string[] = [];
+    const mounted = async (computer: "browser" | undefined) => {
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      bots.push(bot.id);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        approvalMode: "auto",
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        ...(computer ? { computer } : {}),
+      })).status).toBe(200);
+      let path = `/api/bots/${bot.id}/messages`;
+      if (target === "room") {
+        const room = (await api("POST", "/api/groups", { name: `Browser preload ${bots.length}`, memberIds: [bot.id] })).body.group;
+        rooms.push(room.id);
+        expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
+        path = `/api/groups/${room.id}/messages`;
+      }
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", path, { text: "Check the website." })).status).toBe(202);
+      const dump = await readJsonFileWhenReady(fakeClaudeDump) as { mcpConfig: { mcpServers: { browser?: { alwaysLoad?: boolean } } } };
+      expect(dump.mcpConfig.mcpServers.browser).toBeDefined();
+      return dump.mcpConfig.mcpServers.browser!;
+    };
+    try {
+      expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+      expect((await mounted(undefined)).alwaysLoad).toBeUndefined();
+      expect((await mounted("browser")).alwaysLoad).toBe(true);
+    } finally {
+      for (const id of rooms) await api("POST", `/api/groups/${id}/interrupt`, {}).catch(() => undefined);
+      for (const id of bots) await api("POST", `/api/bots/${id}/interrupt`, {}).catch(() => undefined);
+      await api("PATCH", "/api/config", { features: { browser: false } }).catch(() => undefined);
+      for (const id of rooms) await api("DELETE", `/api/groups/${id}`).catch(() => undefined);
+      for (const id of bots) await api("DELETE", `/api/bots/${id}`).catch(() => undefined);
     }
   }, 60_000);
 

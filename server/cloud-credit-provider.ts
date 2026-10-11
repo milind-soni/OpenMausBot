@@ -126,9 +126,6 @@ export class CloudCreditProvider {
     await this.ask();
   }
 
-  /** Called after the person's engines are rebuilt (index.ts reloadProviders). */
-  async restore(): Promise<void> { if (this.loaded) await this.load(); }
-
   close(): void { this.closed = true; clearTimeout(this.timer); }
 
   /** The relay's word on its models: they load (or reload, when they changed),

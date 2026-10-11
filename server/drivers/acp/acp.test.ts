@@ -223,7 +223,10 @@ describe("ACP turns (fake CLI)", () => {
     recorder = recordEvents(instance.adapter);
   };
 
+  let savedAgyModel: string | undefined;
   beforeEach(() => {
+    savedAgyModel = process.env.AGY_ACP_DEFAULT_MODEL;
+    delete process.env.AGY_ACP_DEFAULT_MODEL;
     ensureDirs();
     chmodSync(FAKE_CLI, 0o755);
     scratch = mkdtempSync(join(tmpdir(), "omb-acp-test-"));
@@ -251,6 +254,8 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.CURSOR_AUTH_TOKEN;
     delete process.env.BOX_TOKEN;
     delete process.env.OMB_TTS_KEY;
+    if (savedAgyModel !== undefined) process.env.AGY_ACP_DEFAULT_MODEL = savedAgyModel;
+    else delete process.env.AGY_ACP_DEFAULT_MODEL;
     for (const name of Object.keys(CONTROL_PLANE_FIXTURE)) delete process.env[name];
     delete process.env.FAKE_ACP_MODELS;
     delete process.env.FAKE_ACP_MODEL_STICKS;

@@ -224,4 +224,19 @@ describe("channel queue", () => {
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ items: [expect.objectContaining({ id: tail.id, text: "still waits its own turn" })] }));
     expect(_queuedChannelCount("thread-e")).toBe(0);
   });
+
+  it("drains an idle thread queue while another thread in the same group is working", () => {
+    const item1 = queueChannelMessage("group-multi", "thread-busy", "waits for busy thread to settle");
+    const item2 = queueChannelMessage("group-multi", "thread-idle", "runs immediately in idle thread");
+
+    const run = vi.fn();
+    drainChannelMessages((_groupId, threadId) => threadId === "thread-busy", run);
+
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ threadId: "thread-idle", items: [expect.objectContaining({ id: item2.id })] }));
+    expect(_queuedChannelCount("thread-busy")).toBe(1);
+    expect(_queuedChannelCount("thread-idle")).toBe(0);
+
+    cancelChannelMessage("group-multi", item1.id);
+  });
 });
