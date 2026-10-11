@@ -303,6 +303,11 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
       await new Promise((r) => setTimeout(r, 150));
     }
+    // The random starter can be Pixel, the name create-peer proposes below.
+    // Hiding it keeps its name, so pin this fixture's identity before any case.
+    const starter = (await api("GET", "/api/bots")).body.bots[0];
+    expect(starter).toBeDefined();
+    expect((await api("PATCH", `/api/bots/${starter.id}`, { name: "Comms fixture starter" })).status).toBe(200);
   }, 30_000);
 
   afterAll(async () => {

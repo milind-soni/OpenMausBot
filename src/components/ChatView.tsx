@@ -57,6 +57,7 @@ import { plainErrorLine } from "@/lib/plain-error";
 import { openPlaceAction, placeRowViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
 import type { PlaceRow } from "../../shared/place-view";
 import { trialCreditKind, type TrialCreditRefusal } from "../../shared/trial-credit";
+import { isPureLeakedSystemHarnessMessage, stripLeakedSystemHarnessMessages } from "../../shared/system-message-guard.ts";
 import type { LocaleKey } from "@/locales";
 import { isProviderSafetyBlock, PROVIDER_SAFETY_GUIDANCE, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
 import { isCancelledTranscriptRow } from "../../shared/client-cancel";
@@ -514,7 +515,8 @@ const Bubble = memo(function Bubble({
   const [viewRaw, setViewRaw] = useState(false);
   const speech = useSpeech();
   const speaking = speech.messageId === message.id && speech.status !== "idle";
-  const text = peer ? peer.body : (message.text ?? "");
+  const rawText = peer ? peer.body : (message.text ?? "");
+  const text = user ? rawText : stripLeakedSystemHarnessMessages(rawText);
   // built before any early return so the hook order never changes
   const botMenu = useBotMessageMenu({
     text,
@@ -1043,7 +1045,12 @@ const MessagesList = memo(function MessagesList({
               return <CompactionChip message={m} />;
             case "screen":
               return <ScreenFrame threadId={threadId} message={m} />;
-            default:
+            default: {
+              const peer = peerLine(m) ?? peerRequest(m, botId);
+              const user = m.role === "user" && !peer;
+              if (!user && isPureLeakedSystemHarnessMessage(m.text) && !m.attachments?.length) {
+                return null;
+              }
               return (
                 <Bubble
                   message={m}
@@ -1062,6 +1069,7 @@ const MessagesList = memo(function MessagesList({
                   onReply={onReply}
                 />
               );
+            }
           }
         })();
         if (!row) return divider && <div key={m.id} className="contents">{divider}</div>;
@@ -1205,15 +1213,14 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const {
     scrollRef,
     transcriptRef,
+    topSentinelRef,
     transcriptKey,
     following,
     windowedMessages,
     hiddenCount,
     laterCount,
     olderPending,
-    showEarlier,
     showLater,
-    loadOlder,
     jumpToLatest,
     scrollHandlers,
   } = useTranscriptViewport({
@@ -1221,6 +1228,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     threadId: bot.threadId,
     messages,
     pinOn: [bot.busy, composerDock.pad],
+    hasMore: bot.hasMore,
   });
 
   const lastBotTextId = useMemo(
@@ -1540,25 +1548,14 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           aria-live="off"
           aria-label={t("chat.conversationWith", { name: bot.name })}
         >
-          {hiddenCount > 0 ? (
-            <div className="flex justify-center pt-2">
-              <button
-                onClick={showEarlier}
-                className="ui-pill"
-              >
-                {t("chat.showEarlier", { count: hiddenCount })}
-              </button>
+          {/* Reverse infinite scroll sentinel and smooth loading indicator */}
+          {olderPending ? (
+            <div className="flex items-center justify-center gap-2 py-3 text-xs text-ink-tertiary">
+              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+              <span>{t("chat.loadingEarlier")}</span>
             </div>
-          ) : bot.hasMore ? (
-            <div className="flex justify-center pt-2">
-              <button
-                onClick={loadOlder}
-                disabled={olderPending}
-                className="ui-pill"
-              >
-                {olderPending ? t("chat.loadingEarlier") : t("chat.loadEarlier")}
-              </button>
-            </div>
+          ) : hiddenCount > 0 || bot.hasMore ? (
+            <div ref={topSentinelRef} className="h-2 w-full pointer-events-none" aria-hidden="true" />
           ) : null}
           {windowedMessages.length === 0 && !bot.busy && <EmptyChat bot={bot} />}
           <ChatRowsContext.Provider value={rows}>

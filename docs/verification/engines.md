@@ -48,3 +48,21 @@ prove real OAuth login or native Windows execution.
 - Doctor proves server/engine readiness, not authentication against a real
   provider.
 - Model-picker rendering is Electron UI and remains outside this first map.
+
+## Groq API setup
+
+```sh
+pnpm exec vitest run server/drivers/groq.test.ts server/provider-key-check.test.ts server/config.test.ts server/openai-tools.e2e.test.ts src/components/ApiKeys.test.ts src/state/store.test.ts
+```
+
+These fixtures use disposable data and local HTTP providers. They check the
+preset endpoint, write-only key status, model discovery, selection, streaming
+usage, tool approval/denial/cancellation, and clearing the key. They never call
+Groq or verify a real account's quota, model access, or inference.
+
+For a renderer check, use an isolated server with a synthetic Groq endpoint.
+Open **Settings → API keys**, paste its fixture key, and check that **Test**
+reports catalog reachability without claiming chat authentication. Select a
+Groq model in the bot's picker, send a fixture turn, then clear the key and
+confirm the engine is unavailable. Never use the live app or a real key for
+this recipe.

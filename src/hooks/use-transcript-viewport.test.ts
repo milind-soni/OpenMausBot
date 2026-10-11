@@ -177,6 +177,11 @@ beforeEach(() => {
     observe() {}
     disconnect() {}
   });
+  vi.stubGlobal("IntersectionObserver", class {
+    constructor() {}
+    observe() {}
+    disconnect() {}
+  });
   vi.stubGlobal("HTMLTextAreaElement", class {});
   vi.stubGlobal("HTMLInputElement", class {});
   return () => vi.unstubAllGlobals();
@@ -512,5 +517,33 @@ describe("transcript viewport", () => {
     expect(observers).toBe(0);
     view.rerender({ transcriptShown: true });
     expect(observers).toBe(1);
+  });
+
+  it("automatically expands earlier windowed messages when user scrolls near the top", () => {
+    const view = mount({ messages: rows(300) });
+    expect(view.current.hiddenCount).toBe(180);
+
+    // Leave the bottom and scroll near the top (<= AUTO_EXPAND_TOP_THRESHOLD)
+    view.act(() => {
+      scroller.scrollTop = 200;
+      view.current.scrollHandlers.onWheel({ deltaY: -40 } as never);
+      view.current.scrollHandlers.onScroll();
+    });
+
+    // Automatically expanded earlier messages without clicking a button
+    expect(view.current.hiddenCount).toBe(60);
+  });
+
+  it("automatically loads older messages from server when at top of window and hasMore is true", () => {
+    const view = mount({ messages: rows(50), hasMore: true });
+    expect(view.current.hiddenCount).toBe(0);
+
+    view.act(() => {
+      scroller.scrollTop = 150;
+      view.current.scrollHandlers.onWheel({ deltaY: -40 } as never);
+      view.current.scrollHandlers.onScroll();
+    });
+
+    expect(dispatched).toEqual([{ type: "loadOlderMessages", threadId: "thread" }]);
   });
 });
