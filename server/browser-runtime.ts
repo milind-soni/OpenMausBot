@@ -54,6 +54,50 @@ export function ownsBrowserViewport(env: NodeJS.ProcessEnv): boolean {
 
 export class TransportError extends Error {}
 
+/** One timed browser action, logged with OMB_BROWSER_TIMING=1. Times are in
+ * milliseconds. `inFlight` counts this session's browser work already running
+ * when the action started: the engine runs one command per session, so the
+ * action waited behind it. */
+export interface BrowserTiming {
+  session: string;
+  tool: string;
+  outcome: "ok" | "error";
+  totalMs: number;
+  /** Transport handshake and page sizing; the first call launches the browser here. */
+  launchMs?: number;
+  engineMs?: number;
+  /** The snapshot taken after agent_browser_open. */
+  observeMs?: number;
+  /** Text the model receives, after shaping; the frame's base64 for a preview frame. */
+  chars?: number;
+  inFlight: number;
+}
+
+export function formatBrowserTiming(timing: BrowserTiming): string {
+  const parts = [`browser timing: ${timing.tool} ${timing.outcome}`];
+  const phases: Array<[string, number | undefined]> = [
+    ["total", timing.totalMs], ["launch", timing.launchMs], ["engine", timing.engineMs], ["observe", timing.observeMs],
+  ];
+  for (const [label, value] of phases) {
+    if (value !== undefined) parts.push(`${label}=${Math.round(value)}ms`);
+  }
+  if (timing.chars !== undefined) parts.push(`chars=${timing.chars}`);
+  parts.push(`inflight=${timing.inFlight}`, `session=${timing.session}`);
+  return parts.join(" ");
+}
+
+/** The text a tool result hands the model, in characters. */
+function resultChars(result: unknown): number {
+  const content = (result as { content?: unknown } | null)?.content;
+  if (!Array.isArray(content)) return 0;
+  let chars = 0;
+  for (const item of content) {
+    const text = (item as { text?: unknown } | null)?.text;
+    if (typeof text === "string") chars += text.length;
+  }
+  return chars;
+}
+
 /** An error the engine answered: the action ran and failed (a page that
  * would not load). Nothing is left running in the browser, so unlike a
  * timeout or a lost connection it does not need a restart. Errors mark
@@ -256,11 +300,39 @@ export class BrowserRuntime {
   private options: { requestTimeoutMs: number; takeoverTimeoutMs: number; idleMs: number; maxPending: number; resultBudget: number };
   private closeBrowser: CloseBrowser;
   private applyViewport?: ApplyViewport;
+  private onTiming?: (timing: BrowserTiming) => void;
 
-  constructor({ closeBrowser, applyViewport, ...options }: Partial<BrowserRuntime["options"]> & { closeBrowser?: CloseBrowser; applyViewport?: ApplyViewport } = {}) {
+  constructor({ closeBrowser, applyViewport, onTiming, ...options }: Partial<BrowserRuntime["options"]> & { closeBrowser?: CloseBrowser; applyViewport?: ApplyViewport; onTiming?: (timing: BrowserTiming) => void } = {}) {
     this.options = { requestTimeoutMs: 120_000, takeoverTimeoutMs: 15_000, idleMs: 60_000, maxPending: 16, resultBudget: DEFAULT_BROWSER_RESULT_BUDGET, ...options };
     this.closeBrowser = closeBrowser ?? (async () => false);
     this.applyViewport = applyViewport;
+    this.onTiming = onTiming;
+  }
+
+  private timed<T>(session: string, tool: string, phases: Partial<BrowserTiming>, fn: () => Promise<T>): Promise<T> {
+    if (!this.onTiming) return fn();
+    const onTiming = this.onTiming;
+    const started = performance.now();
+    const inFlight = this.gate(session).agents;
+    const report = (outcome: BrowserTiming["outcome"]) => onTiming({ session, tool, outcome, totalMs: performance.now() - started, ...phases, inFlight });
+    return fn().then((result) => {
+      report((result as { isError?: unknown } | null)?.isError === true ? "error" : "ok");
+      return result;
+    }, (error: unknown) => {
+      report("error");
+      throw error;
+    });
+  }
+
+  /** A preview frame of the bot's browser. It runs as agent work so a person
+   * taking control waits for it, and it shares the engine with the bot's tools. */
+  agentFrame<T extends { png: string }>(session: string, capture: () => Promise<T>): Promise<T> {
+    const phases: Partial<BrowserTiming> = {};
+    return this.timed(session, "preview_frame", phases, () => this.withAgentAction(session, async () => {
+      const frame = await capture();
+      phases.chars = frame.png.length;
+      return frame;
+    }));
   }
 
   private gate(session: string): Gate {
@@ -321,7 +393,10 @@ export class BrowserRuntime {
       if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
       return stuckBrowserToolError();
     }
+    const toolName = typeof (params as { name?: unknown } | null)?.name === "string" ? (params as { name: string }).name : undefined;
+    const phases: Partial<BrowserTiming> = {};
     const invoke = async () => {
+      const launchStarted = performance.now();
       const key = JSON.stringify([spec.command, spec.args, Object.entries(spec.env).sort(([a], [b]) => a.localeCompare(b))]);
       let entry = this.clients.get(session);
       if (entry && entry.key !== key) throw new Error("Browser launch settings changed. Close the browser before reconnecting.");
@@ -347,18 +422,20 @@ export class BrowserRuntime {
         beforeDispatch?.();
         if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
       }
+      phases.launchMs = performance.now() - launchStarted;
       try {
         // The model sees slimmed schemas and text-only, bounded results; the
         // launch/session parameters OMB owns never reach the engine from a call.
         const request = method === "tools/call" ? stripHarnessOwnedArguments(params) : params;
+        const engineStarted = performance.now();
         let result = await entry.client.rpc(method, request);
+        phases.engineMs = performance.now() - engineStarted;
         beforeDispatch?.(); // A turn revoked while the tool ran receives no result.
         if (method === "tools/list") {
           const tools = withRestartTool(slimBrowserToolList(result));
           this.toolLists.set(session, tools);
           return tools;
         }
-        const toolName = request && typeof request === "object" && typeof (request as { name?: unknown }).name === "string" ? (request as { name: string }).name : undefined;
         if (toolName === "agent_browser_open" && result && typeof result === "object" &&
             (result as { isError?: boolean }).isError !== true) {
           // Navigation alone does not prove that the requested page loaded.
@@ -366,6 +443,7 @@ export class BrowserRuntime {
           beforeDispatch?.();
           if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
           let observation: unknown;
+          const observeStarted = performance.now();
           try {
             observation = await entry.client.rpc("tools/call", {
               name: "agent_browser_snapshot", arguments: { compact: true },
@@ -375,6 +453,8 @@ export class BrowserRuntime {
             // Transport failures still engage the uncertainty/recovery gate.
             if (error instanceof TransportError) throw error;
             observation = { isError: true, content: [] };
+          } finally {
+            phases.observeMs = performance.now() - observeStarted;
           }
           beforeDispatch?.();
           const navigation = result as { content?: unknown[] };
@@ -393,7 +473,9 @@ export class BrowserRuntime {
             ...(!observed ? { isError: true } : {}),
           };
         }
-        return shapeBrowserToolResult(result, { toolName, budget: this.options.resultBudget });
+        const shaped = shapeBrowserToolResult(result, { toolName, budget: this.options.resultBudget });
+        phases.chars = resultChars(shaped);
+        return shaped;
       }
       catch (error) {
         // An MCP timeout cannot prove the independent daemon stopped an
@@ -408,7 +490,7 @@ export class BrowserRuntime {
     };
     if (method !== "tools/call") return invoke();
     try {
-      return await this.withAgentAction(session, invoke);
+      return await this.timed(session, toolName ?? "unknown", phases, () => this.withAgentAction(session, invoke));
     } catch (error) {
       if (error instanceof Error && error.message === BROWSER_INTERRUPTED) return stuckBrowserToolError();
       throw error;

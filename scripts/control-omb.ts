@@ -381,6 +381,8 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   // A test's key for relaying an organization library into the fixture
   // (POST /api/testing/org-library); the route does not exist without it.
   if (parentEnv.OMB_TEST_ORG_LIBRARY_KEY) childEnv.OMB_TEST_ORG_LIBRARY_KEY = parentEnv.OMB_TEST_ORG_LIBRARY_KEY;
+  // One log line per browser call and preview frame (server/browser-runtime.ts).
+  if (parentEnv.OMB_BROWSER_TIMING === "1") childEnv.OMB_BROWSER_TIMING = "1";
   // Live calls against server/testing/fake-openai-live.ts only: a loopback
   // URL, and a key that only ever reaches that fake.
   const liveUrl = parentEnv.OMB_OPENAI_LIVE_URL?.trim() ?? "";

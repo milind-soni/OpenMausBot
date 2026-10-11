@@ -108,7 +108,7 @@ describe("a cloud computer starts only when the bot uses it", () => {
     const env = sent.mcpConfig.mcpServers.computer.env;
     const response = await fetch(new URL("/api/internal/computer/mcp", env.OMB_HARNESS_URL), {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${env.OMB_MCP_TOKEN}` },
+      headers: { "content-type": "application/json", authorization: `Bearer ${env.OMB_MCP_TOKEN_COMPUTER}` },
       body: JSON.stringify({ method, params }),
     });
     return { status: response.status, body: await response.json() as any };

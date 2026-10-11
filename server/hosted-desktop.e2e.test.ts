@@ -150,7 +150,7 @@ it("keeps the bot's own engine on the cloud computer, and a failed place never b
     // process holds only a turn-scoped capability, never a Boat credential.
     const computer = sent.mcpConfig.mcpServers.computer;
     expect(computer.args).toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js)$/), "computer"]);
-    expect(computer.env.OMB_MCP_TOKEN).toEqual(expect.any(String));
+    expect(computer.env.OMB_MCP_TOKEN_COMPUTER).toEqual(expect.any(String));
     expect(computer.env.OMB_HARNESS_URL).toBe(fixture.info.url);
     expect(JSON.stringify(sent)).not.toContain(BOAT_TOKEN);
     expect(Object.keys(sent.env).filter(key => /BOAT|BOX_TOKEN|OMB_CLOUD/.test(key))).toEqual([]);

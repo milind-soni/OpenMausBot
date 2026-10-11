@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BrowserRuntime, TransportError, browserRuntimeEnv, type BrowserSpawnSpec } from "./browser-runtime.ts";
+import { BrowserRuntime, TransportError, browserRuntimeEnv, formatBrowserTiming, type BrowserSpawnSpec, type BrowserTiming } from "./browser-runtime.ts";
 
 const runtimes: BrowserRuntime[] = [];
 function runtime(options: ConstructorParameters<typeof BrowserRuntime>[0] = {}) {
@@ -434,6 +434,39 @@ describe("server-owned browser MCP runtime", () => {
     await value.close("s");
     await value.agentRpc("s", spec(), "tools/call", { name: "echo" });
     expect(applyViewport).toHaveBeenCalledTimes(2);
+  });
+
+  it("times each bot call by phase, and the preview frame that held the engine", async () => {
+    const timings: BrowserTiming[] = [];
+    const value = runtime({ onTiming: (timing) => timings.push(timing), applyViewport: async () => true });
+    await value.agentRpc("s", spec(), "tools/call", { name: "agent_browser_open", arguments: { url: "https://example.com" } });
+    const [open] = timings;
+    expect(open).toMatchObject({ session: "s", tool: "agent_browser_open", outcome: "ok", inFlight: 0 });
+    expect(open.launchMs).toBeGreaterThan(0);
+    expect(open.engineMs).toBeGreaterThanOrEqual(0);
+    expect(open.observeMs).toBeGreaterThanOrEqual(0);
+    expect(open.totalMs).toBeGreaterThanOrEqual(open.launchMs! + open.engineMs! + open.observeMs!);
+    expect(open.chars).toBeGreaterThan(100);
+
+    // A frame still capturing when the bot's call starts is work the call waits behind.
+    const frame = deferred<{ png: string }>();
+    const capturing = value.agentFrame("s", () => frame.promise);
+    const click = value.agentRpc("s", spec(), "tools/call", { name: "agent_browser_click", arguments: { selector: "@e1" } });
+    frame.resolve({ png: "AAAA" });
+    await Promise.all([capturing, click]);
+    expect(timings.find((timing) => timing.tool === "preview_frame")).toMatchObject({ outcome: "ok", chars: 4, inFlight: 0 });
+    expect(timings.find((timing) => timing.tool === "agent_browser_click")).toMatchObject({ outcome: "ok", inFlight: 1 });
+
+    await value.agentRpc("refused", spec(), "tools/call", { name: "agent_browser_open", arguments: { url: "https://refused.test" } });
+    expect(timings.at(-1)).toMatchObject({ session: "refused", outcome: "error" });
+    expect(timings.at(-1)!.observeMs).toBeUndefined();
+  });
+
+  it("formats a timing as one greppable line", () => {
+    expect(formatBrowserTiming({ session: "bot-1", tool: "agent_browser_open", outcome: "ok", totalMs: 1234.4, launchMs: 900.2, engineMs: 210.6, observeMs: 120, chars: 5120, inFlight: 1 }))
+      .toBe("browser timing: agent_browser_open ok total=1234ms launch=900ms engine=211ms observe=120ms chars=5120 inflight=1 session=bot-1");
+    expect(formatBrowserTiming({ session: "bot-1", tool: "preview_frame", outcome: "error", totalMs: 3, inFlight: 0 }))
+      .toBe("browser timing: preview_frame error total=3ms inflight=0 session=bot-1");
   });
 
   it("still runs the bot's call when sizing the page fails", async () => {

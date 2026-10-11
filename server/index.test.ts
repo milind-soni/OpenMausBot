@@ -9157,7 +9157,7 @@ describe("harness HTTP API", () => {
       const browser = dump.mcpConfig.mcpServers.browser;
       expect(browser.command).toBe(process.execPath);
       expect(browser.args).toEqual([expect.stringMatching(/harness-mcp-proxy\.(?:ts|js|mjs)$/), "browser"]);
-      expect(browser.env.OMB_MCP_TOKEN).toEqual(expect.any(String));
+      expect(browser.env.OMB_MCP_TOKEN_BROWSER).toEqual(expect.any(String));
       expect(browser.env.OMB_HARNESS_URL).toBe(BASE);
       // Only the server-owned proxy knows native sessions and saved-login keys.
       expect(browser.env.AGENT_BROWSER_SESSION).toBeUndefined();

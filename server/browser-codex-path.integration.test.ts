@@ -116,7 +116,17 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
     // process receives no shared profile key or direct browser command.
     expect(dump.argv).toContain(`mcp_servers.browser.command=${JSON.stringify(process.execPath)}`);
     expect(dump.argv.some((arg: string) => arg.startsWith("mcp_servers.browser.args=") && arg.includes("harness-mcp-proxy.ts") && arg.includes('"browser"'))).toBe(true);
-    expect(dump.env.OMB_MCP_TOKEN).toBeTruthy();
+    // Codex starts every MCP server from one shared environment and passes
+    // each only the names in its env_vars. A token name two servers share
+    // holds the last mount's value, and the browser was refused (#2544).
+    const envVars = (server: string) => JSON.parse(dump.argv.find((arg: string) => arg.startsWith(`mcp_servers.${server}.env_vars=`))?.split("=").slice(1).join("=") ?? "[]") as string[];
+    const browserToken = envVars("browser").filter((name) => name.startsWith("OMB_MCP_TOKEN"));
+    const dataToken = envVars("data").filter((name) => name.startsWith("OMB_MCP_TOKEN"));
+    expect(browserToken).toHaveLength(1);
+    expect(dataToken).toHaveLength(1);
+    expect(browserToken[0]).not.toBe(dataToken[0]);
+    expect(dump.env[browserToken[0]]).toBeTruthy();
+    expect(dump.env[browserToken[0]]).not.toBe(dump.env[dataToken[0]]);
     expect(dump.env.AGENT_BROWSER_SESSION).toBeUndefined();
     expect(dump.env.AGENT_BROWSER_ENCRYPTION_KEY).toBeUndefined();
     expect(dump.calls.some((call: any) => call.method === "turn/start")).toBe(true);

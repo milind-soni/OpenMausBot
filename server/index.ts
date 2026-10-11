@@ -475,7 +475,7 @@ import * as vps from "./vps-computer.ts";
 import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
-import { BrowserRuntime, browserRuntimeEnv } from "./browser-runtime.ts";
+import { BrowserRuntime, browserRuntimeEnv, formatBrowserTiming } from "./browser-runtime.ts";
 import { BrowserLive } from "./browser-live.ts";
 import {
   agentBrowserFrame,
@@ -522,6 +522,7 @@ import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.
 import { WebhookManager } from "./webhooks.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { harnessMcpTokenEnv } from "./harness-mcp-token.ts";
 import {
   installLibrarySkill,
   listLibrarySkills,
@@ -3089,6 +3090,8 @@ const browserRuntime = new BrowserRuntime({
     return closed;
   },
   applyViewport: (spec) => setBrowserViewport(spec.command, spec.env),
+  // Opt-in diagnostics: one line per bot browser call and preview frame.
+  onTiming: process.env.OMB_BROWSER_TIMING === "1" ? (timing) => console.info(formatBrowserTiming(timing)) : undefined,
 });
 const browserLive = new BrowserLive({ runtime: browserRuntime });
 // Temporary profiles last for this server run, but are never saved to disk.
@@ -3150,7 +3153,7 @@ async function browserIntegration(botId: string, profile: string | undefined, tu
     kind: "browser", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 });
   return { profile: partitionId, session, spec, integration: {
     command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, "browser"], env: {
-      ...AGENTS_NODE_FLAG, OMB_MCP_TOKEN: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+      ...AGENTS_NODE_FLAG, [harnessMcpTokenEnv("browser")]: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
     },
   } };
 }
@@ -3189,7 +3192,7 @@ function dataIntegration(botId: string, turn: { threadId: string; generation: st
   const token = mintInternalCapability({ botId, ...turn, kind: "data", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 });
   return {
     command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, "data"], env: {
-      ...AGENTS_NODE_FLAG, OMB_MCP_TOKEN: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+      ...AGENTS_NODE_FLAG, [harnessMcpTokenEnv("data")]: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
     },
   };
 }
@@ -7087,7 +7090,7 @@ function cloudComputerTools(botId: string, owner: TurnOwner, boxId: string | nul
   return {
     command: process.execPath,
     args: [SPAWNED_PROXIES.harnessMcp, "computer"],
-    env: { ...AGENTS_NODE_FLAG, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`, OMB_MCP_TOKEN: control.token },
+    env: { ...AGENTS_NODE_FLAG, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`, [harnessMcpTokenEnv("computer")]: control.token },
     platform: "linux",
   };
 }
@@ -10950,7 +10953,7 @@ async function startTurn(
           browserCapture = async () => {
             const owner = turnResourceOwners.get(threadId);
             if (!owner || !claimTurnResource(owner, `browser:${session}`)) throw new Error("another thread is using this browser");
-            return browserRuntime.withAgentAction(session, () => agentBrowserFrame(frame));
+            return browserRuntime.agentFrame(session, () => agentBrowserFrame(frame));
           };
         }
       }

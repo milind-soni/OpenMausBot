@@ -75,7 +75,7 @@ describe("a slow cloud computer start", () => {
     const env = sent.mcpConfig.mcpServers.computer.env;
     const response = await fetch(new URL("/api/internal/computer/mcp", env.OMB_HARNESS_URL), {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${env.OMB_MCP_TOKEN}` },
+      headers: { "content-type": "application/json", authorization: `Bearer ${env.OMB_MCP_TOKEN_COMPUTER}` },
       body: JSON.stringify({ method: "tools/call", params: { name: "screenshot", arguments: {} } }),
     });
     const body = await response.json() as any;
