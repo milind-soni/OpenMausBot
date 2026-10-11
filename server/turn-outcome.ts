@@ -79,6 +79,11 @@ export class TurnStops {
     const stop = this.#byThread.get(threadId);
     return stop && (!turnId || !stop.turnId || stop.turnId === turnId) ? stop : undefined;
   }
+
+  /** The thread is gone: nothing reads its last stop again. */
+  forget(threadId: string): void {
+    this.#byThread.delete(threadId);
+  }
 }
 
 /** The requester's account of a turn that ended without completing. The
