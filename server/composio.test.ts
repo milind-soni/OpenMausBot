@@ -1251,8 +1251,12 @@ describe.sequential("Composio Sessions", () => {
         await expect(authorizeService(cfg, "slack", "personal")).rejects.toThrow(/already in use/i);
         expect(calls.slice(before).some((call) => call.method === "POST" && call.path.endsWith("/link"))).toBe(false);
       }
+      // An expired attempt no longer holds its alias upstream.
       connectedAccountsOverride = [{ id: "ca_expired", alias: "Personal", status: "EXPIRED", toolkit: { slug: "slack" } }];
-      await expect(authorizeService(cfg, "slack", "personal")).rejects.toThrow(/already in use/i);
+      await expect(authorizeService(cfg, "slack", "personal")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
+      expect(calls.filter((call) => call.method === "POST" && call.path.endsWith("/link")).at(-1)?.body).toEqual({
+        toolkit: "slack", alias: "personal",
+      });
       await expect(authorizeService(cfg, "slack", "  team  ")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
       expect(calls.filter((call) => call.method === "POST" && call.path.endsWith("/link")).at(-1)?.body).toEqual({
         toolkit: "slack", alias: "team",

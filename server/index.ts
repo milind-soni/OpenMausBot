@@ -25607,9 +25607,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // A different active account must never complete a second-account card.
         // Missing alias metadata stays pending rather than guessing from the
         // toolkit-wide status (including scoped keys without account reads).
-        const account = connector.alias
-          ? service?.accounts?.find((item) => item.alias?.trim().toLowerCase() === connector.alias!.toLowerCase())
-          : undefined;
+        // An expired attempt keeps its alias on show beside the retry that
+        // replaced it, so follow the retry.
+        const named = connector.alias
+          ? (service?.accounts ?? []).filter((item) => item.alias?.trim().toLowerCase() === connector.alias!.toLowerCase())
+          : [];
+        const account = named.find((item) => !/^expired$/i.test(item.status)) ?? named[0];
         const state = connector.alias ? {
           connected: /^active$/i.test(account?.status ?? ""),
           pending: /^(initiated|initializing|pending)$/i.test(account?.status ?? ""),

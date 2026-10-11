@@ -1289,7 +1289,11 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
       throw inputError("Add an account alias so the existing connection is not replaced");
     }
   }
-  if (alias && serviceAccounts.some((account) => account.alias?.trim().toLowerCase() === alias.toLowerCase())) {
+  // Composio gives an attempt its alias when the link is minted and frees it
+  // once the link expires, though the EXPIRED record keeps showing it.
+  if (alias && serviceAccounts.some((account) =>
+    account.alias?.trim().toLowerCase() === alias.toLowerCase() && !/^expired$/i.test(account.status ?? "")
+  )) {
     throw inputError(`Account alias "${alias}" is already in use for ${toolkit}`, 409);
   }
   const linkRequest: AccountLinkRequest = { toolkit };

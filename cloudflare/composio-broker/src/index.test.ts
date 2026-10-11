@@ -315,11 +315,13 @@ describe("connected-apps broker boundaries", () => {
       const response = await authorize("gmail", undefined, installation, env as never, ctx as never);
       expect(response.status).toBe(400);
     }
+    // An expired attempt no longer holds its alias upstream.
     accounts = [{ id: "old", alias: "Original", status: "EXPIRED", toolkit: { slug: "gmail" } }];
-    expect((await authorize("gmail", "original", installation, env as never, ctx as never)).status).toBe(409);
+    expect((await authorize("gmail", "original", installation, env as never, ctx as never)).status).toBe(200);
+    expect(linkBodies().at(-1)).toEqual({ toolkit: "gmail", alias: "original" });
     accounts = Array.from({ length: 5 }, (_, id) => ({ id: String(id), status: "INITIALIZING", toolkit: { slug: "gmail" } }));
     expect((await authorize("gmail", undefined, installation, env as never, ctx as never)).status).toBe(409);
-    expect(linkBodies()).toHaveLength(successfulLinks);
+    expect(linkBodies()).toHaveLength(successfulLinks + 1);
     expect(fetchCalls.filter((call) => /^(DELETE|PATCH)$/.test(call.init?.method ?? ""))).toHaveLength(0);
   });
 
