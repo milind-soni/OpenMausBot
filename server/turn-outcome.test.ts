@@ -24,6 +24,9 @@ describe("TurnStops", () => {
     // another turn's settle never reads it, nor does another thread
     expect(stops.read("t1", "turn-2")).toBeUndefined();
     expect(stops.read("t2", "turn-1")).toBeUndefined();
+    // a deleted thread's stop goes with it
+    stops.forget("t1");
+    expect(stops.read("t1", "turn-1")).toBeUndefined();
   });
 
   // Claude reports a usage limit or an overload as a reply its client wrote,

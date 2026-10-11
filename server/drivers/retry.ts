@@ -46,15 +46,22 @@ const TRANSIENT_PATTERNS: Array<{ pattern: RegExp; reason: TransientReason }> = 
   { pattern: /\btimeout(ed)?\b|\btimed? out\b/i, reason: "timeout" },
 ];
 
+/** A subscription's usage running out, in a provider's words. Its window
+ * is hours away, so it is terminal for this engine even when the provider
+ * phrases it as a rate limit. Claude Code names what ran out ("You've hit
+ * your weekly limit · resets Oct 12 at 2:30pm (Asia/Calcutta)", "…your
+ * session limit", "…your Opus limit", "…your team's shared budget", "You're
+ * out of usage credits", "You're out of extra usage", 2.1.295); a
+ * per-minute "rate limit" stays transient. */
+export const USAGE_LIMIT = /\busage limit\b|\bhit your (?:(?!rate\b)[\w'’-]+ ){0,3}(?:limit|budget)\b|\b(?:weekly|daily|monthly|subscription|usage|session|5-hour) limit reached\b|\bout of (?:usage(?: credits)?|extra usage|credits)\b/i;
+
 const TERMINAL_PATTERNS: Array<{ pattern: RegExp; reason: TerminalReason }> = [
   {
     pattern: /\b(?:40[13]|unauthorized|forbidden|invalid api key|missing bearer|authentication required|not logged in|logged out)\b/i,
     reason: "auth",
   },
-  // A subscription's usage window is hours away, so its limit is terminal
-  // for this engine even when the provider phrases it as a rate limit;
-  // checked before the transient 429 pattern for that reason.
-  { pattern: /\busage limit\b|\bhit your (?:usage )?limit\b|\b(?:weekly|daily|monthly|subscription|usage) limit reached\b|\bout of credits\b/i, reason: "quota" },
+  // every terminal pattern is read before the transient 429 one
+  { pattern: USAGE_LIMIT, reason: "quota" },
   { pattern: /\b402\b|\bquota\b|\bbilling\b|\bsubscription\b/i, reason: "quota" },
   { pattern: /\bmodel not found\b|\bunknown model\b|\bdoes not exist for model\b|\bunsupported model\b/i, reason: "unknown_model" },
   { pattern: /\b400\b|\b422\b|\binvalid request\b|\bmalformed\b|\bunexpected status\b/i, reason: "invalid_request" },

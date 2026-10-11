@@ -5826,6 +5826,7 @@ store.onChange((change) => {
     case "thread.deleted":
       directRequestOwners.delete(change.threadId);
       stoppedTurns.delete(change.threadId);
+      turnStops.forget(change.threadId);
       routines?.forgetRoutineRequestReceiptsForThread(change.threadId);
       // A deleted destination must not strand an approval in an internal
       // task. Keep each run's snapshot and expose its execution as fallback.
@@ -6408,6 +6409,16 @@ function requestBehavior(value: unknown): "allow" | "deny" | "answer" | null {
 // the last settled assistant text per thread, so a "finished" notification
 // can carry what the bot actually said
 const lastReply = new Map<string, string>();
+/** Why a settled turn failed, for the person's incident and the bot's work
+ * log: the turn's own last error as TurnStops holds it ("This Claude account
+ * has reached its weekly limit, which resets …"), else the provider's stop
+ * token, which alone says little ("stop_sequence", "quota"). Undefined for a
+ * turn that did not fail. Requesters read the whole account
+ * (stoppedTurnText). */
+function turnFailureCause(event: { threadId: string; turnId?: string; ok: boolean; stopReason?: string | null }): string | undefined {
+  if (event.ok) return undefined;
+  return turnStops.read(event.threadId, event.turnId)?.error ?? (event.stopReason?.trim() || undefined);
+}
 /** Threads whose running turn a client abort ended (the abort sentence as
  * assistant text or as runtime.error), with that turn's id when known.
  * turn.completed reads it as a stop, not a failure, whatever stopReason the
@@ -6783,7 +6794,7 @@ bus.subscribe((event: RuntimeEvent) => {
     const tools = messages
       .filter((message) => message.kind === "activity" && message.turnId === event.turnId && message.tool?.name)
       .map((message) => message.tool!.name);
-    const line = turnOutcomeLine({ ok: event.ok, reply: reply?.text, stopReason: event.stopReason, tools });
+    const line = turnOutcomeLine({ ok: event.ok, reply: reply?.text, stopReason: turnFailureCause(event), tools });
     if (!line) return;
     // A room fewer people can see than this bot leaves no line in its log:
     // session_search would hand it back in a chat anyone who sees the bot has.
@@ -8009,7 +8020,6 @@ bus.subscribe((event: RuntimeEvent) => {
       : proven ? { ...m, requestMessageId: owner.messageId } : m);
     return message;
   };
-
   // A client abort sometimes arrives as assistant text or as runtime.error.
   // That is a stop, not a failure: store one stopped row, drop any text the
   // turn said before it, so neither the digest nor a finished notification
@@ -8476,7 +8486,7 @@ bus.subscribe((event: RuntimeEvent) => {
         turnResourceOwners.get(event.threadId)?.computerParkedOn !== undefined;
       if (!event.ok && !stopped && !lazyClaimAlreadyReported && !computerParked && !routines?.runForThread(event.threadId)) {
         const broken = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
-        if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: event.stopReason?.trim() || "the run ended without a result" });
+        if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: turnFailureCause(event) ?? "the run ended without a result" });
       }
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
@@ -10540,7 +10550,7 @@ async function startTurn(
         const windowIds = selection.representedIds;
         return {
           turnText: withUnseenMessages(unseenBlock, contextTurnText),
-          resumeCursor, sessionReset: !resume, recoveryText, recoveryIsReplay,
+          resumeCursor, sessionReset: !resume, recoveryText,
           handoff: strictResume ? {
             botId: bot.id, instanceId, config, resumeCursor: typeof resumeCursor === "string" ? resumeCursor : undefined,
             ...(instance.driverKind === "codex" ? { effort: effort ?? null } : {}),
@@ -11361,7 +11371,6 @@ async function startTurn(
         resumeCursor: dispatchContext.resumeCursor,
         sessionReset: dispatchContext.sessionReset,
         ...(dispatchContext.recoveryText !== undefined ? { recoveryText: withTurnClock(clock, dispatchContext.recoveryText) } : {}),
-        ...(dispatchContext.recoveryIsReplay ? { recoveryIsReplay: true } : {}),
         transcript,
         system: prompt.text,
         systemStable: prompt.stable,

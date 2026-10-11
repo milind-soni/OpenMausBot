@@ -20,7 +20,8 @@ import { openStartupModelCatalog, writeStartupModelCache } from "../startup-mode
 import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
 import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
-import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
+import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
+import { hostTimeZone } from "../turn-clock.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
 
 import type {
@@ -40,7 +41,7 @@ import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { askInputSummary, commandSummary, toolDetailPreview } from "../tool-summary.ts";
-import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
+import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS, USAGE_LIMIT } from "./retry.ts";
 import { sessionIdlePolicy } from "./session-idle.ts";
 import { parseVersionTriple, versionAtLeast } from "./acp/core.ts";
 import {
@@ -170,6 +171,92 @@ export function claudeVersionTooOld(
 ): boolean {
   if (frame.is_api_error_message !== true && typeof frame.error !== "string") return false;
   return /\bClaude Code v?\d+(?:\.\d+)+ does not support this model\b/i.test(text);
+}
+
+/** The usage window that refuses a Claude account's requests. */
+export interface ClaudeLimit {
+  /** the CLI's rateLimitType: five_hour, seven_day, seven_day_opus,
+   * seven_day_sonnet, seven_day_overage_included or overage (2.1.295); null
+   * when it names none */
+  window: string | null;
+  /** when that window reopens, in epoch seconds; null when unsaid */
+  resetsAt: number | null;
+}
+
+/** The window a CLI's `rate_limit_info` says refuses this account, or null
+ * while its requests go through. The CLI reads it from the API's headers on
+ * every response and reports it in a `rate_limit_event` — "allowed",
+ * "allowed_warning" near a limit, "rejected" past it (2.1.272, 2.1.295) —
+ * and, from 2.1.295, on the refused call's api-error frame too
+ * (`api_error_params`). A rejected window with extra usage in use still runs
+ * the turn on usage credits, so only a refusal without them counts. */
+export function claudeLimitRefusal(info: unknown): ClaudeLimit | null {
+  if (!info || typeof info !== "object") return null;
+  const { status, rateLimitType, resetsAt, isUsingOverage } = info as Record<string, unknown>;
+  if (status !== "rejected" || isUsingOverage === true) return null;
+  return {
+    window: typeof rateLimitType === "string" ? rateLimitType : null,
+    resetsAt: typeof resetsAt === "number" && Number.isFinite(resetsAt) && resetsAt > 0 ? resetsAt : null,
+  };
+}
+
+/** The CLI's api-error frame for a call its account's usage limit refused:
+ * its own code says so (`api_error: "usage_limit_reached"`, 2.1.295), or its
+ * words do ("You've hit your weekly limit · resets …"), or a
+ * `rate_limit_event` had already refused the account (`refused`). A refused
+ * account runs nothing until the window reopens, so that is the failure to
+ * report whatever else the same call said: 2.1.272 answered an account at
+ * its weekly limit with "does not support this model" and an update offer,
+ * and the person updated, to the same refusal. Gated on the CLI's error
+ * flag, like a sign-in failure. */
+export function claudeUsageLimit(
+  frame: { error?: unknown; is_api_error_message?: unknown; api_error?: unknown },
+  text: string,
+  refused = false,
+): boolean {
+  if (frame.is_api_error_message !== true && typeof frame.error !== "string") return false;
+  return refused || frame.api_error === "usage_limit_reached" || USAGE_LIMIT.test(text);
+}
+
+/** Each window as Settings → Usage names it ("5-hour", "Weekly"); any other
+ * is the account's usage limit. */
+const CLAUDE_LIMIT_NAMES: Record<string, string> = {
+  five_hour: "5-hour limit",
+  seven_day: "weekly limit",
+  seven_day_opus: "weekly Opus limit",
+  seven_day_sonnet: "weekly Sonnet limit",
+};
+
+/** One plain line for a turn its account's usage limit refused: which limit,
+ * when it reopens, and what runs before then — a model's own weekly limit
+ * leaves the account's other models running. Nothing to install, sign in to
+ * or retry. The reset is written in this machine's zone, named as the turn
+ * clock names it; with no reset to write, the CLI's own words (`said`) are
+ * quoted, as they may carry one. */
+export function claudeLimitMessage(limit: ClaudeLimit | null, said?: string, now = Date.now(), timeZone = hostTimeZone()): string {
+  const name = limit?.window && Object.hasOwn(CLAUDE_LIMIT_NAMES, limit.window) ? CLAUDE_LIMIT_NAMES[limit.window] : "usage limit";
+  const meanwhile = /^seven_day_(?:opus|sonnet)$/.test(limit?.window ?? "") ? "choose another model for this bot" : "switch this bot to another engine or Claude account";
+  if (limit?.resetsAt && limit.resetsAt * 1000 > now) {
+    let resets: string;
+    try {
+      resets = `${new Date(limit.resetsAt * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone })} (${timeZone})`;
+    } catch {
+      resets = `${new Date(limit.resetsAt * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+    }
+    return `This Claude account has reached its ${name}, which resets ${resets}. Until then, ${meanwhile}.`;
+  }
+  const words = said?.trim().replace(/[.\s]+$/, "");
+  return `This Claude account has reached its ${name}${words ? ` (Claude says: "${words}")` : ""}. For now, ${meanwhile}.`;
+}
+
+/** What an error `result` says failed its turn: its `errors` (2.1.295:
+ * "No conversation found with session ID: …"), else its text, else its
+ * kind. */
+export function claudeResultError(frame: { errors?: unknown; result?: unknown; subtype?: unknown; terminal_reason?: unknown }): string {
+  const errors = Array.isArray(frame.errors) ? frame.errors.filter((error): error is string => typeof error === "string" && error.trim() !== "") : [];
+  if (errors.length) return errors.join("; ");
+  if (typeof frame.result === "string" && frame.result.trim()) return frame.result.trim();
+  return `Claude ended the turn with an error (${String(frame.subtype ?? frame.terminal_reason ?? "unknown")}).`;
 }
 
 /** The CLI environment shared by auth probes and real turns.
@@ -1282,6 +1369,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         awaitingInit?: boolean;
         authFailed?: boolean;
         updateRequired?: boolean;
+        /** the window the latest `rate_limit_event` says refuses this
+         * account (claudeLimitRefusal), null while requests go through */
+        limit?: ClaudeLimit | null;
+        /** the turn failed on its account's usage limit, and said so */
+        limitReached?: boolean;
+        /** what failed this turn is already in front of the person: a
+         * sign-in, update or usage-limit error, or the CLI's own api-error
+         * text. An error `result` says nothing more. */
+        explained?: boolean;
         stopRequested?: boolean;
         /** Steered messages, by the uuid this driver sent them with, that no
          * model call has taken in yet as far as the driver can tell. With
@@ -1970,6 +2066,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       };
       const settleResult = (result: NativeTurnResult) => settle(result.ok, result.stopReason, result.cost, result.usage);
       const currentTurnId = () => session.turn?.turnId ?? turnId;
+      // The turn ran into its account's usage limit: one plain line, once, in
+      // place of the CLI's words or whatever else the refused call said. It
+      // settles as "quota" — never a setup failure or an update offer. The
+      // refused call's own window (`api_error_params`) outranks the event's.
+      const reachLimit = (frame: { api_error_params?: { rate_limit_info?: unknown } }, words: unknown) => {
+        const t = session.turn;
+        if (!t || t.limitReached) return;
+        t.limitReached = t.explained = true;
+        t.limit = claudeLimitRefusal(frame.api_error_params?.rate_limit_info) ?? t.limit;
+        const said = typeof words === "string" && USAGE_LIMIT.test(words) ? words : undefined;
+        emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: claudeLimitMessage(t.limit ?? null, said) });
+      };
       // The process's first result with a cost says what --resume restored,
       // which its turns are measured from; every result is kept for a later
       // resume. A result without one (an API error) decides nothing yet.
@@ -2042,6 +2150,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 held.continuationSilence.unref?.();
               }
               emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model, ...(retry.rebuilt ? { rebuilt: true } : {}) });
+              // the person reads what did not carry over; announced once: a
+              // steered continuation's own init re-reports the same session,
+              // which is no new rebuild
+              if (retry.rebuilt) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
+              retry.rebuilt = false;
             } else if (o.subtype === "thinking_tokens") {
               emit({ ...base(threadId, currentTurnId()), type: "item.updated", itemType: "reasoning", tokens: o.estimated_tokens });
             }
@@ -2070,19 +2183,28 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // reply strands the user. Every other engine reports this as a
             // setup error; that is what routes them to the sign-in card.
             if (claudeAuthFailure(o, text)) {
-              if (session.turn) session.turn.authFailed = true;
+              if (session.turn) session.turn.authFailed = session.turn.explained = true;
               emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: text, setup: true });
               break;
             }
+            // An account past its usage limit runs nothing until the window
+            // reopens, on any model or version: that is what to report, not
+            // the update the same refused call may also have asked for.
+            if (claudeUsageLimit(o, text, Boolean(session.turn?.limit))) {
+              reachLimit(o, text);
+              break;
+            }
             if (claudeVersionTooOld(o, text)) {
-              if (session.turn) session.turn.updateRequired = true;
+              if (session.turn) session.turn.updateRequired = session.turn.explained = true;
               emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: text, setup: true, claudeUpdate: true });
               break;
             }
             if (text.trim()) {
               // The CLI's own report of any other API error is still shown,
               // but marked: the model never produced it.
-              const synthetic = o.is_api_error_message === true || typeof o.error === "string" ? { synthetic: true } : {};
+              const apiError = o.is_api_error_message === true || typeof o.error === "string";
+              const synthetic = apiError ? { synthetic: true } : {};
+              if (apiError && session.turn) session.turn.explained = true;
               // fallback delta for CLIs/paths that never streamed the block
               if (!session.turn?.sawStreamDelta) {
                 emit({ ...base(threadId, currentTurnId()), ...synthetic, type: "content.delta", streamKind: "assistant_text", delta: text });
@@ -2136,11 +2258,39 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             break;
           }
+          case "rate_limit_event":
+            // the account's usage window as the API's last response left it;
+            // read only when the turn fails (claudeUsageLimit, `result`)
+            if (session.turn) session.turn.limit = claudeLimitRefusal(o.rate_limit_info);
+            break;
           case "result": {
             // A synthetic background completion is not the result of the
             // submitted user turn. Settling it would revoke browser access
             // and deny approvals while that user turn is still running.
             if (o.origin?.kind === "task-notification") break;
+            // A --resume the CLI refused before announcing the session: no
+            // `init`, so it never took the prompt. After a long idle 2.1.295
+            // answers a session it no longer has with an error result
+            // ("No conversation found with session ID …") and stays up,
+            // instead of exiting. End the process: its close rebuilds the
+            // conversation on a fresh session, once, as for a CLI that exits
+            // before `init` (classifyResumeFailure).
+            if (o.is_error === true && sessionId && !session.sawInit && session.turn && !session.turn.settled) {
+              closeSession(threadId, "resume refused");
+              break;
+            }
+            // The usage limit refused this turn even if no frame said so: the
+            // result's own error code (2.1.295) or words do, or the CLI's
+            // rate_limit_event did and nothing failed the turn before it.
+            if (o.is_error === true && !session.turn?.authFailed && (session.turn?.limit ||
+                o.api_error === "usage_limit_reached" || USAGE_LIMIT.test(String(o.result ?? "")))) reachLimit(o, o.result);
+            // Any other error result nothing has explained yet is a turn that
+            // failed without an api-error frame: its own words say why, so a
+            // failed turn is never an empty one. A Stop is no failure.
+            if (o.is_error === true && session.turn && !session.turn.settled && !session.turn.explained && !session.turn.stopRequested) {
+              session.turn.explained = true;
+              emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: claudeResultError(o) });
+            }
             // result.usage is this turn's own figure, "per-turn in
             // streaming-input sessions" (2.1.282) even on a retained process.
             // cache reads count as input: they are billed (at the cache rate)
@@ -2156,11 +2306,18 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             });
             const native: NativeTurnResult = {
               ok: o.is_error !== true,
+              // An error result's stop_reason is its synthetic message's
+              // ("stop_sequence") or none, which says nothing; its terminal
+              // reason ("api_error") or kind ("error_during_execution") does.
               stopReason: session.turn?.authFailed
                 ? "auth_required"
-                : session.turn?.updateRequired
-                  ? "update_required"
-                  : o.stop_reason ?? o.terminal_reason ?? null,
+                : session.turn?.limitReached
+                  ? "quota"
+                  : session.turn?.updateRequired
+                    ? "update_required"
+                    : o.is_error === true
+                      ? o.terminal_reason ?? (typeof o.subtype === "string" && o.subtype !== "success" ? o.subtype : null) ?? o.stop_reason ?? null
+                      : o.stop_reason ?? o.terminal_reason ?? null,
               cost: o.total_cost_usd ?? null,
               ...(o.usage
                 ? {
@@ -2428,16 +2585,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // Same relaunch handle as the transient-retry path above. The new
             // session is announced as rebuilt only when it is actually given
             // the replay: with nothing to replay it gets the turn text alone.
+            // That announcement, with its notice, is what the person is told;
+            // this is no retry of a failure.
             retry.rebuilt = recovery.replayed;
             retryState.set(threadId, retry);
             active.set(threadId, { stop: () => { retry.cancelled = true; retryAbort.abort(); }, turnId });
-            emit({
-              ...base(threadId, turnId),
-              type: "turn.retrying",
-              attempt: retry.attempt + 1,
-              delayMs: 0,
-              reason: "resume_rejected",
-            });
             void (async () => {
               try {
                 // no cursor: a fresh session, carrying the rebuild

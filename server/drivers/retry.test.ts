@@ -123,8 +123,23 @@ describe("classifyError — usage limits", () => {
       "Usage limit reached for Claude Max",
       "Rate limit reached: weekly limit reached",
       "You are out of credits",
+      // Claude Code 2.1.295 names what ran out; the first matched no pattern
+      "You've hit your weekly limit \u00b7 resets Oct 12 at 2:30pm (Asia/Calcutta)",
+      "You've hit your session limit \u00b7 resets 3pm",
+      "You've hit your Opus limit",
+      "You've hit your org's monthly spend limit.",
+      "You've hit your team's shared budget. /model to switch models.",
+      "You're out of usage credits. Contact your admin to add more.",
+      "You're out of extra usage",
     ]) {
       expect(classifyError({ text }), text).toEqual({ transient: false, reason: "quota" });
+      expect(classifyError({ exitCode: 1, stderr: text }), text).toEqual({ transient: false, reason: "quota" });
+    }
+  });
+
+  it("keeps a per-minute rate limit transient, however it is worded", () => {
+    for (const text of ["You've hit your rate limit, retry in 5s", "You hit your API rate limit"]) {
+      expect(classifyError({ text }), text).toEqual({ transient: true, reason: "rate_limited" });
     }
   });
 });

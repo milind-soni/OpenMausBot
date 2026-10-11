@@ -28,6 +28,7 @@ import {
   codexUserError,
 } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
+import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import * as procs from "../procs.ts";
 import { autoVerdict } from "../auto-approve.ts";
@@ -1894,14 +1895,21 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(await instance.snapshot()).toMatchObject({ authenticated: false, chatgptPlan: true, warning: { message } });
   });
 
-  it("fails a rejected resume without silently replacing native history", async () => {
+  // Was a bricked thread: a personal thread whose rollout Codex no longer had
+  // failed every turn the same way, until the person switched engines.
+  it("rebuilds a personal thread Codex no longer has, once, from the chat", async () => {
     await create(); // fake rejects thread/resume outside resume mode
     const dump = join(scratch, "personal-missing-thread.json");
     process.env.FAKE_CODEX_DUMP = dump;
-    await instance.adapter.sendTurn({ threadId: "t-fallback", text: "go", resumeCursor: "gone-thread", recoveryText: "Previous messages\nUser: go" });
-    await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: false });
-    expect(recorder.events.some((e) => e.type === "session.started")).toBe(false);
-    expect(JSON.parse(readFileSync(dump, "utf8")).calls.map((call: { method: string }) => call.method)).not.toContain("thread/start");
+    const recoveryText = "Previous messages\nUser: go";
+    await instance.adapter.sendTurn({ threadId: "t-fallback", text: "go", resumeCursor: "gone-thread", recoveryText });
+    await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: true });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.map((call: { method: string }) => call.method)).toEqual(["initialize", "initialized", "config/read", "thread/resume", "thread/start", "turn/start"]);
+    expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: recoveryText }]);
+    // announced as rebuilt, and the person reads what did not carry over
+    expect(recorder.events.filter((e) => e.type === "session.started")).toMatchObject([{ rebuilt: true }]);
+    expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([expect.objectContaining({ message: rebuiltSessionNotice("Codex") })]);
   });
 
   it("names the missing Company model prerequisites instead of one blanket refusal", async () => {
@@ -1949,19 +1957,6 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(seen.argv).toContain('model_provider="openmaus_company"');
     expect(JSON.stringify(seen.argv)).not.toContain("synthetic-company-fixture");
     expect(recorder.events.filter((event) => event.type === "session.started")).toMatchObject([{ sessionId: "codex-thread-1", rebuilt: true }]);
-  });
-
-  it("rebuilds a missing personal thread only for a turn whose recovery text is the replay it would have had", async () => {
-    await create();
-    const dump = join(scratch, "personal-missing-replay.json");
-    process.env.FAKE_CODEX_DUMP = dump;
-    const recoveryText = "[This conversation received an update outside your provider session.]\nUser: go";
-    await instance.adapter.sendTurn({ threadId: "t-personal-replay", text: "go", resumeCursor: "gone-thread", recoveryText, recoveryIsReplay: true });
-    await expect(recorder.until((e) => e.type === "turn.completed")).resolves.toMatchObject({ ok: true });
-    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
-    expect(calls.map((call: { method: string }) => call.method)).toContain("thread/start");
-    expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: recoveryText }]);
-    expect(recorder.events.filter((e) => e.type === "session.started")).toMatchObject([{ rebuilt: true }]);
   });
 
   it("does not announce a rebuilt Company thread when the recovery text is the turn itself", async () => {
