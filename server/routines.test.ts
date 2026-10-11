@@ -2604,8 +2604,9 @@ describe("RoutineManager", () => {
     expect(h.failed).toHaveLength(1);
   });
 
-  it.each(["error", "tool_error"])(
-    "preserves the detailed runtime error when a turn ends with generic %s",
+  // "quota" and "stop_sequence": an account past its weekly limit (Oct 9-10)
+  it.each(["error", "tool_error", "quota", "stop_sequence"])(
+    "keeps the run's own error over the provider's stop token %s",
     async (stopReason) => {
       const h = harness();
       const routine = h.manager.create({

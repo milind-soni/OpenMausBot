@@ -63,7 +63,8 @@ it("reports a crashed run to the Chief, who retries it from the incidents thread
     await expect.poll(async () => (await botsNow()).find((b) => b.id === chief.id)?.tasks?.some((t: any) => t.title === "Team incidents"), { timeout: 20_000 }).toBe(true);
     const incidents = (await botsNow()).find((b) => b.id === chief.id).tasks.find((t: any) => t.title === "Team incidents");
     await expect.poll(async () => (await messages(incidents.threadId)).some((m) =>
-      m.kind === "activity" && m.tool?.name === 'Incident: Ada\'s run in its thread #Reconcile the September invoices. failed: "exit_before_result"' && m.threadRef?.threadId === ada.activeTaskId && m.threadRef?.botId === ada.id,
+      // the run's own words for what failed it, not the stop token
+      m.kind === "activity" && m.tool?.name === 'Incident: Ada\'s run in its thread #Reconcile the September invoices. failed: "claude exited 3 before result: fake-claude: simulated crash before result"' && m.threadRef?.threadId === ada.activeTaskId && m.threadRef?.botId === ada.id,
     ), { timeout: 10_000 }).toBe(true);
     // …and a turn of its own carrying the report, marked as not from the person.
     const chiefRun = await dump(incidents.threadId);

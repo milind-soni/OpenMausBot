@@ -82,3 +82,12 @@ export function recoveryPromptFor(input: RecoveryPromptInput): RecoveryPrompt {
   if (!replay || replay === input.currentText.trim()) return { text: input.currentText, replayed: false };
   return { text: replay, replayed: true };
 }
+
+/** The one line the person reads when an engine no longer had a
+ * conversation's own session and the turn went on in a new one started from
+ * the chat (session.started `rebuilt`): Claude Code after a long idle, a
+ * Codex rollout gone. The conversation carried over; what only that session
+ * held — the results of earlier tool calls — did not. */
+export function rebuiltSessionNotice(engine: string): string {
+  return `${engine} no longer had this conversation's session, so it went on in a new one started from the chat; results of earlier tool calls did not carry over.`;
+}

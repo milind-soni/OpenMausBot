@@ -23,6 +23,7 @@ import {
   claudeCliSupports,
   claudeCliUpdate,
   claudeHookSettings,
+  claudeLimitMessage,
   ClaudeDriver,
   createPermissionBroker,
   hookTokenFile,
@@ -649,6 +650,58 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       type: "runtime.error", message, setup: true, claudeUpdate: true,
     }));
     expect(recorder.events.some((event) => event.type === "item.completed" && event.itemType === "assistant_text")).toBe(false);
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "update_required" });
+  });
+
+  // Pesto on 2.1.295 (Oct 9-10): the CLI said "You've hit your weekly limit",
+  // and the turn was relayed as that reply and settled as "stop_sequence".
+  it("settles a turn its account's weekly limit refused as quota, saying when it resets, with no reply", async () => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 3 * 86_400;
+    const weekly = { status: "rejected", resetsAt, rateLimitType: "seven_day", overageStatus: "rejected", isUsingOverage: false };
+    await create("usage-limit", { FAKE_CLAUDE_RATE_LIMIT: JSON.stringify(weekly) });
+    await instance.adapter.sendTurn({ threadId: "t-weekly", text: "Hey talk to @Tango" });
+    await recorder.until((event) => event.type === "turn.completed");
+    const errors = recorder.events.filter((event) => event.type === "runtime.error");
+    expect(errors).toEqual([expect.objectContaining({ message: claudeLimitMessage({ window: "seven_day", resetsAt }) })]);
+    expect((errors[0] as any).message).toMatch(/^This Claude account has reached its weekly limit, which resets .+\. Until then, /);
+    expect(errors[0]).not.toHaveProperty("setup");
+    expect(errors[0]).not.toHaveProperty("claudeUpdate");
+    expect(recorder.events.some((event) => event.type === "item.completed" && event.itemType === "assistant_text")).toBe(false);
+    expect(recorder.events.some((event) => event.type === "content.delta")).toBe(false);
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "quota" });
+  });
+
+  // Pesto on 2.1.272 (Oct 8-9): the CLI's rate_limit_event refused the
+  // account's week while the call's error said "does not support this model".
+  // The person was offered the update, took it, and met the same refusal.
+  it("names the weekly limit behind an older CLI's update request, and offers no update", async () => {
+    const resetsAt = Math.floor(Date.now() / 1000) + 86_400;
+    await create("api-error", {
+      FAKE_CLAUDE_API_ERROR: "API Error: 400 Claude Code 2.1.272 does not support this model; version 2.1.280 or newer is required. Run 'claude update'.",
+      FAKE_CLAUDE_RATE_LIMIT: JSON.stringify({ status: "rejected", resetsAt, rateLimitType: "seven_day", isUsingOverage: false }),
+    });
+    await instance.adapter.sendTurn({ threadId: "t-weekly-old-cli", text: "hi" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.filter((event) => event.type === "runtime.error")).toEqual([
+      expect.objectContaining({ message: claudeLimitMessage({ window: "seven_day", resetsAt }) }),
+    ]);
+    expect(recorder.events.some((event) => event.type === "runtime.error" && (event.claudeUpdate || event.setup))).toBe(false);
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "quota" });
+  });
+
+  // Quill 2 (Sep 26): 97% of the week used, and a model the CLI was too old
+  // for. Near a limit is not past it: the update is still what to offer.
+  it("still offers the update to an account near, not past, its limit", async () => {
+    const message = "API Error: 400 Claude Code 2.1.268 does not support this model; version 2.1.280 or newer is required. Run 'claude update'.";
+    await create("api-error", {
+      FAKE_CLAUDE_API_ERROR: message,
+      FAKE_CLAUDE_RATE_LIMIT: JSON.stringify({ status: "allowed_warning", resetsAt: Math.floor(Date.now() / 1000) + 86_400, rateLimitType: "seven_day", utilization: 0.97 }),
+    });
+    await instance.adapter.sendTurn({ threadId: "t-near-limit", text: "hi" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.filter((event) => event.type === "runtime.error")).toEqual([
+      expect.objectContaining({ message, setup: true, claudeUpdate: true }),
+    ]);
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "update_required" });
   });
 
@@ -3624,11 +3677,18 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
   afterEach(async () => {
     delete process.env.FAKE_CLAUDE_MODE;
     delete process.env.FAKE_CLAUDE_DUMP;
+    delete process.env.FAKE_CLAUDE_PROMPTS;
     delete process.env.FAKE_CLAUDE_TEXT_HANG;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
   });
+  /** How many launches were handed a prompt, read from FAKE_CLAUDE_PROMPTS. */
+  const launches = (file: string) => readFileSync(file, "utf8").trim().split("\n").length;
+  const promptText = (prompt: any) => {
+    const content = prompt.message.content;
+    return typeof content === "string" ? content : content.map((c: any) => c.text ?? "").join("");
+  };
 
   it("starts a fresh session carrying the rebuild when --resume is refused", async () => {
     // Was a bricked thread: the CLI exits before `init`, the failure is
@@ -3646,7 +3706,8 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
 
     expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: true, turnId: dispatch.turnId });
-    expect(recorder.events.find((e) => e.type === "turn.retrying")).toMatchObject({ reason: "resume_rejected" });
+    // nothing failed that a retry fixed: the rebuilt session is what is told
+    expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
     // it started a NEW session, so the harness records a live cursor again
     const started = recorder.events.filter((e) => e.type === "session.started");
     expect(started.length).toBeGreaterThan(0);
@@ -3686,10 +3747,61 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
     // spent on the first relaunch and the turn must then settle as failed
     // rather than relaunching forever
     process.env.FAKE_CLAUDE_MODE = "exit-early";
+    const prompts = join(scratch, "prompts.jsonl");
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
     await instance.adapter.sendTurn({ threadId: "t-always-dead", text: "what now?", resumeCursor: "gone", recoveryText: REBUILD });
     await recorder.until((e) => e.type === "turn.completed");
     expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: false });
-    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toHaveLength(1);
+    expect(launches(prompts)).toBe(2);
+  });
+
+  // Marketer (Oct 10, 2.1.295, idle since Sep 3): the CLI answered the resume
+  // with an error result instead of exiting, the rebuild above never ran, and
+  // the turn ended empty — no reply, no error, stop reason null.
+  it("rebuilds a session the CLI answers with \"No conversation found\" instead of exiting", async () => {
+    process.env.FAKE_CLAUDE_MODE = "stale-session";
+    const dump = join(scratch, "stale.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const prompts = join(scratch, "stale-prompts.jsonl");
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
+    const dispatch = await instance.adapter.sendTurn({
+      threadId: "t-stale", text: "what now?", resumeCursor: "9de14760-idle-since-september", recoveryText: REBUILD,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.filter((e) => e.type === "turn.completed")).toEqual([expect.objectContaining({ ok: true, turnId: dispatch.turnId })]);
+    expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(false);
+    expect(recorder.events.filter((e) => e.type === "session.started")).toEqual([
+      expect.objectContaining({ rebuilt: true, sessionId: expect.not.stringMatching(/idle-since-september/) }),
+    ]);
+    // one refused resume, one fresh session given the rebuild
+    expect(launches(prompts)).toBe(2);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--resume");
+    expect(promptText(seen.prompt)).toBe(REBUILD);
+    // the next message goes to that same process: it re-announces its
+    // session, which is no new rebuild to tell the person about
+    const rebuilt = recorder.events.find((e) => e.type === "session.started") as { sessionId: string };
+    await instance.adapter.sendTurn({ threadId: "t-stale", text: "and then?", resumeCursor: rebuilt.sessionId, recoveryText: REBUILD });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId !== dispatch.turnId);
+    expect(recorder.events.filter((e) => e.type === "session.started")).toEqual([
+      expect.objectContaining({ rebuilt: true }),
+      expect.not.objectContaining({ rebuilt: true }),
+    ]);
+  });
+
+  it("says what failed when the fresh session ends in an error result too, after one rebuild", async () => {
+    process.env.FAKE_CLAUDE_MODE = "error-result";
+    const prompts = join(scratch, "error-prompts.jsonl");
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
+    await instance.adapter.sendTurn({ threadId: "t-error-result", text: "what now?", resumeCursor: "gone", recoveryText: REBUILD });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(launches(prompts)).toBe(2);
+    expect(recorder.events.filter((e) => e.type === "runtime.error")).toEqual([
+      expect.objectContaining({ message: expect.stringMatching(/^No conversation found with session ID: /) }),
+    ]);
+    expect(recorder.events.filter((e) => e.type === "turn.completed")).toEqual([
+      expect.objectContaining({ ok: false, stopReason: "error_during_execution" }),
+    ]);
   });
 
   it("never resends a turn the CLI accepted before dying", async () => {
@@ -3697,10 +3809,12 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
     // run tools on it — and then died with no output. That is the far side
     // of the acceptance boundary: replaying here is a duplicate side effect
     process.env.FAKE_CLAUDE_MODE = "resume-dies-after-init";
+    const prompts = join(scratch, "accepted-prompts.jsonl");
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
     await instance.adapter.sendTurn({ threadId: "t-accepted", text: "what now?", resumeCursor: "accepted-then-died", recoveryText: REBUILD });
     await recorder.until((e) => e.type === "turn.completed");
     expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: false });
-    expect(recorder.events.some((e) => e.type === "turn.retrying" && e.reason === "resume_rejected")).toBe(false);
+    expect(launches(prompts)).toBe(1);
   });
 
   it("never treats a crash on a fresh launch as a refused resume", async () => {
@@ -3708,10 +3822,12 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
     // this is an ordinary terminal failure, not a licence to send the turn
     // again
     process.env.FAKE_CLAUDE_MODE = "exit-early";
+    const prompts = join(scratch, "fresh-crash-prompts.jsonl");
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
     await instance.adapter.sendTurn({ threadId: "t-fresh-crash", text: "what now?", recoveryText: REBUILD });
     await recorder.until((e) => e.type === "turn.completed");
     expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: false });
-    expect(recorder.events.some((e) => e.type === "turn.retrying" && e.reason === "resume_rejected")).toBe(false);
+    expect(launches(prompts)).toBe(1);
   });
 
   it("does not rebuild when there was no session to resume", async () => {

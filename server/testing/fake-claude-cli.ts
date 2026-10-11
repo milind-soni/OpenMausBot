@@ -6,6 +6,11 @@
 //
 //   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed |
 //                      dead-session (fails only when --resume is passed)
+//                      | stale-session (a --resume launch answers each
+//                        message with the error result 2.1.295 gives a
+//                        session it no longer has, with no init, and stays
+//                        up until stdin ends) | error-result (every launch
+//                        answers that way, resumed or not)
 //                      | resume-dies-after-init (a --resume launch emits
 //                        init, then exits without result or output)
 //                      | stream (partial-message text deltas before the
@@ -14,7 +19,14 @@
 //                        sends, captured from 2.1.263)
 //                      | api-error (the CLI reports a non-auth API error as
 //                        assistant text, then an error result; no model output)
-//   FAKE_CLAUDE_API_ERROR text for the api-error frame (default: overloaded).
+//                      | usage-limit (the account's usage limit refused the
+//                        call: the api-error frame and result 2.1.295 sends,
+//                        code usage_limit_reached, carrying the refused window)
+//   FAKE_CLAUDE_API_ERROR text for the api-error frame (default: overloaded;
+//                      for usage-limit, the weekly limit's words).
+//   FAKE_CLAUDE_RATE_LIMIT JSON rate_limit_info: each turn reports it in a
+//                      `rate_limit_event` after init, as the CLI does from the
+//                      API's headers ({status, rateLimitType, resetsAt, …}).
 //   FAKE_CLAUDE_RELEASE with hang: the turn ends normally once this file exists.
 //   FAKE_CLAUDE_DUMP   path to write {argv, env, cwd, prompt, systemPrompt,
 //                      mcpConfig} as JSON at each turn this process is given
@@ -605,6 +617,17 @@ const playTurn = (prompt: JsonValue, late = false) => {
     process.stderr.write(`fake-claude: No conversation found with session ID: ${argAfter("--resume")}\n`);
     process.exit(1);
   }
+  // The same, as 2.1.295 says it after a long idle: an error result for the
+  // message, no `init`, and the process stays up for the next one.
+  if ((mode === "stale-session" && argv.includes("--resume")) || mode === "error-result") {
+    out({
+      type: "result", subtype: "error_during_execution", duration_ms: 0, is_error: true, num_turns: 0, stop_reason: null,
+      session_id: sessionId, total_cost_usd: 0, errors: [`No conversation found with session ID: ${sessionId}`],
+    });
+    turnRunning = false;
+    finishIfDone();
+    return;
+  }
 
   if (mode === "exit-early") {
     process.stderr.write("fake-claude: simulated crash before result\n");
@@ -636,6 +659,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
 
   // the real CLI re-announces init on every turn of a live process
   out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode, tools });
+  const rateLimit = process.env.FAKE_CLAUDE_RATE_LIMIT ? JSON.parse(process.env.FAKE_CLAUDE_RATE_LIMIT) : null;
+  if (rateLimit) out({ type: "rate_limit_event", rate_limit_info: rateLimit, session_id: sessionId });
 
   // a continuation that announces itself and then never speaks again
   if (lateContinuation && process.env.FAKE_CLAUDE_LATE_STEER_SILENT) {
@@ -654,6 +679,19 @@ const playTurn = (prompt: JsonValue, late = false) => {
 
   const resumedError = process.env.FAKE_CLAUDE_RESUMED_API_ERROR === "1" && argv.includes("--resume") && !resumedErrorPlayed;
   if (resumedError) resumedErrorPlayed = true;
+  if (mode === "usage-limit") {
+    // captured from 2.1.295 for an account past its weekly limit
+    const text = process.env.FAKE_CLAUDE_API_ERROR ?? "You've hit your weekly limit \u00b7 resets Oct 12 at 2:30pm (Asia/Calcutta)";
+    out({
+      type: "assistant", message: { model: "<synthetic>", stop_reason: "stop_sequence", content: [{ type: "text", text }] },
+      error: "rate_limit", is_api_error_message: true, api_error: "usage_limit_reached",
+      ...(rateLimit ? { api_error_params: { rate_limit_info: rateLimit } } : {}),
+    });
+    out({ type: "result", subtype: "success", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", api_error: "usage_limit_reached", result: text });
+    turnRunning = false;
+    finishIfDone();
+    return;
+  }
   if (mode === "api-error" || resumedError) {
     const text = process.env.FAKE_CLAUDE_API_ERROR ?? "API Error: 529 Overloaded. This is a server-side issue, usually temporary.";
     out({ type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text }] }, error: "unknown", is_api_error_message: true });

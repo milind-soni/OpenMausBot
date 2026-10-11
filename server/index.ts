@@ -140,6 +140,7 @@ import { connectorCardText } from "./connector-card-text.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { buildRecall } from "./recall.ts";
 import { hostTimeZone, takesTurnClock, turnClockLine, withTurnClock } from "./turn-clock.ts";
+import { rebuiltSessionNotice } from "./resume-recovery.ts";
 import { createMemoryUpkeep, upkeepEnabled } from "./memory-upkeep.ts";
 import type { CaptureTurn } from "./memory-capture.ts";
 import { appendAboutMe, commitLearned, planLearned } from "./profile-learned.ts";
@@ -3358,7 +3359,7 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
         text += (text ? "\n" : "") + e.text;
       } else if (e.type === "turn.completed") {
         if (e.ok) finish({ status: "reply", text: text || "(the bot finished without a text reply)" });
-        else finish({ status: "failed", text, stopReason: e.stopReason ?? null });
+        else finish({ status: "failed", text, stopReason: turnFailureCause(e) ?? null });
       }
     });
     // Timing out does NOT stop the peer's turn — the caller decides whether
@@ -6230,6 +6231,22 @@ function requestBehavior(value: unknown): "allow" | "deny" | "answer" | null {
 // the last settled assistant text per thread, so a "finished" notification
 // can carry what the bot actually said
 const lastReply = new Map<string, string>();
+/** What each thread's turn last said failed it (its runtime.error), kept
+ * until the thread's next turn starts: every listener of the turn's
+ * turn.completed reads it (turnFailureCause), whenever it runs. */
+const turnFailure = new Map<string, { turnId?: string; message: string }>();
+/** Why a settled turn failed, for whoever is told next — the person's
+ * incident, the Chief's delegation, ask and room results, the bot's work
+ * log: the turn's own last error ("This Claude account has reached its
+ * weekly limit, which resets …"), else the provider's stop token, which
+ * alone says little ("stop_sequence", "quota"). Undefined for a turn that
+ * did not fail. */
+function turnFailureCause(event: { threadId: string; turnId?: string; ok: boolean; stopReason?: string | null }): string | undefined {
+  if (event.ok) return undefined;
+  const failure = turnFailure.get(event.threadId);
+  if (failure && (!failure.turnId || !event.turnId || failure.turnId === event.turnId)) return failure.message;
+  return event.stopReason?.trim() || undefined;
+}
 /** Threads whose running turn a client abort ended (the abort sentence as
  * assistant text or as runtime.error), with that turn's id when known.
  * turn.completed reads it as a stop, not a failure, whatever stopReason the
@@ -6403,7 +6420,7 @@ bus.subscribe((event: RuntimeEvent) => {
     if (event.turnId && store.botByThread(event.threadId)) {
       const reply = store.messagesFor(event.threadId).findLast(message =>
         message.role === "bot" && message.kind === "text" && message.turnId === event.turnId);
-      const outcome = { ok: event.ok, text: (reply?.text || event.stopReason || "The bot finished without a text reply").slice(0, 12_000) };
+      const outcome = { ok: event.ok, text: (reply?.text || turnFailureCause(event) || event.stopReason || "The bot finished without a text reply").slice(0, 12_000) };
       const owner = directFollowupTurns.complete(event.threadId, event.turnId, outcome);
       if (owner) {
         settleDirectCoordination(owner.generation, outcome);
@@ -6575,7 +6592,7 @@ bus.subscribe((event: RuntimeEvent) => {
     const tools = messages
       .filter((message) => message.kind === "activity" && message.turnId === event.turnId && message.tool?.name)
       .map((message) => message.tool!.name);
-    const line = turnOutcomeLine({ ok: event.ok, reply: reply?.text, stopReason: event.stopReason, tools });
+    const line = turnOutcomeLine({ ok: event.ok, reply: reply?.text, stopReason: turnFailureCause(event), tools });
     if (!line) return;
     // A room fewer people can see than this bot leaves no line in its log:
     // session_search would hand it back in a chat anyone who sees the bot has.
@@ -7801,6 +7818,11 @@ bus.subscribe((event: RuntimeEvent) => {
       : proven ? { ...m, requestMessageId: owner.messageId } : m);
     return message;
   };
+  // informational: the turn carries on. The prefix keeps it a status row the
+  // person always sees (src/lib/activity-runs.ts), never a tool step hidden
+  // with Tool calls off.
+  const pushNotice = (words: string) =>
+    pushMessage({ role: "bot", kind: "activity", tool: { name: `notice: ${words.slice(0, 240)}`, ok: true } });
 
   // A client abort sometimes arrives as assistant text or as runtime.error.
   // That is a stop, not a failure: store one stopped row, drop any text the
@@ -7837,12 +7859,16 @@ bus.subscribe((event: RuntimeEvent) => {
       turnStartedAt.set(event.threadId, Date.now());
       // A stop that never saw its turn.completed must not pass for this turn.
       stoppedTurns.delete(event.threadId);
+      turnFailure.delete(event.threadId);
       break;
     case "session.started":
       if (bot && event.sessionId && event.providerInstanceId) {
         store.setResumeCursor(bot.id, event.providerInstanceId, event.sessionId, event.threadId);
       }
       if (typeof event.model === "string" && event.model) sessionModelByThread.set(event.threadId, event.model);
+      // The engine had lost this conversation's own session and the turn went
+      // on in one started from the chat: one line says what did not carry over.
+      if (event.rebuilt) pushNotice(rebuiltSessionNotice(registry.get(event.providerInstanceId ?? "")?.displayName ?? "The engine"));
       break;
     case "item.completed":
       if (event.itemType === "assistant_text") {
@@ -8136,16 +8162,14 @@ bus.subscribe((event: RuntimeEvent) => {
       });
       break;
     case "runtime.notice":
-      // informational: the turn carries on. The prefix keeps it a status row
-      // the person always sees (src/lib/activity-runs.ts), never a tool step
-      // hidden with Tool calls off.
-      pushMessage({ role: "bot", kind: "activity", tool: { name: `notice: ${event.message.slice(0, 240)}`, ok: true } });
+      pushNotice(event.message);
       break;
     case "runtime.error":
       if (errorTranscript(event.message).kind === "stopped") {
         pushStoppedTurn(event.turnId);
         break;
       }
+      turnFailure.set(event.threadId, { turnId: event.turnId, message: event.message });
       pushMessage({
         role: "bot",
         kind: "activity",
@@ -8259,7 +8283,7 @@ bus.subscribe((event: RuntimeEvent) => {
         turnResourceOwners.get(event.threadId)?.computerParkedOn !== undefined;
       if (!event.ok && !stopped && !lazyClaimAlreadyReported && !computerParked && !routines?.runForThread(event.threadId)) {
         const broken = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
-        if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: event.stopReason?.trim() || "the run ended without a result" });
+        if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: turnFailureCause(event) ?? "the run ended without a result" });
       }
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
@@ -8461,9 +8485,8 @@ bus.subscribe((event: RuntimeEvent) => {
       // the request was mirrored there when the delegation drained, and a
       // channel that only ever shows requests is half a record. Mirror the
       // reply on success; mirror a failed/stopped terminal chip otherwise.
-      const delegationFailureName = !event.ok && event.stopReason?.trim()
-        ? `Delegated turn did not finish — ${event.stopReason.trim().slice(0, 120)}`
-        : undefined;
+      const delegationFailure = turnFailureCause(event);
+      const delegationFailureName = delegationFailure ? `Delegated turn did not finish — ${delegationFailure.slice(0, 120)}` : undefined;
       finalizeDelegationWatch(event.threadId, event.ok, reply, delegationFailureName);
       // group busy/unread settle in the group turn engine, which knows
       // whether more member turns are queued behind this one
@@ -10263,7 +10286,7 @@ async function startTurn(
         const windowIds = selection.representedIds;
         return {
           turnText: withUnseenMessages(unseenBlock, contextTurnText),
-          resumeCursor, sessionReset: !resume, recoveryText, recoveryIsReplay,
+          resumeCursor, sessionReset: !resume, recoveryText,
           handoff: strictResume ? {
             botId: bot.id, instanceId, config, resumeCursor: typeof resumeCursor === "string" ? resumeCursor : undefined,
             ...(instance.driverKind === "codex" ? { effort: effort ?? null } : {}),
@@ -11084,7 +11107,6 @@ async function startTurn(
         resumeCursor: dispatchContext.resumeCursor,
         sessionReset: dispatchContext.sessionReset,
         ...(dispatchContext.recoveryText !== undefined ? { recoveryText: withTurnClock(clock, dispatchContext.recoveryText) } : {}),
-        ...(dispatchContext.recoveryIsReplay ? { recoveryIsReplay: true } : {}),
         transcript,
         system: prompt.text,
         systemStable: prompt.stable,
@@ -13532,7 +13554,7 @@ async function runGroupMemberTurn(
       if (providerTurnId && e.turnId && e.turnId !== providerTurnId) return;
       if (e.type === "item.completed" && e.itemType === "assistant_text") replyText += `\n${e.text}`;
       else if (e.type === "turn.completed") {
-        const end = roomTurnEnd(e, Boolean(orchestration), roomClaimFailure);
+        const end = roomTurnEnd({ ok: e.ok, stopReason: turnFailureCause(e) }, Boolean(orchestration), roomClaimFailure);
         if (orchestration && end.stopReason !== undefined) orchestration.result.stopReason = end.stopReason;
         finish(end.outcome);
       }

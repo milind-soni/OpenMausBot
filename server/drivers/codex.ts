@@ -1908,12 +1908,14 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               promptSubmitted,
               producedOutput: state.sawStreamDelta,
             });
-            if ((!config.managed && !turn.recoveryIsReplay) || recoveredMissingSession || stopRequested || state.settled ||
+            if (recoveredMissingSession || stopRequested || state.settled ||
                 !turn.recoveryText?.trim() || !missingNativeCodexThread(error, cursor) || !mayReplay(failure)) throw error;
-            // The prompt has never been submitted. Rebuild missing Company
-            // histories, and a personal thread only for a turn whose recovery
-            // text is the replay it would have had anyway; once, through the
-            // same approved model/provider below.
+            // The prompt has never been submitted and Codex no longer has the
+            // thread: without a rebuild every later turn resumes the same
+            // missing rollout and fails the same way. Rebuild it from the
+            // chat, Company or personal, as Claude does for a refused resume;
+            // once, through the same approved model/provider below. The
+            // person is told (the harness's notice on session.started).
             recoveredMissingSession = true;
             const rebuild = recoveryPromptFor({ recoveryText: turn.recoveryText, currentText: turn.text, failure });
             // Announced as rebuilt only when the replacement really carries the

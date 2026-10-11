@@ -1720,14 +1720,9 @@ export class RoutineManager {
       if (event.cost != null) run.cost = (run.cost ?? 0) + event.cost;
       if (event.denials?.length) run.denials = [...new Set([...(run.denials ?? []), ...event.denials])];
       if (!event.ok) {
-        const genericStopReason = event.stopReason === "error" || event.stopReason === "tool_error";
-        this.failRun(
-          run,
-          (genericStopReason ? run.error : undefined) ??
-            event.stopReason ??
-            run.error ??
-            "The bot did not complete this run",
-        );
+        // the run's own last error says what failed it; a provider's stop
+        // token ("error", "quota", "stop_sequence") alone says little
+        this.failRun(run, run.error ?? event.stopReason ?? "The bot did not complete this run");
         queueMicrotask(() => void this.tick());
         return cloneRun(run);
       }
