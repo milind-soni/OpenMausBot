@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import { writeFileAtomic } from "./atomic.ts";
+import { workOriginSchema, type WorkOrigin } from "./peer-provenance.ts";
 
 const nodeSchema = z.object({
   id: z.string(), rootId: z.string(), parentId: z.string().optional(),
@@ -14,6 +15,9 @@ const nodeSchema = z.object({
   lastProgressAt: z.number().optional(),
   approvalGranted: z.boolean().default(false),
   kind: z.enum(["work", "assignment"]).default("work"),
+  /** On a root: where the tree's work started (peer-provenance.ts). Every
+   * node in the tree is framed by it; absent is outside. */
+  origin: workOriginSchema.optional(),
   /** Turns of this node a restart cut and ran again in place. */
   restarts: z.number().int().nonnegative().default(0),
   /** Its next turn, or the one running now, follows a restart and says so:
@@ -393,7 +397,7 @@ export class RoomHandoffs {
 
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined,
     target: RoomAddress, key: string, text: string, approvalGranted = false,
-    rework = false, sourceText = "", requestBatchKey?: string): { node: RoomHandoff; duplicate: boolean } {
+    rework = false, sourceText = "", requestBatchKey?: string, origin?: WorkOrigin): { node: RoomHandoff; duplicate: boolean } {
     if (this.loadError) throw new Error(this.loadError);
     let parent = parentId ? this.nodes.get(parentId) : this.nodes.get(generation);
     if (parentId && (!parent || parent.status !== "running")) throw new Error("The originating room task is no longer running");
@@ -401,7 +405,8 @@ export class RoomHandoffs {
       throw new Error("The handoff belongs to a different room speaker");
     }
     const fresh = !parent;
-    parent ??= { ...source, id: generation, rootId: generation, key: "root", text: sourceText.slice(0, 12_000), createdAt: this.now(), status: "source", result: "", reported: true, executions: 0, approvalGranted: false, kind: "work", restarts: 0 };
+    parent ??= { ...source, id: generation, rootId: generation, key: "root", text: sourceText.slice(0, 12_000), createdAt: this.now(), status: "source", result: "", reported: true, executions: 0, approvalGranted: false, kind: "work", restarts: 0,
+      ...(origin ? { origin } : {}) };
     const kind = target.groupId && target.groupId === source.groupId ? "assignment" : "work";
     const path = this.path(parent);
     if (path.some(n => n.botId === target.botId && (!n.groupId || !target.groupId || n.groupId === target.groupId))) {

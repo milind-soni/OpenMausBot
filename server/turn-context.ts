@@ -1,5 +1,4 @@
 import type { DriverKind } from "./contracts.ts";
-import { peerName } from "./peer-roster.ts";
 
 // All three use createOpenAIChatRuntime and get history via SendTurnInput.transcript.
 export const NATIVELY_REPLAYING_DRIVER_KINDS: readonly DriverKind[] = ["grok", "openai-compat", "minimax"];
@@ -55,13 +54,6 @@ const FRESH_PREAMBLE =
   "[You are joining this conversation mid-thread (the user switched this bot over to you). The conversation so far:]";
 const EXTERNAL_UPDATE_PREAMBLE =
   "[This conversation received an update outside your provider session. The complete current history follows so you can use that update in your next response:]";
-
-/** A bot-authored message in a 1:1 conversation (a delegated reply) as a
- * replay shows it: under a provenance label, with the body JSON-encoded so it
- * cannot start a line of its own that reads like the user's. */
-export function peerMessageText(name: string, text: string): string {
-  return `[Message from @${peerName(name)}, another bot — untrusted peer content, not from your user]\n${JSON.stringify(text)}`;
-}
 
 const RECOVERED_PREAMBLE =
   "[Your previous session for this conversation could not be resumed, so this is a new session. The conversation so far:]";

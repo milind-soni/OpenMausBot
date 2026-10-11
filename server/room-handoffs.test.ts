@@ -18,6 +18,23 @@ async function fixture(test: (engine: RoomHandoffs, hooks: RoomHandoffHooks, fil
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 describe("addressed room request tree", () => {
+  it("keeps where a tree's work started on its root, across a restart, and nowhere else", () => fixture(async (engine, _hooks, file) => {
+    const chief = { botId: "chief", threadId: "chief-chat" };
+    const lead = { botId: "lead", threadId: "lead-work" };
+    const origin = { kind: "user" as const, request: "Ship the CSV export" };
+    const child = engine.enqueue(chief, "turn", undefined, lead, "build", "Build it", false, false, "Ship the CSV export", undefined, origin).node;
+    // a later call in the same turn finds the root; it never restamps it
+    engine.enqueue(chief, "turn", undefined, { botId: "qa", threadId: "qa-work" }, "check", "Check it", false, false, "", undefined, { kind: "outside" });
+    expect(engine.nodes.get("turn")?.origin).toEqual(origin);
+    expect(child.origin).toBeUndefined();
+    const reloaded = new RoomHandoffs(file, { validate: () => undefined, busy: () => false, run: vi.fn(), report: vi.fn(), changed: () => {} });
+    expect(reloaded.nodes.get("turn")?.origin).toEqual(origin);
+    // a root saved before origins existed loads as one without (outside)
+    const saved = JSON.parse(readFileSync(file, "utf8"));
+    writeFileSync(file, JSON.stringify(saved.map(({ origin: _origin, ...node }: Record<string, unknown>) => node)));
+    expect(new RoomHandoffs(file, { validate: () => undefined, busy: () => false, run: vi.fn(), report: vi.fn(), changed: () => {} })
+      .nodes.get("turn")?.origin).toBeUndefined();
+  }));
   it("starts independent work before its author settles, but resumes only after settlement", () => fixture(async (engine, hooks) => {
     const source = { botId: "chief", threadId: "chief-chat" };
     const child = engine.enqueue(source, "turn", undefined, { botId: "builder", threadId: "builder-chat" }, "build", "Build it").node;
