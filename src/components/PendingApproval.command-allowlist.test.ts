@@ -21,7 +21,7 @@ function message(extra: Partial<NonNullable<Message["card"]>> = {}): Message {
       tool: "Bash", requestId: "request-1", allowSession: true, commandAllowlist, ...extra },
   };
 }
-type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
+type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; "aria-label"?: string }>;
 function nodes(value: ReactNode): Node[] {
   if (!isValidElement(value)) return [];
   const node = value as Node;
@@ -63,7 +63,7 @@ describe("remembering exact command approvals", () => {
     expect(result.html).toContain("Always allow this command");
     expect(result.html).toContain("/work/project");
     expect(result.html).not.toContain("Always allow this session");
-    result.buttons.find((button) => button.props.children === "Always allow this command")!.props.onClick!();
+    result.buttons.find((button) => button.props["aria-label"] === "Always allow this command")!.props.onClick!();
     expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       type: "decideRequest", threadId: "thread-1", requestId: "request-1", behavior: "allow", rememberCommand: true,
       alwaysAllow: undefined, always: undefined,
@@ -89,7 +89,7 @@ describe("remembering exact command approvals", () => {
   });
 
   it("preserves session approval for requests without an exact command", () => {
-    view({ commandAllowlist: undefined }).buttons.find((button) => button.props.children === "Always allow this session")!.props.onClick!();
+    view({ commandAllowlist: undefined }).buttons.find((button) => button.props["aria-label"] === "Always allow this session")!.props.onClick!();
     expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       behavior: "allow", always: true, rememberCommand: undefined,
     }));
@@ -109,5 +109,57 @@ describe("remembering exact command approvals", () => {
       operation: { action: "run_now", routineId: "routine-1", expectedUpdatedAt: 1 } } });
     expect(result.html).not.toContain("Always allow");
     expect(result.html).toContain("Confirm");
+  });
+
+  it("puts the decision on the same row and Cancel turn behind the chevron", () => {
+    const pending = pendingApprovals([message()])[0]!;
+    const slot = (part: "primary" | "more") =>
+      PendingApprovalActions({ pending, bot, threadId: "thread-1", onCancelTurn: vi.fn(), part });
+    const html = renderToStaticMarkup(createElement(PendingApprovalPanel, {
+      pending, count: 1, index: 0, botName: "Scout", actions: slot("primary"), more: slot("more"),
+    }));
+    const details = html.indexOf('id="approval-details-');
+    const row = html.slice(0, details);
+    expect(row).toContain(">Deny</button>");
+    expect(row).toContain(">Allow once</button>");
+    // one short label, the scope is in its name and tooltip
+    expect(row).toContain('aria-label="Always allow this command"');
+    expect(row).toContain(">Always allow</button>");
+    expect(row).not.toContain("Cancel turn");
+    expect(html.slice(details)).toContain("Cancel turn");
+  });
+
+  it("never offers always allow on code or a real send", () => {
+    for (const tool of ["COMPOSIO_PROXY_EXECUTE", "SLACK_SEND_MESSAGE"]) {
+      const result = view({ tool, commandAllowlist: undefined, allowSession: undefined, allowKey: undefined,
+        heldCode: "approval.held.outbound", outboundRequest: { tool, app: "Slack", calls: [{ app: "Slack", label: "Send" }] } });
+      expect(result.html).toContain("Allow once");
+      expect(result.html).not.toContain("Always allow");
+    }
+  });
+
+  it("keeps the answers flat, with a ring only for keyboard focus", () => {
+    const tree = PendingApprovalActions({ pending: pendingApprovals([message()])[0]!, bot, threadId: "thread-1", onCancelTurn: vi.fn(), part: "primary" });
+    const classes = nodes(tree).filter((node) => node.type === "button").map((node) => String((node.props as { className?: string }).className));
+    expect(classes).toHaveLength(3);
+    for (const name of classes) {
+      expect(name).not.toMatch(/(^|\s)(border|shadow|ring-\d)/);
+      expect(name).toContain("focus-visible:ring-2");
+      expect(name).toContain("h-7");
+      expect(name).toContain("text-[13px] font-medium");
+      // equal visual mass: every answer has a fill, Deny keeps red text
+      expect(name).toMatch(/(^|\s)bg-/);
+    }
+    expect(classes[0]).toContain("text-danger");
+  });
+
+  it("lines the row up on the text baseline with the command in a 28px mono pill", () => {
+    const pending = pendingApprovals([message()])[0]!;
+    const html = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending, count: 1, index: 0, botName: "Scout" }));
+    const row = html.slice(0, html.indexOf('id="approval-details-'));
+    expect(row).toContain("flex flex-wrap items-baseline gap-x-2");
+    expect(row).toMatch(/<code class="[^"]*font-mono text-\[12\.5px\] leading-5[^"]*pb-\[3px\] pt-\[5px\][^"]*"[^>]*><span class="truncate">git status --short<\/span><\/code>/);
+    // icons sit on the row's center, not on a text baseline
+    expect(row).toMatch(/<svg[^>]*class="[^"]*self-center[^"]*"/);
   });
 });

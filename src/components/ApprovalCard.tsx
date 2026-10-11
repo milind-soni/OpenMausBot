@@ -4,7 +4,7 @@
 // approval is a decision about one concrete action, so it shows the tool
 // and the actual command/path in monospace, and the choices carry their
 // own behavior instead of being matched by their label text.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Check, ShieldCheck, Undo2, X } from "lucide-react";
 import { api, ApiError, type Bot, type Message, type OptionCardData } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -213,9 +213,9 @@ function AppliedChangeLine({
       .finally(() => setUndoing(false));
   };
   return (
-    <div className="w-full max-w-[840px] text-[13px] text-ink-secondary" data-applied-change={name}>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        {undone ? <Undo2 size={14} className="shrink-0" /> : <Check size={14} className="shrink-0 text-success" />}
+    <div className="w-full max-w-[840px] text-[12.5px] text-ink-tertiary" data-applied-change={name}>
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 leading-5">
+        {undone ? <Undo2 size={13} className="shrink-0 self-center" /> : <Check size={13} className="shrink-0 self-center text-success/80" />}
         <span className="min-w-0 break-words">
           {summary.line}
           {undone && <span> · {t("approval.applied.undone")}</span>}
@@ -225,7 +225,7 @@ function AppliedChangeLine({
             type="button"
             onClick={undo}
             disabled={undoing}
-            className="rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-inset disabled:opacity-60"
+            className={cn(TEXT_ACTION, "text-accent disabled:opacity-60")}
           >
             {undoing ? t("approval.applied.undoing") : t("approval.applied.undo")}
           </button>
@@ -234,7 +234,7 @@ function AppliedChangeLine({
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((value) => !value)}
-          className="rounded-md px-1.5 py-0.5 text-ink-tertiary hover:bg-inset hover:text-ink-secondary"
+          className={cn(TEXT_ACTION, "text-ink-tertiary hover:text-ink-secondary")}
         >
           {open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
         </button>
@@ -244,9 +244,118 @@ function AppliedChangeLine({
         <pre
           tabIndex={0}
           aria-label={t("approval.aria.appliedDetails")}
-          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink"
+          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-3xl bg-inset px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink"
         >
           {card.subtitle}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+/** One line for an action the composer answers: who wants what, then
+ * where it stands. A command shows itself in small monospace, since that
+ * is what the person is deciding on. Anything else (a send's arguments,
+ * code run on an app's side) stays behind Details. */
+/** A command shown inline. Mono runs larger than Inter at the same size,
+ * so 12.5px gives it the 13px label's x-height. The pill is 24px and sits
+ * on the label's baseline (rows align by baseline, not box). Mono's
+ * baseline sits higher in its line than Inter's, so the pill takes the
+ * extra space above to stay centered on the row. The text truncates. */
+export const APPROVAL_CODE_CHIP =
+  "inline-flex min-w-0 max-w-full items-baseline rounded-full bg-inset px-2 pb-px pt-[3px] font-mono text-[12.5px] leading-5 text-ink";
+
+/** Undo and Details on a one-line record: the same pill, centered, as the
+ * composer's controls, a step quieter. */
+const TEXT_ACTION =
+  "inline-flex h-6 items-center rounded-full px-2 hover:bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
+
+function firstLineOf(text: string): string {
+  const line = text.split("\n", 1)[0] ?? "";
+  return line.length > 80 ? `${line.slice(0, 79)}…` : line;
+}
+
+function CompactApprovalRow({
+  header,
+  summary,
+  detail,
+  showDetailInline,
+  outcome,
+  allowed,
+  byVoice,
+  waiting,
+  answeredBelow,
+}: {
+  header: string;
+  summary?: string;
+  detail: string;
+  showDetailInline: boolean;
+  outcome?: string;
+  allowed: boolean;
+  byVoice: ReactNode;
+  waiting: boolean;
+  /** the composer is showing this ask with its answers */
+  answeredBelow: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = () => setOpen((value) => !value);
+  // While the composer shows the ask, a visible line here would say the
+  // same thing twice. Screen readers still find it in place, pointing down.
+  if (waiting && answeredBelow) {
+    return (
+      <div data-approval-row="pending" className="sr-only">
+        {header}{summary ? ` ${summary}` : ""}{detail && showDetailInline ? ` ${firstLineOf(detail)}` : ""}. {t("approval.status.waitingAnswer")}
+      </div>
+    );
+  }
+  return (
+    <div
+      data-tour={waiting ? "approval" : undefined}
+      data-approval-row={waiting ? "pending" : "settled"}
+      className={cn("w-full max-w-[840px] text-[13px]", waiting ? "text-ink-secondary" : "text-ink-tertiary")}
+    >
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 leading-5">
+        {waiting
+          ? <ShieldCheck size={14} className="shrink-0 self-center text-accent" aria-hidden="true" />
+          : allowed
+            ? <Check size={14} className="shrink-0 self-center text-success" aria-hidden="true" />
+            : <X size={14} className="shrink-0 self-center" aria-hidden="true" />}
+        <span className={cn("min-w-0 break-words", waiting && "text-ink")}>{header}</span>
+        {summary && <span className="min-w-0 break-words">{waiting ? summary : `· ${summary}`}</span>}
+        {detail && showDetailInline && (
+          // The command is the button's own name. The group says what it is.
+          <span role="group" aria-label={t("approval.aria.details")} className="min-w-0 max-w-full">
+            <button
+              type="button"
+              aria-expanded={open}
+              title={detail}
+              onClick={toggle}
+              className={cn(APPROVAL_CODE_CHIP, "text-left hover:bg-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus")}
+            >
+              <span className="truncate">{detail}</span>
+            </button>
+          </span>
+        )}
+        <span className="shrink-0" aria-live="polite">· {outcome ?? t("approval.status.waitingAnswer")}</span>
+        {byVoice}
+        {detail && !showDetailInline && (
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={toggle}
+            className={cn(TEXT_ACTION, "text-ink-tertiary hover:text-ink-secondary")}
+          >
+            {open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
+          </button>
+        )}
+      </div>
+      {open && (
+        <pre
+          tabIndex={0}
+          aria-label={t("approval.aria.details")}
+          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-3xl bg-inset px-4 py-3 font-mono text-[12px] leading-relaxed text-ink"
+        >
+          {detail}
         </pre>
       )}
     </div>
@@ -306,6 +415,35 @@ export function ApprovalCard({
           target: card.profileRequest.targetName,
         })
     : undefined;
+
+  // A permission or a held send is answered in the composer, which shows
+  // the whole request while it waits. The transcript keeps one quiet line
+  // for it, so one ask never reads as two cards, and a settled one never
+  // stays a big box. Proposals and team setup keep the full card: their
+  // content is what the person reviews.
+  if (!isRoutineRequest && !isSkillRequest && !isProfileRequest && !isTeamSetup && !card.modelRequest) {
+    const waiting = !settled && !expired;
+    // The question mark belongs to the ask, not to the record of it.
+    const header = outbound
+      ? waiting ? outbound.headline : outbound.headline.replace(/\s*[?？]$/, "")
+      : bot
+        ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })
+        : t("approval.card.wantsTo", { action: toolLabel(displayTool) });
+    return (
+      <CompactApprovalRow
+        header={header}
+        summary={outbound?.summary || undefined}
+        detail={card.subtitle}
+        showDetailInline={!outbound}
+        outcome={outcome}
+        allowed={settled === "allow" && !expired}
+        byVoice={byVoice}
+        waiting={waiting}
+        // the same cards pendingApprovals hands the composer
+        answeredBelow={Boolean(card.requestId && card.tool && !card.dismissed)}
+      />
+    );
+  }
 
   return (
     <div

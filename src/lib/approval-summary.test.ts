@@ -113,3 +113,11 @@ describe("composioActionPhrase", () => {
     expect(composioActionPhrase("LINEAR")).toBeUndefined();
   });
 });
+
+describe("outboundSummary for code run on the app's side", () => {
+  it("says code runs on Composio instead of naming a send", () => {
+    const card = { subtitle: 'Composio · Proxy execute\n{"code_to_execute":"print(1)"}',
+      outboundRequest: { tool: "COMPOSIO_PROXY_EXECUTE", app: "Composio", calls: [{ app: "Composio", label: "Proxy execute" }] } };
+    expect(outboundSummary(card)).toEqual({ headline: "Run code on Composio?", summary: "", opaque: true });
+  });
+});

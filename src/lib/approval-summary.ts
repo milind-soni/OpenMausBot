@@ -78,13 +78,30 @@ export interface OutboundSummary {
   headline: string;
   /** "Create linear comment ×2"; empty when the request could not be read. */
   summary: string;
+  /** The request runs code the app cannot read (Composio's workbench or
+   * proxy). Its raw arguments are code, not a message, so the card keeps
+   * them behind Details. */
+  opaque?: true;
 }
+
+/** The slug the server files every unreadable code request under
+ * (shared/outbound.ts connectorCallsIn). */
+const OPAQUE_TOOL = "COMPOSIO_PROXY_EXECUTE";
 
 /** Headline and summary for an outbound card; undefined for any other card. */
 export function outboundSummary(card: Pick<OptionCardData, "outboundRequest" | "subtitle">): OutboundSummary | undefined {
   if (!card.outboundRequest) return undefined;
   const calls = outboundCalls(card);
   const app = outboundApp(calls);
+  if (card.outboundRequest.tool === OPAQUE_TOOL) {
+    // "Send to Composio? Proxy execute" reads as if something were sent.
+    // Say what is actually asked: code runs on the app's side.
+    return {
+      headline: t("approval.outbound.runCode", { app: app ?? card.outboundRequest.app ?? "Composio" }),
+      summary: "",
+      opaque: true,
+    };
+  }
   return {
     headline: app ? t("approval.outbound.sendTo", { app }) : t("approval.outbound.sendOnBehalf"),
     summary: collapseOutboundCalls(calls, app === null),

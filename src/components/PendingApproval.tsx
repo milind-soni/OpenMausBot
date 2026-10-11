@@ -7,13 +7,14 @@
 // the detail printed raw in a monospace block that is NEVER truncated
 // (it scrolls instead), and the buttons ordered least-destructive-last so
 // the primary action sits under your thumb.
-import { memo } from "react";
+import { memo, useState, type ReactNode } from "react";
+import { ChevronDown, Send, ShieldCheck, TriangleAlert } from "lucide-react";
 import { useStore, type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
-import { toolLabel } from "./ApprovalCard";
+import { APPROVAL_CODE_CHIP, toolLabel } from "./ApprovalCard";
 import { outboundSummary } from "@/lib/approval-summary";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -134,22 +135,73 @@ function label(pending: Pending): string {
   return key ? t(key) : t("approval.label.requested");
 }
 
+/** One look for every button and chip in the approval row: 28px tall,
+ * 13px medium text centred with room for Arabic and other scripts that
+ * reach below the baseline, icon and text on one line with one gap. */
+export const APPROVAL_CONTROL =
+  "inline-flex h-7 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[13px] font-medium leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
+
+const COMMAND_TOOLS = new Set(["Bash", "shell"]);
+
+/** The first line of a request, for the one-line row. The whole of it is
+ * one tap away under the chevron. */
+function firstLine(text: string): string {
+  return (text.split("\n").find((line) => line.trim()) ?? "").trim();
+}
+
+function isDurable(pending: Pending): boolean {
+  const card = pending.message.card;
+  return isSkillApproval(pending) || isRoutineApproval(pending) || isProfileApproval(pending) ||
+    Boolean(card?.teamSetupRequest) || Boolean(card?.modelRequest);
+}
+
+/** What the row says, and the short inline monospace text after it. */
+function rowText(pending: Pending, botName?: string): { line: string; inline?: string } {
+  const card = pending.message.card;
+  const outbound = card ? outboundSummary(card) : undefined;
+  if (outbound) return { line: outbound.headline };
+  if (isDurable(pending)) return { line: label(pending) };
+  const detail = firstLine(pending.commandAllowlist?.command ?? pending.detail);
+  if (!botName) return { line: label(pending), inline: detail || undefined };
+  if (COMMAND_TOOLS.has(pending.tool)) return { line: t("approval.compact.wantsToRun", { name: botName }), inline: detail || undefined };
+  return { line: t("approval.card.namedWantsTo", { name: botName, action: toolLabel(pending.tool) }), inline: detail || undefined };
+}
+
+/** The pending approval above the composer: one row with what is asked
+ * and the answers. Everything else (the full request, why it asks, Cancel
+ * turn) opens under the chevron. */
 export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   pending,
   count,
   index,
+  botName,
+  actions,
+  more,
 }: {
   pending: Pending;
   count: number;
   index: number;
+  /** who is asking, for "Dev wants to run git status" */
+  botName?: string;
+  /** Deny and Allow once, on the row. */
+  actions?: ReactNode;
+  /** Cancel turn, under the chevron. */
+  more?: ReactNode;
   /** The active locale. Not read here: it is the memo key, the same way the
    * transcript takes one. Every line in this panel comes from the catalog,
    * and nothing else about a pending approval changes with the language. */
   locale?: string;
 }) {
-  const heldNote = tFromServer(pending.heldCode, pending.held);
+  const [open, setOpen] = useState(false);
   // A held outbound action names where it sends and what, not its slug.
   const outbound = pending.message.card ? outboundSummary(pending.message.card) : undefined;
+  // Code is held because nothing can tell what it will send, not because it
+  // is known to send. Say that, rather than "This sends something".
+  const heldNote = outbound?.opaque && pending.heldCode === "approval.held.outbound"
+    ? t("approval.held.code")
+    : tFromServer(pending.heldCode, pending.held);
+  const { line, inline } = rowText(pending, botName);
+  const detailsId = `approval-details-${pending.requestId}`;
   return (
     <div
       role="region"
@@ -162,52 +214,83 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
               ? t("approval.aria.pendingProfile")
               : t("approval.aria.pending")
       }
-      className="rounded-t-2xl border-b border-hairline/50 bg-control/40 px-4 py-3"
+      className="px-3 py-2"
     >
-      <div className="flex flex-wrap items-center gap-2" aria-live="polite">
-        <span className="text-[11px] uppercase tracking-[0.18em] text-ink-secondary">
-          {t("approval.pending")}
-        </span>
-        {count > 1 && (
-          <span className="rounded-full bg-control px-1.5 py-0.5 text-[11px] tabular-nums text-ink-secondary">
-            {t("approval.position", { index: index + 1, count })}
-          </span>
-        )}
-        <span className="text-[13px] text-ink">{outbound ? outbound.headline : label(pending)}</span>
-        {outbound ? (
-          outbound.summary && <span className="text-[13px] text-ink-secondary">{outbound.summary}</span>
-        ) : !pending.message.card?.teamSetupRequest && <span className="font-mono text-[11px] text-ink-secondary">
-          {isSkillApproval(pending)
-            ? pending.message.card?.skillRequest?.action === "update" ? "update_skill" : "stage_skill"
-            : isRoutineApproval(pending)
-            ? pending.message.card?.routineRequest?.operation.action === "create"
-              ? "schedule_routine"
-              : "manage_routine"
-            : isProfileApproval(pending)
-              ? "update_profile"
-              : pending.tool}
-        </span>}
+      {/* One line at normal widths. When the pane is narrow the answers
+          drop under the text instead of squeezing it. Items line up on
+          the text baseline, icons on the center. */}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-2">
+        {/* centered on the row, so a mono chip's metrics never move it */}
+        <ShieldCheck size={16} className="shrink-0 self-center text-accent" aria-hidden="true" />
+        <div className="flex min-w-0 flex-1 basis-52 items-baseline gap-2" aria-live="polite">
+          {/* the short label keeps its words; a long command gives way first */}
+          <span className="min-w-0 max-w-[60%] shrink-0 truncate text-[13px] font-medium leading-5 text-ink" title={line}>{line}</span>
+          {outbound?.summary && (
+            <span className="min-w-0 shrink-[4] truncate text-[13px] leading-5 text-ink-secondary" title={outbound.summary}>{outbound.summary}</span>
+          )}
+          {/* 28px like the buttons: 2px more on each side of the 24px pill */}
+          {inline && (
+            <code className={cn(APPROVAL_CODE_CHIP, "shrink-[4] pb-[3px] pt-[5px]")} title={inline}>
+              <span className="truncate">{inline}</span>
+            </code>
+          )}
+          {heldNote && (outbound ? (
+            // the reason it asks, as a marker; the sentence is in its tooltip
+            // and under the chevron
+            <span title={heldNote} className={cn(APPROVAL_CONTROL, "h-auto cursor-default items-baseline bg-warning/10 px-2.5 py-1 text-warning")}>
+              <Send size={13} aria-hidden="true" className="self-center" />
+              {t("approval.compact.maySend")}
+            </span>
+          ) : (
+            <span title={heldNote} className="inline-flex shrink-0 self-center text-warning">
+              <TriangleAlert size={14} aria-hidden="true" />
+              <span className="sr-only">{heldNote}</span>
+            </span>
+          ))}
+          {count > 1 && (
+            <span className="shrink-0 rounded-full bg-control px-1.5 text-[11px] leading-5 tabular-nums text-ink-secondary">
+              {t("approval.position", { index: index + 1, count })}
+            </span>
+          )}
+        </div>
+        <div className="ml-auto flex shrink-0 items-baseline gap-2">
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={detailsId}
+            aria-label={open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
+            title={open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
+            onClick={() => setOpen((value) => !value)}
+            className={cn(APPROVAL_CONTROL, "w-7 self-center px-0 text-ink-tertiary hover:bg-ink/10 hover:text-ink")}
+          >
+            <ChevronDown size={16} aria-hidden="true" className={cn("transition-transform", open && "rotate-180")} />
+          </button>
+          {actions}
+        </div>
       </div>
-      {/* never truncated — long commands wrap and scroll */}
-      <pre
-        tabIndex={0}
-        aria-label={
-          isSkillApproval(pending)
-            ? t("approval.aria.reviewSkill")
-            : isRoutineApproval(pending)
-              ? t("approval.aria.reviewRoutine")
-              : isProfileApproval(pending)
-                ? t("approval.aria.reviewProfile")
-                : t("approval.aria.reviewDetails")
-        }
-        className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-ink"
-      >
-        {pending.commandAllowlist?.command ?? pending.detail}
-      </pre>
-      {pending.message.card?.skillRequest && (
-        <SkillRequestPreview request={pending.message.card.skillRequest} />
-      )}
-      {heldNote && <div className="mt-2 text-[12px] text-warning">{heldNote}</div>}
+      <div id={detailsId} hidden={!open} className="mt-2 space-y-2 px-0.5">
+        {/* never truncated here — long commands wrap and scroll */}
+        <pre
+          tabIndex={0}
+          aria-label={
+            isSkillApproval(pending)
+              ? t("approval.aria.reviewSkill")
+              : isRoutineApproval(pending)
+                ? t("approval.aria.reviewRoutine")
+                : isProfileApproval(pending)
+                  ? t("approval.aria.reviewProfile")
+                  : t("approval.aria.reviewDetails")
+          }
+          className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-3xl bg-inset px-4 py-3 font-mono text-[12px] leading-relaxed text-ink"
+        >
+          {pending.commandAllowlist?.command ?? pending.detail}
+        </pre>
+        {pending.message.card?.skillRequest && (
+          <SkillRequestPreview request={pending.message.card.skillRequest} />
+        )}
+        {heldNote && <div className="text-[12px] text-warning">{heldNote}</div>}
+        {more}
+      </div>
     </div>
   );
 });
@@ -217,12 +300,16 @@ export function PendingApprovalActions({
   threadId,
   bot,
   onCancelTurn,
+  part,
 }: {
   pending: Pending;
   threadId: string;
   /** who asked — "always allow" is remembered against them */
   bot?: Bot;
   onCancelTurn: () => void;
+  /** "primary": Deny, the one "always" grant that applies, and Allow once,
+   * for the row. "more": Cancel turn, for the details. Both when omitted. */
+  part?: "primary" | "more";
 }) {
   const { dispatch } = useStore();
   const ownerOrAdmin = useOwnerOrAdmin();
@@ -251,64 +338,73 @@ export function PendingApprovalActions({
       rememberCommand: rememberCommand || undefined,
     });
 
-  const base = "rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors";
+  const showPrimary = part !== "more";
+  const showMore = part !== "primary";
+  // At most one "always" grant applies, and each is an existing one: a
+  // harness-native card remembers its allowKey on the bot, an exact shell
+  // command goes to the command allowlist, a provider (or a chat tool,
+  // #2484) keeps a session allow. Held sends and app code carry none of
+  // these, so they never offer it. The button says "Always allow"; its
+  // name and tooltip say exactly what is remembered.
+  const always = durableRequest ? null
+    : bot && pending.allowKey
+      ? { name: t("approval.action.alwaysAllow"), hint: t("approval.action.stopAsking", { name: bot.name, key: pending.allowKey }), run: () => decide("allow", true) }
+      : canRememberCommand && pending.commandAllowlist
+        ? { name: t("approval.action.alwaysAllowCommand"), hint: t("approval.action.alwaysAllowCommandHint", { cwd: pending.commandAllowlist.cwd }), run: () => decide("allow", false, true) }
+        : !pending.allowKey && pending.allowSession
+          ? { name: t("approval.action.alwaysAllowSession"), hint: t("approval.action.alwaysAllowSessionHint"), run: () => decide("allow", true) }
+          : null;
+  // Stopping the whole turn is the rare way out, so it lives with the
+  // details, away from the answers.
+  const more = showMore && !durableRequest ? [
+    <button key="cancel" type="button" onClick={onCancelTurn} className={cn(APPROVAL_CONTROL, "bg-ink/[0.07] text-ink-secondary hover:bg-ink/[0.12] hover:text-ink")}>
+      {t("approval.action.cancelTurn")}
+    </button>,
+  ] : [];
+  const primary = showPrimary ? [
+    <button
+      key="deny"
+      type="button"
+      onClick={() => decide("deny")}
+      autoFocus={isTeamSetup}
+      className={cn(APPROVAL_CONTROL, "bg-ink/[0.07] text-danger hover:bg-danger/15")}
+    >
+      {isSuggestion ? t("approval.action.notNow") : isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny")}
+    </button>,
+    always && (
+      <button
+        key="always"
+        type="button"
+        onClick={always.run}
+        aria-label={always.name}
+        title={always.hint}
+        className={cn(APPROVAL_CONTROL, "bg-ink/[0.07] text-ink hover:bg-ink/[0.12]")}
+      >
+        {t("approval.action.alwaysAllow")}
+      </button>
+    ),
+    <button
+      key="allow"
+      type="button"
+      onClick={() => decide("allow")}
+      disabled={isSkillRequest && !reviewedSha256}
+      className={cn(APPROVAL_CONTROL, "bg-accent text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40")}
+    >
+      {isTeamSetup ? pending.message.card?.options[0] : isSkillRequest
+        ? pending.message.card?.skillRequest?.action === "update"
+          ? t("approval.action.update")
+          : t("approval.action.enable")
+        : isRoutineRequest || isProfileRequest
+          ? t("approval.action.confirm")
+          : t("approval.action.allowOnce")}
+    </button>,
+  ].filter(Boolean) : [];
+  if (part === "primary") return <>{primary}</>;
+  if (part === "more") return more.length ? <div className="flex flex-wrap items-center gap-2">{more}</div> : null;
   return (
-    <div className="flex flex-wrap items-center justify-end gap-2 px-2 py-2">
-      {!durableRequest && (
-        <button onClick={onCancelTurn} className={cn(base, "text-ink-secondary hover:bg-control hover:text-ink")}>
-          {t("approval.action.cancelTurn")}
-        </button>
-      )}
-      <button
-        onClick={() => decide("deny")}
-        autoFocus={isTeamSetup}
-        className={cn(base, "border border-danger/40 text-danger hover:bg-danger/10")}
-      >
-        {isSuggestion ? t("approval.action.notNow") : isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny")}
-      </button>
-      {!durableRequest && bot && pending.allowKey && (
-        <button
-          onClick={() => decide("allow", true)}
-          title={t("approval.action.stopAsking", { name: bot.name, key: pending.allowKey })}
-          className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
-        >
-          {t("approval.action.alwaysAllow")}
-        </button>
-      )}
-      {!durableRequest && !pending.allowKey && !canRememberCommand && pending.allowSession && (
-        <button
-          onClick={() => decide("allow", true)}
-          title={t("approval.action.alwaysAllowSessionHint")}
-          className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
-        >
-          {t("approval.action.alwaysAllowSession")}
-        </button>
-      )}
-      {canRememberCommand && pending.commandAllowlist && (
-        <button
-          onClick={() => decide("allow", false, true)}
-          title={t("approval.action.alwaysAllowCommandHint", { cwd: pending.commandAllowlist.cwd })}
-          className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
-        >
-          {t("approval.action.alwaysAllowCommand")}
-        </button>
-      )}
-      <button
-        onClick={() => decide("allow")}
-        disabled={isSkillRequest && !reviewedSha256}
-        className={cn(
-          base,
-          "bg-accent font-medium text-white hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40",
-        )}
-      >
-        {isTeamSetup ? pending.message.card?.options[0] : isSkillRequest
-          ? pending.message.card?.skillRequest?.action === "update"
-            ? t("approval.action.update")
-            : t("approval.action.enable")
-          : isRoutineRequest || isProfileRequest
-            ? t("approval.action.confirm")
-            : t("approval.action.allowOnce")}
-      </button>
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {more}
+      {primary}
     </div>
   );
 }
