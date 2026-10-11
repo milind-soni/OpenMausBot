@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   BEFORE_CAP,
@@ -13,6 +13,7 @@ import {
   JOURNAL_DIR,
   beginMemoryTurn,
   endMemoryTurn,
+  forgetBotMemoryJournal,
   flushMemoryJournal,
   journalFile,
   journalMemoryDelete,
@@ -25,6 +26,7 @@ import {
 } from "./memory-journal.ts";
 import { MEMORY_INDEX, hashMemoryText, readMemoryDoc } from "./memory-store.ts";
 import { WORKSPACES_DIR, ensureWorkspace, workspaceDir } from "./workspace.ts";
+import * as workspace from "./workspace.ts";
 
 let counter = 0;
 const freshBot = () => `journal-bot-${process.pid}-${counter++}`;
@@ -300,6 +302,34 @@ describe("turn boundary", () => {
     writeFileSync(join(workspaceDir(b), "MEMORY.md"), "b learned\n");
     const rows = endMemoryTurn("room-1");
     expect(rows.map((r) => r.botId).sort()).toEqual([a, b].sort());
+  });
+
+  it("does not re-read memory files whose size and mtime are unchanged", async () => {
+    const bot = freshBot();
+    ensureWorkspace(bot);
+    const topic = join(workspaceDir(bot), "memory", "notes.md");
+    const logDir = join(workspaceDir(bot), "memory", "log");
+    mkdirSync(logDir, { recursive: true });
+    writeFileSync(topic, "stable note\n");
+    writeFileSync(join(logDir, "2026-09-10.md"), "- stable line\n");
+    const read = vi.spyOn(workspace, "readMemoryText");
+    try {
+      beginMemoryTurn(bot, "t1");
+      expect(read).toHaveBeenCalled();
+      read.mockClear();
+      expect(endMemoryTurn("t1")).toEqual([]);
+      beginMemoryTurn(bot, "t2");
+      expect(endMemoryTurn("t2")).toEqual([]);
+      expect(read).not.toHaveBeenCalled();
+      await flushMemoryJournal(bot);
+      expect(readMemoryJournal(bot, 10)).toEqual([]);
+      forgetBotMemoryJournal(bot);
+      beginMemoryTurn(bot, "t3");
+      expect(read).toHaveBeenCalled();
+      expect(endMemoryTurn("t3")).toEqual([]);
+    } finally {
+      read.mockRestore();
+    }
   });
 
   it("never throws when a workspace vanished mid-turn", () => {

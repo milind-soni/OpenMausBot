@@ -238,8 +238,9 @@ function indexWrittenMemoryFile(botId: string, relativePath: string): void {
 }
 
 /** Every memory file the bot has, workspace-relative, with its current
- * stat: the seed of a search's sync pass and of a backup. */
-function memoryFilesOnDisk(botId: string): Array<{ path: string; mtimeMs: number; bytes: number }> {
+ * stat: the seed of a search's sync pass, of a backup, and of the
+ * journal's turn diff. */
+export function memoryFilesOnDisk(botId: string): Array<{ path: string; mtimeMs: number; bytes: number }> {
   const dir = workspaceDir(botId);
   const names = [
     "MEMORY.md",

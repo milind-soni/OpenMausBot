@@ -28,11 +28,10 @@ import {
   type MemoryDoc,
   deleteMemoryDoc,
   hashMemoryText,
-  memoryOverview,
-  readMemoryDoc,
   writeMemoryDoc,
 } from "./memory-store.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { memoryFilesOnDisk, readMemoryText, workspaceDir } from "./workspace.ts";
 
 /** "upkeep" is the harness itself: background capture and the tidy-up
  * (server/memory-upkeep.ts) for a bot with Memory upkeep switched on. */
@@ -287,6 +286,12 @@ export interface MemoryChangeInput {
  * advances — so a person's save between two turns is never re-journaled
  * as the bot's work when the turn ends. */
 const baselines = new Map<string, Map<string, string>>();
+/** Size and mtime (truncated, as the search index stores them) at which
+ * that text was read. A later listing with the same pair is the same
+ * bytes, so the turn diff reuses the baseline instead of reading again.
+ * A same-size edit that also keeps the same mtime is missed, which is the
+ * trade the search index already makes. */
+const baselineStats = new Map<string, Map<string, { mtimeMs: number; bytes: number }>>();
 
 function baselineFor(botId: string): Map<string, string> {
   let baseline = baselines.get(botId);
@@ -421,12 +426,43 @@ export function revertMemoryChange(botId: string, entryId: string, opts: { threa
  * thread can have more than one member speaking on it. */
 const turnBots = new Map<string, Set<string>>();
 
+function statsFor(botId: string): Map<string, { mtimeMs: number; bytes: number }> {
+  let stats = baselineStats.get(botId);
+  if (!stats) {
+    stats = new Map();
+    baselineStats.set(botId, stats);
+  }
+  return stats;
+}
+
 function currentDocs(botId: string): Map<string, string> {
   const docs = new Map<string, string>();
-  const overview = memoryOverview(botId);
-  for (const path of [MEMORY_INDEX, ...overview.topics.map((t) => t.path), ...overview.logs.map((l) => l.path)]) {
-    const doc = readMemoryDoc(botId, path);
-    if (doc.exists) docs.set(path, doc.text);
+  const stats = statsFor(botId);
+  const baseline = baselines.get(botId);
+  const seen = new Set<string>();
+  for (const file of memoryFilesOnDisk(botId)) {
+    seen.add(file.path);
+    const mtimeMs = Math.trunc(file.mtimeMs);
+    const cached = stats.get(file.path);
+    const known = baseline?.get(file.path);
+    // The listing already statted the file. Same size and mtime means the
+    // bytes we stored are still the bytes on disk, so this turn does not
+    // read or hash them.
+    if (cached && known !== undefined && cached.bytes === file.bytes && cached.mtimeMs === mtimeMs) {
+      docs.set(file.path, known);
+      continue;
+    }
+    let text: string;
+    try {
+      text = readMemoryText(join(workspaceDir(botId), file.path));
+    } catch {
+      continue;
+    }
+    docs.set(file.path, text);
+    stats.set(file.path, { mtimeMs, bytes: file.bytes });
+  }
+  for (const path of stats.keys()) {
+    if (!seen.has(path)) stats.delete(path);
   }
   return docs;
 }
@@ -499,6 +535,7 @@ export function endMemoryTurn(threadId: string): MemoryJournalEntry[] {
 /** Test seam: forget every baseline and in-flight turn. */
 export function resetMemoryJournalState(): void {
   baselines.clear();
+  baselineStats.clear();
   turnBots.clear();
 }
 
@@ -507,6 +544,7 @@ export function resetMemoryJournalState(): void {
  * next time a turn looked, and would write the journal file back. */
 export function forgetBotMemoryJournal(botId: string): void {
   baselines.delete(botId);
+  baselineStats.delete(botId);
   for (const [threadId, bots] of turnBots) {
     if (!bots.delete(botId)) continue;
     if (bots.size === 0) turnBots.delete(threadId);
