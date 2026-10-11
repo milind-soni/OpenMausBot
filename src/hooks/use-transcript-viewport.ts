@@ -24,7 +24,11 @@ import {
   resolveTranscriptWindow,
   tailWindowStart,
 } from "@/lib/transcript-window";
+import { reducedMotion } from "@/lib/onboarding";
 import { useStore } from "@/state/store";
+
+/** Widgets that answer arrow keys themselves. */
+const KEY_WIDGETS = '[role="menu"], [role="menubar"], [role="listbox"], [role="tree"], [role="grid"], [role="tablist"], [role="radiogroup"], [role="slider"], select, [contenteditable="true"]';
 
 export function useTranscriptViewport<T extends { id: string; role?: string }>({
   ownerId,
@@ -192,6 +196,11 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const typing = e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement;
+      // A menu, list or picker moves its own highlight with these keys; the
+      // transcript does not scroll, so the reader has not left the end.
+      const ownKeys = typeof (e.target as Element | null)?.closest === "function" &&
+        Boolean((e.target as Element).closest(KEY_WIDGETS));
+      if (ownKeys || !canScroll()) return;
       if (e.key === "PageUp" || ((e.key === "Home" || e.key === "ArrowUp") && !typing)) {
         setBottomFollow(false);
       }
@@ -200,6 +209,12 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     return () => window.removeEventListener("keydown", onKey);
   }, [setBottomFollow]);
 
+  // A transcript shorter than its pane cannot leave the end, so no gesture
+  // there may stop following (or show Jump to latest over nothing).
+  const canScroll = () => {
+    const el = scrollRef.current;
+    return Boolean(el && el.scrollHeight - el.clientHeight >= 1);
+  };
   const atEnd = () => {
     const el = scrollRef.current;
     return !el || el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_FOLLOW_THRESHOLD;
@@ -208,7 +223,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     setBottomFollow(true);
     setTranscriptWindow({ key: transcriptKey, start: tailStart, end: null });
     requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: reducedMotion() ? "auto" : "smooth" });
     });
   };
 
@@ -221,7 +236,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
       if (el && e.target === el && e.nativeEvent.offsetX >= el.clientWidth) setBottomFollow(false);
     },
     onWheel: (e: WheelEvent<HTMLDivElement>) => {
-      if (e.deltaY < 0) setBottomFollow(false);
+      if (e.deltaY < 0 && canScroll()) setBottomFollow(false);
       else if (atEnd()) setBottomFollow(true);
     },
     onTouchStart: (e: TouchEvent<HTMLDivElement>) => {
@@ -229,7 +244,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     },
     onTouchMove: (e: TouchEvent<HTMLDivElement>) => {
       const y = e.touches[0]?.clientY ?? 0;
-      if (y > touchY.current + 4) setBottomFollow(false);
+      if (y > touchY.current + 4 && canScroll()) setBottomFollow(false);
       else if (atEnd()) setBottomFollow(true);
     },
     onScroll: () => {

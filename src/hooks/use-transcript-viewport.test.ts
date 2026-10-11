@@ -475,6 +475,42 @@ describe("transcript viewport", () => {
     expect(scroller.calls.at(-1)).toEqual({ top: 120 * ROW, behavior: "smooth" });
   });
 
+  it("jumps without the smooth animation when motion is reduced", () => {
+    const view = mount({ messages: rows(300) });
+    view.act(() => view.current.showEarlier());
+    vi.stubGlobal("window", {
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      matchMedia: (query: string) => ({ matches: query === "(prefers-reduced-motion: reduce)" }),
+    });
+    view.act(() => view.current.jumpToLatest());
+    expect(view.current.following).toBe(true);
+    expect(scroller.calls.at(-1)).toEqual({ top: 120 * ROW, behavior: "auto" });
+  });
+
+  it("keeps following a transcript too short to scroll, so Jump to latest never shows over nothing", () => {
+    const view = mount({ messages: rows(4) });
+    expect(scroller.scrollHeight).toBeLessThan(scroller.clientHeight);
+    view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
+    view.act(() => press("PageUp"));
+    view.act(() => press("ArrowUp"));
+    view.act(() => view.current.scrollHandlers.onTouchStart({ touches: [{ clientY: 100 }] } as never));
+    view.act(() => view.current.scrollHandlers.onTouchMove({ touches: [{ clientY: 200 }] } as never));
+    expect(view.current.following).toBe(true);
+  });
+
+  it("keeps following when arrow keys move through a menu or list", () => {
+    const view = mount({ messages: rows(30) });
+    const inMenu = { closest: (selector: string) => (selector.includes('[role="menu"]') ? {} : null) };
+    view.act(() => press("ArrowUp", inMenu));
+    view.act(() => press("Home", inMenu));
+    view.act(() => press("PageUp", inMenu));
+    expect(view.current.following).toBe(true);
+    // the same key on the page still means the reader scrolled up
+    view.act(() => press("ArrowUp", { closest: () => null }));
+    expect(view.current.following).toBe(false);
+  });
+
   it("re-arms following when another bot or room opens", () => {
     const view = mount({ messages: rows(30) });
     view.act(() => press("PageUp"));
