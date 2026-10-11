@@ -153,19 +153,8 @@ it("expires Company access and cancels only its instances", async () => {
   now = value.expiresAt;
   await expect(company.adapter.sendTurn({ threadId: "company", text: "Fixture", model: "gpt-fixture" })).rejects.toThrow("ended");
   expect(await company.snapshot()).toMatchObject({ state: "unavailable" });
-  await manager.restore();
+  await manager.apply(null);
   expect(registry.instances().map(instance => instance.instanceId)).toEqual(["personal", "local"]);
-});
-
-it("reapplies the transient overlay after a personal fleet rebuild without copying it into config", async () => {
-  const { registry, manager } = await setup(), value = connection();
-  await manager.apply(value);
-  await registry.disposeAll();
-  await registry.load({ personal: { driver: "claudeAgent" }, local: { driver: "openai-compat" } });
-  const personal = registry.get("personal");
-  await manager.restore();
-  expect(registry.instances()).toHaveLength(5);
-  expect(registry.get("personal")).toBe(personal);
 });
 
 it("does not revive a delayed Company creation after the parent revokes it", async () => {

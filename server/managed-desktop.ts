@@ -203,8 +203,6 @@ export class ManagedDesktopProviders {
     return this.tail;
   }
 
-  /** Called after the ordinary fleet is rebuilt; never add Company to cfg. */
-  restore(): Promise<void> { return this.apply(this.connection && this.connection.expiresAt > this.now() ? this.connection : null, true); }
   private ensureDirectory(parts: string[]): string {
     // Only the configured workspace root may already be an operator-chosen
     // alias. None of our owned descendants may redirect into personal homes.
