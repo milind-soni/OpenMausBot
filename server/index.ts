@@ -515,6 +515,7 @@ import { describeTool, readBotActivity } from "./activity.ts";
 import { OutboundCounts } from "./outbound-counts.ts";
 import { OutboundRequestService } from "./outbound-requests.ts";
 import { DEFAULT_OUTBOUND_POLICY, connectorCallsIn, normalizeOutboundPolicy, outboundCallsIn } from "../shared/outbound.ts";
+import { commandPolicyVerdict } from "../shared/command-policy.ts";
 import { connectorAccessDecision, describeConnectorScopes, normalizeConnectorScopes } from "../shared/connector-scopes.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -802,6 +803,25 @@ const sharedWorkspaceFullAccessEnabled = () => SHARED_WORKSPACE_FULL_ACCESS && B
 // LoopbackTrust): the owner on a desktop or a one-person server; a service on
 // a shared workspace, where every bot's shell is a loopback caller too.
 const LOOPBACK = resolveLoopbackTrust({ desktopManaged: DESKTOP_MANAGED, hostedWorkspace: HOSTED_WORKSPACE, cloudHome: Boolean(CLOUD_HOME) });
+// The standing command policy (shared/command-policy.ts): the absolute paths a
+// bot's ordinary commands may run in without a card, colon-separated. Unset —
+// the default, and what every install had before this — leaves every command
+// on a card exactly as before. A relative entry is refused rather than guessed
+// at, because the policy's whole containment check is "is this path inside one
+// of those". Each bot's own task workspace usually belongs here: that is where
+// the engine actually runs commands, not the folder pinned on the bot.
+const commandPolicyRoots = (process.env.OMB_COMMAND_POLICY_ROOT ?? "")
+  .split(":")
+  .map((entry) => entry.trim().replace(/\/+$/, ""))
+  .filter((entry) => {
+    if (!entry) return false;
+    if (!entry.startsWith("/")) {
+      console.warn(`OMB_COMMAND_POLICY_ROOT entries must be absolute paths; ignoring ${JSON.stringify(entry.slice(0, 80))}`);
+      return false;
+    }
+    return true;
+  });
+if (commandPolicyRoots.length) console.log(`command policy: ordinary commands run without a card inside ${commandPolicyRoots.join(", ")}`);
 // `openmausbot serve` on a service-trust server hands the server it starts a
 // per-launch secret on stdin, then closes it (server/cli.ts). It opens only
 // the pairing route, for that CLI. Never an environment variable: every
@@ -7949,6 +7969,18 @@ bus.subscribe((event: RuntimeEvent) => {
         ? autoVerdict(effectiveApprovalMode, event.tool, {
           requiresExplicitApproval: event.requiresExplicitApproval,
           commandAllowed: Boolean(command && commandAllowlist.matches(asker.id, command)),
+          // The operator's standing policy for ordinary commands, off unless
+          // OMB_COMMAND_POLICY_ROOT names the workspace they are scoped to.
+          // Uses the native command and folder the provider reported, never a
+          // display summary, for the same reason the saved-command grant does.
+          commandPolicyAllowed: Boolean(
+            commandPolicyRoots.length && event.command && !guestDriven &&
+            commandPolicyVerdict({
+              command: event.command.command,
+              cwd: event.command.cwd,
+              workspaceRoots: commandPolicyRoots,
+            }).decision === "allow",
+          ),
         })
         : null;
       // Auto's reviewer is the engine's own. Claude accepts `--permission-mode

@@ -105,6 +105,9 @@ function bareToolName(tool: string): string {
 
 /** Why a permission request landed where it did — the decision log's "which
  * rule". `full-access` and `command-allowlist` are explicit user grants;
+ * `command-policy` is the operator's standing rule for ordinary commands
+ * inside a scoped workspace (shared/command-policy.ts), off unless
+ * OMB_COMMAND_POLICY_ROOT names that workspace;
  * `web-search` is the one action Approve for me grants itself;
  * `native-approval` is a card the provider's own reviewer (Auto, or Custom's
  * config) left for the person; `explicit-approval-block` is a sandbox
@@ -113,6 +116,7 @@ function bareToolName(tool: string): string {
 export type AutoVerdictSource =
   | "full-access"
   | "command-allowlist"
+  | "command-policy"
   | "web-search"
   | "native-approval"
   | "explicit-approval-block"
@@ -136,6 +140,11 @@ export function autoVerdict(
     requiresExplicitApproval?: boolean;
     /** Exact bot/provider/folder/command match against the person's saved rules. */
     commandAllowed?: boolean;
+    /** The operator's standing command policy answered this one
+     * (shared/command-policy.ts). Checked after the outbound guard and the
+     * sandbox block, so it can never widen either: it only answers the
+     * ordinary commands that would otherwise each need a tap. */
+    commandPolicyAllowed?: boolean;
   },
 ): AutoVerdict {
   // A question is for a person, whatever channel it arrived on — and
@@ -151,6 +160,7 @@ export function autoVerdict(
   if (context?.requiresExplicitApproval) return { approve: null, source: "explicit-approval-block" };
   if (isOutboundTool(tool)) return { approve: null, source: "outbound-guard" };
   if (context?.commandAllowed) return { approve: `approved ${tool} (saved command)`, source: "command-allowlist" };
+  if (context?.commandPolicyAllowed) return { approve: `approved ${tool} (command policy)`, source: "command-policy" };
   // The one action the app itself grants. A fetch of an arbitrary URL is not
   // a search and stays a prompt, in this mode and every other.
   if (mode === "auto" && WEB_SEARCH.has(bareToolName(tool))) {
