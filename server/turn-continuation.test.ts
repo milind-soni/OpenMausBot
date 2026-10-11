@@ -1,6 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import vm from "node:vm";
+import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { RuntimeEvent } from "./contracts.ts";
@@ -195,5 +197,40 @@ describe("makeCapContinuationSubscriber", () => {
     h.sub({ threadId: "thread-1", type: "turn.completed", ok: false } as RuntimeEvent);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(h.calls.createTask.length).toBe(0);
+  });
+});
+
+// Which turns are their requester's to recover (index.ts reportsToRequester),
+// run without starting a server. Only a requester that is handed the outcome
+// can decide what to send next; where none is, the step cap continues the
+// work on its own as before, rather than leaving it stopped with no one told.
+describe("the harness's reportsToRequester", () => {
+  const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+  const from = source.indexOf("\nfunction reportsToRequester("), to = source.indexOf("\n/** Consume one delegated-turn watch");
+  if (from < 0 || to <= from) throw new Error("reportsToRequester section moved");
+  const code = ts.transpileModule(source.slice(from, to), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+  function owed(watch: Record<string, unknown>, rooms: string[] = []): boolean {
+    const context = vm.createContext({
+      delegationWatch: new Map([["work", watch]]), awaitedAsks: new Set(), roomHandoffs: { nodes: new Map() },
+      store: {
+        botByThread: (threadId: string) => threadId === "chief-dm" ? { id: "chief" } : undefined,
+        groupByThread: (threadId: string) => rooms.includes(threadId) ? { id: `group-${threadId}` } : undefined,
+        taskByThread: (botId: string, threadId: string) => botId === "chief" && threadId === "chief-dm" ? { threadId } : undefined,
+      },
+    });
+    vm.runInContext(code, context, { filename: "index.ts (reportsToRequester fixture)" });
+    return context.reportsToRequester("work") as boolean;
+  }
+
+  it("owes a delegation's step cap to a requester that is woken or polls, not to a room's transcript", () => {
+    // a Chief's own conversation is woken with the outcome
+    expect(owed({ sourceBotId: "chief", sourceThreadId: "chief-dm" })).toBe(true);
+    expect(owed({ sourceThreadId: "chief-dm" })).toBe(true);
+    // an external runtime polls the receipt
+    expect(owed({ sourceBotId: "chief", sourceThreadId: "room", completionOwner: "external" }, ["room"])).toBe(true);
+    // a room or group DM wakes no one: the work continues on its own
+    expect(owed({ sourceBotId: "chief", sourceThreadId: "room" }, ["room"])).toBe(false);
+    // a one-way send hands the work over
+    expect(owed({ sourceBotId: "chief", sourceThreadId: "chief-dm", oneWay: true })).toBe(false);
   });
 });

@@ -7,8 +7,9 @@
 // coordinated turn was interrupted" left it guessing, and a guess re-sends the
 // whole assignment.
 //
-// The harness (index.ts) folds runtime events into TurnStops and reads it when
-// a coordinated or delegated turn settles; the wording is a pure function.
+// The harness (index.ts) folds runtime events into TurnStops, notes there why
+// it stops a turn itself, and reads it when a coordinated or delegated turn
+// settles; the wording is a pure function.
 import { errorTranscript } from "../shared/client-cancel.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { buildTurnDigest, digestTools } from "./digest.ts";
@@ -20,6 +21,9 @@ const REASON_CHARS = 600;
 
 export interface TurnStop {
   turnId?: string;
+  /** Why the harness stopped the turn itself (a Company change), noted
+   * before it interrupts: the turn's own end may settle it first. */
+  cause?: string;
   /** The runtime's last error for the turn, a client abort excepted: its
    * runtime.error, or a provider's own error sent as a reply (a usage limit,
    * an overload: RuntimeEventBase.synthetic). */
@@ -28,11 +32,21 @@ export interface TurnStop {
   handoffPath?: string;
 }
 
-/** Each thread's turn as its runtime last described a failure: its error and
- * the handoff a step cap wrote. A new turn on the thread starts clean, and a
- * read names the turn it settles, so an earlier turn's words never stand in. */
+/** Each thread's turn as its runtime last described a failure — its error
+ * and the handoff a step cap wrote — and the harness's cause when it stopped
+ * the turn. A new turn on the thread starts clean, and a read names the turn
+ * it settles, so an earlier turn's words never stand in. */
 export class TurnStops {
   readonly #byThread = new Map<string, TurnStop>();
+  readonly #handoffOwed: (threadId: string) => boolean;
+
+  /** `handoffOwed`: whether the turn on a thread owes its result to a
+   * requester, which then picks the work up from the step cap's handoff. A
+   * turn nobody awaits is continued from it on its own (turn-continuation.ts),
+   * so its account never asks anyone to assign the rest. */
+  constructor(options: { handoffOwed?: (threadId: string) => boolean } = {}) {
+    this.#handoffOwed = options.handoffOwed ?? (() => true);
+  }
 
   note(event: RuntimeEvent): void {
     if (event.type === "turn.started") {
@@ -41,12 +55,24 @@ export class TurnStops {
     }
     const error = event.type === "runtime.error" ? event.message
       : event.type === "item.completed" && event.itemType === "assistant_text" && event.synthetic ? event.text : undefined;
-    if (event.type !== "cap.exhausted" && (error === undefined || errorTranscript(error).kind !== "error")) return;
-    const held = this.#byThread.get(event.threadId);
-    const stop: TurnStop = held && held.turnId === event.turnId ? held : { turnId: event.turnId };
+    if (event.type === "cap.exhausted" ? !this.#handoffOwed(event.threadId)
+      : error === undefined || errorTranscript(error).kind !== "error") return;
+    const stop = this.#turn(event.threadId, event.turnId);
     if (event.type === "cap.exhausted") stop.handoffPath = event.handoffPath;
     else stop.error = error;
-    this.#byThread.set(event.threadId, stop);
+  }
+
+  /** The harness is stopping this turn, for this cause: whichever settles it
+   * first, its own end or the harness's teardown, reports the same words. */
+  stopping(threadId: string, turnId: string | undefined, cause: string): void {
+    this.#turn(threadId, turnId).cause = cause;
+  }
+
+  #turn(threadId: string, turnId: string | undefined): TurnStop {
+    const held = this.#byThread.get(threadId);
+    const stop: TurnStop = held && held.turnId === turnId ? held : { turnId };
+    this.#byThread.set(threadId, stop);
+    return stop;
   }
 
   read(threadId: string, turnId?: string): TurnStop | undefined {
@@ -58,7 +84,9 @@ export class TurnStops {
 /** The requester's account of a turn that ended without completing. The
  * cause comes first, since a result chip shows only the start; then what the
  * turn did before it stopped, the handoff, and its last message, unabridged:
- * a report written before a late failure is still the teammate's report. */
+ * a report written before a late failure is still the teammate's report. It
+ * is quoted, as data: the account reaches prompts the harness speaks in (a
+ * delegator's wake), where a teammate's words must never pass for its lines. */
 export function stoppedTurnOutcome(input: {
   reason: string;
   /** The thread's messages; only this turn's tool rows are read. */
@@ -79,7 +107,7 @@ export function stoppedTurnOutcome(input: {
   }
   if (input.handoffPath) parts.push(`Every step it took is listed in ${input.handoffPath}; to finish, assign what is left and point to that file.`);
   const said = input.said?.trim();
-  return said ? `${parts.join(" ")}\nIts last message:\n${said}` : parts.join(" ");
+  return said ? `${parts.join(" ")}\nIts last message, quoted: ${JSON.stringify(said)}` : parts.join(" ");
 }
 
 function clip(text: string, max: number): string {

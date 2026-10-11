@@ -5562,17 +5562,22 @@ function coordinationLiveRosterBlock(recipient: BotRecord): string {
   return livePeerRosterBlock(livePeerRoster(team));
 }
 
+/** `outcome.byHarness`: the harness stopped the room (a provider save, a
+ * Company change) and `detail` is its cause: the goal run's card says it and
+ * the room's assignments fail with it, so no requester or person reads it as
+ * the person's Stop. */
 function cancelGroupTurnOperations(
   groupId: string,
   threadId: string,
-  outcome: { status: "stopped" | "limit-reached"; detail: string } = {
+  outcome: { status: "stopped" | "limit-reached"; detail: string; byHarness?: boolean } = {
     status: "stopped",
     detail: "Stopped by you.",
   },
 ) {
   pendingComputerResumes.delete(threadId);
   cancelTeamSetupResumesForThread(threadId);
-  roomHandoffs.cancelRoom(groupId, threadId);
+  if (outcome.byHarness) roomHandoffs.cancelRoom(groupId, threadId, outcome.detail, "failed");
+  else roomHandoffs.cancelRoom(groupId, threadId);
   for (const operation of groupTurnOperations.get(groupId) ?? []) {
     if (operation.threadId !== threadId) continue;
     operation.cancelled = true;
@@ -6311,14 +6316,17 @@ const COMPUTER_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_COMPUTER_WAI
 // exhausted waits in one run the team is blocked on availability, not stuck.
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
 const roomStallCompletions = new RoomTurnStallRegistry();
-/** How each thread's failing turn was described by its runtime. */
-const turnStops = new TurnStops();
+/** How each thread's failing turn was described by its runtime, or by the
+ * harness that stopped it; a step cap's handoff only where a requester picks
+ * the work up from it. */
+const turnStops = new TurnStops({ handoffOwed: reportsToRequester });
 /** A turn that ended without completing, as its requester is told
- * (turn-outcome.ts): `cause` when the harness stopped it, else the runtime's
- * own error, else its bare stop reason; with whatever the turn last said. */
+ * (turn-outcome.ts): `cause` when the harness stopped it (passed, or noted
+ * before it interrupted), else the runtime's own error, else its bare stop
+ * reason; with whatever the turn last said. */
 function stoppedTurnText(threadId: string, turnId: string | undefined, cause?: string, stopReason?: string | null): string {
   const stop = turnStops.read(threadId, turnId);
-  const reason = cause ?? stop?.error ?? `The turn did not complete (${stopReason?.trim() || "no reason given"})`;
+  const reason = cause ?? stop?.cause ?? stop?.error ?? `The turn did not complete (${stopReason?.trim() || "no reason given"})`;
   const said = turnId ? store.messagesFor(threadId).findLast(message =>
     message.role === "bot" && message.kind === "text" && message.turnId === turnId)?.text : undefined;
   return stoppedTurnOutcome({
@@ -8886,14 +8894,27 @@ const handoffs = new Handoffs({
 });
 
 /** Whether another bot awaits the result of the turn in flight on this
- * thread: a teammate's coordinated assignment, a delegation that reports
- * back, or an ask_bot caller still waiting. A one-way send hands the work
- * over, and a Chief's resume answers its person, so either is owned like
- * work a person started there. */
+ * thread, and is handed it when the turn ends: a teammate's coordinated
+ * assignment (its assigner resumes), a delegation whose requester is woken
+ * or polls its receipt, or an ask_bot caller still waiting. A one-way send
+ * hands the work over, a delegation made from a room or a group DM only
+ * lands in that transcript (no one turn there is woken), and a Chief's
+ * resume answers its person: each is owned like work a person started. */
 function reportsToRequester(threadId: string): boolean {
   const watched = delegationWatch.get(threadId);
-  return Boolean(watched && !watched.oneWay) || [...awaitedAsks].some(ask => ask.threadId === threadId)
+  return Boolean(watched && delegationReportsBack(watched)) || [...awaitedAsks].some(ask => ask.threadId === threadId)
     || [...roomHandoffs.nodes.values()].some(node => node.status === "running" && node.threadId === threadId && node.parentId !== undefined);
+}
+
+/** finalizeDelegationWatch's rule for who hears a delegation's end: an
+ * external runtime polls its receipt, and a requester's own conversation is
+ * woken with it (wakeDelegationSource). */
+function delegationReportsBack(watched: NonNullable<ReturnType<typeof delegationWatch.get>>): boolean {
+  if (watched.oneWay) return false;
+  if (watched.completionOwner === "external") return true;
+  const sourceId = watched.sourceBotId ?? (watched.sourceThreadId ? store.botByThread(watched.sourceThreadId)?.id : undefined);
+  return Boolean(sourceId && watched.sourceThreadId && !store.groupByThread(watched.sourceThreadId)
+    && store.taskByThread(sourceId, watched.sourceThreadId));
 }
 
 /** Consume one delegated-turn watch and mirror exactly one terminal state.
@@ -16013,6 +16034,9 @@ async function stopCompanyInstances(ids: string[]) {
   const direct = store.bots.flatMap(bot => store.tasks(bot.id)
     .filter(task => threadBusy(bot.id, task.threadId) && selected.has(botForThread(bot.id, task.threadId)!.modelSelection.instanceId))
     .map(task => ({ botId: bot.id, threadId: task.threadId, owner: turnResourceOwners.get(task.threadId), generation: directTurnGenerationByThread.get(task.threadId) })));
+  // These engines stay attached while their turns end, so a turn's own end
+  // can settle its requester before the loop below: either way it hears this.
+  for (const { threadId } of direct) turnStops.stopping(threadId, liveTurnByThread.get(threadId), cause);
   await Promise.all(direct.map(task => interruptDirectThread(task.botId, task.threadId)));
   for (const { botId, threadId, owner, generation } of direct) {
     const interrupted = stoppedTurnText(threadId, liveTurnByThread.get(threadId), cause);
@@ -16038,10 +16062,7 @@ async function stopCompanyInstances(ids: string[]) {
     if (!bot || !selected.has(bot.modelSelection.instanceId)) continue;
     const group = store.groupByThread(threadId);
     const owner = turnResourceOwners.get(threadId);
-    if (group) {
-      roomHandoffs.cancelRoom(group.id, threadId, stoppedTurnOutcome({ reason: cause, activities: [] }), "failed");
-      cancelGroupTurnOperations(group.id, threadId);
-    }
+    if (group) cancelGroupTurnOperations(group.id, threadId, { status: "stopped", detail: stoppedTurnOutcome({ reason: cause, activities: [] }), byHarness: true });
     revokeInternalCapabilitiesForThread(threadId);
     await runningTurnInstance(bot, threadId)?.adapter.interruptTurn(threadId);
     const stillOwned = groupSpeakers.get(threadId) === speaker &&
@@ -16074,25 +16095,27 @@ async function persistProviderInstance(instanceId: string, instances: NonNullabl
   resetPathCache();
 }
 
-/** The engine a conversation's turn runs on: the one that started the turn
- * in flight, else the thread's own selection (a room's: its speaker's). */
+/** The engine a bot's process in a conversation runs on: the one that
+ * started the turn in flight when that turn is the bot's, else the bot's own
+ * selection there. A room's other members keep theirs while one speaks. */
 function threadEngineId(botId: string, threadId: string): string | undefined {
-  return runningTurnEngines.get(threadId)?.instanceId ?? botForThread(botId, threadId)?.modelSelection.instanceId;
+  const speaking = (groupSpeakers.get(threadId)?.botId ?? botId) === botId;
+  return (speaking ? runningTurnEngines.get(threadId)?.instanceId : undefined) ?? botForThread(botId, threadId)?.modelSelection.instanceId;
 }
 
-/** Engines about to be replaced: every conversation one of them serves loses
- * the bearers its processes were handed, in one synchronous step, so nothing
- * still holding one is honoured again. Each conversation holding a bearer is
- * judged by its turn in flight, else by its bots' engines; a turn running on
- * an engine that stays keeps its own. */
+/** Engines about to be replaced: every process one of them runs loses what
+ * it was handed, in one synchronous step, so nothing still holding it is
+ * honoured again. A turn in flight on one loses its capabilities; a bearer
+ * kept between turns goes with its own bot's engine, so a room member's
+ * survives another member's engine change and vice versa. */
 function revokeEngineCapabilities(engines: ReadonlySet<string>): void {
   if (!engines.size) return;
-  const holders = new Map<string, Set<string>>();
-  const hold = (threadId: string, botId: string) => holders.set(threadId, (holders.get(threadId) ?? new Set<string>()).add(botId));
-  for (const capability of internalCapabilities.values()) hold(capability.threadId, capability.botId);
-  for (const [threadId, slots] of sessionCredentials) for (const slot of slots.keys()) hold(threadId, slot.split(" ")[0]!);
-  for (const [threadId, botIds] of holders) {
-    if ([...botIds].some(botId => engines.has(threadEngineId(botId, threadId) ?? ""))) revokeInternalCapabilitiesForThread(threadId);
+  const onChanged = (botId: string, threadId: string) => engines.has(threadEngineId(botId, threadId) ?? "");
+  for (const capability of internalCapabilities.values()) {
+    if (onChanged(capability.botId, capability.threadId)) revokeEarlierTurnCapabilities(capability.threadId);
+  }
+  for (const [threadId, slots] of sessionCredentials) {
+    for (const slot of slots.keys()) if (onChanged(slot.split(" ")[0]!, threadId)) slots.delete(slot);
   }
 }
 
@@ -16120,11 +16143,9 @@ async function reloadProviders(before: Record<string, unknown>) {
   for (const task of direct) cancelDirectTurnDispatch(task.botId, task.threadId);
   for (const [threadId] of rooms) {
     const group = store.groupByThread(threadId);
-    if (!group) continue;
-    // The room's assignments, queued ones too, fail with this cause rather
-    // than as the person's Stop.
-    roomHandoffs.cancelRoom(group.id, threadId, stoppedTurnOutcome({ reason: cause, activities: [] }), "failed");
-    cancelGroupTurnOperations(group.id, threadId);
+    // The room's assignments, queued ones too, fail with this cause, and its
+    // goal run says it: neither reads as the person's Stop.
+    if (group) cancelGroupTurnOperations(group.id, threadId, { status: "stopped", detail: stoppedTurnOutcome({ reason: cause, activities: [] }), byHarness: true });
   }
   try {
     const kept = [...changed].filter((id) => Object.hasOwn(configs, id));
