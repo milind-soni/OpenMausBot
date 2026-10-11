@@ -306,6 +306,10 @@ export interface GroupTask {
   /** This conversation's turn ceiling, in whole minutes. Absent uses the
    * global group limit. */
   turnTimeoutMinutes?: number;
+  /** Whether a turn is actively running in this thread. */
+  working?: boolean;
+  /** The member bot currently speaking or generating in this thread, if any. */
+  busyBotId?: string | null;
 }
 
 export interface ModelSelection {
@@ -2550,9 +2554,9 @@ export function reducer(state: AppState, action: Action): AppState {
     case "sendGroup": {
       if (!action.sendId) return state;
       const group = state.groups.find((candidate) => candidate.id === action.groupId);
-      const threadId = action.threadId ?? group?.threadId;
-      if (!group || threadId !== group.threadId) return state;
-      if (group.messages.some((message) => message.sendId === action.sendId)) return state;
+      if (!group) return state;
+      const threadId: string = action.threadId ?? group.threadId;
+      if (threadId === group.threadId && group.messages.some((message) => message.sendId === action.sendId)) return state;
       const message = optimisticUserMessage(
         action.text,
         action.sendId,
@@ -2560,12 +2564,14 @@ export function reducer(state: AppState, action: Action): AppState {
         null,
         action.mode ?? "chat",
       );
-      return bumpThreadUpdatedAt({
-        ...state,
-        groups: state.groups.map((candidate) => candidate.id === group.id
+      const stamped = bumpThreadUpdatedAt(state, threadId, message.at);
+      if (threadId !== group.threadId) return stamped;
+      return {
+        ...stamped,
+        groups: stamped.groups.map((candidate) => candidate.id === group.id
           ? { ...candidate, messages: [...candidate.messages, message] }
           : candidate),
-      }, threadId, message.at);
+      };
     }
   }
 }
