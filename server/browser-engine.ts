@@ -12,7 +12,7 @@ import { execFile, spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
@@ -98,7 +98,9 @@ export async function closeBrowserSession(binaryPath: string, env: NodeJS.Proces
     // exit can precede the last piped stdout chunk; close follows stdio.
     child.on("close", (code) => { exited = true; clearTimeout(timer); clearTimeout(killTimer); finish(code === 0); });
   });
-  if (!(await run(["close"])).ok) return false;
+  // A daemon that does not answer `close` keeps running with its Chrome,
+  // detached from us, and every later restart failed the same way (#2603).
+  if (!(await run(["close"])).ok) return killBrowserDaemon(binaryPath, env);
   // Native close acknowledges before the daemon exits. Observe its actual
   // removal through the launch-free inventory command before reconnecting.
   while (Date.now() < deadline) {
@@ -112,7 +114,85 @@ export async function closeBrowserSession(binaryPath: string, env: NodeJS.Proces
     } catch { return false; }
     await new Promise((resolve) => setTimeout(resolve, Math.min(25, Math.max(1, deadline - Date.now()))));
   }
-  return false;
+  return killBrowserDaemon(binaryPath, env);
+}
+
+/** Where agent-browser 0.37 writes `<session>.pid`: AGENT_BROWSER_SOCKET_DIR,
+ * else `$XDG_RUNTIME_DIR/agent-browser` or `~/.agent-browser`, with
+ * `namespaces/<name>/run` below it for a namespace. */
+export function browserDaemonPidPath(env: NodeJS.ProcessEnv): string {
+  const session = env.AGENT_BROWSER_SESSION ?? "";
+  if (env.AGENT_BROWSER_SOCKET_DIR) return join(env.AGENT_BROWSER_SOCKET_DIR, `${session}.pid`);
+  const home = (process.platform === "win32" ? env.USERPROFILE : env.HOME) || homedir();
+  const base = env.XDG_RUNTIME_DIR ? join(env.XDG_RUNTIME_DIR, "agent-browser") : join(home, ".agent-browser");
+  const namespace = env.AGENT_BROWSER_NAMESPACE;
+  return join(namespace ? join(base, "namespaces", namespace, "run") : base, `${session}.pid`);
+}
+
+function execText(file: string, args: string[]): Promise<string | null> {
+  return new Promise((done) => {
+    execFile(file, args, { encoding: "utf8", timeout: 5_000, windowsHide: true }, (error, stdout) => done(error ? null : stdout));
+  });
+}
+
+/** Polls every 50 ms until `done()` or `ms` have passed. */
+async function waitUntil(done: () => boolean, ms: number): Promise<void> {
+  for (let waited = 0; waited < ms && !done(); waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Every process below `root`, read before anything is signalled: once the
+ * daemon dies, its Chrome is re-parented and can no longer be found. */
+async function processDescendants(root: number): Promise<number[]> {
+  const listing = await execText("ps", ["-A", "-o", "pid=,ppid="]);
+  if (listing === null) return [];
+  const children = new Map<number, number[]>();
+  for (const line of listing.trim().split("\n")) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
+    children.set(ppid!, [...children.get(ppid!) ?? [], pid!]);
+  }
+  const found: number[] = [];
+  const walk = (pid: number) => { for (const child of children.get(pid) ?? []) { found.push(child); walk(child); } };
+  walk(root);
+  return found;
+}
+
+/** Last resort when the daemon will not close: stop it and its Chrome by the
+ * pid it wrote. Only a pid that still runs this exact agent-browser binary
+ * is touched, so a stale file naming a reused pid kills nothing. True once
+ * the daemon is gone. */
+async function killBrowserDaemon(binaryPath: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+  let pid: number;
+  try { pid = Number(readFileSync(browserDaemonPidPath(env), "utf8").trim()); }
+  catch { return false; }
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid || !processAlive(pid)) return false;
+  if (process.platform === "win32") {
+    const image = await execText("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"]);
+    if (!image?.toLowerCase().startsWith(`"${basename(binaryPath).toLowerCase()}"`)) return false;
+    // /T takes the daemon's Chrome with it.
+    await execText("taskkill", ["/PID", String(pid), "/T", "/F"]);
+  } else {
+    const command = await execText("ps", ["-o", "args=", "-p", String(pid)]);
+    if (!command?.trim().startsWith(binaryPath)) return false;
+    const tree = [pid, ...await processDescendants(pid)];
+    const signal = (targets: number[], value: NodeJS.Signals) => { for (const target of targets) { try { process.kill(target, value); } catch { /* already gone */ } } };
+    // TERM lets Chrome save the profile; a daemon stopped mid-hang only
+    // acts on KILL, which follows for whatever is still there.
+    signal(tree, "SIGTERM");
+    await waitUntil(() => !tree.some(processAlive), 2_000);
+    signal(tree.filter(processAlive), "SIGKILL");
+  }
+  await waitUntil(() => !processAlive(pid), 2_000);
+  return !processAlive(pid);
 }
 
 const preparedBrowserSessions = new Map<string, Promise<void>>();

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +14,7 @@ import {
   pendingAgentBrowserVersionProbe,
   browserEngineStatus,
   describeBrowserEngine,
+  browserDaemonPidPath,
   browserRestoreKey,
   browserSessionId,
   clearBrowserSessionState,
@@ -190,6 +191,69 @@ describe("deleting one browser session's saved logins", () => {
     const { options } = fixture();
     expect(await clearBrowserSessionState("fixture-browser", session, options)).toBe(false);
     expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe("a browser daemon that will not close (#2603)", () => {
+  it.each([
+    [{ AGENT_BROWSER_SOCKET_DIR: "/s", XDG_RUNTIME_DIR: "/x", AGENT_BROWSER_NAMESPACE: "ns" }, "/s/work.pid"],
+    [{ XDG_RUNTIME_DIR: "/x" }, "/x/agent-browser/work.pid"],
+    [{ XDG_RUNTIME_DIR: "/x", AGENT_BROWSER_NAMESPACE: "ns" }, "/x/agent-browser/namespaces/ns/run/work.pid"],
+    [{ AGENT_BROWSER_NAMESPACE: "ns" }, "/h/.agent-browser/namespaces/ns/run/work.pid"],
+    [{}, "/h/.agent-browser/work.pid"],
+  ])("finds the daemon's pid file where agent-browser writes it (%j)", (extra, expected) => {
+    if (!posix) return;
+    expect(browserDaemonPidPath({ HOME: "/h", USERPROFILE: "/h", AGENT_BROWSER_SESSION: "work", ...extra })).toBe(expected);
+  });
+
+  // A symlink to node stands in for the agent-browser binary: `ps` shows the
+  // path it was started through, and `close` fails because node cannot find
+  // a script by that name — the same failed close a hung daemon gives.
+  const daemons: ChildProcess[] = [];
+  // Each daemon leads its own group, with its child inside it.
+  afterEach(() => { for (const daemon of daemons.splice(0)) { try { process.kill(-daemon.pid!, "SIGKILL"); } catch { /* already stopped */ } } });
+  async function hungDaemon(script: string) {
+    const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    vi.mocked(spawn).mockImplementation(actual.spawn);
+    const home = mkdtempSync(join(tmpdir(), "omb-browser-hung-"));
+    scratch.push(home);
+    const binaryPath = join(home, "agent-browser");
+    symlinkSync(process.execPath, binaryPath);
+    const daemon = actual.spawn(binaryPath, ["-e", script], { detached: true, stdio: "ignore" });
+    daemon.unref();
+    daemons.push(daemon);
+    await vi.waitFor(() => expect(daemon.pid).toBeTypeOf("number"));
+    const env = { HOME: home, USERPROFILE: home, PATH: "", AGENT_BROWSER_SESSION: "work" };
+    mkdirSync(join(home, ".agent-browser"), { recursive: true });
+    return { actual, binaryPath, daemon, env, pidPath: browserDaemonPidPath(env) };
+  }
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+  it.skipIf(!posix)("stops the daemon and the browser under it when close fails", async () => {
+    const { actual, binaryPath, daemon, env, pidPath } = await hungDaemon(
+      "require('node:child_process').spawn('sleep', ['30'], { stdio: 'ignore' }); setInterval(() => {}, 1000);",
+    );
+    let browser = 0;
+    await vi.waitFor(() => {
+      browser = Number(actual.execFileSync("pgrep", ["-P", String(daemon.pid)], { encoding: "utf8" }).trim());
+      expect(browser).toBeGreaterThan(1);
+    });
+    writeFileSync(pidPath, String(daemon.pid));
+    expect(await closeBrowserSession(binaryPath, env, 2_000)).toBe(true);
+    expect(alive(daemon.pid!)).toBe(false);
+    await vi.waitFor(() => expect(alive(browser)).toBe(false));
+  });
+
+  it.skipIf(!posix)("leaves alone a process the pid file names that is not this agent-browser", async () => {
+    const { actual, binaryPath, env, pidPath } = await hungDaemon("setInterval(() => {}, 1000);");
+    const stranger = actual.spawn("sleep", ["30"], { stdio: "ignore" });
+    try {
+      writeFileSync(pidPath, String(stranger.pid));
+      expect(await closeBrowserSession(binaryPath, env, 2_000)).toBe(false);
+      expect(alive(stranger.pid!)).toBe(true);
+    } finally {
+      stranger.kill("SIGKILL");
+    }
   });
 });
 
