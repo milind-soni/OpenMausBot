@@ -22,6 +22,13 @@ OpenMausBot:
    can fix the cause — a sign-in, a missing credential, an unanswered
    question, a setting — it says so in one or two plain sentences and stops.
 
+A report that finds the Chief busy — still answering the previous one, at its
+thread limit, or in a room turn — waits in the incidents thread's queue and
+runs the moment the Chief is free; it is never dropped. The Chief's report
+turn, and its review of any work it hands on from it, mounts no computer and
+no built-in browser: deciding what to do needs neither, so a Works-on computer
+that is missing, unpaid or busy cannot refuse or delay the report.
+
 Limits, so a crash loop is one incident and not a storm: a thread may be
 retried twice; the third report tells the Chief to stop and explain; after
 five incidents in an hour the thread is muted until the hour passes. A

@@ -5777,8 +5777,10 @@ function guardedRequestSnapshot(botId: string, threadId: string, sendId: string)
 }
 
 /** A durable completion fence, not a replay queue. If the process dies while
- * a Chief is awaiting results, its earlier handoff must not become a final. */
-function settleTrackedRequest(threadId: string): void {
+ * a Chief is awaiting results, its earlier handoff must not become a final.
+ * `incoming`: the lines of the request about to replace this one, already on
+ * the thread; the fence is judged as if they had not landed yet. */
+function settleTrackedRequest(threadId: string, incoming: ReadonlySet<string> = new Set()): void {
   const owner = directRequestOwners.get(threadId);
   const bot = store.botByThread(threadId);
   if (!owner?.messageId || owner.stopped || !bot || threadBusy(bot.id, threadId) || roomHandoffs.activeDirect(threadId) ||
@@ -5787,7 +5789,7 @@ function settleTrackedRequest(threadId: string): void {
   // its original provider successfully said it had assigned the work.
   if ([...roomHandoffs.nodes.values()].some(node => !node.parentId && node.threadId === threadId &&
       owner.generations.has(node.id) && node.status !== "completed")) return;
-  const path = store.activePath(threadId);
+  const path = store.activePath(threadId).filter(message => !incoming.has(message.id));
   const source = path.findLast(message => message.role === "user");
   if (source?.id !== owner.messageId || source.requestCancelled || source.requestPending !== true) return;
   const messages = path.slice(path.indexOf(source) + 1);
@@ -7340,13 +7342,14 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
   return null;
 }
 
-function turnSurfacePlan(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string) {
+function turnSurfacePlan(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string, incident = false) {
   const instance = registry.get(bot.modelSelection.instanceId);
   const forcedBoat = runOn === "cloud" || Boolean(inheritedTeamComputer(bot));
   return resolveSurface({
     destination: forcedBoat ? "cloud" : bot.computer,
     pinnedSurface: forcedBoat || !threadId ? null : store.taskByThread(bot.id, threadId)?.surface,
     browserOn: builtInBrowserEnabled(cfg) && bot.browser !== false && instance?.adapter.capabilities.browserMcp === true,
+    incident,
   });
 }
 
@@ -8678,10 +8681,20 @@ function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: s
   });
   const text = incidentText(incident, count);
   // the report carries the broken bot's name as its provenance: it is about
-  // that bot's work and nobody was at the keyboard
-  const peerAsk = { botId: bot.id, name: bot.name, unattended: true };
-  if (botAtThreadCapacity(chief.id) || activeGroupTurnForBot(chief.id)) {
-    queueSteeredMessage(chief.id, incidents.threadId, text, { reason: "capacity", unattended: true, peerAsk });
+  // that bot's work and nobody was at the keyboard; `incident` marks it as
+  // the harness's report, whose turn needs no computer (resolveSurface)
+  const peerAsk = { botId: bot.id, name: bot.name, unattended: true, incident: true };
+  // The incidents thread is reused, so the previous report may still be
+  // running there: this one waits in that thread's queue and drains when
+  // the Chief is free — a burst from one bot as one turn — never refused.
+  const decision = admit("incident", {}, {
+    threadBusy: threadBusy(chief.id, incidents.threadId),
+    atCapacity: botAtThreadCapacity(chief.id),
+    groupTurn: Boolean(activeGroupTurnForBot(chief.id)),
+    parksBehindCoordination: parksBehindCoordination(chief.id, incidents.threadId),
+  });
+  if (decision.action === "queue") {
+    queueSteeredMessage(chief.id, incidents.threadId, text, { reason: decision.reason, unattended: true, peerAsk });
     return;
   }
   void startTurn(chief.id, text, { threadId: incidents.threadId, unattended: true, peerAsk }).catch((error) => {
@@ -9922,7 +9935,12 @@ async function startTurn(
   const task = store.taskByThread(bot.id, threadId);
   if (!task) throw Object.assign(new Error("no such task"), { status: 404 });
   if (hostedModels && !hostedModels.allows(bot.modelSelection)) throw Object.assign(new Error(hostedModels.error()), { status: 409 });
-  const plan = turnSurfacePlan(bot, opts?.runOn, threadId);
+  // A turn answering a Team incidents report mounts no computer. The line
+  // it answers is the one it delivers (sent now, drained from the queue,
+  // retried on a backup engine) or, for a continuation (the review of work
+  // handed on from the report), the line that continuation resumes.
+  const answering = opts?.cardContinuation ? store.activePath(threadId).findLast(message => message.role === "user") : opts?.userMessage ?? opts;
+  const plan = turnSurfacePlan(bot, opts?.runOn, threadId, answering?.peerAsk?.incident === true);
   const instance = registry.get(bot.modelSelection.instanceId);
   if (!instance) {
     // Still on the removed Computer engine: its move failed or found no
@@ -10060,6 +10078,14 @@ async function startTurn(
   directTurnGenerationByThread.set(threadId, dispatchClaimId);
   let requestMessageId = opts?.cardContinuation ? opts.requestMessageId : userMessage.id;
   const previousRequest = directRequestOwners.get(threadId);
+  // This request replaces the thread's last one, which may have finished a
+  // moment ago with its fence still up: its own settle waits on the digest,
+  // while a queued line (the next Team incidents report, a person's
+  // follow-up) drains at turn.completed. Close a finished one first, or it
+  // reads unsettled forever.
+  if (previousRequest && previousRequest.messageId !== requestMessageId) {
+    settleTrackedRequest(threadId, new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]));
+  }
   const requestGenerations = requestMessageId && previousRequest?.messageId === requestMessageId
     ? previousRequest.generations : new Set<string>();
   if (requestGenerations.size >= 500) { requestGenerations.clear(); requestMessageId = undefined; }
@@ -10367,8 +10393,9 @@ async function startTurn(
       const dwebUrl = process.env.DWEB_URL?.trim();
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
       // Cloud routines always use the bot's Boat. The per-bot backend applies
-      // only to ordinary turns.
-      const teamComputer = inheritedTeamComputer(bot);
+      // only to ordinary turns. A turn planned with no computer (an incident
+      // report) inherits no team computer either.
+      const teamComputer = plan.computer === "off" ? undefined : inheritedTeamComputer(bot);
       const cloudBackend = teamComputer || opts?.runOn === "cloud" || bot.cloudBackend !== "vps" ? "box" : "vps";
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;

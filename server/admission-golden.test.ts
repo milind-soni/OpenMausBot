@@ -101,4 +101,18 @@ describe("admission golden tables", () => {
     // A brand-new thread cannot be busy, so the policy never consults it.
     expect(admit("opened-thread", {}, { threadBusy: true })).toEqual({ action: "start" });
   });
+
+  it("incident: a report to the Chief's reused incidents thread queues behind anything and is never refused", () => {
+    expect(admit("incident", {}, {})).toEqual({ action: "start" });
+    // The previous report still running there parks this one (the drop
+    // this surface exists to prevent), reasonless like a busy-thread park.
+    expect(admit("incident", {}, { threadBusy: true })).toEqual({ action: "queue" });
+    expect(admit("incident", {}, { atCapacity: true })).toEqual({ action: "queue", reason: "capacity" });
+    expect(admit("incident", {}, { groupTurn: true })).toEqual({ action: "queue", reason: "group-turn" });
+    expect(admit("incident", {}, { parksBehindCoordination: true })).toEqual({ action: "queue" });
+    expect(admit("incident", {}, { threadBusy: true, atCapacity: true, groupTurn: true })).toEqual({ action: "queue", reason: "capacity" });
+    expect(admit("incident", {}, { threadBusy: true, groupTurn: true })).toEqual({ action: "queue", reason: "group-turn" });
+    // Another of the Chief's threads working does not hold a report back.
+    expect(admit("incident", {}, { botBusy: true })).toEqual({ action: "start" });
+  });
 });

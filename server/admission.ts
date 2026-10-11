@@ -20,7 +20,8 @@ export type AdmissionSurface =
   | "guarded" // guarded external send: refuse when anything is busy
   | "unattended" // routines/webhooks: busy means a missed run
   | "peer" // delegations and resume drains: slot-aware admission
-  | "opened-thread"; // a bot's self-opened thread: queue behind a slot
+  | "opened-thread" // a bot's self-opened thread: queue behind a slot
+  | "incident"; // a report to the Chief's incidents thread: never refused
 
 /** The 1:1 queue's reason vocabulary, shared by the receipt, the chip, and
  * the position lookup. A reasonless park is a busy-thread correction. */
@@ -201,6 +202,17 @@ export function admit(
       // (peerAsk, unattended) survives the wait in the queue payload.
       if (state.atCapacity || state.groupTurn) {
         return { action: "queue", reason: state.atCapacity ? "capacity" : "group-turn" };
+      }
+      return { action: "start" };
+    }
+    case "incident": {
+      // The Chief's one incidents thread is reused, so the previous report
+      // can still be running there. A report waits behind exactly what the
+      // drain waits on — that thread, a slot, a room turn, #1194 parking —
+      // and is never refused: a refused report was a lost one. It never
+      // steers either; each report (or one bot's burst) is a turn of its own.
+      if (state.atCapacity || state.threadBusy || state.groupTurn || state.parksBehindCoordination) {
+        return { action: "queue", reason: state.atCapacity ? "capacity" : state.groupTurn ? "group-turn" : undefined };
       }
       return { action: "start" };
     }

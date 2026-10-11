@@ -51,6 +51,19 @@ describe("resolveSurface", () => {
     expect(surfacePrompt({ computer: null, browser: false }, { note: plan.note })).toBe(plan.note);
   });
 
+  it("a Team incidents report mounts nothing, whatever the bot works on or the thread is pinned to", () => {
+    const plan = resolveSurface({ destination: "off", browserOn: true, incident: true });
+    expect(plan).toMatchObject({ computer: "off", browser: false, pinned: null });
+    expect(plan.note).toMatch(/answers a Team incidents report/);
+    for (const destination of [undefined, "cloud", "vm", "local", "browser"] as const) {
+      for (const pinnedSurface of [null, "cloud", "vm", "local", "browser"] as const) {
+        expect(resolveSurface({ destination, pinnedSurface, browserOn: true, incident: true })).toEqual(plan);
+      }
+    }
+    // the note alone tells the model why it has no screen
+    expect(surfacePrompt({ computer: null, browser: false }, { note: plan.note })).toBe(plan.note);
+  });
+
   it("Off is the one setting a conversation pin cannot override", () => {
     expect(resolveSurface({ destination: "off", pinnedSurface: "browser", browserOn: true }))
       .toMatchObject({ computer: "off", browser: false, pinned: null });

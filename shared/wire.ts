@@ -504,8 +504,10 @@ export interface WireMessage {
    * not know it ignore it. */
   routedBy?: { provider: "jev"; probability: number };
   /** Set on the user-role line another bot delivered into this bot's own
-   * conversation (ask_bot, start_thread). */
-  peerAsk?: { botId: string; name: string; unattended?: boolean };
+   * conversation (ask_bot, start_thread). `incident`: the line is
+   * OpenMausBot's Team incidents report about that bot's broken run
+   * (server/incidents.ts), not its words; its turn mounts no computer. */
+  peerAsk?: { botId: string; name: string; unattended?: boolean; incident?: boolean };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X", linking to the bot-bot channel. */
