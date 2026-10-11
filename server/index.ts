@@ -169,7 +169,8 @@ import {
   ensureDirs,
   instanceConfigs,
   loadConfig,
-  providerReloadKeys,
+  changedInstanceIds,
+  engineLaunches,
   localVmIdleTimeoutMinutes,
   localVmMaxInstances,
   localVmMode,
@@ -371,6 +372,7 @@ import { LiveCallController, LiveCallSignedOutError, type LiveSocket } from "./l
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { turnStartLogLine } from "./turn-log.ts";
 import { makeCapContinuationSubscriber } from "./turn-continuation.ts";
+import { TurnStops, stoppedTurnOutcome } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS, peerMessageText } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
@@ -3329,10 +3331,13 @@ function controlIntegration(
  * for that thread, resolves on turn.completed (or the short inline wait budget). */
 type AskBotOutcome = {
   status: "reply" | "failed" | "timeout" | "error";
+  /** A failed turn's: its cause and what it did (stoppedTurnText). */
   text: string;
-  /** Provider's stop reason when the turn completed not-ok. */
-  stopReason?: string | null;
 };
+
+/** The ask_bot calls waiting on a turn, each by the thread it runs in: that
+ * turn's result is its asker's (reportsToRequester). */
+const awaitedAsks = new Set<{ threadId: string }>();
 
 function askBotAndWait(targetBotId: string, message: string, depth: number, fromBotId?: string, fromThreadId?: string, targetThreadId?: string): Promise<AskBotOutcome> {
   const target = store.bot(targetBotId);
@@ -3341,9 +3346,12 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
   return new Promise((resolve) => {
     let text = "";
     let done = false;
+    const awaited = { threadId };
+    awaitedAsks.add(awaited);
     const finish = (out: AskBotOutcome) => {
       if (done) return;
       done = true;
+      awaitedAsks.delete(awaited);
       clearTimeout(timer);
       unsub();
       resolve(out);
@@ -3358,7 +3366,7 @@ function askBotAndWait(targetBotId: string, message: string, depth: number, from
         text += (text ? "\n" : "") + e.text;
       } else if (e.type === "turn.completed") {
         if (e.ok) finish({ status: "reply", text: text || "(the bot finished without a text reply)" });
-        else finish({ status: "failed", text, stopReason: e.stopReason ?? null });
+        else finish({ status: "failed", text: stoppedTurnText(threadId, e.turnId, undefined, e.stopReason) });
       }
     });
     // Timing out does NOT stop the peer's turn — the caller decides whether
@@ -6285,6 +6293,8 @@ const repeats = new RepeatDetector({ thresholds: [5, 10, 20], maxKeysPerThread: 
 // activity-based, so an hour-long turn that keeps streaming is never
 // touched, and turns parked on a human approval are exempt.
 const TURN_STALL_MS = Math.max(60_000, Number(process.env.OMB_TURN_STALL_MS) || 20 * 60_000);
+/** The watchdog's words for a turn it stopped, as its thread and requester read them. */
+const STALL_CAUSE = `no activity for ${Math.round(TURN_STALL_MS / 60_000)} minutes — the turn was stopped`;
 /** How long ask_bot waits synchronously before the ask is converted into a
  * delegation claim ticket (the peer's turn keeps running either way). */
 const ASK_BOT_TIMEOUT_MS = Math.max(5_000, Number(process.env.OMB_ASK_BOT_TIMEOUT_MS) || 15_000);
@@ -6301,6 +6311,23 @@ const COMPUTER_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_COMPUTER_WAI
 // exhausted waits in one run the team is blocked on availability, not stuck.
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
 const roomStallCompletions = new RoomTurnStallRegistry();
+/** How each thread's failing turn was described by its runtime. */
+const turnStops = new TurnStops();
+/** A turn that ended without completing, as its requester is told
+ * (turn-outcome.ts): `cause` when the harness stopped it, else the runtime's
+ * own error, else its bare stop reason; with whatever the turn last said. */
+function stoppedTurnText(threadId: string, turnId: string | undefined, cause?: string, stopReason?: string | null): string {
+  const stop = turnStops.read(threadId, turnId);
+  const reason = cause ?? stop?.error ?? `The turn did not complete (${stopReason?.trim() || "no reason given"})`;
+  const said = turnId ? store.messagesFor(threadId).findLast(message =>
+    message.role === "bot" && message.kind === "text" && message.turnId === turnId)?.text : undefined;
+  return stoppedTurnOutcome({
+    reason, activities: store.activePath(threadId), turnId,
+    // a provider's error sent as a reply is the cause, said once
+    ...(said && said.trim() !== reason.trim() ? { said } : {}),
+    ...(stop?.handoffPath ? { handoffPath: stop.handoffPath } : {}),
+  });
+}
 const watchdog = new TurnWatchdog({
   stallMs: TURN_STALL_MS,
   checkMs: 60_000,
@@ -6316,6 +6343,7 @@ const watchdog = new TurnWatchdog({
     const routineRun = activeRoutineRunForThread(turn.threadId);
     void runningTurnInstance(bot, turn.threadId)?.adapter.interruptTurn(turn.threadId).catch(() => {});
     const minutes = Math.round(TURN_STALL_MS / 60_000);
+    const stalled = stoppedTurnText(turn.threadId, liveTurnByThread.get(turn.threadId), STALL_CAUSE);
     if (routineRun?.target === "bot") {
       routines?.failThread(turn.threadId, `No activity for ${minutes} minutes — the routine was stopped`);
       pendingDelegationWakes.delete(turn.threadId);
@@ -6324,14 +6352,14 @@ const watchdog = new TurnWatchdog({
     store.appendMessage(turn.threadId, {
       role: "bot",
       kind: "activity",
-      tool: failedTurnTool(`no activity for ${minutes} minutes — the turn was stopped`),
+      tool: failedTurnTool(STALL_CAUSE),
     });
     // a routine's stall reports through its own failure path
     if (bot && routineRun?.target !== "bot") {
-      reportIncident({ kind: "stalled", bot, threadId: turn.threadId, detail: `no activity for ${minutes} minutes — the turn was stopped` });
+      reportIncident({ kind: "stalled", bot, threadId: turn.threadId, detail: STALL_CAUSE });
     }
-    settleDirectFollowup(stalledGeneration);
-    finalizeDelegationWatch(turn.threadId, false, "", "Delegated turn stalled and was stopped");
+    settleDirectFollowup(stalledGeneration, { ok: false, text: stalled });
+    finalizeDelegationWatch(turn.threadId, false, "", `Delegated turn did not finish — ${stalled}`);
     turnUsage.delete(turn.threadId);
     turnContext.delete(turn.threadId);
     roomStallCompletions.stall(turn.threadId);
@@ -6393,6 +6421,7 @@ watchdog.start();
 
 bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
+  turnStops.note(event);
   if (event.type === "request.opened") watchdog.setWaitingOnHuman(event.threadId, true);
   else if (event.type === "request.resolved") watchdog.setWaitingOnHuman(event.threadId, false);
   else if (event.type === "turn.wait_started") watchdog.setWaitingOnComputer(event.threadId, true);
@@ -6401,9 +6430,12 @@ bus.subscribe((event: RuntimeEvent) => {
     watchdog.settle(event.threadId);
     revokeInternalCapabilityForProviderEvent(event);
     if (event.turnId && store.botByThread(event.threadId)) {
-      const reply = store.messagesFor(event.threadId).findLast(message =>
-        message.role === "bot" && message.kind === "text" && message.turnId === event.turnId);
-      const outcome = { ok: event.ok, text: (reply?.text || event.stopReason || "The bot finished without a text reply").slice(0, 12_000) };
+      // A turn that failed tells its requester why, and what it did first.
+      const reply = event.ok ? store.messagesFor(event.threadId).findLast(message =>
+        message.role === "bot" && message.kind === "text" && message.turnId === event.turnId)?.text : undefined;
+      const text = event.ok ? reply || event.stopReason || "The bot finished without a text reply"
+        : stoppedTurnText(event.threadId, event.turnId, undefined, event.stopReason);
+      const outcome = { ok: event.ok, text: text.slice(0, 12_000) };
       const owner = directFollowupTurns.complete(event.threadId, event.turnId, outcome);
       if (owner) {
         settleDirectCoordination(owner.generation, outcome);
@@ -6413,10 +6445,12 @@ bus.subscribe((event: RuntimeEvent) => {
   } else if (event.type !== "session.exited") watchdog.touch(event.threadId);
 });
 
-// Automatic continuity: a turn that died on its budget or on tool errors gets
-// a `Continue:` task on the same bot, seeded with the persisted handoff — the
-// work moves forward without a person noticing and re-dispatching.
-bus.subscribe(makeCapContinuationSubscriber({ store, startTurn }));
+// Automatic continuity: a turn that died on its step budget gets a
+// `Continue:` task on the same bot, seeded with the persisted handoff — the
+// work moves forward without a person noticing and re-dispatching. Assigned
+// work is its requester's to continue: the stop and the handoff return in its
+// outcome (stoppedTurnText), and the requester sends what is left.
+bus.subscribe(makeCapContinuationSubscriber({ store, startTurn, reportsToRequester }));
 
 // Memory journal turn boundary (server/memory-journal.ts). A bot's own
 // file-tool writes to MEMORY.md and memory/ have no hook to tap, so the
@@ -8461,8 +8495,8 @@ bus.subscribe((event: RuntimeEvent) => {
       // the request was mirrored there when the delegation drained, and a
       // channel that only ever shows requests is half a record. Mirror the
       // reply on success; mirror a failed/stopped terminal chip otherwise.
-      const delegationFailureName = !event.ok && event.stopReason?.trim()
-        ? `Delegated turn did not finish — ${event.stopReason.trim().slice(0, 120)}`
+      const delegationFailureName = !event.ok && delegationWatch.has(event.threadId)
+        ? `Delegated turn did not finish — ${stoppedTurnText(event.threadId, completedTurnId, undefined, event.stopReason)}`
         : undefined;
       finalizeDelegationWatch(event.threadId, event.ok, reply, delegationFailureName);
       // group busy/unread settle in the group turn engine, which knows
@@ -8851,6 +8885,17 @@ const handoffs = new Handoffs({
     .filter((m) => m.role === "bot" && m.kind === "text" && !m.from && m.turnId === turnId).map((m) => m.id),
 });
 
+/** Whether another bot awaits the result of the turn in flight on this
+ * thread: a teammate's coordinated assignment, a delegation that reports
+ * back, or an ask_bot caller still waiting. A one-way send hands the work
+ * over, and a Chief's resume answers its person, so either is owned like
+ * work a person started there. */
+function reportsToRequester(threadId: string): boolean {
+  const watched = delegationWatch.get(threadId);
+  return Boolean(watched && !watched.oneWay) || [...awaitedAsks].some(ask => ask.threadId === threadId)
+    || [...roomHandoffs.nodes.values()].some(node => node.status === "running" && node.threadId === threadId && node.parentId !== undefined);
+}
+
 /** Consume one delegated-turn watch and mirror exactly one terminal state.
  * Some harness paths settle a busy bot without a provider turn.completed
  * event, so they call this same finalizer explicitly. */
@@ -8873,6 +8918,9 @@ function finalizeDelegationWatch(
     reply = "";
     failureName = "Result withheld: team or peer access changed while the teammate was working";
   }
+  // The receipt and the wake carry the whole account (stoppedTurnText); a
+  // chip shows its first line.
+  const failureChip = failureName.split("\n", 1)[0]!.slice(0, 180);
   // The receipt is written before any mirror short-circuits: the delegating
   // bot's check/wait_delegation must see a terminal state even when the
   // channel or target is gone.
@@ -8891,7 +8939,7 @@ function finalizeDelegationWatch(
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
-        tool: { name: `Send failed — ${failureName}`, ok: false, ...(watched.taskId ? { handoffId: watched.taskId } : {}) },
+        tool: { name: `Send failed — ${failureChip}`, ok: false, ...(watched.taskId ? { handoffId: watched.taskId } : {}) },
       });
     }
     return true;
@@ -8934,7 +8982,7 @@ function finalizeDelegationWatch(
             tool: {
               name: ok
                 ? `Delegation to @${targetName} completed without a text reply`
-                : `Delegation to @${targetName} failed — ${failureName}`,
+                : `Delegation to @${targetName} failed — ${failureChip}`,
               ok,
             },
           });
@@ -8963,7 +9011,7 @@ function finalizeDelegationWatch(
           tool: {
             name: ok
               ? `Delegation to @${targetName} completed without a text reply`
-              : `Delegation to @${targetName} failed — ${failureName}`,
+              : `Delegation to @${targetName} failed — ${failureChip}`,
             ok,
           },
         });
@@ -8989,7 +9037,7 @@ function finalizeDelegationWatch(
   if (target && channel) {
     if (ok && reply.trim()) mirrorReply(commsBus, target, reply, channel);
     else if (ok) mirrorActivity(commsBus, target, channel, "Delegated turn completed", true);
-    else mirrorActivity(commsBus, target, channel, failureName, false);
+    else mirrorActivity(commsBus, target, channel, failureChip, false);
   }
   return true;
 }
@@ -9889,7 +9937,10 @@ async function startTurn(
   }
   const transitionError = providerTransitionForTurn(bot, opts?.runOn, threadId);
   if (transitionError) throw Object.assign(new Error(transitionError), { status: 409 });
-  if (providerFleetReloading) throw Object.assign(new Error("provider settings are being updated — try again shortly"), { status: 409 });
+  // Only a turn on an engine being replaced waits; the others run on.
+  if (providerInstancesChanging.has(bot.modelSelection.instanceId)) {
+    throw Object.assign(new Error("this provider account is being updated — try again shortly"), { status: 409 });
+  }
   // A workspace at its monthly spend limit starts no turn of any kind: a
   // person's message, a routine, a peer hop or a webhook all stop here.
   assertWithinBudget(cfg, DATA_DIR);
@@ -9985,9 +10036,6 @@ async function startTurn(
     botId, text: resolvedImages.text, images: turnImages.length, depth: commsDepth, card: Boolean(opts?.cardContinuation), spoken,
   }));
   const instanceId = instance.instanceId;
-  if (providerInstancesChanging.has(instanceId)) {
-    throw Object.assign(new Error("this provider account is being updated — try again shortly"), { status: 409 });
-  }
   // A turn always runs on the bot's own engine, model, effort and variant,
   // wherever it works: a cloud computer is a tool it mounts, never a reason
   // to swap the engine (the provider_not_configured incident).
@@ -11199,7 +11247,7 @@ async function startTurn(
         return;
       }
       if (!ownsLatestGeneration) {
-        settleDirectFollowup(dispatchClaimId);
+        settleDirectFollowup(dispatchClaimId, { ok: false, text: e instanceof Error ? e.message : String(e) });
         return;
       }
       if (e instanceof ComputerWaitParked) {
@@ -12022,7 +12070,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           for (const task of store.tasks(bot.id)) {
             purgeTurnAttachmentsForThread(task.threadId);
             clearTurnDigestState(task.threadId);
-            settleDirectFollowup(directTurnGenerationByThread.get(task.threadId));
+            settleDirectFollowup(directTurnGenerationByThread.get(task.threadId), { ok: false, text: "The bot was deleted while it was working" });
             directTurnGenerationByThread.delete(task.threadId);
             directTurnBots.delete(task.threadId);
           }
@@ -12820,10 +12868,6 @@ async function runGroupMemberTurn(
     return false;
   }
   if (isCancelled?.()) return false;
-  if (providerFleetReloading) {
-    onDispatchError?.("provider settings are being updated — try again shortly");
-    return false;
-  }
   const group = store.group(groupId);
   const bot = store.bot(botId);
   const ownsThread = group?.dm
@@ -13506,6 +13550,7 @@ async function runGroupMemberTurn(
     let unsub = () => {};
     let unregisterStall = () => {};
     const deadline = new RoomTurnDeadline(timeoutMinutes, () => {
+      if (orchestration) orchestration.result.stopReason = stoppedTurnText(threadId, providerTurnId, roomTurnTimeoutMessage(bot.name, timeoutMinutes));
       abandonProviderTurn();
       void instance.adapter.interruptTurn(threadId).catch(() => {});
       store.appendMessage(threadId, {
@@ -13533,7 +13578,10 @@ async function runGroupMemberTurn(
       if (e.type === "item.completed" && e.itemType === "assistant_text") replyText += `\n${e.text}`;
       else if (e.type === "turn.completed") {
         const end = roomTurnEnd(e, Boolean(orchestration), roomClaimFailure);
-        if (orchestration && end.stopReason !== undefined) orchestration.result.stopReason = end.stopReason;
+        // An assignment's requester hears the runtime's cause, not "error".
+        if (orchestration && end.stopReason !== undefined) {
+          orchestration.result.stopReason = roomClaimFailure ? end.stopReason : stoppedTurnText(threadId, e.turnId, undefined, end.stopReason);
+        }
         finish(end.outcome);
       }
       // Waiting on a person is not turn work: hold the ceiling while an
@@ -13558,6 +13606,7 @@ async function runGroupMemberTurn(
       return;
     }
     unregisterStall = roomStallCompletions.register(threadId, () => {
+      if (orchestration) orchestration.result.stopReason = stoppedTurnText(threadId, providerTurnId, STALL_CAUSE);
       abandonProviderTurn();
       finish("stalled");
     });
@@ -15954,10 +16003,11 @@ let companyShutdown = false;
 /** End only Company conversations before replacing their native instances. */
 async function stopCompanyInstances(ids: string[]) {
   if (!ids.length) return;
-  if (providerFleetReloading || companyShutdown) {
+  if (companyShutdown) {
     for (const id of ids) { providerAuthSessions.clearInstance(id); bus.detach(id); }
     return;
   }
+  const cause = "turn interrupted — the Company connection changed";
   const selected = new Set(ids);
   for (const id of ids) providerInstancesChanging.add(id);
   const direct = store.bots.flatMap(bot => store.tasks(bot.id)
@@ -15965,14 +16015,15 @@ async function stopCompanyInstances(ids: string[]) {
     .map(task => ({ botId: bot.id, threadId: task.threadId, owner: turnResourceOwners.get(task.threadId), generation: directTurnGenerationByThread.get(task.threadId) })));
   await Promise.all(direct.map(task => interruptDirectThread(task.botId, task.threadId)));
   for (const { botId, threadId, owner, generation } of direct) {
+    const interrupted = stoppedTurnText(threadId, liveTurnByThread.get(threadId), cause);
     releaseTurnResources(owner);
-    settleDirectFollowup(owner?.generation);
+    settleDirectFollowup(owner?.generation, { ok: false, text: interrupted });
     // Another member of this cancellation batch can settle slowly while a
     // completed thread starts a personal turn. Never clear that new owner.
     if (directTurnGenerationByThread.get(threadId) !== generation) continue;
     stopScreenPoller(botId, threadId); releaseLocalVmThread(threadId);
     watchdog.settle(threadId); closeOpenApprovals(threadId); directTurnBots.delete(threadId);
-    finalizeDelegationWatch(threadId, false, "", "Company connection changed");
+    finalizeDelegationWatch(threadId, false, "", `Delegated turn did not finish — ${interrupted}`);
     routines?.failThread(threadId, "Company connection changed while this thread was running");
     if (store.taskByThread(botId, threadId)) {
       store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Company connection changed — choose whether to reconnect or use a personal model", ok: false } });
@@ -15987,7 +16038,10 @@ async function stopCompanyInstances(ids: string[]) {
     if (!bot || !selected.has(bot.modelSelection.instanceId)) continue;
     const group = store.groupByThread(threadId);
     const owner = turnResourceOwners.get(threadId);
-    if (group) cancelGroupTurnOperations(group.id, threadId);
+    if (group) {
+      roomHandoffs.cancelRoom(group.id, threadId, stoppedTurnOutcome({ reason: cause, activities: [] }), "failed");
+      cancelGroupTurnOperations(group.id, threadId);
+    }
     revokeInternalCapabilitiesForThread(threadId);
     await runningTurnInstance(bot, threadId)?.adapter.interruptTurn(threadId);
     const stillOwned = groupSpeakers.get(threadId) === speaker &&
@@ -16020,38 +16074,68 @@ async function persistProviderInstance(instanceId: string, instances: NonNullabl
   resetPathCache();
 }
 
-/** Rebuild the provider fleet after a config change so new keys take
- * effect without a server restart (kills any in-flight turns). */
-async function reloadProviders() {
-  providerFleetReloading = true;
-  providerAuthSessions.clear();
-  // Every provider process is about to die. Revoke all turn capabilities in
-  // one synchronous step before the first teardown await, including room/task
-  // threads that are not a bot's default DM.
-  revokeAllInternalCapabilities();
+/** The engine a conversation's turn runs on: the one that started the turn
+ * in flight, else the thread's own selection (a room's: its speaker's). */
+function threadEngineId(botId: string, threadId: string): string | undefined {
+  return runningTurnEngines.get(threadId)?.instanceId ?? botForThread(botId, threadId)?.modelSelection.instanceId;
+}
+
+/** Engines about to be replaced: every conversation one of them serves loses
+ * the bearers its processes were handed, in one synchronous step, so nothing
+ * still holding one is honoured again. Each conversation holding a bearer is
+ * judged by its turn in flight, else by its bots' engines; a turn running on
+ * an engine that stays keeps its own. */
+function revokeEngineCapabilities(engines: ReadonlySet<string>): void {
+  if (!engines.size) return;
+  const holders = new Map<string, Set<string>>();
+  const hold = (threadId: string, botId: string) => holders.set(threadId, (holders.get(threadId) ?? new Set<string>()).add(botId));
+  for (const capability of internalCapabilities.values()) hold(capability.threadId, capability.botId);
+  for (const [threadId, slots] of sessionCredentials) for (const slot of slots.keys()) hold(threadId, slot.split(" ")[0]!);
+  for (const [threadId, botIds] of holders) {
+    if ([...botIds].some(botId => engines.has(threadEngineId(botId, threadId) ?? ""))) revokeInternalCapabilitiesForThread(threadId);
+  }
+}
+
+/** Apply a provider config write, so new keys and settings take effect
+ * without a server restart. Only the engines launched differently since
+ * `before` (engineLaunches) are replaced, and only the turns running on them
+ * are interrupted, each requester told why. Every other engine keeps its
+ * processes, sessions and turns; a write that changed no engine touches
+ * nothing. */
+async function reloadProviders(before: Record<string, unknown>) {
+  const configs = providerConfigs();
+  const changed = new Set(changedInstanceIds(before, engineLaunches(configs)));
+  if (!changed.size) return;
+  const onChanged = (botId: string, threadId: string) => changed.has(threadEngineId(botId, threadId) ?? "");
   const direct = store.bots.flatMap((bot) => store.tasks(bot.id)
-    .filter((task) => threadBusy(bot.id, task.threadId))
+    .filter((task) => threadBusy(bot.id, task.threadId) && onChanged(bot.id, task.threadId))
     .map((task) => ({ botId: bot.id, threadId: task.threadId, owner: turnResourceOwners.get(task.threadId) })));
-  const rooms = [...groupSpeakers.entries()];
+  const rooms = [...groupSpeakers.entries()].filter(([threadId, speaker]) => onChanged(speaker.botId, threadId));
+  const cause = "turn interrupted — provider settings changed";
+  providerFleetReloading = true;
+  for (const id of changed) providerInstancesChanging.add(id);
+  // Those engines' processes are about to die: revoke before the first await.
+  revokeEngineCapabilities(changed);
+  for (const id of changed) { providerAuthSessions.clearInstance(id); bus.detach(id); }
   for (const task of direct) cancelDirectTurnDispatch(task.botId, task.threadId);
   for (const [threadId] of rooms) {
     const group = store.groupByThread(threadId);
-    if (group) cancelGroupTurnOperations(group.id, threadId);
+    if (!group) continue;
+    // The room's assignments, queued ones too, fail with this cause rather
+    // than as the person's Stop.
+    roomHandoffs.cancelRoom(group.id, threadId, stoppedTurnOutcome({ reason: cause, activities: [] }), "failed");
+    cancelGroupTurnOperations(group.id, threadId);
   }
-  bus.detachAll();
   try {
-    await registry.disposeAll();
-    await registry.load(providerConfigs(), decorateHostedProvider);
-    // Personal providers are usable independently of the optional Company
-    // overlay. Subscribe them before restoring that overlay so a broken or
-    // expired Company runtime cannot leave the rebuilt personal fleet mute.
-    bus.attach(registry.instances());
-    await managedDesktop.restore();
-    await cloudCredit?.restore();
+    const kept = [...changed].filter((id) => Object.hasOwn(configs, id));
+    await Promise.all([...changed].filter((id) => !Object.hasOwn(configs, id)).map((id) => registry.dispose(id)));
+    await registry.load(Object.fromEntries(kept.map((id) => [id, configs[id]])), decorateHostedProvider);
+    bus.attach(kept.flatMap((id) => registry.get(id) ?? []));
   } finally {
     // Settle every exact conversation, not whichever one is selected now.
     // Teardown can swallow terminal events; no task may remain busy forever.
     for (const { botId, threadId, owner } of direct) {
+      const interrupted = stoppedTurnText(threadId, liveTurnByThread.get(threadId), cause);
       stopScreenPoller(botId, threadId);
       releaseLocalVmThread(threadId);
       releaseTurnResources(owner);
@@ -16060,16 +16144,17 @@ async function reloadProviders() {
       watchdog.settle(threadId);
       closeOpenApprovals(threadId);
       directTurnBots.delete(threadId);
-      finalizeDelegationWatch(threadId, false, "", "Delegated turn did not finish — provider settings changed");
+      runningTurnEngines.delete(threadId);
+      finalizeDelegationWatch(threadId, false, "", `Delegated turn did not finish — ${interrupted}`);
       routines?.failThread(threadId, "Provider settings changed while this thread was running");
       if (store.taskByThread(botId, threadId)) {
         store.appendMessage(threadId, {
           role: "bot", kind: "activity",
-          tool: failedTurnTool("turn interrupted — provider settings changed"),
+          tool: failedTurnTool(cause),
         });
         store.setTaskActivity(botId, threadId, "idle");
       }
-      settleDirectFollowup(owner?.generation);
+      settleDirectFollowup(owner?.generation, { ok: false, text: interrupted });
       retryDelegationsWaitingOn(botId);
     }
     for (const [threadId, speaker] of rooms) {
@@ -16079,11 +16164,13 @@ async function reloadProviders() {
       watchdog.settle(threadId);
       closeOpenApprovals(threadId);
       if (groupSpeakers.get(threadId) !== speaker) continue;
+      runningTurnEngines.delete(threadId);
       groupSpeakers.delete(threadId);
       const group = store.groupByThread(threadId);
       if (group) store.patchGroup(group.id, { busyBotId: null });
       store.setActivity(speaker.botId, "idle");
     }
+    for (const id of changed) providerInstancesChanging.delete(id);
     providerFleetReloading = false;
   }
   // killed turns settle here without a turn.completed event, so anything
@@ -16095,9 +16182,9 @@ async function reloadProviders() {
   drainTeamSetupResumes();
 }
 
-// Config writes rebuild the whole provider registry. Keep the read-modify-write
+// Config writes replace the engines they change. Keep the read-modify-write
 // and reload sequence single-flight so two settings requests cannot drop one
-// another's changes or dispose a fleet while another reload is creating it.
+// another's changes or dispose an engine while another reload is creating it.
 let providerConfigBusy = false;
 const providerInstancesChanging = new Set<string>();
 let mcpConfigBusy = false;
@@ -18164,14 +18251,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             receipt: peerDeliveryReceipt({ botId: toBotId, botName: currentTarget.name, outcome: "injected", taskId,
               detail: "the teammate's turn started and is still running; only the synchronous wait ended" }) });
         }
-        if (outcome.status === "failed" && !outcome.text.trim()) {
-          // No partial answer to hand back — mirror the failure where the
-          // exchange lives, with the provider's reason instead of silence.
-          const why = outcome.stopReason?.trim() ? ` — ${outcome.stopReason.trim().slice(0, 120)}` : "";
-          mirrorActivity(commsBus, currentTarget, channel, `Turn failed${why}`, false);
-          return json(res, 200, { botName: currentTarget.name, text: `(the bot's turn failed${why})`,
+        if (outcome.status === "failed") {
+          // The asker gets the cause, what the turn did and its last words,
+          // never partial text passed off as a finished reply; the exchange
+          // gets the cause where it lives.
+          const why = outcome.text.split("\n", 1)[0]!.slice(0, 120);
+          mirrorActivity(commsBus, currentTarget, channel, `Turn failed — ${why}`, false);
+          return json(res, 200, { botName: currentTarget.name, text: outcome.text,
             receipt: peerDeliveryReceipt({ botId: toBotId, botName: currentTarget.name, outcome: "injected",
-              detail: `the teammate's turn started and failed${why}` }) });
+              detail: `the teammate's turn started and failed — ${why}` }) });
         }
         const reply = outcome.status === "timeout"
           ? outcome.text || "(timed out waiting for the bot to reply)"
@@ -25238,6 +25326,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return next === undefined ? [] : [cfg[kind]?.key, next];
       });
       let configWriteCommitted = false;
+      // What each engine is launched with before this write (reloadProviders).
+      const enginesBefore = engineLaunches(providerConfigs());
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
       try {
         // Provider-owned voice ids must be invalidated before the provider
@@ -25324,14 +25414,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           browserReferenceCleanupError = error;
         }
       }
-      // Provider keys change the fleet. Profile, language, voice, VPS, room
-      // timeout, and onboarding progress changes do not rebuild it: no driver
-      // reads them, and they should not interrupt in-flight turns.
-      const reloadKeys = providerReloadKeys(patch);
-      // Config is already durable. A provider credential or runtime change
-      // invalidates every old child immediately, including when browser
-      // cleanup below has to await Electron before reloadProviders begins.
-      if (reloadKeys.length > 0) revokeAllInternalCapabilities();
+      // Only an engine whose launch config this write changed is rebuilt: a
+      // provider key, URL or model default reaches its own engines and no
+      // others, and a setting no driver reads (profile, language, voice, VPS,
+      // room timeout, onboarding progress), or the same values saved again,
+      // rebuilds nothing and interrupts no turn.
+      const changedEngines = new Set(changedInstanceIds(enginesBefore, engineLaunches(providerConfigs())));
+      // Config is already durable. A changed engine's old children are
+      // invalid immediately, including when browser cleanup below has to
+      // await Electron before reloadProviders begins.
+      revokeEngineCapabilities(changedEngines);
       // The cleanup marker becomes committed only after both pieces of durable
       // application state agree. Commit/ACK failures are deferred until every
       // mandatory consequence of the config write has run: no journal I/O
@@ -25349,9 +25441,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               mandatoryError = error;
             }
           }
-          if (reloadKeys.length > 0) {
+          if (changedEngines.size > 0) {
             try {
-              await reloadProviders();
+              await reloadProviders(enginesBefore);
             } catch (error) {
               if (!mandatoryError) mandatoryError = error;
             }

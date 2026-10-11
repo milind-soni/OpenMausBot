@@ -84,7 +84,7 @@ interface FakeHarness {
   failNextStart: () => void;
 }
 
-function harness(options?: { taskTitle?: string; taskForEveryThread?: boolean }): FakeHarness {
+function harness(options?: { taskTitle?: string; taskForEveryThread?: boolean; requested?: Set<string> }): FakeHarness {
   const calls: FakeHarness["calls"] = { createTask: [], startTurn: [], append: [] };
   const task = { threadId: "thread-cont", title: "Continue: Whatever", projectId: undefined as string | undefined, approvalMode: "ask" as const, modelSelection: undefined };
   let clock = 1_000_000;
@@ -104,6 +104,7 @@ function harness(options?: { taskTitle?: string; taskForEveryThread?: boolean })
   const sub = makeCapContinuationSubscriber({
     store: store as unknown as Parameters<typeof makeCapContinuationSubscriber>[0]["store"],
     startTurn: startTurn as unknown as Parameters<typeof makeCapContinuationSubscriber>[0]["startTurn"],
+    reportsToRequester: (threadId) => options?.requested?.has(threadId) === true,
     now: () => clock,
   });
   return {
@@ -170,6 +171,23 @@ describe("makeCapContinuationSubscriber", () => {
     expect(msg).toMatchObject({ kind: "activity", tool: { ok: false } });
     expect(String(msg.tool.name)).toContain("auto-continuation failed");
     expect(String(msg.tool.name)).toContain("/tmp/handoff.md");
+  });
+
+  // A teammate's assigned turn returns its stop and handoff to the requester,
+  // who sends what is left: an unattended second owner would redo the same
+  // work beside that re-send, and its result would never reach the requester.
+  it("leaves work another bot awaits to that requester, and keeps continuing a person's own", async () => {
+    const requested = new Set(["thread-1"]);
+    const h = harness({ requested });
+    h.sub(capEvent());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(h.calls.createTask.length).toBe(0);
+    expect(h.calls.startTurn.length).toBe(0);
+    expect(h.calls.append.length).toBe(0);
+    // Read when the cap lands: once the assignment settled, the thread is the person's again.
+    requested.clear();
+    h.sub(capEvent());
+    await vi.waitFor(() => expect(h.calls.startTurn.length).toBe(1));
   });
 
   it("ignores events that are not cap.exhausted", async () => {

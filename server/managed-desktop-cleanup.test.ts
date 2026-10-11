@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 import { expect, it } from "vitest";
+import { changedInstanceIds, engineLaunches } from "./config.ts";
 
 // Execute the actual cleanup functions without importing index.ts, which would
 // start a server. State and adapters are synthetic; this is an ownership-race
@@ -28,7 +29,7 @@ const code = ts.transpileModule([
   section("async function stopCompanyInstances(", "async function persistProviderInstance("),
 ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
 const reloadProvidersCode = ts.transpileModule(
-  section("async function reloadProviders()", "// Config writes rebuild the whole provider registry."),
+  section("/** The engine a conversation's turn runs on", "// Config writes replace the engines they change."),
   { compilerOptions: { target: ts.ScriptTarget.ESNext } },
 ).outputText;
 
@@ -49,6 +50,7 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
   const autoVmClaims = new Map<string, { owner: { threadId: string; generation: string } }>();
   const started = new Map<string, ReturnType<typeof deferred>>(), interrupted = new Map<string, ReturnType<typeof deferred>>();
   const interruptCalls: string[] = [], cancelled: string[] = [], revoked: string[] = [], messages: string[] = [], settled: string[] = [], detached: string[] = [];
+  const roomCancels: Array<{ threadId: string; reason: string; status: string }> = [];
   // The parked-resume seam (#1651): releaseTurnResources queues the drain
   // when a parked turn waits behind the release. Recorded stubs, so the
   // extracted code runs against the same names the real module sees.
@@ -67,8 +69,10 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
     started.set(threadId, deferred()); interrupted.set(threadId, deferred());
   }
   const context = vm.createContext({
-    providerFleetReloading: false, companyShutdown: false, providerInstancesChanging: new Set(),
+    companyShutdown: false, providerInstancesChanging: new Set(),
     providerAuthSessions: { clearInstance() {} }, bus: { detach: (id: string) => detached.push(id) },
+    liveTurnByThread: new Map(), stoppedTurnText: (_threadId: string, _turnId: string | undefined, cause: string) => cause,
+    stoppedTurnOutcome: ({ reason }: { reason: string }) => reason,
     store: {
       get bots() { return [...bots.values()]; },
       tasks: (botId: string) => kind === "direct" ? [tasks.get(botId)] : [],
@@ -88,7 +92,8 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
     directRequestOwners: new Map(),
     autoVmClaims,
     turnResources: { release() {} }, settlingResourceOwners: new Map(), turnComputerResources: new Map(), teamComputerTurns: new Map(),
-    roomHandoffs: { stopAwaitingDirect() {} }, noteTeammatesLeftRunning() {},
+    roomHandoffs: { stopAwaitingDirect() {}, cancelRoom: (_groupId: string, threadId: string, reason: string, status: string) => roomCancels.push({ threadId, reason, status }) },
+    noteTeammatesLeftRunning() {},
     cancelDirectTurnDispatch: (_botId: string, threadId: string) => cancelled.push(threadId),
     cancelGroupTurnOperations: (_groupId: string, threadId: string) => cancelled.push(threadId),
     revokeInternalCapabilitiesForThread: (threadId: string) => revoked.push(threadId),
@@ -107,7 +112,7 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
   return {
     bots, tasks, groups, owners, directBots, speakers, vmLeases, approvals, screens, watched,
     autoVmClaims,
-    interruptCalls, cancelled, revoked, messages, settled, detached,
+    interruptCalls, cancelled, revoked, messages, settled, detached, roomCancels,
     pendingComputerResumes, resumeDrains, microtasks,
     flushMicrotasks: () => { for (const run of microtasks.splice(0)) run(); },
     context,
@@ -182,6 +187,14 @@ it("skips a later snapshot entry replaced while an earlier group interrupt is pe
   expect(f.cancelled).toEqual(["first"]);
   expect(f.revoked).toEqual(["first"]);
   expect(f.speakers.get("later")?.name).toBe("Personal turn");
+});
+
+// A room's assignments end with the cause, so whoever assigned them never
+// reads a Company change as the person's Stop ("Stopped by user").
+it("fails a Company room turn's assignments with the cause, not as the person's Stop", async () => {
+  const f = fixture("group"), stopping = f.stop();
+  await f.started("first"); f.finish("first"); await stopping;
+  expect(f.roomCancels).toEqual([{ threadId: "first", reason: "turn interrupted — the Company connection changed", status: "failed" }]);
 });
 
 it("also fences group resource-generation changes when the speaker object is unchanged", async () => {
@@ -337,32 +350,99 @@ it("quitting disposes Company instances without interrupting turns or writing co
   expect(f.tasks.get("first")?.busy).toBe(true);
 });
 
-it("reattaches rebuilt personal providers before a Company restore failure", async () => {
-  const order: string[] = [];
-  const personal = { instanceId: "personal" };
+// A provider settings save replaces only the engines whose launch config it
+// changed (config.ts changedInstanceIds), and interrupts only the turns
+// running on them, each requester told why. Saving the same values again, or
+// changing another engine's key, leaves a teammate's long turn running.
+function reloadFixture() {
+  type Thread = { botId: string; threadId: string; engine: string; busy: boolean };
+  const threads: Thread[] = [
+    { botId: "eli", threadId: "eli-work", engine: "compat", busy: true },
+    { botId: "mira", threadId: "mira-work", engine: "claude", busy: true },
+    { botId: "eli", threadId: "eli-idle", engine: "compat", busy: false },
+    { botId: "mira", threadId: "mira-idle", engine: "claude", busy: false },
+  ];
+  let configs: Record<string, { driver: string; environment?: Record<string, string> }> = {
+    compat: { driver: "openai-compat", environment: { OPENAI_COMPAT_API_KEY: "k1" } },
+    claude: { driver: "claudeAgent" },
+  };
+  // Two rooms, each with a member speaking on one of the engines.
+  const rooms = new Map([["room-compat", { botId: "eli", engine: "compat" }], ["room-claude", { botId: "mira", engine: "claude" }]]);
+  const log: string[] = [], settled: Array<{ generation: string; text: string }> = [], revoked: string[] = [];
+  const bearers = new Map(threads.map(thread => [thread.threadId, new Map([[`${thread.botId} agents`, { grants: "", token: "t" }]])]));
   const context = vm.createContext({
-    providerFleetReloading: false,
-    providerAuthSessions: { clear: () => order.push("clear-auth") },
-    revokeAllInternalCapabilities: () => order.push("revoke-capabilities"),
-    store: { bots: [] },
-    groupSpeakers: new Map(),
-    bus: {
-      detachAll: () => order.push("detach"),
-      attach: (instances: Array<{ instanceId: string }>) => order.push(`attach:${instances.map(instance => instance.instanceId).join(",")}`),
+    providerFleetReloading: false, providerInstancesChanging: new Set<string>(),
+    providerConfigs: () => configs, changedInstanceIds, engineLaunches: (launched: typeof configs) => engineLaunches(launched, {}),
+    decorateHostedProvider: undefined,
+    internalCapabilities: new Map(), sessionCredentials: bearers,
+    runningTurnEngines: new Map([...threads.filter(thread => thread.busy), ...[...rooms].map(([threadId, room]) => ({ threadId, ...room }))]
+      .map(thread => [thread.threadId, { instanceId: thread.engine }])),
+    botForThread: (_botId: string, threadId: string) => ({ modelSelection: { instanceId: threads.find(thread => thread.threadId === threadId)!.engine } }),
+    store: {
+      bots: [{ id: "eli" }, { id: "mira" }],
+      tasks: (botId: string) => threads.filter(thread => thread.botId === botId),
+      taskByThread: (_botId: string, threadId: string) => threads.find(thread => thread.threadId === threadId),
+      appendMessage: (threadId: string, message: { tool: { name: string } }) => log.push(`message:${threadId}:${message.tool.name}`),
+      setTaskActivity: (_botId: string, threadId: string) => { threads.find(thread => thread.threadId === threadId)!.busy = false; },
+      groupByThread: (threadId: string) => rooms.has(threadId) ? { id: `group-${threadId}` } : undefined,
+      patchGroup() {}, setActivity() {},
     },
+    threadBusy: (_botId: string, threadId: string) => threads.find(thread => thread.threadId === threadId)!.busy,
+    groupSpeakers: new Map([...rooms].map(([threadId, room]) => [threadId, { botId: room.botId }])), turnResourceOwners: new Map(threads.map(thread => [thread.threadId, { threadId: thread.threadId, generation: `gen-${thread.threadId}` }])),
+    revokeInternalCapabilitiesForThread: (threadId: string) => revoked.push(threadId),
+    providerAuthSessions: { clearInstance: (id: string) => log.push(`auth:${id}`) },
+    bus: { detach: (id: string) => log.push(`detach:${id}`), attach: (instances: Array<{ instanceId: string }>) => log.push(`attach:${instances.map(instance => instance.instanceId)}`) },
     registry: {
-      disposeAll: async () => { order.push("dispose"); },
-      load: async () => { order.push("load-personal"); },
-      instances: () => [personal],
+      dispose: async (id: string) => { log.push(`dispose:${id}`); },
+      load: async (loaded: object) => { log.push(`load:${Object.keys(loaded)}`); },
+      get: (id: string) => ({ instanceId: id }),
     },
-    providerConfigs: () => ({ personal: { driver: "fake" } }), decorateHostedProvider: undefined,
-    managedDesktop: { restore: async () => { order.push("restore-company"); throw new Error("Fixture Company restore failure"); } },
+    cancelDirectTurnDispatch: (_botId: string, threadId: string) => log.push(`cancel:${threadId}`),
+    cancelGroupTurnOperations: (_groupId: string, threadId: string) => log.push(`room-stop:${threadId}`),
+    roomHandoffs: { cancelRoom: (_groupId: string, threadId: string, reason: string, status: string) => log.push(`room-assignments:${threadId}:${status}:${reason}`) },
+    liveTurnByThread: new Map(),
+    stoppedTurnText: (threadId: string, _turnId: string | undefined, cause: string) => `${cause} (${threadId})`,
+    stoppedTurnOutcome: ({ reason }: { reason: string }) => reason,
+    stopScreenPoller() {}, releaseLocalVmThread() {}, releaseTurnResources() {}, endForeignTurns() {}, vpsThreadEnded() {},
+    watchdog: { settle() {} }, closeOpenApprovals() {}, directTurnBots: new Map(),
+    finalizeDelegationWatch: (_threadId: string, _ok: boolean, _reply: string, why: string) => log.push(`delegation:${why}`),
+    routines: { failThread() {} }, failedTurnTool: (name: string) => ({ name, ok: false }),
+    settleDirectFollowup: (generation: string, outcome: { text: string }) => settled.push({ generation, text: outcome.text }),
+    retryDelegationsWaitingOn() {},
+    drainQueuedSends() {}, drainConnectorResumes() {}, drainComputerResumes() {}, drainSecretResumes() {}, drainTeamSetupResumes() {},
   });
   vm.runInContext(reloadProvidersCode, context, { filename: "index.ts (provider reload fixture)" });
+  const save = (next: typeof configs) => {
+    const before = configs;
+    configs = next;
+    return context.reloadProviders(engineLaunches(before, {})) as Promise<void>;
+  };
+  return { threads, log, settled, revoked, save, configs: () => configs, context };
+}
 
-  await expect(context.reloadProviders()).rejects.toThrow("Fixture Company restore failure");
-  expect(order).toEqual([
-    "clear-auth", "revoke-capabilities", "detach", "dispose", "load-personal", "attach:personal", "restore-company",
-  ]);
-  expect(context.providerFleetReloading).toBe(false);
+it("saving the same provider settings again interrupts no turn and replaces no engine", async () => {
+  const f = reloadFixture();
+  await f.save(structuredClone(f.configs()));
+  expect(f.log).toEqual([]);
+  expect(f.settled).toEqual([]);
+  expect(f.revoked).toEqual([]);
+  expect(f.threads.filter(thread => thread.busy).map(thread => thread.threadId)).toEqual(["eli-work", "mira-work"]);
+});
+
+it("a changed key replaces only its engine and tells only that engine's requesters why", async () => {
+  const f = reloadFixture();
+  await f.save({ ...f.configs(), compat: { driver: "openai-compat", environment: { OPENAI_COMPAT_API_KEY: "k2" } } });
+  // The other engine's processes, bearers and teammate turn are untouched.
+  expect(f.log.filter(line => line.includes("claude") || line.includes("mira"))).toEqual([]);
+  expect(f.revoked).toEqual(["eli-work", "eli-idle"]);
+  expect(f.log).toEqual(expect.arrayContaining(["auth:compat", "detach:compat", "cancel:eli-work", "load:compat", "attach:compat",
+    "message:eli-work:turn interrupted — provider settings changed",
+    "delegation:Delegated turn did not finish — turn interrupted — provider settings changed (eli-work)",
+    // a room's assignments fail with the cause, never as the person's Stop
+    "room-assignments:room-compat:failed:turn interrupted — provider settings changed", "room-stop:room-compat"]));
+  expect(f.settled).toEqual([{ generation: "gen-eli-work", text: "turn interrupted — provider settings changed (eli-work)" }]);
+  expect(f.threads.find(thread => thread.threadId === "mira-work")?.busy).toBe(true);
+  expect(f.threads.find(thread => thread.threadId === "eli-work")?.busy).toBe(false);
+  expect(f.context.providerInstancesChanging.size).toBe(0);
+  expect(f.context.providerFleetReloading).toBe(false);
 });

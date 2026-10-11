@@ -393,9 +393,11 @@ export class RoomHandoffs {
     this.trackExecutionPauses();
     this.publish(node);
   }
-  cancelRoom(groupId: string, threadId?: string) {
+  /** A harness stop (a provider reload) passes its own cause and fails the
+   * work, so a requester never reads it as the person's Stop. */
+  cancelRoom(groupId: string, threadId?: string, reason = "Stopped by user", status: "failed" | "cancelled" = "cancelled") {
     for (const n of this.nodes.values()) {
-      if (n.groupId === groupId && (!threadId || n.threadId === threadId) && !terminal(n)) this.cancelTree(n, "Stopped by user");
+      if (n.groupId === groupId && (!threadId || n.threadId === threadId) && !terminal(n)) this.cancelTree(n, reason, status);
     }
   }
   cancelDirect(threadId: string, reason = "Stopped by user") {
