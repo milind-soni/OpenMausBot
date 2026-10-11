@@ -81,9 +81,23 @@ it("keeps live room questions fenced but allows task changes after their turn se
       ["PATCH", `/api/groups/${room.id}`, { memberIds: [bot.id] }],
       ["DELETE", `/api/groups/${room.id}/tasks/${spareThreadId}`],
     ];
-    for (const [method, path, body] of changes) {
+    // The task with the live question is fenced, and so is the room's setup;
+    // another task stays free to start, rename and leave (one queue per task).
+    const fenced: Array<[string, string, unknown?]> = [
+      ["PATCH", `/api/groups/${room.id}/tasks/${room.threadId}`, { title: "Renamed live task" }],
+      ["DELETE", `/api/groups/${room.id}/tasks/${room.threadId}`],
+      ...changes.slice(3, 5),
+    ];
+    for (const [method, path, body] of fenced) {
       expect((await api(method, path, body)).status, `${method} ${path} while live`).toBe(409);
     }
+    const beside = await api<{ task: GroupTask }>("POST", `/api/groups/${room.id}/tasks`, { title: "Task beside the question" });
+    expect(beside.status, "a new task while live").toBe(201);
+    expect((await api("PATCH", `/api/groups/${room.id}/tasks/${spareThreadId}`, { title: "Renamed while live" })).status).toBe(200);
+    expect((await api("POST", `/api/groups/${room.id}/tasks/${room.threadId}`, {})).status).toBe(200);
+    expect((await api("DELETE", `/api/groups/${room.id}/tasks/${beside.body.task.threadId}`)).status).toBe(200);
+    expect(await question()).toMatchObject({ requestType: "question", requestId });
+    expect((await roomState()).working).toBe(true);
 
     writeFileSync(finishGate, "finish");
     await expect.poll(async () => (await roomState()).working, { timeout: 5_000 }).toBe(false);
