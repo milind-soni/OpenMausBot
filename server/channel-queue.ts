@@ -196,11 +196,11 @@ export function settleHeldChannelQueueHead(held: HeldChannelQueue): void {
  * notifications harmless.
  */
 export function drainChannelMessages(
-  isWorking: (groupId: string) => boolean,
+  isWorking: (groupId: string, threadId: string) => boolean,
   run: (input: { groupId: string; threadId: string; items: ChannelQueueItem[] }) => void | Promise<void>,
 ): void {
   for (const [threadId, entry] of queues) {
-    if (isWorking(entry.groupId)) continue;
+    if (isWorking(entry.groupId, threadId)) continue;
     if (entry.items.length === 0) {
       queues.delete(threadId);
       continue;

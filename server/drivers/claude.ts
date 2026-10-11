@@ -443,6 +443,7 @@ export const STATIC_CLAUDE_MODELS: ModelCatalog = {
     { id: "claude-opus-5", label: "Claude Opus 5" },
     { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5", contextWindow: 1_000_000 },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
+    { id: "claude-haiku-5-5", label: "Claude Haiku 5.5", contextWindow: 1_000_000 },
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
   ],
 };
@@ -1563,7 +1564,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         allowed.push("mcp__phone");
       }
       if (turn.integrations?.browser) {
-        mcpServers.browser = { ...turn.integrations.browser };
+        // Behind tool search, the first browser action costs a ToolSearch
+        // model step. Load the tools up front when browsing is the point.
+        mcpServers.browser = turn.preloadBrowserTools
+          ? { ...turn.integrations.browser, alwaysLoad: true }
+          : { ...turn.integrations.browser };
         allowed.push("mcp__browser");
       }
       if (turn.integrations?.data) {

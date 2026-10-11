@@ -181,6 +181,10 @@ export interface SendTurnInput {
    * systemVolatile describes this turn even when its text is unchanged from
    * the previous turn, so digest-based delivery must not suppress the note. */
   mentionTurn?: boolean;
+  /** The built-in browser is this conversation's place, so the bot will very
+   * likely browse: a driver may load its tools up front instead of behind a
+   * tool search, which costs the first browser action a model step. */
+  preloadBrowserTools?: boolean;
   /** Per-bot integrations the driver may hand to the agent as tools. */
   integrations?: {
     /** A local stdio bridge owns the remote Composio transport. Keeping the

@@ -909,11 +909,10 @@ body {
 .glass-rail {
   background: color-mix(in srgb, var(--color-app) 22%, transparent);
 }
-/* Behind a glass pop-up: dim a little and blur, never black out. */
+/* Behind a glass pop-up: dim without adding a second, full-window blur pass.
+   The pop-up surface provides the glass blur over the content it covers. */
 .glass-scrim {
   background: color-mix(in srgb, black 28%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
 }
 @media (prefers-reduced-transparency: reduce) {
   .glass-surface {
@@ -926,8 +925,6 @@ body {
   .glass-rail { background: var(--color-app); }
   .glass-scrim {
     background: color-mix(in srgb, black 50%, transparent);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
 }
 @media (forced-colors: active) {
@@ -1879,14 +1876,22 @@ button:disabled.bg-danger {
   opacity: 1;
 }
 
-/* Sidebar items are clickable and should say so on hover. Tailwind v4's
-   preflight stopped giving buttons a pointer cursor, so bot rows, section
-   headers, and menu entries hovered like static text. Scoped to the sidebar
-   (and its portalled context menu) rather than every button in the app;
-   disabled or busy controls keep the default cursor. */
-[data-sidebar] :is(button, [role="button"]):not(:disabled, [aria-busy="true"]) {
-  cursor: pointer;
+/* Tailwind v4 does not provide pointer cursors for buttons by default.
+   Restore them for enabled interactive controls across the app.
+   Keep specificity low so component cursor styles can override this. */
+
+@layer base {
+  :where(
+    button:not(:disabled, [aria-disabled="true"], [aria-busy="true"]),
+    [role="button"]:not(:disabled, [aria-disabled="true"], [aria-busy="true"]),
+    [role="link"]:not([aria-disabled="true"], [aria-busy="true"]),
+    summary:not([aria-disabled="true"], [aria-busy="true"])
+  ) {
+    cursor: pointer;
+  }
 }
+
+
 ::highlight(omb-citation-source) {
   background-color: color-mix(in srgb, var(--color-accent) 35%, transparent);
 }
