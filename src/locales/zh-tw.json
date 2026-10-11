@@ -1397,6 +1397,8 @@
   "attach.previous": "上一張圖片",
   "attach.next": "下一張圖片",
   "attach.retryAria": "重試載入 {name}",
+  "attach.imageUnavailable": "無法顯示圖片",
+  "attach.imageOutsideWorkspace": "這張圖片不在此聊天的工作資料夾中，因此無法在這裡顯示",
   "attach.previewImageAria": "預覽附加的圖片 {name}",
   "attach.externalHidden": "為保護隱私，已隱藏外部圖片",
   "attach.savedTo": "已儲存至 {path}",

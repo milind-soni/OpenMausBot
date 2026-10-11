@@ -121,6 +121,16 @@ function referencedPath(
   return decodePathWithSuffixRemoved(href);
 }
 
+/** The file name a rendered link or image names, as attach_file records a
+ * delivery's name; null when the target is not a local file link. */
+export function referencedFileName(href: string): string | null {
+  try {
+    return referencedPath(href, true).split(/[\\/]/).at(-1) || null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * A lexical path identity used only for matching a requested file against a
  * rendered Markdown link. Native `resolve` and `fileURLToPath` follow the

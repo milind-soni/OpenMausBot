@@ -205,6 +205,23 @@ export function messageImagePreviewUrl(
   return `/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file?preview=1&ref=${sourceOffset}`;
 }
 
+/** An <img> learns only that it failed. A message image outside the
+ * conversation's folders is refused on every try, so the route is asked once
+ * more for its reason, which the tile then says instead of offering a retry. */
+export async function messageImageOutsideWorkspace(src: string): Promise<boolean> {
+  try {
+    const response = await fetch(src, { cache: "no-store" });
+    if (response.ok) {
+      await response.body?.cancel();
+      return false;
+    }
+    const body = await response.json().catch(() => null) as { code?: unknown } | null;
+    return body?.code === "outside_workspace";
+  } catch {
+    return false;
+  }
+}
+
 function revokeObjectUrlLater(url: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
@@ -667,17 +684,21 @@ export function AttachmentThumbnail({
   onPreview,
   className,
   eager = false,
+  explainRefusal = false,
 }: {
   image: PreviewImage;
   onPreview: () => void;
   className?: string;
   eager?: boolean;
+  /** A message image: when it fails, ask why (messageImageOutsideWorkspace). */
+  explainRefusal?: boolean;
 }) {
   // Every caller keys this component by src. Resetting in an effect races a
   // cached/blob image's onLoad: it can become ready before the effect runs,
   // then be put back into a permanent loading state.
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
   const [attempt, setAttempt] = useState(0);
+  const [outsideWorkspace, setOutsideWorkspace] = useState(false);
   // Until the pixels are known the tile is 4:3; then it takes the picture's own
   // shape (within sane bounds) so a wide image has no empty band beneath it.
   const [ratio, setRatio] = useState<number | null>(null);
@@ -696,8 +717,12 @@ export function AttachmentThumbnail({
       {state === "failed" ? (
         <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center text-ink-secondary" role="alert">
           <ImageOff size={22} />
-          <span className="max-w-full truncate text-[11.5px]">Image unavailable</span>
-          <span
+          {outsideWorkspace ? (
+            <span className="max-w-full text-[11.5px]">{t("attach.imageOutsideWorkspace")}</span>
+          ) : (
+            <span className="max-w-full truncate text-[11.5px]">{t("attach.imageUnavailable")}</span>
+          )}
+          {!outsideWorkspace && <span
             role="button"
             tabIndex={0}
             onClick={(event) => {
@@ -717,7 +742,7 @@ export function AttachmentThumbnail({
             aria-label={t("attach.retryAria", { name: image.name })}
           >
             <RotateCcw size={11} /> {t("chat.retry")}
-          </span>
+          </span>}
         </span>
       ) : (
         <span
@@ -750,7 +775,10 @@ export function AttachmentThumbnail({
               if (naturalWidth > 0 && naturalHeight > 0) setRatio(Math.min(Math.max(naturalWidth / naturalHeight, 0.6), 2.4));
               setState("ready");
             }}
-            onError={() => setState("failed")}
+            onError={() => {
+              setState("failed");
+              if (explainRefusal) void messageImageOutsideWorkspace(image.src).then(setOutsideWorkspace);
+            }}
             className={cn(
               "block size-full object-cover transition duration-200 group-hover/image:scale-[1.015]",
               state === "ready" ? "opacity-100" : "opacity-0",
@@ -883,7 +911,7 @@ export function MarkdownImagePreview({
             <ImageOff size={17} /> {t("attach.oldImage")}
           </span>
         ) : visibleSource ? (
-          <AttachmentThumbnail key={image.src} image={image} onPreview={() => setOpen(true)} className="max-h-96" eager />
+          <AttachmentThumbnail key={image.src} image={image} onPreview={() => setOpen(true)} className="max-h-96" eager explainRefusal={localMessageImage} />
         ) : (
           <span className="flex aspect-[4/3] max-h-96 animate-pulse items-center justify-center rounded-xl border border-hairline/40 bg-inset" role="status">
             <LoaderCircle size={17} className="animate-spin text-ink-tertiary" />

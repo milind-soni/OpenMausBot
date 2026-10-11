@@ -1019,7 +1019,7 @@ function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
   const { message, imageOffsets } = useContext(MessageScopeContext);
   const { src, alt } = props;
   if (!src) {
-    return <span className="text-[12px] text-danger" role="alert">Image unavailable</span>;
+    return <span className="text-[12px] text-danger" role="alert">{t("attach.imageUnavailable")}</span>;
   }
   const filePath = localFilePath(src) ?? undefined;
   const sourceOffset = props.node?.position?.start.offset;

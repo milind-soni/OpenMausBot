@@ -75,6 +75,14 @@ describe("workspace", () => {
     expect(workspaceLocationsPrompt(BOT, thread)).not.toContain("attach_file");
   });
 
+  it("tells every bot that a picture it shows inline must be in the conversation's folders", () => {
+    const thread = ensureTaskWorkspace(BOT, "thread-first");
+    for (const prompt of [workspaceLocationsPrompt(BOT, thread), workspaceLocationsPrompt(BOT, thread, undefined, { attachFile: true })]) {
+      expect(prompt).toContain("Chat links and inline images open only files in currentWorkingFolder and sharedBotFolder.");
+    }
+    expect(workspaceLocationsPrompt(BOT, thread)).toContain("Save a file or picture you want to show in chat there.");
+  });
+
   it("creates distinct private task desks outside shared memory and refuses path traversal", () => {
     const shared = ensureWorkspace(BOT);
     const first = ensureTaskWorkspace(BOT, "thread-first");

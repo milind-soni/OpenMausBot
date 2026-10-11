@@ -649,6 +649,8 @@
   "attach.previous": "Imagem anterior",
   "attach.next": "Próxima imagem",
   "attach.retryAria": "Tentar carregar {name} de novo",
+  "attach.imageUnavailable": "Imagem indisponível",
+  "attach.imageOutsideWorkspace": "Esta imagem está fora da pasta de trabalho deste chat, então não pode ser exibida aqui",
   "attach.previewImageAria": "Pré-visualizar a imagem anexada {name}",
   "attach.externalHidden": "Imagem externa ocultada por privacidade",
   "attach.savedTo": "Salvo em {path}",

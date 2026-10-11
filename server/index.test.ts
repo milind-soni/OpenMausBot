@@ -617,6 +617,12 @@ beforeAll(async () => {
   writeFileSync(linkedImage, "png preview bytes");
   writeFileSync(generatedImage, "generated image bytes");
   writeFileSync(userAttachment, "%PDF shared from the phone\n", { mode: 0o600 });
+  // A picture a bot saved outside the room's folders, and the copy attach_file made of it.
+  const outsideImage = join(home, "Downloads", "sideboard.png");
+  const deliveredImage = join(privateAttachments, "5e1dbd0a-7c3a-4f1e-9b2d-6a0c4f8e2b71.png");
+  mkdirSync(join(home, "Downloads"), { recursive: true });
+  writeFileSync(outsideImage, "outside photo bytes");
+  writeFileSync(deliveredImage, "delivered photo bytes");
   writeFileSync(
     join(home, ".openmausbot", "messages-test-linked-file-room-thread.json"),
     JSON.stringify({
@@ -679,6 +685,24 @@ beforeAll(async () => {
           role: "user",
           kind: "text",
           text: `<attached-file path="${linkedFile}" />`,
+        },
+        // A side branch: a reply showing an outside picture, alone and then
+        // after the turn delivered it with attach_file.
+        {
+          id: "outside-image-message", at: 9, parentId: "user-outside-file-message", role: "bot", kind: "text",
+          text: `Heidi, 51 – Sideboard\n\n![Sideboard](<${pathToFileURL(outsideImage).href}>)\n\nEinschätzung`,
+          from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
+        },
+        { id: "photo-request-message", at: 10, parentId: "outside-image-message", role: "user", kind: "text", text: "Show me the photo" },
+        {
+          id: "delivered-image-message", at: 11, parentId: "photo-request-message", role: "bot", kind: "text", text: "",
+          attachments: [{ kind: "image", path: deliveredImage, mime: "image/png", name: "sideboard.png" }],
+          from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
+        },
+        {
+          id: "delivered-image-reply-message", at: 12, parentId: "delivered-image-message", role: "bot", kind: "text",
+          text: `Heidi, 51 – Sideboard\n\n![Sideboard](<${pathToFileURL(outsideImage).href}>)\n\nEinschätzung`,
+          from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
         },
       ],
     }),
@@ -12872,6 +12896,28 @@ describe("message pages", () => {
     expect((await fetch(
       `${BASE}/api/threads/${threadId}/messages/prose-file-message/file?preview=1&ref=0`,
     )).status).toBe(400);
+  });
+
+  it("shows the copy a bot delivered of an outside picture, and says why one it never delivered is refused", async () => {
+    const threadId = "test-linked-file-room-thread";
+    const ref = "Heidi, 51 – Sideboard\n\n".length;
+    const refused = await fetch(`${BASE}/api/threads/${threadId}/messages/outside-image-message/file?preview=1&ref=${ref}`);
+    expect(refused.status).toBe(403);
+    expect(((await refused.json()) as { code?: string }).code).toBe("outside_workspace");
+
+    const delivered = await fetch(`${BASE}/api/threads/${threadId}/messages/delivered-image-reply-message/file?preview=1&ref=${ref}`);
+    expect(delivered.status).toBe(200);
+    expect(delivered.headers.get("content-type")).toBe("image/png");
+    expect(await delivered.text()).toBe("delivered photo bytes");
+
+    // a link to it saves the same copy
+    const saved = await fetch(`${BASE}/api/threads/${threadId}/messages/delivered-image-reply-message/file`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: pathToFileURL(join(home, "Downloads", "sideboard.png")).href }),
+    });
+    expect(saved.status).toBe(200);
+    expect(await saved.text()).toBe("delivered photo bytes");
   });
 
   it("downloads an exact user attachment only from the private attachment store", async () => {

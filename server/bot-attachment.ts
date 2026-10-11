@@ -99,7 +99,8 @@ export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<
     if (extensionForMime(mime)) {
       if (file.bytes > IMAGE_MAX_BYTES) throw statusError(413, `image exceeds ${IMAGE_MAX_BYTES} bytes`);
       const saved = saveImage(await file.handle.readFile(), mime);
-      return { attachment: { kind: "image", path: saved.path, mime: saved.mime }, bytes: saved.bytes };
+      // The name lets the reply's inline picture of this file show the copy (deliveredCopy).
+      return { attachment: { kind: "image", path: saved.path, mime: saved.mime, name }, bytes: saved.bytes };
     }
     if (!extensionForFileMime(mime)) {
       throw statusError(415, `${file.name} is not a supported attachment type. Supported: ${ATTACH_SUPPORTED_TYPES}.`);
@@ -112,6 +113,29 @@ export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<
   } finally {
     await file.handle.close().catch(() => undefined);
   }
+}
+
+/**
+ * The copy a bot delivered with attach_file of a file its reply shows or
+ * links, by name: the rule a link in the chat follows
+ * (src/components/AttachmentGallery.tsx replyAttachmentGroup). attach_file
+ * posts its own message, so the reply's turn is searched, from the reply
+ * back to the message before it that is not the bot's. Only the reply's
+ * author counts, and two deliveries with one name match neither.
+ */
+export function deliveredCopy(messages: readonly Message[], reply: Message, name: string): Exclude<BotAttachment, { kind: "audio" }> | null {
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  const author = reply.from?.botId;
+  let found: Exclude<BotAttachment, { kind: "audio" }> | null = null;
+  for (let message: Message | undefined = reply; message?.role === "bot"; message = message.parentId ? byId.get(message.parentId) : undefined) {
+    if (message.from?.botId !== author) continue;
+    for (const attachment of message.attachments ?? []) {
+      if (attachment.kind === "audio" || attachment.name !== name) continue;
+      if (found) return null;
+      found = attachment;
+    }
+  }
+  return found;
 }
 
 export type AttachForTurnOutcome<S> =

@@ -417,7 +417,7 @@ export interface WireMessage {
    * and video a bot attached with attach_file; they are opened through the
    * message-scoped file route, never by path. */
   attachments?: Array<
-    | { kind: "image"; path: string; mime: string }
+    | { kind: "image"; path: string; mime: string; name?: string }
     | { kind: "file"; path: string; mime: string; name: string }
     | { kind: "audio"; path: string; mime: string; durationMs?: number }
   >;
