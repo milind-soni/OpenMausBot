@@ -5404,8 +5404,11 @@ function publicGroupState(record: GroupRecord): WireGroup {
   const { installedPackage: _installedPackage, ...group } = record;
   let usage: WireGroup["usage"];
   try { usage = groupUsageReader.forThread(group.threadId); } catch { /* accounting must not block chat */ }
+  const openHandoffs = [...roomHandoffs.nodes.values()].filter(n => n.groupId === group.id && !["completed", "failed", "cancelled"].includes(n.status));
+  // A task works while a turn runs in it or its hand-offs are still out: its
+  // composer locks on this, so another task stays free to talk in.
   const tasks = store.groupTasks(record.id).map((task) => {
-    const working = groupThreadIsWorking(record.id, task.threadId);
+    const working = groupThreadIsWorking(record.id, task.threadId) || openHandoffs.some(n => n.threadId === task.threadId);
     const speaker = groupSpeakers.get(task.threadId);
     return {
       ...task,
@@ -5423,7 +5426,9 @@ function publicGroupState(record: GroupRecord): WireGroup {
     turnTimeoutMinutes: record.turnTimeoutMinutes ?? null,
     usage: usage ?? null,
     busyBotId: currentSpeaker?.botId ?? (activeWorking ? record.busyBotId : null),
-    working: activeWorking || [...roomHandoffs.nodes.values()].some(n => n.groupId === group.id && !["completed", "failed", "cancelled"].includes(n.status)),
+    // The room works while any of its tasks does, a background goal's too:
+    // the sidebar, a call and Stop read this.
+    working: groupIsWorking(record) || openHandoffs.length > 0,
   };
 }
 
