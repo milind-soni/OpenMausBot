@@ -642,11 +642,15 @@ it.each(["SIGTERM", "SIGKILL"] as const)("runs each teammate turn a restart cut 
     expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
     // Its chat says what happened, and nothing failed.
     const chiefRows = (await f.messages()).map((m: any) => m.tool?.name).filter(Boolean);
-    expect(chiefRows).toEqual(expect.arrayContaining(["Engineering lead was cut off by a restart; resumed", "Ops was cut off by a restart; resumed",
+    expect(chiefRows).toEqual(expect.arrayContaining(["Engineering lead was cut off by a restart; resuming", "Ops was cut off by a restart; resuming",
       "Engineering lead replied", "Ops replied", "Resumed with Engineering lead, Ops results after a restart, reviewing"]));
     expect(chiefRows.filter((name: string) => name.startsWith("error:") || name.includes("failed"))).toEqual([]);
+    // Each teammate's chat says it resumed, and never that its turn died:
+    // that turn goes on (a failed line there would offer Retry).
     for (const [botId, threadId] of Object.entries(workThreads)) {
-      expect((await f.messages(threadId)).filter((m: any) => m.tool?.name === "Resumed after a restart"), botId).toHaveLength(1);
+      const rows = (await f.messages(threadId)).map((m: any) => m.tool?.name).filter(Boolean);
+      expect(rows.filter((name: string) => name === "Resuming after a restart"), botId).toHaveLength(1);
+      expect(rows.filter((name: string) => name.startsWith("error:")), botId).toEqual([]);
     }
     // A person's own turn is not run again; a quit or update says in its
     // conversation that it was cut (a crash cannot, nor can Windows' kill).
@@ -662,10 +666,12 @@ it.each(["SIGTERM", "SIGKILL"] as const)("runs each teammate turn a restart cut 
   }
 }), hostTimeout(120_000));
 
-// A crash while the Chief's own turn still runs after it sent work: that
-// turn is not run again; the Chief resumes once its work settles, told its
-// turn was cut, and the teammate that finished is not run again either.
-it("resumes a Chief whose own turn a restart cut after it sent work, once that work settles", () => fixture(async (f) => {
+// A quit, update or crash while the Chief's own turn still runs after it
+// sent work: that turn is not run again; the Chief resumes once its work
+// settles, told its turn was cut, and the teammate that finished is not run
+// again either. A quit does not call that turn dead first: Retry on such a
+// line would start the job twice.
+it.each(["SIGTERM", "SIGKILL"] as const)("resumes a Chief whose own turn a restart cut after it sent work, once that work settles (%s)", (signal) => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "LEAD_DONE_BEFORE_RESTART" };
   f.plan[f.chief.id] = f.delegate("build", [f.lead], "Build the export", { gateFile: f.gate("chief"), resumeReply: "CUT_REVIEWED" });
@@ -673,7 +679,7 @@ it("resumes a Chief whose own turn a restart cut after it sent work, once that w
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("completed");
   expect(f.nodes().find((node: any) => !node.parentId)?.status).toBe("source");
   const chiefTurns = f.turns().length;
-  await f.restart(() => {}, "SIGKILL");
+  await f.restart(() => {}, signal);
   f.open(f.gate("chief"));
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "CUT_REVIEWED"), { timeout: 30_000 }).toBe(true);
   expect(f.turns()).toHaveLength(chiefTurns + 1);
@@ -682,6 +688,32 @@ it("resumes a Chief whose own turn a restart cut after it sent work, once that w
   expect(f.prompt(f.turns().at(-1))).toContain("LEAD_DONE_BEFORE_RESTART");
   expect(f.turns(f.lead.id)).toHaveLength(1);
   expect(f.nodes().every((node: any) => node.status === "completed")).toBe(true);
+  expect((await f.messages()).map((m: any) => m.tool?.name).filter((name: string | undefined) => name?.startsWith("error:"))).toEqual([]);
+}), hostTimeout(90_000));
+
+// A crash while a teammate reviews the results of work it sent on: that
+// review runs again once, and the Chief's chat says so, as for any cut turn.
+it("tells the requester when a teammate's review a restart cut runs again", () => fixture(async (f) => {
+  await warmUp(f);
+  f.plan[f.qa.id] = { reply: "QA_VERIFIED" };
+  f.plan[f.lead.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.qa.id], request_key: "verify", message: "Verify the export" } }], reply: "Sent to QA" },
+    { reply: "LEAD_REVIEW_RERUN", gateFile: f.gate("lead-review") },
+  ] };
+  f.plan[f.chief.id] = f.delegate("build", [f.lead], "Build the export", { resumeReply: "CHIEF_DONE" });
+  await f.send("Please have Engineering build the export.");
+  const leadNode = () => f.nodes().find((node: any) => node.botId === f.lead.id);
+  await expect.poll(() => f.nodes().find((node: any) => node.botId === f.qa.id)?.status, { timeout: 20_000 }).toBe("completed");
+  await expect.poll(() => f.consumed(f.lead.id), { timeout: 20_000 }).toBe(2); // its turn, then its review
+  expect(leadNode()?.status).toBe("running");
+  await f.restart(() => {}, "SIGKILL");
+  f.open(f.gate("lead-review"));
+  await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "CHIEF_DONE"), { timeout: 30_000 }).toBe(true);
+  expect(f.turns(f.qa.id)).toHaveLength(1);
+  const chiefRows = (await f.messages()).map((m: any) => m.tool?.name).filter(Boolean);
+  expect(chiefRows.filter((name: string) => name === "Engineering lead was cut off by a restart; resuming")).toHaveLength(1);
+  expect((await f.messages(leadNode().threadId)).filter((m: any) => m.tool?.name === "Resumed with QA results after a restart, reviewing")).toHaveLength(1);
+  expect(f.prompt(f.turns().at(-1))).toContain("Engineering lead (resumed once in place and told to check what it had already done)");
 }), hostTimeout(90_000));
 
 // A crash while the Chief reviews its teammates' results: the review runs

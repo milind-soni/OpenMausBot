@@ -19,8 +19,8 @@ const nodeSchema = z.object({
   /** Its next turn, or the one running now, follows a restart and says so:
    * "rerun" is its own cut turn run again; "cut", its own turn was cut after
    * handing out the work it now waits on; "teammates", only work it waits on
-   * was cut. Cleared when that turn settles; a node that ends before that
-   * turn runs keeps it, so its requester hears the turn never ran. */
+   * was cut. Cleared when that turn settles (a node ended another way keeps
+   * it, inert). */
   restart: z.enum(["rerun", "cut", "teammates"]).optional(),
 });
 export type RoomHandoff = z.infer<typeof nodeSchema>;
@@ -101,19 +101,36 @@ export class RoomHandoffs {
    * next turn ("teammates"). Queued work and owed resumes go ahead. */
   private reconcileRestart() {
     for (const n of this.nodes.values()) {
-      if (n.status !== "source" && n.status !== "running") continue;
-      const children = this.children(n.id);
-      if (n.status === "source" || children.some(c => c.createdAt >= (n.startedAt ?? n.createdAt))) {
+      const fate = this.cutFate(n);
+      if (!fate) continue;
+      if (fate === "wait") {
         n.status = "waiting"; n.restart = "cut";
-      } else if (n.restart === "rerun") {
+      } else if (fate === "end") {
         n.status = "failed"; n.result = ROOM_HANDOFF_CUT_TWICE; delete n.restart;
         if (!n.parentId) n.reported = false;
       } else {
-        n.status = children.length ? "resume" : "queued"; n.restart = "rerun"; n.restarts++;
+        n.status = this.children(n.id).length ? "resume" : "queued"; n.restart = "rerun"; n.restarts++;
       }
       const parent = n.parentId ? this.nodes.get(n.parentId) : undefined;
       if (parent && !terminal(parent) && !parent.restart) parent.restart = "teammates";
     }
+  }
+  /** What the next boot does with this node if a restart cuts it now: "wait"
+   * for the work its turn handed out, run that turn "again", or "end" it
+   * (its one rerun was cut too); undefined when no turn of it is running. */
+  private cutFate(n: RoomHandoff): "wait" | "again" | "end" | undefined {
+    if (n.status !== "source" && n.status !== "running") return undefined;
+    if (n.status === "source" || this.children(n.id).some(c => c.createdAt >= (n.startedAt ?? n.createdAt))) return "wait";
+    return n.restart === "rerun" ? "end" : "again";
+  }
+  /** The turn running in this conversation is one the next start goes on
+   * with (it waits on its work, or runs again), so a shutdown's line that it
+   * was cut would be false; that start says what happened instead. */
+  continuesAfterRestart(threadId: string): boolean {
+    return [...this.nodes.values()].some(n => {
+      const fate = !n.groupId && n.threadId === threadId ? this.cutFate(n) : undefined;
+      return fate === "wait" || fate === "again";
+    });
   }
 
   /** Shutdown has begun: dispatch nothing more, and leave a turn the
@@ -131,12 +148,14 @@ export class RoomHandoffs {
     const own = node.restart === "rerun"
       ? "OpenMausBot restarted while your previous turn here was running and cut it off; this turn continues it. First check what that turn already did (files, commits, messages, anything sent or started) and verify anything uncertain, so nothing is done twice; then finish and report as usual. A restart alone is not a blocker."
       : node.restart === "cut" ? "OpenMausBot restarted before your previous turn here finished, after it sent work to teammates. Check what that turn already did before repeating any of it." : "";
-    // A child that ended still owing its rerun never ran it; its result says why.
+    // Only a rerun that completed is known to have finished; any other end
+    // (never started, start refused, stopped or expired mid-run) may leave
+    // part of it done, and its result says how it ended.
     const cut = this.children(node.id).filter(child => child.restarts > 0).map(child => `${nameOf(child.botId)} (${
       child.result === ROOM_HANDOFF_CUT_TWICE ? "cut again while resuming, so not resumed a second time: it may be partly done"
-        : child.restart === "rerun" && terminal(child) ? `could not be resumed, so it may be partly done: ${child.status}, see its result`
-        : "resumed once in place and told to check what it had already done"})`);
-    const teammates = cut.length ? `A restart cut these teammates' turns: ${cut.join("; ")}. Check their results as usual; send what is still needed with coordinate_bots and rework=true, or finish without it.` : "";
+        : child.status === "completed" ? "resumed once in place and told to check what it had already done"
+        : `set to resume once but ended ${child.status} before finishing, so it may be partly done: see its result`})`);
+    const teammates = cut.length ? `A restart cut these teammates' turns: ${cut.join("; ")}. Check their results as usual.` : "";
     return own || teammates ? `${[own, teammates].filter(Boolean).join(" ")}\n` : "";
   }
 
@@ -344,7 +363,7 @@ export class RoomHandoffs {
    * never started reports the queue window it waited out, not the tree's. */
   private lifetimeError(n: RoomHandoff): string {
     if (n.status === "queued" && n.executions === 0) {
-      return `Room handoff queue budget exhausted: never started while waiting for a busy teammate after ${duration(this.now() - this.since(n.createdAt))} of the ${duration(this.limits.queueMs)} queue window`;
+      return `Room handoff queue budget exhausted: ${n.restart === "rerun" ? "not resumed after a restart" : "never started"} while waiting for a busy teammate after ${duration(this.now() - this.since(n.createdAt))} of the ${duration(this.limits.queueMs)} queue window`;
     }
     const root = this.root(n);
     return `Room handoff lifetime budget exhausted: node was ${n.status} after ${duration(this.effectiveAgeMs(root))} of the ${duration(this.limits.lifetimeMs)} tree lifetime`;
@@ -353,7 +372,7 @@ export class RoomHandoffs {
    * execution never pauses long enough to age its lifetime budget. */
   private hardCapError(n: RoomHandoff): string {
     const root = this.root(n);
-    const first = `Room handoff hard cap exhausted: node was ${n.status} after ${duration(this.now() - root.createdAt)} of the ${duration(this.limits.hardCapMs)} wall-clock cap`;
+    const first = `Room handoff hard cap exhausted: node was ${n.status} after ${duration(this.now() - this.since(root.createdAt))} of the ${duration(this.limits.hardCapMs)} wall-clock cap`;
     // Graceful expiry: settled children are real work the tree produced,
     // so the expiry still carries a bounded digest of their results. A
     // wide tree cannot turn the error into a dump: each result is tailed
@@ -465,9 +484,9 @@ export class RoomHandoffs {
     this.trackExecutionPauses();
     this.publish(node);
   }
-  cancelRoom(groupId: string, threadId?: string) {
+  cancelRoom(groupId: string, threadId?: string, reason = "Stopped by user") {
     for (const n of this.nodes.values()) {
-      if (n.groupId === groupId && (!threadId || n.threadId === threadId) && !terminal(n)) this.cancelTree(n, "Stopped by user");
+      if (n.groupId === groupId && (!threadId || n.threadId === threadId) && !terminal(n)) this.cancelTree(n, reason);
     }
   }
   cancelDirect(threadId: string, reason = "Stopped by user") {
@@ -515,16 +534,17 @@ export class RoomHandoffs {
   /** Stop this conversation without reaching into a teammate that is already
    * working. Its provider process is left alone: it finishes and its result
    * is still reported here. Work that never started is cancelled, because
-   * nothing is lost; a turn a restart cut, owed its one rerun, has started.
-   * This conversation stops being awaited either way, so no teammate result
-   * resumes a stopped chat. Returns what was left running. */
+   * nothing is lost, and so is a cut turn still owed its rerun: nothing of it
+   * runs, and Stop means stop. This conversation stops being awaited either
+   * way, so no teammate result resumes a stopped chat. Returns what was left
+   * running. */
   stopAwaitingDirect(threadId: string, reason = "Stopped by user"): RoomHandoff[] {
     const left: RoomHandoff[] = [];
     for (const node of this.nodes.values()) {
       if (node.groupId || node.threadId !== threadId || terminal(node)) continue;
       for (const child of this.children(node.id)) {
         if (terminal(child)) continue;
-        if (child.status === "queued" && child.startedAt === undefined) this.cancelTree(child, "Stopped before it started");
+        if (child.status === "queued") this.cancelTree(child, child.restart === "rerun" ? "Stopped before it resumed" : "Stopped before it started");
         else left.push(child);
       }
       node.status = "cancelled"; node.result = reason;
@@ -578,7 +598,7 @@ export class RoomHandoffs {
         (parent.threadId === n.threadId || (n.groupId && n.groupId === parent.groupId))) continue;
       // A stopped source stops waiting; only work that never started is
       // dropped with it. A teammate mid-turn keeps its process and reports,
-      // and so does one a restart cut, run again.
+      // and so does one the person left working that a restart then cut.
       if (parent && terminal(parent) && n.status === "queued" && n.startedAt === undefined) { this.cancelTree(n, "Originating request has ended"); continue; }
       if (this.hooks.busy(n)) continue;
       const root = this.root(n);

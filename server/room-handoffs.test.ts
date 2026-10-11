@@ -230,6 +230,15 @@ describe("addressed room request tree", () => {
     hooks.busy = () => false; engine.tick(); expect(node.status).toBe("running");
     engine.cancelRoom("A"); await flush(); expect(aborted).toBe(true); expect(node.status).toBe("cancelled");
   }));
+  it("ends one room conversation's tree with the reason its caller gives", () => fixture((engine) => {
+    // A routine run a restart failed ends its room work this way (index.ts onRunFailed).
+    const kept = engine.enqueue(addr("A"), "kept", undefined, addr("B"), "work", "build").node;
+    const ended = engine.enqueue({ ...addr("A"), threadId: "run" }, "run", undefined, addr("C"), "work", "build").node;
+    engine.cancelRoom("A", "run", "OpenMausBot restarted while this routine was running");
+    expect(engine.nodes.get("run")).toMatchObject({ status: "cancelled", result: "OpenMausBot restarted while this routine was running" });
+    expect(ended).toMatchObject({ status: "cancelled", result: "OpenMausBot restarted while this routine was running" });
+    expect(kept.status).toBe("queued");
+  }));
   it("names the conversation waiting on a teammate's direct thread until that work settles", () => fixture(async (engine, hooks) => {
     // MOCA-274: a card in the teammate's thread is pointed out to whoever
     // assigned the work, so the thread must lead back to that conversation.
@@ -458,41 +467,111 @@ describe("room handoffs across a restart", () => {
     hooks.run = vi.fn(never);
     const eli = { botId: "eli", threadId: "eli" };
     const kai = { botId: "kai", threadId: "kai" };
+    const ren = { botId: "ren", threadId: "ren" };
+    const zed = { botId: "zed", threadId: "zed" };
     const resumed = engine.enqueue(chief, "turn", undefined, mira, "a", "Build").node;
     const gone = engine.enqueue(chief, "turn", undefined, eli, "b", "Review").node;
     const twice = engine.enqueue(chief, "turn", undefined, kai, "c", "Test").node;
+    const refused = engine.enqueue(chief, "turn", undefined, ren, "d", "Deploy").node;
+    const stopped = engine.enqueue(chief, "turn", undefined, zed, "e", "Document").node;
     engine.sourceSettled("turn", true);
     engine.tick();
     const second = reboot(file);
-    second.hooks.run = vi.fn((node: RoomHandoff) => node.id === resumed.id ? Promise.resolve({ ok: true, text: "Built" }) : never());
+    second.hooks.run = vi.fn((node: RoomHandoff) => node.id === resumed.id ? Promise.resolve({ ok: true, text: "Built" })
+      // Ren's engine is gone after the update: its start is refused.
+      : node.id === refused.id ? Promise.resolve({ ok: false, text: "Engine not installed" }) : never());
     // Eli's conversation is deleted before its rerun can start.
     second.hooks.validate = node => node.id === gone.id ? "Destination bot task no longer exists" : undefined;
     second.engine.tick(); await flush();
     expect(second.engine.restartNote(second.engine.nodes.get(twice.id)!, id => id)).toContain("this turn continues it. First check what that turn already did");
     expect(second.engine.nodes.get(gone.id)).toMatchObject({ status: "failed", result: "Destination bot task no longer exists", restart: "rerun" });
+    // The person stops Zed mid-rerun in its own conversation.
+    expect(second.engine.nodes.get(stopped.id)?.status).toBe("running");
+    second.engine.stopAwaitingDirect("zed");
+    second.engine.tick(); await flush();
 
     const third = reboot(file);
     const notes: string[] = [];
     third.hooks.run = vi.fn(async (node: RoomHandoff) => { notes.push(third.engine.restartNote(node, id => id)); return { ok: true, text: "Reviewed" }; });
     await settle(third.engine);
+    // Only a rerun that completed is called resumed; however else it ended,
+    // its result says how, and what it left may be partly done.
     expect(notes).toEqual(["A restart cut these teammates' turns: mira (resumed once in place and told to check what it had already done); "
-      + "eli (could not be resumed, so it may be partly done: failed, see its result); kai (cut again while resuming, so not resumed a second time: it may be partly done). "
-      + "Check their results as usual; send what is still needed with coordinate_bots and rework=true, or finish without it.\n"]);
+      + "eli (set to resume once but ended failed before finishing, so it may be partly done: see its result); "
+      + "kai (cut again while resuming, so not resumed a second time: it may be partly done); "
+      + "ren (set to resume once but ended failed before finishing, so it may be partly done: see its result); "
+      + "zed (set to resume once but ended cancelled before finishing, so it may be partly done: see its result). "
+      + "Check their results as usual.\n"]);
     // Said by the first turn after the restart only.
     expect(third.engine.restartNote(third.engine.nodes.get("turn")!, id => id)).toBe("");
   }));
-  it("leaves a teammate owed its rerun alone when the person stops the requester after the restart", () => fixture(async (engine, hooks, file) => {
+  it("cancels a teammate still owed its rerun when the person stops the requester after the restart, saying so", () => fixture(async (engine, hooks, file) => {
     hooks.run = vi.fn(never);
     const child = engine.enqueue(chief, "turn", undefined, mira, "work", "Build").node;
     engine.sourceSettled("turn", true);
     engine.tick();
     const next = reboot(file);
-    expect(next.engine.stopAwaitingDirect("chief").map(node => node.id)).toEqual([child.id]);
+    // Nothing of it is running, so nothing is left running.
+    expect(next.engine.stopAwaitingDirect("chief")).toEqual([]);
     await settle(next.engine);
-    expect(next.runs).toEqual([[child.id, false, "rerun"]]);
-    expect(next.engine.nodes.get(child.id)?.status).toBe("completed");
+    expect(next.runs).toEqual([]);
+    expect(next.engine.nodes.get(child.id)).toMatchObject({ status: "cancelled", result: "Stopped before it resumed" });
     expect(next.reported()).toEqual([[child.id, "turn"]]);
   }));
+  it("knows which running conversations the next start goes on with, so a shutdown does not call them cut", () => fixture(async (engine, hooks, file) => {
+    hooks.run = vi.fn(never);
+    const child = engine.enqueue(chief, "turn", undefined, mira, "a", "Build").node;
+    // The Chief's own turn is still running after sending the work: it waits.
+    expect(engine.continuesAfterRestart("chief")).toBe(true);
+    // Work not started yet is no turn of Mira's: her own turn there is cut.
+    expect(engine.continuesAfterRestart("mira")).toBe(false);
+    engine.tick();
+    expect(child.status).toBe("running");
+    // Mira's turn runs again.
+    expect(engine.continuesAfterRestart("mira")).toBe(true);
+    expect(engine.continuesAfterRestart("elsewhere")).toBe(false);
+    engine.sourceSettled("turn", true);
+    // A Chief waiting, not running: a turn running there is a person's own.
+    expect(engine.continuesAfterRestart("chief")).toBe(false);
+
+    // A rerun cut again ends instead: nothing goes on with it.
+    const next = reboot(file);
+    next.hooks.run = vi.fn(never);
+    next.engine.tick();
+    expect(next.engine.nodes.get(child.id)).toMatchObject({ status: "running", restart: "rerun" });
+    expect(next.engine.continuesAfterRestart("mira")).toBe(false);
+  }));
+  it("names a restart, not a never-started wait, when a rerun waits out its queue window, and times the cap from boot", () => {
+    let nowMs = 1_000;
+    return fixture(async (engine, hooks, file) => {
+      hooks.run = vi.fn(never);
+      const child = engine.enqueue(chief, "turn", undefined, mira, "a", "Build").node;
+      engine.sourceSettled("turn", true);
+      engine.tick();
+      nowMs += 10 * 60 * 60_000; // down for ten hours
+      const next = reboot(file, () => nowMs);
+      next.hooks.busy = node => node.botId === "mira";
+      nowMs += ROOM_HANDOFF_LIMITS.queueMs + 1;
+      next.engine.tick();
+      expect(next.engine.nodes.get(child.id)?.result).toBe("Room handoff queue budget exhausted: not resumed after a restart while waiting for a busy teammate after 60m of the 60m queue window");
+    }, () => nowMs);
+  });
+  it("measures the hard cap's elapsed time from boot for a tree that outlived a restart", () => {
+    let nowMs = 1_000;
+    return fixture(async (engine, hooks, file) => {
+      hooks.run = vi.fn(never);
+      const child = engine.enqueue(chief, "turn", undefined, mira, "a", "Build").node;
+      engine.sourceSettled("turn", true);
+      engine.tick();
+      nowMs += 10 * 60 * 60_000; // down for ten hours
+      const next = reboot(file, () => nowMs);
+      next.hooks.run = vi.fn(never);
+      next.engine.tick();
+      nowMs += ROOM_HANDOFF_LIMITS.hardCapMs + 1;
+      next.engine.tick();
+      expect(next.engine.nodes.get(child.id)?.result).toMatch(/^Room handoff hard cap exhausted: node was running after 240m of the 240m wall-clock cap/);
+    }, () => nowMs);
+  });
   it("starts every time budget again at boot, so work resumed after long downtime is not expired and its requester can send more", () => {
     let nowMs = 1_000;
     return fixture(async (engine, hooks, file) => {

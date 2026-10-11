@@ -15,8 +15,9 @@ At the next start (`reconcileRestart` in `server/room-handoffs.ts`):
 - A teammate turn the restart cut runs again once, in place: the same request
   in its own conversation and retained native session, opening with a note to
   check what that turn already did (files, commits, messages, anything sent or
-  started) before it continues. Its chat shows "Resumed after a restart", and
-  the requester's chat shows "Mira was cut off by a restart; resumed".
+  started) before it continues. Its chat shows "Resuming after a restart" (a
+  cut review, "Resumed with … results after a restart, reviewing"), and a
+  direct requester's chat shows "Mira was cut off by a restart; resuming".
 - Never a second automatic run. A restart that cuts that rerun too ends it,
   failed: "Interrupted by another OpenMausBot restart after resuming once; not
   resumed again. Some of its steps may already have taken effect." The
@@ -27,25 +28,34 @@ At the next start (`reconcileRestart` in `server/room-handoffs.ts`):
   cut. A turn cut while reviewing results it already had runs that review
   again once, like any other cut turn.
 - The requester's resume says what the restart did to each teammate it waited
-  on: resumed once and told to check, could not be resumed (its result says
-  why: a deleted conversation, a revoked route), or cut twice. It checks the
-  results as usual and sends again, with `rework=true`, only what is still
-  needed.
+  on: resumed once and told to check (its rerun completed), set to resume but
+  ended before finishing (never started, start refused, stopped or expired;
+  its result says how, and it may be partly done), or cut twice. It checks the
+  results as usual.
 - No notification is added: a fan-out still sends its one "Results in from …",
   and the rerun of a review that already sent it sends nothing.
 - Work queued but never started, and a resume owed but not yet run, go ahead.
   Every time budget of a tree that outlived a restart starts again at boot
   (downtime is nobody's budget); request and execution counts carry on, and a
-  rerun costs one execution. Stop on the requester leaves a rerun alone, like
-  any teammate already mid-turn.
+  rerun costs one execution. Stop on the requester cancels a rerun not yet
+  started, "Stopped before it resumed", since nothing of it is running; a
+  rerun already running is left alone like any teammate mid-turn, and so is
+  one the person left working by a Stop before the restart.
+- A routine run still going at a restart fails, as before, and its
+  teammates' work ends with it, "OpenMausBot restarted while this routine was
+  running": none of it runs again, so no result lands after the person was
+  told the routine failed.
 - On a quit or update, shutdown dispatches nothing more and leaves the turns
   it tears down cut for the next start, so a quit ends where a crash does,
   whatever the engine. Each conversation with a turn still running gets
   "error: turn interrupted — OpenMausBot restarted", as a provider reload's
-  does, and nothing more (no unread mark, no notification). A person's own
-  1:1 turn is not run again, so that line answers it. A crash, or Windows'
-  `SIGTERM`, cannot write that line; the hand-off recovery above still runs.
-  Running routines still fail at a restart.
+  does, and nothing more (no unread mark, no notification), unless the next
+  start goes on with that turn: a cut teammate turn, or a requester's turn
+  that had sent work, says what happened when it resumes instead (a failed
+  line there would offer Retry and start the job twice). Any other turn, such
+  as a person's own 1:1 turn with nothing sent out, is not run again, so that
+  line answers it. A crash, or Windows' `SIGTERM`, cannot write that line;
+  the hand-off recovery above still runs.
 - A workspace restore is not a restart (the source may still be running): it
   ends its copy of unsettled hand-offs, "Not resumed after workspace
   restore.", and runs none of them.
@@ -55,7 +65,7 @@ Regression checks (all use disposable fixtures):
 ```sh
 pnpm exec vitest run server/room-handoffs.test.ts server/room-handoffs-save.test.ts server/direct-coordination.e2e.test.ts server/room-coordination.e2e.test.ts
 pnpm exec vitest run server/delta-context.e2e.test.ts -t "restart"
-pnpm exec vitest run server/full-access-workflows.e2e.test.ts
+pnpm exec vitest run server/full-access-workflows.e2e.test.ts server/room-recovery.e2e.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/direct-coordination-ui.e2e.test.ts
 ```
 

@@ -472,7 +472,7 @@ import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
-import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { ROUTINE_RESTARTED, RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import { BrowserRuntime, browserRuntimeEnv } from "./browser-runtime.ts";
@@ -5199,13 +5199,14 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
       // A cut resume running again already sent its notification.
       if (node.restart !== "rerun") notify(buildNotification("delegation-settled", bot, node.threadId, `Results in from ${who}`, { avatarUrl: bot.avatarUrl }));
     } else if (node.restart === "rerun" && !group) {
-      // A cut turn running again says so where it runs and where it was asked for.
-      store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "Resumed after a restart", ok: true } });
-      if (parent && !parent.groupId) store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
-        from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: `${bot.name} was cut off by a restart; resumed`, ok: true },
-        threadRef: { botId: bot.id, threadId: node.threadId, title: store.taskByThread(bot.id, node.threadId)?.title ?? "Teammate work" } });
+      store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "Resuming after a restart", ok: true } });
     }
+    // A cut turn running again, a review too, says so where it was asked
+    // for. Said as it starts: whether it finishes, its result says.
+    if (node.restart === "rerun" && !group && parent && !parent.groupId) store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
+      from: { botId: bot.id, name: bot.name, color: bot.color },
+      tool: { name: `${bot.name} was cut off by a restart; resuming`, ok: true },
+      threadRef: { botId: bot.id, threadId: node.threadId, title: store.taskByThread(bot.id, node.threadId)?.title ?? "Teammate work" } });
     if (sender && parent && isUnattended(sender.id, parent.threadId)) markUnattended(bot.id, node.threadId);
     if (!group) return new Promise<{ ok: boolean; text: string }>(resolve => {
       let done = false;
@@ -11689,6 +11690,13 @@ routines = new RoutineManager({
     if (run.threadId) {
       pendingDelegationWakes.delete(run.threadId);
       discardDelegations(commsBus, run.threadId);
+      // A run a restart failed takes its teammates' work with it, before any
+      // of it runs again: its results have nowhere to go, and the person is
+      // told once, here, not again by a resume in the run's hidden thread.
+      if (run.error === ROUTINE_RESTARTED) {
+        if (run.groupId) roomHandoffs.cancelRoom(run.groupId, run.threadId, run.error);
+        else roomHandoffs.cancelDirect(run.threadId, run.error);
+      }
     }
     const bot = store.bot(run.botId);
     if (!bot) return;
@@ -26087,12 +26095,15 @@ if (TUNNEL_SOCKET) {
 /** A quit, update or restart cuts every turn still running, and no
  * turn.completed reaches those threads. Each says so now, as a provider
  * reload's does, instead of leaving a message unanswered with no reason; the
- * line is all it adds (no unread, no push). A cut teammate turn runs again at
- * the next start (room-handoffs.ts reconcileRestart). */
+ * line is all it adds (no unread, no push). A hand-off turn the next start
+ * goes on with (room-handoffs.ts reconcileRestart) is left to say so then:
+ * a failed line with Retry there would start the job a second time. */
 function noteTurnsCutByShutdown(): void {
   for (const bot of store.bots) {
     for (const task of store.tasks(bot.id)) {
-      if (threadBusy(bot.id, task.threadId)) store.appendMessage(task.threadId, { role: "bot", kind: "activity", tool: failedTurnTool("turn interrupted — OpenMausBot restarted") });
+      if (threadBusy(bot.id, task.threadId) && !roomHandoffs.continuesAfterRestart(task.threadId)) {
+        store.appendMessage(task.threadId, { role: "bot", kind: "activity", tool: failedTurnTool("turn interrupted — OpenMausBot restarted") });
+      }
     }
   }
 }
