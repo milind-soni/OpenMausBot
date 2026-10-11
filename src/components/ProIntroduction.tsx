@@ -57,11 +57,11 @@ export function ProSettingsCard() {
       </div>
       <div className="flex flex-col items-end gap-1">
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className="text-[12.5px] text-ink-secondary underline underline-offset-2 hover:text-ink"
+          <button type="button" className="cursor-pointer text-[12.5px] text-ink-secondary underline underline-offset-2 hover:text-ink"
             onClick={() => void openExternalLink(withSource(PRICING_URL, "app_settings")).catch(() => {})}>{t("pro.seePlans")}</button>
           <button type="button" className="ui-button" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(trial ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
         </div>
-        {view.kind === "signed-out" && <button type="button" className="text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink"
+        {view.kind === "signed-out" && <button type="button" className="cursor-pointer text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink"
           onClick={() => dispatch(CLOUD_LINK_SETTINGS)}>{t("cloudAccount.signIn")}</button>}
       </div>
     </section>;

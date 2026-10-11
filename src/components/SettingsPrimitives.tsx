@@ -16,7 +16,7 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       className={cn(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
+        "relative cursor-pointer h-6 w-11 shrink-0 rounded-full transition-colors enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
         checked ? "bg-accent" : "bg-control",
         className,
       )}
@@ -55,15 +55,17 @@ export function SettingRow({
   subtitle,
   children,
   message,
+  className,
 }: {
   title: string;
   subtitle?: React.ReactNode;
   children: React.ReactNode;
   message?: React.ReactNode;
+  className?: string;
 }) {
   const titleId = useId();
   return (
-    <div role="group" aria-labelledby={titleId} className="setting-row border-t border-hairline/40 py-4 first:border-t-0">
+    <div role="group" aria-labelledby={titleId} className={cn("px-4", className)}>
       <div className="grid min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6">
         <div className="min-w-0">
           <div id={titleId} className="text-[14px] font-medium text-ink">{title}</div>

@@ -25,6 +25,7 @@ import { RoutineEditor } from "./RoutinesPage";
 import { FullAccessWarning } from "./FullAccessWarning";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { SharePresetDialog } from "./SharePresetDialog";
+import { SettingRow } from "./SettingsPrimitives";
 
 const SECTIONS = ["Identity", "Soul", "Skills", "Memory", "Routines", "Access", "Model", "Permissions", "Voice & alerts"] as const;
 type Section = typeof SECTIONS[number];
@@ -366,14 +367,18 @@ function DraftRoutines({ draft }: { draft: BotCreationDraft }) {
 export function DefaultBotSettings() {
   const [open, setOpen] = useState(false);
   const [sharing, setSharing] = useState(false);
-  return <>
-    <div className="flex items-center justify-between gap-4 py-3"><span className="text-[13px] text-ink">{t("newBot.defaults")}</span>
+
+    const content = <>
       <div className="flex shrink-0 gap-2">
-        <button type="button" onClick={() => setSharing(true)} className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink">{t("newBot.sharePreset")}</button>
-        <button type="button" onClick={() => setOpen(true)} className="rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover">{t("newBot.edit")}</button>
+        <button type="button" onClick={() => setSharing(true)} className="cursor-pointer rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink">{t("newBot.sharePreset")}</button>
+        <button type="button" onClick={() => setOpen(true)} className="cursor-pointer rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover">{t("newBot.edit")}</button>
       </div>
-    </div>
-    {open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />}
-    {sharing && <SharePresetDialog onClose={() => setSharing(false)} />}
+      {open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />}
+      {sharing && <SharePresetDialog onClose={() => setSharing(false)} />}
+    </>
+
+  return <>
+    <SettingRow title={t("newBot.defaults")} children={content} />
+
   </>;
 }

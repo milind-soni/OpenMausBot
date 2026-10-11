@@ -309,7 +309,7 @@ function NewBotEffortRow() {
         disabled={saving}
         aria-label={t("settings.newBotEffort.aria")}
         onChange={(event) => void save(event.target.value)}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
+        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.newBotEffort.default")}</option>
         {EFFORT_LEVELS.map((level) => (
@@ -380,7 +380,7 @@ function ReplayTourRow() {
   const { dispatch } = useStore();
   return (
     <SettingRow title={t("settings.welcome.title")} subtitle={t("settings.welcome.subtitle")}>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <ReplayAppTourButton />
         <button
           onClick={() => dispatch({ type: "toggleWelcome", open: true })}
@@ -409,7 +409,7 @@ function LanguageRow() {
         value={current}
         aria-label={t("settings.language.aria")}
         onChange={(event) => setLanguageChoice(event.target.value)}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
+        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.language.system")}</option>
         {localeChoices.map(({ code, label }) => (
@@ -448,7 +448,7 @@ function FontRow() {
           applyFont(id);
           setCurrent(id);
         }}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
       >
         {FONT_IDS.map((id) => (
           <option key={id} value={id}>{t(`settings.font.${id}`)}</option>
@@ -466,7 +466,7 @@ function SendKeyRow() {
         value={sendKey}
         aria-label={t("settings.sendKey.title")}
         onChange={(event) => setSendKey(parseSendKey(event.target.value))}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
       >
         {SEND_KEYS.map((mode) => (
           <option key={mode} value={mode}>{sendKeyLabel(mode)}</option>
@@ -479,7 +479,7 @@ function SendKeyRow() {
 function AdvancedModeRow() {
   const enabled = useAdvancedMode();
   return (
-    <SettingRow title={t("settings.advancedMode.title")} subtitle={t("settings.advancedMode.subtitle")}>
+    <SettingRow className="rounded-2xl border border-accent-border/40 bg-raised-hover/40 py-4" title={t("settings.advancedMode.title")} subtitle={t("settings.advancedMode.subtitle")}>
       <Switch
         checked={enabled}
         aria-label={t("settings.advancedMode.title")}
@@ -529,7 +529,7 @@ function SidebarDensityRow() {
         value={density}
         aria-label={t("sidebar.density.chooseAria")}
         onChange={(event) => setSidebarDensity(parseSidebarDensity(event.target.value))}
-        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
       >
         {SIDEBAR_DENSITIES.map((option) => (
           <option key={option} value={option}>{t(SIDEBAR_DENSITY_LABEL_KEYS[option])}</option>
@@ -720,27 +720,25 @@ function BuiltInBrowserRow() {
   };
 
   return (
-    <div data-built-in-browser className="rounded-xl bg-card px-4">
-      <SettingRow
-        title={t("settings.experimental.browserAria")}
-        subtitle={desktopBrowser
-          ? browser
-            ? t("settings.experimental.browserOn")
-            : t("settings.experimental.browserOff")
-          : browserBlockedOnWindows
-            ? t("settings.experimental.browserWindows")
-            : browserUnavailableReason(state.config)}
-        message={error ? <p role="alert" className="text-danger">{error}</p> : null}
-      >
-        <Switch
+    <SettingRow
+    title={t("settings.experimental.browserAria")}
+    subtitle={desktopBrowser
+        ? browser
+        ? t("settings.experimental.browserOn")
+        : t("settings.experimental.browserOff")
+        : browserBlockedOnWindows
+        ? t("settings.experimental.browserWindows")
+        : browserUnavailableReason(state.config)}
+    message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+    >
+      <Switch
           checked={browser}
           aria-label={t("settings.experimental.browserAria")}
           disabled={saving || (!browser && !desktopBrowser && !browserInstallable)}
           onClick={() => void toggle(!browser)}
           className="disabled:cursor-wait disabled:opacity-50"
-        />
-      </SettingRow>
-    </div>
+      />
+    </SettingRow>
   );
 }
 
@@ -926,34 +924,35 @@ export function SettingsModal() {
       case "general":
         return (
           <>
-            <div className="rounded-2xl border border-accent-border/40 bg-raised-hover/40 px-1">
-              <AdvancedModeRow />
-            </div>
+            <AdvancedModeRow />
+
             <ProSettingsCard />
             <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
               <ProfileFields />
             </Card>
-            <div>
-              <LanguageRow />
-              <NewBotEffortRow />
-              <AnalyticsRow />
-              <DefaultBotSettings />
-            </div>
+
+            <LanguageRow />
+            <NewBotEffortRow />
+            <AnalyticsRow />
+            <DefaultBotSettings />
+
             <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
               <RoomTurnTimeoutSettings />
             </Card>
+
             <Card title={t("settings.mcpCalls.title")} subtitle={t("settings.mcpCalls.subtitle")}>
               <McpCallTimeoutSettings />
             </Card>
             <ThreadConcurrencySettings />
+
             {!remoteActive && <RoutinesInConversationRow />}
+
             <AutomaticRecoverySettings />
             <ThreadCleanupSettings />
-            <div>
-              {!remoteActive && <ReplayTourRow />}
-              <UpdatesRow />
-              <DiagnosticsRow />
-            </div>
+
+            {!remoteActive && <ReplayTourRow />}
+            <UpdatesRow />
+            <DiagnosticsRow />
           </>
         );
       case "appearance":
@@ -962,21 +961,19 @@ export function SettingsModal() {
             <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
               <SkinPicker />
             </Card>
-            <div>
-              {/* A paired remote client has no General page; keep the switch reachable. */}
-              {remoteActive && <AdvancedModeRow />}
-              <FontRow />
-              <SendKeyRow />
-              <SidebarDensityRow />
-              {/* Simple mode keeps one conversation per bot, so the switch
-                  only means something in Advanced. */}
-              {advanced && <ShowThreadsRow />}
-              <PinnedCirclesRow />
-              <UniversalPinsRow />
-              <NotificationSoundsRow />
-              {!remoteActive && <ToolCallsRow />}
-              <RunCardRow />
-            </div>
+            {/* A paired remote client has no General page; keep the switch reachable. */}
+            {remoteActive && <AdvancedModeRow />}
+            <FontRow />
+            <SendKeyRow />
+            <SidebarDensityRow />
+            {/* Simple mode keeps one conversation per bot, so the switch
+                only means something in Advanced. */}
+            {advanced && <ShowThreadsRow />}
+            <PinnedCirclesRow />
+            <UniversalPinsRow />
+            <NotificationSoundsRow />
+            {!remoteActive && <ToolCallsRow />}
+            <RunCardRow />
           </>
         );
       case "experimental":
@@ -1082,7 +1079,7 @@ export function SettingsModal() {
   };
 
   const blockHeading = (labelKey: LocaleKey) => (
-    <h3 className="px-1 text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-secondary">{t(labelKey)}</h3>
+    <h3 className="px-4 text-[13px] font-semibold uppercase tracking-[0.06em] text-ink-secondary">{t(labelKey)}</h3>
   );
 
   return (
@@ -1145,7 +1142,7 @@ export function SettingsModal() {
                     onClick={() => openSection(id)}
                     aria-current={section === id ? "page" : undefined}
                     className={cn(
-                      "flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
+                      "cursor-pointer flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
                       section === id ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/50 hover:text-ink",
                     )}
                   >
@@ -1167,7 +1164,7 @@ export function SettingsModal() {
                     onClick={() => openSection(page.sections[0]!)}
                     aria-current={current ? "page" : undefined}
                     className={cn(
-                      "flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
+                      "cursor-pointer flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
                       current ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/50 hover:text-ink",
                     )}
                   >
@@ -1181,7 +1178,7 @@ export function SettingsModal() {
         </nav>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:px-5">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:pl-9">
             {advanced ? (
               <select
                 aria-label={t("settings.title")}
@@ -1190,7 +1187,7 @@ export function SettingsModal() {
                   setQuery("");
                   openSection(event.target.value as AppSettingsSection);
                 }}
-                className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
+                className="cursor-pointer min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
               >
                 {SETTINGS_GROUPS.map((group) => {
                   const entries = availableSections.filter((entry) => entry.group === group.id);
@@ -1212,7 +1209,7 @@ export function SettingsModal() {
                   const page = simplePages.find((candidate) => candidate.id === event.target.value);
                   if (page) openSection(page.sections[0]!);
                 }}
-                className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
+                className="cursor-pointer min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
               >
                 {simplePages.map((page) => (
                   <option key={page.id} value={page.id}>{t(page.labelKey)}</option>
@@ -1226,7 +1223,7 @@ export function SettingsModal() {
               onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
               aria-label={t("settings.close")}
               title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
-              className="ui-icon-button shrink-0"
+              className="ui-icon-button cursor-pointer shrink-0"
             >
               <X size={18} />
             </button>
