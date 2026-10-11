@@ -1831,7 +1831,7 @@ ipcMain.on("desktop:unread-count", (event, value) => {
 // The app switches by loading the chosen server's own UI (electron/menu.mjs).
 // Only {id, name, origin} is stored here; the session credential is the
 // HttpOnly cookie /pair set for that origin, kept by Chromium's cookie jar.
-const { LOCAL_ID, activeEnvironment, allowedOrigins, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, withActive, withEnvironment, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
+const { LOCAL_ID, activeEnvironment, allowedOrigins, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, withActive, withEnvironment, withMicrophone, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
 let environmentsState = { environments: [], activeId: LOCAL_ID };
 let computerSharing;
 const sharingPrompts = new Set();
@@ -2228,6 +2228,36 @@ async function cloudHomeSignedIn(origin) {
   }
 }
 
+// A saved server hears the microphone only once the person said yes: asked on
+// its first Live call (one dialog per server at a time), remembered on its
+// record so forgetting the server takes it back. "Don't Allow" holds until the
+// app quits or the server is forgotten, so a page cannot keep re-asking.
+const remoteMicrophoneAsks = new Map();
+const remoteMicrophoneRefused = new Set();
+function askRemoteMicrophone(origin) {
+  const env = activeEnvironment(environmentsState);
+  if (!env || env.origin !== origin || env.microphone === true || remoteMicrophoneRefused.has(origin)) return null;
+  if (!remoteMicrophoneAsks.has(origin)) {
+    const ask = (async () => {
+      const options = {
+        type: "question",
+        buttons: ["Allow", "Don’t Allow"],
+        defaultId: 1,
+        cancelId: 1,
+        message: `Allow “${env.name}” to use the microphone?`,
+        detail: `${new URL(origin).host} wants to hear you for a Live call. Allow only a server you trust; this app remembers your answer for this server until you forget it.`,
+      };
+      const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+      const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
+      if (response !== 0) return void remoteMicrophoneRefused.add(origin);
+      // Saved on the same record only if it is still there (not forgotten meanwhile).
+      if (environmentsState.environments.some((e) => e.id === env.id && e.origin === origin)) persistEnvironments(withMicrophone(environmentsState, env.id));
+    })().finally(() => remoteMicrophoneAsks.delete(origin));
+    remoteMicrophoneAsks.set(origin, ask);
+  }
+  return remoteMicrophoneAsks.get(origin);
+}
+
 async function forgetEnvironment(id) {
   const env = environmentsState.environments.find((e) => e.id === id);
   if (!env) return;
@@ -2241,6 +2271,7 @@ async function forgetEnvironment(id) {
   });
   if (response !== 0) return;
   sharingController().forget(env);
+  remoteMicrophoneRefused.delete(env.origin);
   const wasActive = environmentsState.activeId === id;
   persistEnvironments(withoutEnvironment(environmentsState, id));
   // Leave a removed workspace immediately; forgetting an inactive connection
@@ -3668,16 +3699,19 @@ app.whenReady().then(async () => {
   // serial) stay off. Client mode's loopback relay is the local UI. The
   // person's own Cloud, open in this window, also gets the microphone for a
   // Live call and clipboard writes for its copy buttons (only those): it is
-  // theirs alone. No other server does. A call placed while the saved sign-in
+  // theirs alone. No other server does unasked. A call placed while the saved sign-in
   // is still restoring waits for it. The active paired server, in this
-  // window's main frame, may also write the clipboard. Neither ever reads it;
-  // both are re-evaluated per request, so a server switch or sign-out withdraws it.
+  // window's main frame, may also write the clipboard, and use the microphone
+  // once the person allowed it (askRemoteMicrophone). Neither ever reads the
+  // clipboard; all is re-evaluated per request, so a server switch or sign-out withdraws it.
   appPermissions = appPermissionHandlers({
     rendererOrigin,
     mainContents: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null),
     cloudHomeOrigin: myCloud,
     cloudHomeRestoring: () => cloudAccountRestoring ? cloudAccountRestored() : null,
     activeRemoteOrigin: () => activeEnvironment(environmentsState)?.origin ?? null,
+    activeRemoteMicrophone: () => activeEnvironment(environmentsState)?.microphone === true,
+    askRemoteMicrophone,
   });
   session.defaultSession.setPermissionRequestHandler(appPermissions.request);
   session.defaultSession.setPermissionCheckHandler(appPermissions.check);
