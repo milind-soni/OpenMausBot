@@ -36,6 +36,8 @@ function fixture(root: string): DatabaseSync {
   json(join(root, "webhooks.json"), { version: 1, webhooks: [{ id: "hook", endpointId: "endpoint", enabled: true, secretHash: "a".repeat(64) }], deliveries: [{ id: "delivery" }] });
   json(join(root, "calendar-calls.json"), { version: 1, calls: [{ id: "call", nextRunAt: 100 }] });
   json(join(root, "delegations.json"), { thread: [{ id: "pending" }] });
+  json(join(root, "room-handoffs.json"), [{ id: "root", status: "waiting", restart: "teammates" }, { id: "cut", status: "running" },
+    { id: "owed", status: "queued", restart: "rerun" }, { id: "done", status: "completed", result: "Built" }]);
   json(join(root, "delegation-receipts.json"), [{ id: "receipt" }]);
   json(join(root, "sessions.json"), { identity: "source-session" });
   json(join(root, "cloud-owner.json"), { identity: "source-owner-record" });
@@ -167,6 +169,10 @@ describe("encrypted full workspace backups", () => {
       expect(readJson(join(target, "webhooks.json")).webhooks[0].secretHash).not.toBe("a".repeat(64));
       expect(readJson(join(target, "calendar-calls.json")).calls[0].nextRunAt).toBeNull();
       expect(readJson(join(target, "delegations.json"))).toEqual({});
+      // A restore is not a restart: no copy of unsettled teammate work runs again.
+      const ended = { status: "failed", result: "Not resumed after workspace restore." };
+      expect(readJson(join(target, "room-handoffs.json"))).toEqual([{ id: "root", ...ended }, { id: "cut", ...ended },
+        { id: "owed", ...ended }, { id: "done", status: "completed", result: "Built" }]);
       expect(readJson(join(target, "delegation-receipts.json"))).toEqual([{ id: "receipt" }]);
       const receipt = readLastWorkspaceRestore(target)!;
       expect(receipt.id).toBe(staged.id);
