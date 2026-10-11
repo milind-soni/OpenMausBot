@@ -28,7 +28,10 @@
 //                     session/new's mcpServers, call list_bots + ask_bot on a
 //                     peer, and reply with what the peer said — the comms e2e)
 //                   | delegate-peer (same as ask-peer but uses delegate_bot —
-//                     returns immediately, the peer runs after our turn)
+//                     returns immediately, the peer runs after our turn.
+//                     With FAKE_ACP_REDELEGATE_FILE set, the first wake that
+//                     saw the result delegates a second task, once, and
+//                     writes that file)
 //                   | chief-delegate (delegates only for an ASSIGN_TO_PEER
 //                     prompt; ordinary follow-ups stay responsive)
 //                   | create-peer (a Chief creates a specialist, then delegates
@@ -967,6 +970,23 @@ function handle(msg: any) {
         fakeLog("branch: wokeFromDelegation");
         const failed = promptText.includes("[A delegated task failed]");
         const sawResult = promptText.includes("replied to the delegated task");
+        const redelegateFile = process.env.FAKE_ACP_REDELEGATE_FILE;
+        if (mode === "delegate-peer" && agentsMcp && sawResult && redelegateFile && !existsSync(redelegateFile)) {
+          writeFileSync(redelegateFile, "1");
+          void driveMcp(agentsMcp, [
+            { name: "list_bots", args: () => ({}) },
+            { name: "delegate_bot", args: (list) => ({ bot_id: /id: ([\w-]+)/.exec(list)?.[1] ?? "", message: "second delegated task" }) },
+          ])
+            .then((reply) => {
+              out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegated again: ${reply}` } } } });
+              complete();
+            })
+            .catch((e) => {
+              out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegate error: ${(e as Error).message}` } } } });
+              complete();
+            });
+          return;
+        }
         out({
           jsonrpc: "2.0",
           method: "session/update",

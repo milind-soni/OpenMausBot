@@ -1,7 +1,8 @@
 // Who hears about a broken run, how often, and in what words.
 import { describe, expect, it } from "vitest";
 
-import { chiefForBot, INCIDENT_HARD_LIMIT, INCIDENT_RETRY_LIMIT, IncidentLedger, incidentChip, incidentText, type Incident } from "./incidents.ts";
+import { chiefForBot, INCIDENT_HARD_LIMIT, INCIDENT_RETRY_LIMIT, IncidentLedger, incidentChip, incidentRequest, incidentText, type Incident } from "./incidents.ts";
+import { withPeerProvenance } from "./peer-provenance.ts";
 
 const bots = [
   { id: "clive", name: "Clive", section: "Ops", chiefOfStaff: true },
@@ -56,6 +57,27 @@ describe("IncidentLedger", () => {
     expect(ledger.lastAt("t1")).toBe(9_000);
     ledger.forget("t1");
     expect(ledger.lastAt("t1")).toBeUndefined();
+  });
+});
+
+describe("incidentRequest", () => {
+  const peerAsk = { botId: "clive", name: "Clive" };
+  it("quotes a requester's words, not the note they were delivered under", () => {
+    // the note quotes the person's request too: in 300 characters the brief
+    // the Chief would correct never showed
+    const delivered = withPeerProvenance("Reconcile the September invoices.", { botName: "Clive", delivery: "delegate_bot",
+      origin: { kind: "user", request: "x".repeat(400) } });
+    expect(incidentRequest([{ role: "user", kind: "text", text: delivered, peerAsk }])).toBe("Reconcile the September invoices.");
+  });
+
+  it("reads past a line that is only a note to the request above it, and keeps the person's own words whole", () => {
+    const retry = "[Retry requested by Clive, your Chief of Staff, after this thread's last run stopped. Continue the request above.]";
+    expect(incidentRequest([
+      { role: "user", kind: "text", text: "[Delegated by @Ada] is how I'd label it" },
+      { role: "bot", kind: "text", text: "On it" },
+      { role: "user", kind: "text", text: retry, peerAsk },
+    ])).toBe("[Delegated by @Ada] is how I'd label it");
+    expect(incidentRequest([{ role: "bot", kind: "text", text: "hi" }])).toBeNull();
   });
 });
 

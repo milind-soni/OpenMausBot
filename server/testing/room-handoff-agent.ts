@@ -55,7 +55,12 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   // the user message, so inspect both surfaces just as the model does.
   const turnContext = `${system}\n${JSON.stringify(prompt)}`;
   const resumed = turnContext.includes("Your downstream room requests have settled.");
-  const basePlan = JSON.parse(readFileSync(planPath, "utf8"))[botId] ?? {};
+  // `byPrompt` picks a bot's plan by what its turn was sent, for turns whose
+  // order no index can pin (a thread the bot opened on itself runs beside
+  // the turn that opened it): [{ promptIncludes, plan }], first match wins.
+  const botPlan = JSON.parse(readFileSync(planPath, "utf8"))[botId] ?? {};
+  const basePlan = (botPlan.byPrompt as Array<{ promptIncludes: string; plan: any }> | undefined)
+    ?.find(rule => turnContext.includes(rule.promptIncludes))?.plan ?? botPlan;
   const previous = existsSync(`${planPath}.evidence.jsonl`) ? readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
   const turnIndex = previous.filter(p => p.botId === botId).length;
   const plan = basePlan.turns ? basePlan.turns[turnIndex] : basePlan;

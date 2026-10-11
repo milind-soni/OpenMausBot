@@ -9,9 +9,9 @@ import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq";
 /** Sections whose key can be tried against the provider from the server. */
-export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras";
+export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -45,6 +45,7 @@ const SECTIONS: Record<
   openaiCompat: { body: (v) => ({ openaiCompat: { key: v } }), flag: (c) => c.openaiCompat?.configured ?? false },
   mistral: { body: (v) => ({ mistral: { key: v } }), flag: (c) => c.mistral?.configured ?? false },
   cerebras: { body: (v) => ({ cerebras: { key: v } }), flag: (c) => c.cerebras?.configured ?? false },
+  groq: { body: (v) => ({ groq: { key: v } }), flag: (c) => c.groq?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
 };
 
@@ -146,6 +147,14 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.cerebras.desc",
     href: "https://cloud.cerebras.ai/",
     linkLabelKey: "keys.cerebras.link",
+    optional: true,
+  },
+  groq: {
+    labelKey: "keys.groq.label",
+    placeholder: "gsk_…",
+    descriptionKey: "keys.groq.desc",
+    href: "https://console.groq.com/docs/overview",
+    linkLabelKey: "keys.groq.link",
     optional: true,
   },
   xai: {

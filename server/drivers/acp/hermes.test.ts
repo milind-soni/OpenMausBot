@@ -262,11 +262,11 @@ process.stdin.on("data", (chunk) => {
     { id: "openrouter:beta", label: "openrouter:beta", custom: true },
   ];
 
-  function fakeCli(env: Record<string, string>): { cli: string; env: Record<string, string> } {
+  function fakeCli(env: Record<string, string>, source = FAKE_CLI_SOURCE, name = "fake-hermes.ts"): { cli: string; env: Record<string, string> } {
     const home = mkdtempSync(join(tmpdir(), "omb-hermes-probe-"));
     dirs.push(home);
-    const cli = join(home, "fake-hermes.ts");
-    writeFileSync(cli, FAKE_CLI_SOURCE, { mode: 0o755 });
+    const cli = join(home, name);
+    writeFileSync(cli, source, { mode: 0o755 });
     // The spawn gets exactly this env, so PATH has to survive for the
     // script's /usr/bin/env node shebang to resolve.
     return { cli, env: { PATH: process.env.PATH ?? "", ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), HOME: home, USERPROFILE: home, ...env } };
@@ -308,5 +308,49 @@ process.stdin.on("data", (chunk) => {
     // Resolving at all before any realistic default proves the override was
     // rejected; a 0/NaN deadline would have returned [] immediately.
     await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual(CATALOG);
+  });
+
+  // Answers initialize, closes its stdin, and stays alive. The probe sends
+  // initialize and then session/new, so the second write lands on a pipe
+  // whose read end is gone while the socket is still writable.
+  //
+  // The child staying alive is the whole point. A child that *exits* makes
+  // Node destroy the parent's stdin socket, so `send`'s existing
+  // `!child.stdin?.writable` guard skips the write and no error is raised.
+  // Measured: with the child exited, `writable` is false and the write is
+  // never attempted; with the child alive and fd 0 closed, the write
+  // reports EPIPE to its callback AND emits 'error' on the socket.
+  const CLOSES_STDIN_AND_LIVES = `#!/usr/bin/env node
+import { closeSync } from "node:fs";
+let buf = "";
+process.stdin.on("data", (chunk) => {
+  buf += String(chunk);
+  let nl;
+  while ((nl = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, nl);
+    buf = buf.slice(nl + 1);
+    let msg;
+    try { msg = JSON.parse(line); } catch { continue; }
+    if (msg.method === "initialize") {
+      closeSync(0);
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { protocolVersion: 1 } }) + "\\n");
+      // Outlive the probe's deadline: exiting would destroy the socket and
+      // hide the very write this reproduces.
+      setTimeout(() => process.exit(0), 5_000);
+    }
+  }
+});
+`;
+
+  it("resolves [] instead of crashing when the CLI closes its stdin mid-handshake", async () => {
+    const { cli, env } = fakeCli({ [HERMES_ACP_MODELS_TIMEOUT_ENV]: "2000" }, CLOSES_STDIN_AND_LIVES, "fake-hermes.mjs");
+    // An unhandled 'error' on a stream is an uncaught exception, and this one
+    // took the whole server down at startup on a machine with Hermes
+    // installed. The probe is meant to give up on an unusable CLI, not to end
+    // the process.
+    await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual([]);
+    // Settling first is not enough: an EPIPE emitted a tick later is still
+    // an uncaught exception. Stay in the test until it would have fired.
+    await new Promise((resolve) => setTimeout(resolve, 200));
   });
 });

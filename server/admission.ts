@@ -126,6 +126,8 @@ export interface AdmissionState {
   parksBehindCoordination?: boolean;
   /** The room is mid-turn (its sends always queue; they never steer). */
   roomWorking?: boolean;
+  /** The room thread itself is mid-turn. */
+  threadWorking?: boolean;
 }
 
 export type AdmissionDecision =
@@ -161,7 +163,7 @@ export function admit(
     case "room":
       // Room sends never auto-steer; the queue is the policy. Human override
       // is the head-only manual steer below.
-      return state.roomWorking ? { action: "queue" } : { action: "start" };
+      return (state.threadWorking ?? state.roomWorking) ? { action: "queue" } : { action: "start" };
     case "room-steer": {
       if (!message.speakerPresent || message.engineCanSteer !== true) {
         // An incapable room keeps its queue, exactly like an incapable 1:1

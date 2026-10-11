@@ -41,6 +41,8 @@ describe("admission golden tables", () => {
   it("room: a working channel always queues; it never auto-steers", () => {
     expect(admit("room", {}, { roomWorking: true })).toEqual({ action: "queue" });
     expect(admit("room", {}, { roomWorking: false })).toEqual({ action: "start" });
+    expect(admit("room", {}, { roomWorking: true, threadWorking: false })).toEqual({ action: "start" });
+    expect(admit("room", {}, { roomWorking: true, threadWorking: true })).toEqual({ action: "queue" });
   });
 
   it("room-steer: only the head of a capable room's queue steers", () => {

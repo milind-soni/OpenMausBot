@@ -179,6 +179,7 @@ const FAKE_MCP = `
 const lines = require('node:readline').createInterface({input:process.stdin});
 let initialized = false;
 let rpcTimeoutCalls = 0;
+let pageText = 'Ready';
 lines.on('line', line => {
   const m = JSON.parse(line);
   if (m.method === 'notifications/initialized') { initialized = true; return; }
@@ -196,6 +197,10 @@ lines.on('line', line => {
   else if (m.params.name === 'agent_browser_snapshot' && process.env.HANG_VERIFICATION === '1') return;
   else if (m.params.name === 'agent_browser_snapshot' && process.env.EMPTY_VERIFICATION === '1') result = { content:[] };
   else if (m.params.name === 'agent_browser_snapshot' && process.env.FAIL_VERIFICATION === '1') result = { isError:true, content:[{type:'text',text:'Snapshot unavailable'}] };
+  else if (m.params.name === 'agent_browser_eval' && process.env.FAIL_EVAL === '1') result = { isError:true, content:[{type:'text',text:'Evaluation failed'}] };
+  else if (m.params.name === 'agent_browser_eval') result = { content:[{type:'text',text:JSON.stringify(JSON.stringify({ url:'http://fixture.test/', title:'Fixture', text:pageText + '\\nSay hello' }))}] };
+  else if (m.params.name === 'agent_browser_click' && m.params.arguments.selector === '#missing') result = { isError:true, content:[{type:'text',text:'Element not found: #missing'}] };
+  else if (m.params.name === 'agent_browser_click') { pageText = 'Hello, Ada'; result = { content:[{type:'text',text:JSON.stringify({ data:{ clicked:m.params.arguments.selector, lifecycle:{ launched:false, relaunchedBrowser:false, launchHash:1 } }, error:null, success:true }, null, 2)}] }; }
   else result = { content:[{type:'text',text:JSON.stringify(m.params)}],pid:process.pid };
   process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
 });
@@ -255,6 +260,29 @@ describe("server-owned browser MCP runtime", () => {
     // The bot already holds this page's refs: no second snapshot is needed.
     expect(result.content[1].text).toContain("Its refs are current");
     expect(JSON.parse(result.content[2].text)).toEqual({ name: "agent_browser_snapshot", arguments: { compact: true } });
+  });
+  it("says what an action changed on the page, read with eval so the model's refs stay valid", async () => {
+    const result = await runtime().agentRpc("act", spec(), "tools/call", {
+      name: "agent_browser_click", arguments: { selector: "@e5" },
+    }) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(result.isError).toBeUndefined();
+    // The engine's lifecycle block is gone; the action's own fields stay.
+    expect(JSON.parse(result.content[0].text)).toEqual({ data: { clicked: "@e5" }, error: null, success: true });
+    // Read before and after the click: the change is the difference.
+    expect(result.content[1].text).toBe('Text that appeared on the page: "Hello, Ada". Text that disappeared: "Ready".');
+  });
+  it("still returns the action when reading the page fails, and does not read after a refused action", async () => {
+    const failing = spec();
+    failing.env.FAIL_EVAL = "1";
+    const unread = await runtime().agentRpc("unread", failing, "tools/call", {
+      name: "agent_browser_click", arguments: { selector: "@e5" },
+    }) as { content: Array<{ text: string }> };
+    expect(unread.content).toHaveLength(1);
+    expect(JSON.parse(unread.content[0].text).data).toEqual({ clicked: "@e5" });
+    const refused = await runtime().agentRpc("refused-action", spec(), "tools/call", {
+      name: "agent_browser_click", arguments: { selector: "#missing" },
+    }) as { isError?: boolean; content: Array<{ text: string }> };
+    expect(refused).toEqual({ isError: true, content: [{ type: "text", text: "Element not found: #missing" }] });
   });
   it("inherits only host plumbing and explicit engine settings", () => {
     vi.stubEnv("OPENAI_API_KEY", "must-not-inherit");

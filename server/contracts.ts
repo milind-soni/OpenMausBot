@@ -158,10 +158,6 @@ export interface SendTurnInput {
    * prompt (server/resume-recovery.ts) — so a session the provider lost
    * does not brick the thread, and the new session is not blank. */
   recoveryText?: string;
-  /** recoveryText is the replay this turn would have been sent without a
-   * resume cursor (it carries an update from outside the session). A driver
-   * that rebuilds only some lost sessions may also rebuild this one. */
-  recoveryIsReplay?: boolean;
   /** Prior turns for transcript-replay providers (API-backed drivers). */
   transcript?: Array<{ role: "user" | "assistant"; text: string }>;
   /** Bot persona (name/title/description) as a system prompt. */
@@ -181,6 +177,10 @@ export interface SendTurnInput {
    * systemVolatile describes this turn even when its text is unchanged from
    * the previous turn, so digest-based delivery must not suppress the note. */
   mentionTurn?: boolean;
+  /** The built-in browser is this conversation's place, so the bot will very
+   * likely browse: a driver may load its tools up front instead of behind a
+   * tool search, which costs the first browser action a model step. */
+  preloadBrowserTools?: boolean;
   /** Per-bot integrations the driver may hand to the agent as tools. */
   integrations?: {
     /** A local stdio bridge owns the remote Composio transport. Keeping the
