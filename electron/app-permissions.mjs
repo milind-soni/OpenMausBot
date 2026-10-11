@@ -165,20 +165,26 @@ export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeO
     clipboardWrite(contents, permission, requesting, details);
   return {
     // Only a request may wait (Electron answers it through the callback). A
-    // Cloud page that asks before the saved sign-in has restored is decided
-    // once it has, never refused for being early; a saved server's first
-    // microphone request once the person answered; anything else at once.
-    // Either way the answer is the rule again afterwards, so a switch made
-    // meanwhile still refuses.
+    // main-window page that asks before the saved Cloud sign-in has restored
+    // waits for it first, never refused for being early: the active saved
+    // server may be that Cloud itself ("Open My Cloud"), which needs no
+    // dialog. Then a saved server's microphone request not yet answered asks
+    // the person; anything else is decided at once. Each answer is the rule
+    // again afterwards, so a switch or sign-out made meanwhile still refuses.
     request: (contents, permission, callback, details) => {
       const requesting = details?.requestingUrl ?? contents?.getURL?.() ?? "";
-      if (allowed(contents, permission, requesting, details)) return callback(true);
-      // The active server's own ask first: asksAsCloud holds for any main-window page.
-      const waiting = asksAsRemote(contents, permission, requesting, details) ? askRemoteMicrophone(activeRemoteOrigin())
-        : asksAsCloud(contents, permission, requesting, details) ? cloudHomeRestoring()
-        : null;
-      if (!waiting) return callback(false);
-      void Promise.resolve(waiting).catch(() => {}).then(() => callback(allowed(contents, permission, requesting, details)));
+      const decide = () => allowed(contents, permission, requesting, details);
+      const settle = (waiting) => Promise.resolve(waiting).catch(() => {});
+      // true, false, or a wait for the person's answer.
+      const decideOrAsk = () => {
+        if (decide()) return true;
+        const asking = asksAsRemote(contents, permission, requesting, details) ? askRemoteMicrophone(activeRemoteOrigin()) : null;
+        return asking ? settle(asking).then(decide) : false;
+      };
+      const restoring = !decide() && asksAsCloud(contents, permission, requesting, details) ? cloudHomeRestoring() : null;
+      const answer = restoring ? settle(restoring).then(decideOrAsk) : decideOrAsk();
+      if (typeof answer === "boolean") return callback(answer);
+      void answer.then(callback);
     },
     check: (contents, permission, requestingOrigin, details) =>
       allowed(contents, permission, requestingOrigin || contents?.getURL?.() || "", details),
