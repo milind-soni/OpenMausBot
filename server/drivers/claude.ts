@@ -20,7 +20,7 @@ import { openStartupModelCatalog, writeStartupModelCache } from "../startup-mode
 import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
 import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
-import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
+import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
 import { hostTimeZone } from "../turn-clock.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
 
@@ -2145,8 +2145,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 held.continuationSilence.unref?.();
               }
               emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model, ...(retry.rebuilt ? { rebuilt: true } : {}) });
-              // announced once: a steered continuation's own init re-reports
-              // the same session, which is no new rebuild
+              // the person reads what did not carry over; announced once: a
+              // steered continuation's own init re-reports the same session,
+              // which is no new rebuild
+              if (retry.rebuilt) emit({ ...base(threadId, currentTurnId()), type: "runtime.notice", message: rebuiltSessionNotice("Claude Code") });
               retry.rebuilt = false;
             } else if (o.subtype === "thinking_tokens") {
               emit({ ...base(threadId, currentTurnId()), type: "item.updated", itemType: "reasoning", tokens: o.estimated_tokens });
@@ -2578,8 +2580,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // Same relaunch handle as the transient-retry path above. The new
             // session is announced as rebuilt only when it is actually given
             // the replay: with nothing to replay it gets the turn text alone.
-            // That announcement is what the person is told (the harness's
-            // notice on session.started); this is no retry of a failure.
+            // That announcement, with its notice, is what the person is told;
+            // this is no retry of a failure.
             retry.rebuilt = recovery.replayed;
             retryState.set(threadId, retry);
             active.set(threadId, { stop: () => { retry.cancelled = true; retryAbort.abort(); }, turnId });

@@ -140,7 +140,6 @@ import { connectorCardText } from "./connector-card-text.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { buildRecall } from "./recall.ts";
 import { hostTimeZone, takesTurnClock, turnClockLine, withTurnClock } from "./turn-clock.ts";
-import { rebuiltSessionNotice } from "./resume-recovery.ts";
 import { createMemoryUpkeep, upkeepEnabled } from "./memory-upkeep.ts";
 import type { CaptureTurn } from "./memory-capture.ts";
 import { appendAboutMe, commitLearned, planLearned } from "./profile-learned.ts";
@@ -5655,6 +5654,7 @@ store.onChange((change) => {
     case "thread.deleted":
       directRequestOwners.delete(change.threadId);
       stoppedTurns.delete(change.threadId);
+      turnFailure.delete(change.threadId);
       routines?.forgetRoutineRequestReceiptsForThread(change.threadId);
       // A deleted destination must not strand an approval in an internal
       // task. Keep each run's snapshot and expose its execution as fallback.
@@ -6232,8 +6232,9 @@ function requestBehavior(value: unknown): "allow" | "deny" | "answer" | null {
 // can carry what the bot actually said
 const lastReply = new Map<string, string>();
 /** What each thread's turn last said failed it (its runtime.error), kept
- * until the thread's next turn starts: every listener of the turn's
- * turn.completed reads it (turnFailureCause), whenever it runs. */
+ * until the thread's next turn starts or the thread is deleted: every
+ * listener of the turn's turn.completed reads it (turnFailureCause),
+ * whenever it runs. */
 const turnFailure = new Map<string, { turnId?: string; message: string }>();
 /** Why a settled turn failed, for whoever is told next — the person's
  * incident, the Chief's delegation, ask and room results, the bot's work
@@ -7818,12 +7819,6 @@ bus.subscribe((event: RuntimeEvent) => {
       : proven ? { ...m, requestMessageId: owner.messageId } : m);
     return message;
   };
-  // informational: the turn carries on. The prefix keeps it a status row the
-  // person always sees (src/lib/activity-runs.ts), never a tool step hidden
-  // with Tool calls off.
-  const pushNotice = (words: string) =>
-    pushMessage({ role: "bot", kind: "activity", tool: { name: `notice: ${words.slice(0, 240)}`, ok: true } });
-
   // A client abort sometimes arrives as assistant text or as runtime.error.
   // That is a stop, not a failure: store one stopped row, drop any text the
   // turn said before it, so neither the digest nor a finished notification
@@ -7866,9 +7861,6 @@ bus.subscribe((event: RuntimeEvent) => {
         store.setResumeCursor(bot.id, event.providerInstanceId, event.sessionId, event.threadId);
       }
       if (typeof event.model === "string" && event.model) sessionModelByThread.set(event.threadId, event.model);
-      // The engine had lost this conversation's own session and the turn went
-      // on in one started from the chat: one line says what did not carry over.
-      if (event.rebuilt) pushNotice(rebuiltSessionNotice(registry.get(event.providerInstanceId ?? "")?.displayName ?? "The engine"));
       break;
     case "item.completed":
       if (event.itemType === "assistant_text") {
@@ -8162,7 +8154,10 @@ bus.subscribe((event: RuntimeEvent) => {
       });
       break;
     case "runtime.notice":
-      pushNotice(event.message);
+      // informational: the turn carries on. The prefix keeps it a status row
+      // the person always sees (src/lib/activity-runs.ts), never a tool step
+      // hidden with Tool calls off.
+      pushMessage({ role: "bot", kind: "activity", tool: { name: `notice: ${event.message.slice(0, 240)}`, ok: true } });
       break;
     case "runtime.error":
       if (errorTranscript(event.message).kind === "stopped") {

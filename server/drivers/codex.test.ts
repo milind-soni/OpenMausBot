@@ -28,6 +28,7 @@ import {
   codexUserError,
 } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
+import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import * as procs from "../procs.ts";
 import { autoVerdict } from "../auto-approve.ts";
@@ -1902,8 +1903,9 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
     expect(calls.map((call: { method: string }) => call.method)).toEqual(["initialize", "initialized", "config/read", "thread/resume", "thread/start", "turn/start"]);
     expect(calls.find((call: { method: string }) => call.method === "turn/start").params.input).toEqual([{ type: "text", text: recoveryText }]);
-    // announced as rebuilt: the harness tells the person what did not carry over
+    // announced as rebuilt, and the person reads what did not carry over
     expect(recorder.events.filter((e) => e.type === "session.started")).toMatchObject([{ rebuilt: true }]);
+    expect(recorder.events.filter((e) => e.type === "runtime.notice")).toEqual([expect.objectContaining({ message: rebuiltSessionNotice("Codex") })]);
   });
 
   it("names the missing Company model prerequisites instead of one blanket refusal", async () => {

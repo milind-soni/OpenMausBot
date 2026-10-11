@@ -11,6 +11,7 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { rebuiltSessionNotice } from "./resume-recovery.ts";
 
 /** Pesto's account, as the CLI's rate_limit_event reported it on Oct 9. */
 const weekly = (resetsAt: number) => ({
@@ -180,7 +181,7 @@ it("tells a room's coordinator that a teammate is past its weekly limit, with th
   }
 }, 120_000);
 
-it("goes on in a new session started from the chat when Claude no longer has the old one, and says so", async () => {
+it("goes on in a new session started from the chat when Claude cannot reopen the old one, and says so", async () => {
   const { control, messages, play, close } = await launch();
   try {
     const marketer = (await control(["new-bot", "--name", "Marketer"])).bot;
@@ -196,7 +197,7 @@ it("goes on in a new session started from the chat when Claude no longer has the
     const thread = await messages(marketer.activeTaskId);
     const after = thread.slice(thread.findIndex((m) => m.role === "user" && m.text?.includes("what this")));
     expect(after.filter((m) => m.kind === "activity" && (m.tool?.name ?? "").startsWith("notice: ")).map((m) => m.tool.name)).toEqual([
-      expect.stringMatching(/^notice: .+ no longer had this conversation's session, so it went on in a new one started from the chat; results of earlier tool calls did not carry over\.$/),
+      `notice: ${rebuiltSessionNotice("Claude Code")}`,
     ]);
     expect(after.some((m) => m.kind === "activity" && m.tool?.ok === false)).toBe(false);
     expect(after.some((m) => m.role === "bot" && m.kind === "text" && m.text)).toBe(true);

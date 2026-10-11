@@ -38,6 +38,7 @@ import {
   type ClaudeConfig,
 } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
+import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { ephemeralWorkspaceTokenPath } from "../workspace-backup-policy.ts";
 import * as procs from "../procs.ts";
 import * as localInject from "./local-inject.ts";
@@ -3773,6 +3774,9 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "session.started")).toEqual([
       expect.objectContaining({ rebuilt: true, sessionId: expect.not.stringMatching(/idle-since-september/) }),
     ]);
+    // the person reads, once, what did not carry over
+    const notices = () => recorder.events.filter((e) => e.type === "runtime.notice");
+    expect(notices()).toEqual([expect.objectContaining({ message: rebuiltSessionNotice("Claude Code") })]);
     // one refused resume, one fresh session given the rebuild
     expect(launches(prompts)).toBe(2);
     const seen = JSON.parse(readFileSync(dump, "utf8"));
@@ -3787,6 +3791,7 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
       expect.objectContaining({ rebuilt: true }),
       expect.not.objectContaining({ rebuilt: true }),
     ]);
+    expect(notices()).toHaveLength(1);
   });
 
   it("says what failed when the fresh session ends in an error result too, after one rebuild", async () => {

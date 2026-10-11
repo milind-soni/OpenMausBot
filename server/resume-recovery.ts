@@ -83,11 +83,13 @@ export function recoveryPromptFor(input: RecoveryPromptInput): RecoveryPrompt {
   return { text: replay, replayed: true };
 }
 
-/** The one line the person reads when an engine no longer had a
- * conversation's own session and the turn went on in a new one started from
- * the chat (session.started `rebuilt`): Claude Code after a long idle, a
- * Codex rollout gone. The conversation carried over; what only that session
- * held — the results of earlier tool calls — did not. */
+/** The one line the person reads (runtime.notice) when a driver could not
+ * reopen a conversation's own session and went on in one rebuilt from the
+ * chat: Claude Code refusing a --resume after a long idle, a Codex rollout
+ * gone. The conversation carried over; what only that session held — the
+ * results of earlier tool calls — did not. Sent by the driver beside its
+ * `rebuilt` session.started, so an engine that rebuilds for other reasons
+ * (an ACP agent without session/load, after every idle close) adds no row. */
 export function rebuiltSessionNotice(engine: string): string {
-  return `${engine} no longer had this conversation's session, so it went on in a new one started from the chat; results of earlier tool calls did not carry over.`;
+  return `${engine} could not reopen this conversation's session, so it went on in a new one started from the chat; results of earlier tool calls did not carry over.`;
 }
