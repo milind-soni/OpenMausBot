@@ -1103,6 +1103,26 @@ body {
   from { transform: translateY(4px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
+/* a conversational reply: each short message sits in its own soft bubble,
+   tinted from the ink so it reads on every skin, dark or light */
+.reply-bubble {
+  width: fit-content;
+  max-width: min(100%, 36rem);
+  border-radius: 20px;
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+/* a reply that just arrived shows its bubbles one after another */
+@keyframes bubble-in {
+  from { transform: translateY(6px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.reply-bubble-in {
+  animation: bubble-in 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
 /* mascot arrives at the tail */
 @keyframes turn-mascot-in {
   from { opacity: 0; transform: scale(0.82); }
@@ -1286,6 +1306,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   .turn-phrase-in { animation: none; }
   .turn-phrase-out { display: none; }
   .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
+  .reply-bubble-in { animation: none; }
   .animate-rise, .animate-spot-in { animation: none; }
   .animate-ripple, .animate-bolt { animation: none; }
   .step-open, .check-in, .progress-fill { animation: none; transition: none; }

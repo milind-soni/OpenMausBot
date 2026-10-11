@@ -16,6 +16,7 @@ import { flushSync } from "react-dom";
 import type { BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, LiveSettings, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
 import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-surface";
 import type { TurnDigest } from "../../shared/digest";
+import type { ReplyStyle } from "../../shared/reply-style";
 import type { ToolScope } from "../../shared/tool-scope";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
@@ -240,6 +241,7 @@ export interface Message {
   queueId?: string;
   /** Auto rooms: the decision model picked this reply's speaker. */
   routedBy?: import("../../shared/wire").WireMessage["routedBy"];
+  quickModel?: string;
 }
 
 export type GroupDefaultResponder = import("../../shared/wire").GroupDefaultResponder;
@@ -466,6 +468,8 @@ export interface Bot {
   alwaysAllow?: string[];
   /** speak this bot's replies aloud as they settle */
   speakReplies?: boolean;
+  /** How replies are shaped. Absent = "default". */
+  replyStyle?: ReplyStyle;
   /** this bot's own voice id (falls back to the app-wide one) */
   voice?: string;
   /** whether this bot may send voice notes (on unless switched off) */

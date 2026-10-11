@@ -140,3 +140,14 @@ describe("soul (standing instructions)", () => {
     expect(parseBotProfilePatch({ soul: 5 } as never)).toEqual({ ok: false, error: "soul must be a string" });
   });
 });
+
+describe("parseBotProfilePatch replyStyle", () => {
+  it("accepts default and conversational", () => {
+    expect(parseBotProfilePatch({ replyStyle: "conversational" })).toEqual({ ok: true, patch: { replyStyle: "conversational" } });
+    expect(parseBotProfilePatch({ replyStyle: "default" }, true)).toEqual({ ok: true, patch: { replyStyle: "default" } });
+  });
+
+  it("rejects any other value", () => {
+    expect(parseBotProfilePatch({ replyStyle: "terse" } as never)).toEqual({ ok: false, error: "replyStyle must be default or conversational" });
+  });
+});

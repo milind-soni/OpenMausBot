@@ -109,6 +109,8 @@ import {
   snapshotAvatarGenerationState,
 } from "./avatar-image.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
+import { routeTurn } from "./turn-route.ts";
+import { isConversational } from "../shared/reply-style.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
@@ -2697,6 +2699,9 @@ const directTurnBots = new Map<string, BotRecord>();
  * books them next to its token usage: stable bytes ride the cacheable
  * prefix, volatile bytes are the part that legitimately changes. */
 const turnPromptBytes = new Map<string, { stable: number; volatile: number }>();
+/** The quick model a conversational turn was moved to (server/turn-route.ts),
+ * so usage is booked under the model that actually ran. */
+const routedTurnModels = new Map<string, string>();
 let providerFleetReloading = false;
 const turnResources = new TurnResources();
 const sharedComputerControl = new SharedComputerControl(turnResources, () => store.bots.some(bot => botComputerControlSnapshot(bot.id).held));
@@ -4100,7 +4105,7 @@ function previewSystemPrompt(bot: BotRecord) {
     teamAvailabilityPart(agentsMounted && coordination ? peers : []),
     { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace), enabled: bot.memoryEnabled !== false }) },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined) : "" },
-  ]);
+  ], { replyStyle: bot.replyStyle });
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
   return {
     sections: built.sections,
@@ -8328,13 +8333,15 @@ bus.subscribe((event: RuntimeEvent) => {
           ? `${measuredSelection.instanceId}:${measuredSelection.model}` : undefined });
         const promptBytes = turnPromptBytes.get(event.threadId);
         turnPromptBytes.delete(event.threadId);
+        const routedModel = routedTurnModels.get(event.threadId);
+        routedTurnModels.delete(event.threadId);
         bookTurnUsage({
           botId: bot.id,
           botName: bot.name,
           threadId: event.threadId,
           instanceId: selection.instanceId,
           driverKind: registry.get(selection.instanceId)?.driverKind ?? "unknown",
-          model: selection.model,
+          model: routedModel ?? selection.model,
           input: tokens?.input ?? 0,
           output: tokens?.output ?? 0,
           ...(typeof tokens?.cachedInput === "number" ? { cachedInput: tokens.cachedInput } : {}),
@@ -9991,9 +9998,28 @@ async function startTurn(
   // A turn always runs on the bot's own engine, model, effort and variant,
   // wherever it works: a cloud computer is a tool it mounts, never a reason
   // to swap the engine (the provider_not_configured incident).
-  const model = bot.modelSelection.model;
-  const effort = bot.modelSelection.effort;
-  const variant = bot.modelSelection.variant;
+  // A conversational bot answers a simple chat line on its engine's quick
+  // model (server/turn-route.ts). Same engine, same provider, never for a
+  // thread whose model a person picked or for an automated turn.
+  const lastAsk = store.activePath(threadId).findLastIndex((m) => m.role === "user" && m.kind === "text");
+  const route = routeTurn({
+    conversational: isConversational(bot.replyStyle),
+    followsBotModel: task.modelSelection === undefined,
+    automated: commsDepth > 0 || opts?.automationSource !== undefined || Boolean(opts?.unattended || opts?.cardContinuation || opts?.peerAsk || opts?.coordination),
+    signals: {
+      text: resolvedImages.text,
+      attachments: resolvedImages.images.length,
+      priorTurnUsedTools: lastAsk >= 0 && store.activePath(threadId).slice(lastAsk + 1).some((m) => m.kind === "activity"),
+    },
+    model: bot.modelSelection.model,
+    effort: bot.modelSelection.effort,
+    variant: bot.modelSelection.variant,
+    catalog: instance.models,
+    effortLevels: instance.adapter.capabilities.effortLevels,
+  });
+  const { model, effort, variant } = route;
+  if (route.quickModel) routedTurnModels.set(threadId, model);
+  else routedTurnModels.delete(threadId);
   assertModelVariantSupported({ variant, effort }, instance.adapter.capabilities);
   // A selection can be persisted while its engine is offline. Re-check when
   // the engine returns so an old or unsupported value never reaches a CLI.
@@ -10026,7 +10052,12 @@ async function startTurn(
           sender: opts?.sender,
           ...(opts?.via ? { via: opts.via } : {}),
           ...(opts?.relayed ? { relayed: true } : {}),
+          ...(route.quickModel ? { quickModel: route.quickModel } : {}),
         });
+  }
+  // a queued or edited message arrives already stored: stamp it here
+  if (route.quickModel && userMessage.quickModel !== route.quickModel && !opts?.cardContinuation) {
+    userMessage = store.patchMessage(threadId, userMessage.id, { quickModel: route.quickModel }) ?? userMessage;
   }
   const recoveryUserMessageId = opts?.coordination
     ? store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text")?.id
@@ -11030,7 +11061,7 @@ async function startTurn(
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: boundedCoordination && tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : mentionPrompt(tagged) },
-      ]);
+      ], { replyStyle: liveBot?.replyStyle ?? bot.replyStyle });
       turnPromptBytes.set(threadId, { stable: Buffer.byteLength(prompt.stable), volatile: Buffer.byteLength(prompt.volatile) });
       // Automatic recall rides in front of THIS turn's message, never in the
       // system prompt: the volatile half is re-sent whole whenever any part of

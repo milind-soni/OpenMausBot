@@ -34,6 +34,7 @@ export type BotPatch = Partial<
     | "outbound"
     | "fallback"
     | "speakReplies"
+    | "replyStyle"
     | "memoryEnabled"
     | "voice"
     | "chiefOfStaff"

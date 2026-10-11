@@ -8,6 +8,7 @@
 import { soulSystemPrompt } from "./bot-folder.ts";
 import { teammateAvailabilityPrompt, type RosterMember } from "./peer-roster.ts";
 import type { ConnectorToolGrant } from "../shared/wire.ts";
+import { isConversational, type ReplyStyle } from "../shared/reply-style.ts";
 
 export type PromptPart = { id: string; label: string; text: string };
 export type PromptSection = PromptPart & { bytes: number };
@@ -43,14 +44,26 @@ export function teamAvailabilityPart(team: readonly RosterMember[]): PromptPart 
   return { id: "availability", label: "Team availability", text: teammateAvailabilityPrompt(team) };
 }
 
+/** The conversational reply style, as one fixed paragraph. It sits right
+ * after the soul in the stable half, so it changes the cached prefix only
+ * when the person flips the setting, never from one turn to the next. */
+export const CONVERSATIONAL_STYLE_PROMPT =
+  "\n\nReply style: conversational. Talk like a person in a chat. Keep replies short unless the person asks for detail. Use plain text with no headings, bullet lists, tables or bold unless the person asks for them or the content truly needs them; code always goes in a fenced code block. Send each distinct point as its own short message, separated by a blank line, in the order you find things. When it helps, end with one brief follow-up question. Match the person's language and roughly the length of their message.\n";
+
+export function replyStylePrompt(style: ReplyStyle | undefined): string {
+  return isConversational(style) ? CONVERSATIONAL_STYLE_PROMPT : "";
+}
+
 export function buildSystemPrompt(
   persona: string,
   soul: string,
   parts: PromptPart[],
+  opts?: { replyStyle?: ReplyStyle },
 ): { text: string; sections: PromptSection[]; stable: string; volatile: string } {
   const ordered: PromptPart[] = [
     { id: "persona", label: "Identity", text: persona },
     { id: "soul", label: "Standing instructions (SOUL.md)", text: soulSystemPrompt(soul) },
+    { id: "reply-style", label: "Reply style", text: replyStylePrompt(opts?.replyStyle) },
     ...parts,
   ];
   const sections = ordered

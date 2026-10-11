@@ -8,6 +8,7 @@ import { soulSystemPrompt } from "./bot-folder.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import {
   buildSystemPrompt,
+  CONVERSATIONAL_STYLE_PROMPT,
   CLOUD_HOME_PLACE,
   cloudHomePrompt,
   userProfileSystemPrompt,
@@ -285,5 +286,27 @@ describe("cloudHomePrompt", () => {
     expect(cloudHomePrompt(true)).toContain("turn on Let My Cloud use this Mac under Settings → MausBot Cloud in the desktop app on that Mac");
     expect(cloudHomePrompt(false)).not.toMatch(/shared_computer|list_shared_computers/);
     expect(cloudHomePrompt(false)).toContain("You cannot see or use their Mac or PC, its screen or its files from here.");
+  });
+});
+
+describe("reply style", () => {
+  it("adds nothing for the default style, so existing prompts are unchanged", () => {
+    const plain = buildSystemPrompt("persona", "soul", [{ id: "x", label: "X", text: " tail" }]);
+    expect(buildSystemPrompt("persona", "soul", [{ id: "x", label: "X", text: " tail" }], { replyStyle: "default" })).toEqual(plain);
+    expect(plain.sections.map((s) => s.id)).not.toContain("reply-style");
+  });
+
+  it("puts the conversational guidance right after the soul, in the stable half", () => {
+    const built = buildSystemPrompt("persona", "soul", [
+      { id: "memory", label: "Memory", text: " memory" },
+      { id: "x", label: "X", text: " tail" },
+    ], { replyStyle: "conversational" });
+    expect(built.sections.map((s) => s.id)).toEqual(["persona", "soul", "reply-style", "memory", "x"]);
+    expect(built.stable).toContain(CONVERSATIONAL_STYLE_PROMPT);
+    expect(built.volatile).not.toContain("Reply style");
+    expect(CONVERSATIONAL_STYLE_PROMPT).toMatch(/short/i);
+    expect(CONVERSATIONAL_STYLE_PROMPT).toMatch(/blank line/);
+    expect(CONVERSATIONAL_STYLE_PROMPT).toMatch(/code block/);
+    expect(CONVERSATIONAL_STYLE_PROMPT).toMatch(/language/);
   });
 });

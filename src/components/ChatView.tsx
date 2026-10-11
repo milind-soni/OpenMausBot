@@ -57,6 +57,7 @@ import { plainErrorLine } from "@/lib/plain-error";
 import { openPlaceAction, placeRowViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
 import type { PlaceRow } from "../../shared/place-view";
 import { trialCreditKind, type TrialCreditRefusal } from "../../shared/trial-credit";
+import { isConversational, splitConversationalReply } from "../../shared/reply-style";
 import type { LocaleKey } from "@/locales";
 import { isProviderSafetyBlock, PROVIDER_SAFETY_GUIDANCE, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
 import { isCancelledTranscriptRow } from "../../shared/client-cancel";
@@ -168,6 +169,10 @@ interface ChatRows {
   dispatch: Dispatch<Action>;
   /** Whether a message is on the branch shown now (citation links). */
   onBranch: (messageId: string) => boolean;
+  /** Conversational bots show a reply as several small bubbles. */
+  conversational: boolean;
+  /** When this thread was opened: replies stamped later arrived while it was in view. */
+  openedAt: number;
 }
 
 const ChatRowsContext = createContext<ChatRows | null>(null);
@@ -500,7 +505,7 @@ const Bubble = memo(function Bubble({
   replyTarget?: Message;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, voiceId, tts, localVoice, busy, mentionPeers, focus, dispatch, onBranch } = useChatRows();
+  const { botId, threadId, botName, voiceId, tts, localVoice, busy, mentionPeers, focus, dispatch, onBranch, conversational, openedAt } = useChatRows();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // A user-role line another bot delivered (ask_bot, delegate_bot,
   // start_thread) is that bot speaking, not the person: it takes the
@@ -547,6 +552,23 @@ const Bubble = memo(function Bubble({
     () => message.attachments?.filter((attachment): attachment is VoiceNoteAttachment => attachment.kind === "audio") ?? [],
     [message.attachments],
   );
+  // A conversational reply is one stored message shown as several bubbles,
+  // split on its blank-line breaks. Raw view, peers and replies to a quoted
+  // message keep the single bubble.
+  const segments = useMemo(
+    () => conversational && !user && !peer && !viewRaw && !replyTarget && message.kind === "text" ? splitConversationalReply(text) : [],
+    [conversational, user, peer, viewRaw, replyTarget, message.kind, text],
+  );
+  const split = segments.length > 1;
+  // A reply that arrived while the chat was open shows its bubbles one after
+  // another. Bubbles already on screen stay put as more stream in, and each
+  // batch staggers from its own first bubble.
+  const [fresh] = useState(() => !user && message.at >= openedAt);
+  const shownSegments = useRef(fresh ? 0 : segments.length);
+  const firstNew = shownSegments.current;
+  useEffect(() => {
+    shownSegments.current = Math.max(shownSegments.current, segments.length);
+  }, [segments.length]);
   const webhookView = user ? webhookMessageView(text) : null;
   const cited = user && !webhookView ? splitTranscriptCitations(text) : null;
   const attachments = user && !webhookView ? splitTranscriptAttachments(cited?.display ?? text) : null;
@@ -606,7 +628,7 @@ const Bubble = memo(function Bubble({
             emerging && "turn-answer",
             user && webhookView
               ? "overflow-hidden border border-accent/25 bg-card text-ink shadow-[0_10px_30px_rgba(0,0,0,0.18)]"
-              : attachmentsOnly
+              : attachmentsOnly || split
                 ? "text-ink"
                 : user
                   ? "bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
@@ -667,6 +689,11 @@ const Bubble = memo(function Bubble({
                   {t("chat.sentMidTurn")}
                 </div>
               )}
+              {message.quickModel && (
+                <div data-quick-model className="mt-1 text-[11px] text-ink-tertiary">
+                  {t("chat.quickModel", { model: message.quickModel })}
+                </div>
+              )}
               {message.via === "call" && (
                 <span className="mt-1 text-[11px] text-ink-tertiary" title={t("chat.viaCall")}>
                   {t("chat.viaCall")}
@@ -693,7 +720,21 @@ const Bubble = memo(function Bubble({
                 </div>
               )}
               {!group && <AttachmentGallery images={generatedPaths} files={linkedFiles} message={{ threadId, messageId: message.id }} className={text ? undefined : "mb-0"} eager={eagerAttachments} />}
-              {viewRaw && text ? (
+              {split ? (
+                <div data-conversational-reply className="flex w-full flex-col items-start gap-1" data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={botId} data-citation-thread={threadId}>
+                  {segments.map((segment, index) => (
+                    <div
+                      key={index}
+                      data-reply-segment
+                      dir="auto"
+                      className={cn("reply-bubble", index >= firstNew && "reply-bubble-in")}
+                      style={index >= firstNew ? { animationDelay: `${(index - firstNew) * 120}ms` } : undefined}
+                    >
+                      <ChatMarkdown text={segment} mentionPeers={mentionPeers} message={{ threadId, messageId: message.id }} delivered={group?.delivered} />
+                    </div>
+                  ))}
+                </div>
+              ) : viewRaw && text ? (
                 <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={botId} data-citation-thread={threadId}><RawMarkdownView text={text} /></div>
               ) : text ? (
                 <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={botId} data-citation-thread={threadId}><ChatMarkdown text={text} mentionPeers={mentionPeers} message={{ threadId, messageId: message.id }} delivered={group?.delivered} /></div>
@@ -1238,6 +1279,12 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const localVoice = localSystemVoiceActive();
   const locale = activeLocale();
   const busy = Boolean(bot.busy);
+  const conversational = isConversational(bot.replyStyle);
+  // only a reply that arrives while the chat is open plays its bubbles in;
+  // history and rows scrolled back into view show at once
+  const opened = useRef({ threadId: bot.threadId, at: Date.now() });
+  if (opened.current.threadId !== bot.threadId) opened.current = { threadId: bot.threadId, at: Date.now() };
+  const openedAt = opened.current.at;
   // The header face moves only while the bot works or plays a motion beat,
   // as in the sidebar: a resting face left open would redraw at display rate.
   const headerAnimated = busy || (mascotMotion?.kind ?? "none") !== "none";
@@ -1246,8 +1293,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   branch.current = messages;
   const onBranch = useCallback((messageId: string) => branch.current.some((m) => m.id === messageId), []);
   const rows = useMemo<ChatRows>(
-    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch }),
-    [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch],
+    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch, conversational, openedAt }),
+    [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch, conversational, openedAt],
   );
   // Where this conversation works, for the place icon on screen and page tools.
   const place = effectivePlace(bot, bot.tasks?.find((task) => task.threadId === bot.threadId));
