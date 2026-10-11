@@ -3091,6 +3091,20 @@ const browserRuntime = new BrowserRuntime({
   applyViewport: (spec) => setBrowserViewport(spec.command, spec.env),
 });
 const browserLive = new BrowserLive({ runtime: browserRuntime });
+// Every browser session this server has used, with its launch settings. The
+// agent-browser daemon outlives its MCP transport, so stopping the transports
+// at shutdown left the daemon and its Chrome running until the engine's
+// one-hour idle timeout. Shutdown closes these (closeServerBrowsers).
+const usedBrowserSessions = new Map<string, { command: string; env: Record<string, string> }>();
+async function closeServerBrowsers(): Promise<void> {
+  await Promise.all([...usedBrowserSessions].map(async ([session, spec]) => {
+    // A Chrome attached over CDP is the person's own; it is not ours to close.
+    if (spec.env.AGENT_BROWSER_CDP) return;
+    // Closing saves the session's logins, which come back on its next use.
+    const closed = await closeBrowserSession(spec.command, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session }), 4_000);
+    if (!closed) console.warn(`browser ${session}: could not close its browser at shutdown`);
+  }));
+}
 // Temporary profiles last for this server run, but are never saved to disk.
 // The viewer and the agent must address the SAME temporary browser.
 const temporaryBrowserSessions = new Map<string, string>();
@@ -3110,6 +3124,7 @@ async function forgetTemporaryBrowser(botId: string): Promise<void> {
   const session = temporaryBrowserSessions.get(botId);
   if (!session) return;
   temporaryBrowserSessions.delete(botId);
+  usedBrowserSessions.delete(session);
   const engine = browserEngineStatus();
   if (engine.kind !== "ready") return;
   const closed = await clearBrowserSessionState(engine.binaryPath, session, {
@@ -3139,6 +3154,7 @@ async function browserIntegration(botId: string, profile: string | undefined, tu
       env: { ...process.env, PATH: augmentedPath() },
       attachCdpUrl: browserEngineAttachCdpUrl(cfg) ?? undefined,
     });
+  usedBrowserSessions.set(session, spec);
   await prepareBrowserSessionState(status.binaryPath, session, { env: spec.env, persistent: profile !== "guest", isCurrent: () => {
     const current = store.bot(botId);
     return !!current && current.browser !== false && builtInBrowserEnabled(cfg)
@@ -26093,7 +26109,10 @@ const gracefulShutdown = createGracefulShutdown({
     // Every open DuckDB database flushes and closes; the next start reopens them.
     async () => { await dataEngine.closeAll().catch((error) => console.warn("data: close failed", error)); },
     async () => {
-      await Promise.all([...temporaryBrowserSessions.keys()].map((botId) => forgetTemporaryBrowser(botId)));
+      // Each temporary browser leaves usedBrowserSessions before its first
+      // await, so closeServerBrowsers does not close it a second time.
+      const temporaries = [...temporaryBrowserSessions.keys()].map((botId) => forgetTemporaryBrowser(botId));
+      await Promise.all([...temporaries, closeServerBrowsers()]);
       await browserRuntime.closeAll();
     },
     () => liveCalls.shutdown(),
