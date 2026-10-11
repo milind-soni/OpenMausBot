@@ -168,8 +168,9 @@ pnpm exec vitest run server/comms.test.ts
 The mailbox API fixture uses the isolated launcher and per-model fake-engine
 gates. A peer waits on a real approval-broker card. A card holds only its own
 thread: fresh coordinated work waits only while the card's thread holds the
-peer's last free slot, and then the Chief's conversation says once whose card
-it waits behind and where, as does the Chief's prompt. With a slot free, the
+peer's last free slot, and then the Chief's conversation says once, in a
+notice that never reads as running, whose card it waits behind and where, as
+does the Chief's prompt. With a slot free, the
 work starts beside the open card. Approving the card lets its own turn go on,
 and one attributed result returns to the Chief without another user prompt.
 The approval cases follow a teammate's cards through the broker's own course:
@@ -178,7 +179,9 @@ never "got your approval". The fixture fires the broker's fifteen-minute
 deadline through a marker file (`server/testing/approval-clock-hooks.mjs`,
 loaded only when `OMB_TEST_APPROVAL_CLOCK=1` reaches the isolated launcher).
 The result a Chief's coordination, a routine's delegation and a room's
-coordinator each read then leads with the action that did not run. Exact
+coordinator each read then leads with the action that did not run; a failed
+delegated turn carries it after its failure, and an action the model asked
+again and was allowed is not named. Exact
 control commands, waits, transcripts and the server log path are retained in
 the fixture's `.log.json` evidence, without capability tokens. Queue-unit
 tests cover expiry, multi-job restart recovery, repeated busy periods and

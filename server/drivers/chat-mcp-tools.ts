@@ -1,5 +1,6 @@
 // Per-turn MCP transport for the shared Chat Completions runtime. Approval is
 // owned by the caller; only registered, schema-validated calls reach this file.
+import { createHash } from "node:crypto";
 import type { ValidateFunction } from "ajv";
 import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
@@ -20,8 +21,10 @@ export interface ChatToolResult { text: string; ok: boolean; images?: ChatImageP
 /** How one call is shown to the person: the tool named on its approval card
  * and in the transcript, the input previewed there, whether a card is needed
  * at all, and what "Always allow this session" on that card keeps allowed:
- * the exact tool on its exact server. No grant for the person's own
- * computer, which no engine lets a session-wide allow cover. */
+ * the exact tool on its exact server, the server as launched (a changed
+ * command, URL or credential is another server, as it is a new process to a
+ * warm Claude). No grant for the person's own computer, which no engine lets
+ * a session-wide allow cover. */
 export interface ChatToolCallView { title: string; input: Record<string, unknown>; ask: boolean; grant?: string }
 /** The transport cannot safely continue this turn. A dispatched operation may
  * already have taken effect, so callers must not retry it through a new round. */
@@ -282,7 +285,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const cancel = () => { void close().catch(() => {}); };
   signal.addEventListener("abort", cancel, { once: true });
   const definitions: ChatToolDefinition[] = [];
-  const registered = new Map<string, { client: ChatMcpClient; server: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; name: string; schema: ValidateFunction; searched: boolean }>();
+  const registered = new Map<string, { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; name: string; schema: ValidateFunction; searched: boolean }>();
   try {
     if (signal.aborted) throw aborted();
     // Start independent servers concurrently; consume results in config order
@@ -302,12 +305,16 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       const tools = await client.tools(signal, include, searchable.has(name) ? REMOTE_MCP_STARTUP_MS : STARTUP_MS);
       // Harness mounts are known by the descriptor the harness passed, never
       // by a name a configured server could also claim.
-      return { name, client, builtInBrowser: descriptor === integrations?.browser, agents: descriptor === integrations?.agents,
+      // What the server is, for a grant: hashed, so no credential is kept.
+      // A bridge into a machine minted a fresh bearer this turn, so its
+      // grants last a turn, as a warm engine restarts for it (perTurn).
+      const launch = createHash("sha256").update(JSON.stringify(descriptor)).digest("hex");
+      return { name, client, launch, builtInBrowser: descriptor === integrations?.browser, agents: descriptor === integrations?.agents,
         hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", tools };
     }));
     for (const mount of mounts) {
       if (mount.status === "rejected") throw mount.reason;
-      const { name: server, client, builtInBrowser, agents, hostComputer, tools } = mount.value;
+      const { name: server, client, launch, builtInBrowser, agents, hostComputer, tools } = mount.value;
       const originalNames = new Set<string>();
       for (const tool of tools) {
         if (!object(tool) || typeof tool.name !== "string" || !tool.name.trim() || originalNames.has(tool.name)) throw new Error("MCP server advertised an invalid or duplicate tool name");
@@ -328,7 +335,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         const base = chatToolName(server, tool.name);
         let name = base;
         for (let index = 2; registered.has(name); index += 1) { const suffix = `_${index}`; name = base.slice(0, 64 - suffix.length) + suffix; }
-        registered.set(name, { client, server, builtInBrowser, agents, hostComputer, name: tool.name, schema, searched: searchable.has(server) });
+        registered.set(name, { client, server, launch, builtInBrowser, agents, hostComputer, name: tool.name, schema, searched: searchable.has(server) });
         definitions.push({ type: "function", function: { name, description, parameters } });
         if (Buffer.byteLength(JSON.stringify(definitions)) > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
       }
@@ -356,7 +363,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     const tool = registered.get(name);
     const runs = tool ? target(tool, args) : name;
     if (runs === undefined || tool?.agents) return { title: name, input: args, ask: false };
-    const grant = tool && !tool.hostComputer ? JSON.stringify([tool.server, runs]) : undefined;
+    const grant = tool && !tool.hostComputer ? JSON.stringify([tool.server, tool.launch, runs]) : undefined;
     if (!tool?.searched || tool.name !== CALL_TOOL) return { title: name, input: args, ask: true, ...(grant ? { grant } : {}) };
     return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
   };

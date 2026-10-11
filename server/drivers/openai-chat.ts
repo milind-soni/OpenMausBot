@@ -311,10 +311,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
    * the stored text would rewrite history the provider has cached. In memory
    * only: after a restart a thread replays as stored, as it always did. */
   const delivered = new Map<string, DeliveredUserMessage[]>();
-  /** "Always allow this session" grants by thread: the exact tools a person
-   * allowed for the rest of the conversation. This runtime has no native
-   * session, so the conversation's lives as long as this instance does, as
-   * an ACP agent's does with its process; none survives a restart. */
+  /** "Always allow this session" grants by thread and bot: the exact tools a
+   * person allowed one bot for the rest of the conversation. A room runs
+   * every member on the room's thread, and one bot's allow is not another's.
+   * This runtime has no native session, so the conversation's lives as long
+   * as this instance does, as an ACP agent's does with its process; none
+   * survives a restart. Not cleared on `sessionReset`: with no cursor to
+   * resume, the harness sends that on nearly every turn of this runtime. */
   const sessionGrants = new Map<string, Set<string>>();
 
   const emit = (event: RuntimeEvent) => {
@@ -590,9 +593,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       dir, source: options.nativeLog.source,
       msg: JSON.parse(JSON.stringify(msg, (_key, part) => typeof part === "string" ? safeText(part) : part)),
     });
-    const granted = sessionGrants.get(turn.threadId) ?? new Set<string>();
-    sessionGrants.delete(turn.threadId);
-    sessionGrants.set(turn.threadId, granted);
+    const grantsKey = JSON.stringify([turn.threadId, turn.botId ?? null]);
+    const granted = sessionGrants.get(grantsKey) ?? new Set<string>();
+    sessionGrants.delete(grantsKey);
+    sessionGrants.set(grantsKey, granted);
     if (sessionGrants.size > MAX_DELIVERED_THREADS) sessionGrants.delete(sessionGrants.keys().next().value!);
     const approval = createChatToolApproval({
       signal: abort.signal,

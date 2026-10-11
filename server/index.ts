@@ -5107,7 +5107,9 @@ function noteQueuedBehindPerson(node: RoomHandoff): void {
   queuedBehindPersonNoted.add(node.id);
   store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
     from: { botId: bot.id, name: bot.name, color: bot.color },
-    tool: { name: queuedBehindPersonText(bot.name, card.kind, card.title) },
+    // A notice, not a step: nothing settles it, so it must not read as
+    // running (a spinner in chat, "running" in the run log) forever.
+    tool: { name: queuedBehindPersonText(bot.name, card.kind, card.title), ok: true },
     threadRef: { botId: bot.id, threadId: card.threadId, title: card.title },
   });
 }
@@ -8159,8 +8161,11 @@ bus.subscribe((event: RuntimeEvent) => {
           // Nobody answered this approval: the engine denied it on its own
           // timer and the turn goes on without the action. Kept for the
           // turn's result, so its requester does not read it as done.
-          if (event.source === "timeout" && existing.card.requestType === "permission") {
-            unansweredApprovals.record(event.threadId, event.turnId, existing.card.tool, existing.card.subtitle);
+          // A later card of that turn for the same action that was
+          // answered undoes it: someone decided, and an allow ran it.
+          if (existing.card.requestType === "permission") {
+            if (event.source === "timeout") unansweredApprovals.record(event.threadId, event.turnId, existing.card.tool, existing.card.subtitle);
+            else if (event.source !== "system" && event.source !== "unavailable") unansweredApprovals.answered(event.threadId, event.turnId, existing.card.tool, existing.card.subtitle);
           }
           if (shouldSettleRequestCard(existing.card, event.source)) {
             store.patchMessage(event.threadId, messageId, {
@@ -8511,9 +8516,11 @@ bus.subscribe((event: RuntimeEvent) => {
       // the request was mirrored there when the delegation drained, and a
       // channel that only ever shows requests is half a record. Mirror the
       // reply on success; mirror a failed/stopped terminal chip otherwise.
-      const delegationFailureName = !event.ok && event.stopReason?.trim()
+      // Either one carries the note on approvals nobody answered: a failed
+      // turn's requester reads only its failure.
+      const delegationFailureName = unansweredApprovals.annotate(event.threadId, event.turnId, !event.ok && event.stopReason?.trim()
         ? `Delegated turn did not finish — ${event.stopReason.trim().slice(0, 120)}`
-        : undefined;
+        : "Delegated turn did not finish", false);
       finalizeDelegationWatch(event.threadId, event.ok, unansweredApprovals.annotate(event.threadId, event.turnId, reply, event.ok), delegationFailureName);
       // group busy/unread settle in the group turn engine, which knows
       // whether more member turns are queued behind this one

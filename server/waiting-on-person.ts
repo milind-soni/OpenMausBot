@@ -18,8 +18,10 @@ export function settledWaitingChip(name: string, kind: string, behavior: Resolve
   if (source === "timeout") return question
     ? { name: `Nobody answered ${who}'s question in time`, ok: false }
     : { name: `Nobody answered ${who}'s approval in time — that step did not run`, ok: false };
+  // A question stays open in its thread after its turn ends (a late answer
+  // is delivered as a new turn), so only the turn is said to have ended.
   if (source === "system" || source === "unavailable") return question
-    ? { name: `${who}'s question closed before anyone answered`, ok: false }
+    ? { name: `${who}'s turn ended before anyone answered its question`, ok: false }
     : { name: `${who}'s approval closed before anyone answered — that step did not run`, ok: false };
   if (behavior === "deny") return { name: question ? `${who}'s question was dismissed` : `${who}'s request was denied`, ok: false };
   return source === "user"
@@ -28,13 +30,20 @@ export function settledWaitingChip(name: string, kind: string, behavior: Resolve
 }
 
 /** Why handed-out work has not started: its teammate's free slots are held,
- * and one of them by a card waiting on the person in `title`. */
+ * and one of them by a card waiting on the person in `title`. Written once
+ * and never patched, so it stays true after the card is answered. */
 export function queuedBehindPersonText(name: string, kind: "approval" | "question" | "review", title: string): string {
-  return `Queued for @${name}, who's waiting on your ${kind === "question" ? "answer" : kind} in “${title}”`;
+  return `Queued for @${name} behind your ${kind === "question" ? "answer" : kind} in “${title}”`;
 }
 
 const MAX_ACTIONS = 10;
 const MAX_THREADS = 256;
+
+/** One card's action as the note names it: redacted, one short line. */
+function actionLine(tool: string | undefined, summary: string | undefined): string {
+  return redactSecretsInText(tool && summary && !summary.includes(tool) ? `${tool}: ${summary}` : summary || tool || "an action")
+    .replace(/\s+/g, " ").trim().slice(0, 160);
+}
 
 /** Approvals nobody answered, by thread, for the turn that asked them. Every
  * engine denies such a request on its own timer and the turn carries on, so
@@ -52,12 +61,22 @@ export class UnansweredApprovals {
     if (!turnId) return;
     const noted = this.byThread.get(threadId);
     const actions = noted?.turnId === turnId ? noted.actions : [];
-    const action = redactSecretsInText(tool && summary && !summary.includes(tool) ? `${tool}: ${summary}` : summary || tool || "an action")
-      .replace(/\s+/g, " ").trim().slice(0, 160);
+    const action = actionLine(tool, summary);
     if (!actions.includes(action) && actions.length < MAX_ACTIONS) actions.push(action);
     this.byThread.delete(threadId);
     this.byThread.set(threadId, { turnId, actions });
     if (this.byThread.size > MAX_THREADS) this.byThread.delete(this.byThread.keys().next().value!);
+  }
+
+  /** Someone answered a later card of `turnId` for the same action (the
+   * model asked again once the person was back): nobody-answered no longer
+   * holds for it, and an allowed retry ran. */
+  answered(threadId: string, turnId: string | undefined, tool: string | undefined, summary: string | undefined): void {
+    const noted = this.byThread.get(threadId);
+    if (!turnId || noted?.turnId !== turnId) return;
+    const action = actionLine(tool, summary);
+    noted.actions = noted.actions.filter(candidate => candidate !== action);
+    if (!noted.actions.length) this.byThread.delete(threadId);
   }
 
   /** The turn's result as its requester reads it. A finished turn leads with

@@ -67,9 +67,11 @@ provider its own remembered approval: Claude receives its suggested permission
 rules, and ACP agents such as Grok receive their `allow_always` option, or the
 driver repeats your answer for that exact operation until the native session
 ends. API models (OpenAI-compatible, MiniMax, Mistral, Grok API) have no
-native session, so their driver keeps the allow for that exact tool on that
-exact server for the rest of the conversation, in memory until the server
-restarts. OpenMausBot keeps no standing grant for a provider's tool. It is not
+native session, so their driver keeps the allow for that bot, that exact tool
+and that exact server (as launched: a changed command, URL or credential is
+another server, and a bridge into a VM or a Boat is new each turn) for the
+rest of the conversation, in memory until the server restarts. Another bot in
+the same room asks again. OpenMausBot keeps no standing grant for a provider's tool. It is not
 offered for computer control, for a sandbox change or on a guest's turn. The
 harness's own agents tools (coordinating teammates, threads, memory) never
 ask on Claude, Codex or API models: OpenMausBot authorizes each of those

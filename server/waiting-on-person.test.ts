@@ -16,16 +16,17 @@ describe("the waiting-on-you chip once its card settles", () => {
     // A turn ending or a restart closes the card; nobody approved anything.
     ["approval", "deny", "system", "@Mira's approval closed before anyone answered — that step did not run", false],
     ["approval", "deny", "unavailable", "@Mira's approval closed before anyone answered — that step did not run", false],
-    ["answer", "answer", "system", "@Mira's question closed before anyone answered", false],
+    // A question outlives its turn and can still be answered there.
+    ["answer", "answer", "system", "@Mira's turn ended before anyone answered its question", false],
   ] as const)("a %s settled %s by %s reads %j", (kind, behavior, source, name, ok) => {
     expect(settledWaitingChip("Mira", kind, behavior, source)).toEqual({ name, ok });
   });
 });
 
 describe("work queued behind the person's card", () => {
-  it("names whose card and where", () => {
-    expect(queuedBehindPersonText("Mira", "approval", "@Clive · work")).toBe("Queued for @Mira, who's waiting on your approval in “@Clive · work”");
-    expect(queuedBehindPersonText("Mira", "question", "Release")).toBe("Queued for @Mira, who's waiting on your answer in “Release”");
+  it("names whose card and where, in words that stay true once it is answered", () => {
+    expect(queuedBehindPersonText("Mira", "approval", "@Clive · work")).toBe("Queued for @Mira behind your approval in “@Clive · work”");
+    expect(queuedBehindPersonText("Mira", "question", "Release")).toBe("Queued for @Mira behind your answer in “Release”");
   });
 });
 
@@ -61,6 +62,23 @@ describe("approvals nobody answered", () => {
     notes.record("t3", undefined, "Bash", "npm test");
     expect(notes.annotate("t3", undefined, "done", true)).toBe("done");
     expect(notes.annotate("t1", undefined, "done", true)).toBe("done");
+  });
+
+  it("drops an action once a later card of the turn for it is answered", () => {
+    const notes = new UnansweredApprovals();
+    notes.record("t1", "turn-1", "audit_write", "audit_write {\"name\":\"receipt\"}");
+    notes.record("t1", "turn-1", "Bash", "npm test");
+    // another turn's or another action's answer changes nothing
+    notes.answered("t1", "turn-2", "Bash", "npm test");
+    notes.answered("t1", "turn-1", "Bash", "npm run lint");
+    expect(notes.annotate("t1", "turn-1", "done", true)).toContain("approvals for “audit_write {\"name\":\"receipt\"}”, “Bash: npm test”");
+    // the model asked again once the person was back, and it was answered
+    notes.answered("t1", "turn-1", "audit_write", "audit_write {\"name\":\"receipt\"}");
+    expect(notes.annotate("t1", "turn-1", "done", true)).toBe(
+      "[OpenMausBot: nobody answered the approval for “Bash: npm test” in time, so it did not run. Do not report it as done; it needs the person's approval.]\n\ndone",
+    );
+    notes.answered("t1", "turn-1", "Bash", "npm test");
+    expect(notes.annotate("t1", "turn-1", "done", true)).toBe("done");
   });
 
   it("stores one short, redacted line per action, and at most ten", () => {

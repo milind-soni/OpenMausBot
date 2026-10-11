@@ -258,6 +258,50 @@ describe("approvals that follow the other engines", () => {
   });
 });
 
+describe("whose allow \"Always allow this session\" keeps", () => {
+  it("keeps it for the bot it was given to on that server: not a roommate on the same thread, nor a changed server", async () => {
+    const calls = [
+      toolCall("audit_write", '{"name":"mira","value":"1"}', "call_1"), null,
+      toolCall("audit_write", '{"name":"clive","value":"2"}', "call_2"), null,
+      toolCall("audit_write", '{"name":"mira2","value":"3"}', "call_3"), null,
+      toolCall("audit_write", '{"name":"changed","value":"4"}', "call_4"), null,
+    ];
+    const f = await fixture((_body, response, round) => {
+      const call = calls[round - 1];
+      if (call) sse(response, [chunk({ tool_calls: [call] }, "tool_calls")]);
+      else answer(response);
+    });
+    const opened = () => f.recorder.events.filter((event) => event.type === "request.opened");
+    // a room runs each member's turn on the room's one thread
+    await f.start({ botId: "mira" });
+    const first = await f.recorder.until((event) => event.type === "request.opened");
+    expect(await f.instance.adapter.respondToRequest(f.threadId, first.requestId!, { behavior: "allow", always: true })).toBe("allowed-once");
+    await f.completed();
+
+    f.recorder.events.splice(0);
+    await f.start({ botId: "clive" });
+    const roommate = await f.recorder.until((event) => event.type === "request.opened");
+    expect(roommate).toMatchObject({ tool: "audit_write", allowSession: true });
+    await f.instance.adapter.respondToRequest(f.threadId, roommate.requestId!, { behavior: "deny" });
+    await f.completed();
+
+    f.recorder.events.splice(0);
+    await f.start({ botId: "mira" });
+    await f.completed();
+    expect(opened()).toHaveLength(0);
+
+    // the person pointed "audit" at another launch of the server
+    const audit = f.integrations!.custom!.audit as { command: string; args: string[]; env: Record<string, string> };
+    f.recorder.events.splice(0);
+    await f.start({ botId: "mira", integrations: { custom: { audit: { ...audit, env: { ...audit.env, AUDIT_PROFILE: "other" } } } } });
+    const changed = await f.recorder.until((event) => event.type === "request.opened");
+    expect(changed).toMatchObject({ tool: "audit_write", allowSession: true });
+    await f.instance.adapter.respondToRequest(f.threadId, changed.requestId!, { behavior: "deny" });
+    await f.completed();
+    expect(f.effects().map((effect) => effect.name)).toEqual(["mira", "mira2"]);
+  });
+});
+
 describe("built-in Data provider parity", () => {
   it.each(["openai-compat", "grok", "minimax", "cerebras"] as const)("mounts and executes Data through %s with the shared instructions", async (provider) => {
     const f = await fixture((_body, response, round) => {

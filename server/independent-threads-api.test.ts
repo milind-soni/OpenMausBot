@@ -1,6 +1,6 @@
 // Real harness + its isolated fake-engine launcher. Gates are per model so
 // two tasks on one bot stay in flight until this test completes or stops each.
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -143,7 +143,9 @@ describe("independent bot tasks through the isolated control surface", () => {
     await expect.poll(async () => (await queuedChips()).length).toBe(1);
     const [chip] = await queuedChips();
     expect(chip.threadRef).toMatchObject({ botId: peer.id, threadId: peer.activeTaskId });
-    expect(chip.tool.name).toBe(`Queued for @Mailbox Peer, who's waiting on your approval in “${chip.threadRef.title}”`);
+    expect(chip.tool.name).toBe(`Queued for @Mailbox Peer behind your approval in “${chip.threadRef.title}”`);
+    // a notice nothing settles: never a step left running
+    expect(chip.tool.ok).toBe(true);
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     expect(handoff()?.status).toBe("queued");
     expect(await queuedChips()).toHaveLength(1);
@@ -231,6 +233,24 @@ describe("independent bot tasks through the isolated control surface", () => {
     ]);
     expect((await card("unanswered-approval")).card).toMatchObject({ answered: "deny", dismissed: true });
 
+    // One more goes unanswered, but the model asks again once the person is
+    // back and is allowed: that one ran, so the note must not claim it.
+    const lint = await permission(models[1], "lint-approval", { command: "npm run lint" });
+    await expect.poll(async () => Boolean(await card("lint-approval"))).toBe(true);
+    writeFileSync(expiry, "expire");
+    await expect.poll(() => lint.find((answer) => answer.id === "lint-approval")).toMatchObject({ behavior: "deny", source: "timeout" });
+    rmSync(expiry, { force: true });
+    const retried = await permission(models[1], "lint-retry", { command: "npm run lint" });
+    await expect.poll(async () => Boolean(await card("lint-retry"))).toBe(true);
+    expect((await api("POST", `/api/threads/${workThread}/respond`, { requestId: "lint-retry", behavior: "allow" })).status).toBeLessThan(300);
+    await expect.poll(() => retried.find((answer) => answer.id === "lint-retry")).toMatchObject({ behavior: "allow" });
+    await expect.poll(async () => (await chiefChips()).map((chip) => [chip.tool.name, chip.tool.ok])).toEqual([
+      ["@Release Peer's request was denied", false],
+      ["Nobody answered @Release Peer's approval in time — that step did not run", false],
+      ["Nobody answered @Release Peer's approval in time — that step did not run", false],
+      ["@Release Peer got your approval", true],
+    ]);
+
     // The turn carries on and finishes; its result tells the Chief which
     // action never ran, ahead of the teammate's own words.
     writeFileSync(modelFile(models[1], "gate"), "finish");
@@ -239,13 +259,14 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect(result.startsWith("[OpenMausBot: nobody answered the approval for “Bash: npm run release-check” in time, so it did not run. Do not report it as done;")).toBe(true);
     expect(result).toContain("reply to:");
     expect(result).not.toContain("git push");
+    expect(result).not.toContain("npm run lint");
     await expect.poll(async () => (await api("GET", `/api/threads/${chief.activeTaskId}/messages?limit=100`)).body.messages
       .find((message: any) => message.roomRequest?.id === requestId && message.roomRequest.phase === "result")?.tool?.output ?? "")
       .toContain("nobody answered the approval for “Bash: npm run release-check”");
     evidence.push({ requestId, result: result.slice(0, 400) });
   }, 60_000);
 
-  it("tells a delegating bot that its teammate's approval went unanswered, so the step did not run", async () => {
+  it.each(["finish", "fail"] as const)("tells a delegating bot that its teammate's approval went unanswered, so the step did not run (turn ends: %s)", async (ending) => {
     const chief = (await tool("create_bot", { name: "Delegating Chief", instance_id: "claude", model: models[0] })).bot;
     const peer = (await tool("create_bot", { name: "Delegated Peer", instance_id: "claude", model: models[1] })).bot;
     expect((await api("PATCH", `/api/bots/${peer.id}`, { approvalMode: "ask" })).status).toBe(200);
@@ -278,11 +299,24 @@ describe("independent bot tasks through the isolated control surface", () => {
     writeFileSync(expiry, "expire");
     await expect.poll(() => unanswered.find((answer) => answer.id === "unanswered-delegated")).toMatchObject({ behavior: "deny", source: "timeout" });
     rmSync(expiry, { force: true });
-    writeFileSync(modelFile(models[1], "gate"), "finish");
-    const replied = async () => (await api("GET", `/api/threads/${await runThread()}/messages?limit=100`)).body.messages
-      .find((message: any) => message.kind === "text" && message.text?.startsWith("@Delegated Peer replied to the delegated task:"))?.text as string | undefined;
-    await expect.poll(replied, { timeout: 20_000 }).toBeTruthy();
-    expect((await replied())!.startsWith("@Delegated Peer replied to the delegated task:\n\n[OpenMausBot: nobody answered the approval for “Bash: npm run release-check” in time, so it did not run.")).toBe(true);
+    // whole, so the engine never reads the gate half-written
+    writeFileSync(`${modelFile(models[1], "gate")}.tmp`, ending);
+    renameSync(`${modelFile(models[1], "gate")}.tmp`, modelFile(models[1], "gate"));
+    const note = "[OpenMausBot: nobody answered the approval for “Bash: npm run release-check” in time, so it did not run.";
+    const runMessages = async () => (await api("GET", `/api/threads/${await runThread()}/messages?limit=100`)).body.messages as any[];
+    if (ending === "finish") {
+      const replied = async () => (await runMessages())
+        .find((message: any) => message.kind === "text" && message.text?.startsWith("@Delegated Peer replied to the delegated task:"))?.text as string | undefined;
+      await expect.poll(replied, { timeout: 20_000 }).toBeTruthy();
+      expect((await replied())!.startsWith(`@Delegated Peer replied to the delegated task:\n\n${note}`)).toBe(true);
+    } else {
+      // A failed turn reports only its failure: the note rides on it.
+      const failed = async () => (await runMessages())
+        .find((message: any) => message.tool?.name?.startsWith("Delegation to @Delegated Peer failed"))?.tool as { name: string; ok: boolean } | undefined;
+      await expect.poll(failed, { timeout: 20_000 }).toBeTruthy();
+      expect(await failed()).toMatchObject({ ok: false });
+      expect((await failed())!.name).toBe(`Delegation to @Delegated Peer failed — Delegated turn did not finish — error\n\n${note} Do not report it as done; it needs the person's approval.]`);
+    }
   }, 60_000);
 
   it("tells a room's coordinator that a member's approval went unanswered, so the step did not run", async () => {
