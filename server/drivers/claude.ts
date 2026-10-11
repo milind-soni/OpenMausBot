@@ -447,7 +447,8 @@ export const STATIC_CLAUDE_MODELS: ModelCatalog = {
   ],
 };
 
-const CLAUDE_MODEL_ID = /^[a-z0-9][a-z0-9._:/-]*$/i;
+/** A model slug, optionally with Claude Code's `[1m]` (1M context) suffix. */
+const CLAUDE_MODEL_ID = /^[a-z0-9][a-z0-9._:/-]*(?:\[1m\])?$/i;
 /** Official Anthropic model ids, e.g. claude-sonnet-5-5 (no host:: inject prefix). */
 const OFFICIAL_CLAUDE_ID = /^claude-[a-z0-9.-]+$/;
 
@@ -498,11 +499,29 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
   const extras = [
     ...extrasFromUnknown(settings.availableModels).map((extra) => ({ ...extra, custom: true })),
     ...extrasFromUnknown(settings.customModels).map((extra) => ({ ...extra, custom: true })),
-    ...extrasFromUnknown(settings.extraModels).map((extra) => ({ ...extra, custom: !OFFICIAL_CLAUDE_ID.test(extra.id) })),
+    ...extrasFromUnknown(settings.extraModels).map((extra) => ({ ...extra, custom: !OFFICIAL_CLAUDE_ID.test(extra.id.replace(/\[1m\]$/i, "")) })),
   ];
   const nestedEnv = settings.env && typeof settings.env === "object" ? (settings.env as Record<string, unknown>) : {};
   const envModel = nestedEnv.ANTHROPIC_MODEL ?? env.ANTHROPIC_MODEL;
   if (typeof envModel === "string") extras.push(...extrasFromUnknown([envModel]).map((extra) => ({ ...extra, custom: true })));
+  // Claude Code's own /model additions: the custom option, and the models
+  // the endpoint serves in place of a tier. Official Claude ids stay in the
+  // static list; the env values themselves never reach the bot's CLI.
+  const fromEnv = (name: string) => {
+    const value = nestedEnv[name] ?? env[name];
+    return typeof value === "string" ? value.trim() : "";
+  };
+  const customOption = fromEnv("ANTHROPIC_CUSTOM_MODEL_OPTION");
+  if (customOption) {
+    extras.push(...extrasFromUnknown([{ id: customOption, name: fromEnv("ANTHROPIC_CUSTOM_MODEL_OPTION_NAME") || undefined }])
+      .map((extra) => ({ ...extra, custom: true })));
+  }
+  for (const tier of ["OPUS", "SONNET", "HAIKU"]) {
+    const model = fromEnv(`ANTHROPIC_DEFAULT_${tier}_MODEL`);
+    if (model && !OFFICIAL_CLAUDE_ID.test(model.replace(/\[1m\]$/i, ""))) {
+      extras.push(...extrasFromUnknown([model]).map((extra) => ({ ...extra, custom: true })));
+    }
+  }
 
   const options = STATIC_CLAUDE_MODELS.options.map((option) => ({ ...option }));
   const seen = new Set(options.map((option) => option.id));

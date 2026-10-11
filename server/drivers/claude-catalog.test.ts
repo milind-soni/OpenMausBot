@@ -65,6 +65,33 @@ describe("readClaudeModelCatalog", () => {
     });
   });
 
+  it("lists Claude Code's custom model option and non-Claude tier models as custom", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-claude-catalog-"));
+    scratchDirs.push(home);
+    const dir = join(home, ".claude");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "settings.json"),
+      JSON.stringify({
+        model: "opus[1m]",
+        env: {
+          ANTHROPIC_BASE_URL: "https://gateway.example",
+          ANTHROPIC_CUSTOM_MODEL_OPTION: "qwen-27b",
+          ANTHROPIC_CUSTOM_MODEL_OPTION_NAME: "Qwen 27B",
+          ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-5-5[1m]",
+          ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-large[1m]",
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: "qwen-27b",
+          CLAUDE_CODE_SUBAGENT_MODEL: "subagent-model",
+        },
+      }),
+    );
+
+    expect(readClaudeModelCatalog({ HOME: home }).options.slice(STATIC_CLAUDE_MODELS.options.length)).toEqual([
+      { id: "qwen-27b", label: "Qwen 27B", custom: true },
+      { id: "glm-large[1m]", label: "glm-large[1m]", custom: true },
+    ]);
+  });
+
   it("lists a newer Anthropic model from extraModels with the official rows, not as custom", () => {
     const home = mkdtempSync(join(tmpdir(), "omb-claude-catalog-"));
     scratchDirs.push(home);
@@ -72,11 +99,15 @@ describe("readClaudeModelCatalog", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, "settings.json"),
-      JSON.stringify({ extraModels: [{ id: "claude-sonnet-future-test", label: "Future Claude Sonnet" }, "omlx::local-qwen"] }),
+      JSON.stringify({ extraModels: [
+        { id: "claude-sonnet-future-test", label: "Future Claude Sonnet" },
+        "claude-sonnet-future-test[1m]", "omlx::local-qwen",
+      ] }),
     );
 
     expect(readClaudeModelCatalog({ HOME: home }).options.slice(STATIC_CLAUDE_MODELS.options.length)).toEqual([
       { id: "claude-sonnet-future-test", label: "Future Claude Sonnet" },
+      { id: "claude-sonnet-future-test[1m]", label: "claude-sonnet-future-test[1m]" },
       { id: "omlx::local-qwen", label: "omlx::local-qwen", custom: true },
     ]);
   });

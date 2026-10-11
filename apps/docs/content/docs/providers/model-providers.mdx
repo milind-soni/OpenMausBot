@@ -124,11 +124,14 @@ and your Claude bots follow it:
   OpenRouter's and DeepSeek's guides use shell exports, which the desktop app
   doesn't see, so copy those lines into the `env` block.
 - If you also set `ANTHROPIC_MODEL` there, that model appears under **Use a
-  local model** in the Claude model picker; pick it. Otherwise bots ask for
-  Claude models, which OpenRouter bills as Claude and DeepSeek replaces with
-  its own model. FireConnect's model list doesn't show up in OpenMausBot, so
-  add `ANTHROPIC_MODEL` yourself. `ANTHROPIC_DEFAULT_*_MODEL` and
-  `CLAUDE_CODE_SUBAGENT_MODEL` aren't carried over.
+  local model** in the Claude model picker; pick it. So do
+  `ANTHROPIC_CUSTOM_MODEL_OPTION` and each `ANTHROPIC_DEFAULT_*_MODEL` that
+  isn't a Claude model. Otherwise bots ask for Claude models, which
+  OpenRouter bills as Claude and DeepSeek replaces with its own model.
+  FireConnect's model list doesn't show up in OpenMausBot, so add
+  `ANTHROPIC_MODEL` yourself. A bot runs only the model you pick:
+  `ANTHROPIC_DEFAULT_*_MODEL` and `CLAUDE_CODE_SUBAGENT_MODEL` aren't carried
+  over.
 - It applies only while no Anthropic API key is saved in Connections.
 - It changes Claude Code everywhere on this computer, not just in
   OpenMausBot.
