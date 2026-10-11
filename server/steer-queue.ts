@@ -217,7 +217,7 @@ export function drainSteeredMessages(
     unattended: boolean,
     head: SteerQueueHead,
   ) => void | Promise<void>,
-  isBlocked?: (botId: string, threadId: string) => boolean,
+  isBlocked?: (botId: string, threadId: string, head: SteerQueueHead) => boolean,
 ): void {
   // deleting only the entry being visited is safe under Map iteration
   for (const [threadId, entry] of queues) {
@@ -231,7 +231,7 @@ export function drainSteeredMessages(
       changed();
       continue;
     }
-    if (bot.busy || isBlocked?.(entry.botId, threadId)) continue;
+    if (bot.busy || isBlocked?.(entry.botId, threadId, entry.items[0])) continue;
     const group = drainCoalesceHead(entry.items, coalesceIdentity, (item) => item.queuedAt);
     // committed to draining: the entry leaves the map before anything runs,
     // so a settle racing another settle can never fire the same queue twice
@@ -291,8 +291,12 @@ export function drainSteeredMessages(
  * person's; a bot's own queued work (peerAsk/unattended) never merges with
  * anyone's person texts, nor with its own work from another request, and
  * unattributed local sends (the loopback owner) are one identity — the
- * transcript already names them all the same. */
+ * transcript already names them all the same.
+ * Team incidents reports are OpenMausBot's, whichever bot broke (none
+ * carries a request's origin): the ones that waited behind a busy Chief are
+ * answered as one turn. */
 function coalesceIdentity(item: QueueEntry["items"][number]): string {
+  if (item.peerAsk?.incident) return "incident";
   if (item.peerAsk) return `peer:${item.peerAsk.botId}:${item.unattended === true ? "unattended" : "attended"}:${JSON.stringify(item.origin ?? null)}`;
   if (item.unattended === true) return "unattended";
   if (item.sender) return `person:${item.sender.id ?? item.sender.name}`;

@@ -22,6 +22,23 @@ OpenMausBot:
    can fix the cause — a sign-in, a missing credential, an unanswered
    question, a setting — it says so in one or two plain sentences and stops.
 
+A report that finds the Chief busy — still answering the previous one, at its
+thread limit, or in a room turn — waits in the incidents thread's queue and
+runs the moment the Chief is free, together with any other reports that
+waited; it is never dropped silently. It does not wait for work the Chief
+handed on from an earlier report. If the Chief's turn is refused even then
+(the spend limit, say), the thread says so and the person is told of the
+failure, as for a report refused at once. Handling reports that waited adds
+no notification: a turn that answers only waiting reports about failures the
+person was already told of (a run that could not start, a failed routine)
+ends without a "finished" one.
+
+The Chief's report turn, and its review of work it hands on from one, uses
+the Chief's computer as any turn does, but does not need it: when that
+computer cannot be had — no Boat key, the team's computer missing, its
+settings mid-change — the turn runs without one and the Chief is told why,
+instead of the report being refused.
+
 Limits, so a crash loop is one incident and not a storm: a thread may be
 retried twice; the third report tells the Chief to stop and explain; after
 five incidents in an hour the thread is muted until the hour passes. A
@@ -34,8 +51,9 @@ failure already — so it raises no incident. A run the person stopped is not
 an incident.
 
 `retry_thread` is Chief-only, for a teammate the Chief can reach, never a
-room thread (coordinate in the room instead), and never a thread that is
-still running. The retried thread keeps its own approval level; the Chief is
+room thread (coordinate in the room instead), never a thread that is still
+running, and never one that has finished a run since it was last reported
+(a late report, or a second retry, would redo finished work). The retried thread keeps its own approval level; the Chief is
 not woken for its result — it stays in that thread, findable with
 `list_threads` or `session_search`.
 

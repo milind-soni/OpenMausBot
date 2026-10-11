@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   browserIsThePlace,
   cloudPlaceRefusal,
+  computerSkippedNote,
   computerToolsRefusal,
   parseSurface,
   placeUnavailable,
@@ -63,6 +64,18 @@ describe("resolveSurface", () => {
     // nothing mounted, so the surface paragraph stays silent and only the
     // note tells the model why it has no screen
     expect(surfacePrompt({ computer: null, browser: false }, { note: plan.note })).toBe(plan.note);
+  });
+
+  it("a Team incidents turn that lost its computer is told why and that it has none", () => {
+    const note = computerSkippedNote("The team's cloud computer is missing; explicitly create or retry it from the Team map.");
+    expect(note).toMatch(/^ This turn answers a Team incidents report and your computer could not be prepared for it \(The team's cloud computer is missing; explicitly create or retry it from the Team map\), so no computer is mounted/);
+    expect(note).toMatch(/never claim to have checked that computer yourself\.$/);
+    // nothing mounted: the note alone is the surface paragraph
+    expect(surfacePrompt({ computer: null, browser: false }, { note })).toBe(note);
+    // a browser the plan allowed still mounts beside it, and is described
+    const withBrowser = surfacePrompt({ computer: null, browser: true }, { note });
+    expect(withBrowser).toMatch(/^ Everything you do on screen happens in the built-in browser tab/);
+    expect(withBrowser.endsWith(note)).toBe(true);
   });
 
   it("Off is the one setting a conversation pin cannot override", () => {

@@ -100,6 +100,12 @@ export class IncidentLedger {
   forget(threadId: string): void {
     this.at.delete(threadId);
   }
+
+  /** When this thread was last reported, whatever the window: a report
+   * can reach the Chief after a wait, and its thread may have moved on. */
+  lastAt(threadId: string): number | undefined {
+    return this.at.get(threadId)?.at(-1);
+  }
 }
 
 const fold = (text: string, max: number): string => {
