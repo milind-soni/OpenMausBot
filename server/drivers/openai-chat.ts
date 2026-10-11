@@ -59,6 +59,8 @@ interface CompletionJson {
   error?: unknown;
   base_resp?: { status_code?: unknown; status_msg?: unknown };
   usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; cost?: number };
+  /** Groq reports streaming usage in its final x_groq envelope. */
+  x_groq?: { usage?: CompletionJson["usage"] };
 }
 
 /** The message of a JSON error body a provider returned with HTTP 200.
@@ -122,6 +124,8 @@ const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
   usage
     ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0 }
     : null;
+
+const completionUsage = (json: CompletionJson) => json.usage ?? json.x_groq?.usage;
 
 const asError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
@@ -375,15 +379,16 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
       if (!stream || response.headers.get("content-type")?.includes("application/json")) {
         const json = await response.json() as CompletionJson;
+        const tokenUsage = completionUsage(json);
         if (onUsage) {
           activeSignal.throwIfAborted();
           const count = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
           onUsage({
             model: typeof json.model === "string" && json.model.trim() ? json.model : model,
-            input: count(json.usage?.prompt_tokens),
-            output: count(json.usage?.completion_tokens),
-            cachedInput: count(json.usage?.prompt_tokens_details?.cached_tokens),
-            costUsd: count(json.usage?.cost),
+            input: count(tokenUsage?.prompt_tokens),
+            output: count(tokenUsage?.completion_tokens),
+            cachedInput: count(tokenUsage?.prompt_tokens_details?.cached_tokens),
+            costUsd: count(tokenUsage?.cost),
           });
         }
         const bodyError = completionError(json, "completion error");
@@ -405,7 +410,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           reasoning: options.reasoning && typeof reasoning === "string"
             ? reasoning
             : "",
-          usage: usageFrom(json.usage),
+          usage: usageFrom(tokenUsage),
           toolCalls: calls.finish(finishReason, false),
           finishReason,
           protocolReasoning: typeof reasoning === "string" ? reasoning : "",
@@ -468,7 +473,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           text += contentDelta;
           onDelta?.(contentDelta, "assistant_text");
         }
-        if (chunk.usage) usage = usageFrom(chunk.usage);
+        const tokenUsage = completionUsage(chunk);
+        if (tokenUsage) usage = usageFrom(tokenUsage);
         return false;
       };
       try {

@@ -121,6 +121,19 @@ describe("provider key check", () => {
     expect(urls).toEqual(["https://api.openai.com/v1/models"]);
   });
 
+  it("checks Groq at its preset endpoint without claiming chat authentication", async () => {
+    const groq: typeof fetch = async (input, init) => {
+      expect(String(input)).toBe("https://api.groq.com/openai/v1/models");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture-groq");
+      expect(init?.redirect).toBe("manual");
+      return Response.json({ data: [{ id: "openai/gpt-oss-120b" }] });
+    };
+    expect(await checkProviderKey({ provider: "groq", key: "fixture-groq" }, groq))
+      .toEqual({ ok: true, check: "models", models: ["openai/gpt-oss-120b"] });
+    expect(await checkProviderKey({ provider: "groq", key: "bad-key", url: base }))
+      .toEqual({ ok: false, reason: "rejected", status: 401 });
+  });
+
   it("does not call a custom compatible server's nonexistent /key endpoint", async () => {
     const paths: string[] = [];
     const custom: typeof fetch = async (input) => { paths.push(String(input)); return Response.json({ data: [] }); };
