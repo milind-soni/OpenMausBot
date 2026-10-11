@@ -8,7 +8,11 @@ import { t } from "@/lib/i18n";
 import { plainErrorLine } from "@/lib/plain-error";
 import type { Bot, InstanceInfo, Message } from "@/state/store";
 import { failedTurnCause } from "../../shared/failed-turn";
+import { toolStepLabel } from "@/lib/tool-step-label";
 import { isClientCancellation, isStoppedTurnName } from "../../shared/client-cancel";
+
+/** The prefixes a status row is stored with (src/lib/activity-runs.ts). */
+const STATUS_MARKER = /^(?:recovery|notice):\s*/;
 
 export { failedTurnCause };
 
@@ -38,13 +42,13 @@ export function botEngine(bot: Bot | undefined, instances: InstanceInfo[]): Inst
 
 /** One line for a list preview: a Data receipt its result's title, a
  * failed turn what its row says, minus the "below" a list has no room for;
- * any other activity row its name. */
-export function activityPreview(tool: ActivityTool, engine: InstanceInfo | undefined, dataResult?: Message["dataResult"]): string {
+ * other steps use plain words in Simple mode and their names in Advanced. */
+export function activityPreview(tool: ActivityTool, engine: InstanceInfo | undefined, dataResult?: Message["dataResult"], advanced = false): string {
   if (dataResult) return dataResult.title;
   if (isStoppedTurnName(tool.name)) return t("chat.turnStopped");
   const cause = failedTurnCause(tool.name);
   if (cause !== null && isClientCancellation(cause)) return t("chat.turnStopped");
-  if (cause === null) return tool.name;
+  if (cause === null) return advanced ? tool.name : STATUS_MARKER.test(tool.name) ? tool.name.replace(STATUS_MARKER, "") : toolStepLabel(tool);
   const signedOut = signedOutEngine(tool, engine);
   return signedOut ? t("sidebar.preview.signedOut", { name: signedOut.displayName }) : plainErrorLine(cause) ?? cause;
 }

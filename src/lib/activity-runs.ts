@@ -160,11 +160,13 @@ export function groupTranscript(messages: Message[]): TranscriptItem[] {
 const MAX_NAMES = 3;
 
 /** The one line a folded run has to earn its place with: how much work it
- * was and which tools did it. Failed steps are never folded. */
-export function describeRun(messages: Message[]): string {
+ * was and which tools did it. Failed steps are never folded. `label` names a
+ * step: Simple mode passes the plain phrase, so steps that read the same
+ * count together. */
+export function describeRun(messages: Message[], label: (tool: NonNullable<Message["tool"]>) => string = (tool) => tool.name): string {
   const counts = new Map<string, number>();
   for (const message of messages) {
-    const name = message.tool?.name ?? "";
+    const name = message.tool ? label(message.tool) : "";
     counts.set(name, (counts.get(name) ?? 0) + 1);
   }
   const names = [...counts].map(([name, count]) => (count > 1 ? `${name} ×${count}` : name));

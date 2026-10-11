@@ -149,6 +149,11 @@ describe("describeRun", () => {
       "5 steps · Edit, Bash, Write +2 more",
     );
   });
+
+  it("names steps by the label it is given, counting steps that read the same together", () => {
+    const plain = ({ name }: { name: string }) => (name === "Bash" || name.includes(" ") ? "Run a command" : name);
+    expect(describeRun([tool("Bash"), tool("ls -la"), tool("Edit")], plain)).toBe("3 steps · Run a command ×2, Edit");
+  });
 });
 
 describe("groupTranscript", () => {

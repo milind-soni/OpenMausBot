@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initialState, type AppState, type Bot, type Group } from "@/state/store";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
-const fixture = vi.hoisted(() => ({ showThreads: true, state: {} as Partial<AppState>, dispatch: vi.fn() }));
+const fixture = vi.hoisted(() => ({ advanced: false, showThreads: true, state: {} as Partial<AppState>, dispatch: vi.fn() }));
+vi.mock("@/lib/interface-mode", async (original) => ({
+  ...await original<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => fixture.advanced,
+}));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 vi.mock("react-dom", () => ({ createPortal: (node: ReactNode) => node }));
@@ -48,6 +52,7 @@ function findElement(tree: ReactNode, attribute: string, value: string): ReactEl
 }
 
 beforeEach(() => {
+  fixture.advanced = false;
   fixture.showThreads = true;
   fixture.state = { bots: [bot], selectedId: "other-bot", activeView: "chat", pendingQueued: { queued: [{ queueId: "q", text: "next" }] } };
   fixture.dispatch.mockClear();
@@ -58,6 +63,23 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("bot-first sidebar", () => {
+  it.each([false, true])("uses the selected mode for bot and room tool previews (advanced: %s)", (advanced) => {
+    fixture.advanced = advanced;
+    fixture.showThreads = false;
+    const messages: Bot["messages"] = [{ id: "step", role: "bot", kind: "activity", at: 1, tool: { name: "mcp__omb__computer_batch", ok: true } }];
+    const candidate = { ...bot, messages, tasks: [], projects: [] };
+    const group: Group = { id: "room", threadId: "room-thread", name: "Team", memberIds: [bot.id], messages, defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
+    const expected = advanced ? "mcp__omb__computer_batch" : "Use the computer";
+    const other = advanced ? "Use the computer" : "mcp__omb__computer_batch";
+    for (const markup of [
+      renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate))),
+      renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() })),
+    ]) {
+      expect(markup).toContain(expected);
+      expect(markup).not.toContain(other);
+    }
+  });
+
   it.each([
     { enabled: true, density: "comfortable", size: 32, spacing: ["gap-2", "py-2", "pl-6"] },
     { enabled: true, density: "compact", size: 26, spacing: ["gap-1.5", "py-1", "pl-6"] },

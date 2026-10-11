@@ -159,7 +159,7 @@ function sectionLabel(id: string): string {
 
 /** `visible` is the bot's visible branch (visibleMessages), which the row
  * already works out once per transcript. */
-function preview(bot: Bot, visible: Message[], instances: InstanceInfo[]): string {
+function preview(bot: Bot, visible: Message[], instances: InstanceInfo[], advanced: boolean): string {
   if (bot.activity === "waiting-on-you") return t("sidebar.preview.waiting");
   if (bot.waitingForTeammates) return t("sidebar.preview.waitingOnTeammate");
   if (bot.busy) return t("sidebar.preview.working");
@@ -174,7 +174,7 @@ function preview(bot: Bot, visible: Message[], instances: InstanceInfo[]): strin
     return (last.card.requestId && last.card.tool && !last.card.questionRequest && approvalCardOutcome(last.card)) || last.card.title;
   }
   // a failed turn reads as the chat row says it, never "error: …"
-  if (last.kind === "activity" && last.tool) return activityPreview(last.tool, botEngine(bot, instances), last.dataResult);
+  if (last.kind === "activity" && last.tool) return activityPreview(last.tool, botEngine(bot, instances), last.dataResult, advanced);
   if (last.kind === "screen") return t("sidebar.preview.screenFrame");
   if (last.kind === "connector" && last.connector) return sidebarConnectorPreview(last.connector, t);
   // one line of what the reply says, never the Markdown that draws it
@@ -197,7 +197,7 @@ function openBotContextMenu(onMenu: (menu: MenuState) => void, botId: string, ev
   onMenu({ botId, x: event.clientX, y: event.clientY });
 }
 
-function groupPreview(group: Group, bots: Bot[], instances: InstanceInfo[]): string {
+function groupPreview(group: Group, bots: Bot[], instances: InstanceInfo[], advanced: boolean): string {
   if (group.busyBotId) {
     return t("sidebar.preview.botWorking", {
       name: bots.find((b) => b.id === group.busyBotId)?.name ?? t("sidebar.preview.aBot"),
@@ -211,7 +211,7 @@ function groupPreview(group: Group, bots: Bot[], instances: InstanceInfo[]): str
     return last.from ? `${last.from.name}: ${stopped}` : stopped;
   }
   const text = last.kind === "activity" && last.tool
-    ? activityPreview(last.tool, botEngine(bots.find((bot) => bot.id === last.from?.botId), instances), last.dataResult)
+    ? activityPreview(last.tool, botEngine(bots.find((bot) => bot.id === last.from?.botId), instances), last.dataResult, advanced)
     : last.kind === "goal.run" && last.goalRun
       ? sidebarGoalRunPreview(last.goalRun)
       : last.kind === "connector" && last.connector
@@ -268,6 +268,7 @@ export function GroupListItem({
   onMenu: (menu: { groupId: string; x: number; y: number }) => void;
 }) {
   const { state, dispatch } = useStore();
+  const advanced = useAdvancedMode();
   const selected = state.activeView === "chat" && state.selectedId === group.id;
   // a search opens this room only when it has a matching thread to show,
   // and clearing it puts the room back as it was (MOCA-293)
@@ -327,7 +328,7 @@ export function GroupListItem({
           {(expanded || (quiet && !groupStatus)) && group.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
         </div>
         {!expanded && (!quiet || groupStatus) && <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-[11px] text-ink-secondary">{groupPreview(group, state.bots, state.instances)}</span>
+          <span className="truncate text-[11px] text-ink-secondary">{groupPreview(group, state.bots, state.instances, advanced)}</span>
           {group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
         </div>}
       </div>
@@ -1431,6 +1432,7 @@ function PinnedBotRoster({
 }
 
 export const BotListItem = memo(function BotListItem(props: BotRowProps) {
+  const advanced = useAdvancedMode();
   const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, quiet, query, dispatch, onMenu } = props;
   const showThreads = useShowThreads();
   const liveMedia = useLiveMedia();
@@ -1598,7 +1600,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
                   <span className="sr-only">{t("sidebar.preview.working")}</span>
                 </span>
               ) : (
-                <span dir="auto" className="truncate">{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : preview(bot, visible, instances)}</span>
+                <span dir="auto" className="truncate">{waiting ? t("sidebar.preview.waiting") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : preview(bot, visible, instances, advanced)}</span>
               )}
             </span>
           )}
@@ -2171,7 +2173,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         !q ||
         b.name.toLowerCase().includes(q) ||
         (b.title ?? "").toLowerCase().includes(q) ||
-        preview(b, visibleMessages(b), state.instances).toLowerCase().includes(q) ||
+        preview(b, visibleMessages(b), state.instances, advanced).toLowerCase().includes(q) ||
         b.tasks?.some((task) => !task.routineRunId && task.title.toLowerCase().includes(q)) ||
         b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );

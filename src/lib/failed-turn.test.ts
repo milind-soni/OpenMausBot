@@ -60,9 +60,27 @@ describe("failed turn text", () => {
   it("previews a plan-limit refusal whole and leaves ordinary steps alone", () => {
     const limit = "Your Pro plan includes 2 cloud computers at once. Delete one to start another.";
     expect(activityPreview({ name: `error: ${limit}`, ok: false }, engine())).toBe(limit);
-    expect(activityPreview({ name: "Bash", ok: true }, engine())).toBe("Bash");
+    expect(activityPreview({ name: "Bash", ok: true }, engine())).toBe("Run a command");
     expect(activityPreview({ name: "stopped: Stopped", ok: true }, engine())).toBe("Stopped");
     expect(activityPreview({ name: "error: The request was cancelled by the client.", ok: false }, engine())).toBe("Stopped");
+  });
+
+  it("previews a tool step in plain words and a status row without its marker", () => {
+    expect(activityPreview({ name: "mcp__omb__computer_batch", ok: true }, engine())).toBe("Use the computer");
+    expect(activityPreview({ name: "GITHUB_GET_A_COMMIT", ok: true }, engine())).toBe("Get a commit");
+    expect(activityPreview({ name: "notice: This thread now uses Sonnet.", ok: true }, engine())).toBe("This thread now uses Sonnet.");
+    expect(activityPreview({ name: "recovery: Automatic recovery: trying Codex once.", ok: true }, engine())).toBe("Automatic recovery: trying Codex once.");
+    expect(activityPreview({ name: "Messaged @Ada" }, engine())).toBe("Messaged @Ada");
+  });
+
+  it("keeps technical tool names in Advanced mode and Data titles in both modes", () => {
+    const tool = { name: "mcp__omb__computer_batch", ok: true };
+    expect(activityPreview(tool, engine(), undefined, true)).toBe(tool.name);
+    expect(activityPreview({ name: "notice: Switched model" }, engine(), undefined, true)).toBe("notice: Switched model");
+    const dataResult = { botId: "bot", cardId: "result", title: "Revenue", kind: "chart" as const };
+    for (const advanced of [false, true]) {
+      expect(activityPreview(tool, engine(), dataResult, advanced)).toBe("Revenue");
+    }
   });
 
   it("previews a technical cause as its plain line", () => {
