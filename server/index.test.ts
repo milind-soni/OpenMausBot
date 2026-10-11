@@ -115,6 +115,8 @@ let boatStubPort = 0;
 const boatRouteCalls: Array<{ method: string; path: string }> = [];
 const boatPromptBodies: Array<Record<string, unknown>> = [];
 let boatSlowRequestCount = 0;
+/** Holds a "box_slow" credential check open until released; unset, it takes 150 ms. */
+let boatSlowHold: Promise<void> | null = null;
 let managedBoatRows: Array<Record<string, unknown>> = [];
 let managedBoatListRowsOverride: Array<Record<string, unknown>> | null = null;
 let managedBoatListStatus = 200;
@@ -964,7 +966,7 @@ beforeAll(async () => {
       && new URL(req.url ?? "/", "http://box.invalid").pathname === "/boxes"
     ) {
       boatSlowRequestCount += 1;
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await (boatSlowHold ?? new Promise((resolve) => setTimeout(resolve, 150)));
     }
     if (
       req.headers.authorization === "Bearer box_route" ||
@@ -7901,6 +7903,10 @@ describe("harness HTTP API", () => {
 
   it("excludes new Boat turns, lifecycle actions, and bot deletion while a token change validates", async () => {
     let botId = "";
+    // The check stays open until every refusal below is seen: a save that
+    // reloads no engine is over in moments.
+    let release = () => {};
+    boatSlowHold = new Promise<void>((resolve) => { release = resolve; });
     try {
       expect((await api("PUT", "/api/config", { box: { token: "" } })).status).toBe(200);
       const bot = (await api("POST", "/api/bots")).body.bot;
@@ -7917,11 +7923,14 @@ describe("harness HTTP API", () => {
       expect(turn.status).toBe(409);
       expect(turn.body.error).toMatch(/Boat account settings are being updated/i);
       expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(409);
+      release();
       expect((await changing).status).toBe(200);
 
       expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
       botId = "";
     } finally {
+      release();
+      boatSlowHold = null;
       if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
       await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
     }
@@ -8460,7 +8469,7 @@ describe("harness HTTP API", () => {
         mcpConfig: z.object({ mcpServers: z.object({ ogb: z.object({ args: z.array(z.string()) }) }) }),
       }).parse(await readJsonFileWhenReady(fakeClaudeDump));
       const socketPath = dump.mcpConfig.mcpServers.ogb.args[1];
-      const raise = async (id: string, command: string) => {
+      const raise = async (id: string, command: string, extra: Record<string, unknown> = {}) => {
         const conn = connect(socketPath);
         conns.push(conn);
         const answered = new Promise<{ behavior: string; always?: boolean }>((resolve) => {
@@ -8475,7 +8484,7 @@ describe("harness HTTP API", () => {
           conn.on("connect", resolve);
           conn.on("error", reject);
         });
-        conn.write(JSON.stringify({ t: "ask", id, tool: "Bash", input: { command } }) + "\n");
+        conn.write(JSON.stringify({ t: "ask", id, tool: "Bash", input: { command, ...extra } }) + "\n");
         return answered;
       };
       type Msg = { kind: string; tool?: { name: string }; card?: { title: string; subtitle: string; requestId?: string; held?: string; heldCode?: string; allowKey?: string; allowSession?: boolean; answered?: string } };
@@ -8511,6 +8520,17 @@ describe("harness HTTP API", () => {
       const plain = await second;
       expect(plain).toMatchObject({ behavior: "allow" });
       expect(plain).not.toHaveProperty("always");
+
+      // A card that offers no session allow keeps none, whatever the answer
+      // claims: widening the sandbox is allowed once at most.
+      const widen = raise("ask-widen", "ls /", { dangerouslyDisableSandbox: true });
+      await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "ls /")?.card?.title).toBe("Approval needed");
+      const widenCard = (await messages()).find((m) => m.card?.subtitle === "ls /")!.card!;
+      expect(widenCard.allowSession).toBeUndefined();
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: widenCard.requestId, behavior: "allow", always: true })).status).toBe(200);
+      const once = await widen;
+      expect(once).toMatchObject({ behavior: "allow" });
+      expect(once).not.toHaveProperty("always");
     } finally {
       for (const conn of conns) conn.destroy();
       await api("POST", `/api/bots/${bot.id}/interrupt`);

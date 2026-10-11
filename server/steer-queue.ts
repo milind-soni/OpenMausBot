@@ -20,6 +20,7 @@
 import { newId } from "./contracts.ts";
 import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
 import { drainCoalesceHead } from "./admission.ts";
+import { workOriginSchema, type WorkOrigin } from "./peer-provenance.ts";
 import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { BotRecord, Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
@@ -50,6 +51,9 @@ interface QueueEntry {
      * a queue is a delay, not a person sitting down at the keyboard. */
     unattended?: boolean;
     peerAsk?: Message["peerAsk"];
+    /** Where the work of a thread a bot opened on itself started: the turn
+     * these words start hands work on as the opener's turn would have. */
+    origin?: WorkOrigin;
     /** The person who sent the words: a queue is a delay, not a change of
      * author, so the drained line names them like an immediate send would. */
     sender?: ResolvedSender;
@@ -66,7 +70,7 @@ interface QueueEntry {
 }
 
 /** The first waiting line of a drained batch: the one that starts the turn. */
-export type SteerQueueHead = Pick<QueueEntry["items"][number], "trigger" | "sender" | "peerAsk">;
+export type SteerQueueHead = Pick<QueueEntry["items"][number], "trigger" | "sender" | "peerAsk" | "origin">;
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
 
@@ -84,10 +88,12 @@ export function restoreSteeredMessages(): void {
     const entry = queues.get(row.threadId) ?? { botId: row.ownerId, items: [] };
     if (entry.botId !== row.ownerId) throw new Error("queued task belongs to another bot");
     // a 1:1 line is only ever stamped "call"; "api" belongs to channel rows
-    const { via, ...payload } = row.payload;
+    const { via, origin: storedOrigin, ...payload } = row.payload;
+    const origin = workOriginSchema.safeParse(storedOrigin);
     entry.items.push({
       ...payload,
       ...(via === "call" ? { via } : {}),
+      ...(origin.success ? { origin: origin.data } : {}),
       messageId: row.id,
       prompt: row.payload.prompt ?? row.payload.text,
       // rows queued before timestamps were kept read as queued at restore
@@ -130,7 +136,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; sender?: ResolvedSender; trigger?: UsageTrigger; via?: "call" } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; via?: "call" } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -147,6 +153,7 @@ export function queueSteeredMessage(
     reason: options.reason,
     unattended: options.unattended,
     peerAsk: options.peerAsk,
+    ...(options.origin ? { origin: options.origin } : {}),
     sender: options.sender,
     trigger: options.trigger,
     queuedAt: Date.now(),
@@ -270,7 +277,7 @@ export function drainSteeredMessages(
       // person's words in the same group cannot re-attend a bot's own
       group.some((item) => item.unattended === true),
       // the first waiting line is the one that starts this turn
-      { trigger: group[0].trigger, sender: group[0].sender, peerAsk: group[0].peerAsk },
+      { trigger: group[0].trigger, sender: group[0].sender, peerAsk: group[0].peerAsk, origin: group[0].origin },
     );
     void Promise.resolve(running).then(
       () => settleChatFollowups(ids, null),
@@ -282,10 +289,11 @@ export function drainSteeredMessages(
 /** A queued item's coalescing identity: WHO sent it, with provenance as
  * part of the identity. A person's texts merge only with that same
  * person's; a bot's own queued work (peerAsk/unattended) never merges with
- * anyone's person texts, and unattributed local sends (the loopback owner)
- * are one identity — the transcript already names them all the same. */
+ * anyone's person texts, nor with its own work from another request, and
+ * unattributed local sends (the loopback owner) are one identity — the
+ * transcript already names them all the same. */
 function coalesceIdentity(item: QueueEntry["items"][number]): string {
-  if (item.peerAsk) return `peer:${item.peerAsk.botId}:${item.unattended === true ? "unattended" : "attended"}`;
+  if (item.peerAsk) return `peer:${item.peerAsk.botId}:${item.unattended === true ? "unattended" : "attended"}:${JSON.stringify(item.origin ?? null)}`;
   if (item.unattended === true) return "unattended";
   if (item.sender) return `person:${item.sender.id ?? item.sender.name}`;
   return "person:local";

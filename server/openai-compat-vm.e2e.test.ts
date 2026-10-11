@@ -205,15 +205,10 @@ describe("openai-compat Local VM tools", () => {
     await api("PATCH", `/api/bots/${bot.id}/model`, { instanceId: "openaiCompat", model: "fixture-model" });
     pendingSelect = { surface: "vm" };
     await api("POST", `/api/bots/${bot.id}/messages`, { text: "Open a browser on my Local VM." });
-    // Turn 1: the model picks the Local VM through select_computer. Under the
-    // default Ask approval that call waits on the person's card; allow it, the
-    // turn ends after the tool result, and the continuation reconnects on the VM.
-    const card = await until(async (): Promise<{ requestId: string } | null> => {
-      const state = await api("GET", "/api/bots");
-      const current = state.bots.find((item: any) => item.id === bot.id);
-      return current?.messages?.find((message: any) => message.card?.requestId && !message.card.answered)?.card ?? null;
-    }, Boolean);
-    await api("POST", `/api/bots/${bot.id}/respond`, { threadId: bot.threadId, requestId: card!.requestId, behavior: "allow" });
+    // Turn 1: the model picks the Local VM through select_computer. Even
+    // under the default Ask approval the harness's own agents tools ask
+    // nothing, as on Claude and Codex: the turn ends after the tool result,
+    // and the continuation reconnects on the VM.
     try {
       await until(() => requests.length, count => count >= 3);
     } catch (error) {
@@ -229,6 +224,8 @@ describe("openai-compat Local VM tools", () => {
     const continuation = requests[2];
     expect(toolNames(continuation), JSON.stringify({ tools: toolNames(continuation), requests: requests.length })).toContain("computer_screenshot");
     expect(toolNames(continuation)).toContain("agents_select_computer");
+    const shown = (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id).messages;
+    expect(shown.filter((message: any) => message.card)).toEqual([]);
   }, 60_000);
 
   it("mounts the Local VM for a claudeAgent control on the same surface", async () => {

@@ -10,6 +10,8 @@
 //
 // The policy here is pure so it can be read and tested on its own; the
 // harness (server/index.ts) supplies the store and starts the turns.
+import type { WireMessage as Message } from "../shared/wire.ts";
+import { withoutDeliveredNote } from "./peer-provenance.ts";
 import { canAccessTeam } from "./peer-roster.ts";
 
 export type IncidentKind = "failed" | "stalled" | "could-not-start" | "routine-failed";
@@ -120,6 +122,20 @@ function whatHappened(incident: Incident): string {
     default:
       return `${incident.bot.name}'s run ${where} failed${detail}`;
   }
+}
+
+/** The last thing asked in a thread: the person's line, or a requester's
+ * words without the note the harness delivered them under (which says who
+ * sent them and why, and would fill the quote). A line that is only a note
+ * (a retry) asks nothing new, so the line above it is the request. */
+export function incidentRequest(messages: readonly Pick<Message, "role" | "kind" | "text" | "peerAsk">[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    if (message.role !== "user" || message.kind !== "text" || !message.text) continue;
+    const asked = message.peerAsk ? withoutDeliveredNote(message.text) : message.text;
+    if (asked) return asked;
+  }
+  return null;
 }
 
 /** The one-line chip left in the incidents thread, before the Chief's turn. */

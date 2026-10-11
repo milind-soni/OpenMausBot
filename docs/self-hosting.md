@@ -1011,8 +1011,11 @@ docker compose -f deploy/docker-compose.yml pull omb && docker compose -f deploy
 git pull && pnpm install && sudo systemctl restart openmausbot          # from source
 ```
 
-Routines and queued work survive restarts; in-flight turns do not, so
-update between runs.
+Routines and queued work survive restarts. A teammate turn in flight runs
+again once at the next start, told to check what it already did, and the bot
+that asked for it is told. A person's own turn and a running routine are not
+run again: the conversation says it was interrupted. Update between runs
+where you can.
 
 Stop the server before a filesystem backup so SQLite is copied consistently.
 Back up the entire app data directory and, separately, the service user's

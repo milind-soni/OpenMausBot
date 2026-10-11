@@ -53,7 +53,8 @@ it("keeps a client abort a quiet stop and retries the room request it stopped", 
         res.end(`data: ${JSON.stringify({ error: { message: CANCELLED } })}\n\n`);
         return;
       }
-      // A harmless read. The card is allowed below and the turn goes on.
+      // A harmless read of the harness's own team list: like every agents
+      // tool it asks nothing, and the turn goes on.
       res.end(frame({ content: PARTIAL, tool_calls: [{ index: 0, id: "look-1", type: "function", function: { name: "agents_list_bots", arguments: "{}" } }] }, "tool_calls") + "data: [DONE]\n\n");
       return;
     }
@@ -87,9 +88,6 @@ it("keeps a client abort a quiet stop and retries the room request it stopped", 
     await control(["set-model", "--bot", bot.id, "--instance", "openaiCompat", "--model", "fixture-model"]);
     await api("PATCH", `/api/bots/${bot.id}`, { notifications: true });
     expect((await control(["send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Use the tool, then stop."])).success).toBe(true);
-    expect((await control(["wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30"])).status).toBe("needs-user");
-    const card = (await messages(bot.activeTaskId)).find((message) => message.card?.requestId && !message.card.answered)?.card;
-    await api("POST", `/api/bots/${bot.id}/respond`, { threadId: bot.activeTaskId, requestId: card.requestId, behavior: "allow" });
     await control(["wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30"]);
     const digest = await vi.waitFor(async () => {
       const found = (await messages(bot.activeTaskId)).find((message) => message.kind === "digest");
@@ -102,10 +100,11 @@ it("keeps a client abort a quiet stop and retries the room request it stopped", 
     // The text before the stop stays in the transcript, but it is not the
     // turn's reply: neither the digest nor the finished notification reads it.
     expect(direct.some((message) => message.kind === "text" && message.text === PARTIAL)).toBe(true);
+    expect(direct.some((message) => message.card)).toBe(false);
     expect(JSON.stringify(digest.digest)).not.toContain(PARTIAL);
     // "finished" with nothing said stays quiet (server/notify.ts).
     const notices = stream.frames.filter((candidate) => candidate.kind === "notify" && candidate.notification?.botId === bot.id);
-    expect(notices.map((candidate) => candidate.notification.kind)).toEqual(["approval"]);
+    expect(notices.map((candidate) => candidate.notification.kind)).toEqual([]);
     // The provider settled the turn as an error, but it was a stop: no
     // incident buzzes the person or lands in a Chief's incidents thread.
     const bots = (await api("GET", "/api/bots")).bots as any[];

@@ -229,9 +229,9 @@ describe("routine delegation through the isolated harness", () => {
     await delegate(run.threadId);
     const pendingFile = join(fixture.info.dataDir, "delegations.json");
     expect(JSON.parse(readFileSync(pendingFile, "utf8"))[run.threadId]).toHaveLength(1);
-    // Clearing the fixture's empty connected-app key rebuilds only its fake
-    // provider fleet; it makes no credential probe or external request.
-    await api("PUT", "/api/config", { composio: { apiKey: "" } });
+    // A workspace Anthropic key reaches the fixture's Claude engine, so the
+    // save rebuilds it; it makes no credential probe or external request.
+    await api("PUT", "/api/config", { anthropic: { key: "fixture-anthropic-key" } });
     await expect.poll(async () => (await runState(run.id))?.status).toBe("failed");
     const health = (await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === run.routineId);
     expect(health.failureStreak).toBe(1);

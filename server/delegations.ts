@@ -20,6 +20,7 @@ import { DATA_DIR } from "./config.ts";
 import { failedTurnTool } from "../shared/failed-turn.ts";
 import { newId } from "./contracts.ts";
 import { peerApprovalFailure, requestPeerApproval, type ApprovalBus, type PeerApprovalFailure } from "./peer-approval.ts";
+import { OUTSIDE, workOriginSchema, type WorkOrigin } from "./peer-provenance.ts";
 import { canAccessTeam, peerAllowed } from "./peer-roster.ts";
 import { type BotRecord, type GroupRecord, type Message, type Store } from "./store.ts";
 
@@ -51,7 +52,27 @@ export interface DelegationItem {
    * check/wait_delegation: the receipt is its answer, so completion never
    * wakes the source bot's own engine. Set from the caller's credential. */
   completionOwner?: "external";
+  /** Where the sender's work started, from the harness's records at queue
+   * time. Absent (older queues) is outside. */
+  origin?: WorkOrigin;
 }
+
+/** Starts a drained handoff's turn on its target. `message` is the sender's
+ * words exactly as queued; the harness puts the note that says who sent
+ * them, and where their work started, in front (peer-provenance.ts). */
+export type DelegationRunner = (
+  toBotId: string,
+  message: string,
+  commsDepth: number,
+  sourceThreadId: string,
+  channel: GroupRecord | undefined,
+  taskId: string,
+  sourceBotId: string,
+  targetThreadId: string | undefined,
+  oneWay: boolean,
+  completionOwner: "external" | undefined,
+  origin: WorkOrigin,
+) => void | Promise<void>;
 
 interface PendingDelegationItem extends DelegationItem {
   /** Stable acknowledgement key for crash-safe removal from the queue —
@@ -285,6 +306,8 @@ export function _loadPending(): void {
         }
         if (item.oneWay === true) loaded.oneWay = true;
         if (item.completionOwner === "external") loaded.completionOwner = "external";
+        const origin = workOriginSchema.safeParse(item.origin);
+        if (origin.success) loaded.origin = origin.data;
         return [loaded];
       });
       if (items.length) pendingDelegations.set(threadId, items);
@@ -424,18 +447,7 @@ export function drainDelegations(
   bus: CommsBus,
   approvalBus: ApprovalBus,
   threadId: string,
-  runTarget: (
-    toBotId: string,
-    message: string,
-    commsDepth: number,
-    sourceThreadId: string,
-    channel: GroupRecord | undefined,
-    taskId: string,
-    sourceBotId: string,
-    targetThreadId: string | undefined,
-    oneWay: boolean,
-    completionOwner?: "external",
-  ) => void | Promise<void>,
+  runTarget: DelegationRunner,
   /** Terminal failures before dispatch also need to wake the source. A
    * launched peer reports through its provider-turn finalizer instead. */
   onSettled?: (receipt: DelegationReceipt) => void,
@@ -696,18 +708,7 @@ async function processOne(
   from: BotRecord,
   sourceThreadId: string,
   item: PendingDelegationItem,
-  runTarget: (
-    toBotId: string,
-    message: string,
-    commsDepth: number,
-    sourceThreadId: string,
-    channel: GroupRecord | undefined,
-    taskId: string,
-    sourceBotId: string,
-    targetThreadId: string | undefined,
-    oneWay: boolean,
-    completionOwner?: "external",
-  ) => void | Promise<void>,
+  runTarget: DelegationRunner,
 ): Promise<"settled" | "requeued" | "dispatched"> {
   let sender = from;
   let target = bus.store.bot(item.toBotId);
@@ -842,14 +843,11 @@ async function processOne(
     (sourceThreadId ? bus.store.groupByThread(sourceThreadId) : undefined);
   const channel = item.oneWay ? undefined : getOrCreateChannel(bus.store, sender, target, originatingGroup);
   if (channel) mirrorExchange(bus, sender, target, item.message, channel, sourceThreadId);
-  const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";
-  // A fresh thread's first line gets the shared peer-provenance note from
-  // the harness (which knows whether the opener was unattended); the
-  // classic handoff keeps the prefix it has always had.
-  const prefixed = item.targetThreadId
-    ? item.message
-    : `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
-  await runTarget(item.toBotId, prefixed, item.oneWay ? 0 : item.depth + 1, sourceThreadId, channel, item.id, sender.id, item.targetThreadId, item.oneWay === true, item.completionOwner);
+  // Every shape gets its note from the harness at dispatch (runTarget),
+  // which knows whether the sender was unattended; a classic handoff also
+  // carries the reason the sender gave.
+  const message = item.targetThreadId || !item.reason ? item.message : `${item.message}\n\n[Reason: ${item.reason}]`;
+  await runTarget(item.toBotId, message, item.oneWay ? 0 : item.depth + 1, sourceThreadId, channel, item.id, sender.id, item.targetThreadId, item.oneWay === true, item.completionOwner, item.origin ?? OUTSIDE);
   return "dispatched";
 }
 

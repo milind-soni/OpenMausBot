@@ -100,6 +100,9 @@
 //                      announced the continuation yet.
 //   FAKE_CLAUDE_LATE_STEER_SILENT 1: the late turn prints `init` and then
 //                      nothing at all — a continuation that never speaks.
+//   FAKE_CLAUDE_SLOW_FINISH_GATE path: `slow` replies once this file exists;
+//                      a body of exactly "fail" then ends the turn as an
+//                      engine error (is_error) instead of a success.
 //   FAKE_CLAUDE_SLOW_TAIL_TOOL 1: `slow` makes one more tool call right
 //                      before its reply — a fold seam the harness sees after
 //                      a steer that was already too late to be folded.
@@ -831,6 +834,14 @@ const playTurn = (prompt: JsonValue, late = false) => {
       const tail = steered.length ? ` + steered: ${steered.join(" | ")}` : "";
       replaySteered();
       out({ type: "assistant", message: { content: [{ type: "text", text: `reply to: ${promptText(prompt)}${tail}` }] } });
+      // a finish gate that reads "fail" ends the turn as an engine error
+      const gate = process.env.FAKE_CLAUDE_SLOW_FINISH_GATE;
+      if (!lateContinuation && gate && readFileSync(gate, "utf8").trim() === "fail") {
+        out({ type: "result", is_error: true, stop_reason: "error", result: "fixture turn failed" });
+        turnRunning = false;
+        finishIfDone();
+        return;
+      }
       finish();
     };
     // a late steer's turn holds on its own gate, so a test can look at the
