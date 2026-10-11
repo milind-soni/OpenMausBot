@@ -41,6 +41,22 @@ describe("IncidentLedger", () => {
     ledger.forget("t2");
     expect(ledger.note("t2").count).toBe(1);
   });
+
+  it("remembers when a thread was last reported, so a late retry can see the thread moved on", () => {
+    let now = 5_000;
+    const ledger = new IncidentLedger({ now: () => now });
+    expect(ledger.lastAt("t1")).toBeUndefined();
+    ledger.note("t1");
+    now = 9_000;
+    ledger.note("t1");
+    ledger.note("t2");
+    expect(ledger.lastAt("t1")).toBe(9_000);
+    // the hour window bounds the count, not this answer
+    now += 2 * 60 * 60_000;
+    expect(ledger.lastAt("t1")).toBe(9_000);
+    ledger.forget("t1");
+    expect(ledger.lastAt("t1")).toBeUndefined();
+  });
 });
 
 describe("incident wording", () => {

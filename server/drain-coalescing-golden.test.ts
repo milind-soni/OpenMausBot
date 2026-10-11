@@ -1,7 +1,8 @@
 // Golden freeze of M2's drain-coalescing rule (the L2 ordering/batching
 // layer in admission.ts): a sender's CONTIGUOUS burst inside a short window
 // is one drained item; senders never merge; provenance kind is part of the
-// sender identity; rooms drain one coalesced item per turn. A failing row
+// sender identity (Team incidents reports are all OpenMausBot's, whichever
+// bot broke); rooms drain one coalesced item per turn. A failing row
 // means the drain batching changed; pair any intentional change with an
 // update here so the diff says so out loud.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -161,6 +162,25 @@ describe("drain coalescing golden (M2)", () => {
     expect(run.mock.calls[1][2]).toBe("the planner's own job");
     expect(run.mock.calls[1][5]).toBe(true); // unattended provenance rides its own turn
     expect(run.mock.calls[1][6].peerAsk).toEqual(peerAsk);
+    expect(_queuedCount(bot.threadId)).toBe(0);
+  });
+
+  it("1:1 Team incidents reports merge whichever bot they are about, never with a bot's own job or a person's words", () => {
+    const bot = fakeBot("gd-incidents", "gd-thread-incidents", false);
+    const store = fakeStore([bot]);
+    const report = (botId: string) => ({ botId, name: botId, unattended: true, incident: { threadId: `${botId}-thread` } });
+    queueSteeredMessage(bot.id, bot.threadId, "ada's report", { peerAsk: report("gd-ada"), unattended: true });
+    vi.advanceTimersByTime(30_000);
+    queueSteeredMessage(bot.id, bot.threadId, "ben's report", { peerAsk: report("gd-ben"), unattended: true });
+    queueSteeredMessage(bot.id, bot.threadId, "ada's own job", { peerAsk: { botId: "gd-ada", name: "gd-ada" }, unattended: true });
+    queueSteeredMessage(bot.id, bot.threadId, "a person's words");
+    const run = vi.fn();
+
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls.map((call) => call[2])).toEqual(["ada's report\n\nben's report", "ada's own job", "a person's words"]);
+    expect(run.mock.calls[0][6].peerAsk).toEqual(report("gd-ada"));
     expect(_queuedCount(bot.threadId)).toBe(0);
   });
 

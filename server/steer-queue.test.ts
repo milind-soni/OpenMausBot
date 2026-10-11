@@ -137,6 +137,30 @@ describe("steer-queue module", () => {
     expect(run.mock.calls[0][3].peerAsk).toEqual(peerAsk);
   });
 
+  it("answers Team incidents reports that waited as one turn, whichever bot broke, through a restart", () => {
+    const chief = fakeBot("bot-incidents-chief", "thread-incidents-reports", true);
+    const store = fakeStore([chief]);
+    const run = vi.fn();
+    const ada = { botId: "bot-ada", name: "Ada", unattended: true, incident: { threadId: "thread-ada" } };
+    const ben = { botId: "bot-ben", name: "Ben", unattended: true, incident: { threadId: "thread-ben", notified: true } };
+    queueSteeredMessage(chief.id, chief.threadId, "Ada's report", { unattended: true, peerAsk: ada });
+    queueSteeredMessage(chief.id, chief.threadId, "Ben's report", { unattended: true, peerAsk: ben });
+    // the person's own words never ride along with reports
+    queueSteeredMessage(chief.id, chief.threadId, "what happened?");
+    restoreSteeredMessages(); // a restart reads every report back, provenance and all
+    const heads: unknown[] = [];
+    chief.busy = false;
+    drainSteeredMessages(store, run, (_botId, _threadId, head) => { heads.push(head.peerAsk); return false; });
+    expect(heads).toEqual([ada]);
+    expect(store.messages.map((message) => [message.text, message.peerAsk])).toEqual([["Ada's report", ada], ["Ben's report", ben]]);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run.mock.calls[0][2]).toBe("Ada's report\n\nBen's report");
+    expect(run.mock.calls[0][5]).toBe(true);
+    drainSteeredMessages(store, run);
+    expect(store.messages.at(-1)).toMatchObject({ text: "what happened?" });
+    expect(store.messages.at(-1)?.peerAsk).toBeUndefined();
+  });
+
   it("keeps who sent each queued message, so a steer of the held queue can still name them", () => {
     const botId = "bot-sender-held";
     const threadId = "thread-sender-held";
@@ -347,7 +371,7 @@ describe("steer-queue module", () => {
     const blocked = vi.fn(() => true);
     queueSteeredMessage(bot.id, bot.threadId, "after handshake");
     drainSteeredMessages(store, run, blocked);
-    expect(blocked).toHaveBeenCalledWith(bot.id, bot.threadId);
+    expect(blocked).toHaveBeenCalledWith(bot.id, bot.threadId, expect.anything());
     expect(run).not.toHaveBeenCalled();
     expect(store.messages).toHaveLength(0);
     expect(_queuedCount(bot.threadId)).toBe(1);

@@ -207,11 +207,12 @@ export function admit(
     }
     case "incident": {
       // The Chief's one incidents thread is reused, so the previous report
-      // can still be running there. A report waits behind exactly what the
-      // drain waits on — that thread, a slot, a room turn, #1194 parking —
-      // and is never refused: a refused report was a lost one. It never
-      // steers either; each report (or one bot's burst) is a turn of its own.
-      if (state.atCapacity || state.threadBusy || state.groupTurn || state.parksBehindCoordination) {
+      // can still be running there. A report waits for that thread, a slot
+      // or a room turn and is never refused: a refused report was a lost
+      // one. It never parks behind work the Chief handed on (#1194 is about
+      // one conversation's follow-ups; reports are independent) and never
+      // steers: reports that waited together are one turn of their own.
+      if (state.atCapacity || state.threadBusy || state.groupTurn) {
         return { action: "queue", reason: state.atCapacity ? "capacity" : state.groupTurn ? "group-turn" : undefined };
       }
       return { action: "start" };

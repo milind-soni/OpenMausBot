@@ -57,8 +57,14 @@ const NO_BROWSER_NOTE =
 const OFF_NOTE =
   " This bot's \"Works on\" setting is Off, so no computer and no built-in browser are mounted this turn: you cannot open a page, click, or type on any screen. If the user asks for something that needs one, tell them Works on is Off in this bot's settings — never claim you are opening a browser you do not have.";
 
-const INCIDENT_NOTE =
-  " This turn answers a Team incidents report, so no computer and no built-in browser are mounted: you cannot open, click or check any screen through OpenMausBot. Act through your teammates, or tell the person what only they can fix — never claim to have checked a screen yourself.";
+/** The note for a Team incidents turn whose computer could not be had (the
+ * dispatch's skipComputer): it runs without it rather than refusing the
+ * report, and the model is told why, so it neither pretends to look at a
+ * screen nor loses the cause the person may need to hear. */
+export function computerSkippedNote(cause: string): string {
+  const why = cause.trim().replace(/[\s.]+$/, "");
+  return ` This turn answers a Team incidents report and your computer could not be prepared for it (${why}), so no computer is mounted: you cannot open, click or check anything on it this turn. Act through your teammates, or tell the person what only they can fix — never claim to have checked that computer yourself.`;
+}
 
 /** Decide what a turn mounts. One place per turn: a computer destination
  * mounts only that computer (web work happens in its own browser), a browser
@@ -78,16 +84,8 @@ export function resolveSurface(input: {
   pinnedSurface?: Surface | null;
   /** The built-in browser may mount: workspace flag, bot switch and engine. */
   browserOn: boolean;
-  /** The turn answers a Team incidents report (server/incidents.ts). */
-  incident?: boolean;
 }): SurfacePlan {
   const { destination, browserOn } = input;
-  // An incident report asks the Chief to coordinate — retry a thread, hand
-  // the work on, or tell the person — never to work a screen. Its turn
-  // mounts nothing, whatever the bot works on or the thread is pinned to, so
-  // a computer that is missing, unpaid, asleep or busy can neither refuse
-  // the report nor hold it behind another turn's seat.
-  if (input.incident) return { computer: "off", browser: false, pinned: null, note: INCIDENT_NOTE };
   // Off is the whole answer: no computer and no browser. It used to withhold
   // only the computer, which left a bot set to Off holding the built-in
   // browser — the one surface the setting most obviously reads as forbidding,

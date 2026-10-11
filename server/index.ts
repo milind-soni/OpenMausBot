@@ -552,7 +552,7 @@ import { autoLocalVmAttachable, type ContainerComputerStatus } from "./container
 import { lazyClaimWaitMs, startAutoVmClaim, type AutoVmClaimSlot, type AutoVmClaimTable } from "./auto-vm-claims.ts";
 import { computerFreeAfterText, computerParkedText, computerStoppedWaitingText, computerWaitingText, type ComputerHolder } from "./computer-wait.ts";
 import { modelContextWindow } from "./model-context-window.ts";
-import { cloudPlaceRefusal, computerToolsRefusal, parseSurface, PlaceUnavailableError, placeUnavailable, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt, type PlaceSource, type Surface } from "./surface.ts";
+import { cloudPlaceRefusal, computerSkippedNote, computerToolsRefusal, parseSurface, PlaceUnavailableError, placeUnavailable, resolveSurface, surfaceLabel, surfaceOfComputerKind, surfacePrompt, type ComputerWant, type PlaceSource, type Surface } from "./surface.ts";
 import { cloudRefusal, type PlaceRow } from "../shared/place-view.ts";
 import {
   PendingTurnCancellations,
@@ -2725,6 +2725,16 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
   }
   // A freed seat is the parked-resume drain's trigger (#1651). Deferred past
   // this synchronous settle so the drain reads post-cleanup state.
+  if (pendingComputerResumes.size > 0) queueMicrotask(drainComputerResumes);
+}
+
+/** Let go of the seats a turn's computer setup took when the turn goes on
+ * without that computer (startTurn's skipComputer); settle releases the
+ * rest, and the turn keeps its owner record. */
+function releaseTurnComputer(owner: TurnOwner): void {
+  turnResources.release(owner);
+  if (turnComputerResources.get(owner.threadId)?.owner.generation === owner.generation) turnComputerResources.delete(owner.threadId);
+  if (teamComputerTurns.get(owner.threadId)?.owner.generation === owner.generation) teamComputerTurns.delete(owner.threadId);
   if (pendingComputerResumes.size > 0) queueMicrotask(drainComputerResumes);
 }
 
@@ -5180,7 +5190,10 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
         role: "bot", kind: "activity",
         tool: { name: `Resumed with ${who} results, reviewing`, ok: true },
       });
-      notify(buildNotification("delegation-settled", bot, node.threadId, `Results in from ${who}`, { avatarUrl: bot.avatarUrl }));
+      // a quiet report's review stays quiet (turnAnswers)
+      if (!turnAnswers(node.threadId, { cardContinuation: true, coordination: node }).quiet) {
+        notify(buildNotification("delegation-settled", bot, node.threadId, `Results in from ${who}`, { avatarUrl: bot.avatarUrl }));
+      }
     }
     if (sender && parent && isUnattended(sender.id, parent.threadId)) markUnattended(bot.id, node.threadId);
     if (!group) return new Promise<{ ok: boolean; text: string }>(resolve => {
@@ -6248,9 +6261,19 @@ const providerLabel = (provider: string): string => {
   return bare.charAt(0).toUpperCase() + bare.slice(1);
 };
 
+// Threads whose latest turn is quiet (turnAnswers): it answers only Team
+// incidents reports that waited, about failures the person already heard
+// of. Rewritten by every dispatch, like the internal flag (markInternalTurn),
+// so a quiet turn never silences the next one. Such a turn says none of its
+// own news on its thread; whatever needs the person — an approval, a
+// question, their hands — still reaches them.
+const quietTurnThreads = new Set<string>();
+const QUIET_TURN_NEWS: ReadonlySet<Notification["kind"]> = new Set(["done", "turn-failed", "incident"]);
+
 /** Put a notification on the wire. Clients decide what to do with it — a
  * desktop notification now, a push to a paired phone later. */
 function notify(notification: Notification | null) {
+  if (notification && QUIET_TURN_NEWS.has(notification.kind) && quietTurnThreads.has(notification.threadId)) return;
   // nested rather than spread — the frame's own `kind` names the frame,
   // exactly like {kind:"message", message} and {kind:"bot", bot}
   if (notification) broadcast({ kind: "notify", notification });
@@ -7342,14 +7365,13 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
   return null;
 }
 
-function turnSurfacePlan(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string, incident = false) {
+function turnSurfacePlan(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string) {
   const instance = registry.get(bot.modelSelection.instanceId);
   const forcedBoat = runOn === "cloud" || Boolean(inheritedTeamComputer(bot));
   return resolveSurface({
     destination: forcedBoat ? "cloud" : bot.computer,
     pinnedSurface: forcedBoat || !threadId ? null : store.taskByThread(bot.id, threadId)?.surface,
     browserOn: builtInBrowserEnabled(cfg) && bot.browser !== false && instance?.adapter.capabilities.browserMcp === true,
-    incident,
   });
 }
 
@@ -8631,6 +8653,66 @@ function incidentContext(threadId: string): { lastRequest: string | null; lastRe
   };
 }
 
+/** What a turn answers, read from the lines it answers: the ones it delivers
+ * (sent now, drained from the queue together, retried on a backup engine)
+ * or, for a continuation, its request — for a teammate's results, the lines
+ * the thread held when that work was handed on, so a person's later line
+ * never passes for them. A Team incidents report among them makes the
+ * bot's computer optional (startTurn's skipComputer). A turn answering only
+ * reports that waited in the queue, about failures that already buzzed the
+ * person, is quiet: a report that found the Chief busy used to be dropped
+ * without a push, so handling it now adds none ("finished", "couldn't
+ * start", "resumed with results"). */
+function turnAnswers(threadId: string, opts?: {
+  cardContinuation?: boolean; requestMessageId?: string; coordination?: { id: string };
+  userMessage?: Message; excludeMessageIds?: string[]; peerAsk?: Message["peerAsk"];
+}): { incident: boolean; quiet: boolean } {
+  const path = store.activePath(threadId);
+  let lines: Array<Pick<Message, "peerAsk" | "queueId">>;
+  if (opts?.cardContinuation) {
+    const node = opts.coordination && roomHandoffs.nodes.get(opts.coordination.id);
+    const root = node && roomHandoffs.nodes.get(node.rootId);
+    const end = root?.threadId === threadId ? path.findLastIndex(message => message.role === "user" && message.at <= root.createdAt)
+      : opts.requestMessageId ? path.findIndex(message => message.id === opts.requestMessageId)
+      : path.findLastIndex(message => message.role === "user");
+    // a request drained from the queue is the run of lines it landed as
+    let start = end;
+    while (start > 0 && path[start - 1].role === "user") start -= 1;
+    lines = end < 0 ? [] : path.slice(start, end + 1);
+  } else {
+    const ids = new Set([...(opts?.excludeMessageIds ?? []), ...(opts?.userMessage ? [opts.userMessage.id] : [])]);
+    lines = ids.size ? path.filter(message => ids.has(message.id)) : [{ peerAsk: opts?.peerAsk }];
+  }
+  const reports = lines.filter(line => line.peerAsk?.incident);
+  return {
+    incident: reports.length > 0,
+    quiet: reports.length > 0 && reports.length === lines.length && reports.every(line => line.queueId && line.peerAsk?.incident?.notified),
+  };
+}
+
+/** A report the Chief's turn refused to start (the spend limit, settings
+ * mid-reload, …), sent at once or after its wait in the queue alike: one
+ * chip in the incidents thread, and the person hears of each failure its
+ * own run did not already buzz them about. Refused is never silent. */
+function incidentRefused(chief: BotRecord, incidentsThreadId: string, asks: ReadonlyArray<Message["peerAsk"]>, why: string): void {
+  const refused = `the incident could not reach ${chief.name} — ${why}`;
+  store.appendMessage(incidentsThreadId, { role: "bot", kind: "activity", tool: failedTurnTool(refused) });
+  const lines = store.messagesFor(incidentsThreadId);
+  for (const ask of asks) {
+    if (!ask?.incident || ask.incident.notified) continue;
+    const bot = store.bot(ask.botId);
+    if (!bot) continue;
+    const { threadId } = ask.incident;
+    // the report's own chip, appended when it was raised
+    const chip = lines.findLast(line => line.kind === "activity" && line.tool?.ok === false && line.threadRef?.threadId === threadId)?.tool?.name;
+    const group = store.groupByThread(threadId);
+    notify(buildNotification("incident", bot, threadId, chip ?? refused, {
+      avatarUrl: bot.avatarUrl,
+      ...(group ? { group: { id: group.id, name: group.name } } : {}),
+    }));
+  }
+}
+
 function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string }): void {
   const { bot, threadId } = input;
   const task = store.taskByThread(bot.id, threadId);
@@ -8682,29 +8764,23 @@ function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: s
   const text = incidentText(incident, count);
   // the report carries the broken bot's name as its provenance: it is about
   // that bot's work and nobody was at the keyboard; `incident` marks it as
-  // the harness's report, whose turn needs no computer (resolveSurface)
-  const peerAsk = { botId: bot.id, name: bot.name, unattended: true, incident: true };
+  // the harness's report about that thread (turnAnswers, incidentRefused)
+  const peerAsk = { botId: bot.id, name: bot.name, unattended: true,
+    incident: { threadId, ...(alreadyNotified ? { notified: true } : {}) } };
   // The incidents thread is reused, so the previous report may still be
   // running there: this one waits in that thread's queue and drains when
-  // the Chief is free — a burst from one bot as one turn — never refused.
+  // the Chief is free — with any others that waited — never refused.
   const decision = admit("incident", {}, {
     threadBusy: threadBusy(chief.id, incidents.threadId),
     atCapacity: botAtThreadCapacity(chief.id),
     groupTurn: Boolean(activeGroupTurnForBot(chief.id)),
-    parksBehindCoordination: parksBehindCoordination(chief.id, incidents.threadId),
   });
   if (decision.action === "queue") {
     queueSteeredMessage(chief.id, incidents.threadId, text, { reason: decision.reason, unattended: true, peerAsk });
     return;
   }
   void startTurn(chief.id, text, { threadId: incidents.threadId, unattended: true, peerAsk }).catch((error) => {
-    const why = error instanceof Error ? error.message : String(error);
-    store.appendMessage(incidents.threadId, {
-      role: "bot",
-      kind: "activity",
-      tool: failedTurnTool(`the incident could not reach ${chief.name} — ${why}`),
-    });
-    tellThePerson();
+    incidentRefused(chief, incidents.threadId, [peerAsk], error instanceof Error ? error.message : String(error));
   });
 }
 
@@ -9208,9 +9284,14 @@ function drainQueuedSends() {
         threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve,
         trigger: queuedTurnTrigger(head),
       }).catch((err) => {
-        store.appendMessage(threadId, {
+        const why = err instanceof Error ? err.message : String(err);
+        const chief = head.peerAsk?.incident ? store.bot(botId) : null;
+        // Reports that waited are refused like one sent at once: the
+        // person still hears of a failure nobody buzzed them about.
+        if (chief) incidentRefused(chief, threadId, store.activePath(threadId).filter(line => excludeIds.includes(line.id)).map(line => line.peerAsk), why);
+        else store.appendMessage(threadId, {
           role: "bot", kind: "activity",
-          tool: failedTurnTool(`queued message could not start — ${err instanceof Error ? err.message : String(err)}`),
+          tool: failedTurnTool(`queued message could not start — ${why}`),
         });
         resolve();
         // M2: only this group left the queue, and a turn that never
@@ -9220,8 +9301,10 @@ function drainQueuedSends() {
     }),
     // Provider completion can precede its dispatch promise: keep the queue
     // intact until that exact handshake releases its runtime-only claim.
-    (botId, threadId) => threadBusy(botId, threadId) || botAtThreadCapacity(botId) || Boolean(activeGroupTurnForBot(botId))
-      || parksBehindCoordination(botId, threadId),
+    // Team incidents reports never park behind handed-on work (admission's
+    // "incident" surface says why).
+    (botId, threadId, head) => threadBusy(botId, threadId) || botAtThreadCapacity(botId) || Boolean(activeGroupTurnForBot(botId))
+      || (!head.peerAsk?.incident && parksBehindCoordination(botId, threadId)),
   );
   // Asides always drain after person follow-ups (see drainAsideLane): the
   // steer drain above can make a thread busy again, deferring its asides
@@ -9900,14 +9983,24 @@ async function startTurn(
   if (bot.approvalGrant) {
     throw Object.assign(new Error("this bot's approval level is still being confirmed — try again"), { status: 409 });
   }
+  // A turn answering a Team incidents report needs no computer: one it
+  // cannot have right now — mid-change here, unpaid or missing at dispatch —
+  // leaves it without one (computerSkipped, and the prompt says why) where
+  // any other turn is refused. Deciding what a report needs never waits on
+  // a screen; a report refused for it was a report lost.
+  const answer = turnAnswers(threadId, opts);
+  let computerSkipped: string | undefined;
   const transitionError = providerTransitionForTurn(bot, opts?.runOn, threadId);
-  if (transitionError) throw Object.assign(new Error(transitionError), { status: 409 });
+  if (transitionError && !answer.incident) throw Object.assign(new Error(transitionError), { status: 409 });
+  if (transitionError) computerSkipped = transitionError;
   if (providerFleetReloading) throw Object.assign(new Error("provider settings are being updated — try again shortly"), { status: 409 });
   // A workspace at its monthly spend limit starts no turn of any kind: a
   // person's message, a routine, a peer hop or a webhook all stop here.
   assertWithinBudget(cfg, DATA_DIR);
   if (boatLifecycleBusyBots.has(botId)) {
-    throw Object.assign(new Error("this bot's cloud computer is being changed — wait for it to finish"), { status: 409 });
+    const changing = "this bot's cloud computer is being changed — wait for it to finish";
+    if (!answer.incident) throw Object.assign(new Error(changing), { status: 409 });
+    computerSkipped ??= changing;
   }
   if (threadBusy(botId, threadId)) throw Object.assign(new Error("this thread is already working — interrupt it first"), { status: 409, code: "thread_busy" });
   if (activeGroupTurnForBot(botId)) {
@@ -9935,12 +10028,7 @@ async function startTurn(
   const task = store.taskByThread(bot.id, threadId);
   if (!task) throw Object.assign(new Error("no such task"), { status: 404 });
   if (hostedModels && !hostedModels.allows(bot.modelSelection)) throw Object.assign(new Error(hostedModels.error()), { status: 409 });
-  // A turn answering a Team incidents report mounts no computer. The line
-  // it answers is the one it delivers (sent now, drained from the queue,
-  // retried on a backup engine) or, for a continuation (the review of work
-  // handed on from the report), the line that continuation resumes.
-  const answering = opts?.cardContinuation ? store.activePath(threadId).findLast(message => message.role === "user") : opts?.userMessage ?? opts;
-  const plan = turnSurfacePlan(bot, opts?.runOn, threadId, answering?.peerAsk?.incident === true);
+  const plan = turnSurfacePlan(bot, opts?.runOn, threadId);
   const instance = registry.get(bot.modelSelection.instanceId);
   if (!instance) {
     // Still on the removed Computer engine: its move failed or found no
@@ -9976,6 +10064,8 @@ async function startTurn(
   // time it settles, the fold has only a thread id to go on.
   if (commsDepth > 0) markInternalTurn(threadId);
   else clearInternalTurn(threadId);
+  if (answer.quiet) quietTurnThreads.add(threadId);
+  else quietTurnThreads.delete(threadId);
   // a task takes its name from the first thing you asked it to do
   if (resolvedImages.text.trim() && !opts?.cardContinuation) {
     const titled = store.titleTaskFromFirstMessage(bot.id, resolvedImages.text, threadId);
@@ -10393,9 +10483,8 @@ async function startTurn(
       const dwebUrl = process.env.DWEB_URL?.trim();
       if (dwebUrl) integrations.dweb = { url: dwebUrl };
       // Cloud routines always use the bot's Boat. The per-bot backend applies
-      // only to ordinary turns. A turn planned with no computer (an incident
-      // report) inherits no team computer either.
-      const teamComputer = plan.computer === "off" ? undefined : inheritedTeamComputer(bot);
+      // only to ordinary turns.
+      let teamComputer = computerSkipped ? undefined : inheritedTeamComputer(bot);
       const cloudBackend = teamComputer || opts?.runOn === "cloud" || bot.cloudBackend !== "vps" ? "box" : "vps";
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       const mountsLocalComputer = instance.adapter.capabilities.localComputerMcp === true;
@@ -10409,13 +10498,25 @@ async function startTurn(
       // landed. A team computer or a cloud routine is not this conversation's
       // choice, so those ignore the pin.
       const dispatchTask = store.taskByThread(bot.id, threadId);
-      const wants = plan.computer;
+      let wants: ComputerWant = computerSkipped ? "off" : plan.computer;
+      /** A Team incidents turn's computer is optional (turnAnswers): a place
+       * that cannot be prepared leaves it with none — any seat taken on the
+       * way let go — and the prompt names the cause, where any other turn
+       * fails. A stopped setup and a parked seat wait go on as for any turn. */
+      const skipComputer = (error: unknown) => {
+        if (!answer.incident || error instanceof DirectTurnSetupCancelled || error instanceof ComputerWaitParked) throw error;
+        computerSkipped ??= error instanceof Error ? error.message : String(error);
+        wants = "off";
+        teamComputer = undefined;
+        delete integrations.localComputer;
+        releaseTurnComputer(resourceOwner);
+      };
       // A place the organisation disallows, or a Cloud home never offers, is
       // refused before anything is prepared; Auto below simply skips them.
       const wantedKind = teamComputer ? "box" : wants === "local" ? "thisComputer" : wants === "vm" ? "localVm"
         : wants === "cloud" ? (cloudBackend === "vps" ? "vps" : "box") : undefined;
       const placeRefusal = wantedKind && computerPlaceRefusal(wantedKind);
-      if (placeRefusal) throw Object.assign(new Error(placeRefusal.message), { status: 409, code: placeRefusal.code });
+      if (placeRefusal) skipComputer(Object.assign(new Error(placeRefusal.message), { status: 409, code: placeRefusal.code }));
       // Where an explicit place came from, so its failure names the one
       // control that changes it (and a failed Auto-recorded pin is cleared).
       // Auto and a team's shared computer are nobody's per-turn choice.
@@ -10430,7 +10531,7 @@ async function startTurn(
       if (wants === "cloud" && placeSource) {
         const unsupported = cloudPlaceRefusal(cloudEngine(instance, bot.modelSelection.model), placeSource, bot.name)
           ?? computerToolsRefusal(toolScope, placeSource, bot.name);
-        if (unsupported) throw unsupported;
+        if (unsupported) skipComputer(unsupported);
       }
       let previewCapture: (() => Promise<{ png: string; format: string }>) | null = null;
       let browserCapture: (() => Promise<{ png: string; format: string }>) | null = null;
@@ -10460,7 +10561,7 @@ async function startTurn(
       const autoPinAllowed = () => {
         const liveBot = store.bot(bot.id);
         const liveTask = store.taskByThread(bot.id, threadId);
-        return liveBot?.computer === undefined && !teamComputer && opts?.runOn !== "cloud" && !plan.pinned &&
+        return liveBot?.computer === undefined && !teamComputer && opts?.runOn !== "cloud" && !plan.pinned && !computerSkipped &&
           Boolean(liveTask && liveTask.surfaceSource !== "user");
       };
       const pinAutoSurface = (surface: Surface) => {
@@ -10793,8 +10894,7 @@ async function startTurn(
       } catch (error) {
         // Auto, Off and a team's shared computer name no place; they fail as
         // they are.
-        if (!namedPlace || !placeSource) throw error;
-        throw await asPlaceFailure(error, namedPlace, placeSource, bot, cloudBackend);
+        skipComputer(!namedPlace || !placeSource ? error : await asPlaceFailure(error, namedPlace, placeSource, bot, cloudBackend));
       }
 
       // Auto-only host fallback. Electron owns cua-driver/TCC attribution;
@@ -10854,7 +10954,7 @@ async function startTurn(
           : bot.autoStartVps
             ? "Check the VPS connection in Settings → API keys."
             : "Open Computer and enable Start VPS automatically, or choose Cloud computer to start it manually.";
-        throw new Error(`${autoVpsProblem}. ${hint}`);
+        skipComputer(new Error(`${autoVpsProblem}. ${hint}`));
       }
       // Agent control tools include peer comms and the secure credential
       // request card. A comms-invoked turn (depth ≥ cap) gets none — hard recursion
@@ -11024,7 +11124,7 @@ async function startTurn(
         { id: "files", label: "File locations", text: worksInWorkspace ? workspaceLocationsPrompt(bot.id, cwd, liveBot?.cwd ?? bot.cwd, { attachFile: Boolean(integrations.agents) && !CLOUD_HOME && !HOSTED_WORKSPACE }) : "" },
         { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
         { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
-        { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note, canSelect: computerSelectionTurns.has(threadId), cloudHome: Boolean(CLOUD_HOME) }) },
+        { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note + (computerSkipped && plan.computer !== "off" ? computerSkippedNote(redactSecretsInText(computerSkipped)) : ""), canSelect: computerSelectionTurns.has(threadId), cloudHome: Boolean(CLOUD_HOME) }) },
         { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled()) : "" },
         // gated on the integration, not the key: the hint only goes to a
         // bot whose driver actually mounted the tools
@@ -18329,6 +18429,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!task) return json(res, 404, { error: "no such thread on that bot" });
         if (threadBusy(target.id, threadId) || queuedThreadPosition(target.id, threadId) !== null) {
           return json(res, 409, { error: "that thread is still running — wait for it to settle before retrying" });
+        }
+        // A report can reach the Chief after a wait, and a retry can be
+        // asked twice: a thread that has finished a run since it was last
+        // reported has nothing left to resume, and resuming it would redo
+        // finished work.
+        const reportedAt = incidentLedger.lastAt(threadId);
+        if (reportedAt !== undefined && store.activePath(threadId).some(line => line.turnSucceeded === true && line.at > reportedAt)) {
+          return json(res, 409, { error: "that thread has finished a run since it was reported — there is nothing to retry; read what it did before deciding anything else" });
         }
         requireActiveInternalCapability();
         const unattended = isUnattended(from.id, fromThreadId);

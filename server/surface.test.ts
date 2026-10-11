@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   cloudPlaceRefusal,
+  computerSkippedNote,
   computerToolsRefusal,
   parseSurface,
   placeUnavailable,
@@ -51,17 +52,16 @@ describe("resolveSurface", () => {
     expect(surfacePrompt({ computer: null, browser: false }, { note: plan.note })).toBe(plan.note);
   });
 
-  it("a Team incidents report mounts nothing, whatever the bot works on or the thread is pinned to", () => {
-    const plan = resolveSurface({ destination: "off", browserOn: true, incident: true });
-    expect(plan).toMatchObject({ computer: "off", browser: false, pinned: null });
-    expect(plan.note).toMatch(/answers a Team incidents report/);
-    for (const destination of [undefined, "cloud", "vm", "local", "browser"] as const) {
-      for (const pinnedSurface of [null, "cloud", "vm", "local", "browser"] as const) {
-        expect(resolveSurface({ destination, pinnedSurface, browserOn: true, incident: true })).toEqual(plan);
-      }
-    }
-    // the note alone tells the model why it has no screen
-    expect(surfacePrompt({ computer: null, browser: false }, { note: plan.note })).toBe(plan.note);
+  it("a Team incidents turn that lost its computer is told why and that it has none", () => {
+    const note = computerSkippedNote("The team's cloud computer is missing; explicitly create or retry it from the Team map.");
+    expect(note).toMatch(/^ This turn answers a Team incidents report and your computer could not be prepared for it \(The team's cloud computer is missing; explicitly create or retry it from the Team map\), so no computer is mounted/);
+    expect(note).toMatch(/never claim to have checked that computer yourself\.$/);
+    // nothing mounted: the note alone is the surface paragraph
+    expect(surfacePrompt({ computer: null, browser: false }, { note })).toBe(note);
+    // a browser the plan allowed still mounts beside it, and is described
+    const withBrowser = surfacePrompt({ computer: null, browser: true }, { note });
+    expect(withBrowser).toMatch(/^ Everything you do on screen happens in the built-in browser tab/);
+    expect(withBrowser.endsWith(note)).toBe(true);
   });
 
   it("Off is the one setting a conversation pin cannot override", () => {
