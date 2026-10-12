@@ -33,6 +33,19 @@ let updaterCoordinator = null;
 // Until main says, none may.
 let pageAllowed = () => false;
 
+/** Private main-process API. HTTP clients can reach this only through the
+ * authenticated backend's narrowly typed maintenance bridge. */
+export async function maintenanceUpdate(action, version) {
+  if (!updaterCoordinator) return { status: "unavailable" };
+  if (action === "check") await updaterCoordinator.check(true);
+  if (action === "install") {
+    if (state.status !== "downloaded" || state.version !== version || state.installMode !== "restart") throw new Error("The reviewed update is not ready for an automatic restart.");
+    await updaterCoordinator.install();
+    if (state.status === "error") throw new Error(state.message || "Update failed");
+  }
+  return { status: state.status, version: state.version, installMode: state.installMode, message: state.message };
+}
+
 function updaterLogger() {
   const directory = app.getPath("logs");
   const file = join(directory, "updater.log");

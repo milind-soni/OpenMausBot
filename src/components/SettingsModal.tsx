@@ -14,6 +14,7 @@ import { completionPatch } from "@/lib/onboarding";
 import { AnthropicEveryClaudeBot, ApiKeyRow, OpenAiCompatUrl, OpenCodeProviderKeys, VpsConnection } from "./ApiKeys";
 import { DecisionModelSettings } from "./DecisionModelSettings";
 import { useUpdaterState } from "@/lib/updater";
+import { UpdateEverything } from "./UpdateEverything";
 import { brand } from "../lib/brand";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
@@ -952,6 +953,7 @@ export function SettingsModal() {
 
             {!remoteActive && <ReplayTourRow />}
             <UpdatesRow />
+            <UpdateEverything />
             <DiagnosticsRow />
           </>
         );

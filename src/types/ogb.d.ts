@@ -143,6 +143,11 @@ const __APP_VERSION__: string;
       };
       /** Saved servers and the active one (desktop Server menu). Present on
        * the local server's UI; a remote server's page sees a reduced bridge. */
+      updateEverything?: {
+        state(): Promise<UpdateEverythingState>;
+        check(): Promise<UpdateEverythingState>;
+        run(planId: string): Promise<UpdateEverythingState>;
+      };
       environments?: {
         state: () => Promise<{
           localOrigin: string;
@@ -354,6 +359,14 @@ export interface LinuxLocalControlStatus {
   session?: "x11" | "wayland" | "headless" | "unknown";
   compositor?: "gnome-mutter";
   warnings?: Array<{ label: string; status: string; message: string; detail?: string }>;
+}
+
+export interface UpdateEverythingState {
+  revision?: number;
+  phase: "idle" | "checking" | "ready" | "running" | "complete" | "failed";
+  planId?: string;
+  error?: string;
+  rows: Array<{ id: string; name: string; status: string; providers: string[]; app: string | null; note?: string }>;
 }
 
 export interface UpdaterState {

@@ -418,6 +418,8 @@ function reloadFixture() {
       dispose: async (id: string) => { log.push(`dispose:${id}`); },
       load: async (loaded: object) => { log.push(`load:${Object.keys(loaded)}`); },
       get: (id: string) => ({ instanceId: id }),
+      entries: () => Object.keys(configs).map(instanceId => ({ instanceId })),
+      cliTarget: (id: string) => ({ cli: configs[id]?.driver === "claudeAgent" ? "claude" : "compat" }),
     },
     cancelDirectTurnDispatch: (_botId: string, threadId: string) => log.push(`cancel:${threadId}`),
     cancelGroupTurnOperations: (_groupId: string, threadId: string, outcome: { status: string; detail: string; byHarness?: boolean }) =>
@@ -452,6 +454,18 @@ it("saving the same provider settings again interrupts no turn and replaces no e
   expect(f.revoked).toEqual([]);
   expect(f.held()).toEqual(before);
   expect(f.threads.filter(thread => thread.busy).map(thread => thread.threadId)).toEqual(["eli-work", "mira-work"]);
+});
+
+it("an idle binary update reloads every instance using that executable without replaying turns", async () => {
+  const f = reloadFixture();
+  for (const thread of f.threads) thread.busy = false;
+  f.context.groupSpeakers.clear();
+  await f.save({ ...f.configs(), secondClaude: { driver: "claudeAgent" } });
+  f.log.length = 0;
+  await f.context.reloadProviders(engineLaunches(f.configs(), {}), ["claude"]);
+  expect(f.log).toEqual(["auth:claude", "detach:claude", "auth:secondClaude", "detach:secondClaude", "load:claude,secondClaude", "attach:claude,secondClaude"]);
+  expect(f.settled).toEqual([]);
+  expect(f.threads.every(thread => !thread.busy)).toBe(true);
 });
 
 it("a changed key replaces only its engine and tells only that engine's requesters why", async () => {

@@ -650,7 +650,9 @@ import {
 // Keep these two last: a route module may import any server module, and
 // loading the table after everything above leaves module start-up order as is.
 import { json, onJsonBody, parsedBodyOf, readBody } from "./harness/http.ts";
-import { ROUTES, dispatchRoutes } from "./routes/table.ts";
+import { ROUTES, dispatchRoutes, PASS } from "./routes/table.ts";
+import { createUpdateRoutes } from "./routes/updates.ts";
+import { DesktopUpdateBridge, type DesktopUpdateRequest } from "./desktop-update-bridge.ts";
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
@@ -2001,7 +2003,7 @@ type UtilityParentPort = {
 // SAFETY: Electron's utility-process runtime is the only environment that
 // supplies parentPort; plain Node intentionally leaves it absent.
 const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort;
-type DesktopPrivateMessage = BrowserCleanupWireRequest | {
+type DesktopPrivateMessage = DesktopUpdateRequest | BrowserCleanupWireRequest | {
   type: "openmausbot:browser-control";
   botId: string;
   held: true;
@@ -2091,6 +2093,7 @@ const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator(
   },
 });
 const phoneSecrets = new PhoneSecretBridge(postDesktopPrivateMessage);
+const desktopUpdates = new DesktopUpdateBridge(postDesktopPrivateMessage);
 utilityParentPort?.on("message", (event) => {
   const message = event?.data;
   try {
@@ -2098,6 +2101,7 @@ utilityParentPort?.on("message", (event) => {
     if (handleDesktopTrustedApprovalMessage(message)) return;
     if (browserCleanup.receive(message)) return;
     if (phoneSecrets.receive(message)) return;
+    if (desktopUpdates.receive(message)) return;
     composio.applyManagedBrokerMessage(message);
   } catch (error) {
     console.error(`[desktop-sync] rejected private parent message: ${error instanceof Error ? error.message : String(error)}`);
@@ -16585,9 +16589,11 @@ function revokeEngineCapabilities(engines: ReadonlySet<string>): void {
  * are interrupted, each requester told why. Every other engine keeps its
  * processes, sessions and turns; a write that changed no engine touches
  * nothing. */
-async function reloadProviders(before: Record<string, unknown>) {
+async function reloadProviders(before: Record<string, unknown>, updatedExecutables: string[] = []) {
   const configs = providerConfigs();
   const changed = new Set(changedInstanceIds(before, engineLaunches(configs)));
+  // The idle maintenance lease may replace a binary without changing config.
+  for (const entry of registry.entries()) if (updatedExecutables.includes(registry.cliTarget(entry.instanceId)?.cli ?? "")) changed.add(entry.instanceId);
   if (!changed.size) return;
   const onChanged = (botId: string, threadId: string) => changed.has(threadEngineId(botId, threadId) ?? "");
   const direct = store.bots.flatMap((bot) => store.tasks(bot.id)
@@ -16739,7 +16745,7 @@ const workspaceBackupAccess = {
     }
     return work();
   }, {
-    idle: () => !providerFleetReloading && !providerAuthSessions.active && !browserEngineInstall &&
+    idle: () => !providerFleetReloading && !providerConfigBusy && !providerAuthSessions.active && !browserEngineInstall &&
       !routines?.isTicking && !calendarCalls?.isTicking &&
       !localVmImageBusy && !localVmProvisionBusy && !localVmModeChangeBusy &&
       !localVmLifecycleBusy.size && !boatLifecycleBusyBots.size && !vpsPreviewRequests.size && !orphanBoatLifecycleBusyIds.size &&
@@ -16765,6 +16771,34 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
   readBody,
   restored: workspaceRestore,
   ...workspaceBackupAccess,
+});
+const updateRoutes = createUpdateRoutes({
+  environmentId: ENVIRONMENT_ID,
+  version: serverVersion,
+  providers: describeInstances,
+  authorized: workspaceBackupAccess.authorized,
+  idle: () => !workspaceMaintenance.active && !providerFleetReloading && !providerConfigBusy &&
+    !providerAuthSessions.active && !liveCalls.current() && store.bots.every(bot => !botHasActiveTurn(bot.id)) &&
+    store.groups.every(group => !groupIsWorking(group)),
+  exclusive: work => workspaceBackupAccess.exclusive(() => {
+    if (liveCalls.current()) throw Object.assign(new Error("Finish the active call before updating."), { status: 409 });
+    return work();
+  }),
+  install: async (id, method) => {
+    const target = registry.cliTarget(id);
+    if (!target?.cli) throw new Error("Provider settings changed.");
+    const before = engineLaunches(providerConfigs());
+    const affected = registry.entries().filter(entry => registry.cliTarget(entry.instanceId)?.cli === target.cli).map(entry => entry.instanceId);
+    if (method === "claude") {
+      if (target.driverKind !== "claudeAgent") throw new Error("Provider settings changed.");
+      await updateClaudeCli(target.cli, cliProbeEnvironment());
+    } else if (!(await registry.installRuntime(id))) throw new Error("This provider requires a manual update.");
+    resetPathCache();
+    await reloadProviders(before, [target.cli]);
+    if (affected.some(instanceId => !registry.get(instanceId))) throw new Error("The provider updated but could not reload. Open Engines to check its configuration.");
+    broadcast({ kind: "config", ...configStatus() });
+  },
+  ...(DESKTOP_MANAGED ? { desktop: (action: DesktopUpdateRequest["action"], version?: string) => desktopUpdates.request(action, version) } : {}),
 });
 // Copy this computer here (server/cloud-move-http.ts, docs/copy-workspace.md):
 // every server sizes its own workspace for its desktop, and every server the
@@ -17224,6 +17258,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (await workspaceBackupRoutes(req, res, path, auth)) return;
     if (await cloudMoveRoutes(req, res, path, auth)) return;
+    if (await updateRoutes({ req, res, url, path, method, auth, json, readBody }) !== PASS) return;
     // Count ordinary requests until their asynchronous handler returns, not
     // merely until the browser disconnects. A cancelled upload can still write.
     if (path.startsWith("/api/") && path !== "/api/events" && path !== "/api/health" && !path.startsWith("/api/shared-computers/") && !isWorkspaceBackupSessionControl(method, path)) {

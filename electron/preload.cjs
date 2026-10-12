@@ -326,6 +326,12 @@ const bridge = {
     },
   },
 
+  /** Local main-window only; commands and destinations remain native-owned. */
+  updateEverything: {
+    state: () => ipcRenderer.invoke("updates-all:state"),
+    check: () => ipcRenderer.invoke("updates-all:check"),
+    run: (planId) => ipcRenderer.invoke("updates-all:run", planId),
+  },
   /** Saved servers, this computer's named local environments, and the active
    * one (Server menu). Switching, creating, adding and forgetting are
    * local-only: a remote page may read the list but not change where this

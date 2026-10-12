@@ -115,6 +115,10 @@ renderer components and isolated HTTP routes.
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.
 
+The [Update everything checks](update-everything.md) cover native update ordering,
+administrator-only maintenance routes and confirmation UI with fake installers;
+packaged restart acceptance remains a separate requirement.
+
 The [loading screen and tray smoke](startup-tray.md) checks the startup close
 button, hidden handoff, tray restore, and Quit in a disposable Electron profile.
 

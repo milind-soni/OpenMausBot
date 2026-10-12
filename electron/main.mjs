@@ -10,7 +10,8 @@ import { createAndroidDeviceController } from "./android-device.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
-import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState } from "./updater.mjs";
+import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState, maintenanceUpdate } from "./updater.mjs";
+import { createUpdateEverything, readUpdateResponse } from "./update-everything.mjs";
 import {
   buildDiagnosticsReport,
   diagnosticsFileName,
@@ -1523,6 +1524,17 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
   proc.on("message", (message) => {
     if (!serverSupervisor.isCurrent(proc)) return;
     try {
+      if (message?.type === "openmausbot:update") {
+        if (typeof message.requestId !== "string" || message.requestId.length > 64 || !["state", "check", "install"].includes(message.action)) return;
+        void maintenanceUpdate(message.action, message.version).then(state => {
+          // Installation keeps the backend's idle-workspace lease until the
+          // process exits, or its bounded timeout releases a failed handoff.
+          if (message.action !== "install" && serverSupervisor.isCurrent(proc)) proc.postMessage({ type: "openmausbot:update-result", requestId: message.requestId, state });
+        }, error => {
+          if (serverSupervisor.isCurrent(proc)) proc.postMessage({ type: "openmausbot:update-result", requestId: message.requestId, error: error.message });
+        });
+        return;
+      }
       if (trustedApprovalMode.receive(proc, message)) return;
       if (managedDesktopRelay.receive(proc, message)) return;
       if (orgLibrary?.receive(message)) return;
@@ -3240,6 +3252,46 @@ const workspaceOnly = (handler) => (event, ...args) => {
   return handler(event, ...args);
 };
 const localWorkspaceOnly = (channel, handler) => localOnly(channel, workspaceOnly(handler));
+let updateEverything;
+function allUpdates() {
+  if (updateEverything) return updateEverything;
+  const receipt = path.join(app.getPath("userData"), "update-everything.json");
+  let previous;
+  try { previous = JSON.parse(fs.readFileSync(receipt, "utf8")); } catch { /* first run */ }
+  updateEverything = createUpdateEverything({
+    previous, appVersion: app.getVersion(),
+    targets: () => [
+      { id: environmentsState.activeId, name: "This app", origin: `http://127.0.0.1:${SERVER_PORT}`, local: true,
+        ...(!serverReady ? { unavailable: "The local environment is not ready." } : {}) },
+      ...(environmentsState.activeId !== LOCAL_ID ? [{ id: LOCAL_ID, name: "Default local environment", local: false,
+        unavailable: "Switch to this local environment to update its providers. Its app updates with this installation." }] : []),
+      ...environmentsState.environments.filter(e => e.id !== environmentsState.activeId).map(e => ({
+        id: e.id, name: e.name, origin: e.origin, local: false,
+        ...(e.kind === "local" ? { unavailable: "Inactive local environment: switch to it to update its providers. Its app updates with this installation." } : {}),
+      })),
+    ],
+    request: async (target, suffix, body) => {
+      const init = { method: body === undefined ? "GET" : "POST", redirect: "error", credentials: target.local ? "omit" : "include",
+        signal: AbortSignal.timeout(suffix === "/providers" || suffix === "/check" ? 15 * 60_000 : 15_000),
+        headers: { "content-type": "application/json", origin: target.origin, ...(target.local ? { [DESKTOP_MUTATION_HEADER]: desktopMutationToken } : {}) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }) };
+      const response = await (target.local ? fetch : (...args) => session.defaultSession.fetch(...args))(`${target.origin}/api/updates${suffix}`, init);
+      if (!response.ok) throw Object.assign(new Error(response.status === 401 || response.status === 403 ? "Sign in as an administrator on this environment."
+        : response.status === 404 ? "This environment needs a manual app update to support Update everything."
+        : response.status === 409 || response.status === 503 ? "This environment is busy or its update changed. Finish work and check again."
+        : `Update request failed (${response.status}). Inspect Updates on that environment.`), { permanent: true });
+      return readUpdateResponse(response);
+    },
+    save: state => {
+      fs.writeFileSync(`${receipt}.tmp`, JSON.stringify(state), { mode: 0o600 });
+      fs.renameSync(`${receipt}.tmp`, receipt);
+    },
+  });
+  return updateEverything;
+}
+ipcMain.handle("updates-all:state", localWorkspaceOnly("updates-all:state", () => allUpdates().state()));
+ipcMain.handle("updates-all:check", localWorkspaceOnly("updates-all:check", () => allUpdates().check()));
+ipcMain.handle("updates-all:run", localWorkspaceOnly("updates-all:run", (_event, planId) => allUpdates().run(planId)));
 // Personal Cloud authority stays in main. No renderer-supplied address, token,
 // paid flag or callback can choose an account or activate Pro.
 for (const method of ["state", "begin", "signInAgain", "reopen", "cancel", "refresh", "signOut", "openDashboard", "offer"]) {
