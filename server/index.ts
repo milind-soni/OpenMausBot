@@ -240,7 +240,7 @@ import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine }
 import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentRequest, incidentText, type Incident, type IncidentKind } from "./incidents.ts";
 
 const SESSION_READ_MAX_CHARS = 8_000;
-import { promptWithReply, transcriptText } from "./replies.ts";
+import { promptWithReply, replyTargetIn, transcriptText } from "./replies.ts";
 import type { DataContext } from "./data-context.ts";
 import { promptWithDataContext } from "../shared/data-context.ts";
 import { admit, DRAIN_COALESCE_MAX_ITEMS } from "./admission.ts";
@@ -443,6 +443,7 @@ import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrame
 import { asSchedule, RoutineRequestService } from "./routine-requests.ts";
 import { directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { createAgentCard } from "./chat-widgets.ts";
+import { createChatAppRoutes, createChatApps, createChatAppsMcp } from "./routes/chat-apps.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
 import { ModelRequestService } from "./model-requests.ts";
@@ -8158,7 +8159,7 @@ function drainQueuedSendsNow() {
   );
 }
 
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"] }) {
   const decision = admit("direct", {}, {
     atCapacity: botAtThreadCapacity(botId),
     threadBusy: threadBusy(botId, threadId),
@@ -8169,9 +8170,9 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
-      dataContext,
+      dataContext, fromApp: app?.fromApp,
       reason: decision.reason,
-      prompt: promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
+      prompt: (app?.context ?? "") + promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
       sender,
       trigger,
       via,
@@ -8179,7 +8180,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app });
   return { ok: true as const, threadId, message };
 }
 
@@ -8222,10 +8223,11 @@ async function acceptDirectSend(
     callId?: string;
     dataContext?: DataContext;
     personPresent: boolean;
+    app?: { context?: string; fromApp?: Message["fromApp"] };
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, app } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -8286,7 +8288,7 @@ async function acceptDirectSend(
           engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
         });
         if (busyAdmission.action === "steer" && instance?.adapter.steer) {
-          const prompt = promptWithReply(promptWithDataContext(steerInput.text, dataContext), replyTo, cfg.profile?.name?.trim() || "User");
+          const prompt = (app?.context ?? "") + promptWithReply(promptWithDataContext(steerInput.text, dataContext), replyTo, cfg.profile?.name?.trim() || "User");
           steered = await (steerInput.images.length > 0
             ? instance.adapter.steer(threadId, prompt, steerInput.images)
             : instance.adapter.steer(threadId, prompt))
@@ -8314,7 +8316,7 @@ async function acceptDirectSend(
             text,
             replyToId: replyTo?.id,
             sendId,
-            ...(dataContext ? { dataContext } : {}),
+            ...(dataContext ? { dataContext } : {}), ...(app?.fromApp ? { fromApp: app.fromApp } : {}),
             steered: true,
             sender,
             ...spokenLineFields(via, callId),
@@ -8324,13 +8326,13 @@ async function acceptDirectSend(
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext);
+          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app);
         }
         const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
           sendId,
-          dataContext,
-          prompt: promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
+          dataContext, fromApp: app?.fromApp,
+          prompt: (app?.context ?? "") + promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
           sender,
           trigger,
           via,
@@ -8338,7 +8340,7 @@ async function acceptDirectSend(
         });
         return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
-      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext);
+      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app);
     },
   );
 }
@@ -8636,6 +8638,7 @@ async function startTurn(
     callId?: string;
     relayed?: boolean;
     dataContext?: DataContext;
+    app?: { context?: string; fromApp?: Message["fromApp"] };
     onDispatchError?: (message: string) => void;
     compactOnly?: boolean;
     automaticRecoveryAttempted?: boolean;
@@ -8768,7 +8771,7 @@ async function startTurn(
           text,
           replyToId: opts?.replyTo?.id,
           sendId: opts?.sendId,
-          ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}),
+          ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}), ...(opts?.app?.fromApp ? { fromApp: opts.app.fromApp } : {}),
           peerAsk: opts?.peerAsk,
           sender: opts?.sender,
           ...spokenLineFields(opts?.via, opts?.callId),
@@ -8921,7 +8924,7 @@ async function startTurn(
         ? expandSkillCommandTurnText(bot.id, providerText, skillsLibraryEnabled(cfg) ? (store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills) : undefined)
         : providerText;
       const setupText = agentsMounted ? expandSetupTurnText(skillCommandText) : skillCommandText;
-      const userTurnText = promptWithReply(
+      const userTurnText = (opts?.app?.context ?? "") + promptWithReply(
         skillAuthoring ? expandLearnTurnText(setupText) : setupText,
         opts?.replyTo,
         cfg.profile?.name?.trim() || "User",
@@ -8997,7 +9000,7 @@ async function startTurn(
       // User MCP servers' tools are never pre-allowed: every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true) {
         const custom = await withMcpSignIn(engineMcpServers(bot), mcpOAuth);
-        if (Object.keys(custom).length) integrations.custom = custom;
+        if (Object.keys(custom).length) Object.assign(integrations, { custom }, chatAppsMcp.turnMounts(custom, bot.toolScope));
       }
       const worksInWorkspace = supportsWorkspaceFiles(instance.driverKind);
       if (worksInWorkspace) {
@@ -12598,15 +12601,7 @@ function roomSetupPending(group: GroupRecord): boolean {
   );
 }
 
-function resolveReplyTarget(threadId: string, value: unknown): Message | undefined {
-  if (value === undefined || value === null || value === "") return undefined;
-  if (typeof value !== "string") throw Object.assign(new Error("replyToId must be a message id"), { status: 400 });
-  const target = store.messagesFor(threadId).find((message) => message.id === value);
-  if (!target || (target.kind !== "text" && target.kind !== "widget") || !target.text?.trim()) {
-    throw Object.assign(new Error("the message being replied to is no longer available"), { status: 404 });
-  }
-  return target;
-}
+function resolveReplyTarget(threadId: string, value: unknown): Message | undefined { return replyTargetIn(store.messagesFor(threadId), value); }
 
 const CONNECTOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,80}$/;
 
@@ -13944,6 +13939,9 @@ ROUTES.push(createBotMessageRoutes({
   deliverLateQuestionAnswer, interruptDirectThread, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
   cancelGroupTurnOperations, closeOpenApprovals,
 }));
+const chatApps = createChatApps({ store, dataDir: DATA_DIR });
+const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, oauth: mcpOAuth });
+ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc }));
 // `let` slots are read per request.
 ROUTES.push(createThreadRoutes({
   store, cfg, sessions, groupUsageReader, lendingEnabled,
@@ -14225,7 +14223,7 @@ ROUTES.push(createMcpServerRoutes({
   cloudHome: CLOUD_HOME,
   fallbackPublicUrl: FALLBACK_PUBLIC_URL,
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } },
-  mcpServerResponse, mcpServerBody, mcpPolicyRefusal, persistMcpServers, savedCustomDomain,
+  mcpServerResponse, mcpServerBody, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog: chatAppsMcp,
 }));
 ROUTES.push(createComputerRoutes({
   store, cfg, sessions, teamComputers, computerControl,
@@ -14932,9 +14930,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const body = await readInternalBody();
         requireActiveInternalCapability();
-        const result = createAgentCard({
+        const result = await createAgentCard({
           store,
-          bot: internalSender,
+          bot: internalSender, apps: chatApps,
           threadId: internalCapability.threadId,
           input: body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),
         });

@@ -1500,7 +1500,7 @@ export function GroupView({ group }: { group: Group }) {
         ) : (
         <div
           ref={transcriptRef}
-          className="glass-scroller-content flex w-full flex-col gap-3"
+          className="glass-scroller-content relative flex w-full flex-col gap-3"
           style={{ paddingBottom: composerDock.pad }}
           role="log"
           aria-live="off"

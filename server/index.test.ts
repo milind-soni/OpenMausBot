@@ -8269,7 +8269,7 @@ describe("harness HTTP API", () => {
     try {
       const created = await api("POST", "/api/mcp/servers", { name: "docs", url: fake.url, headers: { Authorization: secret } });
       expect(created.status).toBe(201);
-      expect(created.body.servers).toEqual([{ name: "docs", type: "http", url: fake.url, headerKeys: ["Authorization"], enabled: false }]);
+      expect(created.body.servers).toEqual([{ name: "docs", type: "http", url: fake.url, headerKeys: ["Authorization"], enabled: false, apps: true }]);
       expect(JSON.stringify(created.body)).not.toContain(secret);
 
       const tested = await api("POST", "/api/mcp/servers/docs/test");
@@ -8285,7 +8285,7 @@ describe("harness HTTP API", () => {
         enabled: true,
       });
       expect(updated.status).toBe(200);
-      expect(updated.body.servers[0]).toMatchObject({ type: "sse", headerKeys: ["Authorization", "X-Org"], enabled: true });
+      expect(updated.body.servers[0]).toMatchObject({ type: "sse", headerKeys: ["Authorization", "X-Org"], enabled: true, apps: true });
       expect(JSON.stringify(updated.body)).not.toContain(secret);
       const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
       expect(disk.mcpServers.docs).toEqual({ type: "sse", url: fake.url, headers: { Authorization: secret, "X-Org": "acme" }, enabled: true });
@@ -8313,7 +8313,7 @@ describe("harness HTTP API", () => {
       const first = await api("POST", "/api/mcp/servers/hf/test");
       expect(first.body).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
       expect((await api("GET", "/api/mcp/servers")).body.servers).toEqual([
-        { name: "hf", type: "http", url: fake.url, headerKeys: [], enabled: false, auth: "needs-sign-in" },
+        { name: "hf", type: "http", url: fake.url, headerKeys: [], enabled: false, apps: true, auth: "needs-sign-in" },
       ]);
 
       const started = await api("POST", "/api/mcp/servers/hf/sign-in");
@@ -8378,7 +8378,7 @@ describe("harness HTTP API", () => {
       const created = await api("POST", "/api/mcp/servers", { name: "corp", url, oauth: { clientId: "corp-app", clientSecret: secret, scopes: ["mcp", "offline_access"] } });
       expect(created.status).toBe(201);
       expect(created.body.servers).toEqual([{
-        name: "corp", type: "http", url, headerKeys: [], enabled: false,
+        name: "corp", type: "http", url, headerKeys: [], enabled: false, apps: true,
         oauth: { clientId: "corp-app", scopes: ["mcp", "offline_access"], clientSecretConfigured: true, redirectUri: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-oauth\/callback$/) },
       }]);
 

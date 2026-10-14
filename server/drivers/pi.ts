@@ -45,7 +45,7 @@ import {
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import { canUseMcpServer, parseToolScope } from "../../shared/tool-scope.ts";
-import { gateServer, mcpStdioServer, resultBudget } from "../mcp-gate-config.ts";
+import { appMountFor, gateServer, mcpStdioServer, resultBudget } from "../mcp-gate-config.ts";
 import { remoteMcpSpec } from "../mcp-http.ts";
 
 const DRIVER_KIND = "piAgent";
@@ -126,7 +126,7 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
     if (parsed.scope !== undefined && !canUseMcpServer(parsed.scope, name)) { delete servers[name]; continue; }
     // pi registers every tool it is given and has no tool search of its own.
     const directory = remoteMcpSpec(server) !== undefined;
-    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, budget: name in (turn.integrations?.custom ?? {}) ? resultBudget() : 0, nodeEnv: NODE_ENV_FLAG, directory });
+    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, budget: name in (turn.integrations?.custom ?? {}) ? resultBudget() : 0, nodeEnv: NODE_ENV_FLAG, directory, apps: appMountFor(name, turn) });
     const stdio = gated ?? mcpStdioServer(server, { nodeEnv: NODE_ENV_FLAG, ...(directory ? { directory: { name } } : {}) });
     if (!stdio) throw new Error("Pi MCP server configuration is invalid");
     const original = server as { scope?: string };

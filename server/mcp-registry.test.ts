@@ -53,6 +53,7 @@ describe("custom MCP registry", () => {
       args: [],
       envKeys: ["GITHUB_TOKEN", "MODE"],
       enabled: true,
+      apps: true,
     }]);
     expect(JSON.stringify(listings)).not.toContain("ghp_real");
     expect(JSON.stringify(listings)).not.toContain("read-only");
@@ -226,7 +227,7 @@ describe("remote (url) MCP servers", () => {
 
   it("lists a url server by address and header names only", () => {
     const listings = listMcpServers({ docs: { url: "https://docs.example/mcp", headers: { Authorization: "Bearer real", "X-Org": "acme" } } });
-    expect(listings).toEqual([{ name: "docs", type: "http", url: "https://docs.example/mcp", headerKeys: ["Authorization", "X-Org"], enabled: true }]);
+    expect(listings).toEqual([{ name: "docs", type: "http", url: "https://docs.example/mcp", headerKeys: ["Authorization", "X-Org"], enabled: true, apps: true }]);
     expect(JSON.stringify(listings)).not.toContain("real");
     expect(JSON.stringify(listings)).not.toContain("acme");
   });
@@ -259,7 +260,7 @@ describe("a url server's sign-in app", () => {
     });
     const listings = listMcpServers({ docs: saved });
     expect(listings).toEqual([{
-      name: "docs", type: "http", url, headerKeys: [], enabled: true,
+      name: "docs", type: "http", url, headerKeys: [], enabled: true, apps: true,
       oauth: { clientId: "corp-app", scopes: ["api://mcp/read"], clientSecretConfigured: true },
     }]);
     expect(JSON.stringify(listings)).not.toContain("app-secret-value");
@@ -286,5 +287,24 @@ describe("a url server's sign-in app", () => {
       ok: false, error: "Scopes are single words, like offline_access or api://my-app/mcp.read.",
     });
     expect(parseStoredMcpServer("docs", { url, oauth: { clientId: "a", callbackPort: 8080 } })).toMatchObject({ ok: false });
+  });
+});
+
+describe("the \"Show its apps in chat\" switch", () => {
+  it("is on by default, stored only as apps: false, listed as a boolean, and kept by an edit that does not mention it", () => {
+    expect(parseStoredMcpServer("draw", { type: "http", url: "https://mcp.excalidraw.com/mcp" })).toEqual({
+      ok: true, server: { type: "http", url: "https://mcp.excalidraw.com/mcp", headers: {}, enabled: true },
+    });
+    const off = parseStoredMcpServer("draw", { type: "http", url: "https://mcp.excalidraw.com/mcp", apps: false });
+    expect(off).toEqual({ ok: true, server: { type: "http", url: "https://mcp.excalidraw.com/mcp", headers: {}, enabled: true, apps: false } });
+    expect(parseStoredMcpServer("draw", { command: "npx", apps: true })).toEqual({ ok: true, server: { command: "npx", args: [], env: {}, enabled: true } });
+    expect(listMcpServers({ a: { command: "npx", apps: false }, b: { type: "http", url: "https://b.example/mcp" } }).map((server) => [server.name, server.apps]))
+      .toEqual([["a", false], ["b", true]]);
+    const existing = off.ok ? off.server : undefined;
+    expect(parseMcpServerMutation("draw", { type: "http", url: "https://mcp.excalidraw.com/mcp", headers: {} }, existing)).toMatchObject({ ok: true, server: { apps: false } });
+    expect(parseMcpServerMutation("draw", { type: "http", url: "https://mcp.excalidraw.com/mcp", apps: true }, existing)).toEqual({
+      ok: true, server: { type: "http", url: "https://mcp.excalidraw.com/mcp", headers: {}, enabled: true },
+    });
+    expect(parseStoredMcpServer("draw", { command: "npx", apps: "no" }).ok).toBe(false);
   });
 });

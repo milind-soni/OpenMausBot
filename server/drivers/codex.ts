@@ -50,7 +50,7 @@ import { parseProtocolAskQuestions, questionAnswersById, questionChoices } from 
 import { codexVersionBehind, readLatestCodexRelease } from "./codex-release.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
-import { gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
+import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
 import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
@@ -781,13 +781,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           // schemaValidation), and Codex does not speak SSE. A plan turn has no tool_search, so its URL
           // servers use the proxy's tool directory.
           const directory = plan && "url" in server;
-          if (turn.toolScope === undefined && !("url" in server)) return server;
+          const apps = appMountFor(name, turn);
+          if (turn.toolScope === undefined && !("url" in server) && !apps) return server;
           const hash = createHash("sha256").update(mountName).digest("hex");
           // Codex starts MCP children with only a few env names.
-          const proxy = turn.toolScope === undefined
-            ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(directory ? { directory: { name } } : {}), configEnvName: `OMB_REMOTE_MCP_CONFIG_${hash}`, sourceEnv: env })
-            : gateServer({ name, server, threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" },
-              configEnvName: `OMB_GATE_CONFIG_${hash}`, directory, sourceEnv: env });
+          const proxy = turn.toolScope === undefined && "url" in server
+            ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(directory ? { directory: { name } } : {}), configEnvName: `OMB_REMOTE_MCP_CONFIG_${hash}`, sourceEnv: env, apps })
+            : gateServer({ name, server, threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, configEnvName: `OMB_GATE_CONFIG_${hash}`, directory, sourceEnv: env, apps });
           if (proxy && directory) directoryMounts.add(mountName);
           if (!proxy) return null;
           const shared = { ...proxy.env };

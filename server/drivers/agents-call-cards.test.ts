@@ -147,3 +147,52 @@ describe("update_widget", () => {
     expect(await callTool("update_widget", { widget_id: "m7", widget: WIDGET_SAMPLES.buildStatus }, silent.context)).toEqual({ text: "Could not update that widget.", isError: true });
   });
 });
+
+describe("the chat-app tools", () => {
+  it("are in every catalog, after the widget tools, with schemas a model can fill and no read-only annotation", () => {
+    for (const profile of [PROFILE, { ...PROFILE, chief: true, skillAuthoring: true, sharedComputers: true, voiceNotes: true }, { ...PROFILE, cloudHome: true }]) {
+      const names = availableTools(profile).map((tool) => tool.name);
+      expect(names.slice(names.indexOf("show_widget"), names.indexOf("show_widget") + 4)).toEqual(["show_widget", "update_widget", "show_html", "update_html"]);
+    }
+    const tools = new Map(availableTools(PROFILE).map((tool) => [tool.name, tool as { description: string; inputSchema: { required: string[] }; annotations?: unknown }]));
+    expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page inline in this chat: /);
+    expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. Never put secrets in it\. Not available in rooms\.$/);
+    expect(tools.get("show_html")!.inputSchema.required).toEqual(["html", "title"]);
+    expect(tools.get("update_html")!.description).toBe("Replace a page you showed with show_html, in place. `app_id` is the id show_html returned. The page reloads, so anything the person did in it is lost.");
+    expect(tools.get("update_html")!.inputSchema.required).toEqual(["app_id", "html"]);
+    for (const name of ["show_html", "update_html"]) expect(tools.get(name), name).not.toHaveProperty("annotations");
+  });
+
+  it("show_html posts the page and tells the model how to change it", async () => {
+    const { apiResponse, context } = harness({ ok: true, status: 201, body: { messageId: "m9" } });
+    const result = await callTool("show_html", { html: "<p>hi</p>", title: "Hi", height: 200, fallback_text: "Hi", extra: true }, context);
+    expect(apiResponse).toHaveBeenCalledWith("/api/internal/options-card", {
+      method: "POST",
+      body: JSON.stringify({ tool: "show_html", html: "<p>hi</p>", title: "Hi", height: 200, fallback_text: "Hi" }),
+    });
+    expect(result).toEqual({ text: "Shown as app m9. To change it, call update_html with app_id \"m9\"." });
+  });
+
+  it("says when something in the page was masked as a secret", async () => {
+    const { context } = harness({ ok: true, status: 201, body: { messageId: "m9", masked: true } });
+    expect((await callTool("show_html", { html: "<p>hi</p>", title: "Hi" }, context)).text).toContain("masked before it was stored");
+  });
+
+  it("checks the page before any round trip, and hands a refusal to the model", async () => {
+    const { apiResponse, context } = harness();
+    expect(await callTool("show_html", { title: "Hi" }, context)).toMatchObject({ isError: true, text: expect.stringMatching(/^html:/) });
+    expect(await callTool("show_html", { html: "x".repeat(262_145), title: "Hi" }, context)).toMatchObject({ isError: true });
+    expect(await callTool("update_html", { html: "<p>x</p>" }, context)).toEqual({ text: "app_id: is required, the id show_html returned.", isError: true });
+    expect(apiResponse).not.toHaveBeenCalled();
+    const room = harness({ ok: false, status: 409, body: { error: "Pages are not available in rooms yet. Answer in text." } });
+    expect(await callTool("show_html", { html: "<p>x</p>", title: "x" }, room.context)).toEqual({ text: "Pages are not available in rooms yet. Answer in text.", isError: true });
+    const silent = harness({ ok: false, status: 500, body: {} });
+    expect(await callTool("update_html", { app_id: "m1", html: "<p>x</p>" }, silent.context)).toEqual({ text: "Could not update that page.", isError: true });
+  });
+
+  it("update_html names the page it replaced", async () => {
+    const { apiResponse, context } = harness({ ok: true, status: 201, body: { messageId: "m1" } });
+    expect(await callTool("update_html", { app_id: "m1", html: "<p>x</p>", title: "New", height: 400 }, context)).toEqual({ text: "Updated app m1." });
+    expect(apiResponse).toHaveBeenCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "update_html", app_id: "m1", html: "<p>x</p>", title: "New" }) });
+  });
+});

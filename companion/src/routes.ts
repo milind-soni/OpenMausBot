@@ -151,6 +151,11 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
 
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/image$/ },
+  // An app row's document is transcript data, scoped to its thread. `rpc` reaches only the app's own MCP
+  // server, under the bot's tool selection and approval rules; `context` is bounded text.
+  { method: "GET", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/rpc$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/apps\/[\w-]+\/context$/ },
   MESSAGE_FILE_ROUTE,
   { method: "POST", path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/reactions$/ },
   { method: "GET", path: /^\/api\/threads\/[\w-]+\/export$/ },

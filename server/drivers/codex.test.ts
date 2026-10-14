@@ -1141,6 +1141,31 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(["OMB_REMOTE_MCP_CONFIG_*", "ELECTRON_RUN_AS_NODE"]);
   });
 
+  it("mounts app servers through their observers and leaves the others as they were", async () => {
+    await create();
+    const dump = join(scratch, "app-mcp.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    const board = { command: "board-mcp", args: ["--stdio"], env: { BOARD_KEY: "board-secret" } };
+    const notes = { command: "notes-mcp", args: [], env: {} };
+    const draw = { type: "http" as const, url: "https://draw.example/mcp", headers: {} };
+    const agents = { command: process.execPath, args: ["agents-proxy.js"], env: { OMB_HARNESS_URL: "http://127.0.0.1:8799", OMB_COMMS_TOKEN: "comms-fixture" } };
+    await instance.adapter.sendTurn({ threadId: "t-app-mcp", text: "go", integrations: { agents, custom: { board, notes, draw }, mcpApps: { board: { extension: true }, draw: { extension: false } } } });
+    await recorder.until((event) => event.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    const argv = seen.argv.join(" ");
+    const mount = { harnessUrl: "http://127.0.0.1:8799", token: "comms-fixture" };
+    const gate = JSON.parse(seen.env[`OMB_GATE_CONFIG_${createHash("sha256").update("board").digest("hex")}`]);
+    expect(JSON.parse(gate.OMB_GATE_APPS)).toEqual({ server: "board", ...mount, extension: true });
+    expect(JSON.parse(gate.OMB_GATE_UPSTREAM)).toEqual(board);
+    expect(gate).not.toHaveProperty("OMB_GATE_TOOL_SCOPE");
+    expect(argv).not.toContain("board-secret");
+    expect(JSON.parse(JSON.parse(seen.env[record("draw")]).OMB_REMOTE_MCP_APPS)).toEqual({ server: "draw", ...mount, extension: false });
+    expect(argv).toContain('mcp_servers.notes.command="notes-mcp"');
+    expect(seen.argv).toContain("features.shell_snapshot=false");
+    const thread = seen.calls.find((call: { method: string }) => call.method === "thread/start");
+    expect(thread.params.config["shell_environment_policy.exclude"]).toEqual(expect.arrayContaining(["OMB_GATE_CONFIG_*", "OMB_REMOTE_MCP_CONFIG_*"]));
+  });
+
   // The fake starts each mount as codex-cli 0.160.1 does, whose handshake a strict server refuses.
   describe("a strict URL server", () => {
     const STRICT_TOOLS = [{ name: "report", inputSchema: { type: "object" } }, { name: "campaigns", inputSchema: { type: "object" } }];

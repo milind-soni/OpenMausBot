@@ -256,6 +256,8 @@ jobs:
         run: pnpm exec electron scripts/smoke-approval-modes.cjs
       - name: Verify app permissions and guarded display capture
         run: node scripts/smoke-app-permissions.mjs
+      - name: Verify chat app frames stay sealed
+        run: node scripts/smoke-app-frames.mjs --engagement
       - name: Verify paired phone authorization against packaged harness
         # Forks dist-server/index.js, built by the packaged server step.
         run: pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs

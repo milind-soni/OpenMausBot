@@ -5,6 +5,7 @@ import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { isPersistentQuestionCard, QUESTION_DISMISS_MESSAGE } from "../../shared/ask-question.ts";
 import type { ResolvedSender, SteerQueueReason } from "../../shared/wire.ts";
 import { admit } from "../admission.ts";
+import { AppMessageRate, appContextBlock, prepareAppMessage } from "../chat-apps.ts";
 import { prepareWidgetPress, reopenCancelledPress } from "../chat-widgets.ts";
 import type { ModelSelection, RequestOutcome, SteerOutcome } from "../contracts.ts";
 import { parseDataContext, type DataContext } from "../data-context.ts";
@@ -17,7 +18,7 @@ import type { ReplyTarget } from "../replies.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { acceptedSendMatch, parseSendId } from "../send-idempotency.ts";
-import { cancelSteeredMessage, holdSteeredQueue, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
+import { cancelSteeredMessage, holdSteeredQueue, queuedSteeredMessage, restoreHeldSteeredQueue, settleHeldSteeredQueue } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
@@ -57,6 +58,7 @@ export interface BotMessageRouteDeps {
     input: {
       botId: string; threadId: string; text: string; sendId?: string; replyTo?: Message; sender?: ResolvedSender;
       trigger: UsageTrigger; dataContext?: DataContext; personPresent: boolean;
+      app?: { context?: string; fromApp?: Message["fromApp"] };
     },
     guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
   ): Promise<DirectSendReceipt>;
@@ -136,6 +138,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
   const pinnedClientThread = pinnedClientThreadGuard(store);
   /** widget -> sendId of a press on its way in: a second tap before acceptance must not send a second answer. */
   const pressesInFlight = new Map<string, string | undefined>();
+  const appMessageRate = new AppMessageRate();
   return async ({ req, res, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const requirePinnedClientThread = pinnedClientThread(auth, req);
@@ -149,6 +152,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       }
       const pressed = body.widgetAction !== undefined && body.widgetAction !== null;
       if (guarded && pressed) return json(res, 400, { error: "guarded sends cannot answer a widget" });
+      const fromAnApp = body.appMessage !== undefined && body.appMessage !== null;
+      if (guarded && fromAnApp) return json(res, 400, { error: "guarded sends cannot speak for an app" });
+      if (pressed && fromAnApp) return json(res, 400, { error: "send widgetAction or appMessage, not both" });
       // A distinct route, so an older server answers 404 instead of ignoring the safety preconditions.
       const guardedBody = guarded ? guardedSendSchema.safeParse(body) : null;
       if (guardedBody && !guardedBody.success) {
@@ -157,8 +163,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           ? "onBehalfOf must name the person with an email address, a name, or both"
           : "guarded sends require threadId, sendId, text and expectedActiveLeafId" });
       }
-      const typed = pressed ? "" : String(body.text ?? "").trim();
-      if (!pressed && !typed) return json(res, 400, { error: "text required" });
+      const typed = pressed || fromAnApp ? "" : String(body.text ?? "").trim();
+      if (!pressed && !fromAnApp && !typed) return json(res, 400, { error: "text required" });
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
       requirePinnedClientThread(bot.id, body.threadId);
@@ -178,15 +184,27 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const sendId = parseSendId(body.sendId);
       const press = pressed ? prepareWidgetPress(store, threadId, body.widgetAction, sendId) : null;
       if (press && !press.ok) return json(res, press.status, { error: press.error });
-      const text = press ? press.text : typed;
-      const target = resolveReplyTarget(threadId, press ? press.messageId : body.replyToId);
-      // Only a real press marks the reply; a typed reply to the same row never does, whatever its words.
-      const replyTo: ReplyTarget | undefined = press && target ? { ...target, widgetPress: { label: press.label, action: press.action } } : target;
+      const appSent = fromAnApp ? prepareAppMessage(store, threadId, body.appMessage) : null;
+      if (appSent && !appSent.ok) return json(res, appSent.status, { error: appSent.error });
+      const text = press ? press.text : appSent ? appSent.text : typed;
+      const target = resolveReplyTarget(threadId, press ? press.messageId : appSent ? appSent.messageId : body.replyToId);
+      // Only a real press, or an app's own words, marks the reply; a typed reply to the same row never does, whatever its words.
+      const replyTo: ReplyTarget | undefined = press && target
+        ? { ...target, widgetPress: { label: press.label, action: press.action } }
+        : appSent && target ? { ...target, appMessage: { title: appSent.title, origin: appSent.origin } } : target;
       const pressKey = press?.settles ? `${threadId}:${press.messageId}` : undefined;
       if (pressKey && pressesInFlight.has(pressKey) && !(sendId && pressesInFlight.get(pressKey) === sendId)) {
         return json(res, 409, { error: "That answer is already on its way." });
       }
-      const dataContext = press ? undefined : parseDataContext(body.dataContext);
+      const dataContext = press || appSent ? undefined : parseDataContext(body.dataContext);
+      const retried = Boolean(sendId && (store.messagesFor(threadId).some((message) => message.sendId === sendId) || queuedSteeredMessage(bot.id, threadId, sendId)));
+      const slot = appSent ? appMessageRate.reserve(`${threadId}:${appSent.messageId}`, sendId) : null;
+      if (appSent && !slot) return json(res, 429, { error: "This app has sent too many messages. Wait a while, or type your message." });
+      // A relay is not the person at this screen: it never carries what their apps last showed.
+      const appContext = guarded || retried ? null : appContextBlock(store, threadId);
+      const app = appContext || appSent
+        ? { ...(appContext ? { context: appContext.block } : {}), ...(appSent ? { fromApp: { messageId: appSent.messageId, title: appSent.title } } : {}) }
+        : undefined;
       const sender = messageSender(auth);
       const guardedStart = guarded
         ? async (currentAtStart: BotRecord): Promise<DirectSendReceipt> => {
@@ -216,14 +234,16 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (pressKey) pressesInFlight.set(pressKey, sendId);
       try {
         const receipt = await acceptDirectSend({
-          botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext,
+          botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
           // The bot's own shell reaches this route on a headless server (loopback is the owner), so only a
           // paired session or the desktop capability proves a person and lifts the webhook block.
           personPresent: auth.kind === "session" || DESKTOP_MANAGED,
         }, guardedStart);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
+        appContext?.deliver();
         return json(res, 202, receipt);
       } catch (error) {
+        slot?.release();
         if (error instanceof DirectSendRefused) return json(res, error.status, error.body);
         throw error;
       } finally {
@@ -297,6 +317,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           steered: true,
           sender: item.sender,
           ...spokenLineFields(item.via, item.callId),
+          ...(item.fromApp ? { fromApp: item.fromApp } : {}),
         }));
         const asked = messages.filter((_, index) => !held.items[index]?.unattended && !held.items[index]?.peerAsk).at(-1);
         if (asked) store.setTaskAskedAt(bot.id, bot.threadId, asked.at);

@@ -1,13 +1,38 @@
-// The agents tools that draw a chat card: the Watcher's options card and the widget tools.
+// The agents tools that draw a chat card: the Watcher's options card, the widget tools and the page tools.
+import { parseShowHtmlInput, parseUpdateHtmlInput } from "../../shared/app.ts";
 import { parseOptionsCardInput, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { parseWidgetInput, widgetAdvice } from "../../shared/widget.ts";
 
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 
-export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set(["create_options_card", "show_widget", "update_widget"]);
+export const CARD_TOOL_NAMES: ReadonlySet<string> = new Set(["create_options_card", "show_widget", "update_widget", "show_html", "update_html"]);
 
 const CARD_ROUTE = "/api/internal/options-card";
+
+const MASKED = " Something in it read as a secret and was masked before it was stored. Never put secrets in a page or a widget.";
+
+async function callAppTool(name: "show_html" | "update_html", args: Json, context: ToolCallContext): Promise<ToolCallResult> {
+  const updating = name === "update_html";
+  const parsed = updating ? parseUpdateHtmlInput(args) : parseShowHtmlInput(args);
+  if (!parsed.ok) return { text: parsed.error, isError: true };
+  const body = updating
+    ? { tool: name, app_id: args.app_id, html: args.html, ...(typeof args.title === "string" ? { title: args.title } : {}) }
+    : {
+        tool: name, html: args.html, title: args.title,
+        ...(typeof args.height === "number" ? { height: args.height } : {}),
+        ...(typeof args.fallback_text === "string" ? { fallback_text: args.fallback_text } : {}),
+      };
+  const answer = await context.client.apiResponse(CARD_ROUTE, { method: "POST", body: JSON.stringify(body) });
+  if (!answer.ok) return { text: String(answer.body.error ?? (updating ? "Could not update that page." : "Could not show that page.")), isError: true };
+  const messageId = String(answer.body.messageId ?? "");
+  const masked = answer.body.masked === true ? MASKED : "";
+  return {
+    text: (updating
+      ? `Updated app ${messageId}.`
+      : `Shown as app ${messageId}. To change it, call update_html with app_id "${messageId}".`) + masked,
+  };
+}
 
 export async function callCardTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { api, apiResponse } = context.client;
@@ -25,6 +50,8 @@ export async function callCardTool(name: string, args: Json, context: ToolCallCo
       text: `Rendered the native options card in this Watcher thread (message ${String(result.messageId ?? "created")}). Wait for the person's click or custom response; the card itself authorizes no external action.`,
     };
   }
+
+  if (name === "show_html" || name === "update_html") return callAppTool(name, args, context);
 
   const parsed = parseWidgetInput(args.widget);
   if (!parsed.ok) return { text: parsed.error, isError: true };

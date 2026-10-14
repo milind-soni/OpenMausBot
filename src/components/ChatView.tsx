@@ -89,7 +89,7 @@ import { DataResultChip } from "./DataResultChip";
 import { ThreadRefText } from "./ThreadRefs";
 import { optionsCardRow } from "./OptionsCardRow";
 import { MessageBoundary } from "./MessageBoundary";
-import { WidgetMessage } from "./widget/WidgetMessage";
+import { RichMessageRow, UserLineNote, richRowKind } from "./RichMessageRow";
 import { Composer } from "./Composer";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
 import { ThreadContextWarning } from "./ContextWarning";
@@ -594,11 +594,7 @@ const Bubble = memo(function Bubble({
                   {t("chat.sentMidTurn")}
                 </div>
               )}
-              {message.via === "call" && (
-                <span className="mt-1 text-[11px] text-ink-tertiary" title={t("chat.viaCall")}>
-                  {t("chat.viaCall")}
-                </span>
-              )}
+              <UserLineNote message={message} />
               {collapsible && (
                 <button onClick={() => setExpanded(true)} className="mt-1 text-[12.5px] text-ink-secondary hover:text-ink">
                   {t("chat.showFull")}
@@ -886,7 +882,7 @@ const MessagesList = memo(function MessagesList({
               />
             );
           }
-          switch (m.kind === "widget" && !m.widget ? "text" : m.kind) {
+          switch (richRowKind(m)) {
             case "secret":
               return m.secret ? <SecretRequestCard botId={botId} threadId={threadId} message={m} /> : null;
             case "signin":
@@ -896,7 +892,8 @@ const MessagesList = memo(function MessagesList({
             case "options":
               return optionsCardRow({ message: m, transcript, botId, botName, threadId });
             case "widget":
-              return <MessageBoundary fallbackText={m.text ?? ""}><WidgetMessage botId={botId} threadId={threadId} message={m} /></MessageBoundary>;
+            case "app":
+              return <RichMessageRow botId={botId} botName={botName} threadId={threadId} message={m} />;
             case "routine.run":
               return <RoutineRunRow message={m} botId={botId} />;
             case "call":
@@ -1355,7 +1352,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       >
         <div
           ref={transcriptRef}
-          className="glass-scroller-content flex w-full flex-col gap-3"
+          className="glass-scroller-content relative flex w-full flex-col gap-3"
           style={{ paddingBottom: composerDock.pad }}
           role="log"
           // off: a polite log re-reads every tick and chip while the bot works; TranscriptAnnouncer speaks once when

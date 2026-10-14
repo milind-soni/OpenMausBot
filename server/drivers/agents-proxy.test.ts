@@ -626,6 +626,8 @@ describe("agents-proxy MCP surface", () => {
       "attach_file",
       "show_widget",
       "update_widget",
+      "show_html",
+      "update_html",
       "post_to_room",
       "create_bot",
       "list_team_setup",

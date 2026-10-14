@@ -190,12 +190,26 @@ export class RemoteMcpClient {
     this.onNotification = options.onNotification;
   }
 
-  async initialize(clientName: string, signal: AbortSignal): Promise<unknown> {
-    const result = await this.request("initialize", {
-      protocolVersion: PROTOCOL_VERSION,
-      capabilities: {},
-      clientInfo: { name: clientName, version: "1" },
-    }, signal);
+  extensions: "ok" | "refused" | undefined;
+
+  /** A strict server refuses an initialize field it does not know (HTTP 400 or a JSON-RPC error), so a
+   * refused handshake with `extensions` is sent once more without them. */
+  async initialize(clientName: string, signal: AbortSignal, options: { extensions?: Record<string, unknown> } = {}): Promise<unknown> {
+    const params = { protocolVersion: PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: clientName, version: "1" } };
+    let result: unknown;
+    if (options.extensions && Object.keys(options.extensions).length) {
+      try {
+        result = await this.request("initialize", { ...params, capabilities: { extensions: options.extensions } }, signal);
+        this.extensions = "ok";
+      } catch (error) {
+        if (signal.aborted || !(error instanceof McpRpcError || (error instanceof McpHttpError && error.status === 400))) throw error;
+        this.sessionId = null;
+        this.extensions = "refused";
+        result = await this.request("initialize", params, signal);
+      }
+    } else {
+      result = await this.request("initialize", params, signal);
+    }
     if (isRecord(result) && typeof result.protocolVersion === "string") this.protocolVersion = result.protocolVersion;
     await this.notify("notifications/initialized", undefined, signal);
     return result;

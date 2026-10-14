@@ -443,4 +443,10 @@ describe("isContextMessage", () => {
     expect(isContextMessage({ kind: "widget" })).toBe(false);
     expect(isContextMessage({ kind: "options", text: "Pick one" })).toBe(false);
   });
+
+  it("keeps an app row by its text fallback", () => {
+    expect(isContextMessage({ kind: "app", text: "[App] Sales by month\nRevenue up 12%" })).toBe(true);
+    expect(isContextMessage({ kind: "app", text: "" })).toBe(false);
+    expect(isContextMessage({ kind: "app" })).toBe(false);
+  });
 });

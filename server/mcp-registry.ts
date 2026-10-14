@@ -5,6 +5,8 @@ import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts"
 /** One config.json `mcpServers` entry: the block Claude Code, Cursor and Claude Desktop write. */
 export interface StoredStdioMcpServer extends StdioMcpSpec {
   enabled: boolean;
+  /** "Show its apps in chat": stored only as `false`; on by default. */
+  apps?: false;
 }
 /** An app pre-registered with the server's authorization server; its secret is a credential, never listed. */
 export interface McpOAuthClientConfig {
@@ -15,6 +17,8 @@ export interface McpOAuthClientConfig {
 export interface StoredRemoteMcpServer extends RemoteMcpSpec {
   enabled: boolean;
   oauth?: McpOAuthClientConfig;
+  /** "Show its apps in chat": stored only as `false`; on by default. */
+  apps?: false;
 }
 export type StoredMcpServer = StoredStdioMcpServer | StoredRemoteMcpServer;
 
@@ -25,6 +29,7 @@ export interface StdioMcpServerListing {
   args: string[];
   envKeys: string[];
   enabled: boolean;
+  apps: boolean;
 }
 export interface RemoteMcpServerListing {
   name: string;
@@ -32,6 +37,7 @@ export interface RemoteMcpServerListing {
   url: string;
   headerKeys: string[];
   enabled: boolean;
+  apps: boolean;
   oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean };
 }
 export type McpServerListing = StdioMcpServerListing | RemoteMcpServerListing;
@@ -99,6 +105,7 @@ const stdioEntrySchema = z.object({
   args: z.array(z.string().max(4_096)).max(MAX_ARGS).optional(),
   env: z.record(z.string(), z.string().max(16_384)).optional(),
   enabled: z.boolean().optional(),
+  apps: z.boolean().optional(),
 }).strict();
 
 const stdioMutationSchema = stdioEntrySchema.extend({
@@ -124,6 +131,7 @@ const remoteEntrySchema = z.object({
   headers: z.record(z.string(), z.string().max(16_384)).optional(),
   oauth: oauthClientSchema.optional(),
   enabled: z.boolean().optional(),
+  apps: z.boolean().optional(),
 }).strict();
 
 const remoteMutationSchema = remoteEntrySchema.extend({
@@ -208,6 +216,7 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
       args: parsed.data.args ?? [],
       env: env.values,
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
+      ...appsFor(parsed.data.apps, mutation, existing),
     },
   };
 }
@@ -237,6 +246,7 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
       headers: headers.values,
       ...(oauth.value ? { oauth: oauth.value } : {}),
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
+      ...appsFor(parsed.data.apps, mutation, existing),
     },
   };
 }
@@ -244,6 +254,11 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
 function enabledFor(value: boolean | undefined, mutation: boolean, existing?: StoredMcpServer): boolean {
   if (!mutation) return value !== false;
   return existing ? (value ?? existing.enabled) : false;
+}
+
+function appsFor(value: boolean | undefined, mutation: boolean, existing?: StoredMcpServer): { apps?: false } {
+  const on = value ?? (mutation && existing ? existing.apps !== false : true);
+  return on ? {} : { apps: false };
 }
 
 export function parseStoredMcpServer(name: string, raw: unknown): Parsed {
@@ -309,6 +324,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
         url: server.url,
         headerKeys: Object.keys(server.headers).sort(),
         enabled: server.enabled,
+        apps: server.apps !== false,
         ...(server.oauth ? {
           oauth: { clientId: server.oauth.clientId, scopes: server.oauth.scopes ?? [], clientSecretConfigured: Boolean(server.oauth.clientSecret) },
         } : {}),
@@ -320,6 +336,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
       args: server.args,
       envKeys: Object.keys(server.env).sort(),
       enabled: server.enabled,
+      apps: server.apps !== false,
     }];
   });
 }

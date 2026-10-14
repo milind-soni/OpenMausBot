@@ -4,6 +4,7 @@ import {
   type WidgetAction, type WidgetNode, type WidgetPayload, type WidgetRoot, type WidgetSettled,
 } from "../shared/widget.ts";
 import type { MausColor } from "../shared/wire.ts";
+import type { ChatApps } from "./chat-apps.ts";
 import { createOptionsCard } from "./options-card.ts";
 import { isSecretName, mask, redactSecretsInText } from "./redact.ts";
 import type { Message } from "./store.ts";
@@ -94,16 +95,31 @@ function canonicalWidget(input: Record<string, unknown>): CanonicalWidget {
 }
 
 /** The route has already checked that the conversation is the calling bot's own. */
-export function createAgentCard(args: {
+export interface AgentCardArgs {
   store: AgentCardStore;
   bot: { id: string; name: string; color: MausColor };
   threadId: string;
   input: unknown;
   /** The row a widget call wrote: the calling session made it, so it is never offered back to it as unseen. */
   authored?(messageId: string): void;
-}): AgentCardResult {
+  apps?: Pick<ChatApps, "createAppCard" | "recordMcpAppCall">;
+}
+
+export type McpAppCardInput = { tool: "mcp_app" } & Record<string, unknown>;
+
+export function createAgentCard(args: AgentCardArgs & { input: McpAppCardInput }): Promise<AgentCardResult>;
+export function createAgentCard(args: AgentCardArgs): AgentCardResult;
+export function createAgentCard(args: AgentCardArgs): AgentCardResult | Promise<AgentCardResult> {
   const { store, bot, threadId, input } = args;
   if (!isRecord(input) || input.tool === undefined) return createOptionsCard(args);
+  if (input.tool === "mcp_app") {
+    if (!args.apps?.recordMcpAppCall) return Promise.resolve({ ok: false, status: 400, error: "MCP apps are not available on this computer." });
+    return args.apps.recordMcpAppCall({ bot, threadId, input, ...(args.authored ? { authored: args.authored } : {}) });
+  }
+  if (input.tool === "show_html" || input.tool === "update_html") {
+    if (!args.apps) return { ok: false, status: 400, error: "Pages are not available on this computer." };
+    return args.apps.createAppCard({ bot, threadId, input, ...(args.authored ? { authored: args.authored } : {}) });
+  }
   if (input.tool !== "show_widget" && input.tool !== "update_widget") {
     return { ok: false, status: 400, error: "tool: must be show_widget or update_widget." };
   }

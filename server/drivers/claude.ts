@@ -28,7 +28,7 @@ import type {
   SteerOutcome,
   TextGenerationOptions,
 } from "../contracts.ts";
-import { gateServer, resultBudget } from "../mcp-gate-config.ts";
+import { appMountFor, gateServer, resultBudget } from "../mcp-gate-config.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { newEventId, newId } from "../contracts.ts";
@@ -1276,7 +1276,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const budget = resultBudget(turnEnvironment);
       for (const name of turn.toolScope === undefined ? botOwned : Object.keys(mcpServers)) {
         if (!canUseMcpServer(turn.toolScope, name)) { delete mcpServers[name]; continue; }
-        const gated = gateServer({ name, server: mcpServers[name], threadId, budget: botOwned.has(name) ? budget : 0, nodeEnv: NODE_ENV_FLAG, toolScope: turn.toolScope });
+        const gated = gateServer({ name, server: mcpServers[name], threadId, budget: botOwned.has(name) ? budget : 0, nodeEnv: NODE_ENV_FLAG, toolScope: turn.toolScope, apps: appMountFor(name, turn) });
         if (gated) mcpServers[name] = { ...gated, ...((mcpServers[name] as { alwaysLoad?: unknown })?.alwaysLoad === true ? { alwaysLoad: true } : {}) };
       }
       allowed.splice(0, allowed.length, ...allowed.filter((name) => Object.hasOwn(mcpServers, name.slice("mcp__".length))));

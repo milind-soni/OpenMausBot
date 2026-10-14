@@ -26,7 +26,9 @@ import {
   plainHttpProxyFetch,
   remoteMcpSpec,
 } from "./mcp-http.ts";
+import { APP_ONLY_REFUSAL, AppObserver, REMOTE_MCP_APPS_ENV, UI_EXTENSION, modelVisible, parseAppMount } from "./mcp-app-observer.ts";
 import { lenientToolValidator, schemaProblems } from "./mcp-schema-validator.ts";
+import { APP_EXTENSION_KEY } from "../shared/app.ts";
 
 type Json = Record<string, unknown>;
 function isRecord(value: unknown): value is Json {
@@ -57,7 +59,7 @@ class Refusal extends Error {
   }
 }
 
-const SETTINGS = ["OMB_REMOTE_MCP_SERVER", "OMB_REMOTE_MCP_DIRECTORY"];
+const SETTINGS = ["OMB_REMOTE_MCP_SERVER", "OMB_REMOTE_MCP_DIRECTORY", REMOTE_MCP_APPS_ENV];
 /** Codex hands every MCP child one shared environment, so a mount names its own record; settings leave this env once read. */
 function privateSettings(): Record<string, string | undefined> {
   if (process.argv.length === 2) {
@@ -97,6 +99,14 @@ function directorySettings(raw: string | undefined): { server: string; scope: To
   return fail("invalid tool directory configuration");
 }
 const directory = directorySettings(settings.OMB_REMOTE_MCP_DIRECTORY);
+const observer = (() => {
+  try {
+    const mount = parseAppMount(settings[REMOTE_MCP_APPS_ENV]);
+    return mount ? new AppObserver(mount, { log: (line) => process.stderr.write(`mcp-remote-proxy: ${line}\n`) }) : undefined;
+  } catch { return fail("invalid MCP apps configuration"); }
+})();
+const HANDSHAKE = observer?.mount.extension ? { extensions: { [APP_EXTENSION_KEY]: UI_EXTENSION } } : {};
+const appOnly = new Set<string>();
 
 const REMOTE_ERROR_CHARS = 1_000;
 /** Configured values (address parts, header values) a remote error must never echo. */
@@ -154,6 +164,29 @@ const tasks = new Set<Promise<void>>();
 let initialized = false;
 let closing = false;
 
+/** A tool only an MCP app's view may call is never listed to the engine, and a call to it is refused. */
+async function upstream(method: string, params: unknown, signal: AbortSignal): Promise<unknown> {
+  if (method === "initialize") {
+    const result = await client.initialize("OpenMausBot tool proxy", signal, HANDSHAKE);
+    if (client.extensions === "refused") process.stderr.write("mcp-remote-proxy: the server refused the MCP Apps extension; connected without it\n");
+    observer?.initialized(result);
+    return result;
+  }
+  if (method === "tools/call" && isRecord(params) && appOnly.has(params.name as string)) throw new Refusal(-32602, APP_ONLY_REFUSAL);
+  const result = await client.request(method, params, signal);
+  if (method === "tools/list" && isRecord(result) && Array.isArray(result.tools)) {
+    observer?.listed(result);
+    for (const tool of result.tools) {
+      if (!isRecord(tool) || typeof tool.name !== "string") continue;
+      if (modelVisible(tool)) appOnly.delete(tool.name);
+      else appOnly.add(tool.name);
+    }
+    return { ...result, tools: result.tools.filter(modelVisible) };
+  }
+  if (method === "tools/call") observer?.returned(params, result);
+  return result;
+}
+
 /** Under its own deadline, so a cancelled first request does not cancel the read for the next one. */
 async function readCatalog(): Promise<CatalogTool[]> {
   const signal = AbortSignal.any([closed.signal, AbortSignal.timeout(CATALOG_MS)]);
@@ -161,7 +194,7 @@ async function readCatalog(): Promise<CatalogTool[]> {
   const cursors = new Set<string>();
   let cursor: string | undefined;
   for (let page = 0; page < CATALOG_PAGES; page += 1) {
-    const result = await client.request("tools/list", cursor === undefined ? {} : { cursor }, signal);
+    const result = await upstream("tools/list", cursor === undefined ? {} : { cursor }, signal);
     if (!isRecord(result) || !Array.isArray(result.tools)) throw new Error("invalid tool catalog");
     for (const tool of result.tools) {
       if (isRecord(tool) && typeof tool.name === "string" && tool.name.trim()) tools.push(tool as CatalogTool);
@@ -226,15 +259,15 @@ async function callTool(params: unknown, signal: AbortSignal): Promise<unknown> 
     const call = (await currentCatalog(signal)).tools.call(params.arguments);
     if ("answer" in call) return call.answer;
     if (!allowed(call.name)) return { content: [{ type: "text", text: SELECTION_EXCLUDES }], isError: true };
-    return client.request("tools/call", { ...(isRecord(params._meta) ? { _meta: params._meta } : {}), name: call.name, arguments: call.arguments }, signal);
+    return upstream("tools/call", { ...(isRecord(params._meta) ? { _meta: params._meta } : {}), name: call.name, arguments: call.arguments }, signal);
   }
   if (!allowed(params.name)) throw new Refusal(-32602, SELECTION_EXCLUDES);
-  return client.request("tools/call", params, signal);
+  return upstream("tools/call", params, signal);
 }
 
 async function directed(message: Json, signal: AbortSignal): Promise<unknown> {
   if (message.method === "initialize") {
-    const result = await client.initialize("OpenMausBot tool proxy", signal);
+    const result = await upstream("initialize", undefined, signal);
     if (!isRecord(result)) return result;
     const info = isRecord(result.serverInfo) ? result.serverInfo : {};
     const title = typeof info.title === "string" ? info.title : typeof info.name === "string" ? info.name : undefined;
@@ -249,7 +282,7 @@ async function directed(message: Json, signal: AbortSignal): Promise<unknown> {
     return { tools: searched ? tools.listed(context) : tools.tools };
   }
   if (message.method === "tools/call") return callTool(message.params, signal);
-  return client.request(message.method as string, message.params, signal);
+  return upstream(message.method as string, message.params, signal);
 }
 
 async function handle(message: Json): Promise<void> {
@@ -276,11 +309,7 @@ async function handle(message: Json): Promise<void> {
   const deadline = message.method !== "tools/call" ? 30_000 : directory ? 120_000 : undefined;
   const signal = deadline === undefined ? controller.signal : AbortSignal.any([controller.signal, AbortSignal.timeout(deadline)]);
   try {
-    const result = directory
-      ? await directed(message, signal)
-      : message.method === "initialize"
-        ? await client.initialize("OpenMausBot tool proxy", signal)
-        : await client.request(message.method, message.params, signal);
+    const result = directory ? await directed(message, signal) : await upstream(message.method, message.params, signal);
     if (message.method === "initialize") initialized = true;
     send({ jsonrpc: "2.0", id: message.id, result });
   } catch (failure) {

@@ -1416,6 +1416,44 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(JSON.stringify(seen.argv)).not.toContain("tok-docs");
   });
 
+  // Claude Code advertises no MCP Apps UI extension and keeps tool results to itself, so only OMB's
+  // remote proxy can observe a URL app server.
+  it("mounts a url app server through the proxy and a url server without apps natively, unchanged", async () => {
+    await create();
+    const dump = join(scratch, "app-mcp.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const docs = { type: "http" as const, url: "https://docs.example/mcp", headers: { Authorization: "Bearer tok-docs" } };
+    const draw = { type: "http" as const, url: "https://mcp.excalidraw.com/mcp", headers: { Authorization: "Bearer tok-draw" } };
+    const board = { command: "board-mcp", args: [], env: {} };
+    const agents = { command: process.execPath, args: ["agents-proxy.js"], env: { OMB_HARNESS_URL: "http://127.0.0.1:8799", OMB_COMMS_TOKEN: "comms-fixture" } };
+    await instance.adapter.sendTurn({
+      threadId: "t-app-mcp", text: "hi",
+      integrations: { agents, custom: { docs, draw, board }, mcpApps: { draw: { extension: true }, board: { extension: true } } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.mcpConfig.mcpServers.docs).toEqual(docs);
+    const proxy = seen.mcpConfig.mcpServers.draw;
+    expect(proxy.args[0]).toContain("mcp-remote-proxy");
+    expect(JSON.parse(proxy.env.OMB_REMOTE_MCP_SERVER)).toEqual(draw);
+    expect(JSON.parse(proxy.env.OMB_REMOTE_MCP_APPS)).toEqual({ server: "draw", harnessUrl: "http://127.0.0.1:8799", token: "comms-fixture", extension: true });
+    const gate = seen.mcpConfig.mcpServers.board;
+    expect(gate.args[0]).toContain("mcp-gate");
+    expect(JSON.parse(gate.env.OMB_GATE_APPS)).toMatchObject({ server: "board", extension: true });
+    expect(JSON.stringify(seen.argv)).not.toContain("tok-draw");
+    expect(JSON.stringify(seen.argv)).not.toContain("comms-fixture");
+  });
+
+  it("observes nothing on a turn that cannot report: no agents capability", async () => {
+    await create();
+    const dump = join(scratch, "app-mcp-no-agents.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const draw = { type: "http" as const, url: "https://mcp.excalidraw.com/mcp", headers: {} };
+    await instance.adapter.sendTurn({ threadId: "t-app-mcp-2", text: "hi", integrations: { custom: { draw }, mcpApps: { draw: { extension: true } } } });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.draw).toEqual(draw);
+  });
+
   it("keeps a selected url server's whole catalog: Claude Code searches tools itself", async () => {
     await create();
     const dump = join(scratch, "remote-mcp-scoped.json");

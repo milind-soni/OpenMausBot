@@ -1,9 +1,11 @@
+import { APP_EXTENSION_KEY } from "../shared/app.ts";
 import { augmentedPath } from "./env-path.ts";
 import {
   PROVIDER_CREDENTIAL_ENV,
   stripWorkspaceCredentialEnv,
 } from "./config.ts";
 import { createLineSplitter } from "./mcp-bridge.ts";
+import { UI_EXTENSION, withUiExtension } from "./mcp-app-observer.ts";
 import { MAX_REMOTE_MCP_BYTES, McpHttpError, REMOTE_MCP_STARTUP_MS, RemoteMcpClient } from "./mcp-http.ts";
 import { discoverMcpAuth } from "./mcp-oauth-discovery.ts";
 import { isRemoteMcpServer, type StoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "./mcp-registry.ts";
@@ -20,12 +22,17 @@ export type McpProbeResult =
 
 export const SIGN_IN_REQUIRED = "This server needs you to sign in.";
 
+export interface McpProbeOptions {
+  extension?: boolean;
+  observe?(info: { tools: unknown[]; uiExtension: "ok" | "refused" | "unknown" }): void;
+}
+
 const MAX_STDOUT_BYTES = MAX_REMOTE_MCP_BYTES;
 const MAX_TOOLS = 100;
 export const STDIO_PROBE_TIMEOUT_MS = 8_000;
 export const REMOTE_PROBE_TIMEOUT_MS = REMOTE_MCP_STARTUP_MS;
 
-function probeEnvironment(server: StoredStdioMcpServer): NodeJS.ProcessEnv {
+export function probeEnvironment(server: Pick<StoredStdioMcpServer, "env">): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: augmentedPath() };
   stripWorkspaceCredentialEnv(env);
   for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
@@ -67,16 +74,22 @@ export function probeMcpServer(
   server: StoredMcpServer,
   timeoutMs?: number,
   signal?: AbortSignal,
+  options: McpProbeOptions = {},
 ): Promise<McpProbeResult> {
   return isRemoteMcpServer(server)
-    ? probeRemoteMcpServer(server, timeoutMs ?? REMOTE_PROBE_TIMEOUT_MS, signal)
-    : probeStdioMcpServer(server, timeoutMs ?? STDIO_PROBE_TIMEOUT_MS, signal);
+    ? probeRemoteMcpServer(server, timeoutMs ?? REMOTE_PROBE_TIMEOUT_MS, signal, options)
+    : probeStdioMcpServer(server, timeoutMs ?? STDIO_PROBE_TIMEOUT_MS, signal, options);
+}
+
+function observeProbe(options: McpProbeOptions, tools: unknown[], uiExtension: "ok" | "refused" | "unknown"): void {
+  try { options.observe?.({ tools, uiExtension }); } catch {}
 }
 
 async function probeRemoteMcpServer(
   server: StoredRemoteMcpServer,
   timeoutMs: number,
   signal?: AbortSignal,
+  options: McpProbeOptions = {},
 ): Promise<McpProbeResult> {
   if (signal?.aborted) return { ok: false, error: publicProbeError("cancelled") };
   const timeout = new AbortController();
@@ -84,10 +97,11 @@ async function probeRemoteMcpServer(
   const combined = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
   const client = new RemoteMcpClient(server, { maxBytes: MAX_REMOTE_MCP_BYTES });
   try {
-    await client.initialize("OpenMausBot", combined);
+    await client.initialize("OpenMausBot", combined, options.extension ? { extensions: { [APP_EXTENSION_KEY]: UI_EXTENSION } } : {});
     const result = await client.request("tools/list", {}, combined);
     const tools = result && typeof result === "object" ? (result as { tools?: unknown }).tools : undefined;
     if (!Array.isArray(tools)) return { ok: false, error: "The server did not return a valid MCP tools list." };
+    observeProbe(options, tools, client.extensions ?? "unknown");
     const secrets = server.oauth?.clientSecret ? { ...server.headers, "oauth.clientSecret": server.oauth.clientSecret } : server.headers;
     return { ok: true, ...publicTools(tools, secrets) };
   } catch (error) {
@@ -113,11 +127,14 @@ async function probeRemoteMcpServer(
   }
 }
 
+const INITIALIZE = { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "OpenMausBot", version: "probe" } };
+
 /** Always reaped, never inherits OpenMaus credentials. */
 function probeStdioMcpServer(
   server: StoredStdioMcpServer,
   timeoutMs: number,
   signal?: AbortSignal,
+  options: McpProbeOptions = {},
 ): Promise<McpProbeResult> {
   return new Promise((resolve) => {
     if (signal?.aborted) {
@@ -140,6 +157,7 @@ function probeStdioMcpServer(
     let settled = false;
     let stdoutBytes = 0;
     let initialized = false;
+    let uiExtension: "ok" | "refused" | "unknown" = options.extension ? "ok" : "unknown";
     let timer: ReturnType<typeof setTimeout> | undefined;
     const onAbort = () => finish({ ok: false, error: publicProbeError("cancelled") });
     const finish = (result: McpProbeResult) => {
@@ -167,7 +185,12 @@ function probeStdioMcpServer(
       }
       if (!frame || typeof frame !== "object") return;
       const value = frame as Record<string, unknown>;
-      if (value.id === 1 && value.result && !initialized) {
+      if (value.id === 1 && value.error !== undefined && options.extension && !initialized && uiExtension === "ok") {
+        uiExtension = "refused";
+        write({ jsonrpc: "2.0", id: 3, method: "initialize", params: INITIALIZE });
+        return;
+      }
+      if ((value.id === 1 || (value.id === 3 && uiExtension === "refused")) && value.result && !initialized) {
         initialized = true;
         write({ jsonrpc: "2.0", method: "notifications/initialized" });
         write({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} });
@@ -179,6 +202,7 @@ function probeStdioMcpServer(
         finish({ ok: false, error: publicProbeError("protocol") });
         return;
       }
+      observeProbe(options, result.tools, uiExtension);
       finish({ ok: true, ...publicTools(result.tools, server.env) });
     });
 
@@ -204,15 +228,6 @@ function probeStdioMcpServer(
       return;
     }
 
-    write({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: "2025-06-18",
-        capabilities: {},
-        clientInfo: { name: "OpenMausBot", version: "probe" },
-      },
-    });
+    write({ jsonrpc: "2.0", id: 1, method: "initialize", params: options.extension ? withUiExtension(INITIALIZE) : INITIALIZE });
   });
 }

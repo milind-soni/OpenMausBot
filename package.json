@@ -132,6 +132,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@modelcontextprotocol/ext-apps": "2.0.3",
     "@tailwindcss/vite": "^4.1.11",
     "@types/node": "^26.2.0",
     "@types/novnc__novnc": "1.6.0",

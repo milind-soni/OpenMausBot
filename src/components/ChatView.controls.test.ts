@@ -167,6 +167,14 @@ describe("glass header", () => {
     expect(markup.slice(frame, header)).toContain("[--glass-tint:var(--color-app)]");
     expect(markup.slice(scroller)).toMatch(/class="glass-scroller-content[^"]*"[^>]*role="log"/);
   });
+
+  it("holds every row's positioned parts inside the transcript, so nothing in it can make the window scroll", () => {
+    // An absolutely positioned reply label with no positioned ancestor in the scroller is placed past
+    // the window, which then scrolls by script: an app frame's scrollIntoView lifts the whole app off the top.
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const transcript = markup.match(/class="(glass-scroller-content[^"]*)"[^>]*role="log"/)?.[1] ?? "";
+    expect(transcript.split(" ")).toContain("relative");
+  });
 });
 
 describe("thread control placement", () => {

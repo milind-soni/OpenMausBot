@@ -194,6 +194,7 @@ export interface FollowupPayload {
   mode?: "chat" | "goal";
   via?: "api" | "call";
   callId?: string;
+  fromApp?: Message["fromApp"];
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
   origin?: WorkOrigin;
@@ -448,6 +449,11 @@ export function deleteThread(threadId: string): void {
     connection.prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
     connection.prepare("DELETE FROM thread_state WHERE thread_id = ?").run(threadId);
   });
+}
+
+export function appDocRefs(): string[] {
+  const rows = db().prepare("SELECT DISTINCT json_extract(json, '$.app.doc') AS doc FROM messages WHERE kind = 'app'").all() as Array<{ doc: unknown }>;
+  return rows.flatMap((row) => (typeof row.doc === "string" && row.doc ? [row.doc] : []));
 }
 
 export function threadsReferencing(fragment: string): string[] {

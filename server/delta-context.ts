@@ -15,7 +15,7 @@ export interface ContextMessage {
 
 /** A Live call's row (kind "call") is a record for people, never context. */
 export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest">): boolean {
-  return Boolean(((m.kind === "text" || m.kind === "widget") && m.text) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
+  return Boolean(((m.kind === "text" || m.kind === "widget" || m.kind === "app") && m.text) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
 }
 
 export interface HandedState {
