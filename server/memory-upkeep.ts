@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { DATA_DIR } from "./config.ts";
+import { DATA_DIR, type AppConfig } from "./config.ts";
 import { CaptureBuffer, capturePrompt, newCandidates, parseCandidates, type Candidate, type CaptureBatch, type CaptureTurn } from "./memory-capture.ts";
 import { factIdentity, lineFactIdentity, notebookIdentities } from "./memory-entries.ts";
 import { mergeTopicText } from "./memory-topics.ts";
@@ -528,4 +528,15 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
       while (inflight.size) await Promise.allSettled(inflight);
     },
   };
+}
+
+export const DEFAULT_CAPTURE_QUIET_MS = 2 * 60_000;
+export const DEFAULT_TIDY_HOUR = 3;
+
+export function captureQuietMs(cfg: AppConfig): number {
+  return cfg.memory?.captureQuietMs ?? DEFAULT_CAPTURE_QUIET_MS;
+}
+
+export function tidyHour(cfg: AppConfig): number {
+  return cfg.memory?.tidyHour ?? DEFAULT_TIDY_HOUR;
 }

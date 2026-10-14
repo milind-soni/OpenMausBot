@@ -225,6 +225,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
   { methods: ["POST"], path: /^\/api\/auth\/stream-ticket$/ },
   { methods: ["POST"], path: /^\/api\/auth\/logout$/ },
+  { methods: ["GET", "PUT", "DELETE"], path: /^\/api\/push\/device$/ },
   // Own desktop connector, bound to a private secret; listed only while features.sharedComputers is on.
   { methods: ["POST"], path: /^\/api\/shared-computers\/(?:connect|[\w-]+\/(?:poll|lease|result|disconnect))$/, feature: "sharedComputers" },
   { methods: ["GET"], path: /^\/api\/shared-computers$/, feature: "sharedComputers" },

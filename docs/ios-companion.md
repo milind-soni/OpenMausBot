@@ -53,11 +53,12 @@ The first version includes:
   sufficient; 1Password, Bitwarden, and other AutoFill providers are optional.
 
 Alerts work while the app is open or for the short period it remains connected
-after moving to the background. Once iOS suspends or closes the app, new alerts
-cannot arrive. Closed-app push delivery, voice, and App Store release
-automation are not part of this version. The optional hosted transport connects
-to the user's own computer; it is not a cloud transcript store and cannot wake
-a terminated iOS app.
+after moving to the background. Once iOS suspends or closes the app, the event
+stream is gone; the harness can then wake the phone through Apple Push
+Notification service, by way of a relay in the hosted control plane (see
+[Closed-app alerts](#closed-app-alerts-apns) below). Voice and App Store
+release automation are not part of this version. The optional hosted transport
+connects to the user's own computer; it is not a cloud transcript store.
 
 The Mac must be running OpenMausBot and must not be asleep. Desktop
 **Settings → Remote access** offers an off-by-default **Keep this computer awake**
@@ -217,6 +218,136 @@ the guardian first makes forwarding unavailable, confirms the connector is
 dead, and only then releases the gateway. Another process that later binds a
 local port cannot inherit the public route.
 
+## Closed-app alerts (APNs)
+
+When a bot needs the person (an approval, a question, a sign-in, a mention,
+an incident, a turn that could not start, and the harness's other
+notifications), the harness emits a `notify` frame. A phone whose app holds
+the event stream shows it itself. For a phone whose app is suspended or
+closed, the harness asks the push relay in the hosted control plane to wake
+it. Proposal and decision: issue #2769.
+
+```text
+ harness ──(installation credential, HTTPS)──▶ control plane push relay ──(project APNs key)──▶ APNs ──▶ iPhone
+    ▲                                                                                                    │
+    └──────────────── the app opens and fetches the content over its usual connection ◀─────────────────┘
+```
+
+**Why a relay.** Apple accepts pushes for an App Store or TestFlight build
+only when they are signed with the key of the team that publishes the app.
+That key cannot ship inside every harness, and a harness may run on a VPS or
+in a container rather than on the Mac. So the project's relay holds the key,
+and each harness proves who it is with the installation credential it already
+holds for the hosted transport (`omb_install_…`, from the desktop's hosted
+sign-in, `openmausbot serve --tunnel`, or a fleet's
+`OMB_INSTALLATION_CREDENTIAL`). The harness needs only outbound HTTPS. A
+harness without that credential sends nothing; closed-app alerts are then
+simply unavailable.
+
+**Content-free.** A push carries the alert's kind, a title made from the
+bot's and room's names, and opaque ids. Never the message text, a reply, a
+command, a file path, or a secret. The title is the harness's own banner
+wording, except that a sign-in request leaves out the website and a spend
+notice its amounts. The app fetches everything else from the harness after
+the tap.
+
+**When the harness sends.** Only when the bot's own notification switch
+produced an alert at all; when `features.phonePush` is on for the workspace
+(the default; `PUT /api/config {"features":{"phonePush":false}}` turns it off);
+when this phone has not opted out; when the phone may see that bot or room
+(the same rule as its event stream); and when the phone holds **no** live
+event stream. While the app is connected it shows the frame itself, so it is
+never alerted twice. The harness also coalesces repeats of one kind in one
+conversation for 10 seconds and caps each phone at 30 pushes per 10 minutes.
+
+### What the iOS app implements
+
+1. **Get a token.** After notification permission is granted, call
+   `registerForRemoteNotifications()` and hex-encode the device token in
+   lowercase. Entitlement `aps-environment`; the optional Time Sensitive
+   Notifications capability lets approvals and questions break through Focus.
+2. **Register it with each saved computer**, on the connection that computer
+   already uses (the companion bearer token or the paired session; the
+   harness keys the registration by that identity, never by anything in the
+   body):
+
+   ```http
+   PUT /api/push/device
+   {"token":"<lowercase hex>","environment":"production","pairing":"<tag>"}
+   ```
+
+   - `environment`: `"sandbox"` for development-signed builds,
+     `"production"` for TestFlight and the App Store.
+   - `pairing`: 8–64 characters of `[A-Za-z0-9_-]`, generated once per saved
+     computer and kept with its Keychain pairing. Every push echoes it, so a
+     tap opens the computer that sent it.
+   - `enabled`: optional per-phone opt-out. `false` keeps the registration
+     and sends nothing. Send it only when the person changes the setting:
+     a registration without it keeps the phone's previous choice (on for a
+     new phone), so the refresh sent on every launch never undoes an opt-out.
+
+   It is idempotent; send it on every launch and whenever iOS issues a new
+   token. The answer is `{"push":"on"|"off"|"no-account","device":{…},"relay":"registered"|"pending"|"off"}`.
+   `no-account` means that computer has no hosted sign-in, so it cannot wake
+   the phone; the app may say so in its notification settings.
+3. **Read or remove it.** `GET /api/push/device` returns the same `push` and
+   `device`. `DELETE /api/push/device` removes this phone's registration
+   here and at the relay; call it when the person removes the computer from
+   the phone. Revoking the phone on the computer removes it too.
+4. **Handle the push.** The payload, built by the relay:
+
+   ```json
+   {
+     "aps": {
+       "alert": { "title": "Scout in Launch needs approval" },
+       "sound": "default",
+       "thread-id": "<threadId>",
+       "interruption-level": "time-sensitive"
+     },
+     "omb": {
+       "v": 1,
+       "kind": "approval",
+       "botId": "<botId>",
+       "botName": "Scout",
+       "threadId": "<threadId>",
+       "roomId": "<roomId>",
+       "roomName": "Launch",
+       "pairing": "<tag>"
+     }
+   }
+   ```
+
+   `interruption-level` is `time-sensitive` for `approval`, `question`,
+   `sign-in` and `mention`, and `active` otherwise. `roomId`, `roomName` and
+   `pairing` are present only when known. Treat an unknown `kind` (a newer
+   harness) as a plain alert, and an unknown `omb.v` as "open the app".
+   Repeats for the same kind and conversation share an APNs collapse id, so a
+   newer one replaces the older on the lock screen.
+5. **Route the tap.** Select the saved computer whose `pairing` matches;
+   only a push without `pairing` uses the current computer. If `pairing` is
+   present but matches no saved computer (it was removed from the phone),
+   open the app without navigating. Otherwise connect as usual and open
+   `threadId`: in the room `roomId` when present, otherwise the bot `botId`'s
+   conversation. Fetch the content through the existing API; the push has
+   none to show.
+6. **Foreground race.** If a push arrives while the app has just reconnected
+   and is showing the same alert from the event stream,
+   `userNotificationCenter(_:willPresent:)` may suppress it.
+
+The wire contract between harness and relay (version 1) is
+`shared/phone-push.ts`; the relay and the secrets it needs are described in
+`cloudflare/control-plane/README.md`. Registrations live in
+`push-devices.json` in the data directory (owner-only), keyed
+`companion:<device id>` or `session:<session id>`. The relay stores only the
+token, its environment and the installation it belongs to.
+
+Known gaps: a phone unpaired through the companion sidecar while the harness
+was not running keeps its registration until APNs reports the token dead or
+the app deletes it, because the sidecar's unpairing notice is best effort.
+The harness judges "app is open" by an open event stream; a stream held open
+by a network middlebox after iOS suspended the app delays pushes until it
+drops.
+
 ## Pairing and device security
 
 1. On the Mac, open **Settings → Remote access** and choose **Pair a phone**. The app
@@ -341,6 +472,9 @@ Allowed in the first release:
   available in every mode.
 - Send messages, interrupt bots, answer approvals/questions, and mark chats
   read.
+- Register, read or remove this phone's own APNs token for closed-app alerts
+  (`/api/push/device`). The sidecar's device id names the phone; the body
+  cannot name another one.
 - Create a basic bot.
 - Submit a supported pending credential card as an RFC 9180 HPKE envelope
   bound to the authenticated device, bot, task, message, request, and target.
@@ -428,8 +562,9 @@ distribution scope:
    edit/version controls. Archived or hidden chat management remains desktop-only.
 3. **Notifications:** native permission, live/replayed alerts, time-sensitive
    approvals, badges, and a brief background grace period are in the app.
-   Closed-app delivery still requires project-owned APNs credentials and a
-   hosted relay; Tailscale cannot wake a terminated iOS process.
+   Closed-app delivery goes through the hosted relay with the project's APNs
+   key ([Closed-app alerts](#closed-app-alerts-apns)); the harness side is in
+   this repository, the app side registers its token and routes the tap.
 4. **Distribution:** signing, bundle ownership, privacy declarations,
    TestFlight, and App Store review material. Swift tests and an unsigned
    simulator build already run in the repository CI.

@@ -9,6 +9,8 @@ import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 export interface LiveRouteDeps {
   calls: Pick<LiveCallController, "start" | "end" | "current" | "deviceRevoked">;
+  /** Anything else bound to a phone that must end with its pairing. */
+  deviceRevoked?(device: string): void;
   resolveTarget(botId: string, threadId: string | undefined): { botId: string; botName: string; threadId: string } | null;
   settings(): LiveSettings;
   saveSettings(patch: { voice?: string; readTypedReplies?: boolean; idleMinutes?: number }): Promise<LiveSettings>;
@@ -83,6 +85,7 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
       if (req.headers["x-openmausbot-companion"] !== "1") return json(res, 403, { error: "Only the phone companion can report an unpaired phone." });
       const device = companionDevice(req);
       if (!device) return json(res, 400, { error: "The unpaired phone was not named." });
+      deps.deviceRevoked?.(device);
       return json(res, 200, { call: deps.calls.deviceRevoked(device) });
     }
 

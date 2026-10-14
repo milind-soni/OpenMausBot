@@ -177,6 +177,11 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/live\/call$/ },
   { method: "PATCH", path: /^\/api\/live\/settings$/ },
 
+  // This phone's own APNs token, keyed by the device id the proxy attaches, never one in the body.
+  { method: "GET", path: /^\/api\/push\/device$/ },
+  { method: "PUT", path: /^\/api\/push\/device$/ },
+  { method: "DELETE", path: /^\/api\/push\/device$/ },
+
   // Webhook management stays denied below.
   { method: "GET", path: /^\/api\/routines$/ },
   { method: "POST", path: /^\/api\/routines$/ },

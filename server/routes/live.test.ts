@@ -192,6 +192,13 @@ describe("live routes", () => {
       expect(d.calls.deviceRevoked).toHaveBeenCalledWith("phone-1");
       expect(await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone("phone-2"))).toEqual({ status: 200, body: { call: null } });
     });
+    it("also ends whatever else is bound to the phone (its closed-app alerts)", async () => {
+      const revoked: string[] = [];
+      const d = deps({ deviceRevoked: (device) => revoked.push(device) });
+      await request(d, "POST", "/api/live/device-revoked", undefined, fromPhone());
+      await request(d, "POST", "/api/live/device-revoked", undefined, { "x-openmausbot-companion-device": "phone-1" });
+      expect(revoked).toEqual(["phone-1"]);
+    });
     it("takes the unpairing only from the companion, for a well-formed phone", async () => {
       const d = deps();
       expect((await request(d, "POST", "/api/live/device-revoked", undefined, { "x-openmausbot-companion-device": "phone-1" })).status).toBe(403);

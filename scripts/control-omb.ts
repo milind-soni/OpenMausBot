@@ -177,6 +177,12 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     childEnv.OMB_OPENAI_LIVE_URL = liveUrl;
     if (parentEnv.OMB_OPENAI_LIVE_KEY) childEnv.OMB_OPENAI_LIVE_KEY = parentEnv.OMB_OPENAI_LIVE_KEY;
   }
+  // The installation credential crosses only with a loopback control plane: the fake relay, never the real one.
+  const controlPlane = parentEnv.OMB_CONTROL_PLANE_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(controlPlane)) {
+    childEnv.OMB_CONTROL_PLANE_URL = controlPlane;
+    if (parentEnv.OMB_INSTALLATION_CREDENTIAL) childEnv.OMB_INSTALLATION_CREDENTIAL = parentEnv.OMB_INSTALLATION_CREDENTIAL;
+  }
   // Live calls need Pro; without it the fixture refuses a call with 402 needsPro.
   if (parentEnv.OMB_PRO_PLAN?.trim() === "1") childEnv.OMB_PRO_PLAN = "1";
   // Arms the one-shot audio-append failure inside the fixture server.

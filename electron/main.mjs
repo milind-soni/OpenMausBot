@@ -87,6 +87,8 @@ import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDes
 import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudPlanSnapshot, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
 import { createProPlanRelay } from "./pro-plan.mjs";
+import { createPhonePushRelay } from "./phone-push-relay.mjs";
+import { desktopViewerErrorPage } from "./desktop-viewer-error-page.mjs";
 import { cloudHomeConnectUrl, cloudPlanDisk, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, withCloudHome } from "./cloud-home.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { cloudPageSenderAllowed, createCloudMove, mintOwnerCode, moveBlocked, moveFit, moveRefusal, moveSenderDestination, parseCloudMoveStatus } from "./cloud-move.mjs";
@@ -337,6 +339,7 @@ const serverSupervisor = createServerSupervisor({
     void readCloudOfferBrand();
     syncManagedComposioCredentials();
     syncProPlan();
+    phonePushRelay.serverStarted();
     orgLibrary?.runtimeReady();
     if (managedDesktop) void managedDesktop.refresh().catch(() => {});
     routineWake.start();
@@ -628,6 +631,7 @@ export async function updateSecureCredentialDocument(derive, afterPersist) {
     return await secureCredentialState.update(derive, afterPersist);
   } finally {
     secureCredentials = secureCredentialState.read();
+    phonePushRelay.sync();
   }
 }
 
@@ -1394,6 +1398,13 @@ function syncManagedComposioCredentials() {
   }
 }
 
+const phonePushRelay = createPhonePushRelay({
+  controlPlane: () => resolveCompanionControlPlaneURL({ isPackaged: app.isPackaged, environment: process.env }),
+  credentials: () => secureCredentials,
+  server: () => serverProc,
+  log: slog,
+});
+
 function escapeHtml(value) {
   return value.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 }
@@ -1437,24 +1448,6 @@ function notifyDesktopViewer(open) {
       contextId: desktopViewerContextId,
     });
   }
-}
-
-function desktopViewerErrorPage(message, retryUrl) {
-  const escape = (value) =>
-    String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
-  return (
-    "data:text/html;charset=utf-8," +
-    encodeURIComponent(`<!doctype html><meta name="color-scheme" content="dark"><title>Desktop unavailable</title>
-      <body style="margin:0;display:grid;place-items:center;height:100vh;background:#070707;color:#f5f5f5;font:14px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
-        <main style="max-width:420px;padding:32px;text-align:center"><h2 style="margin:0 0 10px;font-size:18px">Couldn't open the live desktop</h2>
-        <p style="margin:0 0 20px;color:#a1a1aa;line-height:1.5">${escape(message)}</p>
-        <a href="${escape(retryUrl)}" target="_blank" rel="noreferrer" style="display:inline-block;border-radius:9px;background:#fff;color:#111;padding:9px 14px;text-decoration:none;font-weight:600">Open in browser</a></main>
-      </body>`)
-  );
 }
 
 function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {

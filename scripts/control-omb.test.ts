@@ -38,6 +38,17 @@ describe("the fixture's Live call environment", () => {
     expect(childEnv({ OMB_OPENAI_LIVE_KEY: "sk-real" })).not.toHaveProperty("OMB_OPENAI_LIVE_KEY");
   });
 
+  it("lets a control plane cross only as the loopback fake, with its credential", () => {
+    const credential = `omb_install_${"a".repeat(22)}.${"b".repeat(43)}`;
+    expect(childEnv({ OMB_CONTROL_PLANE_URL: "http://127.0.0.1:4200", OMB_INSTALLATION_CREDENTIAL: credential }))
+      .toMatchObject({ OMB_CONTROL_PLANE_URL: "http://127.0.0.1:4200", OMB_INSTALLATION_CREDENTIAL: credential });
+    for (const url of ["https://accounts.openmausbot.com", "http://localhost:4200", "http://127.0.0.1:4200/v1", ""]) {
+      const env = childEnv({ OMB_CONTROL_PLANE_URL: url, OMB_INSTALLATION_CREDENTIAL: credential });
+      expect(env, url).not.toHaveProperty("OMB_CONTROL_PLANE_URL");
+      expect(env, url).not.toHaveProperty("OMB_INSTALLATION_CREDENTIAL");
+    }
+  });
+
   it("lets the Pro answer cross only as OMB_PRO_PLAN=1", () => {
     expect(childEnv({ OMB_PRO_PLAN: "1" })).toMatchObject({ OMB_PRO_PLAN: "1" });
     for (const value of [undefined, "", "0", "true", "yes"]) expect(childEnv({ OMB_PRO_PLAN: value }), String(value)).not.toHaveProperty("OMB_PRO_PLAN");

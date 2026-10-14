@@ -62,6 +62,7 @@ Use only mapped, tested commands:
 - [Chat widgets](widgets.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)
 - [Phone web app installation and safe areas](phone-web-app.md)
+- [Closed-app phone alerts through the push relay](phone-push.md)
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [In-chat team coordination](room-coordination.md)
