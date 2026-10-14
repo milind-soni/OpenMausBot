@@ -4,6 +4,7 @@ import {
   type WidgetAction, type WidgetNode, type WidgetPayload, type WidgetRoot, type WidgetSettled,
 } from "../shared/widget.ts";
 import type { MausColor } from "../shared/wire.ts";
+import { draftBugReportCard } from "./bug-report-card.ts";
 import { createOptionsCard } from "./options-card.ts";
 import { isSecretName, mask, redactSecretsInText } from "./redact.ts";
 import type { Message } from "./store.ts";
@@ -99,11 +100,14 @@ export function createAgentCard(args: {
   bot: { id: string; name: string; color: MausColor };
   threadId: string;
   input: unknown;
+  /** A guest drives this turn: it may not draft a bug report. */
+  guest?: boolean;
   /** The row a widget call wrote: the calling session made it, so it is never offered back to it as unseen. */
   authored?(messageId: string): void;
 }): AgentCardResult {
   const { store, bot, threadId, input } = args;
   if (!isRecord(input) || input.tool === undefined) return createOptionsCard(args);
+  if (input.tool === "draft_bug_report") return draftBugReportCard({ ...args, input });
   if (input.tool !== "show_widget" && input.tool !== "update_widget") {
     return { ok: false, status: 400, error: "tool: must be show_widget or update_widget." };
   }

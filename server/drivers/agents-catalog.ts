@@ -15,6 +15,8 @@ export interface CatalogProfile {
   chief: boolean;
   /** Written into start_thread's schema: the only bot_id it accepts. */
   botId: string;
+  /** A guest drives this turn on a Cloud home. */
+  guestTurn?: boolean;
 }
 
 /** Everything is off unless the harness says "1". */
@@ -27,6 +29,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     memoryEnabled: env.OMB_MEMORY_ENABLED !== "0",
     chief: env.OMB_CHIEF_OF_STAFF === "1",
     botId: env.OMB_BOT_ID ?? "",
+    guestTurn: env.OMB_GUEST_TURN === "1",
   };
 }
 
@@ -504,6 +507,20 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "draft_bug_report",
+    description:
+      "Draft a bug report to the OpenMausBot team, only when OpenMausBot itself fails: team tools that did not connect, an OpenMausBot tool that crashed or keeps failing, a sign-in that loops. Never for errors in the person's own task, code, sites or accounts. The person reviews the draft; nothing is sent unless they press Send. After calling it, end your turn; OpenMausBot resumes you when they send or dismiss it.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        summary: { type: "string", minLength: 1, maxLength: 200, description: "One line: what failed in OpenMausBot." },
+        details: { type: "string", maxLength: 8000, description: "What you were doing, what happened, the exact error and what you tried. No secrets or personal data." },
+      },
+      required: ["summary", "details"],
+    },
+  },
+  {
     name: "send_voice_note",
     description:
       "Send the user a voice note: a short spoken message synthesized with your configured voice, stored as audio, and attached to your reply when the turn ends. Write the note as speakable words, exactly as it should be said — no lists, links or markdown meant for screens. The same text becomes the note's visible caption and transcript, so the person can read or listen. Use it for warmth, tone or emphasis a written line cannot carry; use ordinary text otherwise.",
@@ -853,6 +870,7 @@ const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
 // Never advertised when sharing is off: a model shown a tool it cannot use spends turns finding out.
 export const SHARED_COMPUTER_TOOL_NAMES = new Set(["list_shared_computers", "shared_computer"]);
 const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
+const OWNER_TOOL_NAMES = new Set(["draft_bug_report"]);
 const CHIEF_ONLY_TOOL_NAMES = new Set([
   "create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread",
 ]);
@@ -887,9 +905,12 @@ function catalogTools(profile: CatalogProfile) {
   const VOICE_READY_TOOLS = profile.voiceNotes
     ? SHAREABLE_TOOLS
     : SHAREABLE_TOOLS.filter((tool) => !VOICE_TOOL_NAMES.has(tool.name));
+  const OWNER_READY_TOOLS = profile.guestTurn
+    ? VOICE_READY_TOOLS.filter((tool) => !OWNER_TOOL_NAMES.has(tool.name))
+    : VOICE_READY_TOOLS;
   const ROLE_TOOLS = profile.chief
-    ? VOICE_READY_TOOLS
-    : VOICE_READY_TOOLS.filter((tool) => !CHIEF_ONLY_TOOL_NAMES.has(tool.name)).map((tool) => {
+    ? OWNER_READY_TOOLS
+    : OWNER_READY_TOOLS.filter((tool) => !CHIEF_ONLY_TOOL_NAMES.has(tool.name)).map((tool) => {
       if (!CHIEF_TARGET_TOOL_NAMES.has(tool.name)) return tool;
       const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => key !== "for_bot_id"));
       return { ...tool, description: tool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };

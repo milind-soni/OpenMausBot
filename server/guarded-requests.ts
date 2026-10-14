@@ -58,5 +58,6 @@ export function requestNeedsInput(message: Message): boolean {
   return Boolean((message.card?.requestId && !message.card.answered && !message.card.dismissed && !message.card.expired && !isPersistentQuestionCard(message.card)) ||
     (message.connector && !message.connector.dismissed && !message.connector.resumed && message.connector.status !== "connected") ||
     (message.secret && !message.secret.provided && !message.secret.dismissed && !message.secret.superseded) ||
-    (message.signIn && !message.signIn.done && !message.signIn.cancelled && !message.signIn.superseded));
+    (message.signIn && !message.signIn.done && !message.signIn.cancelled && !message.signIn.superseded) ||
+    (message.bugReport && !message.bugReport.sent && !message.bugReport.dismissed && !message.bugReport.superseded));
 }

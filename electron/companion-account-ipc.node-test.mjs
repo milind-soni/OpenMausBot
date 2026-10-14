@@ -46,7 +46,7 @@ test("the desktop holds its address on demand, read from the running companion",
     },
     managedEndpointNeed,
   });
-  vm.runInContext(`${slice("function ensureCompanionAccountService()", "// Everything the bug-report bundle needs")}
+  vm.runInContext(`${slice("function ensureCompanionAccountService()", "const gatherDiagnostics = ")}
     globalThis.ensure = ensureCompanionAccountService;`, context);
   context.ensure();
 

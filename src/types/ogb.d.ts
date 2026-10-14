@@ -19,6 +19,22 @@ declare global {
     lastBackupAt?: number;
     schedule?: CompanyBackupScheduleState;
   }
+  interface BugReportInput {
+    description: string;
+    /** "bot" when the person sends a bot's draft. */
+    source: "button" | "bot";
+    /** The open conversation, read only with includeChatLog. */
+    threadId?: string;
+    includeChatLog?: boolean;
+  }
+  type BugReportResult = { ok: true; id: string } | { ok: false; error: string; retryAfter?: number };
+  interface BugReportPreview {
+    installId: string;
+    appVersion: string;
+    platform: string;
+    diagnostics: string;
+    chatLog?: string;
+  }
 /** The package.json version, inlined by Vite's define at build time. */
 const __APP_VERSION__: string;
 
@@ -319,6 +335,13 @@ const __APP_VERSION__: string;
       /** Writes the redacted diagnostics report to a user-chosen file;
        * resolves the path, or null when cancelled. */
       exportDiagnostics?(): Promise<string | null>;
+      /** Sends a bug report to the OpenMausBot team: the description, the
+       * redacted diagnostics report and, with `includeChatLog`, the open
+       * conversation, redacted. Local app only. */
+      sendBugReport?(input: BugReportInput): Promise<BugReportResult>;
+      /** What sendBugReport would carry besides the description, so the
+       * person can read it before sending. Local app only. */
+      previewBugReport?(input: Pick<BugReportInput, "threadId" | "includeChatLog">): Promise<BugReportPreview>;
       /** Asks where to save a bot-created file (inside ~/.openmausbot), copies
        * it there and reveals it. Resolves the chosen path, or null if the
        * user cancelled the dialog. */

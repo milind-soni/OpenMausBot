@@ -361,6 +361,17 @@ describe("profileMenuItems", () => {
     expect(build({ update }).map((item) => item.key)).toEqual(["usage", "phone-app", "support", "settings", "update", "account"]);
   });
 
+  it("offers Send bug report under Help and support only where this window can send one", () => {
+    const onBugReport = vi.fn();
+    const help = (items: ReturnType<typeof build>) => items.find((item) => item.key === "support")!.submenu!;
+    expect(help(build()).map((item) => item.key)).not.toContain("bug-report");
+    expect(help(build({ onBugReport })).map((item) => item.key)).toEqual(["help", "feedback", "bug-report", "shortcuts", "about"]);
+    const entry = help(build({ onBugReport })).find((item) => item.key === "bug-report")!;
+    expect(entry.label).toBe("Send bug report");
+    entry.onSelect();
+    expect(onBugReport).toHaveBeenCalledOnce();
+  });
+
   it("opens the Usage and account pages of Settings", () => {
     const onUsage = vi.fn(), onAccount = vi.fn();
     const items = build({ onUsage, onAccount });

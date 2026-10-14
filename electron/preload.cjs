@@ -226,6 +226,8 @@ const bridge = {
   },
   pickFolder: (current) => ipcRenderer.invoke("desktop:pick-folder", current),
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
+  sendBugReport: (input) => ipcRenderer.invoke("desktop:send-bug-report", input),
+  previewBugReport: (input) => ipcRenderer.invoke("desktop:preview-bug-report", input),
   /** ipcRenderer wraps a main-process throw in "Error invoking remote method"; the bubble shows the text verbatim. */
   saveFile: (filePath) =>
     ipcRenderer.invoke("desktop:save-file", filePath).catch((error) => {

@@ -580,6 +580,8 @@ import { createDeciderRoutes } from "./routes/decider.ts";
 import { createBrowserSiteRoutes } from "./routes/browser-sites.ts";
 import { createBrowserEvidenceRoutes } from "./routes/browser-evidence.ts";
 import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
+import { createBugReportCardRoutes } from "./routes/bug-report-cards.ts";
+import { answeredCardResume, connectionUpdateText, credentialUpdateText, openCardWaits, stoppedCardPatch, teamSetupDecisionText } from "./parked-cards.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { createGroupRoutes } from "./routes/groups.ts";
 import { createChannelRoutes } from "./routes/channels.ts";
@@ -2055,6 +2057,7 @@ function agentsIntegration(
         return tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false ? "1" : "0";
       })(),
       OMB_CHIEF_OF_STAFF: store.bot(botId)?.chiefOfStaff === true ? "1" : "0",
+      OMB_GUEST_TURN: cloudGuestDriven(threadId) || cloudGuestDrivenHandoff(roomHandoffId) ? "1" : "0",
     },
   };
 }
@@ -2149,43 +2152,9 @@ const computerParks = new Map<string, string>();
 const parkedSeats = new Map<string, string>();
 const COMPUTER_FREE_NOTE = "OpenMausBot computer update: the computer this conversation waited for is free again. Continue the task that parked waiting for it.";
 const STEP_CAP_NOTE = "Your previous turn stopped at the step limit; continue from where it stopped.";
-const teamSetupDecisionText = (request: TeamSetupRequest): string => {
-  const notNow = request.suggestion && request.result?.state === "denied"
-    ? " The user chose Not now for this suggested specialist. Do not suggest another specialist in this conversation unless they ask for one." : "";
-  return `OpenMausBot team setup decision ${request.requestId}: ${JSON.stringify(request.result)}. Report this exact result and continue the user's already requested work. Do not ask for confirmation again or repeat this setup/deletion. A denied or cancelled operation did not authorize any substitute action. Existing thread models were not changed.${notNow}`;
-};
-const connectionUpdateText = (labels: readonly string[]): string =>
-  `OpenMausBot connection update: the user securely connected ${labels.join(", ")}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
-const credentialUpdateText = (label: string, outcome: "provided" | "dismissed"): string => outcome === "provided"
-  ? `OpenMausBot credential update: the user securely provided ${label}. Continue the task that paused for it. You do not receive the secret and must not ask them to paste it into chat.`
-  : `OpenMausBot credential update: the user declined to provide ${label}. Continue without it if possible, or briefly explain the limitation. Do not ask them to paste it into chat.`;
-
 /** In a room (`memberId`) only this member's cards: one member's park never swallows another's. */
 function resumableCards(threadId: string, since: number, memberId?: string): Array<{ id: string; waits: string }> {
-  const open: Array<{ id: string; waits: string }> = [];
-  const path = store.activePath(threadId).filter((message) => message.at >= since && (memberId === undefined || message.from?.botId === memberId));
-  for (const message of path) {
-    const card = message.card;
-    if (card?.teamSetupRequest && !card.teamSetupRequest.resumed && (card.teamSetupRequest.result || (!card.answered && !card.dismissed && !card.expired))) {
-      open.push({ id: message.id, waits: `team setup decision: ${card.title}` });
-      continue;
-    }
-    const connector = message.connector;
-    if (connector && !connector.dismissed && !connector.resumed) {
-      open.push({ id: message.id, waits: `connect ${connector.label}` });
-      continue;
-    }
-    const secret = message.secret;
-    if (secret && !secret.resumed && !secret.superseded) {
-      open.push({ id: message.id, waits: `provide ${secret.label}` });
-      continue;
-    }
-    const signIn = message.signIn;
-    if (signIn && !signIn.resumed && !signIn.superseded) {
-      open.push({ id: message.id, waits: `sign in to ${signIn.site}` });
-    }
-  }
-  return open;
+  return openCardWaits(store.activePath(threadId).filter((message) => message.at >= since && (memberId === undefined || message.from?.botId === memberId)));
 }
 
 function turnRows(node: HandoffView): Message[] {
@@ -2217,17 +2186,10 @@ function reconcileParkedNode(node: HandoffView): boolean {
       for (const item of cards) store.patchMessage(node.threadId, item.id, { connector: { ...item.connector!, resumed: true, error: undefined } });
       return true;
     }
-    const secret = message.secret;
-    if (secret && !secret.superseded && (secret.provided || secret.dismissed)) {
-      if (!coordinator.answerNode(node.id, credentialUpdateText(secret.label, secret.provided ? "provided" : "dismissed"))) return false;
-      if (!secret.resumed) store.patchMessage(node.threadId, message.id, { secret: { ...secret, resumed: true, error: undefined } });
-      return true;
-    }
-    const signIn = message.signIn;
-    const signedIn = signIn && !signIn.superseded ? signInOutcome(signIn) : null;
-    if (signIn && signedIn) {
-      if (!coordinator.answerNode(node.id, signInResumePrompt(signIn.site, signedIn))) return false;
-      if (!signIn.resumed) store.patchMessage(node.threadId, message.id, { signIn: { ...signIn, resumed: true, error: undefined } });
+    const answered = answeredCardResume(message);
+    if (answered) {
+      if (!coordinator.answerNode(node.id, answered.text)) return false;
+      if (answered.patch) store.patchMessage(node.threadId, message.id, answered.patch);
       return true;
     }
   }
@@ -2290,10 +2252,8 @@ function stopParkedCards(threadId: string): void {
   }
   if (!ids.size) return;
   for (const message of store.messagesFor(threadId)) {
-    if (!ids.has(message.id)) continue;
-    if (message.secret) store.patchMessage(threadId, message.id, { secret: { ...message.secret, stopped: true } });
-    else if (message.connector) store.patchMessage(threadId, message.id, { connector: { ...message.connector, stopped: true } });
-    else if (message.signIn) store.patchMessage(threadId, message.id, { signIn: { ...message.signIn, stopped: true } });
+    const patch = ids.has(message.id) ? stoppedCardPatch(message) : null;
+    if (patch) store.patchMessage(threadId, message.id, patch);
   }
 }
 
@@ -14011,6 +13971,7 @@ ROUTES.push(createBotMemoryRoutes({
 }));
 ROUTES.push(createDeciderRoutes({ decider, config: () => cfg }));
 ROUTES.push(createSignInCardRoutes({ settle: settleSignIn, saveLogin: saveLoginFromCard }));
+ROUTES.push(createBugReportCardRoutes({ store, ownerOf: connectorThread, resume: answerCardNode }));
 ROUTES.push(createRoomHoldRoutes({
   group: (id) => store.group(id),
   setHold: (groupId, botId, held) => {
@@ -14933,7 +14894,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const body = await readInternalBody();
         requireActiveInternalCapability();
         const result = createAgentCard({
-          store,
+          store, guest: cloudGuestDriven(internalCapability.threadId) || cloudGuestDrivenHandoff(internalCapability.roomHandoffId),
           bot: internalSender,
           threadId: internalCapability.threadId,
           input: body, authored: (id) => handoffs.authored(internalCapability.threadId, internalCapability.generation, id),

@@ -387,7 +387,7 @@ export interface WireMessage {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "bugreport" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget";
   text?: string;
   digest?: TurnDigest;
   compaction?: {
@@ -412,6 +412,9 @@ export interface WireMessage {
   secret?: SecretRequestCardData;
   /** signin rows: the bot asked the person to sign in to a site themselves. */
   signIn?: SignInRequestCardData;
+  /** bugreport rows: a bot's draft bug report about OpenMausBot itself.
+   * `text` is the readable fallback for clients that do not know the kind. */
+  bugReport?: BugReportCardData;
   /** One idempotently updated status card for a routine run. */
   routineRun?: RoutineRunCardData;
   /** Terminal receipt for a bounded multi-bot channel goal. */
@@ -681,6 +684,27 @@ export interface SignInRequestCardData {
   error?: string;
   /** Stop ended the turn this card paused: it offers no Done or Cancel,
    * and an answer given afterwards is kept but continues nothing. */
+  stopped?: boolean;
+}
+
+/** A bot's draft of a bug report about OpenMausBot itself. The person edits
+ * and sends it from the desktop app, or dismisses it: nothing reaches the
+ * OpenMausBot team unless they press Send. */
+export interface BugReportCardData {
+  /** The bot's one-line summary of what failed. */
+  summary: string;
+  /** What the bot was doing, what happened and the error it saw. */
+  details: string;
+  sent?: boolean;
+  /** The id the OpenMausBot team's server gave the sent report. */
+  reportId?: string;
+  dismissed?: boolean;
+  /** A newer draft from the same bot in this conversation replaced this
+   * card; it no longer offers Send or Dismiss. */
+  superseded?: boolean;
+  resumed?: boolean;
+  /** Stop ended the turn this card paused: an answer given afterwards is
+   * kept but continues nothing. */
   stopped?: boolean;
 }
 

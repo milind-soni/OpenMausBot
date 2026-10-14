@@ -47,6 +47,7 @@ function profiles(): Record<string, Profile> {
   for (const name of ["skills+shared+voice", "skills+shared+voice+non-chief"]) {
     all[`${name}+cloud-home`] = { env: { ...all[name]!.env, OMB_CLOUD_HOME: "1" } };
   }
+  all["skills+shared+voice+cloud-home+guest"] = { env: { ...all["skills+shared+voice+cloud-home"]!.env, OMB_GUEST_TURN: "1" } };
   all["default+legacy-switches"] = {
     env: { ...all.default!.env, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1" },
   };
@@ -63,25 +64,26 @@ const FULL = "skills+shared+voice";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 54535,
-  "voice": 55276,
-  "shared": 56280,
-  "shared+voice": 57021,
-  "skills": 56588,
-  "skills+voice": 57329,
-  "skills+shared": 58333,
-  "skills+shared+voice": 59074,
-  "non-chief": 44885,
-  "voice+non-chief": 45626,
-  "shared+non-chief": 46630,
-  "shared+voice+non-chief": 47371,
-  "skills+non-chief": 46938,
-  "skills+voice+non-chief": 47679,
-  "skills+shared+non-chief": 48683,
-  "skills+shared+voice+non-chief": 49424,
-  "skills+shared+voice+cloud-home": 58129,
-  "skills+shared+voice+non-chief+cloud-home": 48479,
-  "default+legacy-switches": 54535,
+  "default": 56002,
+  "voice": 56743,
+  "shared": 57747,
+  "shared+voice": 58488,
+  "skills": 58055,
+  "skills+voice": 58796,
+  "skills+shared": 59800,
+  "skills+shared+voice": 60541,
+  "non-chief": 46352,
+  "voice+non-chief": 47093,
+  "shared+non-chief": 48097,
+  "shared+voice+non-chief": 48838,
+  "skills+non-chief": 48405,
+  "skills+voice+non-chief": 49146,
+  "skills+shared+non-chief": 50150,
+  "skills+shared+voice+non-chief": 50891,
+  "skills+shared+voice+cloud-home": 59596,
+  "skills+shared+voice+non-chief+cloud-home": 49946,
+  "skills+shared+voice+cloud-home+guest": 58758,
+  "default+legacy-switches": 56002,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -219,6 +221,12 @@ describe("agents proxy tools/list golden", () => {
       expect(surface.enum).toEqual(["auto", "cloud", "browser"]);
       expect(surface.description).not.toMatch(/\b(?:vm|local) =/);
     }
+  });
+
+  it("shows a guest's turn every tool but draft_bug_report", () => {
+    const owner = toolsOf(wires["skills+shared+voice+cloud-home"]!).map((tool) => tool.name);
+    expect(owner).toContain("draft_bug_report");
+    expect(toolsOf(wires["skills+shared+voice+cloud-home+guest"]!).map((tool) => tool.name)).toEqual(owner.filter((tool) => tool !== "draft_bug_report"));
   });
 
   it("shows only a Chief of Staff the Chief-only tools, and for_bot_id on another bot's profile or model", () => {

@@ -51,9 +51,7 @@ import { GroupUsageChip } from "./GroupUsageChip";
 import { isPureLeakedSystemHarnessMessage, stripLeakedSystemHarnessMessages } from "../../shared/system-message-guard.ts";
 import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 import { ReplyQuote } from "./ReplyQuote";
-import { ConnectorCard } from "./ConnectorCard";
-import { SecretRequestCard } from "./SecretRequestCard";
-import { SignInRequestCard } from "./SignInRequestCard";
+import { askCardRow } from "./AskCardRow";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { GoalRunCard } from "./GoalRunCard";
 import { AttachmentGallery, MessageAttachmentGallery, replyAttachmentGroup } from "./AttachmentGallery";
@@ -439,16 +437,11 @@ export const Transcript = memo(function Transcript({
           ? { botId: routineOwner.id, threadId: routineExecutionThreadId }
           : undefined;
         const canRetryRoom = m.id === retryableId && retryRequest !== null && !roomBusy;
+        const ask = m.from?.botId ? askCardRow(m, { botId: m.from.botId, botName: m.from.name, threadId: group.threadId }) : null;
         const row = isCancelledTranscriptRow(m) ? (
           <CancelledTurnRow onRetry={canRetryRoom ? retryRoom : undefined} />
-        ) :
-          m.kind === "secret" && m.secret && m.from?.botId ? (
-            <SecretRequestCard botId={m.from.botId} threadId={group.threadId} message={m} />
-          ) : m.kind === "signin" && m.signIn && m.from?.botId ? (
-            <SignInRequestCard botId={m.from.botId} botName={m.from.name} threadId={group.threadId} message={m} />
-          ) : m.kind === "connector" && m.connector && m.from?.botId ? (
-            <ConnectorCard botId={m.from.botId} threadId={group.threadId} message={m} />
-          ) : m.kind === "options" && m.card?.requestId && m.card.questionRequest ? (
+        ) : ask ? ask
+          : m.kind === "options" && m.card?.requestId && m.card.questionRequest ? (
             <div className="flex justify-start">
               <MessageBoundary fallbackText={m.card.subtitle || m.card.title || ""}>
                 <QuestionCard threadId={group.threadId} bot={memberOf(m.from?.botId)} message={m} />

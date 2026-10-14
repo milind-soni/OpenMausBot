@@ -1,5 +1,6 @@
 // The bundle is pasted into public issues: the collector never reads secrets, and everything is scrubbed again here.
 import fs from "node:fs";
+import path from "node:path";
 
 // Mirrors WORKSPACE_CREDENTIAL_ENV in server/config.ts; a test asserts the two lists never drift apart.
 export const CREDENTIAL_ENV_NAMES = [
@@ -309,6 +310,21 @@ export function buildDiagnosticsReport({
   }
   lines.push("");
   return lines.join("\n");
+}
+
+/** Config is booleans and numbers only, and every log is redacted: the report is pasted into public issues. */
+export async function collectDiagnostics({ configUrl, logDir, desktopCrashLog, appInfo, maxLogBytes = 256 * 1024, fetch: fetcher = globalThis.fetch }) {
+  const serverStatus = await fetcher(configUrl, { signal: AbortSignal.timeout(3_000) })
+    .then((res) => (res.ok ? res.json() : null))
+    .catch(() => null);
+  const tail = (file) => readSafeLogTail(file, maxLogBytes)?.tail ?? "";
+  return buildDiagnosticsReport({
+    appInfo,
+    configSummary: serverStatus ?? {},
+    desktopLogTail: tail(desktopCrashLog),
+    updaterLogTail: tail(path.join(logDir, "updater.log")),
+    logTail: tail(path.join(logDir, "server.log")),
+  });
 }
 
 export function diagnosticsFileName(date = new Date()) {

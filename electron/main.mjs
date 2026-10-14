@@ -11,13 +11,8 @@ import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
 import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState } from "./updater.mjs";
-import {
-  buildDiagnosticsReport,
-  diagnosticsFileName,
-  formatDesktopCrashRecord,
-  installDesktopCrashListeners,
-  readSafeLogTail,
-} from "./diagnostics.mjs";
+import { collectDiagnostics, diagnosticsFileName, formatDesktopCrashRecord, installDesktopCrashListeners } from "./diagnostics.mjs";
+import { createBugReporter, registerBugReportIpc } from "./bug-report.mjs";
 import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import { evictStartupCacheOnce } from "./startup-cache-eviction.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
@@ -859,33 +854,11 @@ function ensureCompanionAccountService() {
   return companionAccountService;
 }
 
-// Everything the bug-report bundle needs: config is booleans only and the log is redacted, since it is pasted into public issues.
-async function gatherDiagnostics() {
-  const serverStatus = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/config`, {
-    signal: AbortSignal.timeout(3_000),
-  })
-    .then((res) => (res.ok ? res.json() : null))
-    .catch(() => null);
-  const logPath = path.join(LOG_DIR, "server.log");
-  const log = readSafeLogTail(logPath);
-  const desktopLog = readSafeLogTail(DESKTOP_CRASH_LOG);
-  const updaterLog = readSafeLogTail(path.join(LOG_DIR, "updater.log"));
-  return buildDiagnosticsReport({
-    appInfo: {
-      version: app.getVersion(),
-      platform: process.platform,
-      arch: process.arch,
-      electron: process.versions.electron,
-      node: process.versions.node,
-      packaged: app.isPackaged,
-      uptimeSeconds: Math.round(process.uptime()),
-    },
-    configSummary: serverStatus ?? {},
-    desktopLogTail: desktopLog?.tail ?? "",
-    updaterLogTail: updaterLog?.tail ?? "",
-    logTail: log?.tail ?? "",
-  });
-}
+const gatherDiagnostics = (maxLogBytes) => collectDiagnostics({
+  configUrl: `http://127.0.0.1:${SERVER_PORT}/api/config`, logDir: LOG_DIR, desktopCrashLog: DESKTOP_CRASH_LOG, maxLogBytes,
+  appInfo: { version: app.getVersion(), platform: process.platform, arch: process.arch, electron: process.versions.electron,
+    node: process.versions.node, packaged: app.isPackaged, uptimeSeconds: Math.round(process.uptime()) },
+});
 
 let serverStartConflictOnly = false;
 
@@ -2509,6 +2482,9 @@ ipcMain.handle("desktop:export-diagnostics", localOnly("desktop:export-diagnosti
   }
   return result.filePath;
 }));
+
+registerBugReportIpc(ipcMain, createBugReporter({ diagnostics: gatherDiagnostics, localServer: () => `http://127.0.0.1:${SERVER_PORT}`,
+  dataDir: desktopDataDir, appVersion: app.getVersion(), platform: `${process.platform}-${process.arch}` }));
 
 // The path is renderer-controlled: it must resolve inside ~/.openmausbot to a regular file, never a symlink escape.
 ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event, rawPath) => {

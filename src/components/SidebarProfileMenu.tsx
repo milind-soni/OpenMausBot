@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
+  Bug,
   Check,
   CircleUserRound,
   Download,
@@ -18,6 +19,7 @@ import {
 import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
+import { BugReportDialog } from "./BugReportDialog";
 import { PhoneAppDialog } from "./PhoneAppDialog";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { ShortcutHint } from "./ShortcutHint";
@@ -29,6 +31,7 @@ import { brand } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
+import { canSendBugReports, openChatThreadId } from "@/lib/bug-report";
 import {
   cloudPhoneDestination,
   connectPhoneEntry,
@@ -254,6 +257,7 @@ export function profileMenuItems({
   onAbout,
   onHelp,
   onFeedback,
+  onBugReport,
   onAccount,
 }: {
   phone: SidebarMenuItem[];
@@ -266,11 +270,14 @@ export function profileMenuItems({
   onAbout: () => void;
   onHelp: () => void;
   onFeedback: () => void;
+  /** Absent where this window cannot send one. */
+  onBugReport?: () => void;
   onAccount: () => void;
 }): SidebarMenuItem[] {
   const help: SidebarMenuItem[] = [
     { key: "help", label: t("sidebar.menu.help"), icon: <HelpCircle size={18} />, onSelect: onHelp },
     { key: "feedback", label: t("sidebar.menu.feedback"), icon: <DiscordIcon size={17} />, onSelect: onFeedback },
+    ...(onBugReport ? [{ key: "bug-report", label: t("sidebar.menu.bugReport"), icon: <Bug size={18} />, onSelect: onBugReport }] : []),
     {
       key: "shortcuts",
       label: t("sidebar.menu.shortcuts"),
@@ -301,6 +308,7 @@ export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } 
   const update = useUpdateItem();
   const [aboutOpen, setAboutOpen] = useState(false);
   const [phoneAppOpen, setPhoneAppOpen] = useState(false);
+  const [bugReport, setBugReport] = useState<{ threadId?: string } | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
 
   const profile = state.config?.profile;
@@ -328,6 +336,7 @@ export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } 
     onAbout: () => setAboutOpen(true),
     onHelp: () => void openExternalLink(HELP_CENTER_URL),
     onFeedback: () => void openExternalLink(FEEDBACK_URL),
+    ...(canSendBugReports() ? { onBugReport: () => setBugReport({ threadId: openChatThreadId(state) }) } : {}),
     onAccount: () => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }),
   });
   const noteworthy = update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase);
@@ -384,6 +393,7 @@ export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } 
         )}
       />
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
+      {bugReport && <BugReportDialog threadId={bugReport.threadId} onClose={() => setBugReport(null)} />}
       <PhoneAppDialog
         open={phoneAppOpen}
         onClose={() => setPhoneAppOpen(false)}

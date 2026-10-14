@@ -147,3 +147,38 @@ describe("update_widget", () => {
     expect(await callTool("update_widget", { widget_id: "m7", widget: WIDGET_SAMPLES.buildStatus }, silent.context)).toEqual({ text: "Could not update that widget.", isError: true });
   });
 });
+
+describe("draft_bug_report", () => {
+  it("is offered to every bot except on a guest's turn", () => {
+    for (const profile of [PROFILE, { ...PROFILE, chief: true }, { ...PROFILE, cloudHome: true }]) {
+      expect(availableTools(profile).map((tool) => tool.name)).toContain("draft_bug_report");
+    }
+    expect(availableTools({ ...PROFILE, cloudHome: true, guestTurn: true }).map((tool) => tool.name)).not.toContain("draft_bug_report");
+    const tool = availableTools(PROFILE).find((entry) => entry.name === "draft_bug_report")!;
+    expect(tool.description).toMatch(/only when OpenMausBot itself fails/);
+    expect(tool.description).toMatch(/Never for errors in the person's own task/);
+    expect(tool.description).toMatch(/nothing is sent unless they press Send\. After calling it, end your turn/);
+    expect(tool).not.toHaveProperty("annotations");
+  });
+
+  it("posts the draft as the model wrote it and tells the model to end its turn", async () => {
+    const { api, apiResponse, context } = harness();
+    const result = await callTool("draft_bug_report", { summary: " Team tools did not connect ", details: " ECONNREFUSED " }, context);
+    expect(apiResponse).toHaveBeenCalledExactlyOnceWith("/api/internal/options-card", {
+      method: "POST",
+      body: JSON.stringify({ tool: "draft_bug_report", summary: "Team tools did not connect", details: "ECONNREFUSED" }),
+    });
+    expect(api).not.toHaveBeenCalled();
+    expect(result.isError).toBeUndefined();
+    expect(result.text).toMatch(/nothing is sent unless they press Send\. Your turn ends now/);
+  });
+
+  it("refuses a missing or overlong summary without calling the harness, and passes a refusal through", async () => {
+    const { apiResponse, context } = harness({ ok: false, status: 403, body: { error: "draft_bug_report is not available in a conversation a guest is driving." } });
+    expect(await callTool("draft_bug_report", { details: "x" }, context)).toEqual({ text: "draft_bug_report needs summary: one line on what failed in OpenMausBot.", isError: true });
+    expect((await callTool("draft_bug_report", { summary: "x".repeat(201), details: "" }, context)).text).toMatch(/^summary is limited to 200 characters; this one is 201/);
+    expect(apiResponse).not.toHaveBeenCalled();
+    expect(await callTool("draft_bug_report", { summary: "Broken", details: "" }, context))
+      .toEqual({ text: "draft_bug_report is not available in a conversation a guest is driving.", isError: true });
+  });
+});
