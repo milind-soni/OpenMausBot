@@ -9,6 +9,7 @@
 // scripts/bundle-server.mjs inlines agents-catalog/-call/-client into this file, which the harness spawns.
 import readline from "node:readline";
 
+import { withFixHint } from "../tool-hints.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
@@ -19,8 +20,9 @@ const CONTEXT = toolCallContextFromEnv(process.env);
 const send = (msg: Json) => process.stdout.write(JSON.stringify(msg) + "\n");
 const ok = (id: unknown, result: unknown) => send({ jsonrpc: "2.0", id, result });
 const rpcErr = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
-const textResult = (id: unknown, text: string, isError = false) =>
-  ok(id, { content: [{ type: "text", text }], isError });
+// The fix hint goes on after capping, so the cut never drops it.
+const textResult = (id: unknown, name: string, text: string, isError = false) =>
+  ok(id, { content: [{ type: "text", text: isError ? withFixHint({ tool: name, text, origin: "harness" }) : text }], isError });
 
 async function handle(msg: Json) {
   const id = msg.id;
@@ -50,9 +52,9 @@ async function handle(msg: Json) {
       try {
         const { text, isError, passthrough } = await callTool(name, (params.arguments ?? {}) as Json, CONTEXT);
         if (passthrough) ok(id, passthrough);
-        else textResult(id, name === "tool_result_read" ? text : await capResult(text, CONTEXT), isError);
+        else textResult(id, name, name === "tool_result_read" ? text : await capResult(text, CONTEXT), isError);
       } catch (e) {
-        textResult(id, await capResult((e as Error).message, CONTEXT), true);
+        textResult(id, name, await capResult((e as Error).message, CONTEXT), true);
       }
       return;
     }

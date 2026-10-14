@@ -20,6 +20,7 @@ let failSavingResult = false;
 let savedResultWrites = 0;
 let lastCoordinateBody: any = null;
 let coordinateResponse: unknown = { ok: true };
+let coordinateStatus = 200;
 let lastRoomsQuery = "";
 let lastPostBody: any = null;
 let lastExecBody: any = null;
@@ -241,7 +242,7 @@ beforeAll(async () => {
       req.on("data", (c) => (data += c));
       req.on("end", () => {
         lastCoordinateBody = JSON.parse(data);
-        res.writeHead(200, { "content-type": "application/json" });
+        res.writeHead(coordinateStatus, { "content-type": "application/json" });
         res.end(JSON.stringify(coordinateResponse));
       });
       return;
@@ -593,6 +594,30 @@ describe("agents-proxy MCP surface", () => {
       expect(withoutCache.result.content[0].text).toContain("could not be saved");
       expect(savedResultWrites).toBe(writes + 1);
     } finally { agentsResponse = original; }
+  });
+
+  it("adds a fix hint to a known refusal and keeps it an error", async () => {
+    coordinateStatus = 403;
+    coordinateResponse = { error: "Cannot assign work back to an ancestor; results return automatically" };
+    try {
+      const refused = await callTool("coordinate_bots", { bot_ids: ["bot-helper"], message: "Done, here is the report" });
+      expect(refused.result.isError).toBe(true);
+      const text: string = refused.result.content[0].text;
+      expect(text.startsWith("Cannot assign work back to an ancestor")).toBe(true);
+      expect(text).toContain("\n\nHint: Your requester gets your final reply automatically");
+    } finally {
+      coordinateStatus = 200;
+      coordinateResponse = { ok: true };
+    }
+    // an unknown refusal, and every success, go through unchanged
+    computerStatus = 409;
+    computerResponse = { error: "Unavailable right now" };
+    const other = await callTool("select_computer", {});
+    expect(other.result.isError).toBe(true);
+    expect(other.result.content[0].text).not.toContain("Hint:");
+    const fine = await callTool("list_bots", {});
+    expect(fine.result.isError).toBeFalsy();
+    expect(fine.result.content[0].text).not.toContain("Hint:");
   });
 
   it("preserves a large refusal's error status even when its text is capped", async () => {

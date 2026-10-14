@@ -2,12 +2,12 @@
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, rmSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { writeFileAtomic } from "./atomic.ts";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
+import { spillToolResult, ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
+import { toolFailureHookAnswer } from "./tool-hints.ts";
 import { extname, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 
@@ -6252,7 +6252,6 @@ function clearTurnDigestState(threadId: string): void {
 }
 
 const TOOL_RESULTS_DIR = join(DATA_DIR, "tool-results");
-const TOOL_RESULT_SPILL_MAX = 512 * 1024;
 
 const DIGESTS_AFTER_COMPACTION = 2;
 function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: boolean; ignored?: string; context?: string; hookSpecificOutput?: unknown } {
@@ -6276,6 +6275,7 @@ function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: 
     return { ok: true, context };
   }
   if (name === "Stop") return { ok: true };
+  if (name === "PostToolUseFailure") return toolFailureHookAnswer(payload);
   if (name !== "PostToolUse") return { ok: true, ignored: name || "unknown" };
   const toolUseId = typeof payload.tool_use_id === "string" ? payload.tool_use_id : "";
   if (!toolUseId) return { ok: true, ignored: "PostToolUse without tool_use_id" };
@@ -6287,16 +6287,8 @@ function ingestEngineHook(capability: InternalCapability, body: unknown): { ok: 
   if (!turnId || !row?.tool) return { ok: true, ignored: "tool not observed in this turn" };
   const key = `${threadId}:${turnId}:${toolUseId}`;
   if (!commandReceipt("hook.ingest", key)) {
-    const dir = join(TOOL_RESULTS_DIR, threadId.replace(/[^\w.-]/g, "_"));
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const safeId = createHash("sha256").update(key).digest("hex");
-    const file = join(dir, `${safeId}.txt`);
-    const redacted = redactSecretsInText(text);
-    const bounded = redacted.length > TOOL_RESULT_SPILL_MAX
-      ? `${redacted.slice(0, TOOL_RESULT_SPILL_MAX)}\n[… ${redacted.length - TOOL_RESULT_SPILL_MAX} more characters omitted]`
-      : redacted;
-    writeFileAtomic(file, bounded, { mode: 0o600 });
-    store.patchMessage(threadId, row.id, { tool: { ...row.tool, fullResult: redacted.length <= TOOL_RESULT_SPILL_MAX } }, { kind: "hook.ingest", key });
+    const fullResult = spillToolResult(join(TOOL_RESULTS_DIR, threadId.replace(/[^\w.-]/g, "_")), key, text);
+    store.patchMessage(threadId, row.id, { tool: { ...row.tool, fullResult } }, { kind: "hook.ingest", key });
   }
   return { ok: true };
 }

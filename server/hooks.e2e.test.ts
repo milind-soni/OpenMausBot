@@ -54,7 +54,6 @@ function harness(label: string, serverEnv: Record<string, string>, instanceEnv: 
         claude: {
           driver: "claudeAgent",
           environment: {
-            ...instanceEnv,
             FAKE_CLAUDE_TURN_STATE: join(home, "turns"),
             FAKE_CLAUDE_PROMPTS: join(home, "prompts.ndjson"),
             FAKE_CLAUDE_HOOKS: "1",
@@ -62,6 +61,7 @@ function harness(label: string, serverEnv: Record<string, string>, instanceEnv: 
               { name: "Bash", input: { command: "cat big.log" }, ok: true, output: BIG },
               { name: "Read", input: { file_path: "a.ts" }, ok: true, output: "const a = 1;" },
             ]),
+            ...instanceEnv,
           },
           config: { cli: FAKE_CLAUDE },
         },
@@ -162,6 +162,23 @@ posixOnly("engine hooks e2e: compaction", () => {
     expect(replies.at(-1)!.text).toContain("did in an earlier turn");
     expect(replies.at(-1)!.text).toContain("Bash ×1");
   }, 90_000);
+});
+
+posixOnly("engine hooks e2e: fix hints on failed tools", () => {
+  const h = harness("hint", {}, {
+    FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([
+      { name: "Bash", input: { command: "ffmpeg -i in.mov out.mp4" }, ok: false, output: "Exit code 143\nCommand timed out after 2m 0s" },
+    ]),
+  });
+
+  it("answers a known PostToolUseFailure with a hint the engine sees, and leaves the failure a failure", async () => {
+    const bot = await h.runTurn();
+    const row: Msg & { tool?: { ok?: boolean } } = bot.messages.find((m: Msg) => m.kind === "activity" && m.tool?.name === "Bash");
+    expect(row.tool!.ok).toBe(false);
+    // the fake echoes the hook's additionalContext into its reply
+    const reply: Msg = bot.messages.filter((m: Msg) => m.role === "bot" && m.kind === "text" && m.text).at(-1);
+    expect(reply.text).toContain("Hint: Run long jobs");
+  }, 60_000);
 });
 
 posixOnly("engine hooks e2e with OMB_HOOKS=0", () => {

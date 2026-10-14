@@ -1,6 +1,9 @@
 // Short-lived overflow for agents tool results: authorize the live turn first; ownership is both bot and conversation.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { redactSecretsInText } from "../shared/redact.ts";
+import { writeFileAtomic } from "./atomic.ts";
 
 export const TOOL_RESULT_PREVIEW_CHARS = 16_000;
 export const TOOL_RESULT_MAX_CHARS = 128 * 1024;
@@ -68,4 +71,15 @@ export class ToolResults {
     return { id, text, offset: start, nextOffset: start + text.length, length: result.text.length,
       truncated: result.truncated, expiresAt: result.expiresAt };
   }
+}
+
+const SPILL_MAX = 512 * 1024;
+
+/** Writes the redacted result to a private file named by the key's hash; false when it had to be cut. */
+export function spillToolResult(dir: string, key: string, text: string): boolean {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const redacted = redactSecretsInText(text);
+  const bounded = redacted.length > SPILL_MAX ? `${redacted.slice(0, SPILL_MAX)}\n[… ${redacted.length - SPILL_MAX} more characters omitted]` : redacted;
+  writeFileAtomic(join(dir, `${createHash("sha256").update(key).digest("hex")}.txt`), bounded, { mode: 0o600 });
+  return redacted.length <= SPILL_MAX;
 }
