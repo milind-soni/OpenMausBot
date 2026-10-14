@@ -3,7 +3,7 @@ import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, open
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { alwaysCore, isExpired, isMemoryDate, parseMemoryEntries, untilMark, withoutExpired, type MemoryEntryLine } from "./memory-entries.ts";
+import { alwaysCore, isExpired, isMemoryDate, parseMemoryEntries, untilMark, withoutExpired, withoutSuperseded, type MemoryEntryLine } from "./memory-entries.ts";
 import { parseTopicHeader, readTopicHead, renderTopicIndex } from "./memory-topics.ts";
 import { indexMemoryFile, indexedMemoryFiles, recallMemory, removeMemoryFile, type MemoryHit, type SearchMode } from "./message-db.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -189,7 +189,7 @@ const memoryIndexDates = new Map<string, string>();
 function searchableMemoryText(path: string, text: string): string {
   if (path === "MEMORY.md" && text === MEMORY_SEED) return "";
   if (path === "memory/archive.md" || path.startsWith(`memory/${MEMORY_LOG_DIR}/`)) return text;
-  return withoutExpired(text, memoryDate()).text;
+  return withoutSuperseded(withoutExpired(text, memoryDate()).text);
 }
 
 export function syncMemoryIndex(botId: string): void {

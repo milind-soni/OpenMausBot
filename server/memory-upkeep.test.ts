@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import { CaptureBuffer, capturePrompt, newCandidates, parseCandidates, topicFileName, type CaptureTurn } from "./memory-capture.ts";
@@ -8,7 +8,7 @@ import { mergeTopicText, parseTopicHeader } from "./memory-topics.ts";
 import { applyMoves, MAX_MOVES, organizeCandidates, ORGANIZE_MARKER, parseMoves } from "./memory-organize.ts";
 import { flushMemoryJournal, readMemoryJournal } from "./memory-journal.ts";
 import { applyTidy, contradictionBudget, contradictionCandidates, parseContradictions, planTidy } from "./memory-tidy.ts";
-import { createMemoryUpkeep, MAX_PENDING_THREADS, NO_TEXT_ENGINE, type UpkeepBot, type UpkeepEngine } from "./memory-upkeep.ts";
+import { createMemoryUpkeep, MAX_PENDING_THREADS, NO_TEXT_ENGINE, type UpkeepBot, type UpkeepEngine, type UpkeepDeps } from "./memory-upkeep.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { aboutMeLine, appendAboutMe, commitLearned, listLearnedFacts, planLearned, removeLearned } from "./profile-learned.ts";
 import { ensureWorkspace, readMemoryTopic, workspaceDir, writeMemoryFile, writeMemoryTopic, WORKSPACES_DIR } from "./workspace.ts";
@@ -238,7 +238,7 @@ describe("the upkeep loop", () => {
   let organizePrompts: string[];
   let transcript: Map<string, CaptureTurn>;
 
-  const upkeep = () => createMemoryUpkeep({
+  const upkeep = (overrides: Partial<UpkeepDeps> = {}) => createMemoryUpkeep({
     bots: () => [BOT],
     bot: (id) => (id === BOT.id ? BOT : undefined),
     engine: () => engine,
@@ -252,6 +252,7 @@ describe("the upkeep loop", () => {
     quietMs: () => 60_000,
     tidyHour: () => 3,
     now: () => clock,
+    ...overrides,
   });
 
   beforeEach(() => {
@@ -598,6 +599,24 @@ describe("the upkeep loop", () => {
     loop.resume();
     await loop.idle();
     expect(memory()).toContain("Likes jazz");
+  });
+
+  it("persists delegated provenance for a bot-only transcript across restart", async () => {
+    const turn = { person: "", bot: "Saved the project", turnId: "delegated-1", delegated: true, owner: false };
+    const first = upkeep();
+    first.noteTurn(BOT.id, "t1", turn);
+    first.stop();
+    await first.idle();
+    const saved = JSON.parse(readFileSync(join(DATA_DIR, "memory-capture-pending.json"), "utf8"));
+    expect(saved.batches[0].delegatedIds).toEqual(["delegated-1"]);
+    const restored = vi.fn((_bot: string, _thread: string, _turn: string, flags?: { delegated?: boolean }) => flags?.delegated ? turn : null);
+    const second = upkeep({ restoreTurn: restored });
+    second.start();
+    second.flushThread("t1");
+    await second.idle();
+    expect(restored).toHaveBeenCalledWith(BOT.id, "t1", "delegated-1", { failed: false, delegated: true });
+    expect(prompts).toHaveLength(1);
+    second.stop();
   });
 
   it("keeps turns still waiting at shutdown as ids and captures them after the next start", async () => {

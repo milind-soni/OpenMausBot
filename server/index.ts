@@ -118,6 +118,9 @@ import { createMemoryUpkeep, upkeepEnabled } from "./memory-upkeep.ts";
 import { createCacheKeepWarm, type KeepWarmStatus, type KeepWarmTarget } from "./cache-keepwarm.ts";
 import { createSkillReview, turnToolSteps } from "./skill-review.ts";
 import type { CaptureTurn, RoomLine } from "./memory-capture.ts";
+import { memoryTurn } from "./memory-turn.ts";
+import { evidenceInputSchema } from "./project-evidence.ts";
+import { createTeamMemoryActions } from "./host/team-memory.ts";
 import { appendAboutMe, commitLearned, planLearned } from "./profile-learned.ts";
 import { canAccessTeam, canReachPeer, coordinatorSupervises, livePeerRoster, livePeerRosterBlock, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
 import {
@@ -5877,6 +5880,12 @@ bus.subscribe((event: RuntimeEvent) => {
   }
 });
 
+const teamMemoryActions = createTeamMemoryActions({ store, memory: () => teamMemory, roomFeedsBot,
+  mayCapture: (botId, threadId) => {
+    const room = store.groupByThread(threadId);
+    return !room || roomCaptureAllowed(room, store.bot(botId));
+  },
+});
 const memoryUpkeep = createMemoryUpkeep({
   bots: () => store.bots,
   bot: (id) => store.bot(id) ?? undefined,
@@ -5919,17 +5928,15 @@ const memoryUpkeep = createMemoryUpkeep({
     return facts.length;
   },
   sourceLabel: (botId, threadId) => memorySourceLabel({ room: store.groupByThread(threadId), task: store.taskByThread(botId, threadId), threadId }),
-  mayCapture: (botId, threadId) => {
-    const room = store.groupByThread(threadId);
-    return !room || roomCaptureAllowed(room, store.bot(botId));
-  },
-  restoreTurn: (botId, threadId, turnId) => {
+  mayCapture: teamMemoryActions.mayCapture,
+  proposeShared: teamMemoryActions.capture,
+  restoreTurn: (botId, threadId, turnId, flags) => {
     if (routines?.runForThread(threadId)) return null;
     const room = store.groupByThread(threadId);
     if (room) return roomCaptureAllowed(room, store.bot(botId)) ? captureRoomTurnFor(threadId, botId, turnId) : null;
     if (store.botByThread(threadId)?.id !== botId) return null;
     if (CLOUD_HOME && !cloudOwnerOnlyThread(threadId)) return null;
-    return captureTurnFor(threadId, turnId);
+    return captureTurnFor(threadId, turnId, botId, flags?.failed, flags?.delegated);
   },
   ...(lendingMemory ? { writing: <T>(botId: string, write: () => T): T => lendingMemory.trustedWrite(botId, write) } : {}),
   quietMs: () => captureQuietMs(cfg),
@@ -5953,18 +5960,9 @@ bus.subscribe((event: RuntimeEvent) => {
   }
 });
 
-function captureTurnFor(threadId: string, turnId: string): CaptureTurn | null {
-  const path = store.activePath(threadId);
-  const replyAt = path.findLastIndex((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId);
-  if (replyAt < 0) return null;
-  const asked = path.slice(0, replyAt).findLast((message) => message.role === "user" && message.kind === "text");
-  if (!asked || asked.peerAsk) return null;
-  return {
-    person: extractTurnImages(asked.text ?? "").text,
-    bot: path[replyAt]!.text ?? "",
-    owner: !asked.sender,
-    turnId,
-  };
+function captureTurnFor(threadId: string, turnId: string, botId?: string, failed = false, delegated = isInternalTurn(threadId)): CaptureTurn | null {
+  const bot = botId ? store.bot(botId) : store.botByThread(threadId);
+  return bot ? memoryTurn(store.activePath(threadId), bot.id, turnId, Boolean(store.groupByThread(threadId)), failed, delegated) : null;
 }
 
 // Prompt-cache keep-warm (server/cache-keepwarm.ts; design from Cache Tax,
@@ -6064,7 +6062,7 @@ function roomCaptureAllowed(room: GroupRecord, bot: BotRecord | null | undefined
   return room.memberIds.includes(bot.id) && upkeepEnabled(bot) && roomFeedsBot(room, bot);
 }
 
-function captureRoomTurnFor(threadId: string, botId: string, turnId: string): CaptureTurn | null {
+function captureRoomTurnFor(threadId: string, botId: string, turnId: string, failed = false): CaptureTurn | null {
   const path = store.activePath(threadId);
   const replyAt = path.findLastIndex((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId && message.from?.botId === botId);
   if (replyAt < 0) return null;
@@ -6075,9 +6073,9 @@ function captureRoomTurnFor(threadId: string, botId: string, turnId: string): Ca
     if (message.role === "user") {
       if (message.peerAsk || message.aside) continue;
       const text = extractTurnImages(message.text).text;
-      lines.push(message.sender ? { by: "other", name: message.sender.name, text } : { by: "person", name: "Person", text });
+      lines.push(message.sender ? { by: "other", name: message.sender.name, text, messageId: message.id } : { by: "person", name: "Person", text, messageId: message.id });
     } else if (message.role === "bot" && message.from && message.from.botId !== botId && !message.webhookPost) {
-      lines.push({ by: "peer", name: message.from.name, text: message.text });
+      lines.push({ by: "peer", name: message.from.name, text: message.text, messageId: message.id });
     }
   }
   const read = lines.slice(-ROOM_CAPTURE_LINES);
@@ -6087,13 +6085,13 @@ function captureRoomTurnFor(threadId: string, botId: string, turnId: string): Ca
     bot: path[replyAt]!.text ?? "",
     owner: !read.some((line) => line.by === "other"),
     turnId,
-    room: read,
+    room: read, failed, sourceMessageId: path[replyAt]!.id,
   };
 }
 
 bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
-  if (event.type !== "turn.completed" || !event.turnId || !event.ok) return;
+  if (event.type !== "turn.completed" || !event.turnId) return;
   try {
     const room = store.groupByThread(event.threadId);
     if (room) {
@@ -6102,16 +6100,16 @@ bus.subscribe((event: RuntimeEvent) => {
       const reply = store.activePath(event.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === event.turnId);
       const member = reply?.from ? store.bot(reply.from.botId) : undefined;
       if (!roomCaptureAllowed(room, member) || isUnattended(member.id, event.threadId)) return;
-      const turn = captureRoomTurnFor(event.threadId, member.id, event.turnId);
+      const turn = captureRoomTurnFor(event.threadId, member.id, event.turnId, !event.ok);
       if (turn) memoryUpkeep.noteTurn(member.id, event.threadId, turn);
       return;
     }
     const bot = store.botByThread(event.threadId);
-    if (!bot || !upkeepEnabled(bot) || isInternalTurn(event.threadId)
+    if (!bot || !upkeepEnabled(bot)
       || isUnattended(bot.id, event.threadId) || routines?.runForThread(event.threadId)) return;
     if (CLOUD_HOME && !cloudOwnerOnlyThread(event.threadId)) return;
-    const turn = captureTurnFor(event.threadId, event.turnId);
-    if (turn) memoryUpkeep.noteTurn(bot.id, event.threadId, turn);
+    const turn = captureTurnFor(event.threadId, event.turnId, bot.id, !event.ok);
+    if (turn && (!isInternalTurn(event.threadId) || turn.delegated)) memoryUpkeep.noteTurn(bot.id, event.threadId, turn);
   } catch (error) {
     console.warn(`memory upkeep: could not queue a turn for capture: ${(error as Error).message}`);
   }
@@ -10338,7 +10336,7 @@ function resolveAndSendTrust(res: ServerResponse, threadId: string, requestId: s
   if (teamMemoryCard?.card?.teamMemoryRequest) {
     const request = teamMemoryCard.card.teamMemoryRequest;
     const proposer = teamMemoryCard.from?.botId ? store.bot(teamMemoryCard.from.botId) : store.botByThread(threadId);
-    const result = teamMemory.resolve(request.section, request.entryId, behavior === "allow" ? "accept" : "reject");
+    const result = teamMemory.resolveProposal(request.entryId, behavior === "allow" ? "accept" : "reject");
     if (!result.claimed) {
       if (!teamMemoryCard.card.answered) {
         store.patchMessage(threadId, teamMemoryCard.id, { card: { ...teamMemoryCard.card, answered: "unavailable", dismissed: true } });
@@ -15366,6 +15364,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           fromBotId: z.string().min(1).max(128),
           fromThreadId: z.string().min(1).max(128),
           kind: z.string(),
+          key: z.string().max(240).optional(),
+          evidence: evidenceInputSchema.optional(),
           name: z.string(),
           detail: z.string(),
           aliases: z.array(z.string()).optional(),
@@ -15384,11 +15384,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         let proposed: ReturnType<TeamMemory["propose"]>;
         try {
-          proposed = teamMemory.propose(
-            from.section,
-            { kind: body.kind as TeamMemoryKind, name: body.name, detail: body.detail, aliases: body.aliases },
-            { botId: from.id, botName: from.name, threadId: body.fromThreadId, at: Date.now() },
-          );
+          proposed = await teamMemoryActions.propose({ ...body, kind: body.kind as TeamMemoryKind }, from, requireActiveInternalCapability, liveTurnByThread.get(body.fromThreadId));
         } catch (error) {
           return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
         }
@@ -15550,9 +15546,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const rawLimit = Number(url.searchParams.get("limit"));
         const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.trunc(rawLimit), 25) : 12;
         const scope = url.searchParams.get("scope") ?? "all";
-        if (scope !== "all" && scope !== "conversations" && scope !== "memory") {
-          return json(res, 400, { error: "scope must be all, conversations, or memory" });
+        if (scope !== "all" && scope !== "conversations" && scope !== "memory" && scope !== "team") {
+          return json(res, 400, { error: "scope must be all, conversations, memory, or team" });
         }
+        const teamHits = scope === "conversations" || scope === "memory" ? [] : teamMemory.search(from.section, q, limit, range);
+        if (scope === "team") return json(res, 200, { hits: [], memoryHits: [], teamHits });
         const memoryHits = scope === "conversations" || !q || from.memoryEnabled === false ? [] : searchMemoryFiles(from.id, q, limit);
         if (scope === "memory") return json(res, 200, { hits: [], memoryHits });
         const roomByThread = new Map<string, GroupRecord>();
@@ -15581,7 +15579,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (inRoom) {
           discloseRecall(from, fromThreadId, hits.filter((hit) => hit.crossed).map((hit) => hit.threadId));
         }
-        return json(res, 200, { hits, memoryHits });
+        return json(res, 200, { hits, memoryHits, teamHits });
       }
       // session_read: a message id from another bot's thread reads as missing, not forbidden, so the id space leaks nothing.
       if (method === "GET" && path === "/api/internal/session-read") {

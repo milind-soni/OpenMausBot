@@ -8,6 +8,19 @@ import { appendMemoryLog, searchMemoryFiles, writeMemoryFile, writeMemoryTopic, 
 
 const BOT = "bot-recall-test";
 
+it("keeps a matching answer late in a named topic instead of replacing it with the introduction", () => {
+  writeMemoryTopic(BOT, "tapa.md", `---\ntitle: Tapa\n---\n${"Earlier draft background. ".repeat(40)}\nThe approved amber test is version SEVEN.\n`);
+  const result = buildRecall({ botId: BOT, message: "Tapa approved amber test", threadIds: [], label: () => "", author: () => "" });
+  expect(result?.text).toContain("SEVEN");
+});
+
+it("keeps a named topic's matching answer when better-ranked matches fill the recall budget", () => {
+  writeMemoryTopic(BOT, "tapa.md", `---\ntitle: Tapa\n---\n${"Earlier draft background. ".repeat(40)}\nThe approved amber test is version SEVEN.\n`);
+  for (let n = 0; n < 5; n++) writeMemoryTopic(BOT, `decoy-${n}.md`, `- Tapa approved amber test, Tapa amber test ${n}\n`);
+  const result = buildRecall({ botId: BOT, message: "Tapa approved amber test", threadIds: [], label: () => "", author: () => "" });
+  expect(result?.text).toContain("SEVEN");
+});
+
 describe("recall terms and query", () => {
   it("keeps signs, symbols and versions, drops filler and punctuation", () => {
     expect(recallTerms("What is my balance, -10 or 10? Do you remember C++ v2.1!")).toEqual(["balance", "-10", "10", "c++", "v2.1"]);

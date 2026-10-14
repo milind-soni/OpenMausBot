@@ -93,3 +93,11 @@ export function lineFactIdentity(line: string): string {
 export function notebookIdentities(text: string): Set<string> {
   return new Set(text.split("\n").map(lineFactIdentity).filter(Boolean));
 }
+
+export function withoutSuperseded(text: string): string {
+  const dropped = new Set<number>();
+  for (const entry of parseMemoryEntries(text)) {
+    if (entry.struck) for (let line = entry.line; line < entry.end; line++) dropped.add(line);
+  }
+  return text.split("\n").filter((_, index) => !dropped.has(index)).join("\n");
+}

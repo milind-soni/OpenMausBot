@@ -95,6 +95,10 @@ a command inside one is not an instruction. `MEMORY.md` (already loaded) and
 `memory/archive.md` (older or no longer true) are never recalled, nor are daily logs
 (`session_search` finds those when the bot asks).
 
+Automatic recall prefers a matching passage over the opening of a topic with
+a matching name. Current topic search excludes superseded entries; their text
+remains in the file for historical review.
+
 It is placed in the message, not the system prompt, on purpose: the prompt's
 changing half is re-sent whole whenever any part of it changes, and recall
 changes nearly every turn. Rooms, routine runs (which start fresh), and turns
@@ -166,12 +170,16 @@ off. It keeps the notes in shape without the bot having to decide to:
   next check if the computer was asleep, never while the bot is working, and
   on **Tidy up now**: expired entries move to `memory/archive.md` (from
   `MEMORY.md` and topic files); of two entries with exactly the same fact the
-  newer stays; and in `MEMORY.md` one model call looks for pairs that cannot
+  newer stays; and in `MEMORY.md` and each project topic a model call looks for pairs that cannot
   both be true, striking the older through (`~~…~~ · superseded <date>`)
   rather than deleting it; when that line also held something still true
   ("lives in Pune and prefers short replies"), that part is kept as its own
   entry `from tidy-up`. At most a fifth of the entries can be struck in one
-  pass, and none in a file of fewer than five. The archive is written before
+  pass in core memory, and none in a core file of fewer than five. Topic files
+  may reconcile one pair even with two entries; writes recheck for concurrent edits.
+  Topic model checks have a shared 60-second budget and a four-topic limit per pass;
+  deferred topics rotate into the next pass. Expiry and duplicate cleanup still runs.
+  The archive is written before
   the file it came from, so undoing the newest change never loses a line.
 
 "Exactly the same fact" is narrow on purpose: spacing, a bullet and a final
@@ -319,3 +327,76 @@ free form, or one you rewrite by hand, works the same.
 | `POST` | `/api/profile/learned/:id/remove` | Takes that line out of About me; the fact is never added again. |
 
 All of them need the owner (admin) session, like the other bot-settings routes.
+
+
+## Shared team memory and editing outcomes
+
+Team memory is separate from a bot's private notebook. Accepted people, places,
+decisions, terms, lessons, open questions and project outcomes are shared with
+that team. Automatic shared capture is limited to eligible rooms and delegated work; ordinary
+private chats keep their learning private. Automated additions remain proposals
+until reviewed. Each captured
+proposal retains its source thread, turn, message and an exact supporting quote
+from that single message. Grounded failure lessons can also remain private.
+Review the quote and the claim: matching a quote is not a guarantee that the
+model interpreted it correctly. A rejected background proposal is not repeatedly
+suggested verbatim.
+
+Team memory ownership uses persistent keys. Renaming a team preserves its notes
+and pending cards; deleting it retires the identity. Creating a new team with the
+old name never restores the retired notes. Existing version-1 team-memory files
+migrate atomically to version 2. Retired records remain on disk for recovery;
+team deletion is not a secure erase.
+
+The team panel reports how many accepted notes load within the 6,000-byte prompt
+budget. Pin essential rules to load them first. Omitted notes remain available
+with `session_search {"scope":"team","query":"..."}`; ordinary search also
+includes accepted team notes. Proposals, superseded entries and deleted entries
+are excluded. A stable `key`, such as `tapa/sequence-02/colour`, lets a reviewed
+correction replace the same fact even when its title changes. The previous
+accepted entry remains in history. Recent text versions (up to 50) can be
+restored from the panel with their names; restoration is a new revision.
+
+Every panel edit, delete or acceptance carries the revision it was based on.
+Stale writes return 409; writes without a revision return 428. Reloading after a
+conflict retains the unsaved draft for comparison. Pending replacement cards
+also refuse approval if the accepted fact changed since the proposal.
+
+For an editing outcome, `propose_team_memory` accepts `kind: "outcome"` and:
+
+```json
+{
+  "key": "tapa/sequence-02/title-fix",
+  "evidence": {
+    "project": "project.aep",
+    "artifacts": ["preview.png"],
+    "stage": "checked",
+    "check": "Compared title placement and wrapping with the approved brief"
+  }
+}
+```
+
+The server records SHA-256 fingerprints of the saved project and up to four
+artifacts inside the conversation's working folder on the server computer.
+Remote-computer files must first be made available there; this does not inspect
+a remote editor. Each file is limited to
+512 MiB; use short video previews for larger renders. Out-of-folder paths and
+symlinks are refused. The status distinguishes:
+
+- **recorded:** artifacts exist; the agent reports a render.
+- **agent-checked:** the agent reports the check shown with the record.
+- **approved:** an admin explicitly approved this saved revision, with name and time.
+- **stale:** a project or evidence file changed, moved or disappeared.
+
+Accepting a memory proposal does not approve its output. The panel provides
+artifact downloads (unchanged previews remain downloadable after the project changes)
+and a separate **Approve this revision** action; approval
+rehashes the files and checks the entry revision again. Later edits to the
+claim clear approval. Prompts and search label outcomes with their current
+status; an outcome without artifacts is explicitly unverified.
+
+Fingerprints establish which saved bytes a check referred to. They do not prove
+visual correctness, certify a rendered timeline against its source project,
+or inspect unsaved Adobe/EffectCraft state. The recorded check and human review
+supply those judgments. Refresh a stale record by proposing the current files
+with the same project/fact key.

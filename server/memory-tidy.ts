@@ -44,13 +44,13 @@ export function contradictionBudget(liveEntries: number): number {
   return Math.floor(liveEntries * CONTRADICTION_SHARE);
 }
 
-export function planTidy(text: string, today: string, contradictions: readonly Contradiction[] = []): TidyPlan {
+export function planTidy(text: string, today: string, contradictions: readonly Contradiction[] = [], minimumBudget = 0): TidyPlan {
   const entries = parseMemoryEntries(text);
   const expired = entries.filter((e) => isExpired(e, today));
   const live = entries.filter((e) => !e.struck && !isExpired(e, today));
   const duplicates = duplicatesOf(live);
   const candidates = contradictionCandidates(text, today);
-  const budget = contradictionBudget(live.length);
+  const budget = Math.max(minimumBudget, contradictionBudget(live.length));
   const touched = new Set<number>();
   const superseded: TidyPlan["superseded"] = [];
   let deferred = 0;

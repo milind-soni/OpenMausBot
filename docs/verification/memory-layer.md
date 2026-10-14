@@ -53,3 +53,26 @@ The fake engine answers the model steps with scripted JSON, so these tests
 prove the plumbing, not the quality of what a real model captures or judges
 contradictory. Check that by hand with a real Claude bot: switch upkeep on,
 mention a preference in passing, wait two minutes, and read the Memory panel.
+
+## Team integrity and editing evidence
+
+Run the isolated regression checks:
+
+```sh
+pnpm exec vitest run server/team-memory.test.ts server/recall.test.ts server/memory-learning.test.ts server/memory-topic-corrections.test.ts server/project-evidence.test.ts
+pnpm exec vitest run server/memory-integrity.e2e.test.ts server/trust-controls.e2e.test.ts server/team-lifecycle.e2e.test.ts server/cloud-lending-memory.e2e.test.ts
+pnpm exec vitest run src/components/TeamMemoryDialog.test.ts server/drivers/agents-catalog-wire.test.ts
+pnpm run typecheck
+```
+
+The integrity fixture uses the shared launcher and fake engine with its own data,
+project and preview files. It checks rename/name reuse, revision conflicts,
+shared search, reviewed room capture reaching another bot, source-backed lessons
+from a fresh bot-only delegated thread, and separate output
+approval becoming stale when the saved project changes. Unit checks cover late
+matching passages, pinned prompt budgets, keyed corrections/history, rejected
+source quotes, private-chat sharing exclusion, failure lessons, bounded topic
+contradiction checks, legacy ownership, and path/symlink containment.
+The renderer tests exercise the actual dialog's stale-edit draft retention and
+revision-bearing pin action. Model answers remain scripted: these checks do not
+measure real-model extraction accuracy or certify editing/render fidelity.

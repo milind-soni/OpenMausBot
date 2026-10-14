@@ -2,7 +2,7 @@
 import { recallMessages, recallTerms, type MemoryHit, type RecallHit } from "./message-db.ts";
 import { parseTopicHeader, readTopicHead, topicBody, topicWords } from "./memory-topics.ts";
 import { listMemoryTopics, memoryDate, readMemoryTopic, searchMemoryFiles, workspaceDir } from "./workspace.ts";
-import { withoutExpired } from "./memory-entries.ts";
+import { withoutExpired, withoutSuperseded } from "./memory-entries.ts";
 import { join } from "node:path";
 
 export const RECALL_MIN_CHARS = 8;
@@ -112,7 +112,7 @@ export function topicPassages(botId: string, query: string): RecallPassage[] {
       if (topic.name === "archive.md") continue;
       const words = topicWords(topic.name, parseTopicHeader(readTopicHead(join(dir, topic.name))));
       if (!terms.some((term) => words.some((word) => sameWord(term, word)))) continue;
-      const body = topicBody(withoutExpired(readMemoryTopic(botId, topic.name) ?? "", memoryDate()).text);
+      const body = topicBody(withoutSuperseded(withoutExpired(readMemoryTopic(botId, topic.name) ?? "", memoryDate()).text));
       if (!body) continue;
       out.push({ source: "memory", label: `memory/${topic.name}`, snippet: body.length > TOPIC_PASSAGE_CHARS ? `${body.slice(0, TOPIC_PASSAGE_CHARS)}…` : body });
       if (out.length >= MEMORY_HITS) break;
@@ -132,7 +132,6 @@ export function memoryPassages(botId: string, query: string): RecallPassage[] {
   }
   return hits
     .filter((hit) => recalled(hit.file) && enoughMatches(query, hit.snippet))
-    .slice(0, MEMORY_HITS)
     .map((hit) => ({ source: "memory" as const, label: hit.file, at: hit.at, snippet: plain(hit.snippet) }));
 }
 
@@ -159,7 +158,12 @@ export function buildRecall(input: RecallInput): RecallResult | null {
   const query = recallQuery(input.message);
   if (!query) return null;
   const topics = topicPassages(input.botId, query);
-  const named = new Set(topics.map((passage) => passage.label));
-  const notes = [...topics, ...memoryPassages(input.botId, query).filter((passage) => !named.has(passage.label))].slice(0, MEMORY_HITS);
+  const notes = selectMemoryPassages(memoryPassages(input.botId, query), topics);
   return renderRecall([...notes, ...conversationPassages(input, query)]);
+}
+
+export function selectMemoryPassages(matches: readonly RecallPassage[], topics: readonly RecallPassage[]): RecallPassage[] {
+  const named = topics.map(topic => matches.find(match => match.label === topic.label) ?? topic);
+  const namedFiles = new Set(named.map(passage => passage.label));
+  return [...named, ...matches.filter(passage => !namedFiles.has(passage.label))].slice(0, MEMORY_HITS);
 }

@@ -3,10 +3,14 @@
 // rules (the background review Hermes Agent runs in group threads, MIT).
 import { factIdentity, isMemoryDate, notebookIdentities } from "./memory-entries.ts";
 
-export type CandidateKind = "preference" | "fact" | "decision" | "outcome";
-export const CANDIDATE_KINDS: readonly CandidateKind[] = ["preference", "fact", "decision", "outcome"];
+export type CandidateKind = "preference" | "fact" | "decision" | "outcome" | "lesson" | "question";
+export const CANDIDATE_KINDS: readonly CandidateKind[] = ["preference", "fact", "decision", "outcome", "lesson", "question"];
 
 export interface Candidate {
+  sourceTurn?: number;
+  sourceQuote?: string;
+  teamName?: string;
+  key?: string;
   text: string;
   kind: CandidateKind;
   until?: string;
@@ -25,8 +29,8 @@ export function topicFileName(raw: unknown): string | null {
 
 export const MIN_CONFIDENCE = 0.6;
 export const MAX_CANDIDATES = 8;
-const TEXT_MAX = 300;
-const LINE_MAX = 1_500;
+const TEXT_MAX = 600;
+const LINE_MAX = 6_000;
 const NOTEBOOK_MAX = 6_000;
 export const CAPTURE_MARKER = "You are the CAPTURE step of a memory system";
 
@@ -34,9 +38,15 @@ export interface RoomLine {
   by: "person" | "other" | "peer";
   name: string;
   text: string;
+  messageId?: string;
 }
 
 export interface CaptureTurn {
+  sourceMessageId?: string;
+  personMessageId?: string;
+  failed?: boolean;
+  delegated?: boolean;
+  evidence?: string;
   person: string;
   bot: string;
   /** Another person's facts may be kept, but never offered for the owner's About me. */
@@ -51,15 +61,20 @@ function weekday(day: string): string {
 }
 
 export function capturePrompt(input: { botName: string; turns: readonly CaptureTurn[]; notebook: string; today: string; topics?: string }): string {
-  const clip = (text: string) => text.replace(/\s+/g, " ").trim().slice(0, LINE_MAX);
+  const clip = (text: string) => {
+    const folded = text.replace(/\s+/g, " ").trim();
+    return folded.length <= LINE_MAX ? folded : `${folded.slice(0, LINE_MAX / 2)} [middle omitted; consult source message] ${folded.slice(-LINE_MAX / 2)}`;
+  };
   const said = (line: RoomLine) =>
     line.by === "person" ? `Person: ${clip(line.text)}`
     : line.by === "other" ? `${clip(line.name).slice(0, 40)} (another person): ${clip(line.text)}`
     : `${clip(line.name).slice(0, 40)} (another bot): ${clip(line.text)}`;
   const conversation = input.turns
-    .flatMap((turn) => [
+    .flatMap((turn, index) => [
+      `Turn [${index}]${turn.delegated ? " DELEGATED: other bots are not the owner; propose only work lessons, questions or reported outcomes" : ""}${turn.failed ? " FAILED: capture only an evidenced lesson or open question" : ""}:`,
       ...(turn.room ? turn.room.filter((line) => line.text.trim()).map(said) : [turn.person.trim() ? `Person: ${clip(turn.person)}` : ""]),
       turn.bot.trim() ? `${input.botName}: ${clip(turn.bot)}` : "",
+      turn.evidence ? `Observed activity (not approval): ${clip(turn.evidence)}` : "",
     ])
     .filter(Boolean)
     .join("\n");
@@ -86,6 +101,9 @@ export function capturePrompt(input: { botName: string; turns: readonly CaptureT
     "- aboutUser is true only for a durable fact about the Person themselves that any of their assistants should know (a diet, where they live, their company, how they like to be spoken to).",
     "",
     "Where each fact goes:",
+    "- For every item include sourceTurn (the numbered turn) and sourceQuote (an exact excerpt from that turn, at most 600 characters). Never infer success from an assistant saying done. An outcome is only a reported outcome until artifacts are checked and a person approves the exact revision.",
+    "- Project-specific decisions belong to that project even when they are not lasting personal facts. Keep a correction needed for future handoffs; do not turn it into a global preference.",
+    "- Group decisions, durable lessons (including from failures), and unresolved project questions should include teamName (short title) and key (stable project/fact key, reused when a decision changes). These become shared proposals for review, never silently approved facts. Keep the decision and a short reason or rejected alternative together. Do not publish personal information as a team note.",
     "- No topic: a core fact the assistant needs in every conversation — who the Person is, their core preferences, standing decisions.",
     "- A topic: everything else, grouped by subject — a person (\"asha\"), a place, a project or client, a domain of preferences (\"food\", \"travel\"), their work. Reuse an existing topic name when one fits; otherwise name a new one in one or two words. Always give topicAliases: two to five other words someone might use when asking about that subject (for food: restaurants, dinner, lunch, cuisine; for a sister: family, sibling, her name).",
     "",
@@ -96,7 +114,7 @@ export function capturePrompt(input: { botName: string; turns: readonly CaptureT
     "",
     "Work through the Person's messages sentence by sentence and check each stated fact against these rules before answering.",
     `Answer with a JSON list and nothing else, at most ${MAX_CANDIDATES} items. Answer [] only when the Person stated nothing worth keeping:`,
-    '[{"text": "...", "kind": "preference|fact|decision|outcome", "until": "YYYY-MM-DD or omit", "aboutUser": true|false, "noted": true|false, "topic": "name or omit", "topicAliases": ["..."], "confidence": 0..1}]',
+    '[{"text": "...", "kind": "preference|fact|decision|outcome|lesson|question", "until": "YYYY-MM-DD or omit", "aboutUser": true|false, "noted": true|false, "topic": "name or omit", "topicAliases": ["..."], "confidence": 0..1, "sourceTurn": 0, "sourceQuote": "exact excerpt", "teamName": "optional title", "key": "optional project/fact"}]',
   ].join("\n");
 }
 
@@ -126,7 +144,7 @@ export function parseCandidates(text: string, today: string): Candidate[] {
   const out: Candidate[] = [];
   for (const item of list) {
     if (!item || typeof item !== "object") continue;
-    const { text: raw, kind, until, aboutUser, noted, topic, topicAliases, confidence } = item as Record<string, unknown>;
+    const { text: raw, kind, until, aboutUser, noted, topic, topicAliases, confidence, sourceTurn, sourceQuote, teamName, key } = item as Record<string, unknown>;
     if (typeof raw !== "string" || !raw.trim()) continue;
     if (typeof kind !== "string" || !CANDIDATE_KINDS.includes(kind as CandidateKind)) continue;
     if (typeof confidence === "number" && confidence < MIN_CONFIDENCE) continue;
@@ -135,6 +153,10 @@ export function parseCandidates(text: string, today: string): Candidate[] {
     const validUntil = isMemoryDate(until) && until >= today ? until : undefined;
     if (isMemoryDate(until) && !validUntil) continue;
     out.push({
+      ...(Number.isInteger(sourceTurn) && Number(sourceTurn) >= 0 ? { sourceTurn: Number(sourceTurn) } : {}),
+      ...(typeof sourceQuote === "string" && sourceQuote.trim() ? { sourceQuote: sourceQuote.trim().slice(0, 600) } : {}),
+      ...(typeof teamName === "string" && teamName.trim() ? { teamName: teamName.trim().slice(0, 120) } : {}),
+      ...(typeof key === "string" && key.trim() ? { key: key.trim().slice(0, 240) } : {}),
       text: factText,
       kind: kind as CandidateKind,
       ...(validUntil ? { until: validUntil } : {}),

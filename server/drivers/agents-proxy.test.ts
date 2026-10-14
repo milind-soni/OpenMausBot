@@ -1386,7 +1386,7 @@ describe("agents-proxy MCP surface", () => {
 
   it("session_search lists memory-file hits by file, ahead of conversation hits, and forwards the scope", async () => {
     const list = await rpc("tools/list");
-    expect(list.result.tools.find((t: { name: string }) => t.name === "session_search").inputSchema.properties.scope.enum).toEqual(["all", "conversations", "memory"]);
+    expect(list.result.tools.find((t: { name: string }) => t.name === "session_search").inputSchema.properties.scope.enum).toEqual(["all", "conversations", "memory", "team"]);
     sessionSearchResponse = {
       hits: [{ threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", snippet: "the [audit] found three [broken] [links]", task: "Site audit", current: false }],
       memoryHits: [
@@ -1409,6 +1409,14 @@ describe("agents-proxy MCP surface", () => {
 
     await callTool("session_search", { query: "railway", scope: "conversations" });
     expect(lastSessionSearchUrl).toContain("scope=conversations");
+    sessionSearchResponse = { hits: [], memoryHits: [], teamHits: [{ id: "shared-rule", key: "project/colour", name: "Colour", detail: "Use amber", source: { threadId: "shared-room", messageId: "decision" } }] };
+    const shared = await callTool("session_search", { query: "colour", scope: "team" });
+    expect(lastSessionSearchUrl).toContain("scope=team");
+    expect(shared.result.content[0].text).toContain("Accepted team memory");
+    expect(shared.result.content[0].text).toContain("source thread shared-room message decision");
+    expect(shared.result.content[0].text).toContain("Use amber");
+    expect(shared.result.content[0].text).toContain("include shared team memory");
+    expect(shared.result.content[0].text).not.toContain("These are your own notes");
     await callTool("session_search", { query: "railway", scope: "everything" });
     expect(lastSessionSearchUrl).not.toContain("scope=");
     sessionSearchResponse = { hits: [] };
