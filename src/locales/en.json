@@ -147,6 +147,7 @@
   "toolDetail.output": "Result",
   "toolDetail.running": "Running",
   "toolDetail.failed": "Failed",
+  "toolDetail.exitCode": "exit {code}",
   "toolDetail.completed": "Completed",
   "toolDetail.waiting": "Waiting for the tool to finish…",
   "toolDetail.noOutput": "No output was recorded for this call.",
