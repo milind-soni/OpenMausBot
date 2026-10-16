@@ -109,3 +109,16 @@ export function splitSessionPrompt(
     : volatileContextNote(volatile, previous.volatile !== EMPTY_FINGERPRINT);
   return { text: withContextNote(note, text), receipt: { ...fingerprints, turnsSinceFull: turnsSinceFull + 1 } };
 }
+
+/** The volatile half as a reminder in a Claude turn, by the CLI's own out-of-band convention: on a
+ * live session when it changed, and in a new process's first message (`launch`), so the launched
+ * system prompt is the stable half alone and a relaunch keeps a prefix the provider already cached. */
+export function withVolatileNote(text: string, volatile: string, launch = false): string {
+  const body = !volatile.trim()
+    ? "The notes that were in your instructions when this session started have been cleared."
+    : launch
+      ? `This part of your instructions changes from turn to turn, so it arrives here instead of in the system prompt. It replaces any earlier copy:\n\n${volatile.trim()}`
+      : `This part of your instructions changed since this session started. It replaces the earlier copy:\n\n${volatile.trim()}`;
+  const note = `<system-reminder>\n${body}\n</system-reminder>`;
+  return text ? `${note}\n\n${text}` : note;
+}

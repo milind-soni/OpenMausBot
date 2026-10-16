@@ -1,4 +1,5 @@
 // Scripted provider fixture that exercises the REAL injected agents MCP proxy.
+import { splitLaunchNote } from "./launch-note.ts";
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -119,7 +120,10 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   }
   const agent = agentEnv(integration);
   const botId = agent.OMB_BOT_ID;
-  const system = launch?.system ?? readAtLaunch(arg("--append-system-prompt-file"));
+  const launchNote = splitLaunchNote(prompt);
+  prompt = launchNote.prompt;
+  const launchSystem = launch?.system ?? readAtLaunch(arg("--append-system-prompt-file"));
+  const system = launchNote.note && typeof launchSystem === "string" ? `${launchSystem}\n\n${launchNote.note}` : launchSystem;
   // Claude snapshots the launch-time system prompt; later instructions arrive in the user message.
   const turnContext = `${system}\n${JSON.stringify(prompt)}`;
   const resumed = turnContext.includes("Your downstream room requests have settled.");
