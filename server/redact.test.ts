@@ -149,6 +149,9 @@ describe("redactSecretsInText", () => {
       [`groq ${"gsk_"}${alpha}ABCD`, /gsk_/],
       [`meta ${"LLM|"}607358788850350|${alpha}`, /LLM\|6073/],
       [`huggingface ${"hf_"}${alpha}`, /hf_/],
+      [`stripe ${"sk_" + "live_"}${alpha}`, /sk_live_[a-z]/],
+      [`stripe test ${"sk_" + "test_"}${alpha}`, /sk_test_[a-z]/],
+      [`stripe restricted ${"rk_" + "live_"}${alpha}`, /rk_live_[a-z]/],
     ];
     for (const [input, leak] of cases) {
       const out = redactSecretsInText(input);
@@ -268,7 +271,7 @@ describe("holdsCredential", () => {
   it("knows a provider key or a private key block, never a name, a placeholder or code that reads one", () => {
     for (const text of [
       '{"apiKey": "sk-ant-api03-0123456789abcdefABCD"}', "GITHUB_TOKEN=ghp_0123456789abcdefghij0123", "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n",
-      "aws_access_key_id = AKIAABCDEFGHIJKLMNOP",
+      "aws_access_key_id = AKIAABCDEFGHIJKLMNOP", `stripe.secret = "${"sk_" + "live_"}0123456789abcdefABCD"`,
     ]) expect(holdsCredential(text), text).toBe(true);
     for (const text of [
       "token = os.environ['GITHUB_TOKEN']", "API_KEY=your-key-here", "Authorization: Bearer YOUR_TOKEN_HERE", "Keep credentials out of the repo.",
