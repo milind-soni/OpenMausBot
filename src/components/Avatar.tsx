@@ -262,11 +262,14 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
 
 export function InitialsAvatar({
   initials,
+  avatarUrl,
   size = 32,
 }: {
   initials: string;
+  avatarUrl?: string;
   size?: number;
 }) {
+  if (avatarUrl) return <img src={avatarUrl} alt="" className="shrink-0 rounded-full object-cover" style={{ width: size, height: size }} />;
   return (
     <div
       className="flex shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary font-medium"

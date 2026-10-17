@@ -393,7 +393,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnl
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
-            <InitialsAvatar initials={profileInitials(profile)} size={rail ? 30 : 28} />
+            <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={rail ? 30 : 28} />
             {noteworthy && (
               <span
                 aria-hidden
@@ -412,7 +412,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnl
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
-            <InitialsAvatar initials={profileInitials(profile)} size={28} />
+            <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={28} />
             <span className="min-w-0 flex-1 truncate text-[14px] font-medium leading-5 text-ink">{name}</span>
             {noteworthy && (
               <span
