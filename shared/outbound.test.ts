@@ -21,6 +21,10 @@ describe("isOutboundTool", () => {
       "mcp__claude_ai_Gmail__reply",
       "mcp__claude_ai_Gmail__forward",
       "mcp__claude_ai_Slack__slack_send_message",
+      // Only the agents server's own X reads are exempt; another server's post still posts.
+      "mcp__x__post",
+      "mcp__other__x_post",
+      "TWITTER_X_POST",
     ]) {
       expect(isOutboundTool(name), name).toBe(true);
     }
@@ -43,6 +47,11 @@ describe("isOutboundTool", () => {
       "mcp__claude_ai_Gmail__search_threads",
       "mcp__claude_ai_Linear__save_issue",
       "mcp__computer__click",
+      "mcp__agents__x_post",
+      "agents__x_post",
+      "agents_x_post",
+      "x_post",
+      "mcp__agents__x_user_posts",
       "Bash",
       "Read",
       "Edit",

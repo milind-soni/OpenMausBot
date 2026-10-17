@@ -10,6 +10,11 @@ export interface ConfigStatus {
   cerebras?: { configured: boolean };
   groq?: { configured: boolean };
   meta?: { configured: boolean };
+  /** X research comes with MausBot Cloud plans: `included` while this server holds the plan's relay credential;
+   * `unavailable` when the Admin said no to this desktop's paid sign-in. */
+  xResearch?: { included: boolean; unavailable?: boolean };
+  /** The person's own treg key for research: configured or not, never the key. */
+  treg?: { configured: boolean };
   /** `everyClaudeBot`: the key runs every Claude bot, not only "Claude (API key)". */
   anthropic?: { configured: boolean; everyClaudeBot?: boolean };
   openai?: { configured: boolean };

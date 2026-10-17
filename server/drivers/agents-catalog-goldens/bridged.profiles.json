@@ -390,6 +390,27 @@
       "use_tool"
     ]
   },
+  "skills+shared+voice+escalations+x": {
+    "bytes": 15804,
+    "sha256": "a9c3551c4b2ab959a53f54db06dc8d8e026d6dcfab0e698526e7cd28c460904d",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "select_computer",
+      "attach_file",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "send_voice_note",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
   "default+legacy-switches": {
     "bytes": 14884,
     "sha256": "29760e0bd024e3b2b53a0943e2e9c408d7977e6fd283be0daf1acd7417b52dcf",

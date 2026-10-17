@@ -55,7 +55,7 @@ function mainRule() {
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
     createCloudAccountStore: () => ({}), rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null,
     sendUpdaterState: () => {}, refreshCloudMenus: () => {}, announceCloudReady: () => {},
-    syncProPlan: () => {},
+    syncProPlan: () => {}, includedX: { onState: async () => {} },
     createCloudAccountClient: (options) => {
       signIn.options = options;
       return {

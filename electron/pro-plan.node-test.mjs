@@ -131,7 +131,7 @@ test("main starts its server with the answer and hands it every change", () => {
     app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin", env: {} }, cloudTarget,
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
     createCloudAccountStore: () => ({}), rememberCloudHome: () => {}, rememberedCloudHome: () => null, rememberedHome: null, sendUpdaterState: () => {},
-    refreshCloudMenus: () => {}, announceCloudReady: () => {},
+    refreshCloudMenus: () => {}, announceCloudReady: () => {}, includedX: { onState: async () => {} },
     createCloudAccountClient: options => { signIn.options = options; return { state: () => signIn.state }; },
   });
   vm.runInContext(`${slice("function syncProPlan(", "\nfunction syncManagedComposioCredentials")}\n${slice("function ensureCloudAccount() {", "\n/** The free trial")}`, context);

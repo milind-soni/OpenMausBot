@@ -15,11 +15,32 @@ export interface GroupRouteDeps {
   threadStarters: Pick<ThreadStarters, "set">;
   createChannel(value: unknown): GroupRecord;
   publicGroupState(record: GroupRecord): WireGroup;
-  checkedGroupResponder(value: unknown, memberIds: string[]): GroupDefaultResponder | null;
+}
+
+/** A room's default responder from a request body; null when it is not one, or names a bot outside the room. */
+export function checkedGroupResponder(value: unknown, memberIds: string[]): GroupDefaultResponder | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const responder = value as { kind?: unknown; botId?: unknown; fallbackBotId?: unknown };
+  if (responder.kind === "everyone") return { kind: "everyone" };
+  if (responder.kind === "mentions") return { kind: "mentions" };
+  if (responder.kind === "auto") {
+    if (responder.fallbackBotId === undefined || responder.fallbackBotId === null) return { kind: "auto" };
+    return typeof responder.fallbackBotId === "string" && memberIds.includes(responder.fallbackBotId)
+      ? { kind: "auto", fallbackBotId: responder.fallbackBotId }
+      : null;
+  }
+  if (
+    responder.kind === "member" &&
+    typeof responder.botId === "string" &&
+    memberIds.includes(responder.botId)
+  ) {
+    return { kind: "member", botId: responder.botId };
+  }
+  return null;
 }
 
 export function createGroupRoutes(deps: GroupRouteDeps): RouteHandler {
-  const { store, actorKey, threadStarters, createChannel, publicGroupState, checkedGroupResponder } = deps;
+  const { store, actorKey, threadStarters, createChannel, publicGroupState } = deps;
   const CLOUD_HOME = deps.cloudHome;
   return async ({ req, res, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;

@@ -11,6 +11,7 @@ export const CREDENTIAL_PATCH = {
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
   customImageApiKey: (value) => ({ imageGen: { customApiKey: value } }),
   openaiLiveKey: (value) => ({ live: { key: value } }),
+  tregApiKey: (value) => ({ treg: { key: value } }),
 };
 
 /** Electron 43's ipcMain.handle sends a thrown error to the page as its toString(), so a key the provider refused travels as its name. */

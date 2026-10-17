@@ -4852,5 +4852,19 @@
   "apiInstances.remove": "Quitar {name}",
   "apiInstances.refreshModels": "Volver a detectar los modelos de {name}",
   "apiInstances.empty": "Aún no hay otros servidores.",
-  "apiInstances.failed": "No se pudo guardar el servidor. Revisa los campos e inténtalo de nuevo."
+  "apiInstances.failed": "No se pudo guardar el servidor. Revisa los campos e inténtalo de nuevo.",
+  "keys.treg.label": "Clave de treg",
+  "keys.treg.placeholder": "Pega tu clave de treg",
+  "keys.treg.desc": "Permite que los bots busquen en X y consulten empresas, personas, financiación, noticias y más a través de treg. Las llamadas se cobran de tu saldo de treg, sin límites de MausBot.",
+  "keys.treg.link": "Consigue una clave en treg.to",
+  "keys.treg.working": "treg funciona ✓",
+  "keys.treg.balance": "Saldo: {balance}.",
+  "research.title": "Investigación (treg)",
+  "research.ownOn": "Este bot puede buscar en X y consultar empresas, personas y más con tu clave de treg. Las llamadas se cobran de tu saldo de treg.",
+  "research.planOn": "Incluido en tu plan de MausBot Cloud: este bot puede buscar en X y consultar empresas, personas y más dentro del cupo mensual del plan.",
+  "research.off": "Desactivado para este bot. Actívalo para que busque en X y consulte empresas, personas y más.",
+  "research.addKey": "Añade tu clave de treg en Ajustes → Claves de API para que los bots investiguen en X, empresas, personas y más.",
+  "research.openKeys": "Abrir claves de API",
+  "research.connecting": "Conectando la investigación a tu plan Cloud…",
+  "research.switch": "Permitir que este bot use la investigación"
 }

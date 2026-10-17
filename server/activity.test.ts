@@ -35,6 +35,27 @@ describe("describeTool", () => {
     expect(describeTool("mcp__agents__delegate_bot")).toEqual({ app: "Team", label: "Delegate bot" });
   });
 
+  it("files the X research tools under X, not Team", () => {
+    expect(describeTool("mcp__agents__x_search")).toEqual({ app: "X", label: "Searched X" });
+    expect(describeTool("mcp__agents__x_user_posts")).toEqual({ app: "X", label: "Read X posts" });
+    expect(describeTool("mcp__agents__x_post")).toEqual({ app: "X", label: "Read an X post" });
+    expect(describeTool("mcp__agents__x_profile")).toEqual({ app: "X", label: "Looked up an X profile" });
+    expect(describeTool("mcp__agents__delegate_bot")).toEqual({ app: "Team", label: "Delegate bot" });
+  });
+
+  it("files research under Research, a call by the kind of thing it looked up and never the vendor", () => {
+    expect(describeTool("mcp__agents__research_search")).toEqual({ app: "Research", label: "Searched research tools" });
+    expect(describeTool("mcp__agents__research_endpoint")).toEqual({ app: "Research", label: "Read a research tool" });
+    const call = (input: unknown) => describeTool("mcp__agents__research_call", input);
+    expect(call({ id: "apollo.people.search" })).toEqual({ app: "Research", label: "Looked up people" });
+    expect(call('{"id":"crunchbase.companies.lookup","params":{}}')).toEqual({ app: "Research", label: "Looked up companies" });
+    expect(call({ name: "research_call", arguments: { id: "tikhub.tiktok.user.profile" } })).toEqual({ app: "Research", label: "Looked up social data" });
+    expect(call({ id: "anyapi.x.search.posts" })).toEqual({ app: "X", label: "Searched X" });
+    expect(call({ id: "newsapi.news.everything" })).toEqual({ app: "Research", label: "Read the news" });
+    expect(call({ id: "people.vendor.thing" })).toEqual({ app: "Research", label: "Ran a research call" });
+    expect(call(undefined)).toEqual({ app: "Research", label: "Ran a research call" });
+  });
+
   it("falls back to spacing out an unknown name rather than showing it raw", () => {
     expect(describeTool("TaskUpdate")).toEqual({ app: null, label: "Task update" });
     expect(describeTool("replace_file_content")).toEqual({ app: null, label: "Replace file content" });

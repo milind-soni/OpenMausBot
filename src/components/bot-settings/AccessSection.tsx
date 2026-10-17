@@ -16,6 +16,8 @@ import { ConfirmDialog } from "../ConfirmDialog";
 import { Switch } from "../SettingsPrimitives";
 import { ProposalStatus } from "./ProposalStatus";
 import { ToolSelectionCard } from "./ToolSelectionCard";
+import { useCloudPlan } from "../ProIntroduction";
+import { xResearchAction } from "@/lib/cloud-plan";
 import { HIGHLEVEL_SLUG } from "@/lib/highlevel-sign-in";
 import { useBotApps } from "./useBotApps";
 import {
@@ -493,6 +495,38 @@ function ConnectorToolsGrants({
   );
 }
 
+/** Research through treg (the X tools and the general research tools): on for every bot whenever this server holds a
+ * treg key or a Cloud plan's research credential, and switchable off per bot. */
+function ResearchCard({ bot, patch }: { bot: Bot; patch: (patch: { xResearch: boolean }) => void }) {
+  const { state, dispatch } = useStore();
+  const connecting = xResearchAction(useCloudPlan()?.view ?? null) === "connecting" && state.config?.xResearch?.unavailable !== true;
+  const ownKey = state.config?.treg?.configured === true, included = state.config?.xResearch?.included === true;
+  const available = ownKey || included;
+  const on = bot.xResearch !== false;
+  const line = !available ? t(connecting ? "research.connecting" : "research.addKey")
+    : !on ? t("research.off") : t(ownKey ? "research.ownOn" : "research.planOn");
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4" data-testid="access-x-research">
+      <div>
+        <div className="text-[15px] font-medium text-ink">{t("research.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">{line}</div>
+        {!available && !connecting && (
+          <button type="button" className="ui-button mt-2" onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "connections" })}>
+            {t("research.openKeys")}
+          </button>
+        )}
+      </div>
+      <Switch
+        checked={available && on}
+        aria-label={t("research.switch")}
+        disabled={!available}
+        onClick={() => patch({ xResearch: !on })}
+        className="disabled:cursor-not-allowed"
+      />
+    </div>
+  );
+}
+
 function RecordStepsRow({ on, browserOn, myChrome, onChange }: { on: boolean; browserOn: boolean; myChrome: boolean; onChange: (on: boolean) => void }) {
   return (
     <div className="mt-3 flex items-center justify-between gap-4 border-t border-hairline/40 pt-3">
@@ -552,7 +586,7 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
   );
 }
 
-export type AccessPart = "worksOn" | "folder" | "apps" | "mcp" | "tools" | "browser" | "webhooks" | "always";
+export type AccessPart = "worksOn" | "folder" | "apps" | "xResearch" | "mcp" | "tools" | "browser" | "webhooks" | "always";
 
 export function AccessSection({
   bot,
@@ -716,6 +750,8 @@ export function AccessSection({
           />
         )}
       </div>}
+
+      {!draft && shows("xResearch") && <ResearchCard bot={bot} patch={patch} />}
 
       {!draft && shows("webhooks") && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Webhooks</div>

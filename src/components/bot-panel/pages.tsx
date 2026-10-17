@@ -246,7 +246,7 @@ export function PageBody({ page, ...context }: PageContext & { page: PageId }): 
     case "routines":
       return <RoutinesSection bot={bot} routines={derived.botRoutines} runs={state.routineRuns} />;
     case "apps":
-      return <AccessSection bot={bot} derived={derived} parts={["apps"]} />;
+      return <AccessSection bot={bot} derived={derived} parts={["apps", "xResearch"]} />;
     case "memory":
       return null;
     case "skills":

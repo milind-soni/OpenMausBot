@@ -1013,7 +1013,7 @@ describe("the drill-in pages", () => {
   it("renders the full sections, or the part a page needs", () => {
     expect(ofType(body("model"), ModelSection)!.props.bot).toMatchObject({ id: "scout" });
     expect(ofType(body("approvals"), PermissionsSection)!.props.parts).toEqual(["approval", "outbound"]);
-    for (const [page, parts] of [["apps", ["apps"]], ["mcp", ["mcp"]], ["tools", ["tools"]], ["webhooks", ["webhooks"]], ["always", ["always"]]] as const) {
+    for (const [page, parts] of [["apps", ["apps", "xResearch"]], ["mcp", ["mcp"]], ["tools", ["tools"]], ["webhooks", ["webhooks"]], ["always", ["always"]]] as const) {
       expect(ofType(body(page), AccessSection)!.props.parts).toEqual(parts);
     }
     expect(ofType(body("routines"), RoutinesSection)!.props.routines).toBe(fixture.derived.botRoutines);

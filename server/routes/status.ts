@@ -10,7 +10,9 @@ import { fleetAvailable, fleetRequest, fleetSocketPath } from "../fleet-client.t
 import { noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import type { OutboundCounts } from "../outbound-counts.ts";
 import { loadPlanUsage, planAccountsFromInstances } from "../plan-usage.ts";
+import { tregProviderApi } from "../included-services.ts";
 import { checkProviderKey, PROVIDER_KEY_KINDS, providerBaseUrl, type ProviderKeyKind } from "../provider-key-check.ts";
+import { checkTregKey } from "../research.ts";
 import type { Store } from "../store.ts";
 import { readThreadEvents } from "../thread-events.ts";
 import { parseUsageRange } from "../usage-ledger.ts";
@@ -130,6 +132,14 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
     if (method === "POST" && path === "/api/keys/test") {
       const body = await readBody(req, 8192);
       const provider = body?.provider;
+      if (provider === "treg") {
+        if (body?.key !== undefined && typeof body.key !== "string") return json(res, 400, { error: "key must be a string" });
+        const key = typeof body?.key === "string" ? body.key.trim() : cfg.treg?.key?.trim() || "";
+        if (!key) return json(res, 400, { error: "No key to test. Paste one or save one first." });
+        if (key.length > 512) return json(res, 400, { error: "That does not look like a treg key." });
+        res.setHeader("cache-control", "no-store");
+        return json(res, 200, await checkTregKey(key, { api: tregProviderApi() }));
+      }
       if (!PROVIDER_KEY_KINDS.includes(provider as ProviderKeyKind)) {
         return json(res, 400, { error: `provider must be one of ${PROVIDER_KEY_KINDS.join(", ")}` });
       }

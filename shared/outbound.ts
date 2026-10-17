@@ -68,11 +68,15 @@ export function isReadOnlyTool(name: string): boolean {
   return tokens.length > 0 && READ_VERBS.has(tokens[0]);
 }
 
+/** The built-in agents server's X research tools only read X: x_post reads a post, it does not post one. */
+const AGENTS_X_READS = /^(?:mcp__agents__|agents__|agents_)?x_(?:search|user_posts|post|profile)$/;
+
 /** Does this tool send something to someone, or move money? */
 export function isOutboundTool(name: string): boolean {
   // A raw API call from the workbench can do anything an app tool can, and
   // nothing here can read which; it is treated as a send.
   if (name === "COMPOSIO_PROXY_EXECUTE") return true;
+  if (AGENTS_X_READS.test(name)) return false;
   const tokens = actionTokens(name);
   if (tokens.length === 0) return false;
   if (isReadOnlyTool(name)) return false;

@@ -64,6 +64,7 @@ function keyProviders(config: ConfigStatus): KeyProvider[] {
     [config.imageGen?.openaiConfigured, "openai_image"],
     [config.imageGen?.customKeyConfigured, "custom_image"],
     [config.live?.configured, "openai_live"],
+    [config.treg?.configured, "treg"],
   ];
   return configured.flatMap(([on, provider]) => on === true ? [provider] : []);
 }

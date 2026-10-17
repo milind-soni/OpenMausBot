@@ -177,6 +177,15 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     childEnv.OMB_OPENAI_LIVE_URL = liveUrl;
     if (parentEnv.OMB_OPENAI_LIVE_KEY) childEnv.OMB_OPENAI_LIVE_KEY = parentEnv.OMB_OPENAI_LIVE_KEY;
   }
+  // Research against loopback stubs only (server/x-research.e2e.test.ts): the relay token crosses only with its stub,
+  // and a treg stand-in replaces treg.to, so no test reaches a real relay or treg.
+  const xUrl = parentEnv.OMB_CLOUD_X_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}(?:\/[A-Za-z0-9_-]+)*$/.test(xUrl)) {
+    childEnv.OMB_CLOUD_X_URL = xUrl;
+    if (parentEnv.OMB_CLOUD_X_TOKEN) childEnv.OMB_CLOUD_X_TOKEN = parentEnv.OMB_CLOUD_X_TOKEN;
+  }
+  const tregUrl = parentEnv.OMB_TREG_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(tregUrl)) childEnv.OMB_TREG_URL = tregUrl;
   // Live calls need Pro; without it the fixture refuses a call with 402 needsPro.
   if (parentEnv.OMB_PRO_PLAN?.trim() === "1") childEnv.OMB_PRO_PLAN = "1";
   // Arms the one-shot audio-append failure inside the fixture server.
