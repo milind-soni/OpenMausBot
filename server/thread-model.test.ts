@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection, ProviderSnapshot } from "./contracts.ts";
 import { Store, toWireTask, type BotRecord, type TaskRecord } from "./store.ts";
+import { approvalModeFor } from "../shared/approval-mode.ts";
 import { threadModelFallback, type ThreadEngine } from "./thread-model.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 
@@ -173,6 +174,36 @@ describe("threads follow their bot's model", () => {
     store.patchTask(bot.id, other.threadId, { approvalMode: "full", autoApprove: false });
     store.applyModelDefault(bot.id, sonnet);
     expect(store.taskByThread(bot.id, other.threadId)?.approvalMode).toBe("full");
+  });
+
+  it("a thread whose own level the bot's engine would have to confirm takes the bot's own level there, not Ask", () => {
+    const store = open();
+    const bot = store.createBot();
+    store.patchBot(bot.id, { modelSelection: sonnet, approvalMode: "full", autoApprove: false, alwaysAllow: ["data_load"] });
+    // a Codex Custom grant never crosses engines, so this thread used to land on Ask
+    const away = store.createTask(bot.id, "On Codex")!;
+    store.switchTaskModel(bot.id, away.threadId, codex, false, false, { approvalMode: "custom", autoApprove: false, alwaysAllow: ["Bash"] });
+    expect(store.followBotModel(bot.id, [away.threadId])).toEqual([away.threadId]);
+    expect(store.taskByThread(bot.id, away.threadId)).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: ["data_load"] });
+    expect(open().taskByThread(bot.id, away.threadId)?.approvalMode).toBe("full");
+  });
+
+  it("never a bot level still pending or one the bot's engine does not implement", () => {
+    const store = open();
+    const bot = store.createBot();
+    store.patchBot(bot.id, { modelSelection: sonnet, approvalMode: "full", autoApprove: false });
+    const away = store.createTask(bot.id, "On Codex")!;
+    store.switchTaskModel(bot.id, away.threadId, codex, false, false, { approvalMode: "custom", autoApprove: false, alwaysAllow: ["Bash"] });
+    store.patchBot(bot.id, { approvalGrant: { requestId: "r", mode: "full", phase: "prepared" } });
+    store.followBotModel(bot.id, [away.threadId]);
+    expect(approvalModeFor(store.projectBotForTask(bot.id, away.threadId)!)).toBe("ask");
+
+    const other = store.createBot();
+    store.patchBot(other.id, { modelSelection: codex, approvalMode: "edits", autoApprove: false });
+    const thread = store.createTask(other.id, "On Claude")!;
+    store.switchTaskModel(other.id, thread.threadId, sonnet, false, false, { approvalMode: "custom", autoApprove: false, alwaysAllow: ["Bash"] });
+    store.followBotModel(other.id, [thread.threadId]);
+    expect(store.taskByThread(other.id, thread.threadId)?.approvalMode).toBe("ask");
   });
 
   it("the wire carries the model a thread runs on and whether it follows the bot", () => {

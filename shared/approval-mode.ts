@@ -92,3 +92,16 @@ export function isEmergencyApprovalDowngrade(
 ): boolean {
   return next === "ask" && (current === "full" || current === "custom");
 }
+
+/** The level a thread takes when it moves back onto its bot's model and its own level would need
+ * confirming on that engine: the bot's own saved level there, instead of Ask. Null (Ask, as before)
+ * when the bot's level is Ask, still a pending grant, or one the engine does not implement. A
+ * thread-only grant belongs to its one thread, so it is not the bot's level. */
+export function botLevelOnItsEngine(
+  bot: { approvalMode?: unknown; autoApprove?: unknown; approvalGrant?: { threadOnly?: true } | null; alwaysAllow?: string[] },
+  driverKind: string | undefined,
+): { approvalMode: ApprovalMode; autoApprove: boolean; alwaysAllow: string[] } | null {
+  const mode = approvalModeFor({ approvalMode: bot.approvalMode, autoApprove: bot.autoApprove, approvalGrant: bot.approvalGrant?.threadOnly ? undefined : bot.approvalGrant });
+  if (mode === "ask" || !supportsApprovalMode(driverKind, mode)) return null;
+  return { approvalMode: mode, autoApprove: mode === "auto", alwaysAllow: [...(bot.alwaysAllow ?? [])] };
+}

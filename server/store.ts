@@ -20,7 +20,7 @@ import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { scrubbedSkillRequest } from "./skill-request-card.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
-import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, type ApprovalMode } from "../shared/approval-mode.ts";
+import { approvalModeFor, botLevelOnItsEngine, isApprovalMode, modelSwitchNeedsAsk, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
@@ -2292,7 +2292,7 @@ export class Store {
     const patches = bot.tasks.map((task): Partial<TaskRecord> | null => !listed.has(task.threadId) || task.modelSelection === undefined ? null : {
       ...reset(task.modelSelection, bot.modelSelection),
       modelSelection: undefined,
-      ...(this.switchNeedsAsk(botId, task.threadId, task.modelSelection, bot.modelSelection) ? structuredClone(ASK_NOW) : {}),
+      ...(this.switchNeedsAsk(botId, task.threadId, task.modelSelection, bot.modelSelection) ? botLevelOnItsEngine(bot, this.driverKindOf(bot.modelSelection.instanceId)) ?? structuredClone(ASK_NOW) : {}),
     });
     const moved = bot.tasks.filter((_, index) => patches[index]).map((task) => task.threadId);
     if (!moved.length) return [];
