@@ -1,6 +1,6 @@
-// Claude Code over stream-json both ways: prompt on stdin, one retained CLI process per thread,
-// each turn settled by the CLI's own `result` frame.
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createClaudeCheckpointHelper, autoCompactWindow } from "./claude-checkpoint.ts";
+export { autoCompactWindow, CLAUDE_CHECKPOINT_SYSTEM_PROMPT } from "./claude-checkpoint.ts";
+           import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
@@ -61,7 +61,6 @@ import {
   type AskQuestion,
 } from "../../shared/ask-question.ts";
 
-/** Parent-session credentials/routing a named account must not inherit. */
 export const CLAUDE_ACCOUNT_ENV_KEYS = [
   "CLAUDE_CODE_OAUTH_TOKEN",
   "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
@@ -77,7 +76,7 @@ export const CLAUDE_ACCOUNT_ENV_KEYS = [
   "CLAUDE_CODE_USE_FOUNDRY",
 ] as const;
 
-export function resolveClaudeConfigDir(configDir?: string, env: NodeJS.ProcessEnv = process.env): string {
+ export function resolveClaudeConfigDir(configDir?: string, env: NodeJS.ProcessEnv = process.env): string {
   const home = env.HOME || env.USERPROFILE || homedir();
   const configured = configDir?.trim() || env.CLAUDE_CONFIG_DIR?.trim() || join(home, ".claude");
   const expanded = configured === "~" ? home : configured.startsWith("~/") ? join(home, configured.slice(2)) : configured;
@@ -87,9 +86,7 @@ export function resolveClaudeConfigDir(configDir?: string, env: NodeJS.ProcessEn
   return normalize(expanded);
 }
 
-/** Whether a stream frame is the CLI reporting no login. Only frames the CLI flags as api errors
- * (`error`, `is_api_error_message`) count, so a reply that discusses being logged out never does. */
-export function claudeAuthFailure(
+ export function claudeAuthFailure(
   frame: { error?: unknown; is_api_error_message?: unknown },
   text: string,
 ): boolean {
@@ -97,9 +94,7 @@ export function claudeAuthFailure(
   return frame.error === "authentication_failed" || classifyError({ text }).reason === "auth";
 }
 
-/** The API refusing a model newer than the installed CLI, relayed as an api-error frame ("Claude
- * Code 2.1.268 does not support this model; version 2.1.280 or newer is required…"); it names no model. */
-export function claudeVersionTooOld(
+ export function claudeVersionTooOld(
   frame: { error?: unknown; is_api_error_message?: unknown },
   text: string,
 ): boolean {
@@ -116,9 +111,7 @@ export function claudeResultError(frame: { errors?: unknown; result?: unknown; s
   return `Claude ended the turn with an error (${String((frame.subtype !== "success" && frame.subtype) || frame.terminal_reason || "unknown")}).`;
 }
 
-/** The CLI environment shared by auth probes and turns, so a probe never reports an API-key login
- * that the turn would strip. */
-function claudeEnvironment(
+ function claudeEnvironment(
   model?: string | null,
   source: NodeJS.ProcessEnv = process.env,
   configDir?: string,
@@ -128,7 +121,6 @@ function claudeEnvironment(
   if (configDir?.trim()) {
     env.CLAUDE_CONFIG_DIR = resolveClaudeConfigDir(configDir, env);
     for (const key of CLAUDE_ACCOUNT_ENV_KEYS) {
-      // Subscription OAuth always comes from this account's own login, never the parent's.
       if (key.startsWith("CLAUDE_CODE_OAUTH_") || key.endsWith("_FILE_DESCRIPTOR") || !Object.hasOwn(instanceEnvironment, key)) {
         delete env[key];
       }
@@ -140,18 +132,15 @@ function claudeEnvironment(
   delete env.CLAUDE_CODE_ENTRYPOINT;
   stripWorkspaceCredentialEnv(env);
   const applied = applyClaudeInject(env, model);
-  // An inherited ANTHROPIC_API_KEY would flip a subscription login to pay-as-you-go.
   if (!applied.injected && !instanceEnvironment.ANTHROPIC_API_KEY) delete env.ANTHROPIC_API_KEY;
   return env;
 }
 
-/** Escape hatch: the bot inherits this machine's Claude Code setup (MCP servers, connectors,
- * skills, agents, hooks, personal CLAUDE.md). */
-function inheritsUserConfig(env: NodeJS.ProcessEnv): boolean {
+ function inheritsUserConfig(env: NodeJS.ProcessEnv): boolean {
   return env.OMB_CLAUDE_INHERIT_USER_CONFIG === "1";
 }
 
-export function claudeInheritWarning(env: NodeJS.ProcessEnv): ProviderSnapshot["warning"] | undefined {
+ export function claudeInheritWarning(env: NodeJS.ProcessEnv): ProviderSnapshot["warning"] | undefined {
   if (!inheritsUserConfig(env)) return undefined;
   return {
     title: "Bots inherit this machine's Claude Code setup",
@@ -164,9 +153,7 @@ export function claudeInheritWarning(env: NodeJS.ProcessEnv): ProviderSnapshot["
   };
 }
 
-/** The selected CLI account's auth settings, without its hooks, permissions, MCP servers or
- * personal instructions. */
-export function readClaudeAuthSettings(
+ export function readClaudeAuthSettings(
   env: NodeJS.ProcessEnv,
   instanceEnvironment: NodeJS.ProcessEnv = {},
 ): { env?: Record<string, string>; apiKeyHelper?: string } {
@@ -189,9 +176,7 @@ export function readClaudeAuthSettings(
   }
 }
 
-/** `<cwd>/.mcp.json`, forwarded verbatim because --strict-mcp-config stops the CLI reading it.
- * A malformed file is ignored. */
-function projectMcpServers(cwd: string): Record<string, unknown> {
+ function projectMcpServers(cwd: string): Record<string, unknown> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(join(cwd, ".mcp.json"), "utf8"));
@@ -207,66 +192,42 @@ function projectMcpServers(cwd: string): Record<string, unknown> {
   return out;
 }
 
-/** OMB_CLAUDE_AUTOCOMPACT: a token count, "auto" (the CLI's own window) or "off". The CLI rejects
- * a window outside 100k-1M as an argument error, so a configured value is clamped. */
-export function autoCompactWindow(env: NodeJS.ProcessEnv): string | null {
-  const raw = (env.OMB_CLAUDE_AUTOCOMPACT ?? "").trim().toLowerCase();
-  if (raw === "off") return null;
-  if (raw === "auto") return "auto";
-  const parsed = raw ? Number(raw) : DEFAULT_AUTOCOMPACT_TOKENS;
-  if (!Number.isFinite(parsed) || parsed <= 0) return String(DEFAULT_AUTOCOMPACT_TOKENS);
-  return String(Math.min(1_000_000, Math.max(100_000, Math.floor(parsed))));
-}
-
-const DEFAULT_AUTOCOMPACT_TOKENS = 200_000;
-
-/** The first Claude CLI to accept each flag; an unknown flag is a hard argument error. Checked
- * against the published binaries (the changelog never records --autocompact): --strict-mcp-config
- * 1.0.60, --setting-sources 1.0.122, --autocompact 2.1.122. */
-export const CLAUDE_FLAG_FLOORS = {
+ export const CLAUDE_FLAG_FLOORS = {
   "--strict-mcp-config": [1, 0, 60],
   "--setting-sources": [1, 0, 122],
   "--autocompact": [2, 1, 122],
   "--system-prompt-snapshot": [2, 1, 267],
-  // 2.1.248 takes --restricted; 2.1.257 honours blockReadsOutsideWorkingDirectories.
   "--restricted": [2, 1, 257],
-  // Keep-warm pings only. Not bisected: both are in every 2.1 build checked.
   "--fork-session": [2, 1, 0],
   "--no-session-persistence": [2, 1, 0],
   // Background calls. Not bisected: the guest path passes it from 2.1.257.
   "--tools": [2, 1, 257],
 } as const satisfies Record<string, ClaudeCliVersion>;
 
-const withWhy = (refusal: string, why: string | undefined) => why ? `${refusal} ${why}` : refusal;
+  const withWhy = (refusal: string, why: string | undefined) => why ? `${refusal} ${why}` : refusal;
 
-/** Probed on Claude Code 2.1.284 in `default` mode: without this list, built-in "read-only" Bash
- * commands run unasked, and `xargs head` reads any file. */
 export const GUEST_CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "WebSearch"] as const;
-const GUEST_FORBIDDEN_TOOLS = new Set(["Bash", "PowerShell", "WebFetch", "BashOutput", "KillShell", "KillBash", "NotebookEdit", "Task", "Agent"]);
-export const GUEST_CLAUDE_PERMISSIONS = {
+ const GUEST_FORBIDDEN_TOOLS = new Set(["Bash", "PowerShell", "WebFetch", "BashOutput", "KillShell", "KillBash", "NotebookEdit", "Task", "Agent"]);
+ export const GUEST_CLAUDE_PERMISSIONS = {
   blockReadsOutsideWorkingDirectories: true,
   deny: ["Bash", "PowerShell", "WebFetch", "Read(//proc/**)"],
 } as const;
 
 export type ClaudeCliVersion = readonly [number, number, number];
 
-export const CLAUDE_CONTEXT_CONTROL_MIN_VERSION: ClaudeCliVersion = CLAUDE_FLAG_FLOORS["--system-prompt-snapshot"];
+ export const CLAUDE_CONTEXT_CONTROL_MIN_VERSION: ClaudeCliVersion = CLAUDE_FLAG_FLOORS["--system-prompt-snapshot"];
 
-/** The first CLI seen to echo a stdin user message with its uuid as a model call takes it in
- * (--replay-user-messages, 2.1.282): a steer written during a tool call is echoed after that
- * tool's result, one written during the last model call only after the turn's `result`. */
-export const CLAUDE_REPLAY_FLOOR: ClaudeCliVersion = [2, 1, 282];
+ export const CLAUDE_REPLAY_FLOOR: ClaudeCliVersion = [2, 1, 282];
 
-/** `claude --version` prints "2.1.232 (Claude Code)". */
-export function parseClaudeCliVersion(stdout: string | null | undefined): ClaudeCliVersion | null {
+ export function parseClaudeCliVersion(stdout: string | null | undefined): ClaudeCliVersion | null {
   return parseVersionTriple(stdout ?? "");
 }
 
-export function claudeCliSupports(version: ClaudeCliVersion | null, flag: keyof typeof CLAUDE_FLAG_FLOORS): boolean {
+ export function claudeCliSupports(version: ClaudeCliVersion | null, flag: keyof typeof CLAUDE_FLAG_FLOORS): boolean {
   return version === null || versionAtLeast(version, CLAUDE_FLAG_FLOORS[flag]);
 }
 
-export function claudeCliUpdate(version: string | null, cli: string): ProviderSnapshot["update"] | undefined {
+ export function claudeCliUpdate(version: string | null, cli: string): ProviderSnapshot["update"] | undefined {
   const parsed = parseClaudeCliVersion(version);
   if (!parsed || versionAtLeast(parsed, CLAUDE_CONTEXT_CONTROL_MIN_VERSION)) return undefined;
   const floor = CLAUDE_CONTEXT_CONTROL_MIN_VERSION.join(".");
@@ -301,7 +262,7 @@ export interface ClaudeConfig {
   requireApiKey?: boolean;
 }
 
-export const STATIC_CLAUDE_MODELS: ModelCatalog = {
+ export const STATIC_CLAUDE_MODELS: ModelCatalog = {
   default: "claude-sonnet-5",
   options: [
     { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
@@ -350,11 +311,10 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
   return { default: STATIC_CLAUDE_MODELS.default, options };
 }
 
-const PERM_PROXY_PATH = SPAWNED_PROXIES.permission;
+   const PERM_PROXY_PATH = SPAWNED_PROXIES.permission;
 const DWEB_PROXY_PATH = SPAWNED_PROXIES.dweb;
 const HOOK_HELPER_PATH = SPAWNED_PROXIES.hook;
-// In the packaged app process.execPath is the Electron binary; this makes it run as plain node.
-const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
+  const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
 function removePrivateTempDir(filePath: string | null | undefined): boolean {
   if (!filePath) return true;
@@ -366,7 +326,7 @@ function removePrivateTempDir(filePath: string | null | undefined): boolean {
   }
 }
 
-interface Ask {
+       interface Ask {
   id: string;
   kind: "permission" | "question";
   tool: string;
@@ -381,35 +341,30 @@ const DENY_TIMEOUT_NOTE =
 const QUESTION_TIMEOUT_NOTE = "OpenMausBot: nobody answered in time. Use your best judgment and continue.";
 const DUPLICATE_ASK_ID_NOTE = "OpenMausBot: duplicate ask id — skipping this request.";
 
-function systemEndedReply(kind: Ask["kind"]): { behavior: AskBehavior; message: string } {
+ function systemEndedReply(kind: Ask["kind"]): { behavior: AskBehavior; message: string } {
   return kind === "question"
     ? { behavior: "answer", message: "OpenMausBot: the turn is ending — wrap up." }
     : { behavior: "deny", message: "OpenMausBot: the turn ended" };
 }
 
-function askQuestions(ask: Ask): AskQuestion[] | null {
+ function askQuestions(ask: Ask): AskQuestion[] | null {
   return ask.tool === ASK_USER_QUESTION_TOOL || ask.tool === ASK_USER_TOOL ? parseAskQuestions(ask.input) : null;
 }
 
-function askSummary(ask: Ask): string {
+ function askSummary(ask: Ask): string {
   const questions = askQuestions(ask);
   if (questions) return askQuestionSummary(questions);
   return askInputSummary(ask.input) ?? ask.tool ?? "tool";
 }
 
-/** One native `result` frame. A steer sent after the turn's last model call runs as the CLI's next
- * native turn, so one logical turn can span several. */
-export interface NativeTurnResult {
+ export interface NativeTurnResult {
   ok: boolean;
   stopReason: string | null;
   cost: number | null;
   usage?: { input: number; output: number; cachedInput?: number };
 }
 
-/** Merges native turns into one logical turn. Cost takes the latest figure: total_cost_usd is
- * "cumulative across turns in streaming-input sessions … read the latest result rather than
- * summing" (2.1.282). */
-export function sumNativeTurnResults(earlier: NativeTurnResult | null, latest: NativeTurnResult): NativeTurnResult {
+ export function sumNativeTurnResults(earlier: NativeTurnResult | null, latest: NativeTurnResult): NativeTurnResult {
   if (!earlier) return latest;
   const usage = earlier.usage && latest.usage
     ? {
@@ -428,28 +383,20 @@ export function sumNativeTurnResults(earlier: NativeTurnResult | null, latest: N
   };
 }
 
-/** How long after a `result` the CLI may announce, with `init`, the native turn for a steer sent
- * after the last model call (about 60 ms on 2.1.282). */
-export const STEERED_CONTINUATION_GRACE_MS = 2_000;
+ export const STEERED_CONTINUATION_GRACE_MS = 2_000;
 
-/** How long a steered continuation may stay silent after its `init` (2.1.282 sends `status` within
- * milliseconds) before the turn closes on the held result. */
-export const STEERED_CONTINUATION_SILENCE_MS = 30_000;
+ export const STEERED_CONTINUATION_SILENCE_MS = 30_000;
 
-const fakeTimerScale = (name: string) => Number(process.env[name] ?? "1") || 1;
+ const fakeTimerScale = (name: string) => Number(process.env[name] ?? "1") || 1;
 const steerGraceScale = () => fakeTimerScale("FAKE_CLAUDE_STEER_GRACE_SCALE");
 const steerSilenceScale = () => fakeTimerScale("FAKE_CLAUDE_STEER_SILENCE_SCALE");
 
-export function hookTokenFile(threadId: string, botId?: string): string {
+ export function hookTokenFile(threadId: string, botId?: string): string {
   const digest = createHash("sha256").update(`${botId ?? ""}\0${threadId}`).digest("hex").slice(0, 24);
   return join(DATA_DIR, "hook-tokens", `${digest}.token`);
 }
 
-/** Hooks for the private --settings file. Claude Code runs each command as a shell line with the
- * event JSON on stdin and applies any hookSpecificOutput it prints. */
-export function claudeHookSettings(helperPath: string): Record<string, unknown> {
-  // JSON quoting is not shell quoting: $(), backticks and $names expand inside double quotes.
-  // Windows paths go through env so their backslashes are not JSON-escaped.
+ export function claudeHookSettings(helperPath: string): Record<string, unknown> {
   const command = process.platform === "win32"
     ? '"%OMB_HOOK_NODE%" "%OMB_HOOK_HELPER%"'
     : [process.execPath, helperPath].map(path => `'${path.replace(/'/g, "'\\''")}'`).join(" ");
@@ -458,17 +405,13 @@ export function claudeHookSettings(helperPath: string): Record<string, unknown> 
 }
 
 export function permissionSocketPath(threadId: string, botId?: string) {
-  // Half the tag digests the full bot+thread key: Windows named pipes share one global namespace
-  // and are never unlinked, and 8 chars keeps POSIX paths under the 104-byte sun_path limit.
   const key = botId ? `${botId}\0${threadId}` : threadId;
   const prefix = threadId.replace(/[^\w-]/g, "").slice(0, 4);
   const digest = createHash("sha256").update(key).digest("hex").slice(0, 4);
   return brokerSocketPath(DATA_DIR, `${prefix}${digest}`);
 }
 
-/** Broker bind paths, in order. Windows pipe names are never unlinkable (a hung child can hold one
- * for minutes), and macOS rejects socket paths past `sun_path`, hence the short temp fallback. */
-export function brokerSocketCandidates(threadId: string, botId?: string): string[] {
+ export function brokerSocketCandidates(threadId: string, botId?: string): string[] {
   const base = permissionSocketPath(threadId, botId);
   if (process.platform !== "win32") {
     const scope = createHash("sha256")
@@ -496,7 +439,6 @@ export async function createPermissionBroker(opts: {
     string,
     { ask: Ask; finish: (behavior: AskBehavior, message: string | undefined, source: AskResolutionSource, always?: boolean) => void }
   >();
-  // server.close() leaves open connections wired: asks after close must never become cards.
   let closed = false;
   let boundPath = opts.socketPaths[0] ?? "";
   const connectionHandler = (conn: import("node:net").Socket) => {
@@ -519,22 +461,18 @@ export async function createPermissionBroker(opts: {
         const askId = String(msg.id ?? newId());
         const kind = msg.kind === "question" ? ("question" as const) : ("permission" as const);
         if (closed) {
-          // Always answer: permission-proxy.ts resolves only on an answer, so a drop hangs the tool.
           try {
             conn.write(JSON.stringify({ t: "answer", id: askId, ...systemEndedReply(kind) }) + "\n");
           } catch {}
           continue;
         }
-        // A retained process keeps its proxy connection between turns; late asks fail closed.
         if (opts.isActive && !opts.isActive()) {
           try {
             conn.write(JSON.stringify({ t: "answer", id: askId, ...systemEndedReply(kind) }) + "\n");
           } catch {}
           continue;
         }
-        // `pending` is server-scoped: a duplicate id would orphan the first ask.
         if (pending.has(askId)) {
-          // askId is client-controlled; JSON.stringify keeps it from corrupting the log line.
           console.error(`permission broker on ${boundPath}: duplicate ask id ${JSON.stringify(askId)} — denying`);
           try {
             conn.write(JSON.stringify({ t: "answer", id: askId, behavior: "deny", message: DUPLICATE_ASK_ID_NOTE }) + "\n");
@@ -546,8 +484,6 @@ export async function createPermissionBroker(opts: {
           if (!pending.delete(askId)) return;
           clearTimeout(timer);
           try {
-            // On `always` the proxy returns the CLI's own suggested rules, so Claude, not the
-            // harness, remembers the allow. `source` keeps a timeout note from passing as human words.
             conn.write(
               JSON.stringify({ t: "answer", id: askId, behavior, message, source, ...(always ? { always: true } : {}) }) + "\n",
             );
@@ -578,7 +514,6 @@ export async function createPermissionBroker(opts: {
       attempt.once("error", (error) => resolve(error as Error & { code?: string }));
       attempt.listen(candidate);
     });
-    // A fallback under the shared OS temp root must not be connectable by another local account.
     if (outcome === "listening" && process.platform !== "win32") {
       try {
         chmodSync(candidate, 0o600);
@@ -611,7 +546,6 @@ export async function createPermissionBroker(opts: {
       break;
     }
   }
-  // Fail closed: an unbound candidate could connect the proxy to a stale or unrelated listener.
   if (!server) throw new Error("claude: permission broker could not bind a local socket");
   const drain = () => {
     for (const p of Array.from(pending.values())) {
@@ -696,17 +630,13 @@ function firstText(content: unknown): string {
   return "";
 }
 
-/** A turn's cost from total_cost_usd, which is the process's running total (2.1.282): the growth
- * since `previous`, or the whole figure when the start is unknown or the total went down. */
-export function turnCostFromRunningTotal(total: number | null, previous: number | null): number | null {
+ export function turnCostFromRunningTotal(total: number | null, previous: number | null): number | null {
   if (total === null) return null;
   if (previous === null || total < previous) return total;
   return Number((total - previous).toFixed(10));
 }
 
-/** total_cost_usd and per-model modelUsage [input, cache read, cache write, output] from a
- * `result`; both cover the whole session, including what --resume restored. */
-export interface ClaudeCostSnapshot {
+ export interface ClaudeCostSnapshot {
   total: number;
   models: Record<string, [number, number, number, number]>;
 }
@@ -725,9 +655,7 @@ export function claudeCostSnapshot(total: unknown, modelUsage: unknown): ClaudeC
   return { total, models };
 }
 
-/** The running total a resumed session carried before this process's first turn. On --resume the
- * CLI (2.1.282) restores cost from an earlier state, not always the latest one seen. */
-export function restoredCostBase(
+ export function restoredCostBase(
   earlier: readonly ClaudeCostSnapshot[],
   current: ClaudeCostSnapshot,
   usage: { input: number; cacheRead: number; cacheWrite: number; output: number },
@@ -750,7 +678,7 @@ export function restoredCostBase(
   return exact ?? inside;
 }
 
-const COST_HISTORY_FILE = join(DATA_DIR, "claude-cost-history.json");
+ const COST_HISTORY_FILE = join(DATA_DIR, "claude-cost-history.json");
 const COST_HISTORY_SESSIONS = 100;
 const COST_HISTORY_STATES = 8;
 
@@ -780,7 +708,9 @@ function recordCostState(sessionId: string, state: ClaudeCostSnapshot): void {
   for (const id of ids.slice(0, Math.max(0, ids.length - COST_HISTORY_SESSIONS))) delete history[id];
   try {
     writeFileAtomic(COST_HISTORY_FILE, JSON.stringify(history), { mode: 0o600, durable: false });
-  } catch {}
+  } catch {
+    // a lost state only means a later resume keeps its whole figure
+  }
 }
 
 type ClaudeImage = NonNullable<SendTurnInput["images"]>[number];
@@ -793,9 +723,7 @@ type ClaudeUserMessage = {
   message: { role: "user"; content: string | ClaudeUserContent[] };
 };
 
-/** Delivers a changed volatile system-prompt half in-turn, by the CLI's own out-of-band
- * convention, instead of relaunching and re-uploading the prompt cache. */
-function withVolatileNote(text: string, volatile: string): string {
+  function withVolatileNote(text: string, volatile: string): string {
   const body = volatile.trim()
     ? `This part of your instructions changed since this session started. It replaces the earlier copy:\n\n${volatile.trim()}`
     : "The notes that were in your instructions when this session started have been cleared.";
@@ -820,8 +748,7 @@ function claudeUserMessage(
   return { type: "user", message: { role: "user", content } };
 }
 
-/** Native traces get attached to bug reports: keep the image block's shape, never its bytes. */
-function diagnosticClaudeUserMessage(message: ClaudeUserMessage): ClaudeUserMessage {
+ function diagnosticClaudeUserMessage(message: ClaudeUserMessage): ClaudeUserMessage {
   if (!Array.isArray(message.message.content)) return message;
   return {
     ...message,
@@ -873,8 +800,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       try {
         const resolved = await mergeLocalInject(readClaudeModelCatalog(catalogEnv), catalogEnv);
         if (resolved.options.length) models = resolved;
-      } catch {}
-      try { writeStartupModelCache(instanceId, models); } catch {}
+      } catch {
+        // Keep the last usable catalog when settings.json is unreadable.
+      }
+      try { writeStartupModelCache(instanceId, models); } catch { /* derived cache */ }
     };
     const startupModelRefresh = config.managed ? null : (await openStartupModelCatalog({
       instanceId,
@@ -885,7 +814,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
     let cliVersion: ClaudeCliVersion | null = null;
     let cliVersionChecked = false;
-    // Whether `claude --help` lists --autocompact: 2.1.129 rejects it despite the floor.
     let cliHasAutocompact: boolean | null = null;
     let cliHelpVersion: string | null = null;
     const readCliVersion = (env: NodeJS.ProcessEnv): Promise<string | null> =>
@@ -918,9 +846,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const listeners = new Set<RuntimeEventListener>();
     const active = new Map<string, { stop: () => void; turnId: string; broker?: Awaited<ReturnType<typeof createPermissionBroker>> }>();
 
-    // Under --input-format stream-json the CLI settles a turn with `result` while stdin stays open,
-    // takes the next stdin message as a new turn, and folds one sent mid-turn into the running turn
-    // before its next model call (2.1.221).
     interface Session {
       child: ReturnType<typeof spawnCli>;
       broker?: Awaited<ReturnType<typeof createPermissionBroker>>;
@@ -929,10 +854,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       argsKey: string;
       volatile: string;
       sessionId: string | null;
-      /** `init` arrived; before it the CLI took nothing, so a resume retry is safe */
       sawInit: boolean;
-      /** the mode `init` reports: the CLI accepts `--permission-mode auto` for any model but runs
-       * "default" silently where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it) */
       nativePermissionMode: string | null;
       replaysUserMessages: boolean;
       turn: {
@@ -941,8 +863,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         retryAbort: AbortController;
         settled: boolean;
         sawStreamDelta: boolean;
-        /** sent to a warm process that has not yet sent this turn's `init`; if it exits first it
-         * never took the prompt */
         awaitingInit?: boolean;
         authFailed?: boolean;
         updateRequired?: boolean;
@@ -950,8 +870,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         limitReached?: boolean;
         explained?: boolean;
         stopRequested?: boolean;
-        /** Steer uuids no model call has taken in yet. Without --replay-user-messages the CLI never
-         * says whether a steer was folded in or runs next. */
         pendingSteers: Set<string>;
         deferred: NativeTurnResult | null;
         continuationGrace: ReturnType<typeof setTimeout> | null;
@@ -985,7 +903,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       warmContracts.delete(threadId);
       warmHolds.delete(threadId);
       if (s.idleTimer) clearTimeout(s.idleTimer);
-      // Close the broker before a replacement binds the same socket; a late close must not unlink it.
       const broker = s.broker;
       s.broker = undefined;
       broker?.close();
@@ -1050,8 +967,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const { threadId, botId } = turn;
       const relaunch = logicalTurnId !== undefined;
       if (!relaunch) {
-        // taskkill is asynchronous on Windows: a turn sent right after Stop waits for the stopped
-        // process to be gone.
         const stopped = sessions.get(threadId);
         if (stopped?.turn?.stopRequested && active.get(threadId)?.turnId === stopped.turn.turnId &&
             await killCliTree(stopped.child)) await stopped.closed;
@@ -1066,7 +981,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (controlsHost && permissionMode === "bypassPermissions" && turn.approvalMode !== "full") {
         throw new Error("local computer control requires the interactive approval broker");
       }
-      // Before any broker or process, so a bad attachment leaves nothing live.
       const promptMsg = claudeUserMessage(turn.text, turn.images);
       const turnId = logicalTurnId ?? newId();
       const retryAbort = new AbortController();
@@ -1117,7 +1031,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (compactWindow && cliHasAutocompact === true) {
         args.push("--autocompact", compactWindow);
       }
-      // --resume keeps the recorded system prompt, so every turn refreshes it.
       if (cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) {
         args.push("--system-prompt-snapshot", "off");
       }
@@ -1126,10 +1039,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (injected.model) args.push("--model", injected.model);
       if (turn.effort) args.push("--effort", turn.effort);
 
-      // Off argv: Windows' CreateProcess limit (spawn ENAMETOOLONG), and the prompt may be sensitive.
       let systemPromptPath: string | null = null;
 
-      // Pre-allowed: a headless acceptEdits run silently denies anything unlisted.
       const mcpServers: Record<string, unknown> = {};
       const allowed: string[] = [];
       if (turn.integrations?.composio) {
@@ -1145,7 +1056,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         };
         if (!controlsHost) allowed.push("mcp__computer");
       }
-      // Pre-allowed, or the CLI's own ListAgents look-alike shadows it.
       if (turn.integrations?.agents) {
         // Claude waits for always-loaded tools before building the prompt.
         mcpServers.agents = { ...turn.integrations.agents, alwaysLoad: true };
@@ -1156,7 +1066,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         allowed.push("mcp__phone");
       }
       if (turn.integrations?.browser) {
-        // Behind tool search, the first browser action costs a ToolSearch model step.
         mcpServers.browser = turn.preloadBrowserTools
           ? { ...turn.integrations.browser, alwaysLoad: true }
           : { ...turn.integrations.browser };
@@ -1176,18 +1085,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         };
         allowed.push("mcp__dweb");
       }
-      // User servers are not pre-allowed, so acceptEdits routes each call to the broker. Remote
-      // entries are already in the CLI's shape and it connects itself: Claude Code 2.1.292 sends only
-      // spec-defined initialize fields (2025-11-25), so strict servers accept it, and it keeps its MCP
-      // tool search for big catalogs.
       const botOwned = new Set<string>();
       for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
         if (Object.hasOwn(mcpServers, name)) continue;
         mcpServers[name] = { ...server };
         botOwned.add(name);
       }
-      // --strict-mcp-config makes this the CLI's only MCP source, so the bot project's servers merge
-      // last, never shadowing a harness mount. Never for a guest: its folder could declare a command.
       if (isolated && turn.cwd && !turn.guestConfined) {
         for (const [name, server] of Object.entries(projectMcpServers(turn.cwd))) {
           if (Object.hasOwn(mcpServers, name)) continue;
@@ -1201,7 +1104,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (gated) mcpServers[name] = { ...gated, ...((mcpServers[name] as { alwaysLoad?: unknown })?.alwaysLoad === true ? { alwaysLoad: true } : {}) };
       }
       allowed.splice(0, allowed.length, ...allowed.filter((name) => Object.hasOwn(mcpServers, name.slice("mcp__".length))));
-      // Full access keeps ask_user: native bypass skips permission prompts, not questions.
       let broker: Awaited<ReturnType<typeof createPermissionBroker>> | undefined;
       const socketPath = permissionSocketPath(threadId, botId);
       if (permissionMode !== "bypassPermissions") {
@@ -1210,9 +1112,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const permissionEnv = { ...NODE_ENV_FLAG, ...(turn.toolScope !== undefined ? { OMB_PERMISSION_TOOL_SCOPE: JSON.stringify(turn.toolScope) } : {}) };
       mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: permissionEnv, alwaysLoad: true };
       allowed.push("mcp__ogb");
-      // A guest pre-allows only harness tools; anything else (the browser can open file:) asks.
       if (turn.guestConfined) allowed.splice(0, allowed.length, ...allowed.filter((name) => name === "mcp__ogb" || name === "mcp__agents"));
-      // The MCP config carries credentials and argv is readable via `ps`: a 0600 file, removed at settle.
       let mcpConfigPath: string | null = null;
       if (Object.keys(mcpServers).length) {
         mcpConfigPath = join(mkdtempSync(join(tmpdir(), "omb-mcp-")), "mcp.json");
@@ -1223,8 +1123,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const env = environment(turnModel);
       const authSettings = isolated && !injected.injected
         ? readClaudeAuthSettings(env, input.environment) : {};
-      // The hook helper reads its bearer from a per-thread file refreshed every turn, so a
-      // long-lived CLI process never presents a stale token.
       const hooks = turn.integrations?.hooks;
       const hookTokenPath = hooks ? hookTokenFile(threadId, botId) : null;
       if (hooks && hookTokenPath) {
@@ -1238,14 +1136,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = "1";
       }
       const settings: Record<string, unknown> = { ...authSettings };
-      // Project-only settings still find the personal memory via ancestors when the bot lives under HOME.
       if (isolated) settings.claudeMdExcludes = [join(homedir(), ".claude", "CLAUDE.md")];
       if (hooks) settings.hooks = claudeHookSettings(HOOK_HELPER_PATH);
       if (turn.guestConfined) settings.permissions = GUEST_CLAUDE_PERMISSIONS;
       const authSettingsPath = mcpConfigPath && Object.keys(settings).length
         ? join(dirname(mcpConfigPath), "auth-settings.json") : null;
       if (authSettingsPath) args.push("--settings", authSettingsPath);
-      // Approvals and browser credentials expire at the turn boundary; native background workers must not outlive it.
       env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
       const cwd = turn.cwd ?? homedir();
       const commandCwd = permissionLaunchCwd(cwd);
@@ -1285,7 +1181,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           : claudeUserMessage(withVolatileNote(turn.text, volatile), turn.images);
         live.volatile = volatile;
         const running = live.turn;
-        // A warm process can exit just as the next turn is written; its close resumes this turn.
         if (!(await writeUser(live, threadId, message)) && !running?.stopRequested) closeSession(threadId, "stdin write failed");
         if (mcpConfigPath) {
           try {
@@ -1296,7 +1191,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       if (live) closeSession(threadId, turn.sessionReset ? "context reset" : "spawn contract changed");
 
-      // Until sessions.set() below, this turn owns every launch resource and must release it on failure.
       const cleanupUnownedLaunch = () => {
         broker?.close();
         broker = undefined;
@@ -1451,7 +1345,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           t.continuationSilence = null;
         }
         session.broker?.pause();
-        // The CLI read the credential-bearing config at start; it must not sit on disk.
         if (session.mcpConfigPath) {
           try {
             rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
@@ -1501,7 +1394,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         } catch {
           return;
         }
-        // A replayed stdin message carries its images again: keep their bytes out of the log.
         appendNative(threadId, { dir: "in", source: "claude.sdk.message", msg: o?.type === "user" && o.isReplay === true && o.message ? diagnosticClaudeUserMessage(o) : o });
         if (session.turn?.continuationSilence && !(o.type === "system" && o.subtype === "init") && !(o.type === "user" && o.isReplay === true)) {
           clearTimeout(session.turn.continuationSilence);
@@ -1510,7 +1402,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         switch (o.type) {
           case "system":
             if (o.subtype === "init") {
-              // A guest's CLI that kept a command-running tool is stopped before it does anything.
               const tools: unknown[] = Array.isArray(o.tools) ? o.tools : [];
               if (session.turn?.input.guestConfined && (o.permissionMode !== "default" || tools.some((tool) => typeof tool === "string" && GUEST_FORBIDDEN_TOOLS.has(tool)))) {
                 emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: withWhy("This Claude Code kept its shell, so it can't run this turn. Update Claude Code.", session.turn?.input.confinedWhy) });
@@ -1552,7 +1443,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             break;
           case "stream_event": {
-            // Subagent narration is dropped: parallel Tasks would interleave prose into one bubble.
             if (o.parent_tool_use_id) break;
             const ev = o.event ?? {};
             if (ev.type !== "content_block_delta") break;
@@ -1568,7 +1458,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           case "assistant": {
             const msg = o.message ?? {};
             const text = firstText(msg.content);
-            // Signed out, the CLI answers with an api-error frame whose only content is "run /login".
             if (claudeAuthFailure(o, text)) {
               if (session.turn) session.turn.authFailed = session.turn.explained = true;
               emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: text, setup: true });
@@ -1616,7 +1505,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 ...(typeof msg.usage.cache_read_input_tokens === "number"
                   ? { cachedInput: msg.usage.cache_read_input_tokens }
                   : {}),
-                // One assistant message is one model call; its prompt is fresh + cache-read + cache-write.
                 contextTokens: (msg.usage.input_tokens || 0) + (msg.usage.cache_read_input_tokens || 0) + (msg.usage.cache_creation_input_tokens || 0),
               });
             }
@@ -1642,10 +1530,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             if (session.turn) session.turn.limit = claudeLimitRefusal(o.rate_limit_info);
             break;
           case "result": {
-            // A synthetic task-notification completion is not the submitted user turn's result.
             if (o.origin?.kind === "task-notification") break;
-            // After a long idle 2.1.295 answers a --resume it no longer has with an error result ("No
-            // conversation found with session ID …") and stays up; end it so its close rebuilds once.
             if (o.is_error === true && sessionId && !session.sawInit && session.turn && !session.turn.settled) {
               closeSession(threadId, "resume refused");
               break;
@@ -1656,8 +1541,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               session.turn.explained = true;
               emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: claudeResultError(o) });
             }
-            // result.usage is per turn "in streaming-input sessions" (2.1.282) even on a retained
-            // process; total_cost_usd is the process's running total.
             noteCostState(o.total_cost_usd, o.modelUsage, {
               input: o.usage?.input_tokens || 0,
               cacheRead: o.usage?.cache_read_input_tokens || 0,
@@ -1666,8 +1549,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             });
             const native: NativeTurnResult = {
               ok: o.is_error !== true,
-                // An error result's stop_reason ("stop_sequence" or none) says nothing; its
-                // terminal_reason ("api_error") or subtype ("error_during_execution") does.
               stopReason: session.turn?.authFailed
                 ? "auth_required"
                 : session.turn?.limitReached
@@ -1691,13 +1572,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 : {}),
             };
             const t = session.turn;
-            // queued_turn_count ("greater than 0 means at least one more user turn (and result)
-            // follows", 2.1.282) misses a stdin steer not yet queued: it said 0 and the CLI ran the
-            // message 58 ms later. So 0 decides nothing.
             const queuedTurns = typeof o.queued_turn_count === "number" ? o.queued_turn_count : 0;
             if (t && !t.settled && (queuedTurns > 0 || t.pendingSteers.size > 0)) {
-                // Hold the result: a turn.completed now would revoke the turn's capabilities under
-                // the continuation (its internal tools would answer 401).
               if (!session.replaysUserMessages) t.pendingSteers.clear();
               t.deferred = sumNativeTurnResults(t.deferred, native);
               t.armGrace = () => {
@@ -1745,7 +1621,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       let closeFinalized = false;
       const finalizeClose = async (code: number | null) => {
         if (closeFinalized) return;
-        // The root can close while its MCP helpers run: reap them before releasing the turn.
         if (!(await killCliTree(child, 0))) {
           session.broker?.close();
           session.broker = undefined;
@@ -1757,7 +1632,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (session.turn?.stopRequested && !session.turn.settled) {
           settle(false, "interrupted");
         } else if (session.turn?.deferred && !session.turn.settled) {
-          // A result is held, so the prompt already ran: never relaunch.
           const held = session.turn.deferred;
           if (session.turn.continuationGrace) {
             settleResult(held);
@@ -1784,7 +1658,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               retry.attempt < RETRY_MAX_ATTEMPTS - 1
             ))
           ) {
-            // `active` stays: an interrupt during the backoff reaches stop() and cancels the retry.
             const failedBroker = session.broker;
             session.broker = undefined;
             failedBroker?.pause();
@@ -1852,8 +1725,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             })();
             return;
           }
-          // A --resume the CLI exited from before `init` never read the prompt; without one fresh
-          // session the dead cursor would fail every later turn identically.
           const resumeFailure = classifyResumeFailure({
             attempted: Boolean(sessionId),
             rejected: !session.sawInit,
@@ -1924,7 +1795,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
 
       const stop = () => {
         if (session.turn) session.turn.stopRequested = true;
-        // taskkill is asynchronous on Windows: retire steering and approvals before the child submits more.
         closeSession(threadId, "interrupted");
         retry.cancelled = true;
         retryAbort.abort();
@@ -1933,7 +1803,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       active.set(threadId, { stop, turnId, broker });
       emit({ ...base(threadId, turnId), type: "turn.started" });
 
-      // Prompt over stdin, never argv (ARG_MAX); stdin stays open for steers and the next turn.
       if (!(await writeUser(session, threadId, promptMsg))) {
         if (!session.turn?.stopRequested) settle(false, "stdin_write_failed");
         closeSession(threadId, "stdin write failed");
@@ -1952,7 +1821,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       } catch {
         return "refused";
       }
-      // Counted before the write: a `result` read while the words are in flight must hold for them.
       const id = randomUUID();
       turn.pendingSteers.add(id);
       if (!(await writeUser(s, threadId, { ...message, uuid: id }))) {
@@ -1981,7 +1849,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       const probed = await claudeAuthStatus(config.cli, env);
       const auth = probed.authenticated === undefined ? lastAuth : (lastAuth = probed);
-      // Turns run on the CLI's own login, so its reported cost is what the call would bill.
       return { state: "available", version, ...auth, ...(update ? { update } : {}), ...(warning ? { warning } : {}), billing: "subscription" };
     };
 
@@ -2069,6 +1936,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
     };
 
+    const checkpointHelper = createClaudeCheckpointHelper({ config, inputEnvironment: input.environment, environment, readClaudeAuthSettings, noKeyMessage: NO_ANTHROPIC_KEY });
+    const generateCheckpoint = checkpointHelper.generateCheckpoint;
+
     return {
       instanceId,
       driverKind: DRIVER_KIND,
@@ -2103,7 +1973,6 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           queueing: true,
           // stream-json takes image blocks on any user message, mid-turn too
           steerImages: true,
-          // Only while this CLI can refresh a resumed session's recorded prompt (--system-prompt-snapshot).
           get strictResume() {
             return cliVersionChecked && cliVersion !== null && claudeCliSupports(cliVersion, "--system-prompt-snapshot");
           },
@@ -2152,9 +2021,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           return () => listeners.delete(listener);
         },
       },
+      generateCheckpoint,
       generateText: (prompt, options) => generateReview(prompt, options?.signal, options?.onUsage, options?.timeoutMs, options?.model),
       reviewPermission: generateReview,
       dispose: async () => {
+        checkpointHelper.close();
         try {
           await login.dispose();
         } finally {

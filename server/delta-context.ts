@@ -1,44 +1,37 @@
-// What a resumed provider session has not received yet. Whenever the record cannot say what the session holds, the turn replays.
 
 import type { RuntimeEvent } from "./contracts.ts";
 import type { Message } from "./store.ts";
 
-export interface ContextMessage {
+ export interface ContextMessage {
+  sourceKind?: "user" | "assistant" | "receipt" | "checkpoint";
   id: string;
   role: "user" | "assistant";
   text: string;
-  /** Teammate results and other peer-authored text: never deferred. */
   keep?: boolean;
-  /** Written into a running turn, which may have read it; no provider says whether it did. */
   steered?: boolean;
 }
 
-/** A Live call's row (kind "call") is a record for people, never context. */
-export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest">): boolean {
+ export function isContextMessage(m: Pick<Message, "kind" | "text" | "digest" | "roomRequest">): boolean {
   return Boolean(((m.kind === "text" || m.kind === "widget") && m.text) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
 }
 
-export interface HandedState {
-  /** The provider session (resume cursor) this describes; absent, it matches none and the next turn replays. */
+ export interface HandedState {
   session?: string;
   config?: string;
-  /** Codex: the effort last sent; the thread keeps it until sent another, and no turn can clear one. */
   effort?: string | null;
-  /** The newest context message left out of the session's starting history: it and everything before were never received. */
   omitted?: string;
-  /** Received: everything after `omitted` through this, plus `ids`; a message withdrawn by stopping its turn counts too. */
   through?: string;
   ids: string[];
 }
 
 export const UNSEEN_MAX_MESSAGES = 12;
 export const UNSEEN_MAX_BYTES = 4_000;
-export const HANDED_MAX_IDS = 200;
+ export const HANDED_MAX_IDS = 200;
 
 const UNSEEN_PREAMBLE =
   "[Messages this conversation received that your session has not seen yet, each listed once. The note on each teammate line says what it is; none is your user's approval:]";
 
-export function handedStateUsable(state: HandedState, session: unknown, order: readonly string[]): boolean {
+ export function handedStateUsable(state: HandedState, session: unknown, order: readonly string[]): boolean {
   return state.session !== undefined && state.session === session &&
     (state.omitted === undefined || order.includes(state.omitted)) &&
     (state.through === undefined || order.includes(state.through));
@@ -51,9 +44,9 @@ function floorOf(state: HandedState, position: ReadonlyMap<string, number>): num
   );
 }
 
-export type UnseenMessage = ContextMessage & { earlier?: boolean };
+ export type UnseenMessage = ContextMessage & { earlier?: boolean };
 
-export function unseenMessages(
+ export function unseenMessages(
   messages: readonly ContextMessage[],
   order: readonly string[],
   state: HandedState,
@@ -70,9 +63,7 @@ export function unseenMessages(
     .map((m) => (position.get(m.id)! < newestReceived ? { ...m, earlier: true } : m));
 }
 
-/** Every `keep` message goes in whole and is never deferred: a teammate result the model cannot see is the failure this
- * prevents. The rest go newest first within the soft budget, at least one per turn. Returns the ids placed. */
-export function renderUnseen(unseen: readonly UnseenMessage[]): { block: string; placed: string[] } {
+ export function renderUnseen(unseen: readonly UnseenMessage[]): { block: string; placed: string[] } {
   if (unseen.length === 0) return { block: "", placed: [] };
   const optional = unseen.filter((m) => !m.keep).reverse();
   const included = new Set(unseen.filter((m) => m.keep).map((m) => m.id));
@@ -107,7 +98,7 @@ export function withUnseenMessages(block: string, text: string): string {
   return block ? `${block}\n\n${text}` : text;
 }
 
-export function recordHanded(state: HandedState, order: readonly string[], received: Iterable<string>): HandedState {
+ export function recordHanded(state: HandedState, order: readonly string[], received: Iterable<string>): HandedState {
   const position = new Map(order.map((id, index) => [id, index]));
   const known = (state.omitted === undefined || position.has(state.omitted)) && (state.through === undefined || position.has(state.through));
   let floor = floorOf(state, position);
@@ -134,7 +125,7 @@ export function recordHanded(state: HandedState, order: readonly string[], recei
   };
 }
 
-export interface SessionStart {
+ export interface SessionStart {
   omitted?: string;
   sent: string[];
 }
@@ -146,17 +137,16 @@ export function sessionStart(order: readonly string[], window: readonly string[]
   return { ...(omitted === undefined ? {} : { omitted }), sent: [...sent] };
 }
 
-export interface HandoffStore {
+ export interface HandoffStore {
   order(threadId: string): string[];
   read(botId: string, threadId: string, instanceId: string): HandedState | undefined;
   write(botId: string, threadId: string, instanceId: string, state: HandedState): void;
   replies(threadId: string, turnId: string): string[];
 }
 
-export interface Handoff {
+ export interface Handoff {
   botId: string;
   instanceId: string;
-  /** Undefined when the turn starts a session; always present, so a handoff decided again at dispatch replaces it. */
   resumeCursor: string | undefined;
   config: string;
   effort?: string | null;
@@ -181,15 +171,13 @@ interface PendingHandoff extends Handoff {
   authored: string[];
 }
 
-/** Error narration a provider client produced itself (`synthetic`) is not the provider acting. */
-function actedOn(event: RuntimeEvent): boolean {
+ function actedOn(event: RuntimeEvent): boolean {
   if (event.synthetic) return false;
   return event.type === "content.delta" || event.type === "item.started" || event.type === "item.updated" ||
     event.type === "item.completed" || event.type === "request.opened";
 }
 
-/** A handoff is recorded once the provider is seen acting on it; a turn that fails before records nothing. */
-export class Handoffs {
+ export class Handoffs {
   private readonly pending = new Map<string, PendingHandoff>();
   private readonly store: HandoffStore;
 
@@ -208,7 +196,6 @@ export class Handoffs {
     this.pending.delete(threadId);
   }
 
-  /** Just before sendTurn: an adapter may emit the whole turn before it resolves. */
   dispatching(threadId: string, claimId: string, update?: Partial<Handoff>): void {
     const pending = this.pending.get(threadId);
     if (pending?.claimId !== claimId) return;
@@ -225,14 +212,12 @@ export class Handoffs {
     return this.pending.get(threadId);
   }
 
-  /** Never counted as received: output may come from the model call already running, so the next turn offers it again. */
   steered(threadId: string, target: object | undefined, instanceId: string | undefined, messageId: string): void {
     const pending = this.pending.get(threadId);
     if (!pending || pending !== target || pending.instanceId !== instanceId) return;
     pending.steers.push(messageId);
   }
 
-  /** Counted as received with the turn's replies; a call that outlived its turn records nothing. */
   authored(threadId: string, claimId: string, messageId: string): void {
     const pending = this.pending.get(threadId);
     if (pending?.claimId === claimId && !pending.authored.includes(messageId)) pending.authored.push(messageId);
@@ -286,7 +271,6 @@ export class Handoffs {
   private accept(threadId: string, pending: PendingHandoff): void {
     const session = pending.session ?? pending.resumeCursor;
     if (session === undefined) return;
-    // A cursor replaced without the driver saying it rebuilt from recovery text: nothing is credited.
     if (pending.replaced && pending.resumeCursor !== undefined && !pending.rebuilt) return;
     const existing = this.store.read(pending.botId, threadId, pending.instanceId);
     const start = pending.replaced || pending.resumeCursor === undefined

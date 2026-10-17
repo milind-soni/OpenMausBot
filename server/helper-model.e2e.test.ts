@@ -16,11 +16,11 @@ const fake = (name: string) => join(SERVER_DIR, "testing", name);
 const FAKES = ["fake-claude-cli.ts", "fake-codex-app-server.ts", "fake-pi-cli.ts"];
 const posixOnly = describe.skipIf(process.platform === "win32");
 
-const SUMMARY_MARKER = "Summarize this conversation history in third person";
-const SUMMARY = "The person said they are vegetarian and asked for nothing else.";
 const SKILL_MD = "---\nname: weekly-report\ndescription: Writes the weekly status report.\n---\n\n# Weekly report\n\nWrites the weekly status report from the project notes.\n\n## When to Use\n- \"write the weekly report\"\n\n## Procedure\n1. Read the notes.\n2. Keep it to five bullets.\n\n## Pitfalls\n- Long reports go unread: stop at five bullets.\n\n## Verification\n- Count the bullets.\n";
 
 interface Msg {
+  id: string;
+  tool?: { name: string };
   role: string;
   kind: string;
   text?: string;
@@ -47,7 +47,6 @@ async function boot(extraConfig: Record<string, unknown>) {
   const routes = join(home, "one-shot-routes.json");
   writeFileSync(routes, JSON.stringify({
     [CAPTURE_MARKER]: JSON.stringify([{ text: "The person is vegetarian", kind: "preference", aboutUser: true, confidence: 0.9 }]),
-    [SUMMARY_MARKER]: SUMMARY,
     [SKILL_REVIEW_MARKER]: JSON.stringify({ changes: [{ action: "create", skill_md: SKILL_MD, gist: "Five-bullet weekly report." }] }),
   }));
   writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
@@ -123,6 +122,28 @@ async function boot(extraConfig: Record<string, unknown>) {
   return { api, waitFor, getBot, newBot, turn, ledger, memory, close, log: () => stdout, dataDir: join(home, ".openmausbot") };
 }
 
+async function unsupportedCheckpoint(server: Awaited<ReturnType<typeof boot>>, bot: { id: string; threadId: string }) {
+  const content = (messages: Msg[]) => messages.filter(message => message.kind === "text")
+    .map(({ id, role, kind, text }) => ({ id, role, kind, text }));
+  const before = content((await server.getBot(bot.id)).messages);
+  expect(before.length).toBeGreaterThan(0);
+  const cursor = () => (JSON.parse(readFileSync(join(server.dataDir, "bots.json"), "utf8")) as any[])
+    .find(record => record.id === bot.id)?.tasks.find((task: any) => task.threadId === bot.threadId)?.resumeCursors;
+  const priorCursor = cursor();
+  expect((await server.api("POST", `/api/bots/${bot.id}/compact`, { threadId: bot.threadId })).status).toBe(202);
+  await server.waitFor(async () => {
+    const current = await server.getBot(bot.id);
+    return !current.busy && current.messages.some(message => message.tool?.name.includes("does not support tool-free streaming checkpoints; original history retained"));
+  }, "the unsupported checkpoint response");
+  const after = (await server.getBot(bot.id)).messages;
+  expect(content(after)).toEqual(before);
+  expect(after.filter(message => message.kind === "compaction")).toEqual([]);
+  expect(cursor()).toEqual(priorCursor);
+  expect(server.ledger(bot.id).some(row => row.trigger.job === "compaction")).toBe(false);
+  await server.turn(bot, "Continue after the unsupported checkpoint without dropping the earlier requirement.");
+  expect(content((await server.getBot(bot.id)).messages).slice(0, before.length)).toEqual(before);
+}
+
 posixOnly("the helper model, through the real server", () => {
   let server: Awaited<ReturnType<typeof boot>>;
   beforeAll(async () => {
@@ -137,16 +158,9 @@ posixOnly("the helper model, through the real server", () => {
     instanceId: "claude", driverKind: "claudeAgent", model: "claude-haiku-5-5", threadId: expect.stringMatching(new RegExp(`^${job}-`)),
     trigger: expect.objectContaining({ kind: "helper", job }),
   });
-  const compacted = async (bot: { id: string; threadId: string }) => {
-    expect((await server.api("POST", `/api/bots/${bot.id}/compact`, { threadId: bot.threadId })).status).toBe(202);
-    await server.waitFor(async () => {
-      const current = await server.getBot(bot.id);
-      return !current.busy && current.messages.some((message) => message.kind === "compaction");
-    }, "the compaction record");
-    return (await server.getBot(bot.id)).messages.find((message) => message.kind === "compaction")!.compaction!.summary;
-  };
+  const unsupported = (bot: { id: string; threadId: string }) => unsupportedCheckpoint(server, bot);
 
-  it("gives a Pi bot memory capture, the skill review and a written summary from the helper, each booked as a helper call", async () => {
+  it("keeps Pi memory and skill helpers working while unsupported checkpoints preserve history", async () => {
     const { api, waitFor, getBot, newBot, turn, ledger, memory } = server;
     const bot = await newBot("pi");
     expect((await api("GET", `/api/bots/${bot.id}/memory/upkeep`)).body).toMatchObject({ enabled: true, modelSteps: true });
@@ -164,9 +178,7 @@ posixOnly("the helper model, through the real server", () => {
     await waitFor(() => ledger(bot.id).some((row) => row.trigger.job === "skill-review"), "the review call to be booked");
     expect(ledger(bot.id)).toContainEqual(helperRow("skill-review"));
 
-    expect(await compacted(bot)).toContain(`Model-written historical summary (may be incomplete):\n${SUMMARY}`);
-    await waitFor(() => ledger(bot.id).some((row) => row.trigger.job === "compaction"), "the summary call to be booked");
-    expect(ledger(bot.id)).toContainEqual(helperRow("compaction"));
+    await unsupported(bot);
 
     // read on its own in the usage summary, apart from the person's turns
     const byPerson = (await api("GET", "/api/usage?groupBy=user")).body.groups as Array<{ key: string; label: string }>;
@@ -174,7 +186,7 @@ posixOnly("the helper model, through the real server", () => {
     expect(server.log()).toContain('helper model: small writing jobs for bots whose engine has no one-off text call are written by "claude" (claude-haiku-5-5)');
   }, 300_000);
 
-  it("accepts a bot's never-use-the-helper switch, saves it, refuses a wrong type, and then writes none of the three jobs for that bot", async () => {
+  it("persists the helper opt-out and refuses invalid values while preserving unsupported checkpoint history", async () => {
     const { api, waitFor, getBot, newBot, turn, ledger, memory, dataDir } = server;
     const bot = await newBot("pi");
     const upkeep = async () => (await api("GET", `/api/bots/${bot.id}/memory/upkeep`)).body;
@@ -202,10 +214,7 @@ posixOnly("the helper model, through the real server", () => {
     // the skill review: three tool steps are due, and it is refused the same way
     await waitFor(() => server.log().includes(`skill review: ${bot.id}: this bot's engine cannot run a background review`), "the review to be refused");
     expect((await getBot(bot.id)).messages.some((message) => message.card?.skillRequest)).toBe(false);
-    // the compaction summary: excerpts, not the helper's text
-    const summary = await compacted(bot);
-    expect(summary).toMatch(/^Historical excerpts in chronological order/);
-    expect(summary).not.toContain(SUMMARY);
+    await unsupported(bot);
     expect(ledger(bot.id).some((row) => row.trigger.kind === "helper")).toBe(false);
 
     // switched back, the helper may write for it again
@@ -230,7 +239,7 @@ posixOnly("the helper model, through the real server", () => {
     expect((await api("POST", "/api/bots", { settings: { helperModel: "false" } })).status).toBe(400);
   }, 120_000);
 
-  it("writes a Codex bot's summary with the helper, while its memory upkeep stays on Codex's own background call", async () => {
+  it("keeps Codex memory upkeep on its own background call without substituting an unvalidated checkpoint", async () => {
     const { api, waitFor, newBot, turn, ledger } = server;
     const bot = await newBot("codex");
     expect((await api("GET", `/api/bots/${bot.id}/memory/upkeep`)).body).toMatchObject({ enabled: true, modelSteps: true });
@@ -238,10 +247,8 @@ posixOnly("the helper model, through the real server", () => {
     await waitFor(() => ledger(bot.id).some((row) => row.threadId.startsWith("memory-")), "Codex's own capture call to be booked");
     expect(ledger(bot.id).filter((row) => row.threadId.startsWith("memory-")).every((row) => row.driverKind === "codex" && row.trigger.kind === "bot")).toBe(true);
 
-    expect(await compacted(bot)).toContain(`Model-written historical summary (may be incomplete):\n${SUMMARY}`);
-    await waitFor(() => ledger(bot.id).some((row) => row.trigger.job === "compaction"), "the summary call to be booked");
-    expect(ledger(bot.id)).toContainEqual(helperRow("compaction"));
-    expect(ledger(bot.id).filter((row) => row.trigger.kind === "helper").map((row) => row.trigger.job)).toEqual(["compaction"]);
+    await unsupported(bot);
+    expect(ledger(bot.id).filter((row) => row.trigger.kind === "helper")).toEqual([]);
   }, 240_000);
 
   it("leaves a Claude bot writing with its own engine and its own quick model", async () => {
@@ -261,19 +268,12 @@ posixOnly("without a helper model, through the real server", () => {
   beforeAll(async () => { server = await boot({}); }, 90_000);
   afterAll(async () => { await server?.close(); });
 
-  it("keeps a Pi bot's fallbacks: no model steps for upkeep, and an excerpt summary", async () => {
-    const { api, waitFor, getBot, newBot, turn, ledger } = server;
+  it("keeps Pi history intact without a helper or checkpoint capability", async () => {
+    const { api, newBot, turn, ledger } = server;
     const bot = await newBot("pi");
     expect((await api("GET", `/api/bots/${bot.id}/memory/upkeep`)).body).toMatchObject({ enabled: true, modelSteps: false });
     await turn(bot, "Just so you know, I'm vegetarian.");
-    expect((await api("POST", `/api/bots/${bot.id}/compact`, { threadId: bot.threadId })).status).toBe(202);
-    await waitFor(async () => {
-      const current = await getBot(bot.id);
-      return !current.busy && current.messages.some((message) => message.kind === "compaction");
-    }, "the compaction record");
-    const record = (await getBot(bot.id)).messages.find((message) => message.kind === "compaction")!;
-    expect(record.compaction!.summary).toMatch(/^Historical excerpts in chronological order/);
-    expect(record.compaction!.summary).not.toContain("Model-written");
+    await unsupportedCheckpoint(server, bot);
     expect(ledger(bot.id).some((row) => row.trigger.kind === "helper")).toBe(false);
     expect(server.log()).not.toContain("helper model:");
   }, 180_000);

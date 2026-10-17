@@ -1,11 +1,11 @@
-// A turn whose thread emits nothing for stallMs is wedged; waiting on a person or a computer is not a stall.
-export interface WatchedTurn {
+           export interface WatchedTurn {
   threadId: string;
   botId: string;
   startedAt: number;
   lastEventAt: number;
   waitingOnHuman: boolean;
   waitingOnComputer: boolean;
+  checkpointOwnsDeadline: boolean;
 }
 
 const parked = (turn: WatchedTurn): boolean => turn.waitingOnHuman || turn.waitingOnComputer;
@@ -22,7 +22,6 @@ export class TurnWatchdog {
   private timer: ReturnType<typeof setInterval> | null = null;
   private opts: TurnWatchdogOptions;
 
-  // No parameter properties: Node's type-stripping cannot transform them.
   constructor(opts: TurnWatchdogOptions) {
     this.opts = opts;
   }
@@ -45,7 +44,7 @@ export class TurnWatchdog {
 
   watch(threadId: string, botId: string): void {
     const at = this.now();
-    this.turns.set(threadId, { threadId, botId, startedAt: at, lastEventAt: at, waitingOnHuman: false, waitingOnComputer: false });
+    this.turns.set(threadId, { threadId, botId, startedAt: at, lastEventAt: at, waitingOnHuman: false, waitingOnComputer: false, checkpointOwnsDeadline: false });
   }
 
   touch(threadId: string): void {
@@ -67,6 +66,15 @@ export class TurnWatchdog {
     turn.lastEventAt = this.now();
   }
 
+  /** Checkpoint helpers own prefill and meaningful-token idle deadlines. The
+   * ordinary event watchdog cannot distinguish a slow prefill from a stall. */
+  setCheckpointOwnsDeadline(threadId: string, active: boolean): void {
+    const turn = this.turns.get(threadId);
+    if (!turn) return;
+    turn.checkpointOwnsDeadline = active;
+    turn.lastEventAt = this.now();
+  }
+
   settle(threadId: string): void {
     this.turns.delete(threadId);
   }
@@ -83,7 +91,7 @@ export class TurnWatchdog {
   sweep(): void {
     const at = this.now();
     for (const turn of this.turns.values()) {
-      if (parked(turn)) continue;
+      if (parked(turn) || turn.checkpointOwnsDeadline) continue;
       if (at - turn.lastEventAt < this.opts.stallMs) continue;
       this.turns.delete(turn.threadId);
       this.opts.onStall(turn);

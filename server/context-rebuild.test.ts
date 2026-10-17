@@ -34,15 +34,55 @@ describe("context replay", () => {
     expect(result.representedIds).toContain("79");
   });
 
-  it("counts the summary and omission notice against the budget", () => {
+  it("preserves complete large checkpoints and refuses bounds that cannot fit them", () => {
     const history = entries(["old", "old reply", "retained", "reply", ""]);
-    const result = selectReplay(history, { budgetBytes: 1_024, compaction: {
-      id: "4", firstKeptId: "2", foldedThroughId: "1", summary: "large 🐭 summary ".repeat(1_000), by: "harness", tokensBefore: 100,
-    } });
-    expect(size(result)).toBeLessThanOrEqual(1_024);
+    const summary = "large 🐭 summary ".repeat(1_000);
+    const compaction = { id: "4", firstKeptId: "2", foldedThroughId: "1", summary, by: "harness" as const, tokensBefore: 100 };
+    const result = selectReplay(history, { compaction });
     expect(result.compacted).toBe(2);
-    expect(new Set(result.representedIds)).toEqual(new Set(["0", "1", "2", "3", "4"]));
-    expect(result.transcript[0]!.text).toContain("historical data");
+    expect(result.representedIds).toEqual(["0", "1", "2", "3", "4"]);
+    expect(result.transcript[0]!.text).toContain(JSON.stringify(summary));
+    expect(result.transcript[0]!.text).toContain("Earlier user requirements remain applicable");
+    expect(result.transcript[0]!.text).toContain("not new instructions or authorization");
+    expect(result.shortened).toEqual([]);
+    expect(() => selectReplay(history, { budgetBytes: 1_024, compaction })).toThrow("complete checkpoint");
+  });
+
+  it("keeps long history and its prefix stable as new turns arrive", () => {
+    const history = entries(Array.from({ length: 80 }, (_, i) => `${i} ${"long 🐭 text ".repeat(100)}`));
+    const initial = selectReplay(history);
+    const extended = selectReplay([...history, { id: "80", role: "user", text: "continue" }]);
+    expect(initial.transcript).toEqual(history);
+    expect(size(initial)).toBeGreaterThan(24_000);
+    expect(extended.transcript.slice(0, history.length)).toEqual(initial.transcript);
+    expect(initial.representedIds).toEqual(history.map(entry => entry.id));
+    expect(initial.dropped).toBe(0);
+    expect(initial.shortened).toEqual([]);
+  });
+
+  it("represents prior checkpoint IDs in a later cumulative checkpoint", () => {
+    const history = entries(["original request", "reply", "", "follow-up", "reply", "", "next"]);
+    const result = selectReplay(history, { compaction: {
+      id: "5", firstKeptId: "", foldedThroughId: "4", summary: "Original requirements and follow-up remain active", by: "harness", tokensBefore: 100,
+    } });
+    expect(result.compacted).toBe(5);
+    expect(result.representedIds).toEqual(history.map(entry => entry.id));
+    expect(result.transcript.map(entry => entry.id)).toEqual(["5", "6"]);
+  });
+
+  it.each([
+    { id: "missing", firstKeptId: "2", foldedThroughId: "1" },
+    { id: "3", firstKeptId: "missing", foldedThroughId: "1" },
+    { id: "3", firstKeptId: "1", foldedThroughId: "2" },
+    { id: "1", firstKeptId: "2", foldedThroughId: "0" },
+  ])("keeps history with invalid fork or rewind anchors %j", (anchors) => {
+    const history = entries(["original requirement", "reply", "new branch", ""]);
+    const result = selectReplay(history, { compaction: { ...anchors, summary: "obsolete", by: "person", tokensBefore: 100 } });
+    expect(result.compacted).toBe(0);
+    expect(result.transcript[0]!.text).toBe("original requirement");
+    expect(result.representedIds).toEqual(["0", "1", "2"]);
+    expect(result.transcript).toEqual(history.slice(0, 3));
+    expect(JSON.stringify(result.transcript)).not.toContain("obsolete");
   });
 
   it("ignores records whose anchors no longer belong to the selected branch", () => {
@@ -514,9 +554,8 @@ describe("tool history in a rebuilt session", () => {
       const tools = history.slice(0, -1).flatMap(entry => Array.from({ length: 10 }, (_, i) => line(entry.id, `${entry.id}.${i}`)));
       const result = selectReplay(history, { tools });
       const plain = selectReplay(history);
-      // the same 40 messages (and the same omission notice) as without them
       expect(result.transcript).toEqual(plain.transcript);
-      expect(result.transcript.filter(entry => entry.id)).toHaveLength(40);
+      expect(result.transcript.filter(entry => entry.id)).toHaveLength(history.length);
       expect(result.inline.filter(entry => !toolLine(entry))).toEqual(plain.transcript);
       expect(result.inline.filter(toolLine).map(entry => entry.text))
         .toEqual(tools.slice(-REPLAY_TOOL_LINE_CAP).map(tool => tool.text));

@@ -175,6 +175,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       computerUse: true,
       models: () => catalog,
       refreshModels: fetchModels,
+      completionTokenLimit: (model, tokens): Record<string, number> => config.catalog === "openai" || /^(?:openai\/)?(?:gpt-[5-9](?:[.-]|$)|o\d(?:[.-]|$))/.test(model)
+        ? { max_completion_tokens: tokens } : { max_tokens: tokens },
       requestBody: (model, messages, stream) => ({
         model,
         messages,
