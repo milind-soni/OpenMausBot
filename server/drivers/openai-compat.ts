@@ -20,11 +20,9 @@ const DEFAULT_MODELS: ModelCatalog = {
 };
 
 const DEFAULT_KEY_ENV = "OPENAI_COMPAT_API_KEY";
-/** A provider's own key: such an instance never falls back to the workspace OpenAI-compatible key, URL,
- * model or routing. */
-const OWN_KEY_ENVS = new Set(["OMB_OPENAI_API_KEY", "OMB_OPENROUTER_API_KEY"]);
+ const OWN_KEY_ENVS = new Set(["OMB_OPENAI_API_KEY", "OMB_OPENROUTER_API_KEY"]);
 
-const OPENAI_MODELS: ModelCatalog = {
+ const OPENAI_MODELS: ModelCatalog = {
   default: "gpt-5",
   options: [
     { id: "gpt-5", label: "gpt-5" },
@@ -32,8 +30,7 @@ const OPENAI_MODELS: ModelCatalog = {
   ],
 };
 
-/** OpenAI's /models also lists embeddings, speech, images, moderation and Responses-only models. */
-export function isOpenAIChatModel(id: string): boolean {
+ export function isOpenAIChatModel(id: string): boolean {
   if (!/^(gpt-|chatgpt-|o\d)/i.test(id)) return false;
   return !/(audio|realtime|tts|transcribe|search|image|embedding|moderation|instruct|codex|computer-use|deep-research|-pro\b)/i.test(id);
 }
@@ -47,6 +44,21 @@ export interface OpenAICompatConfig {
   model?: string;
   provider?: string;
   managedModels?: string[];
+  contextWindows?: Record<string, number>;
+}
+
+function positiveTokens(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+export function advertisedContextWindow(row: Record<string, unknown>): number | undefined {
+  const limits = ["context_length", "context_window", "max_model_len", "max_context_length", "contextWindow"]
+    .map(key => positiveTokens(row[key]));
+  const provider = row.top_provider;
+  if (provider && typeof provider === "object") limits.push(positiveTokens((provider as Record<string, unknown>).context_length));
+  const valid = limits.filter((value): value is number => value !== undefined);
+  // A serving provider may cap the usable window below the model's nominal limit.
+  return valid.length ? Math.min(...valid) : undefined;
 }
 
 function isOpenRouterUrl(url: string): boolean {
@@ -62,11 +74,17 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
   const config = (raw ?? {}) as Record<string, unknown>;
   if (config.tools !== undefined && typeof config.tools !== "boolean") throw new Error("tools must be a boolean");
   if (config.managedModels !== undefined && (!Array.isArray(config.managedModels) || !config.managedModels.length || config.managedModels.some(model => typeof model !== "string" || !model.trim()))) throw new Error("Invalid managed models.");
+  const windows = config.contextWindows;
+  if (windows !== undefined && (typeof windows !== "object" || windows === null || Array.isArray(windows)
+    || Object.entries(windows).some(([id, value]) => !id.trim() || typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0))) {
+    throw new Error("contextWindows must map model IDs to positive integer token limits");
+  }
   const ownKey = typeof config.apiKeyEnv === "string" && OWN_KEY_ENVS.has(config.apiKeyEnv);
   if (config.catalog !== undefined && config.catalog !== "openai") throw new Error("catalog must be \"openai\"");
   const envUrl = ownKey ? undefined : process.env.OPENAI_COMPAT_URL;
   return {
     ...(config.tools !== undefined ? { tools: config.tools as boolean } : {}),
+    ...(windows ? { contextWindows: windows as Record<string, number> } : {}),
     ...(config.managedModels ? { managedModels: config.managedModels as string[] } : {}),
     url: (typeof config.url === "string" && config.url ? config.url : envUrl || "https://openrouter.ai/api/v1")
       .replace(/\/+$/, ""),
@@ -78,7 +96,6 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
     model: typeof config.model === "string" && config.model
       ? config.model
       : ownKey ? undefined : process.env.OPENAI_COMPAT_MODEL || undefined,
-    // An explicit empty override disables inherited routing; absent still inherits the global pin.
     provider: typeof config.provider === "string"
       ? config.provider || undefined
       : ownKey ? undefined : process.env.OPENAI_COMPAT_PROVIDER || undefined,
@@ -103,7 +120,6 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
 
   async create(input) {
     const { config } = input;
-    // An instance naming its own key variable reads only that one: the workspace key must not reach its host.
     const ownKeyVariable = config.apiKeyEnv !== DEFAULT_KEY_ENV;
     const apiKey =
       config.key ??
@@ -136,10 +152,9 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           signal: AbortSignal.timeout(8_000),
         });
         if (!response.ok) return;
-        type Row = { id?: unknown; name?: unknown; created?: unknown };
+        type Row = Record<string, unknown>;
         const json = await response.json() as { data?: Row[] } | Row[];
         let rows = Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
-        // OpenAI lists its catalog unordered and mixed with non-chat models.
         if (config.catalog === "openai") {
           rows = rows
             .filter((row) => typeof row.id === "string" && isOpenAIChatModel(row.id))
@@ -151,18 +166,39 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
           const id = typeof row.id === "string" ? row.id : "";
           if (!id || seen.has(id)) continue;
           seen.add(id);
+          const contextWindow = advertisedContextWindow(row);
           options.push({
             id,
             label: typeof row.name === "string" && row.name.trim() ? row.name : id,
+            ...(contextWindow ? { contextWindow } : {}),
             ...(config.catalog === "openai" ? {} : { custom: true }),
           });
         }
         if (!options.length) return;
+        // llama.cpp's training window can exceed its configured slot size.
+        // Query the active model without autoloading another model.
+        for (const selected of rows.filter(row => row.owned_by === "llamacpp" && typeof row.id === "string")) {
+          try {
+            const url = new URL(config.url);
+            url.pathname = url.pathname.replace(/\/v1\/?$/, "").replace(/\/$/, "") + "/props";
+            url.searchParams.set("model", String(selected.id));
+            url.searchParams.set("autoload", "false");
+            const props = await fetch(url, { redirect: "error", headers: { authorization: `Bearer ${apiKey}` }, signal: AbortSignal.timeout(3_000) });
+            if (props.ok) {
+              const json = await props.json() as { default_generation_settings?: { n_ctx?: unknown } };
+              const window = positiveTokens(json.default_generation_settings?.n_ctx);
+              const option = options.find(option => option.id === selected.id);
+              if (window && option) option.contextWindow = window;
+            }
+          } catch { /* optional runtime metadata; retain the catalog */ }
+        }
         if (config.model && !options.some((model) => model.id === config.model)) {
           options.unshift({ id: config.model, label: config.model, custom: true });
         }
         catalog = { default: config.model ?? options[0].id, options };
-      } catch {}
+      } catch {
+        // Catalog refresh is opportunistic; keep the seeded options.
+      }
     };
     if (apiKey) void fetchModels();
 
@@ -173,7 +209,15 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       apiUrl: config.url,
       tools: config.tools,
       computerUse: true,
-      models: () => catalog,
+      models: () => {
+        const windows = config.contextWindows;
+        if (!windows || !Object.keys(windows).length) return catalog;
+        const options = catalog.options.map(option => windows[option.id] ? { ...option, contextWindow: windows[option.id] } : option);
+        if (!config.managedModels) for (const [id, contextWindow] of Object.entries(windows)) {
+          if (!options.some(option => option.id === id)) options.push({ id, label: id, custom: true, contextWindow });
+        }
+        return { ...catalog, options };
+      },
       refreshModels: fetchModels,
       requestBody: (model, messages, stream) => ({
         model,

@@ -152,6 +152,10 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         patch.tts = { ...patch.tts, voice: "" };
       }
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      if (patch.openaiCompat?.contextWindows !== undefined && body.expectedContextWindows !== undefined &&
+          JSON.stringify(body.expectedContextWindows) !== JSON.stringify(cfg.openaiCompat?.contextWindows ?? {})) {
+        return json(res, 409, { error: "Context limits changed in another window. Refresh settings and try again." });
+      }
       if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {
         const current = (cfg.browserProfiles ?? []).map(({ id, name, browser }) => ({ id, name, ...(browser ? { browser } : {}) }));
         if (JSON.stringify(body.expectedBrowserProfiles) !== JSON.stringify(current)) {

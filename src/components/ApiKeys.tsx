@@ -1,5 +1,4 @@
-// Security: secrets are write-only; GET /api/config returns configured flags, never values.
-import { useEffect, useId, useRef, useState } from "react";
+   import { useEffect, useId, useRef, useState } from "react";
 import { Check, CircleHelp, ExternalLink, Loader2, TriangleAlert } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -10,7 +9,7 @@ import { SECTION_PROVIDER, type KeyResult, type KeyVia } from "@/lib/analytics-a
 import { keyRemoved, keySaved, keySaveFailure, keyTestResult, savedKeyResult } from "@/lib/product-events";
 
 export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta";
-export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta";
+ export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -46,8 +45,7 @@ const SECTIONS: Record<
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
 };
 
-// Provider keys have no desktop-shell slot yet; they go to the server's own 0600 config.
-const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey">> = {
+  const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey">> = {
   composio: "composioApiKey",
   box: "boxToken",
   opencodeGo: "opencodeGoApiKey",
@@ -246,7 +244,7 @@ function CredentialHelp({ section }: { section: ConfigSection }) {
   );
 }
 
-export function looksLikeKey(value: string): boolean {
+ export function looksLikeKey(value: string): boolean {
   return value.length > 0 && !/\s/.test(value);
 }
 
@@ -414,8 +412,7 @@ export function ApiKeyRow({
   );
 }
 
-/** Security: write-only; the server returns names, never keys, and hands the keys to OpenCode alone. */
-export function OpenCodeProviderKeys() {
+ export function OpenCodeProviderKeys() {
   const { state, dispatch } = useStore();
   const names = state.config?.opencodeGo?.providerKeys ?? [];
   const [name, setName] = useState("");
@@ -514,7 +511,7 @@ export function OpenCodeProviderKeys() {
   );
 }
 
-export function AnthropicEveryClaudeBot() {
+ export function AnthropicEveryClaudeBot() {
   const { state, dispatch } = useStore();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -630,7 +627,7 @@ export function VpsConnection() {
   );
 }
 
-export function OpenAiCompatUrl() {
+ export function OpenAiCompatUrl() {
   const { state, dispatch } = useStore();
   const saved = state.config?.openaiCompat?.url ?? "";
   const [value, setValue] = useState(saved);
@@ -674,4 +671,70 @@ export function OpenAiCompatUrl() {
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
     </div>
   );
+}
+
+export function OpenAiCompatContextWindow() {
+  const { state, dispatch, refreshModels, refreshInstances } = useStore();
+  const instance = state.instances.find(item => item.instanceId === "openaiCompat");
+  const endpoint = (state.config?.openaiCompat?.resolvedUrl || state.config?.openaiCompat?.url || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
+  const overrides = state.config?.openaiCompat?.contextWindows ?? {};
+  useEffect(() => { void refreshInstances(); }, [endpoint, refreshInstances]);
+  const [model, setModel] = useState(instance?.models.default ?? "");
+  const saved = overrides[endpoint]?.[model];
+  const [value, setValue] = useState(saved === undefined ? "" : String(saved));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const savingRef = useRef(false);
+  useEffect(() => { setValue(saved === undefined ? "" : String(saved)); }, [saved, model, endpoint]);
+  useEffect(() => { setDone(false); setError(null); }, [model, endpoint]);
+  useEffect(() => { if (!model && instance?.models.default) setModel(instance.models.default); }, [model, instance?.models.default]);
+  const trimmed = value.trim();
+  const valid = !trimmed || (/^\d+$/.test(trimmed) && Number.isSafeInteger(Number(trimmed)) && Number(trimmed) > 0);
+  const dirty = trimmed !== (saved === undefined ? "" : String(saved));
+  const window = instance?.models.options.find(option => option.id === model)?.contextWindow;
+
+  const save = async () => {
+    if (savingRef.current || !valid || !dirty || !model.trim()) return;
+    savingRef.current = true; setSaving(true); setError(null); setDone(false);
+    const windows = { ...overrides[endpoint] };
+    if (trimmed) windows[model] = Number(trimmed); else delete windows[model];
+    try {
+      const config = await api("/api/config", { method: "PUT", body: JSON.stringify({ expectedContextWindows: overrides, openaiCompat: { contextWindows: { ...overrides, [endpoint]: windows } } }) }) as ConfigStatus;
+      dispatch({ type: "configStatus", config });
+      setDone(true);
+      await Promise.allSettled([refreshModels("openaiCompat"), refreshInstances()]);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { savingRef.current = false; setSaving(false); }
+  };
+
+  return <div className="space-y-2">
+    <label className="block text-[13px] text-ink-secondary">
+      {t("keys.openaiCompat.contextModel")}
+      <input value={model} onChange={event => setModel(event.target.value.trim())} disabled={saving} list="compat-context-models"
+        aria-label={t("keys.openaiCompat.contextModel")} spellCheck={false}
+        className="mt-1.5 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink" />
+    </label>
+    <datalist id="compat-context-models">{instance?.models.options.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</datalist>
+    <label className="block text-[13px] text-ink-secondary">
+      {t("keys.openaiCompat.contextWindow")}
+      <input type="text" inputMode="numeric" value={value} onChange={event => { setValue(event.target.value); setDone(false); }} disabled={saving}
+        aria-label={t("keys.openaiCompat.contextWindow")} aria-invalid={!valid} placeholder={t("keys.openaiCompat.contextAuto")}
+        onKeyDown={event => { if (event.key === "Enter") void save(); }}
+        className="mt-1.5 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink" />
+    </label>
+    <p className="text-[11.5px] leading-relaxed text-ink-secondary">{t("keys.openaiCompat.contextHint")}</p>
+    {window !== undefined ? <p className="text-[11.5px] text-ink-secondary">{t("keys.openaiCompat.contextCurrent", { tokens: window.toLocaleString() })}</p> : null}
+    {!valid ? <p role="alert" className="text-[12px] text-danger">{t("keys.openaiCompat.contextInvalid")}</p> : null}
+    {error ? <p role="alert" className="text-[12px] text-danger">{error}</p> : null}
+    {done ? <p role="status" className="text-[12px] text-success">{t("keys.openaiCompat.contextSaved")}</p> : null}
+    <button onClick={() => void save()} disabled={saving || !valid || !dirty || !model.trim()}
+      className="rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink disabled:opacity-50">
+      {t("keys.openaiCompat.contextSave")}
+    </button>
+  </div>;
+}
+
+export function OpenAiCompatSettings() {
+  return <><OpenAiCompatUrl /><OpenAiCompatContextWindow /></>;
 }

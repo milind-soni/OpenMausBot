@@ -4,7 +4,7 @@ import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { keySaved } from "@/lib/product-events";
 import { addedServers } from "@/lib/openai-compat-endpoints";
-import { ApiKeyRow, OpenAiCompatUrl } from "./ApiKeys";
+import { ApiKeyRow, OpenAiCompatSettings } from "./ApiKeys";
 
 export function modelIds(text: string): string[] {
   return [...new Set(text.split(/[,，、\s]+/).map((id) => id.trim()).filter(Boolean))];
@@ -21,7 +21,7 @@ export function OtherOpenAiCompatServers() {
       <summary className="cursor-pointer text-[13px] text-ink-secondary">{t("keys.other.title")}</summary>
       <div className="mt-3 flex flex-col gap-4">
         <ApiKeyRow section="openaiCompat" testProvider="openaiCompat" />
-        <OpenAiCompatUrl />
+        <OpenAiCompatSettings />
         <AddedServers servers={added} />
       </div>
     </details>
