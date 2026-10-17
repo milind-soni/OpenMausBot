@@ -35,6 +35,7 @@ const CONTEXT_NOTE = "Context from OpenMausBot updated since this conversation s
 const MEMORY = "Your memory (MEMORY.md):\n# Memory\n- Fixture prefers concise replies.";
 // Team availability changes whenever a teammate starts or finishes, so it must never reach the cached system message.
 const AVAILABILITY = "Team availability";
+const ANNOUNCEMENT = "I'm working in the Cua Local VM and will launch XFCE Terminal first.";
 function delivered(request: ChatRequest) {
   const system = request.messages.find((message) => message.role === "system")?.content ?? "";
   const turn = request.messages.findLast((message) => message.role === "user")?.content ?? "";
@@ -78,7 +79,9 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
     const frame = (delta: unknown, finish_reason: string | null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
     res.writeHead(200, { "content-type": "text/event-stream" });
     if (toolResult) {
-      res.end(frame({ content: ["allow", "selected"].includes(scenario) ? "The artifact was created." : "The operation was denied." }, "stop") + "data: [DONE]\n\n");
+      res.end(frame({ content: ["allow", "selected", "announced"].includes(scenario) ? "The artifact was created." : "The operation was denied." }, "stop") + "data: [DONE]\n\n");
+    } else if (scenario === "announced" && !request.messages.some(message => message.role === "assistant" && message.content === ANNOUNCEMENT)) {
+      res.end(frame({ content: ANNOUNCEMENT }, "stop") + "data: [DONE]\n\n");
     } else if (["text", "ordinary", "scope-empty", "tools-off"].includes(scenario)) {
       res.end(frame({ content: scenario === "text" ? JSON.stringify(call) : "Hello from the fixture." }, "stop") + "data: [DONE]\n\n");
     } else {
@@ -122,7 +125,7 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
     await api("POST", `/api/instances/${instanceId}/refresh-models`, {});
     const mcpScript = join(fixture.info.dataDir, "fixture-mcp.mjs");
     writeFileSync(mcpScript, MCP_FIXTURE);
-    for (const mode of ["allow", "deny", "cancel", "text", "ordinary", "selected", "scope-empty", "tools-off"]) {
+    for (const mode of ["allow", "deny", "cancel", "text", "ordinary", "selected", "scope-empty", ...(instanceId === "openaiCompat" ? ["announced"] : []), "tools-off"]) {
       scenario = mode;
       const artifact = join(fixture.info.dataDir, `${mode}-artifact.txt`);
       const startupMarker = join(fixture.info.dataDir, `${mode}-mcp-started.txt`);
@@ -149,16 +152,20 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
       expect((await control(["send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Write the verification artifact if a structured tool is requested."])).success).toBe(true);
       const wait = () => control(["wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "20"]);
       let settled = await wait();
-      if (["allow", "deny", "cancel", "selected"].includes(mode)) {
+      if (["allow", "deny", "cancel", "selected", "announced"].includes(mode)) {
         expect(settled.status, JSON.stringify({ tools: requests[before]?.tools?.map((tool) => tool.function.name), messages: settled.messages })).toBe("needs-user");
         expect(existsSync(artifact)).toBe(false);
-        expect(requests).toHaveLength(before + 1);
+        expect(requests).toHaveLength(before + (mode === "announced" ? 2 : 1));
+        if (mode === "announced") {
+          expect(requests[before + 1]!.messages.at(-2)).toEqual({ role: "assistant", content: ANNOUNCEMENT });
+          expect(requests[before + 1]!.messages.at(-1)).toMatchObject({ role: "user", content: expect.stringContaining("called no tool") });
+        }
         const state = await api("GET", "/api/bots");
         const current = state.bots.find((item: any) => item.id === bot.id);
         const card = current.messages.find((message: any) => message.card?.requestId && !message.card.answered)?.card;
         expect(card?.requestId).toBeTruthy();
         if (mode === "cancel") await control(["interrupt", "--bot", bot.id, "--task", bot.activeTaskId]);
-        else await api("POST", `/api/bots/${bot.id}/respond`, { threadId: bot.activeTaskId, requestId: card.requestId, behavior: mode === "selected" ? "allow" : mode });
+        else await api("POST", `/api/bots/${bot.id}/respond`, { threadId: bot.activeTaskId, requestId: card.requestId, behavior: ["selected", "announced"].includes(mode) ? "allow" : mode });
         settled = await wait();
       }
       const messages = await control(["messages", "--bot", bot.id, "--task", bot.activeTaskId, "--limit", "20"]);
@@ -172,14 +179,14 @@ it.each(["openaiCompat", "groq", "meta"] as const)("%s runs structured MCP calls
       expect(first.all).not.toContain("update it with your file tools");
       expect(first.all).not.toContain("File locations for this bot");
       expect(first.all).not.toContain("read its exact SKILL.md path above with your file tools");
-      if (mode === "allow" || mode === "deny" || mode === "selected") {
-        expect(requests).toHaveLength(before + 2);
-        const continued = requests[before + 1]!;
-        expect(delivered(continued)).toEqual(first);
+      if (["allow", "deny", "selected", "announced"].includes(mode)) {
+        expect(requests).toHaveLength(before + (mode === "announced" ? 3 : 2));
+        const continued = requests.at(-1)!;
+        if (mode !== "announced") expect(delivered(continued)).toEqual(first);
         const result = continued.messages.find((message) => message.role === "tool");
         expect(result?.tool_call_id).toBe("fixture-call");
         expect(continued.messages.some((message) => message.role === "assistant" && message.tool_calls?.some((call) => call.id === result?.tool_call_id))).toBe(true);
-        if (mode === "allow" || mode === "selected") {
+        if (["allow", "selected", "announced"].includes(mode)) {
           expect(settled.status).toBe("settled");
           expect(readFileSync(artifact, "utf8")).toBe("verified");
           expect(result?.content).toContain("created verification artifact");

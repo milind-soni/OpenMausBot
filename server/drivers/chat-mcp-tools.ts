@@ -21,7 +21,7 @@ export interface ChatToolDefinition {
 export interface ChatToolResult { text: string; ok: boolean; images?: ChatImagePart[] }
 /** How a call is shown and granted. A grant names the exact tool on the server as launched; the
  * person's own computer never gets a session-wide one. */
-export interface ChatToolCallView { title: string; input: Record<string, unknown>; ask: boolean; grant?: string }
+export interface ChatToolCallView { title: string; input: Record<string, unknown>; ask: boolean; grant?: string; readOnly?: boolean }
 /** A dispatched operation may already have taken effect: never retry it through a new round. */
 export class ChatToolSessionError extends Error {}
 export interface SkippedChatMcpServer { server: string; reason: string }
@@ -36,7 +36,7 @@ export interface ChatToolSession {
 }
 
 type Server = { command: string; args: string[]; env: Record<string, string> };
-type RegisteredTool = { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; name: string; schema: ValidateFunction; searched: boolean };
+type RegisteredTool = { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; name: string; schema: ValidateFunction; searched: boolean; readOnly: boolean };
 function chatToolName(server: string, tool: string): string {
   return `${server}_${tool}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "mcp_tool";
 }
@@ -321,13 +321,19 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
               if (key in parameters) { constraints[key] = parameters[key]; delete parameters[key]; }
             }
           }
-          const description = (typeof tool.description === "string" ? tool.description : "Configured MCP tool") +
+          const originalDescription = typeof tool.description === "string" ? tool.description : "Configured MCP tool";
+          // XFCE Terminal 1.0.4: https://docs.xfce.org/apps/xfce4-terminal/command-line
+          const launchGuidance = tool.name === "launch_app" && /\bLinux\b/.test(originalDescription)
+            ? " For xfce4-terminal, pass shell commands as additional_arguments: [\"--hold\", \"--execute\", \"/bin/sh\", \"-c\", \"COMMAND\"]. Do not put a standalone -- before the terminal options; -e takes one command string, whereas --execute takes the remaining arguments. A successful launch confirms only the process, not command execution. Verify output or resulting state before reporting completion; do not repeat a command that may already have run."
+            : "";
+          const description = originalDescription + launchGuidance +
             (Object.keys(constraints).length ? " Additional argument constraints (validated before execution): " + JSON.stringify(constraints) : "");
           const base = chatToolName(server, tool.name);
           let name = base;
           const taken = (candidate: string) => registered.has(candidate) || staged.some((entry) => entry.definition.function.name === candidate);
           for (let index = 2; taken(name); index += 1) { const suffix = `_${index}`; name = base.slice(0, 64 - suffix.length) + suffix; }
-          staged.push({ tool: { client, server, launch, builtInBrowser, agents, hostComputer, name: tool.name, schema, searched: searchable.has(server) },
+          const readOnly = object(tool.annotations) && tool.annotations.readOnlyHint === true && tool.annotations.destructiveHint !== true;
+          staged.push({ tool: { client, server, launch, builtInBrowser, agents, hostComputer, name: tool.name, schema, searched: searchable.has(server), readOnly },
             definition: { type: "function", function: { name, description, parameters } } });
         }
         if (Buffer.byteLength(JSON.stringify([...definitions, ...staged.map((entry) => entry.definition)])) > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
@@ -363,7 +369,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     const runs = tool ? target(tool, args) : name;
     if (runs === undefined || tool?.agents) return { title: name, input: args, ask: false };
     const grant = tool && !tool.hostComputer ? JSON.stringify([tool.server, tool.launch, runs]) : undefined;
-    if (!tool?.searched || tool.name !== CALL_TOOL) return { title: name, input: args, ask: true, ...(grant ? { grant } : {}) };
+    if (!tool?.searched || tool.name !== CALL_TOOL) return { title: name, input: args, ask: true, ...(grant ? { grant } : {}), ...(tool?.readOnly ? { readOnly: true } : {}) };
     return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
   };
   return {
