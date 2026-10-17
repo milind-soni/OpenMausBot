@@ -567,6 +567,30 @@ describe("live browser control affordance", () => {
     expect(html).toContain("Restart browser…");
   });
 
+  const tab = (tabId: string) => ({ tabId, active: tabId === "t1", title: tabId, url: `https://${tabId}.example.test/` });
+
+  it("does not offer Close on the only tab, which the engine refuses to close", () => {
+    fixture.states = { 2: [tab("t1")], 4: true };
+    const html = render();
+    expect(html).toContain(">t1</button>");
+    expect(html).not.toContain('aria-label="Close t1"');
+  });
+
+  it("still closes one of two tabs", async () => {
+    fixture.states = { 2: [tab("t1"), tab("t2")], 4: true };
+    const nodes = renderElements();
+    expect(nodes.filter((node) => ["Close t1", "Close t2"].includes(node.props["aria-label"] ?? ""))).toHaveLength(2);
+    const cleanup = fixture.effects[2]!();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "current-viewer" });
+    click(nodes, "Close t2"); await settleAll();
+    expect(sentTypes()).toEqual(["take", "tab-close"]);
+    expect(api).toHaveBeenLastCalledWith("/api/bots/pepper/browser/action", {
+      method: "POST", body: JSON.stringify({ type: "tab-close", tabId: "t2", viewerId: "current-viewer" }),
+      timeoutMs: 120_000,
+    });
+    cleanup?.();
+  });
+
   const status = (html: string) => /<div role="status"([^>]*)>(.*?)<\/div><\/div><dialog/.exec(html)!;
 
   it("shows a status pill, not a control, over the page only while this viewer holds the browser", () => {
@@ -981,6 +1005,67 @@ describe("explicit browser control and signing in", () => {
     expect(value.value).toBe("");
     for (const setter of fixture.setters) expect(JSON.stringify(setter.mock.calls)).not.toContain(secret);
     for (const log of logs) expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
+    cleanup?.();
+  });
+});
+
+describe("a tab-close reply that arrives before the tabs event", () => {
+  const tab = (tabId: string) => ({ tabId, active: tabId === "t1", title: tabId, url: `https://${tabId}.example.test/` });
+  const setTabs = () => fixture.setters[2]!;
+  const closeT2 = async () => {
+    fixture.states = { 2: [tab("t1"), tab("t2")], 4: true };
+    const nodes = renderElements();
+    const connect = fixture.effects[2]!;
+    const cleanup = connect();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "current-viewer" });
+    return { nodes, connect, cleanup };
+  };
+
+  it("removes the closed tab once the action succeeds for the same generation and viewer", async () => {
+    const { nodes, cleanup } = await closeT2();
+    fixture.setters.forEach((setter) => setter.mockClear());
+    click(nodes, "Close t2"); await settleAll();
+    expect(setTabs()).toHaveBeenCalledOnce();
+    const update = setTabs().mock.calls[0]![0] as (tabs: ReturnType<typeof tab>[]) => ReturnType<typeof tab>[];
+    expect(update([tab("t1"), tab("t2")])).toEqual([tab("t1")]);
+    // A tabs event that already arrived first makes the update a no-op.
+    expect(update([tab("t1")])).toEqual([tab("t1")]);
+    cleanup?.();
+  });
+
+  it("an old close finishing after reconnect does not touch the new session's tabs", async () => {
+    const { nodes, connect, cleanup } = await closeT2();
+    const oldClose = deferred();
+    vi.mocked(api).mockResolvedValueOnce({}).mockReturnValueOnce(oldClose.promise);
+    click(nodes, "Close t2"); await settleAll();
+    cleanup?.();
+    const secondCleanup = connect();
+    FixtureEventSource.instances[1]!.emit("ready", { viewerId: "new-viewer" });
+    FixtureEventSource.instances[1]!.emit("tabs", { tabs: [tab("t1"), tab("t2")] });
+    fixture.setters.forEach((setter) => setter.mockClear());
+    oldClose.resolve(); await settleAll();
+    expect(setTabs()).not.toHaveBeenCalled();
+    secondCleanup?.();
+  });
+
+  it("an old viewer's close in the same generation does not touch tabs after a new ready", async () => {
+    const { nodes, cleanup } = await closeT2();
+    const oldClose = deferred();
+    vi.mocked(api).mockResolvedValueOnce({}).mockReturnValueOnce(oldClose.promise);
+    click(nodes, "Close t2"); await settleAll();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "replacement-viewer" });
+    fixture.setters.forEach((setter) => setter.mockClear());
+    oldClose.resolve(); await settleAll();
+    expect(setTabs()).not.toHaveBeenCalled();
+    cleanup?.();
+  });
+
+  it("a refused close keeps the list for the engine's tabs event to correct", async () => {
+    const { nodes, cleanup } = await closeT2();
+    vi.mocked(api).mockResolvedValueOnce({}).mockRejectedValueOnce(new Error("Cannot close the last tab"));
+    fixture.setters.forEach((setter) => setter.mockClear());
+    click(nodes, "Close t2"); await settleAll();
+    expect(setTabs()).not.toHaveBeenCalled();
     cleanup?.();
   });
 });
