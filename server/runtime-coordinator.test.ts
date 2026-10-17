@@ -115,7 +115,7 @@ describe("view: an Assignment as the legacy node", () => {
       id: "as_1", rootId: "gen-1", parentId: "gen-1", threadId: "builder-work", botId: "builder", key: "builder", text: "Build it",
       createdAt: 1_000, status: "queued", result: "half done", reported: true, executions: 2, startedAt: 1_500, lastProgressAt: 2_000,
       approvalGranted: true, kind: "work", origin: { kind: "user", request: "Ship the CSV export" }, restarts: 1, restart: "rerun", requestBatchKey: "b1",
-      mode: "work", reply: "resume",
+      mode: "work", level: "ask", reply: "resume", originKind: "person",
     });
     const plain = view(base);
     expect(plain).toMatchObject({ reported: false, approvalGranted: false, restarts: 0, lastProgressAt: 2_000 });
@@ -167,6 +167,7 @@ describe("view: an Assignment as the legacy node", () => {
   ])("origin: %s", (_name, origin, expected) => {
     const projected = view(row({ origin }));
     expect(projected.origin).toEqual(expected);
+    expect(projected.originKind).toBe(origin.kind);
     if (expected === undefined) expect("origin" in projected).toBe(false);
   });
 });

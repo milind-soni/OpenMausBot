@@ -1,9 +1,12 @@
 # Full Access workflows
 
+Upstream already lets ordinary Full-access connected-app actions run without a second outbound approval. The remaining change verifies the active delegated turn and its lineage at dispatch, preserves recipient Custom and outside-origin boundaries, and refuses a grant revoked before execution. Connector scopes and tool grants remain in force.
+
 Run the isolated integration recipe:
 
 ```sh
 pnpm exec vitest run server/full-access-workflows.e2e.test.ts
+pnpm exec vitest run server/trust-controls.e2e.test.ts
 pnpm exec vitest run server/team-setup-requests.test.ts server/profile-requests.test.ts server/routine-requests.test.ts
 pnpm exec electron scripts/smoke-approval-modes.cjs --all-threads-only
 pnpm typecheck
@@ -40,6 +43,12 @@ of a real provider's planning quality or authentication.
   change while the bot default remains Ask.
 - An expired turn token is refused, and Full does not authorize changes to
   an existing bot outside the Chief's team scope.
+- The connector fixture runs direct sends, multi-execute batches, workbench
+  code and remote bash through a local synthetic Composio broker. Full runs
+  without outbound cards or daily caps and leaves a Full approval decision.
+  An Ask sibling still waits; a Full thread works when its bot defaults to Ask.
+  Revoking Full or connector write scope during session setup stops dispatch.
+  Ask approvals, denial and concurrent daily-allowance limits remain enforced.
 
 ## Evidence and limits
 
@@ -63,3 +72,10 @@ The first recipe verifies server and MCP behavior, not the rendered review UI,
 desktop permission-grant gesture, or real-model instruction following. The
 test starts from fixture-only saved grants; it does not test granting Full
 Access through the desktop.
+
+On 2026-10-09, the connector Full regression failed against the previous
+always-ask gate, then passed after the policy change. The six affected test
+files passed 56 tests, including all 16 connector trust tests. Server and
+renderer typechecking, changed-file lint and locale validation passed. All
+connector requests went to the fixture broker; no live app, account or mail
+was changed.
