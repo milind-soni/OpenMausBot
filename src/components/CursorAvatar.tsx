@@ -2,6 +2,7 @@
 import React, { useEffect, useId, useMemo, useRef } from 'react'
 
 import { MASCOT_BODIES } from "../../shared/mascot-bodies"
+import { GLYPH_BANG, GLYPH_MESSAGE, GLYPH_QUERY } from "./mascot-glyphs"
 import {
   EXPRESSIONS,
   EXPRESSION_COUNT,
@@ -146,15 +147,6 @@ export interface StateEffects {
 
 interface EffectsByState extends Partial<Record<CursorState, StateEffects>> {}
 
-const GLYPH_BANG =
-  '<path fill="{{GRADIENT}}" d="M99 58 Q99 43 114.3 43 Q129.6 43 129.6 58 L123 150 Q122 161 114.3 161 Q106.6 161 105.6 150 Z"/>' +
-  '<circle fill="{{GRADIENT}}" cx="114.3" cy="188" r="15"/>'
-
-const GLYPH_QUERY =
-  '<path fill="none" stroke="{{GRADIENT}}" stroke-width="19" stroke-linecap="round" ' +
-  'd="M88 76 A27 27 0 1 1 114.3 112 L114.3 132"/>' +
-  '<circle fill="{{GRADIENT}}" cx="114.3" cy="170" r="13"/>'
-
 export const EFFECTS: EffectsByState = {
   // Bounded by the viewBox's 15-unit margin: a piece thrown much past ~130 from centre is clipped mid-flight.
   celebrate: { confetti: { count: 16, period: 1500, life: 1300, origin: 74, spread: 54 } },
@@ -170,7 +162,7 @@ export const EFFECTS: EffectsByState = {
   receiving: { trails: { count: 2, period: 1500, radius: 120 } },
 
   alerting: { glyph: { markup: GLYPH_BANG, period: 2600, hold: 1100 } },
-  notifying: { glyph: { markup: GLYPH_BANG, period: 4200, hold: 900 } },
+  notifying: { glyph: { markup: GLYPH_MESSAGE, period: 4200, hold: 900 } },
   confused: { glyph: { markup: GLYPH_QUERY, period: 5200, hold: 1200 } },
 }
 

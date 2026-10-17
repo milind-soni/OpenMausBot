@@ -46,6 +46,7 @@ const MOTION_SCENARIOS = {
   success: "Step completed",
   celebrate: "Turn finished",
   blink: "New reply",
+  // unread shows a speech bubble, never the "!" of a real alert
   surprise: "Unread update",
   failure: "Action failed",
 } satisfies Record<Exclude<MausMotion, "none">, string>;
