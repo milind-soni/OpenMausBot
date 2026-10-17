@@ -54,7 +54,7 @@ export function ThreadCleanupSettings() {
     if (capDraft !== null && confirmedCapBytes !== null && mibText(confirmedCapBytes) === capDraft) setCapDraft(null);
   }, [confirmedCapBytes, capDraft]);
 
-  const save = async (patch: { eventLogRetentionDays?: number | null; eventLogMaxBytes?: number | null }, knob: Knob) => {
+  const save = async (patch: { eventLogRetentionDays?: number | false; eventLogMaxBytes?: number | false }, knob: Knob) => {
     if (saving.current) return;
     saving.current = true;
     setPending(knob);
@@ -79,7 +79,7 @@ export function ThreadCleanupSettings() {
       setRetentionDraft(null);
       setError("");
       setErrorKnob(null);
-      void save({ eventLogRetentionDays: null }, "retention");
+      void save({ eventLogRetentionDays: false }, "retention");
       return;
     }
     const days = parseDays(retentionValue);
@@ -96,7 +96,7 @@ export function ThreadCleanupSettings() {
       setCapDraft(null);
       setError("");
       setErrorKnob(null);
-      void save({ eventLogMaxBytes: null }, "cap");
+      void save({ eventLogMaxBytes: false }, "cap");
       return;
     }
     const bytes = parseCapMib(capValue);

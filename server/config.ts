@@ -302,10 +302,10 @@ const cacheKeepWarmSchema = z.object({
 }).strict();
 const threadsConfigSchema = z.object({
   maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS),
-  /** Byte cap for each thread's events/ and native/ log; absent means unbounded. */
-  eventLogMaxBytes: z.number().int().min(MIN_THREAD_EVENT_LOG_BYTES).max(MAX_THREAD_EVENT_LOG_BYTES).optional(),
-  /** Days a closed or archived thread's event logs survive; absent keeps them forever. */
-  eventLogRetentionDays: z.number().int().min(1).max(3650).optional(),
+  /** Byte cap for each thread's events/ and native/ log; absent means 50 MiB, false means unbounded. */
+  eventLogMaxBytes: z.number().int().min(MIN_THREAD_EVENT_LOG_BYTES).max(MAX_THREAD_EVENT_LOG_BYTES).or(z.literal(false)).optional(),
+  /** Days a closed or archived thread's event logs survive; absent means 30, false keeps them forever. */
+  eventLogRetentionDays: z.number().int().min(1).max(3650).or(z.literal(false)).optional(),
 }).strict();
 const newBotsConfigSchema = z.object({
   /** Effort for a new bot whose model selection names none. */
@@ -510,7 +510,7 @@ export interface AppConfig extends HelperConfig {
   profile?: { name?: string; email?: string; aboutMe?: string };
   rooms?: { turnTimeoutMinutes: number };
   mcp?: { callTimeoutMinutes?: number };
-  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
+  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number | false; eventLogRetentionDays?: number | false };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
   localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number };
@@ -651,12 +651,12 @@ export function maxConcurrentBotThreads(cfg: { threads?: { maxConcurrentPerBot?:
 }
 
 export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
-  const cap = cfg.threads?.eventLogMaxBytes;
+  const cap = cfg.threads?.eventLogMaxBytes ?? 50 * 1024 * 1024;
   return typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? cap : null;
 }
 
 export function threadEventLogRetentionDays(cfg: AppConfig): number | null {
-  return cfg.threads?.eventLogRetentionDays ?? null;
+  return (cfg.threads?.eventLogRetentionDays ?? 30) || null;
 }
 
 export function localVmMode(cfg: AppConfig): "shared" | "per-bot" | "pool" {

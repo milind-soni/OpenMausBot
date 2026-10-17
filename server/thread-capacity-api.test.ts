@@ -48,10 +48,11 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
   const finish = (threadId: string) => writeFileSync(threadFile(threadId, "gate"), "finish this isolated turn");
   const busyThreads = async (botId: string) => (await botState(botId)).tasks.filter((task: any) => task.busy).map((task: any) => task.threadId) as string[];
   const send = (botId: string, threadId: string, text: string, sendId?: string) => api("POST", `/api/bots/${botId}/messages`, { threadId, text, sendId });
+  const defaultEventLogLimits = { eventLogMaxBytes: 50 * 1024 * 1024, eventLogRetentionDays: 30 };
   const limit = async (maxConcurrentPerBot: number) => {
     const result = await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot } });
     expect(result.status).toBe(200);
-    expect(result.body.threads).toEqual({ maxConcurrentPerBot });
+    expect(result.body.threads).toEqual({ maxConcurrentPerBot, ...defaultEventLogLimits });
     return result;
   };
   const botWithThreads = async (count: number) => {
@@ -119,7 +120,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
   });
 
   it("defaults to three, runs ten real turns after raising the limit, and safely queues and cancels overflow", async () => {
-    expect((await api("GET", "/api/config")).body.threads).toEqual({ maxConcurrentPerBot: 3 });
+    expect((await api("GET", "/api/config")).body.threads).toEqual({ maxConcurrentPerBot: 3, ...defaultEventLogLimits });
     for (const maxConcurrentPerBot of [0, 11, 1.5, "2", null]) {
       expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot } })).status).toBe(400);
     }

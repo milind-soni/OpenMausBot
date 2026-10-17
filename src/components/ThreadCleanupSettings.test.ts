@@ -20,7 +20,7 @@ describe("ThreadCleanupSettings", () => {
     expect(parseCapMib("0.3")).toBeNull();
   });
 
-  it("keeps both knobs off by default and disables their number entry", () => {
+  it("shows both knobs unchecked when turned off and disables their number entry", () => {
     fixture.threads = undefined;
     const markup = renderToStaticMarkup(createElement(ThreadCleanupSettings));
     expect(markup).not.toContain('thread-log-retention-enabled" type="checkbox" class="size-4 accent-accent" checked');
@@ -29,7 +29,8 @@ describe("ThreadCleanupSettings", () => {
     expect(markup).toContain('value="30"');
     expect(markup).toContain('value="50"');
     expect(markup).toContain('disabled=""');
-    expect(markup).toContain("Off by default.");
+    expect(markup).toContain("On by default, at 30 days.");
+    expect(markup).toContain("On by default, at 50 MiB.");
     expect(markup.match(/never threads or transcripts\./g)).toHaveLength(2);
   });
 

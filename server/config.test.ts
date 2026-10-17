@@ -129,26 +129,30 @@ describe("configuration boundaries", () => {
     }
   });
 
-  it("caps per-thread event logs only when a size is configured", () => {
-    expect(threadEventLogMaxBytes({})).toBeNull();
-    expect(threadEventLogMaxBytes({ threads: { maxConcurrentPerBot: 3 } })).toBeNull();
-    const parsed = parseStoredConfig({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: 50 * 1024 * 1024 } });
-    expect(threadEventLogMaxBytes(parsed)).toBe(50 * 1024 * 1024);
+  it("caps per-thread event logs at 50 MiB unless a size is configured or the cap is turned off", () => {
+    expect(threadEventLogMaxBytes({})).toBe(50 * 1024 * 1024);
+    expect(threadEventLogMaxBytes({ threads: { maxConcurrentPerBot: 3 } })).toBe(50 * 1024 * 1024);
+    const parsed = parseStoredConfig({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: 8 * 1024 * 1024 } });
+    expect(threadEventLogMaxBytes(parsed)).toBe(8 * 1024 * 1024);
+    expect(threadEventLogMaxBytes(parseStoredConfig({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: false } }))).toBeNull();
     expect(parseConfigPatch({ threads: { eventLogMaxBytes: 50 * 1024 * 1024 } })).toEqual({ threads: { eventLogMaxBytes: 50 * 1024 * 1024 } });
+    expect(parseConfigPatch({ threads: { eventLogMaxBytes: false } })).toEqual({ threads: { eventLogMaxBytes: false } });
     expect(parseConfigPatch({ threads: { eventLogMaxBytes: null } })).toEqual({ threads: { eventLogMaxBytes: null } });
-    for (const value of [0, -1, 256 * 1024 - 1, 1.5, "1000"]) {
+    for (const value of [0, -1, 256 * 1024 - 1, 1.5, "1000", true]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: value } })).toThrow("threads.eventLogMaxBytes");
     }
   });
 
-  it("keeps thread event logs forever unless a retention window is configured", () => {
-    expect(threadEventLogRetentionDays({})).toBeNull();
-    expect(threadEventLogRetentionDays(parseStoredConfig({ threads: { maxConcurrentPerBot: 2 } }))).toBeNull();
-    const configured = parseStoredConfig({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: 30 } });
-    expect(threadEventLogRetentionDays(configured)).toBe(30);
+  it("keeps finished threads' event logs 30 days unless a window is configured or retention is turned off", () => {
+    expect(threadEventLogRetentionDays({})).toBe(30);
+    expect(threadEventLogRetentionDays(parseStoredConfig({ threads: { maxConcurrentPerBot: 2 } }))).toBe(30);
+    const configured = parseStoredConfig({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: 90 } });
+    expect(threadEventLogRetentionDays(configured)).toBe(90);
+    expect(threadEventLogRetentionDays(parseStoredConfig({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: false } }))).toBeNull();
     expect(parseConfigPatch({ threads: { eventLogRetentionDays: 30 } })).toEqual({ threads: { eventLogRetentionDays: 30 } });
+    expect(parseConfigPatch({ threads: { eventLogRetentionDays: false } })).toEqual({ threads: { eventLogRetentionDays: false } });
     expect(parseConfigPatch({ threads: { eventLogRetentionDays: null } })).toEqual({ threads: { eventLogRetentionDays: null } });
-    for (const value of [0, -1, 1.5, "30", 3660]) {
+    for (const value of [0, -1, 1.5, "30", 3660, true]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: value } })).toThrow("threads.eventLogRetentionDays");
     }
   });
@@ -724,7 +728,7 @@ describe("saving the newer sections", () => {
     }
   });
 
-  it("clears a thread event-log knob with null while other keys survive", () => {
+  it("resets a thread event-log knob to its default with null while other keys survive", () => {
     const path = join(DATA_DIR, "config.json");
     mkdirSync(DATA_DIR, { recursive: true });
     writeFileSync(path, JSON.stringify({}));
@@ -737,6 +741,11 @@ describe("saving the newer sections", () => {
       disk = JSON.parse(readFileSync(path, "utf8"));
       expect(disk.threads).toEqual({ maxConcurrentPerBot: 3 });
       expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3 });
+      expect(threadEventLogRetentionDays(parseStoredConfig(disk))).toBe(30);
+      expect(threadEventLogMaxBytes(parseStoredConfig(disk))).toBe(50 * 1024 * 1024);
+      saveConfig({ threads: { eventLogRetentionDays: false, eventLogMaxBytes: false } });
+      disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: false, eventLogMaxBytes: false });
       expect(threadEventLogRetentionDays(parseStoredConfig(disk))).toBeNull();
       expect(threadEventLogMaxBytes(parseStoredConfig(disk))).toBeNull();
     } finally {
