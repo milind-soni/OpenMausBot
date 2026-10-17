@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+              import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -17,16 +17,15 @@ import { hostTimeout } from "./testing/host-timeout.ts";
 import { openSse, type SseRecorder } from "./testing/sse.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const SETTLED = "Your downstream room requests have settled.";
+ const SETTLED = "Your downstream room requests have settled.";
 const jsonl = (path: string) => existsSync(path)
   ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 const terminal = (status: string | undefined) => status === "completed" || status === "failed" || status === "cancelled";
 
-type ModelAnswer = { say: string } | { call: true } | { hold: Promise<void>; after: ModelAnswer };
+ type ModelAnswer = { say: string } | { call: true } | { hold: Promise<void>; after: ModelAnswer };
 type ModelRequest = { lastUser: string; toolsSinceUser: number };
 
 async function chiefJob(test: (f: any) => Promise<void>) {
-  // The approval deadline and the stall window elapse only on marker files, never on their own.
   const parentEnv = { ...process.env, OMB_TEST_APPROVAL_CLOCK: "1", OMB_TEST_STALL_CLOCK: "1" };
   const requests: ModelRequest[] = [];
   let answer: (request: ModelRequest) => ModelAnswer = () => ({ say: "OK" });
@@ -41,13 +40,19 @@ async function chiefJob(test: (f: any) => Promise<void>) {
     const lastUserAt = sent.messages.map((message) => message.role).lastIndexOf("user");
     const request = { lastUser: lastUserAt < 0 ? "" : text(sent.messages[lastUserAt]!), toolsSinceUser: sent.messages.slice(lastUserAt + 1).filter((message) => message.role === "tool").length };
     requests.push(request);
-    const tool = sent.tools?.find((candidate) => candidate.function.name.endsWith("list_bots"))?.function.name ?? "missing_tool";
+    // Large catalogs expose the same read through the agents directory. Keep
+    // one real operation per round; inventing a missing tool would make the
+    // implementation fail for a fixture transport assumption.
+    const directTool = sent.tools?.find((candidate) => candidate.function.name.endsWith("list_bots"))?.function.name;
+    const tool = directTool ?? sent.tools?.find((candidate) => candidate.function.name === "agents_call_tool")?.function.name;
+    expect(tool).toBeTruthy();
+    const callArguments = directTool ? {} : { name: "list_bots", arguments: {} };
     const frame = (delta: unknown, finish: string | null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
     const reply = async (out: ServerResponse, given: ModelAnswer): Promise<void> => {
       if ("hold" in given) { await given.hold; return reply(out, given.after); }
       out.writeHead(200, { "content-type": "text/event-stream" });
       out.end("say" in given ? frame({ content: given.say }, "stop") + "data: [DONE]\n\n"
-        : frame({ tool_calls: [{ index: 0, id: `call_${++callSerial}`, type: "function", function: { name: tool, arguments: "{}" } }] }, "tool_calls") + "data: [DONE]\n\n");
+        : frame({ tool_calls: [{ index: 0, id: `call_${++callSerial}`, type: "function", function: { name: tool, arguments: JSON.stringify(callArguments) } }] }, "tool_calls") + "data: [DONE]\n\n");
     };
     await reply(res, answer(request)).catch(() => {});
   });
@@ -78,7 +83,7 @@ async function chiefJob(test: (f: any) => Promise<void>) {
         ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.timeout(20_000) });
       const raw = await response.text();
       let parsed: any = raw;
-      try { parsed = JSON.parse(raw); } catch {}
+      try { parsed = JSON.parse(raw); } catch { /* text */ }
       return { status: response.status, body: parsed };
     };
     const cli = (...args: string[]) => runControlOmb([...args, "--url", url]) as Promise<any>;
@@ -175,13 +180,13 @@ async function chiefJob(test: (f: any) => Promise<void>) {
   }
 }
 
-const ASSIGNED_BY_CLIVE = /^\[OpenMausBot assignment \S+ from @Clive for the user\]$/m;
-const personLineage = (request: string) =>
+ const ASSIGNED_BY_CLIVE = /^\[OpenMausBot assignment \S+ from @Clive for the user\]$/m;
+ const personLineage = (request: string) =>
   `the user asked: ${JSON.stringify(request)}. This is your task, sent on the user's behalf: do it with your own tools and permissions.`;
 const DISTRUST = /untrusted|not human approval|rather than doing it|cannot trace/;
-const STEP_CAP_CONTINUES = "Your previous turn stopped at the step limit; continue from where it stopped.";
+ const STEP_CAP_CONTINUES = "Your previous turn stopped at the step limit; continue from where it stopped.";
 
-it("carries a consult-and-implement job over several teammate turns, through a step cap, to one final answer", () => chiefJob(async (f) => {
+         it("carries a consult-and-implement job over several teammate turns, through a step cap, to one final answer", () => chiefJob(async (f) => {
   const request = "PHASE-A-JOB: Build a CSV export for invoices. Ask Mira how to approach it, have Eli implement and test it, and own the result.";
   f.script(f.clive.id,
     { key: "A0", match: ["PHASE-A-JOB"], steps: [
@@ -260,7 +265,7 @@ it("carries a consult-and-implement job over several teammate turns, through a s
   expect(mainThreads).toMatchObject({ [f.clive.id]: job, [f.mira.id]: f.mira.activeTaskId, [f.eli.id]: f.eli.activeTaskId });
 }), hostTimeout(120_000));
 
-it("tells the Chief what happened to each approval: allowed, denied, or never answered and not run", () => chiefJob(async (f) => {
+      it("tells the Chief what happened to each approval: allowed, denied, or never answered and not run", () => chiefJob(async (f) => {
   f.script(f.clive.id,
     { key: "B0", match: ["PHASE-APPROVALS-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "CHECK-HISTORY: check the export module's recent history." } }], reply: "B0: Mira is checking." },
     { key: "B1", match: [SETTLED, "HISTORY-RESULT"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "PUSH-BRANCH: push the export branch.", rework: true } }], reply: "B1: pushing." },
@@ -308,7 +313,7 @@ it("tells the Chief what happened to each approval: allowed, denied, or never an
   ]);
 }), hostTimeout(120_000));
 
-it.each(["SIGTERM", "SIGKILL"] as const)("wakes the Chief after a restart cuts its teammates mid-job, and it reports (%s)", (signal) => chiefJob(async (f) => {
+     it.each(["SIGTERM", "SIGKILL"] as const)("wakes the Chief after a restart cuts its teammates mid-job, and it reports (%s)", (signal) => chiefJob(async (f) => {
   f.script(f.clive.id,
     { key: "R0", match: ["PHASE-RESTART-JOB"], steps: [
       { arguments: { bot_ids: [f.mira.id], message: "CONSULT-SCHEMA: consult on the export schema." } },
@@ -356,7 +361,7 @@ it.each(["SIGTERM", "SIGKILL"] as const)("wakes the Chief after a restart cuts i
   expect(f.notifications.slice(before).map((notification: any) => [notification.kind, notification.body])).toEqual([["delegation-settled", "Results in from Mira, Eli"]]);
 }), hostTimeout(120_000));
 
-it("keeps a job running through a provider settings save that changes nothing", () => chiefJob(async (f) => {
+    it("keeps a job running through a provider settings save that changes nothing", () => chiefJob(async (f) => {
   f.script(f.clive.id,
     { key: "F0", match: ["PHASE-SAVE-JOB"], steps: [
       { arguments: { bot_ids: [f.mira.id], message: "RESEARCH-FORMAT: research the export format." } },
@@ -388,7 +393,7 @@ it("keeps a job running through a provider settings save that changes nothing", 
   }
 }), hostTimeout(90_000));
 
-it("tells the Chief a teammate's turn stalled, in the watchdog's words", () => chiefJob(async (f) => {
+   it("tells the Chief a teammate's turn stalled, in the watchdog's words", () => chiefJob(async (f) => {
   f.script(f.clive.id,
     { key: "D0", match: ["PHASE-STALL-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "LONG-SUITE: run the full integration suite; it prints nothing until it finishes." } }], reply: "D0: Mira is running the suite." },
     { key: "D1", match: [SETTLED, "PHASE-STALL-JOB"], reply: "STALL-FINAL: the suite run stalled; I will tell the person." });
@@ -419,7 +424,7 @@ it("tells the Chief a teammate's turn stalled, in the watchdog's words", () => c
     ["done", "D0: Mira is running the suite."], ["delegation-settled", "Results in from Mira"]]);
 }), hostTimeout(90_000));
 
-it("lets a card hold only its own job: other jobs run beside it, or say once whose card they wait behind", () => chiefJob(async (f) => {
+    it("lets a card hold only its own job: other jobs run beside it, or say once whose card they wait behind", () => chiefJob(async (f) => {
   f.script(f.clive.id,
     { key: "G0", match: ["PHASE-G-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: "SHIP-CHECK: run the test suite and say whether the export can ship." } }], reply: "G0: Mira is checking." },
     { key: "G1", match: [SETTLED, "PHASE-G-JOB"], reply: "G-FINAL: the export can ship." },
@@ -465,7 +470,7 @@ it("lets a card hold only its own job: other jobs run beside it, or say once who
   expect(f.turns(f.clive.id).map((record: any) => record.planKey).sort()).toEqual(["G0", "G1", "H0", "H1", "K0", "K1"]);
 }), hostTimeout(90_000));
 
-it("tells a teammate the person's job is its task, and a routine's handoff is not the person's request", () => chiefJob(async (f) => {
+      it("tells a teammate the person's job is its task, and a routine's handoff is not the person's request", () => chiefJob(async (f) => {
   const request = "PHASE-TRUST-JOB: hand the release QA to Mira; she owns it.";
   f.script(f.clive.id,
     { key: "T0", match: ["PHASE-TRUST-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], thread: "new", reply: "none",
@@ -503,8 +508,7 @@ it("tells a teammate the person's job is its task, and a routine's handoff is no
   expect(resumed).toContain("check claims against what was observed; redo only what the evidence does not cover");
 }), hostTimeout(90_000));
 
-// Auto reaches the person's own desktop only on macOS and Windows.
-(process.platform === "linux" ? it.skip : it)("holds a teammate's screen call while another job has the computer, and both jobs finish", () => chiefJob(async (f) => {
+     (process.platform === "linux" ? it.skip : it)("holds a teammate's screen call while another job has the computer, and both jobs finish", () => chiefJob(async (f) => {
   const userData = join(f.dataDir, "user-data");
   mkdirSync(userData, { recursive: true });
   writeFileSync(join(userData, "cua-connection.json"), JSON.stringify({ mode: "embedded", status: "ready", socketPath: join(f.dataDir, "cua.sock"),

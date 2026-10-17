@@ -1,6 +1,4 @@
-// Per-turn MCP transport for the Chat Completions runtime: approval is the caller's, and only
-// registered, schema-validated calls arrive here.
-import { createHash } from "node:crypto";
+  import { createHash } from "node:crypto";
 import type { ValidateFunction } from "ajv";
 import { stripControlPlaneEnv } from "../config.ts";
 import type { SendTurnInput } from "../contracts.ts";
@@ -8,10 +6,11 @@ import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { bridgedCallTarget, unbridgedServer } from "./agents-bridge.ts";
 import { chatImage, type ChatImagePart } from "./chat-images.ts";
-import { CALL_TOOL, directoryCallTarget, isDirectoryTool } from "../mcp-directory.ts";
+import { CALL_TOOL, DESCRIBE_TOOL, LISTED_TOOLS_MAX, SEARCH_TOOL, ToolDirectory, directoryCallTarget, isDirectoryTool, type CatalogTool } from "../mcp-directory.ts";
 import { mcpStdioServer } from "../mcp-gate-config.ts";
 import { REMOTE_MCP_STARTUP_MS, remoteMcpSpec } from "../mcp-http.ts";
 import { compileToolSchema } from "../mcp-schema-validator.ts";
+import { CATALOG_FINGERPRINT_META, fingerprintCatalog } from "../mcp-catalog-fingerprint.ts";
 import { allowsTool, canUseMcpServer, parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
 
 export interface ChatToolDefinition {
@@ -28,8 +27,9 @@ export interface SkippedChatMcpServer { server: string; reason: string }
 export interface ChatToolSession {
   definitions: ChatToolDefinition[];
   skipped: SkippedChatMcpServer[];
+  /** Host-only identity of the authorized original catalogs, including hidden definitions. */
+  readonly catalogFingerprint?: string;
   validate(name: string, args: unknown): void;
-  /** Directory reads and OpenMausBot's own agents server need no card; call_tool shows the tool it runs. */
   view(name: string, args: Record<string, unknown>): ChatToolCallView;
   execute(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<ChatToolResult>;
   close(): Promise<void>;
@@ -41,10 +41,16 @@ function chatToolName(server: string, tool: string): string {
   return `${server}_${tool}`.toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "mcp_tool";
 }
 const STARTUP_MS = 8_000;
-const DEFAULT_CALL_MS = 10 * 60_000;
+ const DEFAULT_CALL_MS = 10 * 60_000;
 const FRAME_BYTES = 2 * 1024 * 1024;
 const OUTPUT_BYTES = 50 * 1024;
 const TOOL_COUNT = 128;
+export const CHAT_DISCOVERED_TOOL_COUNT = 4096;
+/** Large local catalogs stay in the host, just like searched remote MCP.
+ * A small selected catalog still supports direct calls without discovery. */
+export const CHAT_LISTED_CATALOG_BYTES = 8_000;
+export const CHAT_TOOL_DISCOVERY_PROMPT =
+  "\nTool catalogs may be deferred. When a tool named in these instructions is absent from the offered tools, use that server's search_tools to find it, describe_tool for its full instructions and schema, and call_tool to run it by its original name. All available capabilities remain reachable through these tools; discovery grants no extra permissions.";
 const MAX_PAGES = 100;
 const SCHEMA_BYTES = 64 * 1024;
 const CATALOG_BYTES = 1024 * 1024;
@@ -55,14 +61,14 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 function aborted(): Error { return new Error("MCP operation cancelled"); }
 
-/** A chat-runtime bot's tools never get the operator's control-plane secrets; the entry's own env is applied last. */
-export function chatMcpEnvironment(serverEnv: Record<string, string>, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+ export function chatMcpEnvironment(serverEnv: Record<string, string>, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...source, PATH: augmentedPath() };
   stripControlPlaneEnv(env);
   return { ...env, ...serverEnv };
 }
 
 class ChatMcpClient {
+  catalogFingerprint?: string;
   private readonly frameBytes: number;
   private child: ReturnType<typeof spawnCli>;
   private buffer = "";
@@ -75,7 +81,6 @@ class ChatMcpClient {
   constructor(server: Server, computerUse = false) {
     this.frameBytes = computerUse ? 32 * 1024 * 1024 : FRAME_BYTES;
     try {
-      // The desktop shell inherits Finder's bare PATH, where `npx`-style servers cannot find `node`.
       this.child = spawnCli(server.command, server.args, {
         stdio: ["pipe", "pipe", "pipe"], env: chatMcpEnvironment(server.env),
       }, "bot");
@@ -103,7 +108,6 @@ class ChatMcpClient {
     for (const entry of this.pending.values()) entry.reject(new Error("MCP session closed"));
     this.pending.clear();
     this.buffer = "";
-    // Windows reaps the tree via taskkill /T, which can exceed shorter budgets on a loaded machine.
     this.closing = killCliTree(this.child, 5_000).then((stopped) => {
       if (!stopped) throw new Error("MCP server shutdown could not be confirmed; execution outcome may be uncertain");
     });
@@ -163,7 +167,7 @@ class ChatMcpClient {
         };
         const cancel = () => {
           try { this.write({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: id, reason: "Cancelled" } }); }
-          catch {}
+          catch { /* cleanup owns transport failure */ }
           finish(aborted());
         };
         const timer = setTimeout(() => finish(new Error("MCP request timed out; execution outcome may be uncertain")), timeout);
@@ -197,8 +201,10 @@ class ChatMcpClient {
     for (let page = 0; page < MAX_PAGES; page += 1) {
       const result = await this.call("tools/list", cursor ? { cursor } : {}, signal, remaining());
       if (!object(result) || !Array.isArray(result.tools)) throw new Error("MCP tools/list returned an invalid result");
+      const metadata = object(result._meta) ? result._meta[CATALOG_FINGERPRINT_META] : undefined;
+      if (typeof metadata === "string" && /^[a-f0-9]{64}$/.test(metadata)) this.catalogFingerprint = metadata;
       tools.push(...result.tools.filter(include));
-      if (tools.length > TOOL_COUNT) throw new Error("MCP tool count exceeds the 128-tool limit");
+      if (tools.length > CHAT_DISCOVERED_TOOL_COUNT) throw new Error("MCP tool count exceeds the discovery limit");
       if (result.nextCursor === undefined) return tools;
       if (typeof result.nextCursor !== "string" || !result.nextCursor || cursors.has(result.nextCursor)) throw new Error("MCP tools/list returned an invalid pagination cursor");
       cursors.add(result.nextCursor);
@@ -216,8 +222,7 @@ function boundedText(value: string): string {
   return `${bytes.subarray(0, end).toString()}\n[MCP result truncated at 50KB; request less output.]`;
 }
 
-/** Smaller models fill optional fields with "" instead of omitting them; for these a blank means omitted. */
-const BUILT_IN_BROWSER_BLANK_MEANS_OMITTED: Record<string, readonly string[]> = {
+ const BUILT_IN_BROWSER_BLANK_MEANS_OMITTED: Record<string, readonly string[]> = {
   agent_browser_read: ["url"],
 };
 
@@ -272,9 +277,11 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   signal.addEventListener("abort", cancel, { once: true });
   const definitions: ChatToolDefinition[] = [];
   const registered = new Map<string, RegisteredTool>();
+  const directories = new Map<string, { directory: ToolDirectory; operation: string; server: string; byOriginal: Map<string, string> }>();
+  let catalogBytes = 0;
+  let catalogHash = createHash("sha256");
   try {
     if (signal.aborted) throw aborted();
-    // Concurrent starts, consumed in config order so names and collision suffixes stay stable.
     const mounts = await Promise.allSettled(servers.map(async ([name, descriptor]) => {
       if (signal.aborted || closed) throw aborted();
       const client = new ChatMcpClient(descriptor, computerUse);
@@ -283,8 +290,6 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       const include = (tool: unknown) => scope === undefined || (object(tool) && typeof tool.name === "string"
         && ((searchable.has(name) && isDirectoryTool(tool.name)) || allowsTool(scope, { kind: "mcp", server: name, name: tool.name })));
       const tools = await client.tools(signal, include, searchable.has(name) ? REMOTE_MCP_STARTUP_MS : STARTUP_MS);
-      // Harness mounts are known by descriptor, never by a name a configured server could claim. A grant
-      // hashes the descriptor (no credential kept); machine bridges mint a bearer per turn, so theirs last a turn.
       const launch = createHash("sha256").update(JSON.stringify(descriptor)).digest("hex");
       return { name, client, launch, builtInBrowser: descriptor === integrations?.browser, agents: descriptor === agentsServer,
         hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", tools };
@@ -304,53 +309,92 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         continue;
       }
       const { name: server, client, launch, builtInBrowser, agents, hostComputer, tools } = mount.value;
-      const staged: Array<{ tool: RegisteredTool; definition: ChatToolDefinition }> = [];
+      const registeredBefore = new Set(registered.keys());
+      const directoriesBefore = new Set(directories.keys());
+      const definitionsBefore = definitions.length;
+      const bytesBefore = catalogBytes;
+      const hashBefore = catalogHash.copy();
       try {
-        const originalNames = new Set<string>();
-        for (const tool of tools) {
-          if (!object(tool) || typeof tool.name !== "string" || !tool.name.trim() || originalNames.has(tool.name)) throw new Error("MCP server advertised an invalid or duplicate tool name");
-          originalNames.add(tool.name);
-          if (definitions.length + staged.length >= TOOL_COUNT) throw new Error("MCP tool count exceeds the 128-tool limit");
-          if (!object(tool.inputSchema) || tool.inputSchema.type !== "object") throw new Error("MCP tools require an object input schema");
-          if (Buffer.byteLength(JSON.stringify(tool.inputSchema)) > SCHEMA_BYTES) throw new Error("MCP tool schema exceeds the 64KB limit");
-          const schema = compileToolSchema(tool.inputSchema);
-          const parameters = { ...tool.inputSchema };
-          const constraints: Record<string, unknown> = {};
-          if (computerUse) {
-            for (const key of ["anyOf", "oneOf", "allOf", "not"]) {
-              if (key in parameters) { constraints[key] = parameters[key]; delete parameters[key]; }
-            }
+      const originalNames = new Set<string>();
+      const direct: ChatToolDefinition[] = [];
+      const catalog: CatalogTool[] = [];
+      const byOriginal = new Map<string, string>();
+      for (const tool of tools) {
+        if (!object(tool) || typeof tool.name !== "string" || !tool.name.trim() || originalNames.has(tool.name)) throw new Error("MCP server advertised an invalid or duplicate tool name");
+        originalNames.add(tool.name);
+        catalogBytes += Buffer.byteLength(JSON.stringify(tool));
+        if (catalogBytes > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
+        if (!object(tool.inputSchema) || tool.inputSchema.type !== "object") throw new Error("MCP tools require an object input schema");
+        if (Buffer.byteLength(JSON.stringify(tool.inputSchema)) > SCHEMA_BYTES) throw new Error("MCP tool schema exceeds the 64KB limit");
+        const schema = compileToolSchema(tool.inputSchema);
+        const parameters = { ...tool.inputSchema };
+        const constraints: Record<string, unknown> = {};
+        if (computerUse) {
+          for (const key of ["anyOf", "oneOf", "allOf", "not"]) {
+            if (key in parameters) { constraints[key] = parameters[key]; delete parameters[key]; }
           }
-          const description = (typeof tool.description === "string" ? tool.description : "Configured MCP tool") +
-            (Object.keys(constraints).length ? " Additional argument constraints (validated before execution): " + JSON.stringify(constraints) : "");
-          const base = chatToolName(server, tool.name);
-          let name = base;
-          const taken = (candidate: string) => registered.has(candidate) || staged.some((entry) => entry.definition.function.name === candidate);
-          for (let index = 2; taken(name); index += 1) { const suffix = `_${index}`; name = base.slice(0, 64 - suffix.length) + suffix; }
-          staged.push({ tool: { client, server, launch, builtInBrowser, agents, hostComputer, name: tool.name, schema, searched: searchable.has(server) },
-            definition: { type: "function", function: { name, description, parameters } } });
         }
-        if (Buffer.byteLength(JSON.stringify([...definitions, ...staged.map((entry) => entry.definition)])) > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
+        const description = (typeof tool.description === "string" ? tool.description : "Configured MCP tool") +
+          (Object.keys(constraints).length ? " Additional argument constraints (validated before execution): " + JSON.stringify(constraints) : "");
+        const base = chatToolName(server, tool.name);
+        let name = base;
+        for (let index = 2; registered.has(name) || directories.has(name); index += 1) { const suffix = `_${index}`; name = base.slice(0, 64 - suffix.length) + suffix; }
+        registered.set(name, { client, server, launch, builtInBrowser, agents, hostComputer, name: tool.name, schema, searched: searchable.has(server) });
+        byOriginal.set(tool.name, name);
+        catalog.push(tool as CatalogTool);
+        direct.push({ type: "function", function: { name, description, parameters } });
+      }
+      catalogHash.update(JSON.stringify([server, fingerprintCatalog(server, catalog),
+        searchable.has(server) ? client.catalogFingerprint : undefined]));
+      const alreadySearched = searchable.has(server) && catalog.every((tool) => isDirectoryTool(tool.name));
+      const deferred = !alreadySearched && (direct.length > LISTED_TOOLS_MAX || Buffer.byteLength(JSON.stringify(direct)) > CHAT_LISTED_CATALOG_BYTES);
+      if (deferred) {
+        const directory = new ToolDirectory(catalog, { check: (tool, args) => {
+          const entry = registered.get(byOriginal.get(tool.name)!)!;
+          omitBlankDefaults(entry.builtInBrowser, entry.name, args);
+          return entry.schema(args) ? undefined : (entry.schema.errors ?? []).map((error) => error.message ?? "Invalid arguments");
+        } });
+        for (const tool of directory.listed({ server })) {
+          const original = tool.name as string;
+          const base = chatToolName(server, original);
+          let name = base;
+          for (let index = 2; registered.has(name) || directories.has(name); index += 1) {
+            const suffix = `_${index}`; name = base.slice(0, 64 - suffix.length) + suffix;
+          }
+          directories.set(name, { directory, operation: original, server, byOriginal });
+          definitions.push({ type: "function", function: { name, description: tool.description as string, parameters: tool.inputSchema as Record<string, unknown> } });
+        }
+      } else {
+        definitions.push(...direct);
+      }
+      if (definitions.length > TOOL_COUNT) throw new Error("MCP tool count exceeds the 128-tool limit");
       } catch (error) {
+        for (const key of registered.keys()) if (!registeredBefore.has(key)) registered.delete(key);
+        for (const key of directories.keys()) if (!directoriesBefore.has(key)) directories.delete(key);
+        definitions.length = definitionsBefore;
+        catalogBytes = bytesBefore;
+        catalogHash = hashBefore;
         if (!skippable.has(server)) throw error;
         await skip(error);
-        continue;
-      }
-      for (const { tool, definition } of staged) {
-        registered.set(definition.function.name, tool);
-        definitions.push(definition);
       }
     }
     if (signal.aborted || closed) throw aborted();
   } catch (error) { await close(); throw error; }
   const target = (tool: { name: string; searched: boolean }, args: unknown) => tool.searched ? directoryCallTarget(tool.name, args) : tool.name;
+  const advertised = new Set(definitions.map((tool) => tool.function.name));
   const validate = (name: string, args: unknown) => {
     if (closed || signal.aborted) throw new ChatToolSessionError("MCP session closed");
+    const deferred = directories.get(name);
+    if (deferred) {
+      if (!object(args)) throw new Error("Tool arguments must be an object");
+      if (deferred.operation === CALL_TOOL && scope !== undefined && typeof args.name === "string"
+        && !allowsTool(scope, { kind: "mcp", server: deferred.server, name: args.name })) throw new Error("Tool selection excludes this tool");
+      return;
+    }
     const tool = registered.get(name);
-    if (!tool) throw new Error("The requested tool was not advertised for this turn");
+    if (!tool || !advertised.has(name)) throw new Error("The requested tool was not advertised for this turn");
     const excluded = (runs: string | undefined) => scope !== undefined && runs !== undefined
       && !allowsTool(scope, { kind: "mcp", server: tool.server, name: runs });
-      // A directory mistake ran nothing and must not end the turn as a failed call.
     const directory = tool.searched && isDirectoryTool(tool.name);
     // Security: should a bridged agents server answer here, use_tool is also judged by the tool it names.
     if (!directory && (excluded(tool.name) || (tool.agents && excluded(bridgedCallTarget(tool.name, args))))) throw new Error("Tool selection excludes this tool");
@@ -359,6 +403,15 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     if (tool.searched && excluded(target(tool, args))) throw new Error("Tool selection excludes this tool");
   };
   const view = (name: string, args: Record<string, unknown>): ChatToolCallView => {
+    const deferred = directories.get(name);
+    if (deferred) {
+      const call = deferred.operation === CALL_TOOL ? deferred.directory.call(args) : undefined;
+      if (!call || "answer" in call) return { title: name, input: args, ask: false };
+      const original = deferred.byOriginal.get(call.name)!;
+      const tool = registered.get(original)!;
+      const grant = !tool.hostComputer ? JSON.stringify([tool.server, tool.launch, call.name]) : undefined;
+      return { title: original, input: call.arguments, ask: !tool.agents, ...(grant && !tool.agents ? { grant } : {}) };
+    }
     const tool = registered.get(name);
     const runs = tool ? target(tool, args) : name;
     if (runs === undefined || tool?.agents) return { title: name, input: args, ask: false };
@@ -367,13 +420,25 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
   };
   return {
-    definitions, skipped, validate, view, close,
+    definitions, skipped, catalogFingerprint: catalogHash.digest("hex"), validate, view, close,
     async execute(name, args, callSignal) {
       validate(name, args);
       if (callSignal.aborted) { await close(); throw aborted(); }
-      const tool = registered.get(name)!;
+      const deferred = directories.get(name);
+      let originalName = name;
+      let originalArgs = args;
+      if (deferred) {
+        const answer = deferred.operation === SEARCH_TOOL ? await deferred.directory.search(args)
+          : deferred.operation === DESCRIBE_TOOL ? deferred.directory.describe(args) : undefined;
+        if (answer) return { text: answer.content.map((part) => part.text).join("\n"), ok: answer.isError !== true };
+        const call = deferred.directory.call(args);
+        if ("answer" in call) return { text: call.answer.content.map((part) => part.text).join("\n"), ok: call.answer.isError !== true };
+        originalName = deferred.byOriginal.get(call.name)!;
+        originalArgs = call.arguments;
+      }
+      const tool = registered.get(originalName)!;
       try {
-        const result = await tool.client.call("tools/call", { name: tool.name, arguments: args }, AbortSignal.any([signal, callSignal]), callTimeoutMs);
+        const result = await tool.client.call("tools/call", { name: tool.name, arguments: originalArgs }, AbortSignal.any([signal, callSignal]), callTimeoutMs);
         if (signal.aborted || callSignal.aborted) throw aborted();
         if (!object(result) || !Array.isArray(result.content) || (result.isError !== undefined && typeof result.isError !== "boolean")) throw new Error("MCP tool returned an invalid result; execution outcome may be uncertain");
         const parts: string[] = [];

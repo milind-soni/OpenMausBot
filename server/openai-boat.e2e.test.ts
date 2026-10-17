@@ -29,11 +29,28 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
     if (path === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "chosen-vision-model" }, { id: "other-default" }] }));
     if (path === "/v1/chat/completions") {
       requests.push(body);
-      const completed = body.messages.some((message: any) => message.role === "tool");
+      const last = body.messages.at(-1);
+      const previousCall = [...body.messages].reverse().find((message: any) => message.tool_calls?.length)?.tool_calls[0];
       const tool = body.tools?.find((entry: any) => entry.function.name === "computer_screenshot");
+      let call: { name: string; arguments: string } | undefined;
+      if (last.role === "tool" && previousCall?.function.name === "computer_search_tools") {
+        const result = JSON.parse(JSON.parse(last.content).result);
+        const found = result.matches.find((match: any) => match.name === "screenshot");
+        expect(found, "Assigned cloud computer must expose screenshot through discovery").toBeTruthy();
+        call = found.needsDescription
+          ? { name: "computer_describe_tool", arguments: JSON.stringify({ name: found.name }) }
+          : { name: "computer_call_tool", arguments: JSON.stringify({ name: found.name, arguments: {} }) };
+      } else if (last.role === "tool" && previousCall?.function.name === "computer_describe_tool") {
+        const definition = JSON.parse(JSON.parse(last.content).result);
+        call = { name: "computer_call_tool", arguments: JSON.stringify({ name: definition.name, arguments: {} }) };
+      } else if (last.role === "user" && typeof last.content === "string") {
+        call = tool ? { name: tool.function.name, arguments: "{}" }
+          : { name: "computer_search_tools", arguments: JSON.stringify({ query: "screenshot" }) };
+      }
+      const completed = !call;
       return res.end(JSON.stringify({ choices: [{ message: completed
         ? { role: "assistant", content: "Fixture completed." }
-        : { role: "assistant", content: null, tool_calls: [{ id: "capture", type: "function", function: { name: tool?.function.name ?? "missing_computer", arguments: "{}" } }] },
+        : { role: "assistant", content: null, tool_calls: [{ id: `capture-${requests.length}`, type: "function", function: call }] },
       finish_reason: completed ? "stop" : "tool_calls" }] }));
     }
     if (boatOffline && path.startsWith("/sandboxes")) { res.statusCode = 503; return res.end(JSON.stringify({ error: "Fixture Boat unavailable" })); }
@@ -86,6 +103,7 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
       const card = conversation.messages.find((message: any) => message.card?.requestId && !message.card.answered)?.card;
       expect(card?.requestId).toBeTruthy();
       const commandsBefore = commands.length;
+      expect(card?.tool).toBe("computer_screenshot");
       if (scenario === "held") await api("POST", `/api/bots/${bot.id}/computer/control`, { action: "take" });
       await api("POST", `/api/threads/${scenario === "group" ? group.threadId : bot.activeTaskId}/respond`, { requestId: card.requestId, behavior: "allow" });
       if (scenario === "held") {
@@ -95,9 +113,9 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
       }
       const settled = await control(["wait", ...destination, "--timeout", "20"]);
       expect(settled.status).toBe(scenario === "held" ? "failed" : "settled");
-      expect(requests.slice(before)).toHaveLength(2);
+      expect(requests.length).toBeGreaterThan(before + 1);
       expect(requests.slice(before).every(request => request.model === "chosen-vision-model")).toBe(true);
-      const followup = requests[before + 1].messages;
+      const followup = requests.at(-1).messages;
       if (scenario === "held") {
         expect(followup.at(-1).content).toContain("The person has handed this computer back. This call was NOT performed");
       } else {
@@ -131,7 +149,7 @@ it("keeps the selected API model for direct, group and scheduled Boat turns and 
     expect(card?.requestId).toBeTruthy();
     await api("POST", `/api/threads/${routineThread}/respond`, { requestId: card.requestId, behavior: "allow" });
     expect((await control(["wait", ...destination, "--timeout", "20"])).status).toBe("settled");
-    expect(requests.slice(beforeRoutine)).toHaveLength(2);
+    expect(requests.length).toBeGreaterThan(beforeRoutine + 1);
     expect(requests.slice(beforeRoutine).every(request => request.model === "chosen-vision-model")).toBe(true);
     expect(nativePrompts).toBe(0);
     expect(commands.some(command => command.includes(".model.jpg"))).toBe(true);

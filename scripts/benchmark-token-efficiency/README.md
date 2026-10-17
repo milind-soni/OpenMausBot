@@ -1,0 +1,28 @@
+# Token efficiency benchmark helpers
+
+Run from the repository root. Requires the repository's TypeScript execution setup and an already-running, explicitly selected loopback Splash server for measurement or replay. These helpers do not start, stop, or reconfigure that server.
+
+Capture uses `launchVerificationServer` with isolated fixture data and a synthetic provider. It reads a tools/list catalog JSON array from `OMB_COMPUTER_CATALOG_FILE`, copies it into the fixture, and invokes only synthetic mail operations. It never performs a real computer operation or reads a live inbox. Supply a catalog exported through a read-only tool listing; its exact bytes are SHA-256 hashed in the capture. Captures also record the actual repository HEAD and whether tracked source changes exist. A dirty flag means HEAD alone does not reproduce the source.
+
+```sh
+export OMB_COMPUTER_CATALOG_FILE=/absolute/path/to/computer-tools.json
+node --experimental-strip-types scripts/benchmark-token-efficiency/capture-session.mjs "$PWD" baseline /tmp/omb-captures long 275
+export OMB_BENCHMARK_URL=http://127.0.0.1:YOUR_PORT
+node scripts/benchmark-token-efficiency/measure-captures.mjs /tmp/omb-captures/baseline-long.json /tmp/omb-tokens.json
+export OMB_BENCHMARK_MODEL=EXACT_LOCAL_MODEL_ID
+node scripts/benchmark-token-efficiency/replay-splash.mjs /tmp/omb-captures/baseline-long.json /tmp/omb-latency.json
+node scripts/benchmark-token-efficiency/price-tokens.mjs /tmp/omb-tokens.json
+node --test scripts/benchmark-token-efficiency/*.node-test.mjs
+```
+
+Missing endpoint, model, or catalog settings cause refusal. Endpoints must be loopback HTTP origins. Choose the intended server before setting these variables; replay performs inference on it. Use a new latency output filename for a new run; an existing output resumes completed requests only with the same capture hash, namespace, endpoint, and model.
+
+`short` captures five turns. The current `long` workload captures 20 turns with 275 reference rows per turn and advertises a 262,144-token model context. Both set the isolated fixture's rebuild budget to 1,000,000 bytes and disable auto-compaction. These settings retain canonical references for comparing prefixes and do not change live configuration. The actual input token counts depend on the loaded template and tokenizer.
+
+Measurement applies that server's real chat template and compares exact token IDs. It reports the longest earlier eligible prefix across the trace. Structural longest-common-prefix overlap is an upper bound only, not a Sol cache-policy projection. The measurement also renders partial messages to identify the initial system/developer block and latest 21 eligible user or final consecutive-tool endpoints, then requires a previously saved eligible endpoint to match one of those incoming lookup boundaries exactly. Splash cannot render a system/developer-only partial request because it requires a user message. The helper records that omitted lookup boundary; this trace never writes such an endpoint, so the omission cannot change its projected reads. These local template boundaries are Qwen-equivalent, not verified Sol token endpoints. A repeated cache window can reuse earlier requests rather than just the immediately preceding request; eviction, runner cache capacity, and intervening traffic can reduce observed reuse. The no-generation template boundary defines eligible input; the assistant generation suffix remains ordinary input.
+
+Replay adds a constant unique namespace at the first tool description when tools exist, otherwise at the first message content. Function names remain unchanged and each row records nonce placement. This reduces prior trace reuse without flushing the user's cache; a template prefix preceding the nonce may still be cached, so a cold trace is not guaranteed. It warms the server and requests one generated token per completion with explicit `reasoning_effort: "none"`. It records raw usage, first-token time, wall time, and status. Model-generated operations are never executed. This measures fixed-request latency and cache use; it does not measure answer quality or natural tool-selection behavior. Use the repository's actual quality/verification scripts for those checks. One invocation replays one trace. Failed requests leave an error and health snapshot; exclude an interrupted trace from headline timings rather than merging measurements across runtime restarts.
+
+`billing.mjs` provides `calculateCost`, `projectPrefixPolicy`, and `projectMeasuredCounts`. Standard hypothetical GPT-6.1 Sol Responses rates per million units are ordinary input/read/write/output: 2/0.10/2.50/10 through 272,000 input units, and 4/0.20/5/15 above that threshold for the whole request. Cache reads and writes partition input. GPT-5.6-and-later boundary-policy reads require 1,024 units and retain exact endpoint counts (no 128-unit rounding); writes below a 1,024-unit eligible prefix are zero. Transferred observed Splash counts stay unrounded and are capped at eligible input. All suffix units remain ordinary input. For Qwen tokenization, label projections **Qwen-token-equivalent rate-card units**, never exact Sol tokens or paid bills. Public tiktoken 0.14.0 cannot map this model; an o200k count is a surrogate.
+
+Pricing and cache policy sources checked October 10, 2026: [model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol), [prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching). Chat Completions tool calling is unsupported on Sol; this cost comparison is a hypothetical equivalent Responses workload.
