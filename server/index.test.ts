@@ -222,6 +222,7 @@ const waitForIsolatedServer = async (
         if (health.app === "openmausbot" && health.pid === serverChild.pid && health.static === true) return;
       }
     } catch {
+      /* still starting */
     }
     if (Date.now() >= deadline) {
       throw new Error(
@@ -1224,6 +1225,7 @@ beforeAll(async () => {
       const res = await fetch(`${BASE}/api/health`);
       if (res.ok) break;
     } catch {
+      /* not up yet */
     }
     if (Date.now() > deadline) throw new Error(`server never came up. stderr:\n${stderr}`);
     if (child.exitCode !== null) throw new Error(`server exited ${child.exitCode}. stderr:\n${stderr}`);
@@ -7568,7 +7570,7 @@ describe("harness HTTP API", () => {
     await api("DELETE", `/api/bots/${bot.id}`);
   });
 
-  it("refuses approval-level changes while a bot is working", async () => {
+  it("saves approval-level changes while a bot is working", async () => {
     const instances = (await api("GET", "/api/instances")).body.instances;
     const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
     const bot = (await api("POST", "/api/bots", {
@@ -7582,15 +7584,19 @@ describe("harness HTTP API", () => {
         return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
       }, { timeout: 5_000 }).toBe(true);
 
-      const blocked = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto" });
-      expect(blocked.status).toBe(409);
-      expect(blocked.body.error).toMatch(/stop this bot's turn before changing its approval level/i);
+      const untrusted = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto" });
+      expect(untrusted.status).toBe(409);
+      const response = await fetch(`${BASE}/api/bots/${bot.id}`, { method: "PATCH",
+        headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ approvalMode: "auto" }) });
+      const changed = { status: response.status, body: await response.json() as any };
+      expect(changed.status).toBe(200);
+      expect(changed.body.bot).toMatchObject({ approvalMode: "auto", busy: true });
       const stored = (await api("GET", "/api/bots?messages=0")).body.bots.find(
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(stored.busy).toBe(true);
-      expect(stored.approvalMode).toBe(bot.approvalMode);
-      expect(stored.autoApprove).toBe(bot.autoApprove);
+      expect(stored.approvalMode).toBe("auto");
+      expect(stored.autoApprove).toBe(true);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
       await expect.poll(async () => {
@@ -9492,7 +9498,7 @@ describe("harness HTTP API", () => {
       const bot = (await api("POST", "/api/bots")).body.bot;
       bots.push(bot.id);
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
-        approvalMode: "auto",
+        approvalMode: "ask",
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
         ...(computer ? { computer } : {}),
       })).status).toBe(200);

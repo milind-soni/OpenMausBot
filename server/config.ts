@@ -1,26 +1,28 @@
 // ~/.openmausbot/config.json, with env vars overriding its credentials.
+import type { AppConfig } from "./config-types.ts";
+export type { AppConfig } from "./config-types.ts";
 import { readFileSync, mkdirSync, existsSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
+import { normalizeImageGenerationUrl } from "../shared/image-generation.ts";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { withoutComputerEngine } from "./computer-engine-removal.ts";
-import { newBotDefaultsSchema, type NewBotDefaults } from "./new-bot-defaults.ts";
+import { newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { replaySettings } from "./replay-settings.ts";
-import { EFFORT_LEVELS, type EffortLevel, type LiveSettings } from "../shared/wire.ts";
-import { isModelVariant, type InstanceConfigMap, type McpServerSpec, type ModelSelection } from "./contracts.ts";
+import { EFFORT_LEVELS, type LiveSettings } from "../shared/wire.ts";
+import { isModelVariant, type InstanceConfigMap, type McpServerSpec } from "./contracts.ts";
 import { DEFAULT_WINDOW_MINUTES, MAX_WINDOW_MINUTES } from "./cache-keepwarm.ts";
 import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-icon.ts";
-import { helperStoredShape, type HelperConfig } from "./side-jobs.ts";
-import { loopGuardConfigSchema, type LoopGuardConfig } from "./host/loop-guard.ts";
+import { helperStoredShape } from "./side-jobs.ts";
+import { loopGuardConfigSchema } from "./host/loop-guard.ts";
 import { migrateLegacyFeatureFlags } from "./legacy-feature-flags.ts";
 import { isRemoteMcpServer, parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
-import { deciderConfigSchema, type DeciderConfig } from "./decider/config.ts";
-import { browserEngineConfigSchema, isValidCdpTarget, type BrowserEngineConfig } from "./browser/config.ts";
+import { deciderConfigSchema } from "./decider/config.ts";
+import { browserEngineConfigSchema, isValidCdpTarget } from "./browser/config.ts";
 import { roomContextSettings } from "./room-context-settings.ts";
 
 const optionalText = z.string().optional();
@@ -371,7 +373,8 @@ const appConfigSchema = z.object({
     .optional(),
   /** `model` seeds the default selection; `provider` pins an OpenRouter upstream (e.g. "fireworks"). */
   openaiCompat: z
-    .object({ key: optionalText, url: optionalText, model: optionalText, provider: optionalText })
+    .object({ key: optionalText, url: optionalText, model: optionalText, provider: optionalText,
+      contextWindows: z.record(z.string().min(1), z.record(z.string().trim().min(1), z.number().int().positive())).optional() })
     .optional(),
   /** Composio project key; `userId`/`sessionId` reuse one Composio Session. */
   composio: z.object({ apiKey: optionalText, userId: optionalText, sessionId: optionalText }).optional(),
@@ -464,62 +467,6 @@ const appConfigPatchSchema = appConfigSchema.omit({ instances: true, mcpServers:
   .extend({ threads: threadsPatchSchema.optional(), newBots: newBotsPatchSchema.optional() });
 const jsonObjectSchema = z.record(z.string(), z.json());
 
-export interface AppConfig extends HelperConfig {
-  customDomain?: string;
-  signIn?: { admins?: string[]; members?: string[] };
-  /** Preferred selection for newly created bots; existing bots keep theirs. */
-  defaultModelSelection?: ModelSelection;
-  /** Off by default; one backup attempt only before any work starts. */
-  automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
-  cacheKeepWarm?: { enabled: boolean; windowMinutes?: number };
-  /** UI creation template. Saving it never mutates a bot or grants access. */
-  newBotDefaults?: NewBotDefaults;
-  newBots?: { effort?: EffortLevel };
-  cliStartup?: {
-    access: "local" | "tunnel" | "tailscale" | "public-url";
-    publicUrl?: string;
-    phone?: "ios" | "android";
-  };
-  mcpServers?: Record<string, unknown>;
-  language?: string;
-  xai?: { key?: string; url?: string };
-  mistral?: { key?: string };
-  cerebras?: { key?: string };
-  groq?: { key?: string; url?: string };
-  meta?: { key?: string; url?: string };
-  /** `everyClaudeBot`: the key runs every Claude bot instead of its login; unset means true. */
-  anthropic?: { key?: string; url?: string; everyClaudeBot?: boolean };
-  openai?: { key?: string };
-  openrouter?: { key?: string };
-  budgets?: { monthlyUsd?: number; warnAtPercent?: number };
-  decisions?: { retentionDays?: number };
-  loopGuard?: LoopGuardConfig;
-  safetyFloor?: { enabled?: boolean };
-  billing?: { currency?: string; prices?: Record<string, { inputPerMillion: number; outputPerMillion: number; cachedInputPerMillion?: number }> };
-  openaiCompat?: { key?: string; url?: string; model?: string; provider?: string };
-  composio?: { apiKey?: string; userId?: string; sessionId?: string };
-  /** Boat token (ascii.dev renamed Box to Boat); config key "box", env BOX_TOKEN. */
-  box?: { token?: string };
-  /** A named host from the user's SSH config. Authentication stays with SSH. */
-  vps?: { sshAlias?: string };
-  opencodeGo?: { apiKey?: string; providerKeys?: Record<string, string> };
-  tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string; fishModel?: FishTtsModel };
-  decider?: DeciderConfig;
-  imageGen?: ImageGenerationConfig;
-  live?: { key?: string; voice?: string; readTypedReplies?: boolean; idleMinutes?: number };
-  profile?: { name?: string; email?: string; aboutMe?: string };
-  rooms?: { turnTimeoutMinutes: number };
-  mcp?: { callTimeoutMinutes?: number };
-  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
-  context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
-  memory?: { captureQuietMs?: number; tidyHour?: number };
-  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number };
-  features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; autoRecall?: boolean; routinesInConversation?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; chiefEscalations?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean };
-  onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
-  browserProfiles?: BrowserProfile[];
-  browserEngine?: BrowserEngineConfig;
-  instances?: InstanceConfigMap;
-}
 export type BrowserProfile = z.output<typeof browserProfileSchema> & {
   partitionId?: string;
 };
@@ -1318,6 +1265,11 @@ const API_KEY_FLEET: InstanceConfigMap = {
   },
 };
 
+export function openaiCompatConnectionUrl(cfg: AppConfig): string {
+  const config = cfg.instances?.openaiCompat?.config as { url?: unknown } | undefined;
+  return typeof config?.url === "string" && config.url ? config.url : cfg.openaiCompat?.url || "https://openrouter.ai/api/v1";
+}
+
 export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
   // Google retired Gemini CLI for the free/Pro/Ultra tiers on 2026-06-18; enterprise licences restore it with
   // `{"instances": {"gemini": {"driver": "geminiAgent"}}}`.
@@ -1420,6 +1372,15 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
         entry.config = merged;
       }
     }
+  }
+  // Workspace overrides belong to this connection and endpoint, never to
+  // a separate compatible account that happens to use the same model ID.
+  const shared = map.openaiCompat;
+  if (shared?.driver === "openai-compat" && cfg.openaiCompat?.contextWindows) {
+    const current = typeof shared.config === "object" && shared.config !== null && !Array.isArray(shared.config) ? shared.config as Record<string, unknown> : {};
+    const url = typeof current.url === "string" && current.url ? current.url : cfg.openaiCompat.url || "https://openrouter.ai/api/v1";
+    const windows = cfg.openaiCompat.contextWindows[url.replace(/\/+$/, "")];
+    if (windows && !Object.hasOwn(current, "contextWindows")) shared.config = { ...current, contextWindows: windows };
   }
   return map;
 }

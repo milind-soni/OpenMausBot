@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { MAX_CHAT_ROUNDS } from "../drivers/openai-chat-support.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
 import { ENGINE_KINDS, engineCapabilities, replaysTranscriptNatively, type EngineCapabilities } from "./capabilities.ts";
 
@@ -70,11 +71,8 @@ describe("engineCapabilities", () => {
     }
   });
 
-  it("keeps the chat family's step cap equal to MAX_CHAT_ROUNDS in openai-chat.ts", () => {
-    const source = readFileSync(new URL("../drivers/openai-chat.ts", import.meta.url), "utf8");
-    const found = /^const MAX_CHAT_ROUNDS = (\d+);/m.exec(source);
-    expect(found, "MAX_CHAT_ROUNDS moved or was renamed; update server/runtime/capabilities.ts").not.toBeNull();
-    expect(engineCapabilities("openai-compat").stepCap).toBe(Number(found![1]));
+  it("keeps the chat family's step cap equal to the exported round limit", () => {
+    expect(engineCapabilities("openai-compat").stepCap).toBe(MAX_CHAT_ROUNDS);
   });
 });
 

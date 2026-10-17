@@ -14,7 +14,7 @@ export interface ConfigStatus {
   anthropic?: { configured: boolean; everyClaudeBot?: boolean };
   openai?: { configured: boolean };
   openrouter?: { configured: boolean };
-  openaiCompat?: { configured: boolean; url?: string };
+  openaiCompat?: { configured: boolean; url?: string; resolvedUrl?: string; contextWindows?: Record<string, Record<string, number>> };
   /** what this server is entitled to; Settings shows only what works here.
    * `license` reaches admins only, and only while the key is inside its
    * warning window or grace period. */

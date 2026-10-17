@@ -270,6 +270,16 @@ describe("thread control placement", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
+  it("keeps approval selection enabled while the selected thread is working", () => {
+    const working = { ...bot, tasks: bot.tasks!.map(task => ({ ...task, busy: true, activity: "working" as const })) };
+    renderToStaticMarkup(createElement(ChatView, { bot: working }));
+    expect(fixture.approval?.disabled).toBeFalsy();
+    expect(fixture.approval?.busy).toBe(true);
+    fixture.dispatch.mockClear();
+    fixture.approval!.onSelect("auto");
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "auto" } });
+  });
+
   it("explains provider safety errors without offering an ineffective Retry", () => {
     const markup = renderToStaticMarkup(createElement(ErrorRow, { message: "Blocked by our safety systems", onRetry: () => {} }));
     expect(markup).toContain("Full access controls tool approvals, not provider safety checks");
@@ -484,7 +494,7 @@ describe("thread control placement", () => {
     expect(markup.indexOf("data-test-approval-control")).toBeLessThan(markup.indexOf("<textarea"));
     expect(markup).not.toContain('aria-label="Thread settings"');
     expect(fixture.model).toMatchObject({ threadId: "selected", bot: { busy: false, modelSelection: { model: "thread-model" } } });
-    expect(fixture.approval).toMatchObject({ approvalMode: "ask", disabled: false, trustedModesAvailable: false });
+    expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: false, trustedModesAvailable: false });
     fixture.approval!.onSelect("auto");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "auto" } });
   });

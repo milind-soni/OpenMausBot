@@ -4,6 +4,7 @@ Run the isolated integration recipe:
 
 ```sh
 pnpm exec vitest run server/full-access-workflows.e2e.test.ts
+pnpm exec vitest run server/trust-controls.e2e.test.ts
 pnpm exec vitest run server/team-setup-requests.test.ts server/profile-requests.test.ts server/routine-requests.test.ts
 pnpm exec electron scripts/smoke-approval-modes.cjs --all-threads-only
 pnpm typecheck
@@ -40,6 +41,14 @@ of a real provider's planning quality or authentication.
   change while the bot default remains Ask.
 - An expired turn token is refused, and Full does not authorize changes to
   an existing bot outside the Chief's team scope.
+- The connector fixture runs direct sends, multi-execute batches, workbench
+  code and remote bash through a local synthetic Composio broker. Full runs
+  without outbound cards or daily caps and leaves a Full approval decision.
+  An Ask sibling still waits; a Full thread works when its bot defaults to Ask.
+  Revoking Full (the thread's own, or the Chief's behind a room hand-off) or
+  connector write scope during session setup stops a call that would need
+  approval.
+  Ask approvals, denial and concurrent daily-allowance limits remain enforced.
 
 ## Evidence and limits
 

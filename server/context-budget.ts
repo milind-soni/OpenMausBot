@@ -1,4 +1,4 @@
-import type { ModelCatalog } from "./contracts.ts";
+import type { ModelCatalog, ProviderInstance } from "./contracts.ts";
 import { modelContextWindow } from "./model-context-window.ts";
 
 export const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -10,6 +10,12 @@ export function contextWindowFor(model: string | undefined, catalog?: ModelCatal
   if (positive(declared)) return declared;
   const inferred = model ? modelContextWindow(model) : undefined;
   return positive(inferred) ? inferred : DEFAULT_CONTEXT_WINDOW;
+}
+
+/** Compatible usage snapshots can outlive a changed endpoint override;
+ * compaction must consult that endpoint's current serving catalog. */
+export function compactionContextWindow(model: string, instance: Pick<ProviderInstance, "driverKind" | "models">, reported?: number): number {
+  return contextWindowFor(model, instance.models, instance.driverKind === "openai-compat" ? undefined : reported);
 }
 
 /** A "meter" reading (an ACP agent's own usage_update) is shown only; it never times OpenMausBot's compaction. */

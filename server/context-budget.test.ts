@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { compactBudget, compactionReading, contextWindowFor, shouldCompact, DEFAULT_CONTEXT_WINDOW } from "./context-budget.ts";
+import { compactBudget, compactionContextWindow, compactionReading, contextWindowFor, shouldCompact, DEFAULT_CONTEXT_WINDOW } from "./context-budget.ts";
 
 it("keeps compaction reachable below small model windows", () => {
   expect(compactBudget(8_000)).toBe(6_400);
@@ -45,4 +45,12 @@ it("times compaction from a driver's reading unless the driver reports it for th
   expect(window).toBe(DEFAULT_CONTEXT_WINDOW);
   expect(shouldCompact({ contextTokens: compactionReading({ contextReading: "meter" }, reading)?.tokens, estimatedBytes: 4_000,
     budget: compactBudget(window), window })).toBe(false);
+});
+
+it("uses a compatible endpoint's refreshed capacity instead of a stale usage window", () => {
+  const instance = { driverKind: "openai-compat", models: { default: "fixture", options: [{ id: "fixture", label: "Fixture", contextWindow: 65536 }] } };
+  expect(compactionContextWindow("fixture", instance, 262144)).toBe(65536);
+  instance.models.options[0].contextWindow = 32768;
+  expect(compactionContextWindow("fixture", instance, 262144)).toBe(32768);
+  expect(compactionContextWindow("fixture", { ...instance, driverKind: "claudeAgent" }, 262144)).toBe(262144);
 });

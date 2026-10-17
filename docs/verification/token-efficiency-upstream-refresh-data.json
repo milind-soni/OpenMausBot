@@ -1,0 +1,446 @@
+{
+  "measuredAt": "2026-10-13",
+  "method": "Synthetic fake-completion capture, resident Splash chat-template/tokenizer only; no inference or measured KV hits",
+  "captures": [
+    {
+      "label": "upstream-20261013",
+      "workload": "short",
+      "sourceRevision": "a00ded1311365e48f9fc7c74e6185f77a193e78e",
+      "sourceDirty": false,
+      "catalogHash": "ea82be4d6006308275623eeacebe7f179486623c6512b9c331544e1903613f59",
+      "tokenizer": "Exact token IDs from the explicitly selected local server chat template/tokenizer; Qwen-token-equivalent rate-card units when the loaded model is Qwen",
+      "rows": [
+        {
+          "turn": 1,
+          "round": 1,
+          "phase": "reply",
+          "inputTokens": 45770,
+          "eligiblePrefixTokens": 45765,
+          "commonPreviousPrefixTokens": 0,
+          "maxEarlierEligiblePrefixTokens": 0,
+          "lookupBoundaryTokens": [
+            45765
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 0,
+          "scriptedOutputTokens": 19,
+          "toolCount": 106,
+          "messages": 3,
+          "renderedBytes": 196859
+        },
+        {
+          "turn": 2,
+          "round": 1,
+          "phase": "execute",
+          "inputTokens": 45895,
+          "eligiblePrefixTokens": 45890,
+          "commonPreviousPrefixTokens": 45769,
+          "maxEarlierEligiblePrefixTokens": 45765,
+          "lookupBoundaryTokens": [
+            45765,
+            45890
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 45765,
+          "scriptedOutputTokens": 18,
+          "toolCount": 106,
+          "messages": 6,
+          "renderedBytes": 197350
+        },
+        {
+          "turn": 2,
+          "round": 2,
+          "phase": "reply",
+          "inputTokens": 46893,
+          "eligiblePrefixTokens": 46888,
+          "commonPreviousPrefixTokens": 45894,
+          "maxEarlierEligiblePrefixTokens": 45890,
+          "lookupBoundaryTokens": [
+            45765,
+            45890,
+            46888
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 45890,
+          "scriptedOutputTokens": 21,
+          "toolCount": 106,
+          "messages": 8,
+          "renderedBytes": 202061
+        },
+        {
+          "turn": 3,
+          "round": 1,
+          "phase": "reply",
+          "inputTokens": 47059,
+          "eligiblePrefixTokens": 47054,
+          "commonPreviousPrefixTokens": 45897,
+          "maxEarlierEligiblePrefixTokens": 45897,
+          "lookupBoundaryTokens": [
+            45765,
+            45890,
+            47054
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 45890,
+          "scriptedOutputTokens": 19,
+          "toolCount": 106,
+          "messages": 9,
+          "renderedBytes": 202296
+        },
+        {
+          "turn": 4,
+          "round": 1,
+          "phase": "execute",
+          "inputTokens": 47187,
+          "eligiblePrefixTokens": 47182,
+          "commonPreviousPrefixTokens": 47058,
+          "maxEarlierEligiblePrefixTokens": 47054,
+          "lookupBoundaryTokens": [
+            45765,
+            45890,
+            47054,
+            47182
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 47054,
+          "scriptedOutputTokens": 18,
+          "toolCount": 106,
+          "messages": 12,
+          "renderedBytes": 202799
+        },
+        {
+          "turn": 4,
+          "round": 2,
+          "phase": "reply",
+          "inputTokens": 47262,
+          "eligiblePrefixTokens": 47257,
+          "commonPreviousPrefixTokens": 47186,
+          "maxEarlierEligiblePrefixTokens": 47182,
+          "lookupBoundaryTokens": [
+            45765,
+            45890,
+            47054,
+            47182,
+            47257
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 47182,
+          "scriptedOutputTokens": 13,
+          "toolCount": 106,
+          "messages": 14,
+          "renderedBytes": 203126
+        },
+        {
+          "turn": 5,
+          "round": 1,
+          "phase": "reply",
+          "inputTokens": 47305,
+          "eligiblePrefixTokens": 47300,
+          "commonPreviousPrefixTokens": 47189,
+          "maxEarlierEligiblePrefixTokens": 47189,
+          "lookupBoundaryTokens": [
+            45765,
+            45890,
+            47054,
+            47182,
+            47300
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 47182,
+          "scriptedOutputTokens": 19,
+          "toolCount": 106,
+          "messages": 15,
+          "renderedBytes": 203261
+        }
+      ]
+    },
+    {
+      "label": "01-tool-efficiency",
+      "workload": "short",
+      "sourceRevision": "ebc0c83a05569fac8fb560af1944bd6c3aad464c",
+      "sourceDirty": false,
+      "catalogHash": "ea82be4d6006308275623eeacebe7f179486623c6512b9c331544e1903613f59",
+      "tokenizer": "Exact token IDs from the explicitly selected local server chat template/tokenizer; Qwen-token-equivalent rate-card units when the loaded model is Qwen",
+      "rows": [
+        {
+          "turn": 1,
+          "round": 1,
+          "phase": "reply",
+          "inputTokens": 7267,
+          "eligiblePrefixTokens": 7262,
+          "commonPreviousPrefixTokens": 0,
+          "maxEarlierEligiblePrefixTokens": 0,
+          "lookupBoundaryTokens": [
+            7262
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 0,
+          "scriptedOutputTokens": 19,
+          "toolCount": 15,
+          "messages": 3,
+          "renderedBytes": 29960
+        },
+        {
+          "turn": 2,
+          "round": 1,
+          "phase": "search",
+          "inputTokens": 7392,
+          "eligiblePrefixTokens": 7387,
+          "commonPreviousPrefixTokens": 7266,
+          "maxEarlierEligiblePrefixTokens": 7262,
+          "lookupBoundaryTokens": [
+            7262,
+            7387
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 7262,
+          "scriptedOutputTokens": 17,
+          "toolCount": 15,
+          "messages": 6,
+          "renderedBytes": 30451
+        },
+        {
+          "turn": 2,
+          "round": 2,
+          "phase": "describe",
+          "inputTokens": 8185,
+          "eligiblePrefixTokens": 8180,
+          "commonPreviousPrefixTokens": 7391,
+          "maxEarlierEligiblePrefixTokens": 7387,
+          "lookupBoundaryTokens": [
+            7262,
+            7387,
+            8180
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 7387,
+          "scriptedOutputTokens": 16,
+          "toolCount": 15,
+          "messages": 8,
+          "renderedBytes": 34243
+        },
+        {
+          "turn": 2,
+          "round": 3,
+          "phase": "execute",
+          "inputTokens": 8345,
+          "eligiblePrefixTokens": 8340,
+          "commonPreviousPrefixTokens": 8184,
+          "maxEarlierEligiblePrefixTokens": 8180,
+          "lookupBoundaryTokens": [
+            7262,
+            7387,
+            8180,
+            8340
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 8180,
+          "scriptedOutputTokens": 25,
+          "toolCount": 15,
+          "messages": 10,
+          "renderedBytes": 35032
+        },
+        {
+          "turn": 2,
+          "round": 4,
+          "phase": "reply",
+          "inputTokens": 9354,
+          "eligiblePrefixTokens": 9349,
+          "commonPreviousPrefixTokens": 8344,
+          "maxEarlierEligiblePrefixTokens": 8340,
+          "lookupBoundaryTokens": [
+            7262,
+            7387,
+            8180,
+            8340,
+            9349
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 8340,
+          "scriptedOutputTokens": 21,
+          "toolCount": 15,
+          "messages": 12,
+          "renderedBytes": 39777
+        },
+        {
+          "turn": 3,
+          "round": 1,
+          "phase": "reply",
+          "inputTokens": 10539,
+          "eligiblePrefixTokens": 10534,
+          "commonPreviousPrefixTokens": 9353,
+          "maxEarlierEligiblePrefixTokens": 9349,
+          "lookupBoundaryTokens": [
+            7262,
+            7387,
+            8180,
+            8340,
+            9349,
+            10534
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 9349,
+          "scriptedOutputTokens": 19,
+          "toolCount": 15,
+          "messages": 15,
+          "renderedBytes": 44770
+        },
+        {
+          "turn": 4,
+          "round": 1,
+          "phase": "execute",
+          "inputTokens": 10667,
+          "eligiblePrefixTokens": 10662,
+          "commonPreviousPrefixTokens": 10538,
+          "maxEarlierEligiblePrefixTokens": 10534,
+          "lookupBoundaryTokens": [
+            7262,
+            7387,
+            8180,
+            8340,
+            9349,
+            10534,
+            10662
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 10534,
+          "scriptedOutputTokens": 25,
+          "toolCount": 15,
+          "messages": 18,
+          "renderedBytes": 45273
+        },
+        {
+          "turn": 4,
+          "round": 2,
+          "phase": "reply",
+          "inputTokens": 10753,
+          "eligiblePrefixTokens": 10748,
+          "commonPreviousPrefixTokens": 10666,
+          "maxEarlierEligiblePrefixTokens": 10662,
+          "lookupBoundaryTokens": [
+            7262,
+            7387,
+            8180,
+            8340,
+            9349,
+            10534,
+            10662,
+            10748
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 10662,
+          "scriptedOutputTokens": 13,
+          "toolCount": 15,
+          "messages": 20,
+          "renderedBytes": 45634
+        },
+        {
+          "turn": 5,
+          "round": 1,
+          "phase": "reply",
+          "inputTokens": 10871,
+          "eligiblePrefixTokens": 10866,
+          "commonPreviousPrefixTokens": 10752,
+          "maxEarlierEligiblePrefixTokens": 10748,
+          "lookupBoundaryTokens": [
+            7262,
+            7387,
+            8180,
+            8340,
+            9349,
+            10534,
+            10662,
+            10748,
+            10866
+          ],
+          "omittedLookupBoundaries": [
+            {
+              "messageEnd": 1,
+              "reason": "Splash requires a user message; initial system/developer boundary cannot render independently. This trace never writes a system-only endpoint."
+            }
+          ],
+          "matchedEarlierBoundaryTokens": 10748,
+          "scriptedOutputTokens": 19,
+          "toolCount": 15,
+          "messages": 23,
+          "renderedBytes": 46096
+        }
+      ]
+    }
+  ]
+}

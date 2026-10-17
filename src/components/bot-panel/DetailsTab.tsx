@@ -45,7 +45,7 @@ export function DetailsTab({ bot, derived, overview, onOpen }: {
   const autoOffered = approvalModeOptionsFor(engine?.driverKind ?? "", trustedModesAvailable)
     .some((option) => option.mode === "auto");
   const chooseMode = (mode: Extract<ApprovalMode, "ask" | "auto" | "full">) => {
-    if (bot.busy || mode === approvalMode) return;
+    if (mode === approvalMode) return;
     if (mode === "full") {
       dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: "full", applyToAllThreads: true } });
       return;
@@ -172,9 +172,9 @@ export function DetailsTab({ bot, derived, overview, onOpen }: {
             value={displayedApprovalMode}
             onChange={chooseMode}
             options={[
-              { value: "ask", label: t("botSettings.simple.ask"), tooltip: t("botSettings.simple.askHint"), disabled: Boolean(bot.busy) },
-              { value: "auto", label: t("botSettings.simple.decide"), tooltip: t("botSettings.simple.decideHint"), disabled: Boolean(bot.busy) || !autoOffered },
-              { value: "full", label: t("botSettings.simple.full"), tooltip: t("botSettings.simple.fullHint"), disabled: Boolean(bot.busy) },
+              { value: "ask", label: t("botSettings.simple.ask"), tooltip: t("botSettings.simple.askHint") },
+              { value: "auto", label: t("botSettings.simple.decide"), tooltip: t("botSettings.simple.decideHint"), disabled: !autoOffered },
+              { value: "full", label: t("botSettings.simple.full"), tooltip: t("botSettings.simple.fullHint") },
             ]}
           />
           <div className="mx-0.5 text-[12.5px] leading-[1.35] text-ink-secondary">{actsHint}</div>

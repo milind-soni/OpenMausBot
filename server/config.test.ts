@@ -6,6 +6,7 @@ import type { JsonValue } from "./schema.ts";
 
 import { cacheUntilConfigChanges,
   changedInstanceIds,
+  openaiCompatConnectionUrl,
   customMcpServers,
   engineLaunches,
   DATA_DIR,
@@ -2193,4 +2194,34 @@ describe("a value derived from config.json", () => {
       }
     },
   );
+});
+
+it("scopes compatible context overrides to their endpoint and default connection", () => {
+  const endpoint = "https://first.invalid/v1";
+  const model = "qwen-local";
+  const patch = { openaiCompat: { url: endpoint, contextWindows: { [endpoint]: { [model]: 262144 } } } };
+  expect(parseConfigPatch(patch)).toEqual(patch);
+  const configs = instanceConfigs({ ...patch, instances: {
+    openaiCompat: { driver: "openai-compat" },
+    separate: { driver: "openai-compat", config: { url: endpoint } },
+    openai: { driver: "openai-compat", config: { apiKeyEnv: "OMB_OPENAI_API_KEY" } },
+  } });
+  expect(configs.openaiCompat.config).toMatchObject({ contextWindows: { [model]: 262144 } });
+  expect(configs.separate.config).not.toHaveProperty("contextWindows");
+  expect(configs.openai.config).not.toHaveProperty("contextWindows");
+  const changed = instanceConfigs({ ...patch, openaiCompat: { ...patch.openaiCompat, url: "https://second.invalid/v1" } });
+  expect(changed.openaiCompat.config).not.toHaveProperty("contextWindows");
+  const own = instanceConfigs({ ...patch, instances: { openaiCompat: { driver: "openai-compat", config: { contextWindows: { [model]: 8192 } } } } });
+  expect(own.openaiCompat.config).toMatchObject({ contextWindows: { [model]: 8192 } });
+  const automaticEndpoint = "https://openrouter.ai/api/v1";
+  expect(instanceConfigs({ openaiCompat: { url: "", contextWindows: { [automaticEndpoint]: { [model]: 32768 } } },
+    instances: { openaiCompat: { driver: "openai-compat", config: { url: "" } } } }).openaiCompat.config)
+    .toMatchObject({ contextWindows: { [model]: 32768 } });
+  for (const value of [0, -1, 1.5, "262144"]) expect(() => parseConfigPatch({ openaiCompat: { contextWindows: { [endpoint]: { [model]: value } } } })).toThrow();
+});
+
+it("resolves context-limit edits against the instance endpoint before workspace defaults", () => {
+  expect(openaiCompatConnectionUrl({ instances: { openaiCompat: { driver: "openai-compat", config: { url: "https://instance.invalid/v1" } } },
+    openaiCompat: { url: "https://workspace.invalid/v1" } })).toBe("https://instance.invalid/v1");
+  expect(openaiCompatConnectionUrl({ openaiCompat: { url: "https://workspace.invalid/v1" } })).toBe("https://workspace.invalid/v1");
 });

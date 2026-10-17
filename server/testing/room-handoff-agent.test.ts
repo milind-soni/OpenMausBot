@@ -10,8 +10,10 @@ async function withMcp(script: string, test: (run: () => Promise<string>, dir: s
   const config = join(dir, "mcp.json");
   const prompt = join(dir, "system.txt");
   const plan = join(dir, "plan.json");
-  writeFileSync(config, JSON.stringify({ mcpServers: { agents: {
-    command: process.execPath, args: ["-e", script], env: { OMB_BOT_ID: "fixture", FIXTURE_HOME: dir },
+  writeFileSync(config, JSON.stringify({ mcpServers: { connectors: {
+    command: process.execPath, args: ["-e", "process.exit(9)"], env: { OMB_BOT_ID: "fixture", OMB_CONNECTOR_TOKEN: "synthetic-connector" },
+  }, agents: {
+    command: process.execPath, args: ["-e", script], env: { OMB_BOT_ID: "fixture", OMB_COMMS_TOKEN: "synthetic-agents", FIXTURE_HOME: dir },
   } } }));
   writeFileSync(prompt, "Only this disposable test fixture.");
   writeFileSync(plan, JSON.stringify({ fixture: { reply: "Completed fixture" } }));

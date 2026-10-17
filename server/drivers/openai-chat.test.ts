@@ -11,6 +11,8 @@ import { GrokDriver } from "./grok.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { MistralDriver } from "./mistral.ts";
+import { selectReplay } from "../context-rebuild.ts";
+import { CHAT_TOOL_DISCOVERY_PROMPT } from "./chat-mcp-tools.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -110,6 +112,189 @@ describe("createOpenAIChatRuntime one-shot usage", () => {
   });
 });
 
+describe("OpenAI-compatible wire history", () => {
+  it("rebuilds after a truncated reply instead of retaining an incomplete protocol", async () => {
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown, init?: RequestInit) => {
+      if (!String(url).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "Partial reply." },
+        finish_reason: bodies.length === 1 ? "length" : "stop" }] }),
+      { headers: { "content-type": "application/json" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "truncated-wire", displayName: "Truncated fixture", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+      environment: { K: "fixture-key" },
+    });
+    const completed: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => { if (event.type === "turn.completed") completed.push(event); });
+    try {
+      await instance.adapter.sendTurn({ threadId: "truncated", text: "first", systemStable: "Rules.", systemVolatile: "Memory.",
+        transcript: [], sourceMessage: { id: "u1", role: "user", text: "first" } });
+      await vi.waitFor(() => expect(completed).toHaveLength(1));
+      expect(completed[0]).toMatchObject({ ok: false, stopReason: "error" });
+      await instance.adapter.sendTurn({ threadId: "truncated", text: "second", systemStable: "Rules.", systemVolatile: "Memory.",
+        sourceMessage: { id: "u2", role: "user", text: "second" }, transcript: [
+          { id: "u1", role: "user", text: "first" }, { id: "a1", role: "assistant", text: "Partial reply." },
+        ] });
+      await vi.waitFor(() => expect(completed).toHaveLength(2));
+      expect(bodies[1].messages[1]).toEqual({ role: "user", content: "first" });
+      expect(bodies[1].messages.at(-1).content).toContain("Memory.");
+      expect(completed[1]).toMatchObject({ ok: true });
+    } finally { await instance.dispose(); }
+  });
+
+
+  it("keeps a prefix as the selected replay window slides and can seed from an omitted window", async () => {
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown, init?: RequestInit) => {
+      if (!String(url).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ choices: [{ message: { content: `answer ${bodies.length}` }, finish_reason: "stop" }] }),
+        { headers: { "content-type": "application/json" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "sliding", displayName: "Sliding fixture", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+      environment: { K: "fixture-key" },
+    });
+    const completed: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => { if (event.type === "turn.completed") completed.push(event); });
+    const history: Array<{ id: string; role: "user" | "assistant"; text: string }> = Array.from({ length: 12 }, (_, index) =>
+      ({ id: `old-${index}`, role: index % 2 ? "assistant" : "user", text: `old message ${index}` }));
+    try {
+      for (let index = 1; index <= 4; index++) {
+        const sourceMessage = { id: `u${index}`, role: "user" as const, text: `turn ${index}` };
+        const transcript = selectReplay(history, { maxMessages: 6 }).transcript;
+        await instance.adapter.sendTurn({ threadId: "sliding", text: sourceMessage.text,
+          systemStable: "Stable.", systemVolatile: "Memory.", sourceMessage, transcript });
+        await vi.waitFor(() => expect(completed).toHaveLength(index));
+        expect(completed.at(-1)).toMatchObject({ ok: true });
+        if (index > 1) {
+          const prior = bodies[index - 2].messages;
+          expect(bodies[index - 1].messages.slice(0, prior.length)).toEqual(prior);
+          expect(bodies[index - 1].messages.at(-1).content).toBe(sourceMessage.text);
+        }
+        history.push(sourceMessage, { id: `a${index}`, role: "assistant", text: `answer ${index}` });
+      }
+    } finally { await instance.dispose(); }
+  });
+
+  it("keeps the exact prior request prefix and sends only a changed context note", async () => {
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown, init?: RequestInit) => {
+      if (!String(url).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ choices: [{ message: { content: `answer ${bodies.length}` }, finish_reason: "stop" }] }),
+        { headers: { "content-type": "application/json" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "wire", displayName: "Wire fixture", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+      environment: { K: "fixture-key" },
+    });
+    const completed: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => { if (event.type === "turn.completed") completed.push(event); });
+    const send = async (turn: Parameters<typeof instance.adapter.sendTurn>[0]) => {
+      const count = completed.length;
+      await instance.adapter.sendTurn({ systemStable: "Stable rules.", systemVolatile: "Memory: tea.", ...turn });
+      await vi.waitFor(() => expect(completed.length).toBe(count + 1));
+      expect(completed.at(-1)).toMatchObject({ ok: true });
+    };
+    try {
+      await send({ threadId: "same", text: "clock and recall\n\nfirst", sourceMessage: { id: "u1", role: "user", text: "first" }, transcript: [] });
+      await send({ threadId: "same", text: "clock and recall\n\nsecond", sourceMessage: { id: "u2", role: "user", text: "second" },
+        transcript: [{ id: "u1", role: "user", text: "first" }, { id: "a1", role: "assistant", text: "answer 1" }] });
+      expect(bodies[1].messages.slice(0, bodies[0].messages.length)).toEqual(bodies[0].messages);
+      expect(bodies[1].messages.at(-1).content).toBe("clock and recall\n\nsecond");
+
+      await send({ threadId: "same", text: "third", systemVolatile: "Memory: coffee.", sourceMessage: { id: "u3", role: "user", text: "third" },
+        transcript: [{ id: "u1", role: "user", text: "first" }, { id: "a1", role: "assistant", text: "answer 1" },
+          { id: "u2", role: "user", text: "second" }, { id: "a2", role: "assistant", text: "answer 2" }] });
+      expect(bodies[2].messages.slice(0, bodies[1].messages.length)).toEqual(bodies[1].messages);
+      expect(bodies[2].messages.at(-1).content).toContain("Memory: coffee.");
+
+      await send({ threadId: "same", text: "fourth", systemVolatile: "", sourceMessage: { id: "u4", role: "user", text: "fourth" },
+        transcript: [{ id: "u1", role: "user", text: "first" }, { id: "a1", role: "assistant", text: "answer 1" },
+          { id: "u2", role: "user", text: "second" }, { id: "a2", role: "assistant", text: "answer 2" },
+          { id: "u3", role: "user", text: "third" }, { id: "a3", role: "assistant", text: "answer 3" }] });
+      expect(bodies[3].messages.at(-1).content).toContain("have been cleared");
+      expect(bodies[3].messages.slice(0, bodies[2].messages.length)).toEqual(bodies[2].messages);
+
+      await send({ threadId: "same", text: "fifth", systemVolatile: "", sourceMessage: { id: "u5", role: "user", text: "fifth" },
+        transcript: [{ id: "", role: "assistant", text: "[2 earlier messages omitted from this context; full history remains in the app.]" },
+          { id: "u2", role: "user", text: "second" }, { id: "a2", role: "assistant", text: "answer 2" },
+          { id: "u3", role: "user", text: "third" }, { id: "a3", role: "assistant", text: "answer 3" },
+          { id: "u4", role: "user", text: "fourth" }, { id: "a4", role: "assistant", text: "answer 4" }] });
+      expect(bodies[4].messages.slice(0, bodies[3].messages.length)).toEqual(bodies[3].messages);
+      expect(bodies[4].messages.at(-1)).toEqual({ role: "user", content: "fifth" });
+    } finally { await instance.dispose(); }
+  });
+
+  it("rejects a changed canonical message even when its ID is unchanged", async () => {
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown, init?: RequestInit) => {
+      if (!String(url).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "answer" }, finish_reason: "stop" }] }),
+        { headers: { "content-type": "application/json" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "wire", displayName: "Wire fixture", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+      environment: { K: "fixture-key" },
+    });
+    const completed: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => { if (event.type === "turn.completed") completed.push(event); });
+    try {
+      await instance.adapter.sendTurn({ threadId: "edited", text: "first", systemStable: "Stable rules.", systemVolatile: "Memory.",
+        sourceMessage: { id: "u1", role: "user", text: "first" }, transcript: [] });
+      await vi.waitFor(() => expect(completed).toHaveLength(1));
+      await instance.adapter.sendTurn({ threadId: "edited", text: "second", systemStable: "Stable rules.", systemVolatile: "Memory.",
+        sourceMessage: { id: "u2", role: "user", text: "second" }, transcript: [
+          { id: "u1", role: "user", text: "edited first" }, { id: "a1", role: "assistant", text: "answer" },
+        ] });
+      await vi.waitFor(() => expect(completed).toHaveLength(2));
+      expect(bodies[1].messages[1]).toEqual({ role: "user", content: "edited first" });
+      expect(bodies[1].messages.at(-1).content).toContain("Memory.");
+    } finally { await instance.dispose(); }
+  });
+
+
+  it("retains a bounded image in the next request's cached prefix", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-wire-image-"));
+    const path = join(dir, "pixel.png");
+    writeFileSync(path, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLttAAAAABJRU5ErkJggg==", "base64"));
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown, init?: RequestInit) => {
+      if (!String(url).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ choices: [{ message: { content: `answer ${bodies.length}` }, finish_reason: "stop" }] }),
+        { headers: { "content-type": "application/json" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "wire-image", displayName: "Wire image fixture", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+      environment: { K: "fixture-key" },
+    });
+    const completed: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => { if (event.type === "turn.completed") completed.push(event); });
+    try {
+      await instance.adapter.sendTurn({ threadId: "image", text: "first", systemStable: "Stable.", systemVolatile: "", approvalMode: "full",
+        sourceMessage: { id: "u1", role: "user", text: "first" }, transcript: [], images: [{ path, mime: "image/png", bytes: readFileSync(path).byteLength }] });
+      await vi.waitFor(() => expect(completed).toHaveLength(1));
+      await instance.adapter.sendTurn({ threadId: "image", text: "second", systemStable: "Stable.", systemVolatile: "", approvalMode: "ask",
+        sourceMessage: { id: "u2", role: "user", text: "second" }, transcript: [
+          { id: "u1", role: "user", text: "first" }, { id: "a1", role: "assistant", text: "answer 1" },
+        ] });
+      await vi.waitFor(() => expect(completed).toHaveLength(2));
+      expect(bodies[0].messages[1].content.some((part: any) => part.type === "image_url")).toBe(true);
+      expect(bodies[1].messages.slice(0, bodies[0].messages.length)).toEqual(bodies[0].messages);
+    } finally { await instance.dispose(); rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
 describe("createOpenAIChatRuntime tool approvals", () => {
   const mcpDir: string[] = [];
   afterEach(() => { for (const d of mcpDir.splice(0)) rmSync(d, { recursive: true, force: true }); });
@@ -142,6 +327,59 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     return { command: script, args: [], env: receipt ? { RECEIPT: receipt } : {} };
   };
 
+  it("replays a completed tool chain and final reasoning across an approval-mode change", async () => {
+    const bodies: any[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown, init?: RequestInit) => {
+      if (!String(url).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      bodies.push(JSON.parse(String(init?.body)));
+      const message = bodies.length === 1
+        ? { content: null, reasoning_content: "Call the fixture tool.", tool_calls: [{ id: "call_1", type: "function", function: { name: "fx_write", arguments: "{}" } }] }
+        : bodies.length === 2
+        ? { content: "Completed.", reasoning_content: "The call returned successfully." }
+        : { content: "Continued." };
+      return new Response(JSON.stringify({ choices: [{ message, finish_reason: bodies.length === 1 ? "tool_calls" : "stop" }],
+        usage: { prompt_tokens: bodies.length * 1_000, completion_tokens: 10 } }),
+        { headers: { "content-type": "application/json" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "wire-tools", displayName: "Wire tool fixture", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }),
+      environment: { K: "fixture-key" },
+    });
+    const completed: RuntimeEvent[] = [];
+    const contextUsage: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => {
+      if (event.type === "turn.completed") completed.push(event);
+      if (event.type === "thread.token-usage.updated") contextUsage.push(event);
+    });
+    const integration = { custom: { fx: toolServer() } };
+    try {
+      await instance.adapter.sendTurn({ threadId: "tools", text: "first", systemStable: "Stable rules.", systemVolatile: "Memory.",
+        sourceMessage: { id: "u1", role: "user", text: "first" }, transcript: [], approvalMode: "full", integrations: integration });
+      await vi.waitFor(() => expect(completed).toHaveLength(1), { timeout: 10_000 });
+      expect(completed[0]).toMatchObject({ ok: true });
+      expect(bodies[0].messages[0]).toMatchObject({ role: "system", content: "Stable rules." + CHAT_TOOL_DISCOVERY_PROMPT });
+      expect(contextUsage.at(-1)).toMatchObject({ input: 3_000, output: 20, contextTokens: 2_010 });
+      expect(bodies[1].messages.find((message: any) => message.role === "tool").content).toContain("done");
+      await instance.adapter.sendTurn({ threadId: "tools", text: "second", systemStable: "Stable rules.", systemVolatile: "Memory.",
+        sourceMessage: { id: "u2", role: "user", text: "second" }, transcript: [
+          { id: "u1", role: "user", text: "first" }, { id: "a1", role: "assistant", text: "Completed." },
+        ], approvalMode: "ask", integrations: integration });
+      await vi.waitFor(() => expect(completed).toHaveLength(2), { timeout: 10_000 });
+      expect(bodies[2].messages.slice(0, bodies[1].messages.length)).toEqual(bodies[1].messages);
+      expect(bodies[2].messages.at(-2)).toMatchObject({ role: "assistant", content: "Completed.", reasoning_content: "The call returned successfully." });
+      expect(bodies[2].messages.at(-1)).toEqual({ role: "user", content: "second" });
+      await instance.adapter.sendTurn({ threadId: "tools", text: "third", systemStable: "Stable rules.", systemVolatile: "Memory.",
+        sourceMessage: { id: "u3", role: "user", text: "third" }, transcript: [
+          { id: "u1", role: "user", text: "first" }, { id: "a1", role: "assistant", text: "Completed." },
+          { id: "u2", role: "user", text: "second" }, { id: "a2", role: "assistant", text: "Continued." },
+        ], approvalMode: "full" });
+      await vi.waitFor(() => expect(completed).toHaveLength(3));
+      expect(bodies[3].messages.some((message: any) => message.role === "tool")).toBe(false);
+      expect(bodies[3].messages[1]).toEqual({ role: "user", content: "first" });
+    } finally { await instance.dispose(); }
+  }, 20_000);
+
   it.each(["openai", "grok", "mistral", "minimax"] as const)("scopes %s schemas and blocks a remembered native question even under Full access", async (driver) => {
     const dir = mkdtempSync(join(tmpdir(), "omb-api-scope-")); mcpDir.push(dir);
     const receipt = join(dir, "calls.txt");
@@ -150,9 +388,9 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       { index: 1, id: "withheld", type: "function", function: { name: "ask_user", arguments: JSON.stringify({ questions: [{ question: "Must not be shown" }] }) } },
     ];
     const first = `data: ${JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: calls } }] })}\n\n`
-      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":100,"completion_tokens":4}}\n\n';
     const last = 'data: {"choices":[{"index":0,"delta":{"content":"Finished."}}]}\n\n'
-      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":200,"completion_tokens":2}}\n\n';
     const bodies: any[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: unknown, init?: RequestInit) => {
       if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
@@ -171,11 +409,46 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       expect(bodies[0].tools.map((tool: any) => tool.function.name)).toEqual(["fx_write"]);
       await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
       expect(events.filter((event) => event.type === "request.opened")).toEqual([]);
+      expect(events.filter(event => event.type === "thread.token-usage.updated")).toMatchObject([
+        { input: 100, output: 4, contextTokens: 104 },
+        { input: 300, output: 6, contextTokens: 202 },
+      ]);
       expect(readFileSync(receipt, "utf8")).toBe("write\n");
       const withheld = bodies[1].messages.find((message: any) => message.role === "tool" && message.tool_call_id === "withheld");
       expect(JSON.parse(withheld.content)).toMatchObject({ ok: false });
       expect(withheld.content).toMatch(/tool selection excludes/i);
       expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
+    } finally { await instance.dispose(); }
+  }, 20_000);
+
+  it("reads a narrower mode before a later tool in the same model response", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-live-boundary-")); mcpDir.push(dir);
+    const receipt = join(dir, "calls.txt");
+    let requests = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: unknown) => {
+      if (!String(url).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      const first = requests++ === 0;
+      const delta = first ? { tool_calls: [0, 1].map(index => ({ index, id: `write-${index}`, type: "function", function: { name: "fx_write", arguments: "{}" } })) }
+        : { content: "Finished." };
+      return sse(`data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: first ? "tool_calls" : "stop" }] })}\n\ndata: [DONE]\n\n`);
+    }));
+    const instance = await OpenAICompatDriver.create({ instanceId: "live-boundary", displayName: "Fixture", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.test/v1", apiKeyEnv: "K", model: "fixture" }), environment: { K: "synthetic" } });
+    let mode: "full" | "ask" = "full";
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent(event => {
+      events.push(event);
+      if (event.type === "item.completed" && event.itemId === "write-0") mode = "ask";
+    });
+    try {
+      await instance.adapter.sendTurn({ threadId: "live-boundary", text: "Do the fixture writes", approvalMode: "full",
+        currentApprovalMode: () => mode, integrations: { custom: { fx: toolServer(receipt) } } });
+      await vi.waitFor(() => expect(events.some(event => event.type === "request.opened")).toBe(true), { timeout: 10_000 });
+      expect(readFileSync(receipt, "utf8")).toBe("write\n");
+      const card = events.find(event => event.type === "request.opened")!;
+      expect(await instance.adapter.respondToRequest("live-boundary", card.requestId!, { behavior: "deny" })).toBe("rejected");
+      await vi.waitFor(() => expect(events.some(event => event.type === "turn.completed")).toBe(true));
+      expect(readFileSync(receipt, "utf8")).toBe("write\n");
     } finally { await instance.dispose(); }
   }, 20_000);
 
@@ -303,6 +576,8 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     try {
       await instance.adapter.sendTurn({
         threadId: "toolerr", text: "Use the tool, then answer.", approvalMode: "full",
+        systemStable: "Stable rules.", systemVolatile: "Memory.", transcript: [],
+        sourceMessage: { id: "u1", role: "user", text: "Use the tool, then answer." },
         integrations: { custom: { fx: { command: script, args: [], env: {} } } },
       });
       await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
@@ -313,6 +588,23 @@ describe("createOpenAIChatRuntime tool approvals", () => {
       expect(completed.stopReason).toBe("tool_error");
       expect(events.some((event) => event.type === "runtime.error" && /One or more tool operations failed/.test((event as any).message ?? ""))).toBe(true);
       expect(events.some((event) => event.type === "cap.exhausted")).toBe(false);
+      await instance.adapter.sendTurn({
+        threadId: "toolerr", text: "Thanks.", approvalMode: "full",
+        systemStable: "Stable rules.", systemVolatile: "Memory.",
+        sourceMessage: { id: "u2", role: "user", text: "Thanks." },
+        transcript: [
+          { id: "u1", role: "user", text: "Use the tool, then answer." },
+          { id: "a1", role: "assistant", text: "Done after failure." },
+        ],
+        integrations: { custom: { fx: { command: script, args: [], env: {} } } },
+      });
+      await vi.waitFor(() => expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(2));
+      expect(bodies).toHaveLength(3);
+      expect(bodies[2].messages.slice(0, bodies[1].messages.length)).toEqual(bodies[1].messages);
+      expect(bodies[2].messages.at(-2)).toMatchObject({ role: "assistant", content: "Done after failure." });
+      expect(bodies[2].messages.at(-1)).toEqual({ role: "user", content: "Thanks." });
+      expect(events.filter((event) => event.type === "item.started" && event.itemType === "tool")).toHaveLength(1);
+      expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
     } finally {
       await instance.dispose();
     }
