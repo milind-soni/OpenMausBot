@@ -68,7 +68,7 @@ const CATALOG_COPY: Record<string, string> = {
 
 function catalogCopy(entry: TeamCatalogEntry): TeamCatalogEntry {
   const id = CATALOG_COPY[entry.name.trim().toLowerCase()];
-  return id ? { ...entry, name: t(`templates.catalog.${id}.name` as LocaleKey), summary: t(`templates.catalog.${id}.summary` as LocaleKey), outcome: t(`templates.catalog.${id}.summary` as LocaleKey) } : entry;
+  return id ? { ...entry, name: t(`templates.catalog.${id}.name` as LocaleKey), summary: t(`templates.catalog.${id}.summary` as LocaleKey) } : entry;
 }
 
 export interface TeamImportResult {
@@ -606,7 +606,8 @@ export function TeamLibraryPanel({
   const normalizedSearch = search.trim().toLowerCase();
   const visibleTeams = (catalog?.teams ?? []).filter((entry) => {
     if (!normalizedSearch) return true;
-    return `${entry.name} ${entry.summary} ${entry.category} ${entry.skills.join(" ")} ${entry.requires.apps.join(" ")}`
+    const copy = catalogCopy(entry);
+    return `${copy.name} ${copy.summary} ${entry.name} ${entry.summary} ${entry.category} ${entry.skills.join(" ")} ${entry.requires.apps.join(" ")}`
       .toLowerCase()
       .includes(normalizedSearch);
   });
