@@ -42,6 +42,21 @@ export function hasNativeAutoReview(driverKind: string | undefined): boolean {
 
 const APPROVAL_RANK: Record<ApprovalMode, number> = { ask: 0, edits: 1, auto: 2, full: 3, custom: 4 };
 
+export interface ApprovalFields {
+  approvalMode?: ApprovalMode;
+  autoApprove?: boolean;
+  alwaysAllow?: string[];
+}
+
+/** A thread runs at its own approval fields and falls back to its bot's for any it does not store. */
+export function threadApproval(thread: ApprovalFields, bot: ApprovalFields): ApprovalFields {
+  return {
+    approvalMode: thread.approvalMode ?? (thread.autoApprove === undefined ? bot.approvalMode : undefined),
+    autoApprove: thread.autoApprove ?? bot.autoApprove,
+    alwaysAllow: structuredClone(thread.alwaysAllow ?? bot.alwaysAllow),
+  };
+}
+
 export function approvalModeWidens(from: ApprovalMode, to: ApprovalMode): boolean {
   return APPROVAL_RANK[to] > APPROVAL_RANK[from];
 }

@@ -1,7 +1,7 @@
 import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { BotsSaveError } from "./bots-save.ts";
+import { RegistrySaveError } from "./registry-save.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { Store, type BotRecord } from "./store.ts";
@@ -54,7 +54,7 @@ describe("bots.json save failures", () => {
     const tasks = bot.tasks;
     failNextSave(store);
 
-    expect(() => store.createTask(bot.id, "Never saved")).toThrow(BotsSaveError);
+    expect(() => store.createTask(bot.id, "Never saved")).toThrow(RegistrySaveError);
     expect(bot.tasks).toBe(tasks);
     expect(store.tasks(bot.id).map((task) => task.title)).not.toContain("Never saved");
     expect(bot.threadId).toBe(second.threadId);
@@ -65,7 +65,7 @@ describe("bots.json save failures", () => {
     const { store, bot, first } = storeWithTwoThreads();
     failNextSave(store);
 
-    expect(() => store.patchTask(bot.id, first.threadId, { title: "Renamed", unread: true, archivedAt: 1 })).toThrow(BotsSaveError);
+    expect(() => store.patchTask(bot.id, first.threadId, { title: "Renamed", unread: true, archivedAt: 1 })).toThrow(RegistrySaveError);
     expect(first).toMatchObject({ unread: false });
     expect(first.title).not.toBe("Renamed");
     expect(first.archivedAt).toBeUndefined();
@@ -77,16 +77,29 @@ describe("bots.json save failures", () => {
     store.patchTask(bot.id, second.threadId, { approvalMode: "full", autoApprove: false, alwaysAllow: ["tool-a"] });
     failNextSave(store);
 
-    expect(() => store.patchTask(bot.id, second.threadId, { approvalMode: "ask", autoApprove: false, alwaysAllow: [] })).toThrow(BotsSaveError);
+    expect(() => store.patchTask(bot.id, second.threadId, { approvalMode: "ask", autoApprove: false, alwaysAllow: [] })).toThrow(RegistrySaveError);
     expect(second).toMatchObject({ approvalMode: "ask", alwaysAllow: [] });
     expect(new Store(selection).taskByThread(bot.id, second.threadId)).toMatchObject({ approvalMode: "full" });
 
     failNextSave(store);
-    expect(() => store.patchTask(bot.id, second.threadId, { approvalMode: "full" })).toThrow(BotsSaveError);
+    expect(() => store.patchTask(bot.id, second.threadId, { approvalMode: "full" })).toThrow(RegistrySaveError);
     expect(second.approvalMode).toBe("ask");
     failNextSave(store);
-    expect(() => store.patchTask(bot.id, second.threadId, { alwaysAllow: ["tool-b"] })).toThrow(BotsSaveError);
+    expect(() => store.patchTask(bot.id, second.threadId, { alwaysAllow: ["tool-b"] })).toThrow(RegistrySaveError);
     expect(second.alwaysAllow).toEqual([]);
+  });
+
+  it("keeps a revocation of permissions a thread inherits from its bot", () => {
+    const { store, bot, second } = storeWithTwoThreads();
+    store.patchBot(bot.id, { approvalMode: "full", alwaysAllow: ["tool-a", "tool-b"] });
+    delete second.approvalMode;
+    delete second.autoApprove;
+    delete second.alwaysAllow;
+    failNextSave(store);
+
+    expect(() => store.patchTask(bot.id, second.threadId, { approvalMode: "auto", alwaysAllow: ["tool-a"] })).toThrow(RegistrySaveError);
+    expect(second).toMatchObject({ approvalMode: "auto", alwaysAllow: ["tool-a"] });
+    expect(store.projectBotForTask(bot.id, second.threadId)).toMatchObject({ approvalMode: "auto", alwaysAllow: ["tool-a"] });
   });
 
   it("keeps a thread and its conversation when its deletion cannot be saved, and deletes both on retry", () => {
@@ -132,9 +145,98 @@ describe("bots.json save failures", () => {
   });
 
   it("names the unsaved action and keeps the raw error as its cause", () => {
-    const fullDisk = new BotsSaveError("the thread's usage", Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" }));
+    const fullDisk = new RegistrySaveError("the thread's usage", "bots.json", Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" }));
 
     expect(fullDisk.message).toBe("Couldn't save the thread's usage: OpenMausBot couldn't write bots.json.");
     expect(fullDisk.cause).toMatchObject({ code: "ENOSPC" });
+  });
+});
+
+function failNextGroupSave(store: Store) {
+  return vi.spyOn(store as unknown as { saveGroups(): void }, "saveGroups")
+    .mockImplementationOnce(() => { throw Object.assign(new Error("EPERM: operation not permitted, rename 'groups.json.tmp' -> 'groups.json'"), { code: "EPERM" }); });
+}
+
+function roomWithTwoThreads() {
+  const store = new Store(selection);
+  const room = store.createGroup("Launch team", [store.createBot().id, store.createBot().id]);
+  const first = store.activeGroupTask(room.id)!;
+  store.patchGroup(room.id, { pinnedMessageId: "pin-one" });
+  store.pinGroupCwd(room.id);
+  const second = store.createGroupTask(room.id)!;
+  const changes = vi.fn();
+  store.onChange(changes);
+  return { store, room, first, second, changes };
+}
+
+describe("groups.json save failures", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("keeps a room on its thread when a switch cannot be saved", () => {
+    const { store, room, first, second, changes } = roomWithTwoThreads();
+    failNextGroupSave(store);
+
+    expect(() => store.switchGroupTask(room.id, first.threadId))
+      .toThrow("Couldn't save the thread switch: another program is holding OpenMausBot's groups.json, or its folder is read-only.");
+    expect(room.threadId).toBe(second.threadId);
+    expect(room.pinnedMessageId).toBeUndefined();
+    expect(room.pinnedCwd).toBeUndefined();
+    expect(changes).not.toHaveBeenCalled();
+    expect(new Store(selection).group(room.id)?.threadId).toBe(second.threadId);
+
+    store.switchGroupTask(room.id, first.threadId);
+    expect(room).toMatchObject({ threadId: first.threadId, pinnedMessageId: "pin-one" });
+    expect(changes).toHaveBeenCalledWith({ type: "group", groupId: room.id });
+    expect(new Store(selection).group(room.id)?.threadId).toBe(first.threadId);
+  });
+
+  it("does not open a room thread that was never saved", () => {
+    const { store, room, second, changes } = roomWithTwoThreads();
+    const tasks = room.tasks;
+    failNextGroupSave(store);
+
+    expect(() => store.createGroupTask(room.id, "Never saved")).toThrow(RegistrySaveError);
+    expect(room.tasks).toBe(tasks);
+    expect(room.tasks!.map((task) => task.title)).not.toContain("Never saved");
+    expect(room.threadId).toBe(second.threadId);
+    expect(changes).not.toHaveBeenCalled();
+  });
+
+  it("restores a room thread's name, pin, time limit, title and folder when they cannot be saved", () => {
+    const { store, room, second } = roomWithTwoThreads();
+    const unchanged = structuredClone(second);
+    const attempts = [
+      () => store.renameGroupTask(room.id, second.threadId, "Renamed"),
+      () => store.setGroupTaskPinned(room.id, second.threadId, true),
+      () => store.setGroupTaskTurnTimeout(room.id, second.threadId, 15),
+      () => store.titleGroupTaskFromFirstMessage(room.id, "Plan the launch", second.threadId),
+      () => store.pinGroupCwd(room.id, second.threadId),
+    ];
+    for (const attempt of attempts) {
+      failNextGroupSave(store);
+      expect(attempt).toThrow(RegistrySaveError);
+      expect(second).toEqual(unchanged);
+    }
+    expect(room.pinnedCwd).toBeUndefined();
+  });
+
+  it("keeps a room thread and its conversation when its deletion cannot be saved, and deletes both on retry", () => {
+    const { store, room, first, second, changes } = roomWithTwoThreads();
+    store.appendMessage(second.threadId, { role: "user", kind: "text", text: "Keep this conversation" });
+    changes.mockClear();
+    failNextGroupSave(store);
+
+    expect(() => store.deleteGroupTasks(room.id, [second.threadId])).toThrow("Couldn't save the thread deletion");
+    expect(room.tasks!.map((task) => task.threadId)).toEqual([second.threadId, first.threadId]);
+    expect(room.threadId).toBe(second.threadId);
+    expect(changes).not.toHaveBeenCalled();
+    expect(new Store(selection).messagesFor(second.threadId).map((message) => message.text)).toEqual(["Keep this conversation"]);
+
+    expect(store.deleteGroupTasks(room.id, [second.threadId])?.deleted).toEqual([second.threadId]);
+    expect(room).toMatchObject({ threadId: first.threadId, pinnedMessageId: "pin-one" });
+    expect(new Store(selection).group(room.id)?.tasks?.map((task) => task.threadId)).toEqual([first.threadId]);
+    expect(new Store(selection).messagesFor(second.threadId)).toEqual([]);
   });
 });
