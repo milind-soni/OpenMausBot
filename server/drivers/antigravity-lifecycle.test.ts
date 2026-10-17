@@ -86,6 +86,20 @@ afterEach(() => {
 });
 
 describe("Antigravity initialization diagnostics", () => {
+  it.each(["win32", "linux"])("names antivirus scanning only for a silent Windows timeout (%s)", async (platform) => {
+    const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { ...original, value: platform });
+    try {
+      fakeChild(null);
+      const result = client().initialize(100).catch((error: Error) => error);
+      await vi.advanceTimersByTimeAsync(100);
+      const error = await result;
+      expect(error.message.includes("antivirus scanning")).toBe(platform === "win32");
+    } finally {
+      Object.defineProperty(process, "platform", original);
+    }
+  });
+
   it("reports a timeout separately from a missing executable without exposing stderr", async () => {
     const child = fakeChild(null);
     const acp = client();
@@ -106,13 +120,13 @@ describe("Antigravity initialization diagnostics", () => {
     acp.close();
   });
 
-  it("keeps the existing 90-second cold-start allowance", async () => {
+  it("keeps the platform's cold-start allowance (90 s, 180 s on Windows)", async () => {
     const child = fakeChild(null);
     const acp = client();
     const result = acp.initialize();
     let settled = false;
     void result.then(() => { settled = true; });
-    await vi.advanceTimersByTimeAsync(89_000);
+    await vi.advanceTimersByTimeAsync((process.platform === "win32" ? 180_000 : 90_000) - 1_000);
     expect(settled).toBe(false);
     child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: initialized })}\n`);
     await expect(result).resolves.toEqual(initialized);

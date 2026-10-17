@@ -20,8 +20,10 @@ import {
 // Printed on stderr by Google's server, not stdout.
 export const ANTIGRAVITY_AUTH_PREFIX = "Open the following link to authenticate the ACP server: ";
 const AUTH_TIMEOUT_MS = 5 * 60_000;
-// Google's packaged server can take tens of seconds to cold-start, especially on Windows.
-const STARTUP_TIMEOUT_MS = 90_000;
+// Google's packaged server can take tens of seconds to cold-start. On Windows it unpacks a
+// ~430 MB one-file bundle that antivirus scans file by file, which can outlast 90 s (#2916).
+const STARTUP_TIMEOUT_MS = process.platform === "win32" ? 180_000 : 90_000;
+const WINDOWS_SILENT_HINT = "On Windows, antivirus scanning of the files the runtime unpacks can hold it this long without any output.";
 const MAX_PROTOCOL_LINE_BYTES = 16 * 1024 * 1024;
 // Past the 16 KiB ceiling parseAntigravityAuthorizationUrl accepts, so no partial link is dropped.
 const MAX_DIAGNOSTIC_LINE_CHARS = 64 * 1024;
@@ -309,6 +311,7 @@ export class AntigravityAcpClient {
             `Antigravity initialization timed out after ${Math.ceil(timeoutMs / 1_000)} seconds (${process.platform}-${process.arch}). ` +
             "The executable was found, but did not finish starting. " +
             (this.nativeStartupHint ? `${this.nativeStartupHint} ` : "") +
+            (process.platform === "win32" && !this.startupOutputBytes && !this.startupDiagnosticBytes ? `${WINDOWS_SILENT_HINT} ` : "") +
             `Startup output: ${this.startupOutputBytes} bytes; diagnostic output: ${this.startupDiagnosticBytes} bytes. ` +
             "Retry setup. If it still fails, share this error and your OpenMausBot version; do not paste Google sign-in links or tokens.",
           ));
