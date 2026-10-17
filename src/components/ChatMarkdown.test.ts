@@ -1126,6 +1126,17 @@ describe("bidi: message content carries its own direction", () => {
     expect(fenced).toContain('<div dir="ltr"');
   });
 
+  it("starts a single long line wrapped, but not a short line or several lines", () => {
+    const fence = (code: string, lang: string) => renderToStaticMarkup(createElement(ChatMarkdown, { text: `\`\`\`${lang}\n${code}\n\`\`\`` }));
+    const long = fence(`echo ${"a".repeat(40)} > ~/example/some-long-file-name.sha && cat ~/example/file`, "sh");
+    expect(long).toContain('aria-pressed="true"');
+    expect(long).toContain("whitespace-pre-wrap");
+    const short = fence("pnpm test", "sh");
+    expect(short).toContain('aria-pressed="false"');
+    const several = fence(`${"x".repeat(100)}\ny`, "ts");
+    expect(several).toContain('aria-pressed="false"');
+  });
+
   it("lets an inline span break, so a long path cannot leave the bubble", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: `${ARABIC} \`dist/{download,privacy,terms,license,support,presskit,changelogs,docs,about,feedback}\` ${ARABIC}`,

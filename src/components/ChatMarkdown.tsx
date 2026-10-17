@@ -16,7 +16,7 @@ import {
   formatLineCount,
   getLanguageDisplayName,
   getSnippetFileName,
-  parseFenceInfo,
+  parseFenceInfo, startsWrapped,
 } from "../lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
 import { repairMarkdownTables } from "../lib/markdown-tables";
@@ -835,7 +835,7 @@ function MarkdownCode({ node, children }: BlockProps) {
   if (lang.trim().toLowerCase() === "mermaid") {
     return <MermaidDiagram code={code} />;
   }
-  return <CodeBlock code={code} lang={lang} initialWrap={wrap} />;
+  return <CodeBlock code={code} lang={lang} initialWrap={wrap || startsWrapped(code)} />;
 }
 
 function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
