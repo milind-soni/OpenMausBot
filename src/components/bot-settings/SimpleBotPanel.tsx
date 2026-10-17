@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+         import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ChevronRight, FileText, Image as ImageIcon, Slack, Smartphone, X } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -42,7 +42,7 @@ const labelCls = "mb-1.5 block text-[12px] text-ink-secondary";
 
 export type SimpleBotTab = "details" | "memory" | "library" | "skills" | "routines" | "vault";
 
-const TABS = [
+ const TABS = [
   ["details", "botSettings.simple.details"],
   ["memory", "botSettings.simple.memory"],
   ["library", "botSettings.simple.library"],
@@ -51,22 +51,22 @@ const TABS = [
   ["vault", "botSettings.simple.vault"],
 ] as const;
 
-const SIMPLE_PLACES: readonly Place[] = ["local", "cloud"];
+ const SIMPLE_PLACES: readonly Place[] = ["local", "cloud"];
 
-const USES_SHOWN = 4;
+ const USES_SHOWN = 4;
 
 const rowsCls = "divide-y divide-hairline/40 border-y border-hairline/40";
 const sectionTitleCls = "text-[12px] text-ink-secondary";
-const rowActionCls = "flex shrink-0 items-center gap-0.5 rounded-md py-1 pl-2 pr-1 text-[13px] font-medium text-ink hover:bg-raised";
+ const rowActionCls = "flex shrink-0 items-center gap-0.5 rounded-md py-1 pl-2 pr-1 text-[13px] font-medium text-ink hover:bg-raised";
 const linkCls = "rounded-md px-1.5 py-0.5 text-[12px] font-medium text-accent-text hover:bg-raised";
-const segmentCls = "inline-flex shrink-0 rounded-full bg-inset p-0.5";
+ const segmentCls = "inline-flex shrink-0 rounded-full bg-inset p-0.5";
 const segmentItemCls = (on: boolean) =>
   cn(
     "rounded-full px-2.5 py-1 text-[12px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
     on ? "bg-raised text-ink shadow-sm" : "text-ink-secondary enabled:hover:text-ink",
   );
 
-function Row({ title, hint, badge, children, ...rest }: {
+ function Row({ title, hint, badge, children, ...rest }: {
   title: ReactNode;
   hint?: ReactNode;
   badge?: ReactNode;
@@ -95,7 +95,7 @@ export interface LibraryItem {
   messageId: string;
 }
 
-export function botLibraryItems(bot: Bot): LibraryItem[] {
+ export function botLibraryItems(bot: Bot): LibraryItem[] {
   const groups: LibraryItem[][] = [];
   const seen = new Set<string>();
   for (const message of [...visibleMessages(bot)].reverse()) {
@@ -155,13 +155,12 @@ export function SimpleBotPanel({
   const platform = capabilities.host?.platform ?? "other";
   const placeSeat = usePlaceSeat(state.config, platform);
   const { patch, approvalMode, engine, trustedModesAvailable } = derived;
-  // Antigravity's old Auto still executes as Ask: show that without changing the saved mode or granting Full.
   const displayedApprovalMode = engine?.driverKind === "antigravityAgent" && approvalMode === "auto" ? "ask" : approvalMode;
 
   const autoOffered = approvalModeOptionsFor(engine?.driverKind ?? "", trustedModesAvailable)
     .some((option) => option.mode === "auto");
   const chooseMode = (mode: Extract<ApprovalMode, "ask" | "auto" | "full">) => {
-    if (bot.busy || mode === approvalMode) return;
+    if (mode === approvalMode) return;
     if (mode === "full") {
       dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: "full", applyToAllThreads: true } });
       return;
@@ -282,6 +281,8 @@ export function SimpleBotPanel({
         {tab === "details" && (
           <div role="tabpanel" className="mt-5 flex flex-col gap-6">
             <div className={rowsCls}>
+              {/* The same editor Identity has under All settings: color, body,
+                  expression, or a picture of the person's own. */}
               {editing === "look" ? (
                 <div className="py-3.5" data-simple-row="look">
                   <BotProfileAvatarCard bot={bot} activeState={derived.activeState} mascotMotion={derived.mascotMotion ?? null} onPatch={patch} />
@@ -393,6 +394,16 @@ export function SimpleBotPanel({
                 </Row>
               )}
 
+              {/* The bot's model, in the same plain-words picker as the chat
+                  header, shown in place (a floating popover would be clipped by
+                  this scrolling panel). A pick is the bot's model: groups and
+                  every thread without its own model move with it, like the full
+                  Model section, and the line below counts the threads that don't. */}
+              {/* The Thinking row below carries the effort steps, so the picker's
+                  own copy of that band is hidden while the row is shown: two
+                  copies of one control in one view read as a bug. The picker is
+                  not asked to leave it out because its file is at its size
+                  ceiling (scripts/testing/file-size-ratchet.test.ts). */}
               <div
                 className={cn("py-3.5", thinkingLevels.length > 0 && "[&_[data-simple-effort]]:hidden")}
                 data-simple-default-model
@@ -451,7 +462,7 @@ export function SimpleBotPanel({
                         data-approval-choice={choice.mode}
                         aria-pressed={selected}
                         title={choice.hint}
-                        disabled={Boolean(bot.busy) || !choice.offered}
+                        disabled={!choice.offered}
                         onClick={() => chooseMode(choice.mode)}
                         className={segmentItemCls(selected)}
                       >
@@ -493,6 +504,7 @@ export function SimpleBotPanel({
                   <span className="mt-1 flex flex-wrap gap-1">
                     {usedApps.slice(0, USES_SHOWN).map((app) => (
                       <span key={app.slug} data-simple-uses={app.slug} className="inline-flex max-w-full items-center gap-1 rounded-full bg-control py-0.5 pl-1 pr-2 text-[11.5px] text-ink">
+                        {/* Keyed by its mark: the catalog can arrive after the list. */}
                         <ServiceIcon key={`${app.card.logo}:${app.card.domain}`} card={app.card} className="size-3.5 shrink-0 text-[8px]" />
                         <span className="truncate">{app.label}</span>
                       </span>
@@ -517,6 +529,8 @@ export function SimpleBotPanel({
                 </button>
               </Row>
 
+              {/* A bot's own number and inbox are on their way; the rows say so
+                  rather than appear one day with no warning. */}
               <Row data-simple-row="phone" title={t("botSettings.simple.phone")} badge={soon} hint={t("botSettings.simple.phoneHint")} />
               <Row data-simple-row="email" title={t("botSettings.simple.email")} badge={soon} hint={t("botSettings.simple.emailHint")} />
             </div>
@@ -546,6 +560,7 @@ export function SimpleBotPanel({
                           {scheduleLabel(routine.schedule)} · {routineNextLabel(routine)}
                         </div>
                       </div>
+                      {/* A finished one-shot has nothing left to switch on. */}
                       {!routineFinished(routine) && (
                         <Switch
                           checked={routine.enabled}
@@ -711,6 +726,7 @@ export function SimpleBotPanel({
           dispatch({ type: "updateBot", botId: target.botId, patch: target.patch });
         }}
       />
+      {/* Where the phone apps are. Pairing a phone stays in the profile menu. */}
       <PhoneAppDialog open={phoneAppOpen} onClose={() => setPhoneAppOpen(false)} />
     </>
   );

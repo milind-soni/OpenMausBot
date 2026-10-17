@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   APPROVAL_MODES,
+  runningApprovalMode,
+  supportsLiveApprovalMode,
   DEFAULT_APPROVAL_MODE,
   approvalModeFor,
   setDefaultApprovalMode,
@@ -59,8 +61,6 @@ describe("approval modes", () => {
     expect(hasNativeAutoReview(driver)).toBe(false);
   });
 
-  // The chat-completions family has no provider reviewer, so Auto behaves like Ask, but Full is implemented in the harness
-  // (createOpenAIChatRuntime answers its own gate), so it is offered.
   it.each(["grok", "openai-compat", "minimax", "groq", "meta"])("offers harness-implemented Full on %s, but never native Auto", (driver) => {
     expect(supportsApprovalMode(driver, "ask")).toBe(true);
     expect(supportsApprovalMode(driver, "auto")).toBe(true);
@@ -177,5 +177,21 @@ describe("approval support bound to a registry", () => {
         expect(supports({ driverKind }, mode)).toBe(supportsApprovalMode(driverKind, mode));
       }
     }
+  });
+});
+
+describe("mode selection during work", () => {
+  it("allows both directions at app-owned gates and delays native elevation while honoring revocation", () => {
+    expect(runningApprovalMode("ask", "full", true)).toBe("full");
+    expect(runningApprovalMode("full", "ask", true)).toBe("ask");
+    expect(runningApprovalMode("ask", "full", false)).toBe("ask");
+    expect(runningApprovalMode("auto", "full", false)).toBe("auto");
+    expect(runningApprovalMode("full", "ask", false)).toBe("ask");
+    expect(runningApprovalMode("full", "auto", false)).toBe("auto");
+    expect(supportsLiveApprovalMode("openai-compat")).toBe(true);
+    expect(supportsLiveApprovalMode("meta")).toBe(true);
+    expect(supportsLiveApprovalMode("museCode")).toBe(false);
+    expect(supportsLiveApprovalMode("codex")).toBe(false);
+    expect(supportsLiveApprovalMode(undefined)).toBe(false);
   });
 });

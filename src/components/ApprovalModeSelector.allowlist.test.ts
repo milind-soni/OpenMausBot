@@ -18,10 +18,10 @@ function nodes(value: ReactNode): Node[] {
   const node = value as Node;
   return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
 }
-function render(onSelect: (mode: ApprovalMode) => void, onManageCommandAllowlist?: () => void, trustedModesAvailable = true, disabled = false) {
+function render(onSelect: (mode: ApprovalMode) => void, onManageCommandAllowlist?: () => void, trustedModesAvailable = true, disabled = false, busy = false) {
   let tree: ReactNode;
   function Capture() {
-    tree = ApprovalModeSelector({ providerName: "Codex", driverKind: "codex", approvalMode: "ask", onSelect, onManageCommandAllowlist, trustedModesAvailable, disabled });
+    tree = ApprovalModeSelector({ providerName: "Codex", driverKind: "codex", approvalMode: "ask", onSelect, onManageCommandAllowlist, trustedModesAvailable, disabled, busy });
     return tree;
   }
   return { html: renderToStaticMarkup(createElement(Capture)), nodes: nodes(tree) };
@@ -69,7 +69,18 @@ describe("command allowlist menu access", () => {
     expect(render(vi.fn()).html).not.toContain("Command allowlist");
   });
 
-  it("allows command management while busy while keeping every mode unavailable", () => {
+  it("offers mode changes during work and explains when native providers apply them", () => {
+    fixture.open = true;
+    const select = vi.fn();
+    const menu = render(select, undefined, true, false, true);
+    expect(menu.html).toContain("next user turn");
+    const mode = menu.nodes.find(node => node.props.role === "menuitemradio")!;
+    expect(mode.props.disabled).toBe(false);
+    mode.props.onClick!();
+    expect(select).toHaveBeenCalledOnce();
+  });
+
+  it("allows command management while mode selection is explicitly disabled", () => {
     const select = vi.fn(), manage = vi.fn();
     const trigger = render(select, manage, true, true).nodes.find((node) => node.props["aria-haspopup"] === "menu")!;
     expect(trigger.props.disabled).toBe(false);

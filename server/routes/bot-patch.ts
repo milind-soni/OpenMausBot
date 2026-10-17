@@ -1,4 +1,4 @@
-import { z } from "zod";
+       import { z } from "zod";
 
 import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { normalizeConnectorScopes } from "../../shared/connector-scopes.ts";
@@ -44,7 +44,6 @@ export interface BotPatchRouteDeps {
   supportsApprovalMode: ReturnType<typeof createApprovalModeSupport>;
   routines(): RoutineManager | null;
   activeVpsThreads: { has(botId: string): boolean };
-  /** Full access comes only from the workspace policy. */
   hostedWorkspace: boolean;
   hostedFullAccessRefusal: string;
   desktopManaged: boolean;
@@ -162,7 +161,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       let requestedComputer = existingBot?.computer;
       if (computerSpecified) {
         if (body.computer === null) {
-          // Clients send null for Auto; the durable field is then absent.
           requestedComputer = undefined;
           patch.computer = undefined;
         } else if (
@@ -176,7 +174,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         }
       }
       if (normalizedSelection) patch.modelSelection = normalizedSelection;
-      // null/"" clears; the id is not checked against the transcript.
       if (body.pinnedMessageId !== undefined) {
         if (body.pinnedMessageId === null || body.pinnedMessageId === "") patch.pinnedMessageId = undefined;
         else if (typeof body.pinnedMessageId === "string" && /^[\w-]+$/.test(body.pinnedMessageId)) {
@@ -201,7 +198,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         }
         patch.fallback = chain;
       }
-      // null clears back to every connected app.
       if (body.connectorScopes !== undefined) {
         if (body.connectorScopes === null) patch.connectorScopes = undefined;
         else {
@@ -219,7 +215,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
         patch.composio = body.composio;
       }
-      // An admin decision, so not on the client-writable profile surface.
       if (body.voiceNotes !== undefined) {
         if (typeof body.voiceNotes !== "boolean") return json(res, 400, { error: "voiceNotes must be true or false" });
         patch.voiceNotes = body.voiceNotes;
@@ -232,14 +227,12 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         }
         patch.memoryEnabled = body.memoryEnabled;
       }
-      // null drops the per-tool grants; {} means no tools.
       if (body.connectorTools !== undefined) {
         if (body.connectorTools === null) {
           patch.connectorTools = undefined;
         } else {
           const parsed = parseConnectorTools(body.connectorTools);
           if (!parsed.ok) return json(res, 400, { error: parsed.error });
-          // An unreachable backend never blocks the patch: the call-time check stays the authority.
           const semantic = await composio.validateConnectorGrants(cfg, parsed.grants);
           if (semantic) return json(res, 400, { error: semantic });
           patch.connectorTools = parsed.grants;
@@ -249,7 +242,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.parkDirectMessages !== "boolean") return json(res, 400, { error: "parkDirectMessages must be true or false" });
         patch.parkDirectMessages = body.parkDirectMessages;
       }
-      // Omitted keeps the selection; null restores all enabled servers; [] mounts none.
       let requestedMcpServers = existingBot?.mcpServers;
       if (Object.hasOwn(body, "toolScope")) {
         const parsed = parseToolScope(body.toolScope === null ? undefined : body.toolScope);
@@ -276,7 +268,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.memoryUpkeep !== "boolean") return json(res, 400, { error: "memoryUpkeep must be true or false" });
         patch.memoryUpkeep = body.memoryUpkeep;
       }
-      // true/false overrides the workspace, null follows it.
       if (body.cacheKeepWarm !== undefined) {
         if (body.cacheKeepWarm !== null && typeof body.cacheKeepWarm !== "boolean") return json(res, 400, { error: "cacheKeepWarm must be true, false or null" });
         patch.cacheKeepWarm = body.cacheKeepWarm ?? undefined;
@@ -296,7 +287,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         if (typeof body.recordBrowserSteps !== "boolean") return json(res, 400, { error: "recordBrowserSteps must be true or false" });
         patch.recordBrowserSteps = body.recordBrowserSteps;
       }
-      // null/"" = the bot's own session.
       if (body.browserProfile !== undefined) {
         const requestedProfile = body.browserProfile === null || body.browserProfile === ""
           ? undefined
@@ -338,7 +328,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (body.hidden === true && existingBot?.chiefOfStaff && body.chiefOfStaff !== false) {
         return json(res, 400, { error: "choose another Chief of Staff before hiding this bot" });
       }
-      // Type-checked, not copied: a string alwaysAllow would answer .includes() with substring matches.
       if (body.autoApprove !== undefined) {
         if (typeof body.autoApprove !== "boolean") return json(res, 400, { error: "autoApprove must be true or false" });
       }
@@ -351,21 +340,17 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         }
         requestedApprovalMode = body.approvalMode;
       } else if (body.autoApprove !== undefined) {
-        // Older clients' boolean can choose only Auto or Ask, never Full access.
         requestedApprovalMode = body.autoApprove ? "auto" : "ask";
       } else {
         requestedApprovalMode = approvalModeFor(existingBot ?? {});
       }
       const currentApprovalMode = approvalModeFor(existingBot ?? {});
-      const approvalChangeRequested = body.approvalMode !== undefined || body.autoApprove !== undefined;
-      if (existingBot?.busy && approvalChangeRequested && requestedApprovalMode !== currentApprovalMode) {
-        return json(res, 409, {
-          error: "stop this bot's turn before changing its approval level",
-        });
+      if (requestedApprovalMode === "auto" && currentApprovalMode !== "auto" &&
+          auth.kind === "loopback" && !DESKTOP_MANAGED && !req.headers.origin && store.bots.some(bot => bot.busy)) {
+        return json(res, 409, { error: "Change approval mode from the app or a paired device while bots are working." });
       }
       if (body.approvalMode !== undefined || body.autoApprove !== undefined) {
         patch.approvalMode = requestedApprovalMode;
-        // Older paired apps read autoApprove as exactly Auto.
         patch.autoApprove = requestedApprovalMode === "auto";
       }
       const targetSelection = normalizedSelection ?? existingBot?.modelSelection;
@@ -386,8 +371,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           error: "This provider does not support the selected approval level, or changing providers requires choosing Ask first",
         });
       }
-      // Full access applies from any client that can reach this API; Custom moves only through the
-      // desktop's private channel because it holds restrictions the person wrote.
       const requiresPrivateApprovalTransition =
         (requestedApprovalMode === "custom" && currentApprovalMode !== "custom") ||
         (currentApprovalMode === "custom" && requestedApprovalMode !== "custom");
@@ -408,9 +391,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       if (body.applyToAllThreads === true && existingBot) {
         const threads = store.tasks(existingBot.id);
-        if (threads.some((task) => threadBusy(existingBot.id, task.threadId))) {
-          return json(res, 409, { error: "stop this bot's turns before changing its approval level" });
-        }
         if (threads.some((task) => approvalModeFor(store.projectBotForTask(existingBot.id, task.threadId) ?? {}) === "custom")) {
           return json(res, 403, { error: "A thread on Custom approval can only leave it from the packaged desktop app" });
         }
@@ -418,8 +398,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           return json(res, 400, { error: "Every thread's provider must support this approval level" });
         }
       }
-      // Auto on this Mac hands a bot the user's real session: only the desktop's warning dialog sends
-      // acknowledgeLocalAuto, so a bot curling the loopback API is refused.
       const wantsComputer = computerSpecified ? requestedComputer : existingBot?.computer;
       const wantsAuto = requestedApprovalMode === "auto";
       const alreadyGranted =
@@ -437,8 +415,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         }
         patch.approvePeerComms = body.approvePeerComms;
       }
-      // null: everyone visible in the section; an array (even empty) is the explicit wiring. Narrowing is free;
-      // widening needs acknowledgePeerScope, since any loopback caller (a bot with Bash) gets admin.
       if (body.peers !== undefined) {
         let nextPeers: string[] | undefined;
         if (body.peers === null) nextPeers = undefined;
@@ -477,9 +453,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         }
         patch.managedSections = sections;
       }
-      // Losing the role revokes its grants: no dormant authority returns if it is elected again.
       if (body.chiefOfStaff === false) patch.managedSections = [];
-      // "everyone" (default), "admins" or { people: [...] }; members' PATCHes never get here.
       if (Object.hasOwn(body, "visibility")) {
         const parsed = parseVisibility(body.visibility);
         if (!parsed.ok) return json(res, 400, { error: parsed.error });
@@ -491,8 +465,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         }
         patch.alwaysAllow = [...new Set(body.alwaysAllow as string[])].slice(0, 200);
       }
-      // Known gap: outside the packaged desktop, loopback is the owner, so these loosenings are one curl from
-      // the bot they constrain. An originless, session-less loopback caller may loosen only while every bot is idle.
       const loosened: string[] = [];
       const trustPatch = patch as Pick<Partial<BotRecord>, "outbound" | "connectorScopes" | "fallback">;
       if (body.outbound !== undefined && trustPatch.outbound?.policy === "allow" &&
@@ -505,7 +477,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       if (Array.isArray(patch.managedSections) && patch.managedSections.some(section => !(existingBot?.managedSections ?? []).includes(section))) {
         loosened.push("managedSections");
       }
-      // A shell can forge an Origin header: new cross-team authority from local scripts only while every bot is idle.
       if (loosened.includes("managedSections") && auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
         return json(res, 409, { error: "Stop running bots before granting access to another team, or use the desktop app or a paired Full-access session." });
       }
@@ -553,7 +524,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
       const freshBrowserBot = store.bot(m[1]);
-      // Rechecked: the awaits above can yield after the first memory check.
       if (freshBrowserBot && body.memoryEnabled !== undefined &&
           body.memoryEnabled !== (freshBrowserBot.memoryEnabled !== false) &&
           (freshBrowserBot.busy || activeGroupTurnForBot(freshBrowserBot.id))) {
@@ -571,7 +541,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           return json(res, 409, { error: "Stop this bot's turns before changing its tool selection." });
         }
       }
-      // A running turn cannot unmount custom servers; rechecked after the awaits above.
       if (body.mcpServers !== undefined) {
         if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
           return json(res, 401, { error: "unauthorized: this session has expired or was revoked" });
@@ -604,7 +573,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       if (profile.patch.soul !== undefined) {
         if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
-      // Runtime fields keep their fail-closed order; only the profile fields commit atomically.
         const runtimePatch = { ...patch };
         for (const field of Object.keys(profile.patch)) delete runtimePatch[field];
         if (Object.keys(runtimePatch).length) store.patchBot(m[1], runtimePatch);
