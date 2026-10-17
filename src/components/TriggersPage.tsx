@@ -44,8 +44,8 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   }, [focus]);
   useEffect(() => { backButtonRef.current?.focus({ preventScroll: true }); }, []);
 
-  const all = useMemo(() => automationsFrom({ routines: state.routines, webhooks: routinesOnly ? [] : state.webhooks, runs: state.routineRuns }),
-    [state.routines, state.webhooks, state.routineRuns, routinesOnly]);
+  const all = useMemo(() => automationsFrom({ routines: state.routines, webhooks: routinesOnly ? [] : state.webhooks, runs: state.routineRuns, bots: state.bots }),
+    [state.routines, state.webhooks, state.routineRuns, state.bots, routinesOnly]);
   const showFilter = all.length >= FILTER_FROM && new Set(all.map((automation) => automation.botId)).size > 1;
   const listed = orderAutomations(all.filter((automation) => !showFilter || botFilter === "all" || automation.botId === botFilter));
   const open = all.find((automation) => automation.id === openId) ?? null;
@@ -64,8 +64,8 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
 
   return (
     <main className="flex h-full min-w-0 flex-1 flex-col bg-app animate-workspace-in">
-      <header className={cn("shrink-0 border-b border-hairline/35 bg-app py-3 pr-4", macInset && view === "calendar" ? "pl-[86px]" : "pl-4")} style={windowDragStyle}>
-        <div className="flex items-center gap-2">
+      <header className={cn("shrink-0 border-b border-hairline/35 bg-app py-3 pr-4", macInset && view === "calendar" ? "pl-[86px]" : view === "list" ? "pl-12 md:pl-4" : "pl-4")} style={windowDragStyle}>
+        <div className="flex flex-wrap items-center gap-2">
           <button type="button" ref={backButtonRef} onClick={onBack} aria-label="Back" title="Back" className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink" style={windowNoDragStyle}><ArrowLeft size={18} /></button>
           <h1 data-tour="automations-page" className="mr-1 text-[18px] font-semibold tracking-tight text-ink">{t("automations.title")}</h1>
           <div className="ml-auto flex items-center gap-3" style={windowNoDragStyle}>
@@ -92,7 +92,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
         {view === "calendar" ? <AutomationsCalendar botFilter={botFilter} selectedAutomationId={openId} onOpenAutomation={setOpenId} onOpenRoom={onOpenRoom} /> : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
-              {all.length === 0 && state.routinesLoadState !== "loading" ? (
+              {all.length === 0 && state.routinesLoadState !== "loading" && state.hydrated ? (
                 <section aria-label={t("automations.empty.title")} className="px-6 py-16 text-center">
                   <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-accent/10 text-accent"><Zap size={22} /></div>
                   <h2 className="text-[17px] font-semibold text-ink">{t("automations.empty.title")}</h2>
@@ -111,14 +111,15 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
                           {status.state === "needs-you"
                             ? <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12.5px] text-warning">{t("automations.needsYou", { reason: status.reason ?? "" })}<FixButton automation={automation} status={status} actions={actions} onEdit={() => setEditing({ kind: automation.kind, id: automation.id })} /></div>
                             : <div className="mt-0.5 text-[12.5px] text-ink-secondary">{statusLine(automation)}</div>}
+                          {actions.error && actions.errorFor?.endsWith(`:${automation.id}`) && <p role="alert" className="mt-1 text-[12px] text-danger">{actions.error}</p>}
                         </div>
-                        <Switch checked={automation.enabled} aria-label={t("automations.toggle", { name: automation.name })} onClick={() => actions.toggle(automation)} className="mt-0.5 shrink-0" />
+                        {status.state !== "done" && <Switch checked={automation.enabled} disabled={actions.busy === `toggle:${automation.id}`} aria-label={t("automations.toggle", { name: automation.name })} onClick={() => void actions.toggle(automation)} className="mt-0.5 shrink-0" />}
                       </li>
                     );
                   })}
                 </ul>
               )}
-              {actions.error && <p role="alert" className="mt-3 text-[12px] text-danger">{actions.error}</p>}
+              {actions.error && !listed.some((automation) => actions.errorFor?.endsWith(`:${automation.id}`)) && <p role="alert" className="mt-3 text-[12px] text-danger">{actions.error}</p>}
               <RoutineWakeBar />
             </div>
           </div>

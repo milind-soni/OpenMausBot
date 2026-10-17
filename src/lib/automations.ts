@@ -4,7 +4,7 @@ import { cronScheduleLabel } from "../../shared/cron-label";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import type { Routine, RoutineRun, RoutineSchedule } from "@/lib/routines";
-import type { WebhookTrigger } from "@/lib/webhooks";
+import type { WebhookAttempt, WebhookTrigger } from "@/lib/webhooks";
 import type { OptionCardData } from "@/state/store";
 
 export type AutomationKind = "schedule" | "webhook";
@@ -26,8 +26,10 @@ export interface Automation {
 const runTime = (run: RoutineRun) => run.startedAt ?? run.scheduledFor ?? run.createdAt;
 const newestFirst = (left: RoutineRun, right: RoutineRun) => runTime(right) - runTime(left);
 
-export function automationsFrom(sources: { routines: readonly Routine[]; webhooks: readonly WebhookTrigger[]; runs: readonly RoutineRun[] }): Automation[] {
+/** With `bots`, an automation whose bot no longer exists is left out: it can never run, so it is never shown. */
+export function automationsFrom(sources: { routines: readonly Routine[]; webhooks: readonly WebhookTrigger[]; runs: readonly RoutineRun[]; bots?: readonly { id: string }[] }): Automation[] {
   const runsOf = (id: string) => sources.runs.filter((run) => run.routineId === id).sort(newestFirst);
+  const botIds = sources.bots && new Set(sources.bots.map((bot) => bot.id));
   return [
     ...sources.routines.map((routine): Automation => ({
       kind: "schedule", id: routine.id, name: routine.name, botId: routine.botId, instructions: routine.prompt, enabled: routine.enabled,
@@ -37,7 +39,7 @@ export function automationsFrom(sources: { routines: readonly Routine[]; webhook
       kind: "webhook", id: webhook.id, name: webhook.name, botId: webhook.botId, instructions: webhook.prompt, enabled: webhook.enabled,
       eventTypes: webhook.eventTypes, nextRunAt: null, runs: runsOf(webhook.id),
     })),
-  ];
+  ].filter((automation) => !botIds || botIds.has(automation.botId));
 }
 
 export function automationFor(ref: { kind: AutomationKind; id: string }, sources: Parameters<typeof automationsFrom>[0]): Automation | null {
@@ -45,6 +47,7 @@ export function automationFor(ref: { kind: AutomationKind; id: string }, sources
     routines: ref.kind === "schedule" ? sources.routines.filter((routine) => routine.id === ref.id) : [],
     webhooks: ref.kind === "webhook" ? sources.webhooks.filter((webhook) => webhook.id === ref.id) : [],
     runs: sources.runs,
+    bots: sources.bots,
   })[0] ?? null;
 }
 
@@ -88,7 +91,7 @@ export function nextWhen(at: number, now = Date.now()): string {
   return new Date(at).toLocaleDateString(locale(), { month: "short", day: "numeric" });
 }
 
-const capital = (text: string) => text.charAt(0).toLocaleUpperCase(locale()) + text.slice(1);
+export const capital = (text: string) => text.charAt(0).toLocaleUpperCase(locale()) + text.slice(1);
 
 // ---- The sentence ----
 
@@ -186,7 +189,8 @@ export function automationSentence(automation: Pick<Automation, "kind" | "name" 
 
 export type AutomationFix = "answer" | "sign-in" | "usage" | "edit" | "run";
 export interface AutomationStatus {
-  state: "working" | "paused" | "needs-you";
+  /** Done: a one-time automation whose time has passed. It has nothing left to turn on; Edit gives it a new time. */
+  state: "working" | "paused" | "needs-you" | "done";
   /** Needs you: one plain sentence, and the one button that fixes it. */
   reason?: string;
   fix?: AutomationFix;
@@ -205,10 +209,11 @@ function ownerFix(run: RoutineRun): { reason: string; fix: AutomationFix } | nul
   return null;
 }
 
-/** Paused when switched off. Needs you when its last run waits on the person, failed for a reason only the person can
- * fix, or failed twice running. A run that failed and then recovered is Working. */
-export function automationStatus(automation: Pick<Automation, "enabled" | "runs">): AutomationStatus {
-  if (!automation.enabled) return { state: "paused" };
+/** Done when a one-time automation's time has passed, Paused when switched off. Needs you when its last run waits on the
+ * person, failed for a reason only the person can fix, or failed twice running. A run that failed and then recovered is
+ * Working. */
+export function automationStatus(automation: Pick<Automation, "enabled" | "runs"> & Partial<Pick<Automation, "schedule">>, now = Date.now()): AutomationStatus {
+  if (!automation.enabled) return isDone(automation, now) ? { state: "done" } : { state: "paused" };
   const settled = automation.runs.filter((run) => run.status !== "cancelled" && run.status !== "queued");
   const latest = settled[0];
   if (latest?.status === "waiting") return { state: "needs-you", reason: t("automations.reason.answer"), fix: "answer" };
@@ -222,9 +227,17 @@ export function automationStatus(automation: Pick<Automation, "enabled" | "runs"
   return { state: "working" };
 }
 
-const RANK = { "needs-you": 0, working: 1, paused: 2 } as const;
+/** A one-time automation whose time has passed: turning it back on would have nothing to do. */
+export const isDone = (automation: Partial<Pick<Automation, "schedule">>, now = Date.now()) =>
+  automation.schedule?.type === "once" && automation.schedule.at <= now;
 
-/** Needs you first, then Working, then Paused; within each, the soonest next run, then by name. */
+export const STATUS_WORD: Record<AutomationStatus["state"], LocaleKey> = {
+  working: "automations.status.working", paused: "automations.status.paused", "needs-you": "automations.status.needsYou", done: "automations.status.done",
+};
+
+const RANK = { "needs-you": 0, working: 1, paused: 2, done: 3 } as const;
+
+/** Needs you first, then Working, then Paused, then Done; within each, the soonest next run, then by name. */
 export function orderAutomations<T extends Automation>(automations: readonly T[]): T[] {
   return automations
     .map((automation) => ({ automation, rank: RANK[automationStatus(automation).state] }))
@@ -236,9 +249,9 @@ export function orderAutomations<T extends Automation>(automations: readonly T[]
 
 /** The grey line under a sentence: "Working · last ran today 9:02 AM · next Monday 9:00 AM". */
 export function statusLine(automation: Automation, now = Date.now()): string {
-  const status = automationStatus(automation);
+  const status = automationStatus(automation, now);
   const latest = automation.runs.find((run) => run.status !== "queued");
-  const parts = [t(status.state === "paused" ? "automations.status.paused" : status.state === "needs-you" ? "automations.status.needsYou" : "automations.status.working")];
+  const parts = [t(STATUS_WORD[status.state])];
   if (latest?.status === "running") parts.push(t("automations.runningNow"));
   else if (latest) parts.push(`${t("automations.lastRan", { when: lastWhen(runTime(latest), now) })}${isProblem(latest) ? " ✗" : ""}`);
   else parts.push(t("automations.notRunYet"));
@@ -265,3 +278,48 @@ export const AUTOMATION_FIX_LABEL: Record<AutomationFix, LocaleKey> = {
   edit: "automations.fix.edit",
   run: "automations.fix.run",
 };
+
+export const CALLS_SHOWN = 30;
+export const CALL_PREVIEW_CHARS = 240;
+
+export interface WebhookCall {
+  id: string;
+  at: number;
+  /** ✓ when it was taken in, ✗ when it was turned away or skipped. */
+  ok: boolean;
+  reason: string;
+  /** The payload's first characters; empty when nothing trustworthy was received (a wrong secret, say). */
+  preview: string;
+}
+
+/** One incoming call in plain words: why it was taken in, turned away or skipped. */
+function callReason(attempt: WebhookAttempt): { ok: boolean; reason: string } {
+  if (attempt.outcome === "accepted") return { ok: true, reason: t("automations.calls.received") };
+  if (attempt.outcome === "captured") return { ok: true, reason: t("automations.calls.test") };
+  if (attempt.outcome === "duplicate") return { ok: false, reason: t("automations.calls.duplicate") };
+  if (attempt.outcome === "ignored") return { ok: false, reason: attempt.eventName ? t("automations.calls.skipped", { kind: attempt.eventName }) : t("automations.calls.noKind") };
+  const repeats = Number(/\((\d+) requests\)/.exec(attempt.reason ?? "")?.[1] ?? 1);
+  if (attempt.statusCode === 401) return { ok: false, reason: repeats > 1 ? t("automations.calls.wrongSecretTimes", { count: repeats }) : t("automations.calls.wrongSecret") };
+  if (attempt.statusCode === 409) return { ok: false, reason: t("automations.calls.paused") };
+  if (attempt.statusCode === 410) return { ok: false, reason: t("automations.calls.botGone") };
+  if (attempt.statusCode === 429) return { ok: false, reason: /rate limit/i.test(attempt.reason ?? "") ? t("automations.calls.tooFast") : t("automations.calls.tooMany") };
+  if (attempt.statusCode === 413) return { ok: false, reason: t("automations.calls.tooLarge") };
+  if (attempt.statusCode === 400) return { ok: false, reason: t("automations.calls.unreadable") };
+  return { ok: false, reason: t("automations.calls.refused") };
+}
+
+/** The last calls another app made to this automation, newest first, including the ones turned away. */
+export function webhookCalls(webhookId: string, attempts: readonly WebhookAttempt[]): WebhookCall[] {
+  return attempts.filter((attempt) => attempt.webhookId === webhookId)
+    .sort((left, right) => right.receivedAt - left.receivedAt)
+    .slice(0, CALLS_SHOWN)
+    .map((attempt) => ({ id: attempt.id, at: attempt.receivedAt, ...callReason(attempt), preview: (attempt.preview ?? "").slice(0, CALL_PREVIEW_CHARS) }));
+}
+
+/** The newest payload it accepted, so instructions can name its real fields. A turned-away call never counts. */
+export function lastReceived(webhook: Pick<WebhookTrigger, "id" | "verificationSample">, attempts: readonly WebhookAttempt[]): { at: number; preview: string } | null {
+  const latest = attempts.filter((attempt) => attempt.webhookId === webhook.id && attempt.outcome !== "rejected" && attempt.preview)
+    .reduce<WebhookAttempt | null>((newest, attempt) => (!newest || attempt.receivedAt > newest.receivedAt ? attempt : newest), null);
+  if (latest) return { at: latest.receivedAt, preview: latest.preview! };
+  return webhook.verificationSample?.preview ? { at: webhook.verificationSample.receivedAt, preview: webhook.verificationSample.preview } : null;
+}

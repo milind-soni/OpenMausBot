@@ -15,7 +15,7 @@ const HARD_CAP = 2000;
 const LISTED_FROM = 1000;
 
 const LINES: Record<string, number> = {
-  "server/index.ts": 17308,
+  "server/index.ts": 17306,
   "src/state/store.tsx": 3604,
   "electron/main.mjs": 3470,
   "server/store.ts": 2475,
@@ -23,9 +23,9 @@ const LINES: Record<string, number> = {
   "server/drivers/claude.ts": 2168,
   "server/drivers/acp/core.ts": 2009,
   "server/drivers/codex.ts": 1872,
-  "server/routines.ts": 1869,
+  "server/routines.ts": 1858,
   "src/components/ComputerPanel.tsx": 1918,
-  "src/components/RoutineCalendarPage.tsx": 1765,
+  "src/components/RoutineCalendarPage.tsx": 1763,
   "server/config.ts": 1455,
   "src/components/ChatView.tsx": 1492,
   "server/routine-requests.ts": 1677,

@@ -1114,10 +1114,12 @@ export function reducer(state: AppState, action: Action): AppState {
     case "routinesLoadFailed":
       return { ...state, routinesLoadState: "error" };
     case "routinePatched": {
-      const exists = state.routines.some((routine) => routine.id === action.routine.id);
+      const existing = state.routines.find((routine) => routine.id === action.routine.id);
+      // A PATCH's answer and the server's broadcast of it can arrive in either order: never step back to an older edit.
+      if (existing && existing.updatedAt > action.routine.updatedAt) return state;
       return {
         ...state,
-        routines: exists
+        routines: existing
           ? state.routines.map((routine) => (routine.id === action.routine.id ? action.routine : routine))
           : [action.routine, ...state.routines],
       };
@@ -2581,10 +2583,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           api("/api/routines", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
           break;
         case "updateRoutine":
-          api(`/api/routines/${action.routineId}`, {
-            method: "PATCH",
-            body: JSON.stringify(action.patch),
-          }).catch(showError);
+          api(`/api/routines/${action.routineId}`, { method: "PATCH", body: JSON.stringify(action.patch) })
+            .then(({ routine }) => rawDispatch({ type: "routinePatched", routine }), showError);
           break;
         case "deleteRoutine":
           api(`/api/routines/${action.routineId}`, { method: "DELETE" }).catch(showError);

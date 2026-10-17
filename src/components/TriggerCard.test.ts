@@ -82,7 +82,7 @@ describe("the chat card a bot-made automation leaves", () => {
       { id: "run-2", routineId: "routine-1", botId: "bot-1", status: "completed", scheduledFor: now - 60_000, startedAt: now - 60_000, createdAt: now - 60_000, threadId: "exec-2", output: "Three priorities: invoices, hiring, launch.\nMore detail." },
     ];
     const html = render(scheduleCard);
-    expect(html).toMatch(/Last ran today [^<]* ✓ Three priorities: invoices, hiring, launch\. · next /);
+    expect(html).toMatch(/Last ran today [^<]* ✓ Three priorities: invoices, hiring, launch\. · next: /);
     expect(html).not.toContain("More detail.");
     expect(html).not.toContain("Next: ");
   });
@@ -92,13 +92,30 @@ describe("the chat card a bot-made automation leaves", () => {
     expect(render(scheduleCard)).toContain("Needs you: It&#x27;s waiting for your answer.");
   });
 
-  it("pauses through the store, and says Paused with Resume once paused", () => {
+  it("pauses through its own API, applies the answer at once, and says Paused with Resume once paused", async () => {
+    fixture.api.mockResolvedValue({ routine: { ...routine, enabled: false } });
     click(scheduleCard, "Pause");
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateRoutine", routineId: "routine-1", patch: { enabled: false } });
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "routinePatched", routine: { ...routine, enabled: false } }));
+    expect(fixture.api).toHaveBeenCalledWith("/api/routines/routine-1", { method: "PATCH", body: JSON.stringify({ enabled: false }) });
     fixture.state.routines = [{ ...routine, enabled: false }];
     const html = render(scheduleCard);
     expect(html).toContain(">Paused<");
     expect(html).toContain("Resume</button>");
+  });
+
+  it("says why when turning it back on is refused", async () => {
+    fixture.state.routines = [{ ...routine, enabled: false }];
+    fixture.api.mockRejectedValue(new Error("Its time has passed. Edit it to pick a new time."));
+    click(scheduleCard, "Resume");
+    await vi.waitFor(() => expect(document.querySelector("[role=alert]")?.textContent).toBe("Its time has passed. Edit it to pick a new time."));
+  });
+
+  it("says Done, with no Pause or Resume, once a one-time automation has happened", () => {
+    fixture.state.routines = [{ ...routine, enabled: false, nextRunAt: null, schedule: { type: "once", at: now - 60_000 } }];
+    fixture.state.routineRuns = [{ id: "run-4", routineId: "routine-1", botId: "bot-1", status: "completed", scheduledFor: now - 60_000, startedAt: now - 60_000, createdAt: now - 60_000, output: "Sent." }];
+    const html = render(scheduleCard);
+    expect(html).toMatch(/>Done · Last ran today [^<]* ✓ Sent\.</);
+    expect(html).not.toMatch(/(Pause|Resume)<\/button>/);
   });
 
   it("undoes through the conversation's undo route with the card's request id", () => {
@@ -114,7 +131,7 @@ describe("the chat card a bot-made automation leaves", () => {
   it("says when another app sends something, offers Copy address, and shows no address or secret on the card", () => {
     const html = render(webhookCard);
     expect(html).toContain("Set up: When another app sends something, Scout drafts a follow-up for the lead");
-    expect(html).toContain("hasn&#x27;t run yet");
+    expect(html).toContain(">Hasn&#x27;t run yet<");
     expect(html).toContain("Copy address</button>");
     expect(html).not.toMatch(/whsec_|wh_abc|webhook/i);
   });
@@ -132,5 +149,19 @@ describe("the chat card a bot-made automation leaves", () => {
     const gone = render(scheduleCard);
     expect(gone).toContain("This automation no longer exists");
     expect(gone).not.toContain("Pause</button>");
+  });
+
+  it("opens Edit over the whole page, never inside the transcript the card sits in", async () => {
+    fixture.state = { ...fixture.state, groups: [], sections: [] };
+    click(scheduleCard, "Edit");
+    await vi.waitFor(() => expect(document.querySelector("[role=dialog]")).not.toBeNull(), { timeout: 5_000 });
+    expect(document.querySelector("[data-trigger-card] [role=dialog]")).toBeNull();
+    expect(document.querySelector("[role=dialog]")!.closest("body > div:not(:has([data-trigger-card]))")).not.toBeNull();
+  });
+
+  it("never shows an automation whose bot was deleted", () => {
+    fixture.state.bots = [];
+    expect(render(scheduleCard)).toContain("This automation no longer exists");
+    expect(render(webhookCard)).toContain("This automation no longer exists");
   });
 });

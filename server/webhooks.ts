@@ -435,17 +435,24 @@ export class WebhookManager {
     return { webhook: publicTrigger(trigger), secret };
   }
 
-  disableForBot(botId: string): void {
-    let changed = false;
-    for (const trigger of this.webhooks) {
-      if (trigger.botId !== botId || !trigger.enabled) continue;
-      trigger.enabled = false;
-      trigger.updatedAt = this.now();
+  /** A deleted bot's webhooks go with it, for good: the bot cannot come back, so no Undo keeps them. */
+  removeForBot(botId: string): void {
+    const gone = this.webhooks.filter((trigger) => trigger.botId === botId);
+    if (!gone.length && !this.deleted.some((entry) => entry.webhook.botId === botId)) return;
+    this.assertWritable();
+    const ids = new Set(gone.map((trigger) => trigger.id));
+    const endpoints = gone.map((trigger) => `${trigger.endpointId}:`);
+    this.webhooks = this.webhooks.filter((trigger) => !ids.has(trigger.id));
+    this.deleted = this.deleted.filter((entry) => entry.webhook.botId !== botId);
+    this.attempts = this.attempts.filter((attempt) => !ids.has(attempt.webhookId));
+    this.deliveries = this.deliveries.filter((delivery) => !endpoints.some((prefix) => delivery.key.startsWith(prefix)));
+    for (const trigger of gone) {
+      this.rate.delete(trigger.endpointId);
+      this.unauthorized.delete(trigger.id);
       this.options.cancelQueued?.(trigger.id, "The assigned MAUS was deleted");
-      this.emit(trigger);
-      changed = true;
     }
-    if (changed) this.save();
+    this.save();
+    for (const trigger of gone) this.options.emit?.({ kind: "webhook.deleted", webhookId: trigger.id });
   }
 
   authorize(endpointId: string, secret: string): boolean {
@@ -471,13 +478,14 @@ export class WebhookManager {
     const trigger = this.webhooks.find((candidate) => candidate.id === id);
     if (!trigger) return null;
     const eventName = trigger.eventTypes?.[0] ?? "openmaus.test";
+    // Run now is the person's own test: like a schedule's, it runs while paused.
     return this.dispatch(trigger, {
       payload,
       contentType: "application/json",
       eventName,
       userAgent: "OpenMausBot webhook tester",
       deliveryId: `test-${randomUUID()}`,
-    });
+    }, true);
   }
 
   recordRejected(endpointId: string, statusCode: number, reason: string, event: Partial<WebhookEvent> = {}): WebhookAttempt | null {
@@ -509,8 +517,8 @@ export class WebhookManager {
     return attempt;
   }
 
-  private dispatch(trigger: StoredWebhookTrigger, event: WebhookEvent): WebhookReceiveResult {
-    if (!trigger.enabled) fail(409, "This webhook is paused");
+  private dispatch(trigger: StoredWebhookTrigger, event: WebhookEvent, byPerson = false): WebhookReceiveResult {
+    if (!trigger.enabled && !byPerson) fail(409, "This webhook is paused");
     if (this.options.botState(trigger.botId) === "missing") fail(410, "The assigned MAUS no longer exists");
 
     const allowed = trigger.eventTypes ?? [];

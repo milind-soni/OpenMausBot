@@ -1146,7 +1146,7 @@
   "sidebar.confirm.archiveTitle": "Lưu trữ {name}?",
   "sidebar.confirm.archiveBody": "{name} sẽ bị ẩn khỏi thanh bên, nhưng mọi cuộc trò chuyện đều được giữ lại. Bạn có thể khôi phục bất kỳ lúc nào từ mục Bot đã lưu trữ.",
   "sidebar.confirm.deleteTitle": "Xóa {name}?",
-  "sidebar.confirm.deleteBody": "Thao tác này sẽ xóa vĩnh viễn {name}, các cuộc trò chuyện, tệp, bộ nhớ và bất kỳ máy tính nào thuộc sở hữu của bot — bao gồm các tệp của máy tính đó và thông tin đăng nhập trình duyệt. Máy tính dùng chung của team vẫn được giữ lại. Không thể hoàn tác thao tác này.",
+  "sidebar.confirm.deleteBody": "Thao tác này sẽ xóa vĩnh viễn {name}, các cuộc trò chuyện, tệp, bộ nhớ, các tác vụ tự động và bất kỳ máy tính nào thuộc sở hữu của bot — bao gồm các tệp của máy tính đó và thông tin đăng nhập trình duyệt. Máy tính dùng chung của team vẫn được giữ lại. Không thể hoàn tác thao tác này.",
   "sidebar.archived.title": "Bot đã lưu trữ",
   "sidebar.archived.subtitle": "Các cuộc trò chuyện được giữ lại cho đến khi bạn chọn xóa bot.",
   "sidebar.archived.restoreAll": "Khôi phục tất cả",

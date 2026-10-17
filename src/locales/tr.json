@@ -1146,7 +1146,7 @@
   "sidebar.confirm.archiveTitle": "{name} arşivlensin mi?",
   "sidebar.confirm.archiveBody": "{name} kenar çubuğundan ayrılır, ancak tüm sohbetler saklanır. Arşivlenen botlar bölümünden istediğiniz zaman geri yükleyebilirsiniz.",
   "sidebar.confirm.deleteTitle": "{name} silinsin mi?",
-  "sidebar.confirm.deleteBody": "Bu işlem {name} botunu, sohbetlerini, dosyalarını, belleğini ve sahip olduğu tüm bilgisayarları (bu bilgisayarın dosyaları ve tarayıcı oturumları dahil) kalıcı olarak kaldırır. Paylaşılan ekip bilgisayarları kalır. Bu işlem geri alınamaz.",
+  "sidebar.confirm.deleteBody": "Bu işlem {name} botunu, sohbetlerini, dosyalarını, belleğini, otomasyonlarını ve sahip olduğu tüm bilgisayarları (bu bilgisayarın dosyaları ve tarayıcı oturumları dahil) kalıcı olarak kaldırır. Paylaşılan ekip bilgisayarları kalır. Bu işlem geri alınamaz.",
   "sidebar.archived.title": "Arşivlenen botlar",
   "sidebar.archived.subtitle": "Siz bir botu silmeyi seçene kadar sohbetler saklanır.",
   "sidebar.archived.restoreAll": "Tümünü geri yükle",

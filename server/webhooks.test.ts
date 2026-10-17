@@ -338,3 +338,32 @@ describe("WebhookManager", () => {
     expect(() => h.manager.receive(webhook.endpointId, secret, { payload: { overflow: true }, eventName: "push" })).toThrow("rate limit");
   });
 });
+
+describe("turning a webhook back on, Run now, and a deleted bot's webhooks", () => {
+  it("turns a paused webhook back on, and Run now works while it is paused, like a schedule's", () => {
+    const h = harness();
+    const { webhook } = create(h.manager);
+    expect(h.manager.update(webhook.id, { enabled: false, verificationPending: false })).toMatchObject({ enabled: false });
+    expect(h.manager.test(webhook.id)).toMatchObject({ runId: "run-1", duplicate: false });
+    expect(h.manager.update(webhook.id, { enabled: true, verificationPending: false })).toMatchObject({ enabled: true });
+  });
+
+  it("removes a deleted bot's webhooks for good, with their calls, and cancels their queued work", () => {
+    const h = harness();
+    const { webhook, secret } = create(h.manager);
+    const other = h.manager.create({ name: "Other", prompt: "Other work", botId: "maus-other" });
+    h.manager.receive(webhook.endpointId, secret, { payload: { lead: "Ada" }, deliveryId: "lead-1" });
+    h.manager.remove(h.manager.create({ name: "Deleted earlier", prompt: "x", botId: "maus-sales" }).webhook.id);
+
+    h.manager.removeForBot("maus-sales");
+
+    expect(h.manager.list().map((trigger) => trigger.id)).toEqual([other.webhook.id]);
+    expect(h.manager.listAttempts()).toEqual([]);
+    expect(h.cancelled).toContainEqual({ id: webhook.id, message: "The assigned MAUS was deleted" });
+    expect(h.emitted).toContainEqual({ kind: "webhook.deleted", webhookId: webhook.id });
+    expect(() => h.manager.receive(webhook.endpointId, secret, { payload: {} })).toThrow("Invalid webhook URL or secret");
+    const saved = JSON.parse(readFileSync(h.file, "utf8"));
+    expect(saved.webhooks.map((trigger: { id: string }) => trigger.id)).toEqual([other.webhook.id]);
+    expect(saved.deleted).toEqual([]);
+  });
+});

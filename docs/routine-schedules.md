@@ -15,6 +15,20 @@ In **Automations → Schedule**, choose **Monthly**, **Yearly**, or **Custom cro
 can be changed. Saved cron routines retain their own zone even on another
 computer. Editing just a title or instructions preserves the exact schedule.
 
+## Off, on, and done
+
+The switch on **Automations** pauses a schedule or a webhook and turns it back
+on; a schedule comes back with its next time. If the server refuses, the reason
+shows beside the switch. A one-time schedule whose time has passed reads
+**Done** and has no switch: turning it on would have nothing to do, so the
+server refuses it ("Its time has passed. Edit it to pick a new time."). Saving
+it with a new time turns it back on.
+
+Deleting a bot deletes its schedules and webhooks too, and their runs. A
+webhook's address stops working at once. Automations left behind by a bot
+deleted in an earlier version are removed the next time OpenMausBot starts, and
+never run meanwhile.
+
 ## Advanced cron
 
 Cron uses five fields: **minute hour day-of-month month day-of-week**.

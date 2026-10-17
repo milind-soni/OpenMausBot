@@ -277,7 +277,7 @@
   "sidebar.confirm.archiveTitle": "Archiver {name} ?",
   "sidebar.confirm.archiveBody": "{name} quitte la barre latérale, mais toutes les conversations sont conservées. Vous pouvez le restaurer à tout moment depuis Bots archivés.",
   "sidebar.confirm.deleteTitle": "Supprimer {name} ?",
-  "sidebar.confirm.deleteBody": "Cela supprime définitivement {name}, ses conversations, ses fichiers, sa mémoire et tout ordinateur qui lui appartient, y compris les fichiers et connexions de navigateur de cet ordinateur. Les ordinateurs partagés de l'équipe sont conservés. C'est irréversible.",
+  "sidebar.confirm.deleteBody": "Cela supprime définitivement {name}, ses conversations, ses fichiers, sa mémoire, ses automatisations et tout ordinateur qui lui appartient, y compris les fichiers et connexions de navigateur de cet ordinateur. Les ordinateurs partagés de l'équipe sont conservés. C'est irréversible.",
   "sidebar.archived.title": "Bots archivés",
   "sidebar.archived.subtitle": "Les conversations sont conservées jusqu'à ce que vous supprimiez un bot.",
   "sidebar.archived.restoreAll": "Tout restaurer",

@@ -533,7 +533,7 @@
   "sidebar.confirm.archiveTitle": "归档 {name}？",
   "sidebar.confirm.archiveBody": "{name} 会从侧边栏消失，但所有对话都会保留。你随时可以在“已归档的机器人”中恢复它。",
   "sidebar.confirm.deleteTitle": "删除 {name}？",
-  "sidebar.confirm.deleteBody": "这会永久删除 {name}、它的对话、文件、记忆，以及该机器人拥有的所有计算机，包括这些计算机上的文件和浏览器登录信息。团队共享的计算机会保留。此操作无法撤销。",
+  "sidebar.confirm.deleteBody": "这会永久删除 {name}、它的对话、文件、记忆、自动化，以及该机器人拥有的所有计算机，包括这些计算机上的文件和浏览器登录信息。团队共享的计算机会保留。此操作无法撤销。",
   "sidebar.archived.title": "已归档的机器人",
   "sidebar.archived.subtitle": "在你选择删除机器人之前，对话都会保留。",
   "sidebar.archived.restoreAll": "全部恢复",

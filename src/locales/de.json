@@ -357,7 +357,7 @@
   "sidebar.confirm.archiveTitle": "{name} archivieren?",
   "sidebar.confirm.archiveBody": "{name} verschwindet aus der Seitenleiste, aber jede Unterhaltung bleibt erhalten. Du kannst den Bot jederzeit unter „Archivierte Bots“ wiederherstellen.",
   "sidebar.confirm.deleteTitle": "{name} löschen?",
-  "sidebar.confirm.deleteBody": "Damit werden {name}, alle Unterhaltungen, Dateien, der Speicher und jeder diesem Bot zugeordnete Computer dauerhaft entfernt — einschließlich der Dateien und Browser-Anmeldungen auf diesem Computer. Gemeinsam genutzte Teamcomputer bleiben erhalten. Das lässt sich nicht rückgängig machen.",
+  "sidebar.confirm.deleteBody": "Damit werden {name}, alle Unterhaltungen, Dateien, der Speicher, die Automatisierungen und jeder diesem Bot zugeordnete Computer dauerhaft entfernt — einschließlich der Dateien und Browser-Anmeldungen auf diesem Computer. Gemeinsam genutzte Teamcomputer bleiben erhalten. Das lässt sich nicht rückgängig machen.",
   "sidebar.archived.title": "Archivierte Bots",
   "sidebar.archived.subtitle": "Unterhaltungen bleiben erhalten, bis du einen Bot löschst.",
   "sidebar.archived.restoreAll": "Alle wiederherstellen",

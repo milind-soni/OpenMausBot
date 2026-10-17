@@ -12,6 +12,8 @@ export type RoutineCalendarItem = {
   durationMinutes: number;
   routine: Routine | null;
   run: RoutineRun | null;
+  /** A future event of an automation that needs the person: shown in its status colour, not as working. */
+  needsYou?: boolean;
 };
 
 export type CalendarCollisionItem = {

@@ -1037,7 +1037,7 @@
   "sidebar.confirm.archiveTitle": "{name} をアーカイブしますか？",
   "sidebar.confirm.archiveBody": "{name} はサイドバーから消えますが、会話はすべて残ります。「アーカイブ済みのボット」からいつでも戻せます。",
   "sidebar.confirm.deleteTitle": "{name} を削除しますか？",
-  "sidebar.confirm.deleteBody": "{name} と、その会話、ファイル、メモリー、そのボットが所有するすべてのコンピューターを完全に削除します。そのコンピューター内のファイルとブラウザーのログイン情報も消去されます。チームで共有しているコンピューターは残ります。元に戻せません。",
+  "sidebar.confirm.deleteBody": "{name} と、その会話、ファイル、メモリー、オートメーション、そのボットが所有するすべてのコンピューターを完全に削除します。そのコンピューター内のファイルとブラウザーのログイン情報も消去されます。チームで共有しているコンピューターは残ります。元に戻せません。",
   "sidebar.archived.title": "アーカイブ済みのボット",
   "sidebar.archived.subtitle": "ボットを削除するまで、会話は保持されます。",
   "sidebar.archived.restoreAll": "すべて戻す",

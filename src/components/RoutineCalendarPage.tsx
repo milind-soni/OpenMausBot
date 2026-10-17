@@ -44,6 +44,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { t } from "@/lib/i18n";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import type { CalendarCall, CalendarCallAttachment, CalendarCallInput } from "@/lib/calendar-calls";
+import { isDone } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import {
   imageAttachmentFromFile,
@@ -527,7 +528,7 @@ export function EventEditor({
           botId: lockedBotId ?? botIds[0] ?? "",
           groupId: routineTarget === "room-goal" ? groupId : null,
           runOn: routineTarget === "room-goal" ? "maus" : runOn,
-          enabled: existingRoutine ? undefined : true,
+          enabled: existingRoutine && (existingRoutine.enabled || !isDone(existingRoutine, savedAt)) ? undefined : true,
           schedule: nextSchedule,
           durationMinutes,
           timeoutMinutes,
@@ -537,10 +538,7 @@ export function EventEditor({
           attachments: routineTarget === "room-goal" ? [] : attachments as RoutineContextAttachment[],
           ...(routineTarget === "bot" ? { resultsThreadId } : {}),
         };
-        const response = await editorRequest(existingRoutine ? `/api/routines/${existingRoutine.id}` : "/api/routines", {
-          method: existingRoutine ? "PATCH" : "POST",
-          body: JSON.stringify(input),
-        });
+        const response = await editorRequest(existingRoutine ? `/api/routines/${existingRoutine.id}` : "/api/routines", { method: existingRoutine ? "PATCH" : "POST", body: JSON.stringify(input) });
         dispatch({ type: "routinePatched", routine: response.routine });
       } else {
         if (recurrence === "interval" || isCronChoice(recurrence)) throw new Error("Choose a supported call schedule.");
@@ -1230,7 +1228,7 @@ function CalendarEventCard({
   const paused = Boolean(routine && !run && !routine.enabled);
   const [previewDuration, setPreviewDuration] = useState(item.durationMinutes);
   useEffect(() => setPreviewDuration(item.durationMinutes), [item.durationMinutes]);
-  const status = run?.status;
+  const status = run?.status, attention = status === "failed" || status === "missed" || status === "waiting" || (item.kind === "routine" && !run && item.needsYou === true);
   const statusLabel = run ? routineRunLabel(run) : undefined;
   const canMove = isCall || Boolean(routine && !run && !paused && routine.schedule.type !== "cron");
   const schedule = isCall ? item.call.schedule : routine?.schedule;
@@ -1298,7 +1296,7 @@ function CalendarEventCard({
         {previewDuration >= 30 && (isCall ? <Video size={compact ? 11 : 13} className="mt-0.5 shrink-0" /> : primary ? <BotAvatar bot={primary} state={status ? statusState(status) : paused ? "sleeping" : "idle"} size={compact ? 18 : 22} animated={status === "running" || status === "waiting"} /> : null)}
         <div className="min-w-0 flex-1">
           <div className={cn("truncate text-[11px] font-semibold", previewDuration < 30 ? "leading-none" : "leading-tight")}>{name}</div>
-          {previewDuration >= 30 && <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px] opacity-80">{!isCall && <span data-event-status={paused ? "paused" : status === "failed" || status === "missed" || status === "waiting" ? "needs-you" : "working"} className={cn("size-1.5 shrink-0 rounded-full", paused ? "bg-ink-tertiary" : status === "failed" || status === "missed" || status === "waiting" ? "bg-warning" : "bg-success")} />}<span className="truncate">{niceTime(item.at)} · {isCall ? t(ownerBots.length === 1 ? "routines.botCountOne" : "routines.botCountMany", { count: ownerBots.length }) : isRoomGoal ? room?.name ?? t("routines.group") : intervalCadence ? `${primary?.name ?? ""} · ${intervalCadence}` : primary?.name}</span></div>}
+          {previewDuration >= 30 && <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px] opacity-80">{!isCall && <span data-event-status={paused ? "paused" : attention ? "needs-you" : "working"} className={cn("size-1.5 shrink-0 rounded-full", paused ? "bg-ink-tertiary" : attention ? "bg-warning" : "bg-success")} />}<span className="truncate">{niceTime(item.at)} · {isCall ? t(ownerBots.length === 1 ? "routines.botCountOne" : "routines.botCountMany", { count: ownerBots.length }) : isRoomGoal ? room?.name ?? t("routines.group") : intervalCadence ? `${primary?.name ?? ""} · ${intervalCadence}` : primary?.name}</span></div>}
         </div>
         {previewDuration >= 30 && ownerBots.length > 1 && <span className="rounded bg-inset/60 px-1 py-0.5 text-[8px]">+{ownerBots.length - 1}</span>}
       </div>

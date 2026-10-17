@@ -476,6 +476,7 @@ import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
+import { tieAutomationsToBots } from "./bot-automations.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { AGENTS_PROXY_ENV, agentsProxyLaunch, agentsToolBridgeEnv, applyAgentsBridge, bridgedToolTitle, turnEngine } from "./agents-bridge-switch.ts";
@@ -9850,8 +9851,6 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           store.deleteBot(bot.id, setupRequest);
           skillReview.dropBot(bot.id);
           memoryUpkeep.forgetBot(bot.id);
-          routines!.disableForBot(bot.id);
-          webhooks.disableForBot(bot.id);
           calendarCalls!.removeBot(bot.id);
           browserLive.closeForBot(bot.id);
           cacheKeepWarm.cancelBot(bot.id);
@@ -10221,6 +10220,7 @@ const webhooks = new WebhookManager({
   },
 });
 const webhookRequests = new WebhookRequestService({ store, webhooks, botName: (botId) => store.bot(botId)?.name ?? "the bot" });
+tieAutomationsToBots(store, { routines: routines!, webhooks });
 
 let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
@@ -16182,9 +16182,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (routineMatch && method === "DELETE") {
       const removed = routines!.remove(routineMatch[1]);
       if (removed) cloudRoutineAuthors?.remove(routineMatch[1]);
-      return removed
-        ? json(res, 200, { ok: true })
-        : json(res, 404, { error: "no such routine" });
+      return removed ? json(res, 200, { ok: true }) : json(res, 404, { error: "no such routine" });
     }
     if (path === "/api/routine-runs/seen-all" && method === "POST") {
       return json(res, 200, { runs: routines!.markAllSeen() });

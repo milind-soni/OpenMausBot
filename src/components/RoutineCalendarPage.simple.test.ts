@@ -136,7 +136,7 @@ describe("Automations page", () => {
   it("lists each automation as one sentence with a plain status line and a switch", () => {
     const html = markup(createElement(RoutinesPage, { onBack: vi.fn(), onOpenRoom: vi.fn() }));
     expect(html).toContain("Every day at 6:30 AM, Runner summarises my inbox and calendar".replace("my inbox", "your inbox"));
-    expect(html).toMatch(/Working · last ran [^<]+ · next [^<]+/);
+    expect(html).toMatch(/Working · last ran [^<]+ · next: [^<]+/);
     expect(html).not.toMatch(/Latest: |Not run yet|runs OK this week|Run logs/);
   });
 
@@ -177,7 +177,7 @@ describe("Automations page", () => {
   });
 
   it("greets an empty list, and its example fills the New box", () => {
-    fixture.state = { ...fixture.state!, routines: [], webhooks: [], routineRuns: [], routinesLoadState: "ready" };
+    fixture.state = { ...fixture.state!, hydrated: true, routines: [], webhooks: [], routineRuns: [], routinesLoadState: "ready" };
     const html = markup(createElement(RoutinesPage, { onBack: vi.fn(), onOpenRoom: vi.fn() }));
     expect(html).toContain("Your bots can do things on their own.");
     expect(html).toContain("Try: every morning, summarize my inbox");
@@ -308,6 +308,22 @@ describe("routine editor", () => {
     click(buttons(tree).get("Save"));
     const [, off] = fixture.api.mock.calls.at(-1) as unknown as [string, { body: string }];
     expect(JSON.parse(off.body)).toMatchObject({ continuity: false });
+  });
+
+  it("turns a one-time routine that already happened back on when it is saved with a new time, and leaves any other's switch alone", async () => {
+    const save = async (saved: Routine) => {
+      fixture.values = [];
+      const props = { seed: { kind: "routine" as const, at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [bot.id], routine: saved }, bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn() };
+      click(buttons(capture(() => EventEditor(props))).get("Save"));
+      await vi.waitFor(() => expect(fixture.api).toHaveBeenCalled());
+      const [, init] = fixture.api.mock.calls.at(-1) as unknown as [string, { body: string }];
+      fixture.api.mockClear();
+      return JSON.parse(init.body);
+    };
+    const once = { ...routine, schedule: { type: "once" as const, at: Date.now() - 3_600_000 }, nextRunAt: null };
+    expect(await save({ ...once, enabled: false })).toMatchObject({ enabled: true });
+    expect(await save({ ...once, enabled: false, schedule: { type: "once", at: Date.now() + 7_200_000 } })).not.toHaveProperty("enabled");
+    expect(await save({ ...routine, enabled: false })).not.toHaveProperty("enabled");
   });
 
   it("shows a routine with no thread of its own reporting into the bot's main thread", () => {

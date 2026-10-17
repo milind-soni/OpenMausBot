@@ -1012,6 +1012,7 @@ export class RoutineManager {
     if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
     const scheduleChanged = JSON.stringify(clean.schedule) !== JSON.stringify(routine.schedule);
     const enabledChanged = clean.enabled !== routine.enabled;
+    if (enabledChanged && clean.enabled && clean.schedule.type === "once" && clean.schedule.at <= now) throw new RoutineScheduleError("Its time has passed. Edit it to pick a new time.");
     const nextRunAt = !clean.enabled ? null : scheduleChanged || enabledChanged
       ? this.initialOccurrence(clean.schedule, now)
       : routine.nextRunAt;
@@ -1079,16 +1080,9 @@ export class RoutineManager {
     return true;
   }
 
-  disableForBot(botId: string) {
-    let changed = false;
-    for (const routine of this.routines) {
-      if (routine.botId !== botId || !routine.enabled) continue;
-      routine.enabled = false;
-      routine.nextRunAt = null;
-      routine.updatedAt = Math.max(this.now(), routine.updatedAt + 1);
-      this.emitRoutine(routine);
-      changed = true;
-    }
+  /** A deleted bot's schedules go with it: each is removed, its unfinished runs stop, and its run history is dropped. */
+  removeForBot(botId: string) {
+    for (const routine of this.routines.filter((candidate) => candidate.botId === botId)) this.remove(routine.id);
     for (const run of this.runs) {
       if (run.botId !== botId || !["queued", "running", "waiting"].includes(run.status)) continue;
       run.status = "cancelled";
@@ -1097,16 +1091,11 @@ export class RoutineManager {
       run.finishedAt = this.now();
       run.error = "The assigned bot was deleted";
       this.emitRun(run);
-      if (run.threadId) {
-        if (run.target === "room-goal" && run.groupId) {
-          void this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
-        } else {
-          void this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
-        }
-      }
-      changed = true;
+      if (run.threadId && run.target === "room-goal" && run.groupId) void this.options.interruptGoal?.(run.groupId, run.threadId).catch(() => {});
+      else if (run.threadId) void this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
     }
-    if (changed) this.save();
+    const kept = this.runs.filter((run) => run.botId !== botId);
+    if (kept.length !== this.runs.length) this.commitMutation(() => { this.runs = kept; });
   }
 
   disableForGroup(groupId: string) {
@@ -1363,7 +1352,7 @@ export class RoutineManager {
         await this.stopRun(run, `Stopped after reaching the ${run.timeoutMinutes}-minute run limit`, "limit-reached");
       }
       const dueRoutines = this.routines.filter(
-        (routine) => routine.enabled && routine.nextRunAt != null && routine.nextRunAt <= now,
+        (routine) => routine.enabled && routine.nextRunAt != null && routine.nextRunAt <= now && this.targetState(routine) !== "missing",
       );
       // An unanswered wait gives way to its routine's next occurrence, which would otherwise be skipped behind it.
       for (const routine of dueRoutines) {

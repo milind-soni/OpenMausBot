@@ -3021,3 +3021,17 @@ describe("notifications feed", () => {
     }
   });
 });
+
+describe("a routine's answer and its broadcast", () => {
+  it("applies whichever arrives first and never steps back to an older edit", () => {
+    const routine = { id: "r1", name: "Daily", prompt: "Summarize", target: "bot", botId: "b1", runOn: "maus", enabled: true,
+      schedule: { type: "daily", time: "09:00", weekdays: [1] }, durationMinutes: 30, nextRunAt: 5, createdAt: 1, updatedAt: 10 } as AppState["routines"][number];
+    const paused = { ...routine, enabled: false, nextRunAt: null, updatedAt: 11 };
+    const resumed = { ...routine, updatedAt: 12 };
+    let state = reducer({ ...initialState, routines: [routine] }, { type: "routinePatched", routine: paused });
+    state = reducer(state, { type: "routinePatched", routine: resumed });
+    state = reducer(state, { type: "routinePatched", routine: paused });
+    expect(state.routines).toEqual([resumed]);
+    expect(reducer(state, { type: "routinePatched", routine: { ...resumed, failureStreak: 1 } }).routines[0]).toMatchObject({ failureStreak: 1 });
+  });
+});

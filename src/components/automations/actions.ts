@@ -14,27 +14,29 @@ export function useAutomationActions() {
   const showThreads = useShowThreads();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
+  /** What the error is about, e.g. "toggle:<id>", so it shows beside the thing that was clicked. */
+  const [errorFor, setErrorFor] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
 
   const attempt = async (key: string, work: () => Promise<unknown>) => {
     if (busy) return;
     setBusy(key);
     setError("");
+    setErrorFor(null);
     try { await work(); }
-    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)); setErrorFor(key); }
     finally { setBusy(null); }
   };
 
-  const toggle = (automation: Automation) => {
+  const toggle = (automation: Automation) => attempt(`toggle:${automation.id}`, async () => {
     if (automation.kind === "schedule") {
-      dispatch({ type: "updateRoutine", routineId: automation.id, patch: { enabled: !automation.enabled } });
+      const response = await api(`/api/routines/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !automation.enabled }) });
+      dispatch({ type: "routinePatched", routine: response.routine });
       return;
     }
-    void attempt(`toggle:${automation.id}`, async () => {
-      const response = await api(`/api/webhooks/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !automation.enabled, verificationPending: false }) });
-      dispatch({ type: "webhookPatched", webhook: response.webhook });
-    });
-  };
+    const response = await api(`/api/webhooks/${automation.id}`, { method: "PATCH", body: JSON.stringify({ enabled: !automation.enabled, verificationPending: false }) });
+    dispatch({ type: "webhookPatched", webhook: response.webhook });
+  });
 
   const runNow = (automation: Automation) => attempt(`run:${automation.id}`, () => automation.kind === "schedule"
     ? new Promise<void>((resolve, reject) => dispatch({ type: "runRoutine", routineId: automation.id, onStarted: () => resolve(), onError: reject }))
@@ -74,5 +76,5 @@ export function useAutomationActions() {
     if (bot && run?.threadId) openBotThread(dispatch, bot, run.threadId, showThreads);
   };
 
-  return { busy, error, setError, copied, toggle, runNow, remove, copyAddress, openRun };
+  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, openRun };
 }

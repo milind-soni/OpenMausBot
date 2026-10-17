@@ -6,6 +6,7 @@ import type { CalendarCall } from "@/lib/calendar-calls";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { addDays, calendarRangeLabel, projectedRoutineItems, scheduleAt, startOfDay, startOfWeek } from "@/lib/routine-calendar";
+import { automationsFrom, automationStatus } from "@/lib/automations";
 import type { RoutineRun } from "@/lib/routines";
 import { api, useStore } from "@/state/store";
 import { CalendarGrid, EventDetails, EventEditor, projectCalls, QuickComposer, type CalendarEventItem, type EventKind, type EventSeed } from "../RoutineCalendarPage";
@@ -20,7 +21,7 @@ export function AutomationsCalendar({ botFilter, selectedAutomationId, onOpenAut
 }) {
   const { state, dispatch } = useStore();
   const routinesOnly = window.ogb?.remoteClient?.active === true;
-  const [days, setDays] = useState<1 | 7>(7);
+  const [days, setDays] = useState<1 | 7>(() => (window.innerWidth < 640 ? 1 : 7));
   const [anchor, setAnchor] = useState(() => startOfDay(Date.now()));
   const [calls, setCalls] = useState<CalendarCall[]>([]);
   const [quick, setQuick] = useState<EventSeed | null>(null);
@@ -38,12 +39,16 @@ export function AutomationsCalendar({ botFilter, selectedAutomationId, onOpenAut
   useEffect(() => { if (!routinesOnly) void loadCalls(); }, [loadCalls, routinesOnly]);
 
   const items = useMemo<CalendarEventItem[]>(() => {
-    const routineItems = projectedRoutineItems(state.routines, state.routineRuns, rangeStart, rangeEnd).map((item) => ({ ...item, kind: "routine" as const }));
+    const botIds = new Set(state.bots.map((bot) => bot.id));
+    const routines = state.routines.filter((routine) => botIds.has(routine.botId));
+    const needsYou = new Set(automationsFrom({ routines, webhooks: [], runs: state.routineRuns }).filter((automation) => automationStatus(automation).state === "needs-you").map((automation) => automation.id));
+    const routineItems = projectedRoutineItems(routines, state.routineRuns.filter((run) => botIds.has(run.botId)), rangeStart, rangeEnd)
+      .map((item) => ({ ...item, kind: "routine" as const, needsYou: Boolean(item.routine && !item.run && needsYou.has(item.routine.id)) }));
     const callItems = projectCalls(calls, rangeStart, rangeEnd).map((item) => ({ ...item, kind: "call" as const }));
     return [...routineItems, ...callItems]
       .filter((item) => botFilter === "all" || (item.kind === "call" ? item.call.botIds.includes(botFilter) : (item.routine?.botId ?? item.run?.botId) === botFilter))
       .sort((left, right) => left.at - right.at);
-  }, [state.routines, state.routineRuns, calls, rangeStart, rangeEnd, botFilter]);
+  }, [state.routines, state.routineRuns, state.bots, calls, rangeStart, rangeEnd, botFilter]);
 
   const liveSelected = selected?.kind === "call"
     ? (() => { const call = calls.find((candidate) => candidate.id === selected.call.id); return call ? { ...selected, call } : null; })()

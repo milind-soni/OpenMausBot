@@ -219,6 +219,8 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
       if (typeof plan.progressAfterGate === "string") progress?.(plan.progressAfterGate);
       if (plan.delayMs) await new Promise(resolve => { delayTimer = setTimeout(resolve, plan.delayMs); });
       if (plan.fail && !resumed) throw new Error("Scripted addressed agent failure");
+      // `failWith`: the turn fails with this engine error, e.g. a signed-out reason.
+      if (typeof plan.failWith === "string") throw new Error(plan.failWith);
       if (plan.failResumed && resumed) throw new Error("Scripted failure of a resumed turn");
       if (approval && approval.behavior !== "allow") return plan.replyIfDenied ?? `${plan.reply} (approval ${approval.behavior})`;
       if (entry) return plan.reply ?? `Result from ${botId}`;
@@ -231,6 +233,7 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
     appendFileSync(`${planPath}.evidence.jsonl`, JSON.stringify({ botId, turnIndex, threadId: agent.OMB_THREAD_ID, pid: process.pid,
       model: argv.includes("--model") ? arg("--model") : undefined,
       permissionMode: argv.includes("--permission-mode") ? arg("--permission-mode") : undefined,
+      restricted: argv.includes("--restricted"), permissionPromptTool: argv.includes("--permission-prompt-tool"),
       snapshotMode: argv.includes("--system-prompt-snapshot") ? arg("--system-prompt-snapshot") : undefined,
       resumed, system, prompt, evidence, ...(entry ? { planKey: entry.key } : {}), ...(approval ? { approval } : {}), ...(screen ? { screen } : {}), ...launch?.evidence }) + "\n");
   }

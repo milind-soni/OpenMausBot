@@ -3675,3 +3675,65 @@ describe("routine paths that cannot exist where the routine runs", () => {
     expect(JSON.parse(readFileSync(h.options.file!, "utf8")).routines[0]).not.toHaveProperty("warning");
   });
 });
+
+describe("turning a schedule back on, and a deleted bot's schedules", () => {
+  const start = new Date(2026, 7, 17, 8, 0, 0).getTime();
+  const once = (at: number) => ({ name: "Reminder", prompt: "Remind me", botId: "maus-1", schedule: { type: "once" as const, at } });
+
+  it("turns a paused schedule back on with its next occurrence", () => {
+    const h = harness(start);
+    const routine = h.manager.create({ name: "Daily", prompt: "Summarize", botId: "maus-1", schedule: { type: "daily", time: "09:00", weekdays: [0, 1, 2, 3, 4, 5, 6] } });
+    expect(h.manager.update(routine.id, { enabled: false })).toMatchObject({ enabled: false, nextRunAt: null });
+    h.setNow(start + 3 * 60 * 60_000);
+    expect(h.manager.update(routine.id, { enabled: true })).toMatchObject({ enabled: true, nextRunAt: new Date(2026, 7, 18, 9, 0).getTime() });
+  });
+
+  it("refuses to turn a one-time schedule back on once its time has passed, instead of running it again and switching itself off", async () => {
+    const h = harness(start);
+    const ran = h.manager.create(once(start + 60_000));
+    h.setNow(start + 60_000);
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRoutines().find((routine) => routine.id === ran.id)).toMatchObject({ enabled: false });
+    expect(() => h.manager.update(ran.id, { enabled: true })).toThrow(RoutineScheduleError);
+    expect(() => h.manager.update(ran.id, { enabled: true })).toThrow("Its time has passed. Edit it to pick a new time.");
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    // A new time turns it back on.
+    expect(h.manager.update(ran.id, { enabled: true, schedule: { type: "once", at: start + 60 * 60_000 } })).toMatchObject({ enabled: true, nextRunAt: start + 60 * 60_000 });
+    // Paused before its time and turned on again before it: fine.
+    const later = h.manager.create(once(start + 2 * 60 * 60_000));
+    h.manager.update(later.id, { enabled: false });
+    expect(h.manager.update(later.id, { enabled: true })).toMatchObject({ enabled: true, nextRunAt: start + 2 * 60 * 60_000 });
+  });
+
+  it("removes a deleted bot's schedules, stops its unfinished runs and drops its run history, leaving other bots' alone", async () => {
+    const h = harness(start);
+    const daily = { type: "daily" as const, time: "23:59", weekdays: [1] };
+    const gone = h.manager.create({ name: "Gone", prompt: "Work", botId: "maus-1", schedule: daily });
+    const goneToo = h.manager.create({ name: "Gone too", prompt: "Work", botId: "maus-1", enabled: false, schedule: daily });
+    const kept = h.manager.create({ name: "Kept", prompt: "Work", botId: "maus-2", schedule: daily });
+    const running = h.manager.runNow(gone.id)!;
+    h.manager.runNow(kept.id);
+    await h.manager.tick();
+    expect(h.manager.listRuns().find((run) => run.id === running.id)?.status).toBe("running");
+
+    h.manager.removeForBot("maus-1");
+
+    expect(h.manager.listRoutines().map((routine) => routine.id)).toEqual([kept.id]);
+    expect(h.manager.listRuns().map((run) => run.botId)).toEqual(["maus-2"]);
+    expect(h.interruptedTurns).toEqual([{ botId: "maus-1", threadId: "thread-1" }]);
+    expect(h.emitted).toEqual(expect.arrayContaining([{ kind: "routine.deleted", routineId: gone.id }, { kind: "routine.deleted", routineId: goneToo.id }]));
+    expect(JSON.parse(readFileSync(h.options.file!, "utf8")).routines.map((routine: { id: string }) => routine.id)).toEqual([kept.id]);
+  });
+
+  it("never starts a due schedule whose bot no longer exists", async () => {
+    const h = harness(start);
+    h.manager.create(once(start + 60_000));
+    h.setBot("missing");
+    h.setNow(start + 60_000);
+    await h.manager.tick();
+    expect(h.manager.listRuns()).toEqual([]);
+    expect(h.started).toEqual([]);
+  });
+});
