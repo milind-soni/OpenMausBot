@@ -6,7 +6,7 @@ provider's own permission modes, passed through. A native tool request that
 reaches you is one the provider left for you. OpenMausBot only answers from an
 explicit grant: Full Access, a saved exact command or MCP read-shaped tool, or
 the narrow built-in web-search allowance under Approve for me. In Full Access,
-OMB also applies its own configuration tools without another approval.
+OMB also runs connected-app actions and applies its own configuration tools without another approval.
 
 Every bot and conversation starts at **Full access**, the default T3 Code uses
 too: each engine runs in its own most permissive mode, and a real question or
@@ -65,6 +65,15 @@ or workspace/team ownership and computer-sharing grants. Full Access controls
 approval prompts; it does not sign in for you, enable a feature you disabled,
 or grant another bot access to a different workspace.
 
+Explicit connected-app scopes and tool grants still apply in Full access.
+Opaque Composio code cannot run against a restricted tool grant because its
+targets cannot be verified. The source thread's Full grant, or a Chief's level
+carried by a room hand-off, is checked again immediately before dispatch: a
+grant revoked while session setup waits falls back to the bot's outbound
+policy, so an Ask policy or opaque code stops the call. Below Full, sending still needs approval or a counted daily allowance,
+and opaque code always needs explicit approval. Full actions do not consume
+that allowance, and are recorded in the decision log with `rule: full-access`.
+
 The effective setting belongs to the source conversation. An existing Ask
 thread remains Ask even if the bot default is Full; a Full thread works
 without these extra prompts even if the bot default is Ask. A bot nobody has
@@ -109,6 +118,24 @@ own default and its other conversations do not change, and an ordinary bot's
 hand-off still uses the recipient's setting. A consultation (`consult: true`)
 answers from what the teammate knows and acts on nothing, so no level travels
 with it. Questions and missing credentials still reach you.
+
+## Changing the level while working
+
+The composer selector stays available during a running turn. OpenMausBot saves
+changes for that conversation; its siblings keep their selections.
+
+For OpenAI-compatible and other chat API engines, the new selection applies
+before the next tool executes, including later tools in the same response.
+Changing the level preserves delivered tool history;
+it does not itself reset the API conversation's replay prefix.
+
+Native harnesses receive their permission mode with each user turn. Selecting a
+new level while working saves it for the next user turn. App-side gates honor a
+narrower grant immediately, including revoking a Chief's delegated connector
+access; elevation waits for the native harness's next user turn.
+
+Already-running actions finish, and already-open cards remain for you to answer.
+Changing the selection never silently answers a question or an open approval.
 
 ## Answering a request
 

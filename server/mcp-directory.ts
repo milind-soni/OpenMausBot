@@ -21,7 +21,7 @@ export const LISTED_TOOLS_MAX = 40;
 export const LISTED_CHARS_MAX = 100_000;
 export const SEARCH_LIMIT_DEFAULT = 8;
 export const SEARCH_LIMIT_MAX = 20;
-const DESCRIPTION_CHARS = 200;
+export const DESCRIPTION_CHARS = 200;
 export const SIGNATURE_CHARS = 300;
 const AREAS_CHARS = 2_000;
 const ABOUT_CHARS = 400;
@@ -185,6 +185,28 @@ const AREA_WEIGHT = FIELD_WEIGHTS.name;
 const LIST_INTENT = new Set(["who", "which", "what", "show", "list", "recent", "newest", "latest", "all"]);
 const LIST_WEIGHT = 0.5;
 
+// Catalogs often call a screenshot a capture or webpage navigation a URL
+// change. Expand these common requests without rewriting upstream schemas;
+// literal terms keep their full weight so synonyms cannot dominate a name.
+const QUERY_ALIASES = new Map(([
+  ["screenshot", ["capture", "screen", "display", "png"]],
+  ["snapshot", ["capture", "screenshot"]],
+  ["webpage", ["browser", "page", "url"]],
+  ["open", ["navigate", "launch"]],
+] as const).map(([word, aliases]) => [terms(word)[0], terms(aliases.join(" "))]));
+const QUERY_ALIAS_WEIGHT = 0.3;
+
+function weightedQuery(query: string): Map<string, number> {
+  const literal = terms(query);
+  const weights = new Map(literal.map((word) => [word, 1]));
+  for (const word of literal) {
+    for (const alias of QUERY_ALIASES.get(word) ?? []) {
+      if (!weights.has(alias)) weights.set(alias, QUERY_ALIAS_WEIGHT);
+    }
+  }
+  return weights;
+}
+
 function counted(text: string): { counts: Map<string, number>; length: number } {
   const counts = new Map<string, number>();
   const words = terms(text);
@@ -213,7 +235,8 @@ function byName(a: CatalogTool, b: CatalogTool): number {
 }
 
 export const bm25Ranker: ToolRanker = (query, tools, limit) => {
-  const wanted = [...new Set(terms(query))];
+  const weighted = weightedQuery(query);
+  const wanted = [...weighted.keys()];
   const exact = query.trim().toLowerCase();
   const listing = !wanted.includes("list") && query.toLowerCase().split(/[^\p{L}\p{N}]+/u).some((word) => LIST_INTENT.has(word));
   const docs = tools.map((tool) => {
@@ -235,16 +258,16 @@ export const bm25Ranker: ToolRanker = (query, tools, limit) => {
   const scored: Array<{ tool: CatalogTool; score: number }> = [];
   for (const doc of docs) {
     let score = doc.tool.name.toLowerCase() === exact ? 1_000 : 0;
-    for (const term of wanted) {
+    for (const [term, weight] of weighted) {
       let tf = 0;
       for (const field of FIELDS) {
         const { counts, length } = doc.fields[field];
         const count = counts.get(term);
         if (count) tf += (FIELD_WEIGHTS[field] * count) / (1 - B + (B * length) / average[field]);
       }
-      if (tf) score += rarity(docs.length, df.get(term) ?? 0) * saturated(tf);
+      if (tf) score += weight * rarity(docs.length, df.get(term) ?? 0) * saturated(tf);
       const inArea = doc.area.counts.get(term);
-      if (inArea) score += rarity(docs.length, areaDf.get(term) ?? 0) * saturated((AREA_WEIGHT * inArea) / (1 - B + (B * doc.area.length) / averageArea));
+      if (inArea) score += weight * rarity(docs.length, areaDf.get(term) ?? 0) * saturated((AREA_WEIGHT * inArea) / (1 - B + (B * doc.area.length) / averageArea));
     }
     if (score > 0 && listing && doc.lists) score += LIST_WEIGHT * listRarity;
     if (score > 0) scored.push({ tool: doc.tool, score });
@@ -291,6 +314,14 @@ function typeText(schema: unknown, depth: number, root?: unknown, hops = 0): str
   if (isRecord(schema.properties)) return "object";
   if (Array.isArray(schema.allOf) && schema.allOf.length === 1) return typeText(schema.allOf[0], depth, root, hops);
   return "unknown";
+}
+
+function signatureOmitsDetails(schema: unknown): boolean {
+  if (!isRecord(schema)) return true;
+  if (Object.keys(schema).some(key => !["type", "properties", "required", "additionalProperties"].includes(key))) return true;
+  if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) return true;
+  return isRecord(schema.properties) && Object.values(schema.properties).some(field => !isRecord(field) ||
+    Object.keys(field).some(key => key !== "type") || !["string", "number", "integer", "boolean", "null"].includes(String(field.type)));
 }
 
 export function inputSignature(schema: unknown, maxChars = SIGNATURE_CHARS): string {
@@ -462,7 +493,7 @@ export class ToolDirectory {
       },
       {
         name: DESCRIBE_TOOL,
-        description: `Get the exact description and input schema of one tool of ${who}. Use it when a match's input fields are cut short or you need their exact types.`,
+        description: `Get the exact description and input schema of one tool of ${who}. Read it before first use of matches marked needsDescription, or when you need exact input types.`,
         inputSchema: { type: "object", properties: { name: nameField }, required: ["name"], additionalProperties: false },
         annotations: { readOnlyHint: true },
       },
@@ -492,15 +523,19 @@ export class ToolDirectory {
     const found = await this.ranker(query, this.tools, limit);
     const matches = found.slice(0, limit).filter((tool) => this.index.get(tool.name) === tool).map((tool) => {
       const annotations = isRecord(tool.annotations) ? tool.annotations : {};
+      const description = tool.description ?? tool.title;
+      const input = inputSignature(tool.inputSchema);
+      const abbreviated = (typeof description === "string" && description.replace(/\s+/g, " ").trim().length > DESCRIPTION_CHARS) || input.includes("…") || signatureOmitsDetails(tool.inputSchema);
       return {
         name: tool.name,
-        description: oneLine(tool.description ?? tool.title, DESCRIPTION_CHARS),
-        input: inputSignature(tool.inputSchema),
+        description: oneLine(description, DESCRIPTION_CHARS),
+        input,
+        ...(abbreviated ? { needsDescription: true } : {}),
         ...(annotations.readOnlyHint === true ? { readOnly: true } : annotations.destructiveHint === true ? { destructive: true } : {}),
       };
     });
     return result(matches.length
-      ? { matches, next: `Run one with ${CALL_TOOL}({ "name": "...", "arguments": {...} }). ${DESCRIBE_TOOL} gives a tool's exact input schema when its input is cut short.` }
+      ? { matches, next: `Run one with ${CALL_TOOL}({ "name": "...", "arguments": {...} }). For matches marked needsDescription, read ${DESCRIBE_TOOL} before first use for full instructions and schema.` }
       : { matches, next: `Nothing matched. Try other words, or one of these areas: ${areaSummary(this.tools, 600)}.` });
   }
 

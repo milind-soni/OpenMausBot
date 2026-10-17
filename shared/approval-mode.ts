@@ -21,6 +21,18 @@ export function supportsApprovalMode(driverKind: string | undefined, mode: Appro
   return true;
 }
 
+/** App-owned tool loops can read a new selection before each execution. */
+export function supportsLiveApprovalMode(driverKind: string | undefined): boolean {
+  return ["openai-compat", "grok", "minimax", "mistral", "cerebras", "groq", "meta"].includes(driverKind ?? "");
+}
+
+/** Native modes retain their dispatched ceiling while app gates honor revocation. */
+export function runningApprovalMode(dispatched: ApprovalMode, selected: ApprovalMode, live: boolean): ApprovalMode {
+  if (live) return selected;
+  const rank = { ask: 0, edits: 1, auto: 2, custom: 2, full: 3 };
+  return rank[selected] < rank[dispatched] ? selected : dispatched;
+}
+
 /** Whether switching engines must first drop this level to Ask. A Custom
  * grant's rules belong to one provider's tool semantics, so it never crosses
  * engines; Full carries silently to any engine; Auto-accept edits stops at an

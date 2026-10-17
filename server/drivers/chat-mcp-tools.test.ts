@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
-import { ChatToolSessionError, mountChatTools, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { CHAT_DISCOVERED_TOOL_COUNT, CHAT_LISTED_CATALOG_BYTES, ChatToolSessionError, mountChatTools, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
@@ -112,7 +113,7 @@ describe("Chat MCP session", () => {
       reply(message, {tools:[
         {name:"read-notes",inputSchema:schema},
         {name:"read_notes",inputSchema:{$ref:"https://example.invalid/private"}},
-        ...Array.from({length:129}, (_,i) => ({name:"excluded"+i,inputSchema:{type:"object"},description:"withheld-description"}))
+        ...Array.from({length:${CHAT_DISCOVERED_TOOL_COUNT + 1}}, (_,i) => ({name:"excluded"+i,inputSchema:{type:"object"},description:"withheld-description"}))
       ]}); return;
     }`);
     const session = await f.mount(false, false, { allow: ["mcp:audit:read-notes"] });
@@ -234,7 +235,7 @@ describe("Chat MCP session", () => {
 
   it.each([
     ["repeated cursor", `reply(message, {tools:[],nextCursor:"same"});`],
-    ["too many tools", `reply(message, {tools:Array.from({length:129},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
+    ["too many tools", `reply(message, {tools:Array.from({length:${CHAT_DISCOVERED_TOOL_COUNT + 1}},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
     ["duplicate tool", `reply(message, {tools:[{name:"same",inputSchema:schema},{name:"same",inputSchema:schema}]});`],
     ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
     ["oversized incomplete frame", `process.stdout.write("x".repeat(2*1024*1024+1));`],
@@ -247,7 +248,7 @@ describe("Chat MCP session", () => {
   });
 
   it.each([
-    ["too many tools", `reply(message, {tools:Array.from({length:129},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
+    ["too many tools", `reply(message, {tools:Array.from({length:${CHAT_DISCOVERED_TOOL_COUNT + 1}},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
     ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
   ])("still fails startup for a harness mount and awaits child cleanup for %s", async (_label, response) => {
     const f = fixture(`if (message.method === "tools/list") { ${response} continue; }`);
@@ -331,6 +332,27 @@ describe("Chat MCP session", () => {
     expect(session.skipped.map((entry) => entry.server).sort()).toEqual(["kissflow", "missing", "slack"]);
     expect(warn).toHaveBeenCalledTimes(3);
     warn.mockRestore();
+  });
+
+  it("rolls back partial registration and fingerprints when an optional catalog fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const ready = fixture();
+    const failed = fixture(`if(message.method === "tools/list") {
+      reply(message,{tools:[{name:"partial",inputSchema:schema},{name:"broken",inputSchema:{type:"string"}}]}); continue;
+    }`);
+    try {
+      const baseline = await mountChatTools({ custom: { ready: ready.server } }, ready.controller.signal);
+      sessions.push(baseline);
+      const combined = await mountChatTools({ custom: { failed: failed.server, ready: ready.server } }, ready.controller.signal);
+      sessions.push(combined);
+      expect(combined.definitions).toEqual(baseline.definitions);
+      expect(combined.catalogFingerprint).toBe(baseline.catalogFingerprint);
+      expect(combined.skipped).toEqual([{ server: "failed", reason: expect.stringContaining("object input schema") }]);
+      expect(() => combined.validate("failed_partial", { value: "must not run" })).toThrow("not advertised");
+      expect(failed.read().calls.some(call => call.method === "tools/call")).toBe(false);
+      expect(alive(failed.read().pid)).toBe(false);
+      await expect(combined.execute("ready_write", { value: "available" }, ready.controller.signal)).resolves.toMatchObject({ ok: true });
+    } finally { warn.mockRestore(); }
   });
 
   it("still fails setup when a harness mount (not a configured server) fails", async () => {
@@ -479,6 +501,155 @@ describe("Chat MCP tool directory", () => {
       expect(session.definitions.map((tool) => tool.function.name)).toEqual(whopLikeCatalog(5).map((tool) => `whop_${tool.name.replace("-", "_")}`));
       expect(session.view("whop_payments_list", { company_id: "biz_1" })).toEqual({ title: "whop_payments_list", input: { company_id: "biz_1" }, ask: true, grant: grantFor("whop", "payments_list") });
     } finally { await remote.close(); }
+  });
+
+  it("lists OpenMausBot's own agents catalog as its bridge built it, however large", async () => {
+    const tools = availableTools(catalogProfileFromEnv({ OMB_SKILL_AUTHORING_ENABLED: "1" }));
+    expect(Buffer.byteLength(JSON.stringify(tools))).toBeGreaterThan(CHAT_LISTED_CATALOG_BYTES);
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:${JSON.stringify(tools)}}); continue; }`);
+    const session = await mountChatTools({ agents: f.server }, f.controller.signal);
+    sessions.push(session);
+    const names = session.definitions.map((tool) => tool.function.name);
+    expect(names).toEqual(tools.map((tool) => `agents_${tool.name}`));
+    expect(names).not.toContain("agents_search_tools");
+    expect(session.view("agents_list_bots", {})).toEqual({ title: "agents_list_bots", input: {}, ask: false });
+  });
+
+  it("fingerprints hidden descriptions and schemas without changing the offered discovery surface", async () => {
+    const tools = whopLikeCatalog(300);
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:JSON.parse(process.env.CATALOG)}); continue; }`);
+    const mount = async (catalog: unknown) => {
+      f.server.env.CATALOG = JSON.stringify(catalog);
+      return f.mount();
+    };
+    const first = await mount(tools);
+    const same = await mount(tools);
+    const reorderedKeys = await mount(tools.map(tool => Object.fromEntries(Object.entries(tool).reverse())));
+    expect(first.catalogFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(same.catalogFingerprint).toBe(first.catalogFingerprint);
+    expect(reorderedKeys.catalogFingerprint).toBe(first.catalogFingerprint);
+    const changedDescription = structuredClone(tools);
+    changedDescription[0].description += " Follow the new prerequisite before execution.";
+    const described = await mount(changedDescription);
+    const changedSchema = structuredClone(tools);
+    changedSchema[0].inputSchema = { ...changedSchema[0].inputSchema as Record<string, unknown>, required: ["new_required_argument"] };
+    const typed = await mount(changedSchema);
+    expect(JSON.stringify(described.definitions)).toBe(JSON.stringify(first.definitions));
+    expect(JSON.stringify(typed.definitions)).toBe(JSON.stringify(first.definitions));
+    expect(described.catalogFingerprint).not.toBe(first.catalogFingerprint);
+    expect(typed.catalogFingerprint).not.toBe(first.catalogFingerprint);
+    expect(JSON.stringify(first.definitions)).not.toContain(first.catalogFingerprint!);
+  });
+
+  it("fingerprints remote originals hidden behind an unchanged discovery surface", async () => {
+    const tools = whopLikeCatalog(300);
+    const remote = await startFakeHttpMcp({ tools });
+    const controller = new AbortController(); controllers.push(controller);
+    const mount = async (scope?: ToolScope) => {
+      const session = await mountChatTools({ custom: { whop: { type: "http", url: remote.url, headers: {} } } }, controller.signal, false, scope);
+      sessions.push(session);
+      return session;
+    };
+    try {
+      const first = await mount();
+      const same = await mount();
+      expect(same.catalogFingerprint).toBe(first.catalogFingerprint);
+      tools[0].description += " Changed hidden prerequisite.";
+      const changed = await mount();
+      expect(JSON.stringify(changed.definitions)).toBe(JSON.stringify(first.definitions));
+      expect(changed.catalogFingerprint).not.toBe(first.catalogFingerprint);
+      const scope = { allow: ["mcp:whop:payments_list"] };
+      const selected = await mount(scope);
+      const excluded = tools.find(tool => tool.name !== "payments_list")!;
+      excluded.description += " Excluded private canary.";
+      const unchanged = await mount(scope);
+      expect(unchanged.catalogFingerprint).toBe(selected.catalogFingerprint);
+      expect(JSON.stringify(unchanged.definitions)).not.toContain("Excluded private canary");
+      expect(remote.calls).toEqual([]);
+    } finally { await remote.close(); }
+  });
+
+  it("fingerprints only the authorized original catalog and its server identity", async () => {
+    const tools = whopLikeCatalog(100);
+    const selected = tools.find(tool => tool.name === "payments_list")!;
+    selected.description = "Authorized instructions ".repeat(Math.ceil(CHAT_LISTED_CATALOG_BYTES / 20));
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:JSON.parse(process.env.CATALOG)}); continue; }`);
+    const scope = { allow: [`mcp:audit:${selected.name}`] };
+    f.server.env.CATALOG = JSON.stringify(tools);
+    const first = await f.mount(false, false, scope);
+    const changed = structuredClone(tools);
+    for (const tool of changed) if (tool.name !== selected.name) {
+      tool.description = "Excluded private canary";
+      tool.inputSchema = { type: "object", properties: { secret: { type: "string" } } };
+    }
+    f.server.env.CATALOG = JSON.stringify(changed);
+    const filtered = await f.mount(false, false, scope);
+    expect(filtered.catalogFingerprint).toBe(first.catalogFingerprint);
+    expect(JSON.stringify(filtered.definitions)).not.toContain("Excluded private canary");
+    const renamed = await mountChatTools({ custom: { another_server: f.server } }, f.controller.signal, false, { allow: [`mcp:another_server:${selected.name}`] });
+    sessions.push(renamed);
+    expect(renamed.catalogFingerprint).not.toBe(first.catalogFingerprint);
+  });
+
+  it("searches a large stdio catalog, validates the real schema, and approves the actual operation", async () => {
+    const tools = whopLikeCatalog(300);
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:${JSON.stringify(tools)}}); continue; }`);
+    const session = await f.mount();
+    expect(session.definitions.map((tool) => tool.function.name)).toEqual(["audit_search_tools", "audit_describe_tool", "audit_call_tool"]);
+    const found = JSON.parse((await session.execute("audit_search_tools", { query: "list payments", limit: 1 }, f.controller.signal)).text);
+    expect(found.matches[0].name).toBe("payments_list");
+    expect(session.view("audit_search_tools", { query: "list payments" }).ask).toBe(false);
+    const wrong = { name: "payments_list", arguments: { first: "ten" } };
+    expect(session.view("audit_call_tool", wrong).ask).toBe(false);
+    const result = await session.execute("audit_call_tool", wrong, f.controller.signal);
+    expect(result.ok).toBe(true);
+    expect(JSON.parse(result.text).problems).toContain("must have required property 'company_id'");
+    expect(f.read().calls.filter((call) => call.method === "tools/call")).toEqual([]);
+    const args = { name: "payments_list", arguments: { company_id: "fixture", first: 2 } };
+    expect(session.view("audit_call_tool", args)).toEqual({ title: "audit_payments_list", input: args.arguments, ask: true, grant: grantFor("audit", "payments_list") });
+    await session.execute("audit_call_tool", args, f.controller.signal);
+    expect(f.read().calls.filter((call) => call.method === "tools/call").map((call) => call.params)).toEqual([{ name: "payments_list", arguments: args.arguments }]);
+  });
+
+  it("defers a large HighLevel catalog and discovers tools without executing them", async () => {
+    const catalog = whopLikeCatalog(300);
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:${JSON.stringify(catalog)}}); continue; }`);
+    const session = await mountChatTools({ highlevel: f.server }, f.controller.signal);
+    sessions.push(session);
+    expect(session.definitions.map(tool => tool.function.name)).toEqual(["highlevel_search_tools", "highlevel_describe_tool", "highlevel_call_tool"]);
+    const result = JSON.parse((await session.execute("highlevel_search_tools", { query: "list payments", limit: 1 }, f.controller.signal)).text);
+    expect(result.matches[0].name).toBe("payments_list");
+    expect(session.view("highlevel_search_tools", { query: "list payments" }).ask).toBe(false);
+    expect(f.read().calls.filter(call => call.method === "tools/call")).toEqual([]);
+  });
+
+  it("defers a few verbose computer tools without activating the computer for discovery", async () => {
+    const toolSchema = { ...schema, description: "Instructions ".repeat(Math.ceil(CHAT_LISTED_CATALOG_BYTES / 4)) };
+    const f = fixture("", toolSchema);
+    const session = await f.mount(true, true);
+    expect(session.definitions.map((tool) => tool.function.name)).toEqual(["computer_search_tools", "computer_describe_tool", "computer_call_tool"]);
+    await session.execute("computer_search_tools", { query: "write", limit: 1 }, f.controller.signal);
+    expect(f.read().calls.filter((call) => call.method === "tools/call")).toEqual([]);
+    const input = { name: "write", arguments: { value: "computer-fixture" } };
+    expect(session.view("computer_call_tool", input)).toEqual({ title: "computer_write", input: input.arguments, ask: true, grant: grantFor("computer", "write") });
+    await expect(session.execute("computer_call_tool", input, f.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:computer-fixture" });
+    const host = await mountChatTools({ localComputer: { ...f.server, scope: "local-computer" } }, f.controller.signal, true);
+    sessions.push(host);
+    expect(host.view("computer_call_tool", input)).toEqual({ title: "computer_write", input: input.arguments, ask: true });
+  });
+
+  it("never exposes or executes excluded tools through a deferred local catalog", async () => {
+    const tools = whopLikeCatalog(100);
+    const allowed = tools.filter((tool) => tool.name.endsWith("_list"));
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:${JSON.stringify(tools)}}); continue; }`);
+    const session = await f.mount(false, false, { allow: allowed.map((tool) => `mcp:audit:${tool.name}`) });
+    expect(session.definitions.map((tool) => tool.function.name)).toContain("audit_search_tools");
+    const found = JSON.parse((await session.execute("audit_search_tools", { query: "create payments", limit: 20 }, f.controller.signal)).text);
+    expect(found.matches.every((match: { name: string }) => allowed.some((tool) => tool.name === match.name))).toBe(true);
+    await expect(session.execute("audit_call_tool", { name: "payments_create", arguments: {} }, f.controller.signal)).rejects.toThrow("Tool selection excludes");
+    const described = await session.execute("audit_describe_tool", { name: "payments_create" }, f.controller.signal);
+    expect(described.text).not.toContain("inputSchema");
+    expect(f.read().calls.filter((call) => call.method === "tools/call")).toEqual([]);
   });
 });
 

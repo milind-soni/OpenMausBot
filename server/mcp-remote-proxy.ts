@@ -5,6 +5,7 @@ import { redactSecretsInText } from "../shared/redact.ts";
 import { allowsTool, parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
 import type { ValidateFunction } from "ajv";
+import { CATALOG_FINGERPRINT_META, fingerprintCatalog } from "./mcp-catalog-fingerprint.ts";
 import {
   CALL_TOOL,
   DESCRIBE_TOOL,
@@ -246,7 +247,8 @@ async function directed(message: Json, signal: AbortSignal): Promise<unknown> {
   if (message.method === "tools/list") {
     if (isRecord(message.params) && message.params.cursor !== undefined) throw new Refusal(-32602, "Invalid cursor");
     const { tools, searched } = await currentCatalog(signal);
-    return { tools: searched ? tools.listed(context) : tools.tools };
+    return { tools: searched ? tools.listed(context) : tools.tools,
+      ...(searched ? { _meta: { [CATALOG_FINGERPRINT_META]: fingerprintCatalog(context.server, tools.tools) } } : {}) };
   }
   if (message.method === "tools/call") return callTool(message.params, signal);
   return client.request(message.method as string, message.params, signal);

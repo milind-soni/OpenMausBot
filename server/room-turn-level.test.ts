@@ -27,6 +27,19 @@ describe("room turn level", () => {
     expect(levels.forRequest("room-1", "dev", own)).toBe("ask");
   });
 
+  it("reads live tool-boundary modes without affecting sibling rooms or retaining the callback", () => {
+    const levels = createRoomTurnLevels();
+    let mode: "ask" | "auto" | "full" = "ask";
+    const release = levels.dispatched("room", "dev", "ask", () => mode);
+    mode = "full";
+    expect(levels.forRequest("room", "dev", own)).toBe("full");
+    expect(levels.forRequest("other", "dev", own)).toBe("ask");
+    mode = "auto";
+    expect(levels.forRequest("room", "dev", own)).toBe("auto");
+    release();
+    expect(levels.forRequest("room", "dev", own)).toBe("ask");
+  });
+
   it("keeps a newer turn's level when an older turn ends late", () => {
     const levels = createRoomTurnLevels();
     const releaseOld = levels.dispatched("room-1", "dev", "ask");

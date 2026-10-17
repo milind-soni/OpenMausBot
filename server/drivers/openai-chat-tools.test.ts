@@ -18,6 +18,7 @@ import { GrokDriver } from "./grok.ts";
 import { CerebrasDriver } from "./cerebras.ts";
 import { MinimaxDriver } from "./minimax.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
+import { CHAT_TOOL_DISCOVERY_PROMPT } from "./chat-mcp-tools.ts";
 
 interface ChatRequest {
   messages: Array<{
@@ -294,6 +295,17 @@ describe("whose allow \"Always allow this session\" keeps", () => {
   });
 });
 
+describe("discovery instructions", () => {
+  it.each([false, true])("includes a mounted catalog's guidance once when already supplied=%s", async supplied => {
+    const f = await fixture((_body, response) => answer(response));
+    const suffix = f.instance.adapter.systemPromptSuffix!;
+    expect(suffix).toBe(CHAT_TOOL_DISCOVERY_PROMPT);
+    await f.start({ systemStable: "Standing rules." + (supplied ? suffix : ""), systemVolatile: "Memory." });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests[0].messages[0]).toEqual({ role: "system", content: "Standing rules." + suffix });
+  });
+});
+
 describe("built-in Data provider parity", () => {
   it.each(["openai-compat", "grok", "minimax", "cerebras"] as const)("mounts and executes Data through %s with the shared instructions", async (provider) => {
     const f = await fixture((_body, response, round) => {
@@ -306,7 +318,7 @@ describe("built-in Data provider parity", () => {
     await f.decide();
     expect(await f.completed()).toMatchObject({ ok: true });
     expect(f.requests[0].tools?.map(tool => tool.function.name)).toContain("data_write");
-    expect(f.requests[0].messages).toContainEqual({ role: "system", content: BUILT_IN_DATA_SYSTEM_PROMPT });
+    expect(f.requests[0].messages).toContainEqual({ role: "system", content: BUILT_IN_DATA_SYSTEM_PROMPT + CHAT_TOOL_DISCOVERY_PROMPT });
     expect(f.effects()).toEqual([{ name: "receipt", value: "done" }]);
     expect(f.requests[1].messages).toContainEqual(expect.objectContaining({ role: "tool", tool_call_id: "call_write", content: expect.stringContaining("Stored receipt=done") }));
   });
@@ -596,6 +608,7 @@ describe.each<Provider>(["openai-compat", "grok", "minimax"])("%s structured too
     expect(f.requests).toHaveLength(1);
     expect(f.requests[0].tools?.map((tool) => tool.function.name)).toEqual(["ask_user"]);
     expect(f.requests[0].messages.map((message) => message.role)).toEqual(["system", "user", "assistant", "user"]);
+    expect(f.requests[0].messages[0]).toEqual({ role: "system", content: "Fixture persona" });
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: imitation }));
     expect(f.recorder.events.some((event) => event.type === "request.opened" || event.type === "item.started")).toBe(false);
     expect(f.effects()).toEqual([]);

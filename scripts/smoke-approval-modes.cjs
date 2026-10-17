@@ -137,6 +137,11 @@ app.whenReady().then(async () => {
     });
     return;
   }
+  if (process.argv.includes("--live-modes-only")) {
+    await require("./testing/live-approval-ui-smoke.cjs")({ root, url: `http://127.0.0.1:${port}`, api, until,
+      grant: (botId, mode, options) => coordinator.request(child, botId, mode, options) });
+    return;
+  }
   // One explicit grant covers old, archived and future threads, even if their
   // provider differs. Use the real private bridge, not fixture state edits.
   const whole = (await api("/api/bots", "POST", { name: "All threads fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
@@ -255,14 +260,13 @@ app.whenReady().then(async () => {
   assert.equal((await api(`/api/bots/${parallel.id}/tasks/${working.threadId}`, "POST")).status, 200);
   assert.equal((await api(`/api/bots/${parallel.id}/messages`, "POST", { text: "Hold for fixture approval", threadId: working.threadId })).status, 202);
   const held = await until(async () => pendingCard((await api("/api/bots")).body.bots.find(bot => bot.id === parallel.id)));
-  const parallelModes = async () => (await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === parallel.id).tasks.map(task => task.approvalMode);
-  const modesBefore = await parallelModes();
-  await assert.rejects(coordinator.request(child, parallel.id, "full", { allThreads: true }), /active turns/);
-  assert.deepEqual(await parallelModes(), modesBefore);
-  await assert.rejects(coordinator.request(child, parallel.id, "full", { threadId: working.threadId, threadOnly: true }), /Stop this thread/);
+  await coordinator.request(child, parallel.id, "full", { threadId: working.threadId, threadOnly: true });
+  assert.equal((await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === parallel.id).tasks.find(task => task.threadId === working.threadId).approvalMode, "full");
+  // This native turn retains Ask; the saved Full grant applies on its next turn.
+  assert.equal(pendingCard((await api("/api/bots")).body.bots.find(bot => bot.id === parallel.id)).requestId, held.requestId);
   const separate = await coordinator.request(child, parallel.id, "full", { threadId: idle.threadId, threadOnly: true });
   assert.equal(separate.tasks.find(task => task.threadId === working.threadId).busy, true);
-  assert.equal(separate.tasks.find(task => task.threadId === working.threadId).approvalMode, "ask");
+  assert.equal(separate.tasks.find(task => task.threadId === working.threadId).approvalMode, "full");
   assert.equal(separate.tasks.find(task => task.threadId === idle.threadId).approvalMode, "full");
   await api(`/api/bots/${parallel.id}/respond`, "POST", { requestId: held.requestId, behavior: "deny" });
   await until(async () => !(await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === parallel.id).busy);

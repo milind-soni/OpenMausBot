@@ -357,11 +357,9 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         requestedApprovalMode = approvalModeFor(existingBot ?? {});
       }
       const currentApprovalMode = approvalModeFor(existingBot ?? {});
-      const approvalChangeRequested = body.approvalMode !== undefined || body.autoApprove !== undefined;
-      if (existingBot?.busy && approvalChangeRequested && requestedApprovalMode !== currentApprovalMode) {
-        return json(res, 409, {
-          error: "stop this bot's turn before changing its approval level",
-        });
+      if (requestedApprovalMode === "auto" && currentApprovalMode !== "auto" &&
+          auth.kind === "loopback" && !DESKTOP_MANAGED && !req.headers.origin && store.bots.some(bot => bot.busy)) {
+        return json(res, 409, { error: "Change approval mode from the app or a paired device while bots are working." });
       }
       if (body.approvalMode !== undefined || body.autoApprove !== undefined) {
         patch.approvalMode = requestedApprovalMode;
@@ -408,9 +406,6 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       if (body.applyToAllThreads === true && existingBot) {
         const threads = store.tasks(existingBot.id);
-        if (threads.some((task) => threadBusy(existingBot.id, task.threadId))) {
-          return json(res, 409, { error: "stop this bot's turns before changing its approval level" });
-        }
         if (threads.some((task) => approvalModeFor(store.projectBotForTask(existingBot.id, task.threadId) ?? {}) === "custom")) {
           return json(res, 403, { error: "A thread on Custom approval can only leave it from the packaged desktop app" });
         }

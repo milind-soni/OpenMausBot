@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   APPROVAL_MODES,
+  runningApprovalMode,
+  supportsLiveApprovalMode,
   DEFAULT_APPROVAL_MODE,
   approvalModeFor,
   setDefaultApprovalMode,
@@ -177,5 +179,21 @@ describe("approval support bound to a registry", () => {
         expect(supports({ driverKind }, mode)).toBe(supportsApprovalMode(driverKind, mode));
       }
     }
+  });
+});
+
+describe("mode selection during work", () => {
+  it("allows both directions at app-owned gates and delays native elevation while honoring revocation", () => {
+    expect(runningApprovalMode("ask", "full", true)).toBe("full");
+    expect(runningApprovalMode("full", "ask", true)).toBe("ask");
+    expect(runningApprovalMode("ask", "full", false)).toBe("ask");
+    expect(runningApprovalMode("auto", "full", false)).toBe("auto");
+    expect(runningApprovalMode("full", "ask", false)).toBe("ask");
+    expect(runningApprovalMode("full", "auto", false)).toBe("auto");
+    expect(supportsLiveApprovalMode("openai-compat")).toBe(true);
+    expect(supportsLiveApprovalMode("meta")).toBe(true);
+    expect(supportsLiveApprovalMode("museCode")).toBe(false);
+    expect(supportsLiveApprovalMode("codex")).toBe(false);
+    expect(supportsLiveApprovalMode(undefined)).toBe(false);
   });
 });

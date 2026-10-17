@@ -4924,5 +4924,7 @@
   "apiInstances.remove": "Remove {name}",
   "apiInstances.refreshModels": "Detect models for {name} again",
   "apiInstances.empty": "No other servers yet.",
-  "apiInstances.failed": "Couldn't save the server. Check the fields and try again."
+  "apiInstances.failed": "Couldn't save the server. Check the fields and try again.",
+  "approvalMode.liveChange": "Changes apply before the next tool executes. Actions already running and open approval cards keep their current decision.",
+  "approvalMode.nextTurnChange": "You can change the selection now. This provider applies it on the next user turn; the running turn keeps its current level."
 }

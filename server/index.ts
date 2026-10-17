@@ -1,5 +1,8 @@
 // Import first: it reads a Cloud home's secrets off the launcher's pipe before any module can start a process.
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
+import { createDelegatedLevel, DELEGATED_LEVEL_NAMES } from "./host/delegated-level.ts";
+import { createRoomApprovalModes } from "./host/room-approval.ts";
+import { createSourceApprovalMode, effectiveRoomApprovalModeFor } from "./host/live-approval.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -11,7 +14,7 @@ import { extname, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 
 import { z } from "zod";
-import { selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
+import { selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES, EXTERNAL_CONTEXT_MARKER_PREFIX, isExternalContextMarker, latestCompaction } from "./context-rebuild.ts";
 import { draftSummary, foldPoint } from "./compaction-summary.ts";
 import { compactBudget, compactionReading, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
@@ -35,6 +38,8 @@ import { canWorkOnCloud, type CloudEngine } from "../shared/cloud-computer.ts";
 import {
   approvalModeFor,
   modelSwitchNeedsAsk,
+  runningApprovalMode,
+  supportsLiveApprovalMode,
   isEmergencyApprovalDowngrade,
   isApprovalMode, setDefaultApprovalMode,
   type ApprovalMode,
@@ -53,7 +58,7 @@ import { isPendingSignInRequest, normalizeSignInSite, signInFallbackText, signIn
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
-import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegatedApprovalMode, undeliveredApprovalTool } from "./auto-approve.ts";
+import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import { providerMcpTool, providerToolAllowKey } from "./provider-tool-allow.ts";
@@ -2324,6 +2329,7 @@ function settleDirectFollowup(generation: string | undefined, outcome: DirectTur
 }
 // A running conversation keeps its exact bot settings: another thread or a changed default must not retarget its tools.
 const directTurnBots = new Map<string, BotRecord>();
+const dispatchedApprovalModes = new WeakMap<BotRecord, ApprovalMode>();
 const routedTurnModels = new Map<string, string>();
 const turnPromptBytes = new Map<string, { stable: number; volatile: number }>();
 let providerFleetReloading = false;
@@ -3300,6 +3306,7 @@ function previewSystemPrompt(bot: BotRecord) {
     teamAvailabilityPart(agentsMounted && coordination ? peers : []),
     { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace), enabled: bot.memoryEnabled !== false }) },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsHost.skillsIndex(bot, undefined, instance) : "" },
+    { id: "engine-instructions", label: "Tool discovery", text: instance?.adapter.systemPromptSuffix ?? "" },
   ], agentsMounted ? { env: agentsToolBridgeEnv(cfg, bot, instance && turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), bot.cwd ?? undefined)) } : undefined, { replyStyle: bot.replyStyle });
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
   return {
@@ -3389,12 +3396,12 @@ const approvalModeForTurn = (bot: BotRecord, peerInitiated = false, threadId = b
   return mode;
 };
 
-function sourceApprovalMode(botId: string, threadId: string): ApprovalMode {
-  const owner = connectorThread(botId, threadId);
-  if (!owner) return "ask";
-  const bot = store.projectBotForTask(botId, threadId) ?? owner.bot;
-  return approvalModeForTurn(bot, false, threadId);
-}
+const sourceApprovalMode = createSourceApprovalMode({
+  store: () => store, owner: connectorThread, directTurnBots, dispatchedApprovalModes,
+  driverKind: selection => registry.cliTarget(selection.instanceId)?.driverKind,
+  forRequest: (threadId, botId, fallback) => roomTurnLevels.forRequest(threadId, botId, fallback),
+  approvalModeForTurn, isInternalTurn,
+});
 
 function fullAccessForSource(botId: string, threadId: string): boolean {
   return sourceApprovalMode(botId, threadId) === "full";
@@ -3413,21 +3420,14 @@ function peerReviewRequired(bot: BotRecord, threadId: string): boolean {
   return Boolean(bot.approvePeerComms && !fullAccessForSource(bot.id, threadId));
 }
 
-function delegatedLevel(from: BotRecord, fromThreadId: string, target: BotRecord, recipientMode: ApprovalMode): ApprovalMode | null {
-  return delegatedApprovalMode({
-    senderIsChief: Boolean(from.chiefOfStaff),
-    senderMode: sourceApprovalMode(from.id, fromThreadId),
-    sameBot: from.id === target.id,
-    recipientMode,
-    recipientDriverKind: registry.cliTarget(target.modelSelection.instanceId)?.driverKind,
-  });
-}
+const delegatedLevel = createDelegatedLevel({
+  sourceApprovalMode,
+  driverKind: instanceId => registry.cliTarget(instanceId)?.driverKind,
+});
 
 function ownThreadLevel(target: BotRecord, threadId: string): ApprovalMode {
   return approvalModeForTurn(store.projectBotForTask(target.id, threadId) ?? target, false, threadId);
 }
-
-const DELEGATED_LEVEL_NAMES: Partial<Record<ApprovalMode, string>> = { edits: "Auto-accept edits", auto: "Approve for me", full: "Full access" };
 
 function applyDelegatedLevel(from: BotRecord, fromThreadId: string, target: BotRecord, threadId: string): void {
   const level = delegatedLevel(from, fromThreadId, target, ownThreadLevel(target, threadId));
@@ -3441,18 +3441,16 @@ function applyDelegatedLevel(from: BotRecord, fromThreadId: string, target: BotR
   });
 }
 
-function roomTurnApprovalMode(bot: BotRecord, threadId: string, orchestration?: GroupTurnOrchestration): ApprovalMode {
-  const handoff = orchestration?.roomHandoffId ? coordinator.node(orchestration.roomHandoffId) : undefined;
-  const source = handoff?.parentId ? coordinator.node(handoff.parentId) : undefined;
-  return roomTurnLevel(bot, threadId, source);
-}
+const { roomTurnApprovalMode, roomTurnLevel } = createRoomApprovalModes({
+  node: id => coordinator.node(id), bot: id => store.bot(id),
+  cloudGuestDriven, approvalModeForTurn, delegatedLevel,
+});
 
-function roomTurnLevel(bot: BotRecord, threadId: string, source: Pick<HandoffView, "botId" | "threadId"> | undefined): ApprovalMode {
-  if (cloudGuestDriven(threadId)) return "ask";
-  const from = source ? store.bot(source.botId) : undefined;
-  const own = approvalModeForTurn(bot, source !== undefined, threadId);
-  return (from && source && delegatedLevel(from, source.threadId, bot, own)) || own;
-}
+const effectiveRoomApprovalMode = (bot: BotRecord, threadId: string, orchestration?: GroupTurnOrchestration): ApprovalMode => effectiveRoomApprovalModeFor({
+  driverKind: registry.cliTarget(bot.modelSelection.instanceId)?.driverKind,
+  selected: () => roomTurnApprovalMode(bot, threadId, orchestration),
+  dispatched: fallback => roomTurnLevels.forRequest(threadId, bot.id, fallback),
+});
 
 /** Custom transitions never go over loopback HTTP (a bot's shell could curl it); only Electron's private utility-process channel delivers them. */
 function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
@@ -3460,9 +3458,6 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
   const message = raw as Record<string, unknown>;
   const grantTarget = (bot: BotRecord) => bot.approvalGrant?.threadOnly
     ? store.projectBotForTask(bot.id, bot.approvalGrant.threadId!) : bot;
-  const grantBusy = (bot: BotRecord) => bot.approvalGrant?.threadOnly
-    ? threadBusy(bot.id, bot.approvalGrant.threadId!) : bot.busy ||
-      Boolean(bot.approvalGrant?.allThreads && store.tasks(bot.id).some(task => threadBusy(bot.id, task.threadId)));
   const grantSupported = (bot: BotRecord, mode: ApprovalMode) => supportsApprovalMode(
     grantTarget(bot)?.modelSelection, mode) &&
     (!bot.approvalGrant?.allThreads || store.tasks(bot.id).every(task => supportsApprovalMode(
@@ -3475,7 +3470,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     const threadId = bot.approvalGrant?.threadId;
     if (!threadId) return true;
     const target = store.projectBotForTask(bot.id, threadId);
-    return Boolean(target && !threadBusy(bot.id, threadId) && (bot.approvalGrant?.threadOnly ||
+    return Boolean(target && (bot.approvalGrant?.threadOnly ||
       registry.cliTarget(target.modelSelection.instanceId)?.driverKind === registry.cliTarget(bot.modelSelection.instanceId)?.driverKind));
   };
   if (message.type === "approval-trusted-mode-commit") {
@@ -3494,7 +3489,6 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot.approvalGrant.mode === mode &&
       bot.approvalGrant.phase === "committed" &&
       (bot.approvalGrant.threadOnly || bot.approvalMode === mode) &&
-      !grantBusy(bot) &&
       threadCanReceiveGrant(bot) &&
       grantSupported(bot, mode)
     ) {
@@ -3589,11 +3583,9 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot.approvalGrant.phase === "confirmed" &&
       (bot.approvalGrant.threadOnly || bot.approvalMode === mode)
     ) {
-      if (grantBusy(bot) || !grantSupported(bot, mode)) {
+      if (!grantSupported(bot, mode)) {
         clearGrant(bot);
-        activate(false, grantBusy(bot)
-          ? "Stop this bot's turn before changing its approval level"
-          : "This provider does not support the selected approval level");
+        activate(false, "This provider does not support the selected approval level");
         return true;
       }
       // Still inert until Electron acknowledges this and requests finalization.
@@ -3634,7 +3626,6 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot.approvalGrant.mode === mode &&
       bot.approvalGrant.phase === "activated" &&
       (bot.approvalGrant.threadOnly || bot.approvalMode === mode) &&
-      !grantBusy(bot) &&
       threadCanReceiveGrant(bot) &&
       grantSupported(bot, mode)
     ) {
@@ -3646,9 +3637,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     if (bot?.approvalGrant?.requestId === requestId) {
       clearGrant(bot);
     }
-    finalize(false, bot?.busy
-      ? "Stop this bot's turn before changing its approval level"
-      : "The approval finalization no longer matches this bot");
+    finalize(false, "The approval finalization no longer matches this bot");
     return true;
   }
   if (message.type !== "approval-trusted-mode-set") return false;
@@ -3698,9 +3687,9 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     return true;
   }
   if (message.allThreads === true && (existing.approvalGrant || store.tasks(botId).some(task =>
-      threadBusy(botId, task.threadId) || !supportsApprovalMode(
+      !supportsApprovalMode(
         task.modelSelection ?? existing.modelSelection, mode)))) {
-    respond({ ok: false, error: "Finish this bot's active turns and approval changes first. Every thread's provider must support this approval level." });
+    respond({ ok: false, error: "Finish this bot's pending approval change first. Every thread's provider must support this approval level." });
     return true;
   }
   // Edits and Auto are not elevated: one write, no two-phase grant. Only this channel may move a team off Custom.
@@ -3733,8 +3722,8 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       respond({ ok: false, error: "Choose this bot's approval level in bot settings before refreshing a thread" });
       return true;
     }
-    if (existing.approvalGrant || threadBusy(botId, target.threadId)) {
-      respond({ ok: false, error: "Stop this thread and finish its pending approval change first" });
+    if (existing.approvalGrant) {
+      respond({ ok: false, error: "Finish this thread's pending approval change first" });
       return true;
     }
     if (!supportsApprovalMode(target.modelSelection, mode)) {
@@ -3762,8 +3751,8 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     }
     // An ambiguous scoped grant may be cleared, but never a different grant.
     const clearsOwnGrant = mode === "ask" && existing.approvalGrant?.threadOnly && existing.approvalGrant.threadId === threadId;
-    if ((existing.approvalGrant && !clearsOwnGrant) || threadBusy(botId, target.threadId)) {
-      respond({ ok: false, error: "Stop this thread and finish its pending approval change first" });
+    if (existing.approvalGrant && !clearsOwnGrant) {
+      respond({ ok: false, error: "Finish this thread's pending approval change first" });
       return true;
     }
     if (!supportsApprovalMode(target.modelSelection, mode)) {
@@ -3809,18 +3798,12 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       respond({ ok: false, error: "Choose this bot's approval level in bot settings before applying it to an existing thread" });
       return true;
     }
-    if (threadBusy(botId, threadId as string) ||
-      registry.cliTarget(target.modelSelection.instanceId)?.driverKind !== registry.cliTarget(existing.modelSelection.instanceId)?.driverKind) {
+    if (registry.cliTarget(target.modelSelection.instanceId)?.driverKind !== registry.cliTarget(existing.modelSelection.instanceId)?.driverKind) {
       respond({ ok: false, error: "Stop this thread and use the bot's provider before applying its approval level" });
       return true;
     }
   }
   const emergencyDowngrade = existing.busy && isEmergencyApprovalDowngrade(currentMode, mode);
-  const clearsPendingElevation = mode === "ask" && existing.approvalGrant !== undefined;
-  if (existing.busy && !emergencyDowngrade && !clearsPendingElevation) {
-    respond({ ok: false, error: "Stop this bot's turn before changing its approval level" });
-    return true;
-  }
   if (!supportsApprovalMode(existing.modelSelection, mode)) {
     respond({ ok: false, error: "Custom approval settings are available only for Codex bots" });
     return true;
@@ -7038,7 +7021,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id, event.threadId) : false;
       // No command the owner saved answers for a guest-driven turn.
       const guestDriven = cloudGuestDriven(event.threadId);
-      const ownApprovalMode = (who: BotRecord) => approvalModeForTurn(who, isInternalTurn(event.threadId), event.threadId);
+      const ownApprovalMode = (who: BotRecord) => sourceApprovalMode(who.id, event.threadId);
       const effectiveApprovalMode = !asker || guestDriven ? "ask"
         : group && speaker?.botId === asker.id ? roomTurnLevels.forRequest(event.threadId, asker.id, () => ownApprovalMode(asker))
           : ownApprovalMode(asker);
@@ -7607,13 +7590,6 @@ function turnAnswers(threadId: string, opts?: {
   };
 }
 
-// Provider sessions only know their own turns' messages, so a harness-appended result marks the task for one replay; the unique suffix keeps a newer marker through a racing replay.
-const EXTERNAL_CONTEXT_MARKER_PREFIX = "__openmaus_external_context__:";
-
-function isExternalContextMarker(value: string | undefined): boolean {
-  return Boolean(value?.startsWith(EXTERNAL_CONTEXT_MARKER_PREFIX));
-}
-
 function markTaskContextExternallyUpdated(bot: BotRecord, threadId: string): void {
   const task = store.taskByThread(bot.id, threadId);
   if (!task) return;
@@ -7630,11 +7606,6 @@ function markTaskContextExternallyUpdated(bot: BotRecord, threadId: string): voi
     lastInstanceId: `${EXTERNAL_CONTEXT_MARKER_PREFIX}${randomUUID()}`,
     unread: true,
   });
-}
-
-function latestCompaction(messages: readonly Message[]) {
-  const record = messages.findLast(message => message.kind === "compaction" && message.compaction);
-  return record?.compaction ? { ...record.compaction, id: record.id } : undefined;
 }
 
 function directContext(bot: BotRecord, threadId: string, messages: Message[]): ContextMessage[] {
@@ -8527,10 +8498,11 @@ async function startTurn(
       }
       const context = directContext(bot, threadId, activeMessages);
       const contextOrder = context.map(m => m.id);
+      const sourceContext = context.find((message) => message.id === userMessage.id && message.role === "user");
       const replayable = context.filter(m => !skipTranscript.has(m.id));
       const record = latestCompaction(activeMessages);
       const selection = selectReplay(context, { budgetBytes: cfg.context?.rebuildBytes ?? DEFAULT_REBUILD_BYTES, excludedIds: skipTranscript, compaction: record, tools: replayToolCalls(activeMessages, cfg.context) });
-      const transcript = selection.transcript.map(({ role, text }) => ({ role, text }));
+      const transcript = selection.transcript.map(({ id, role, text }) => ({ id, role, text }));
       const contextReset = selection.compacted > 0 && record?.id !== task.appliedCompactionId;
       if (contextReset) store.patchTask(bot.id, threadId, { resumeCursors: {} });
 
@@ -9101,6 +9073,7 @@ async function startTurn(
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : "" },
+        { id: "engine-instructions", label: "Tool discovery", text: instance.adapter.systemPromptSuffix ?? "" },
       ], integrations.agents, { replyStyle: liveBot?.replyStyle ?? bot.replyStyle });
       turnPromptBytes.set(threadId, { stable: Buffer.byteLength(prompt.stable), volatile: Buffer.byteLength(prompt.volatile) });
       // Recall rides in front of this turn's message, never the system prompt, whose volatile half is re-sent whole on any change.
@@ -9116,6 +9089,10 @@ async function startTurn(
       // Before sendTurn: an adapter may emit the whole turn before it resolves.
       handoffs.dispatching(threadId, dispatchClaimId, dispatchContext.handoff);
       const clock = takesTurnClock(userTurnText) ? turnClockLine(Date.now(), hostTimeZone()) : "";
+      const dispatchApprovalMode = approvalModeForTurn(store.projectBotForTask(bot.id, threadId) ?? bot, commsDepth > 0, threadId);
+      const dispatchedBot = { ...bot, approvalMode: dispatchApprovalMode, autoApprove: dispatchApprovalMode === "auto", approvalGrant: undefined };
+      dispatchedApprovalModes.set(dispatchedBot, dispatchApprovalMode);
+      directTurnBots.set(threadId, dispatchedBot);
       const shareNote = skillsHost.shareNote(bot, threadId, Boolean(privateWorkspace));
       const dispatch = await guardTurnDispatch(shareNote.after(instance.adapter.sendTurn({
         threadId,
@@ -9125,7 +9102,9 @@ async function startTurn(
         text: withTurnClock(clock, withRecalled(recalled, dispatchContext.turnText + shareNote.text)),
         ...(recalled ? { recalled } : {}),
         images: dispatchContext.images,
-        approvalMode: approvalModeForTurn(bot, commsDepth > 0, threadId),
+        approvalMode: dispatchApprovalMode,
+        currentApprovalMode: () => directTurnGenerationByThread.get(threadId) === dispatchClaimId && threadBusy(bot.id, threadId)
+          ? sourceApprovalMode(bot.id, threadId) : "ask",
         toolScope,
         ...(guestConfined ? { guestConfined: true, confinedWhy: confinedWhy(threadId) } : {}),
         model,
@@ -9135,6 +9114,8 @@ async function startTurn(
         sessionReset: dispatchContext.sessionReset,
         ...(dispatchContext.recoveryText !== undefined ? { recoveryText: withTurnClock(clock, dispatchContext.recoveryText + shareNote.text) } : {}),
         transcript,
+        sourceMessage: sourceContext ? { id: sourceContext.id, role: "user", text: sourceContext.text } : undefined,
+        replayReset: rewound || contextReset,
         system: prompt.text,
         systemStable: prompt.stable,
         systemVolatile: prompt.volatile,
@@ -11050,6 +11031,7 @@ async function runClaimedGroupMemberTurn(
     { id: "skills", label: "Skills index", text: workspace ? skillsHost.skillsIndex(bot, threadId, instance) : "" },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
+    { id: "engine-instructions", label: "Tool discovery", text: instance.adapter.systemPromptSuffix ?? "" },
   ], integrations.agents);
 
   // The startup engine read is part of setup: wait for it before the claim below.
@@ -11165,7 +11147,8 @@ async function runClaimedGroupMemberTurn(
     // A private chat reaches a room only through the explicit, disclosed session_search, never automatically.
     const roomRecalled = cardContinuation ? "" : autoRecallPrompt(bot, threadId, resolvedLatestImages.text, { conversations: false, userName });
     const turnApprovalMode = roomTurnApprovalMode(readyBot, threadId, orchestration);
-    if (!done) releaseTurnLevel = roomTurnLevels.dispatched(threadId, readyBot.id, turnApprovalMode);
+    if (!done) releaseTurnLevel = roomTurnLevels.dispatched(threadId, readyBot.id, turnApprovalMode,
+      () => runningApprovalMode(turnApprovalMode, roomTurnApprovalMode(store.bot(readyBot.id) ?? readyBot, threadId, orchestration), supportsLiveApprovalMode(instance.driverKind)));
     const { reset: roomReset, displaced } = roomMemberContexts.dispatch(threadId, readyBot.id, instance.instanceId, cfg.context);
     if (roomReset) {
       store.appendMessage(threadId, {
@@ -11191,6 +11174,8 @@ async function runClaimedGroupMemberTurn(
         ...(roomRecalled ? { recalled: roomRecalled } : {}),
         images: turnImages,
         approvalMode: turnApprovalMode,
+        currentApprovalMode: () => !abandoned && !isCancelled?.()
+          ? effectiveRoomApprovalMode(store.bot(readyBot.id) ?? readyBot, threadId, orchestration) : "ask",
         toolScope: roomToolScope,
         ...(roomGuestConfined ? { guestConfined: true, confinedWhy: confinedWhy(threadId) } : {}),
         system: roomSystem.text,
