@@ -14,6 +14,10 @@ import type { Notification, NotificationLogEntry } from "../shared/notification.
 export type { SearchHit } from "./message-search-query.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
+/** The rows the Today page reads, and among them the failed tool calls. JSON.stringify escapes every quote inside a
+ * string value, so a stored row holds the bare text "ok":false only as a real key. */
+const WORK_KINDS = "kind IN ('activity', 'digest', 'options')";
+const FAILED_CALL = "kind = 'activity' AND instr(json, '\"ok\":false') > 0";
 
 let handle: DatabaseSync | null = null;
 let handlePath: string | null = null;
@@ -47,6 +51,9 @@ function open(): DatabaseSync {
     -- walk these rows in time order on messages_thread. Created on every
     -- open, including a database that already has messages.
     CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
+    -- Partial, so no other query's plan can move onto them: only a statement that repeats the WHERE may use one.
+    CREATE INDEX IF NOT EXISTS messages_work_at ON messages(kind, at) WHERE ${WORK_KINDS};
+    CREATE INDEX IF NOT EXISTS messages_failed_at ON messages(at) WHERE ${FAILED_CALL};
     CREATE TABLE IF NOT EXISTS thread_state (
       thread_id TEXT PRIMARY KEY,
       active_leaf_id TEXT
@@ -484,6 +491,89 @@ export function workingGoalRunMessages(): Array<{ threadId: string; message: Mes
     )
     .all() as Array<{ thread_id: string; json: string }>;
   return rows.map((row) => ({ threadId: row.thread_id, message: JSON.parse(row.json) as Message }));
+}
+
+const MULTI_EXECUTE_INPUT = "CASE WHEN json_extract(json, '$.tool.name') LIKE '%MULTI\\_EXECUTE%' ESCAPE '\\' THEN json_extract(json, '$.tool.input') END AS input";
+
+/** One tool call or turn summary in a time window, with only the fields the Today page reads. JSON booleans read as 1 or 0. */
+export interface WorkRow {
+  threadId: string;
+  id: string;
+  at: number;
+  kind: "activity" | "digest";
+  name: string | null;
+  ok: number | null;
+  turnId: string | null;
+  fromBotId: string | null;
+  turnSucceeded: number | null;
+  requestMessageId: string | null;
+  digest: string | null;
+  input: string | null;
+}
+
+export function workRows(since: number, until: number): WorkRow[] {
+  return db().prepare(
+    "SELECT thread_id AS threadId, id, at, kind, json_extract(json, '$.tool.name') AS name, json_extract(json, '$.tool.ok') AS ok, " +
+    "json_extract(json, '$.turnId') AS turnId, json_extract(json, '$.from.botId') AS fromBotId, " +
+    "json_extract(json, '$.turnSucceeded') AS turnSucceeded, json_extract(json, '$.requestMessageId') AS requestMessageId, " +
+    "CASE WHEN kind = 'digest' THEN json_extract(json, '$.digest') END AS digest, " +
+    `${MULTI_EXECUTE_INPUT} FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind <> 'options' AND at >= ? AND at <= ? ORDER BY at`,
+  ).all(since, until) as unknown as WorkRow[];
+}
+
+/** What might still need the person since a time: open cards, failed tool calls, and the turns that settle them. JSON booleans read as 1 or 0. */
+export interface AttentionRow {
+  threadId: string;
+  id: string;
+  at: number;
+  kind: "options" | "activity" | "digest";
+  fromBotId: string | null;
+  digestBotId: string | null;
+  name: string | null;
+  setup: number | null;
+  place: string | null;
+  output: string | null;
+  input: string | null;
+  card: string | null;
+}
+
+
+export function attentionRows(since: number): AttentionRow[] {
+  const columns = "SELECT thread_id AS threadId, id, at, kind, json_extract(json, '$.from.botId') AS fromBotId, json_extract(json, '$.digest.botId') AS digestBotId, " +
+    "json_extract(json, '$.tool.name') AS name, json_extract(json, '$.tool.setup') AS setup, json_extract(json, '$.tool.place') AS place, " +
+    `substr(json_extract(json, '$.tool.output'), 1, 2000) AS output, ${MULTI_EXECUTE_INPUT}, ` +
+    "CASE WHEN kind = 'options' THEN json_extract(json, '$.card') END AS card";
+  return db().prepare(
+    `${columns} FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' AND at >= ? ` +
+    "AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0 " +
+    "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 " +
+    `UNION ALL ${columns} FROM messages INDEXED BY messages_failed_at WHERE ${FAILED_CALL} AND at >= ? AND json_extract(json, '$.tool.ok') = 0 ` +
+    `UNION ALL ${columns} FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'digest' AND at >= ? ` +
+    "AND json_extract(json, '$.turnSucceeded') = 1 ORDER BY at",
+  ).all(since, since, since) as unknown as AttentionRow[];
+}
+
+/** Successful tool calls after a time whose row mentions `word` (case-insensitive), newest last. */
+export function successfulCallsMentioning(since: number, word: string): Array<{ at: number; name: string; input: string | null }> {
+  return db().prepare(
+    `SELECT at, json_extract(json, '$.tool.name') AS name, ${MULTI_EXECUTE_INPUT} FROM messages ` +
+    `INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'activity' AND at > ? AND json LIKE ? ESCAPE '\\' ` +
+    "AND json_extract(json, '$.tool.ok') = 1 ORDER BY at",
+  ).all(since, `%${word.replace(/[\\%_]/g, "\\$&")}%`) as Array<{ at: number; name: string; input: string | null }>;
+}
+
+/** Who sent each request: the fields that tell a person's line from another bot's, the API's or a relay's. */
+export function requestSenders(keys: ReadonlyArray<{ threadId: string; id: string }>): Map<string, { role: string; peer: number; via: string | null; relayed: number }> {
+  const out = new Map<string, { role: string; peer: number; via: string | null; relayed: number }>();
+  for (let i = 0; i < keys.length; i += 400) {
+    const slice = keys.slice(i, i + 400);
+    const rows = db().prepare(
+      "SELECT thread_id, id, role, json_extract(json, '$.peerAsk') IS NOT NULL AS peer, json_extract(json, '$.via') AS via, " +
+      `coalesce(json_extract(json, '$.relayed'), 0) AS relayed FROM messages WHERE (thread_id, id) IN (VALUES ${slice.map(() => "(?, ?)").join(", ")})`,
+    ).all(...slice.flatMap((key) => [key.threadId, key.id])) as Array<{ thread_id: string; id: string; role: string; peer: number; via: string | null; relayed: number }>;
+    for (const row of rows) out.set(`${row.thread_id}\u0000${row.id}`, { role: row.role, peer: row.peer, via: row.via, relayed: row.relayed });
+  }
+  return out;
 }
 
 export function setActiveLeaf(threadId: string, leafId: string | null): void {

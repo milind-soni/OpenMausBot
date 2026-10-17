@@ -53,7 +53,7 @@ function humanize(raw: string): string {
   return spaced ? spaced[0].toUpperCase() + spaced.slice(1) : raw;
 }
 
-function toolkitName(slug: string): string {
+export function toolkitName(slug: string): string {
   return TOOLKIT_NAMES[slug] ?? slug[0] + slug.slice(1).toLowerCase();
 }
 
