@@ -26,7 +26,7 @@ import {
 } from "@/lib/connector-status";
 import { BotAvatar } from "./Avatar";
 import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
-import { CATEGORY_SECTION_SIZE, catalogSections, inCategory, rankCategories } from "@/lib/app-catalog";
+import { appCategoryLabel, CATEGORY_SECTION_SIZE, catalogSections, connectorDescription, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
 import { HighLevelCard } from "./HighLevelCard";
 import { openBotSettings } from "./bot-panel/panel-link";
@@ -39,54 +39,6 @@ export interface ToolkitCard {
   noAuth?: boolean;
   domain: string | null;
   categories?: string[];
-}
-
-const APP_CATEGORY_COPY: Record<string, string> = {
-  productivity: "productivity",
-  "developer tools": "developerTools",
-  communication: "communication",
-  files: "files",
-  "sales and crm": "salesCrm",
-  design: "design",
-  marketing: "marketing",
-  analytics: "analytics",
-};
-
-const CONNECTOR_COPY: Record<string, string> = {
-  "google calendar": "googleCalendar",
-  "google sheets": "googleSheets",
-  "google docs": "googleDocs",
-  notion: "notion",
-  github: "github",
-  linear: "linear",
-  sentry: "sentry",
-  jira: "jira",
-  slack: "slack",
-  gmail: "gmail",
-  discord: "discord",
-  "google drive": "googleDrive",
-  posthog: "posthog",
-  "x (twitter)": "xTwitter",
-  reddit: "reddit",
-  zapier: "zapier",
-  hubspot: "hubspot",
-  salesforce: "salesforce",
-  asana: "asana",
-  trello: "trello",
-  dropbox: "dropbox",
-  airtable: "airtable",
-  figma: "figma",
-  stripe: "stripe",
-};
-
-function appCategoryLabel(name: string): string {
-  const id = APP_CATEGORY_COPY[name.trim().toLowerCase()];
-  return id ? t(`apps.category.${id}` as LocaleKey) : name;
-}
-
-function connectorDescription(card: Pick<ToolkitCard, "label" | "blurb">): string {
-  const id = CONNECTOR_COPY[card.label.trim().toLowerCase()];
-  return id ? t(`apps.catalog.${id}.blurb` as LocaleKey) : card.blurb;
 }
 
 let cachedConnectorStatus: Record<string, ConnectorStatus> | null = null;

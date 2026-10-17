@@ -24,7 +24,7 @@ const LINES: Record<string, number> = {
   "server/drivers/acp/core.ts": 2009,
   "server/drivers/codex.ts": 1872,
   "server/routines.ts": 1869,
-  "src/components/ComputerPanel.tsx": 1918,
+  "src/components/ComputerPanel.tsx": 1901,
   "src/components/RoutineCalendarPage.tsx": 1765,
   "server/config.ts": 1455,
   "src/components/ChatView.tsx": 1492,
@@ -47,7 +47,7 @@ const LINES: Record<string, number> = {
   "src/components/ChatMarkdown.tsx": 1039,
   "src/components/PluginsPanel.tsx": 1113,
   "server/org-library.ts": 1003,
-  "src/components/TeamLibraryPanel.tsx": 1120,
+  "src/components/TeamLibraryPanel.tsx": 1102,
   "src/components/AttachmentPreview.tsx": 1044,
 };
 

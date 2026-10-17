@@ -16,3 +16,8 @@ export function initialGreeting(name: string, language?: string): string {
   }
   return GREETINGS.en(name);
 }
+
+/** The seeded message; a function language is read now, so a language changed in Settings reaches the next new bot. */
+export function initialGreetingMessage(name: string, language: string | (() => string)) {
+  return { role: "bot", kind: "text", text: initialGreeting(name, typeof language === "function" ? language() : language) } as const;
+}

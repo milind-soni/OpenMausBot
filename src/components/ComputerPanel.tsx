@@ -69,25 +69,7 @@ import { approvalModeFor } from "../../shared/approval-mode";
 import { openPlaceAction, placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
 import { cloudRefusal, type PlaceActionId, type PlaceFacts, type PlaceView } from "../../shared/place-view";
 import { t } from "@/lib/i18n";
-import { localizeComputerProblem } from "@/lib/computer-messages";
-import type { LocaleKey } from "@/locales";
-
-class LocalizedPanelError extends Error {
-  constructor(
-    readonly key: LocaleKey,
-    readonly problem?: string | null,
-    readonly fallbackKey?: LocaleKey,
-  ) {
-    super(key);
-  }
-}
-
-function panelErrorText(error: Error | string | null): string | null {
-  if (error instanceof LocalizedPanelError) {
-    return t(error.key, error.fallbackKey ? { problem: localizeComputerProblem(error.problem) ?? t(error.fallbackKey) } : undefined);
-  }
-  return localizeComputerProblem(error instanceof Error ? error.message : error);
-}
+import { LocalizedPanelError, panelErrorText } from "@/lib/computer-messages";
 
 interface VpsComputerStatus {
   configured: boolean;

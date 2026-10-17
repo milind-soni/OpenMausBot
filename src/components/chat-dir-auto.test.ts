@@ -21,7 +21,7 @@ describe("chat text follows the writer's direction", () => {
     expectDirAuto("RawMarkdownToggle.tsx", 'data-testid="raw-markdown-view"');
     expectDirAuto("GroupView.tsx", "value={bulletinDraft}");
     expectDirAuto("GroupView.tsx", "group.bulletin.split");
-    expectDirAuto("TaskPicker.tsx", "{task.title}");
+    expectDirAuto("TaskPicker.tsx", "{localizedTaskTitle(task.title)}");
     expectDirAuto("TaskPicker.tsx", "task.threadId === bot.threadId");
     expectDirAuto("SearchResults.tsx", "line-clamp-2");
 

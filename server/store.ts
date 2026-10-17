@@ -37,7 +37,7 @@ import type {
 import { movesThreadToTop } from "../shared/wire.ts";
 import { parseConnectorTools } from "./connector-tools.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
-import { initialGreeting } from "./initial-greeting.ts";
+import { initialGreetingMessage } from "./initial-greeting.ts";
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
   SecretRequestCardData, Surface, TaskClosedBy, TaskOpenedBy, TaskUsage,
@@ -1538,11 +1538,7 @@ export class Store {
     // Before its transcript: clients need the bot/thread mapping to place either message.
     this.emit({ type: "bot", botId: bot.id });
     if (opts.seedMessages !== false) {
-      this.appendMessage(bot.threadId, {
-        role: "bot",
-        kind: "text",
-        text: initialGreeting(name, typeof this.initialLanguage === "function" ? this.initialLanguage() : this.initialLanguage),
-      });
+      this.appendMessage(bot.threadId, initialGreetingMessage(name, this.initialLanguage));
     }
     return bot;
   }

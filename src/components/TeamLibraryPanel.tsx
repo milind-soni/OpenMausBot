@@ -28,48 +28,13 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { LocaleKey } from "@/locales";
+import { catalogCopy, type TeamCatalog, type TeamCatalogEntry } from "@/lib/team-catalog";
 
 import { ShareTeamDialog } from "./ShareTeamDialog";
 import { OrgLibraryTab } from "./TeamLibraryPanelOrg";
 import { MAX_TEAM_BACKUP_BYTES } from "../../shared/team-backup";
 import { takeImportName } from "../../shared/import-name";
 const COMMUNITY_TEAMS_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
-
-interface TeamCatalogEntry {
-  slug: string;
-  name: string;
-  summary: string;
-  category: string;
-  outcome?: string;
-  setupMinutes?: number;
-  featured?: boolean;
-  package?: string;
-  manifest: string;
-  readme: string;
-  members: number;
-  skills: string[];
-  requires: { apps: string[] };
-}
-
-interface TeamCatalog {
-  repositoryUrl: string;
-  teams: TeamCatalogEntry[];
-}
-
-const CATALOG_COPY: Record<string, string> = {
-  "seo growth team": "seoGrowth",
-  "engineering team": "engineering",
-  "100x marketing team": "marketing100x",
-  "reddit lead miner": "redditLeadMiner",
-  "competitor watch": "competitorWatch",
-  "inbox follow-up": "inboxFollowup",
-};
-
-function catalogCopy(entry: TeamCatalogEntry): TeamCatalogEntry {
-  const id = CATALOG_COPY[entry.name.trim().toLowerCase()];
-  return id ? { ...entry, name: t(`templates.catalog.${id}.name` as LocaleKey), summary: t(`templates.catalog.${id}.summary` as LocaleKey), outcome: t(`templates.catalog.${id}.summary` as LocaleKey) } : entry;
-}
 
 export interface TeamImportResult {
   name: string;

@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import type { LocaleKey } from "@/locales";
 
 /**
  * Computer status responses come from the server so they can also be useful
@@ -23,4 +24,22 @@ export function localizeComputerProblem(problem: string | null | undefined): str
   const desktopFailure = /^The Local VM desktop failed to start: (.+)$/.exec(problem);
   if (desktopFailure) return t("computer.problem.desktopFailed", { detail: desktopFailure[1]! });
   return problem;
+}
+
+/** A Computer panel error worded by locale key, so it is translated when shown rather than when thrown. */
+export class LocalizedPanelError extends Error {
+  constructor(
+    readonly key: LocaleKey,
+    readonly problem?: string | null,
+    readonly fallbackKey?: LocaleKey,
+  ) {
+    super(key);
+  }
+}
+
+export function panelErrorText(error: Error | string | null): string | null {
+  if (error instanceof LocalizedPanelError) {
+    return t(error.key, error.fallbackKey ? { problem: localizeComputerProblem(error.problem) ?? t(error.fallbackKey) } : undefined);
+  }
+  return localizeComputerProblem(error instanceof Error ? error.message : error);
 }

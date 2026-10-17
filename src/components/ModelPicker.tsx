@@ -64,8 +64,7 @@ export function offersLocalModels(instance: InstanceInfo | undefined, localCount
 }
 
 export function effortLabel(level: EffortLevel): string {
-  const key = level === "xhigh" ? "model.effort.xhigh" : `model.effort.${level}`;
-  return t(key as Parameters<typeof t>[0]);
+  return t(`model.effort.${level}` as Parameters<typeof t>[0]);
 }
 
 /**
