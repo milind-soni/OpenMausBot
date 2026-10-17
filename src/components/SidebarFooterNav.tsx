@@ -1,6 +1,7 @@
 import { FolderOpen, Network, Puzzle, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { useAppTriggers } from "@/lib/app-triggers";
 import { cn } from "@/lib/cn";
 import { useCloudFilesReady } from "@/lib/cloud-files";
 import { t } from "@/lib/i18n";
@@ -100,7 +101,8 @@ export function SidebarFooterNav({
   const toolbar = advanced && !iconsOnly && toolsLayout === "toolbar";
   const iconSize = iconsOnly && !rail ? 20 : 18;
   const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
-  const automationsNeedYou = state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt);
+  const appTriggers = useAppTriggers();
+  const automationsNeedYou = state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt) || appTriggers.triggers.some((trigger) => trigger.enabled && trigger.problem);
   const automationsRow = <NavRow
     id="automations"
     label={t("sidebar.nav.automations")}

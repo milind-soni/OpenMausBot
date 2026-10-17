@@ -4,7 +4,7 @@ import { AUTOMATION_FIX_LABEL, type Automation, type AutomationStatus } from "@/
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
-import type { useAutomationActions } from "./actions";
+import type { useAllAutomationActions } from "./app-actions";
 
 /** A coloured dot for Working and Paused; a warning sign for Needs you. */
 export function StatusMark({ status, className }: { status: AutomationStatus; className?: string }) {
@@ -16,7 +16,7 @@ export function StatusMark({ status, className }: { status: AutomationStatus; cl
 export function FixButton({ automation, status, actions, onEdit, className }: {
   automation: Automation;
   status: AutomationStatus;
-  actions: ReturnType<typeof useAutomationActions>;
+  actions: ReturnType<typeof useAllAutomationActions>;
   onEdit: () => void;
   className?: string;
 }) {
@@ -27,6 +27,7 @@ export function FixButton({ automation, status, actions, onEdit, className }: {
     if (fix === "answer" || fix === "sign-in") actions.openRun(automation, automation.runs.find((run) => run.status !== "queued"));
     else if (fix === "usage") dispatch({ type: "toggleAppSettings", open: true, section: "usage" });
     else if (fix === "edit") onEdit();
+    else if (fix === "reconnect") dispatch({ type: "togglePlugins", open: true, surface: "apps" });
     else void actions.runNow(automation);
   };
   return (

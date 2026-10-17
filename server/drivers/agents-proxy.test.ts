@@ -650,6 +650,7 @@ describe("agents-proxy MCP surface", () => {
       "session_search",
       "session_read",
       "list_triggers",
+      "list_trigger_events",
       "create_trigger",
       "manage_trigger",
       "propose_profile",
@@ -736,7 +737,7 @@ describe("agents-proxy MCP surface", () => {
       "list_shared_computers",
       "assignment_status", "list_bots", "list_rooms", "list_threads",
       "list_team_setup",
-      "session_search", "session_read", "list_triggers", "skills_list",
+      "session_search", "session_read", "list_triggers", "list_trigger_events", "skills_list",
     ];
     expect(list.result.tools.filter((tool: any) => tool.annotations?.readOnlyHint)
       .map((tool: any) => tool.name)).toEqual(readNames);
@@ -758,7 +759,7 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     const create = list.result.tools.find((t: { name: string }) => t.name === "create_trigger");
     expect(create.inputSchema.required).toEqual(["when", "name", "instructions"]);
-    expect(create.inputSchema.properties.when.enum).toEqual(["schedule", "webhook"]);
+    expect(create.inputSchema.properties.when.enum).toEqual(["schedule", "app_event", "webhook"]);
     const schedule = create.inputSchema.properties.schedule;
     expect(JSON.stringify(create.inputSchema)).not.toMatch(/"oneOf"|"anyOf"|"allOf"|"const"/);
     expect(schedule.type).toBe("object");

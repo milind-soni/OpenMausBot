@@ -27,6 +27,36 @@ A MausBot Cloud plan includes connected apps: there is no key to add. At every s
 
 The built image uses the default service; `OMB_COMPOSIO_BROKER_URL` names another (a staging service, or a closed port in CI). The server run from source registers only with an explicitly named service, so development and tests never create installations on the real one.
 
+## App events
+
+An app-event automation runs a bot when something happens in a connected app: a new Gmail message, a Slack
+message in a channel, a HubSpot deal changing stage. It uses Composio triggers through the managed service, on
+the desktop, a headless server and a Cloud alike:
+
+1. `create_trigger` (`when: "app_event"`) or the editor saves the automation in `app-triggers.json` in the data
+   folder and creates its trigger on the service (`POST /v1/triggers`), which checks that the connected account
+   belongs to this installation. A Gmail filter (from, subject, label, words) becomes Gmail's own search, so
+   other mail never arrives; other apps match the filter as events arrive.
+2. Composio posts each event, signed, to the service, which queues it per installation for up to 7 days.
+3. The server long-polls the queue (`GET /v1/events`, 25 seconds at a time) while it has an automation switched
+   on. Each event becomes a routine run, with the event fenced as untrusted data. A burst shares runs: at most 3
+   waiting runs per automation, up to 20 events each. The cursor that acknowledges events moves only after the
+   run is saved, and a redelivered event is recognised by its id, so each event runs once.
+4. The server compares its automations with the service at start and every 15 minutes (hourly while all are
+   paused) and fixes any difference by itself: a lost copy is made again, an unwanted one is removed, on/off is
+   matched. An expired connection shows as **Needs you** with **Reconnect**.
+
+| | Desktop | Paid Cloud |
+| --- | --- | --- |
+| Events kept per day (UTC) | 500 | 2,000 |
+
+A Cloud counts as paid once its server presents the Admin's signed grant (`OMB_CLOUD_CONNECTED_APPS_GRANT`).
+Events over the limit are not run; the automation shows how many were skipped today and why.
+
+Gmail and other polled apps are checked every 15 minutes, the minimum for Composio-managed sign-ins. A server
+that uses its own Composio project key cannot watch apps yet: `list_trigger_events` and the editor say so, and a
+schedule that checks the app, or a webhook, does the job instead.
+
 ## Scoped key permissions
 
 A default project API key works without additional configuration. For a least-privilege scoped key, grant:

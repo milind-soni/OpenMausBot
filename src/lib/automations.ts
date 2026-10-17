@@ -5,9 +5,11 @@ import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import type { Routine, RoutineRun, RoutineSchedule } from "@/lib/routines";
 import type { WebhookTrigger } from "@/lib/webhooks";
+import type { AppTrigger } from "@/lib/app-triggers";
+import { appProblem, appStatusParts, appWhen, skippedToday } from "@/lib/app-automations";
 import type { OptionCardData } from "@/state/store";
 
-export type AutomationKind = "schedule" | "webhook";
+export type AutomationKind = "schedule" | "webhook" | "app";
 
 export interface Automation {
   kind: AutomationKind;
@@ -18,6 +20,8 @@ export interface Automation {
   enabled: boolean;
   schedule?: RoutineSchedule;
   eventTypes?: string[];
+  /** kind "app": what it watches, its problem and what it skipped. */
+  appTrigger?: AppTrigger;
   nextRunAt: number | null;
   /** This automation's runs, newest first. */
   runs: RoutineRun[];
@@ -26,7 +30,7 @@ export interface Automation {
 const runTime = (run: RoutineRun) => run.startedAt ?? run.scheduledFor ?? run.createdAt;
 const newestFirst = (left: RoutineRun, right: RoutineRun) => runTime(right) - runTime(left);
 
-export function automationsFrom(sources: { routines: readonly Routine[]; webhooks: readonly WebhookTrigger[]; runs: readonly RoutineRun[] }): Automation[] {
+export function automationsFrom(sources: { routines: readonly Routine[]; webhooks: readonly WebhookTrigger[]; appTriggers?: readonly AppTrigger[]; runs: readonly RoutineRun[] }): Automation[] {
   const runsOf = (id: string) => sources.runs.filter((run) => run.routineId === id).sort(newestFirst);
   return [
     ...sources.routines.map((routine): Automation => ({
@@ -37,6 +41,10 @@ export function automationsFrom(sources: { routines: readonly Routine[]; webhook
       kind: "webhook", id: webhook.id, name: webhook.name, botId: webhook.botId, instructions: webhook.prompt, enabled: webhook.enabled,
       eventTypes: webhook.eventTypes, nextRunAt: null, runs: runsOf(webhook.id),
     })),
+    ...(sources.appTriggers ?? []).map((trigger): Automation => ({
+      kind: "app", id: trigger.id, name: trigger.name, botId: trigger.botId, instructions: trigger.prompt, enabled: trigger.enabled,
+      appTrigger: trigger, nextRunAt: null, runs: runsOf(trigger.id),
+    })),
   ];
 }
 
@@ -44,6 +52,7 @@ export function automationFor(ref: { kind: AutomationKind; id: string }, sources
   return automationsFrom({
     routines: ref.kind === "schedule" ? sources.routines.filter((routine) => routine.id === ref.id) : [],
     webhooks: ref.kind === "webhook" ? sources.webhooks.filter((webhook) => webhook.id === ref.id) : [],
+    appTriggers: ref.kind === "app" ? (sources.appTriggers ?? []).filter((trigger) => trigger.id === ref.id) : [],
     runs: sources.runs,
   })[0] ?? null;
 }
@@ -55,6 +64,8 @@ export function cardAutomation(card: OptionCardData): { kind: AutomationKind; id
   if (routine?.operation.action === "create" && routine.resultId) return { kind: "schedule", id: routine.resultId };
   const webhook = card.webhookRequest;
   if (webhook?.operation.action === "create" && webhook.resultId) return { kind: "webhook", id: webhook.resultId };
+  const app = card.appTriggerRequest;
+  if (app?.operation.action === "create" && app.resultId) return { kind: "app", id: app.resultId };
   return null;
 }
 
@@ -140,8 +151,11 @@ function thirdPerson(verb: string): string {
 }
 
 /** What the bot does, as a short phrase: the first clause of its instructions, addressed to the person. */
+/** Words a bot may leave at the end of its instructions that a person never says: "…a reply to the email in the event data". */
+const TECHNICAL_TAIL = /\s+(?:in|from|of|inside)\s+(?:the\s+)?(?:(?:incoming|webhook|trigger|app)\s+)?(?:event(?:'s)?(?:\s+(?:data|payload|body))?|payload|webhook(?:\s+(?:data|body|payload|call))?|trigger(?:\s+(?:data|payload))?)$/i;
+
 export function doesPhrase(instructions: string, english = activeLocale().startsWith("en")): string {
-  let clause = instructions.replace(/^\s*please\s+/i, "").split(/[.:;!?\n]|\s[—–-]\s/)[0]?.trim() ?? "";
+  let clause = instructions.replace(/^\s*please\s+/i, "").split(/[.:;!?\n]|\s[—–-]\s/)[0]?.trim().replace(TECHNICAL_TAIL, "") ?? "";
   if (!clause) return t("automations.does.default");
   if (english) {
     clause = clause.replace(/\bme\b/gi, "you").replace(/\bmy\b/gi, "your").replace(/\bmine\b/gi, "yours").replace(/\bI\b/g, "you");
@@ -174,8 +188,9 @@ export function sourcePhrase(name: string): string {
 }
 
 /** "Every weekday at 9 AM, Scout sends you a summary of your inbox"; "When your sales form sends something, Scout drafts…". */
-export function automationSentence(automation: Pick<Automation, "kind" | "name" | "instructions" | "schedule">, botName: string): string {
+export function automationSentence(automation: Pick<Automation, "kind" | "name" | "instructions" | "schedule" | "appTrigger">, botName: string): string {
   const does = doesPhrase(automation.instructions);
+  if (automation.kind === "app" && automation.appTrigger) return t("automations.sentence.appEvent", { when: appWhen(automation.appTrigger), bot: botName, does });
   if (automation.kind === "schedule" && automation.schedule) {
     return t("automations.sentence.schedule", { when: plainWhen(automation.schedule), bot: botName, does });
   }
@@ -184,7 +199,7 @@ export function automationSentence(automation: Pick<Automation, "kind" | "name" 
 
 // ---- Status: Working / Paused / Needs you ----
 
-export type AutomationFix = "answer" | "sign-in" | "usage" | "edit" | "run";
+export type AutomationFix = "answer" | "sign-in" | "usage" | "edit" | "run" | "reconnect";
 export interface AutomationStatus {
   state: "working" | "paused" | "needs-you";
   /** Needs you: one plain sentence, and the one button that fixes it. */
@@ -207,8 +222,10 @@ function ownerFix(run: RoutineRun): { reason: string; fix: AutomationFix } | nul
 
 /** Paused when switched off. Needs you when its last run waits on the person, failed for a reason only the person can
  * fix, or failed twice running. A run that failed and then recovered is Working. */
-export function automationStatus(automation: Pick<Automation, "enabled" | "runs">): AutomationStatus {
+export function automationStatus(automation: Pick<Automation, "enabled" | "runs" | "appTrigger">): AutomationStatus {
   if (!automation.enabled) return { state: "paused" };
+  const app = automation.appTrigger && appProblem(automation.appTrigger);
+  if (app) return { state: "needs-you", ...app };
   const settled = automation.runs.filter((run) => run.status !== "cancelled" && run.status !== "queued");
   const latest = settled[0];
   if (latest?.status === "waiting") return { state: "needs-you", reason: t("automations.reason.answer"), fix: "answer" };
@@ -241,7 +258,8 @@ export function statusLine(automation: Automation, now = Date.now()): string {
   const parts = [t(status.state === "paused" ? "automations.status.paused" : status.state === "needs-you" ? "automations.status.needsYou" : "automations.status.working")];
   if (latest?.status === "running") parts.push(t("automations.runningNow"));
   else if (latest) parts.push(`${t("automations.lastRan", { when: lastWhen(runTime(latest), now) })}${isProblem(latest) ? " ✗" : ""}`);
-  else parts.push(t("automations.notRunYet"));
+  else if (!automation.appTrigger) parts.push(t("automations.notRunYet"));
+  if (automation.appTrigger) parts.push(...appStatusParts(automation.appTrigger, Boolean(latest)), ...[skippedToday(automation.appTrigger, now) ?? []].flat());
   if (automation.nextRunAt != null) parts.push(t("automations.next", { when: nextWhen(automation.nextRunAt, now) }));
   return parts.join(" · ");
 }
@@ -264,4 +282,5 @@ export const AUTOMATION_FIX_LABEL: Record<AutomationFix, LocaleKey> = {
   usage: "automations.fix.usage",
   edit: "automations.fix.edit",
   run: "automations.fix.run",
+  reconnect: "automations.fix.reconnect",
 };

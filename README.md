@@ -426,6 +426,15 @@ The existing duration field remains calendar/display metadata. Webhook triggers 
 but reuse the same queued task executor and calendar
 receipts.
 
+**App events** start a bot when something happens in a connected app ("whenever I get an email from Acme, draft
+a reply"). The bot finds the app's events with `list_trigger_events` and calls `create_trigger` with
+`when: "app_event"`; the person can also choose **New → Set it up yourself → When something happens in an app**.
+Composio sends each event to OpenMausBot's connected-apps service, which queues it; the app collects the queue
+with a long poll, so a desktop needs no public address and events wait while it is closed. Gmail is checked every
+15 minutes; Slack, GitHub and other push apps arrive at once. A desktop keeps up to 500 events a day and a paid
+Cloud 2,000; what is skipped shows on the automation. App events need the included connected apps: a server
+using its own Composio key cannot watch apps yet. Details: [docs/composio.md](docs/composio.md#app-events).
+
 OpenMausBot starts a webhook-only receiver on `127.0.0.1:8800` by default (or one port above `OMB_PORT`).
 Set `OMB_WEBHOOK_PORT` to choose another port. A webhook secret is shown once when the trigger is created
 or rotated. Bearer authentication is recommended so the secret stays out of request URLs and most access

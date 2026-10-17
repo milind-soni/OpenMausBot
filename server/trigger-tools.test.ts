@@ -43,7 +43,7 @@ describe("listTriggers", () => {
 
 describe("parseTriggerRequest", () => {
   const source = { fromBotId: "bot-a", fromThreadId: "thread-a" };
-  const isSchedule = (id: string) => id.startsWith("r");
+  const isSchedule = (id: string) => id.startsWith("r") ? "schedule" as const : id.startsWith("a") ? "app" as const : "webhook" as const;
 
   it("routes a create by its kind and a change by whose id it is", () => {
     expect(parseTriggerRequest({ ...source, action: "create", kind: "schedule", routine: { name: "x" } }, isSchedule))
@@ -54,6 +54,10 @@ describe("parseTriggerRequest", () => {
       .toMatchObject({ ok: true, kind: "schedule", proposal: { action: "pause", routineId: "r1" } });
     expect(parseTriggerRequest({ ...source, action: "update", triggerId: "w1", changes: { name: "y" } }, isSchedule))
       .toMatchObject({ ok: true, kind: "webhook", operation: { action: "update", webhookId: "w1", changes: { name: "y" } } });
+    expect(parseTriggerRequest({ ...source, action: "create", kind: "app", trigger: { name: "x" } }, isSchedule))
+      .toMatchObject({ ok: true, kind: "app", operation: { action: "create", trigger: { name: "x" } } });
+    expect(parseTriggerRequest({ ...source, action: "update", triggerId: "a1", changes: { filter: { from: "acme" } } }, isSchedule))
+      .toMatchObject({ ok: true, kind: "app", operation: { action: "update", triggerId: "a1", changes: { filter: { from: "acme" } } } });
   });
 
   it("refuses a field the trigger's kind does not have, and unknown shapes", () => {
@@ -61,6 +65,8 @@ describe("parseTriggerRequest", () => {
       .toMatchObject({ ok: false, error: expect.stringContaining("has no schedule") });
     expect(parseTriggerRequest({ ...source, action: "update", triggerId: "r1", changes: { eventTypes: ["push"] } }, isSchedule))
       .toMatchObject({ ok: false });
+    expect(parseTriggerRequest({ ...source, action: "update", triggerId: "a1", changes: { event: "SLACK_X" } }, isSchedule))
+      .toMatchObject({ ok: false, error: expect.stringContaining("delete it and create a new one") });
     expect(parseTriggerRequest({ ...source, action: "create", kind: "email", routine: {} }, isSchedule)).toMatchObject({ ok: false });
     expect(parseTriggerRequest({ ...source, action: "create", kind: "schedule", routine: {}, extra: 1 }, isSchedule)).toMatchObject({ ok: false });
   });

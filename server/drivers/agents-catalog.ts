@@ -130,7 +130,7 @@ const TRIGGER_FIELDS_SCHEMA = {
     type: "string",
     minLength: 1,
     maxLength: 20_000,
-    description: "Complete steps for each run, which does NOT see this conversation. Put judgement here, e.g. \"if it is not about an order, stop\".",
+    description: "Complete steps for each run, which does NOT see this conversation, in the person's plain words (\"draft a reply\"), never \"event data\", \"payload\", \"webhook\" or \"trigger\". Put judgement here, e.g. \"if it is not about an order, stop\".",
   },
   schedule: { ...ROUTINE_SCHEDULE_SCHEMA, description: `Only for when=schedule. ${ROUTINE_SCHEDULE_SCHEMA.description}` },
   webhook_event_types: {
@@ -138,6 +138,21 @@ const TRIGGER_FIELDS_SCHEMA = {
     maxItems: 20,
     items: { type: "string", maxLength: 200 },
     description: "Only for when=webhook: optional event names to accept (from the caller's event-type header, e.g. push). Omit to accept every call.",
+  },
+  filter: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      from: { type: "string", maxLength: 200 },
+      subject_contains: { type: "string", maxLength: 200 },
+      label: { type: "string", maxLength: 200 },
+      contains: { type: "string", maxLength: 200 },
+    },
+    description: "app_event only: plain words, all must match. Gmail filters at the source.",
+  },
+  event_config: {
+    type: "object",
+    description: "app_event only: settings from list_trigger_events config_fields.",
   },
   run_on: {
     type: "string",
@@ -625,7 +640,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "list_triggers",
     description:
-      "List this bot's triggers, its routines (schedules) and webhooks: ids, when they fire, on or paused, next run or last fire. trigger_id: one trigger with its last 10 fires. Includes the computer's authoritative current time and timezone.",
+      "List this bot's triggers, its routines (schedules), app events and webhooks: ids, when they fire, on or paused, next run or last fire, problems. trigger_id: one trigger with its last 10 fires. Includes the computer's authoritative current time and timezone.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -636,19 +651,35 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "list_trigger_events",
+    description:
+      "Before create_trigger with when=app_event: the connected apps you may use, with their accounts and events (slug, delivery, config_fields, filter_fields), and popular apps not connected yet.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        app: { type: "string", description: "Optional app slug, e.g. gmail." },
+        search: { type: "string", maxLength: 100, description: "Optional words in event names." },
+      },
+    },
+  },
+  {
     name: "create_trigger",
     description:
-      "Set up work that happens on its own: when <something happens>, a bot does <instructions>. Call it in this turn whenever the person describes recurring or event-based work (\"every morning send me…\", \"when another app calls…\"); never ask for confirmation first. It applies at once and the person sees a card with Edit, Pause and Undo. when=schedule runs on a time rule (call list_triggers first for relative dates: it has the authoritative time and timezone); when=webhook gives an address another app sends to (the person copies it from the card; you never see its secret). To the person these are automations. Something to do once, now, is not a trigger. for_bot_id: a trigger for ANOTHER bot in your section, which keeps that bot's engine and permissions.",
+      "Set up work that happens on its own: when <something happens>, a bot does <instructions>. Call it in this turn whenever the person describes recurring or event-based work (\"every morning send me…\", \"whenever I get an email from…\", \"when another app calls…\"); never ask for confirmation first. It applies at once and the person sees a card with Edit, Pause and Undo. when=schedule runs on a time rule (call list_triggers first for relative dates: it has the authoritative time and timezone); when=app_event runs when something happens in a connected app (list_trigger_events first; prefer it to a schedule that keeps checking); when=webhook gives an address another app sends to (the person copies it from the card; you never see its secret). To the person these are automations: write name and instructions as they would say them. Something to do once, now, is not a trigger. for_bot_id: a trigger for ANOTHER bot in your section, which keeps that bot's engine and permissions.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         when: {
           type: "string",
-          enum: ["schedule", "webhook"],
-          description: "schedule = on a time rule (give schedule); webhook = when another app calls a link.",
+          enum: ["schedule", "app_event", "webhook"],
+          description: "schedule = on a time rule (give schedule); app_event = something happens in a connected app (give app and event); webhook = when another app calls a link.",
         },
         ...TRIGGER_FIELDS_SCHEMA,
+        app: { type: "string", description: "app_event: app slug from list_trigger_events." },
+        event: { type: "string", description: "app_event: event slug from list_trigger_events." },
+        account: { type: "string", description: "app_event: account id or alias, only when the app has several." },
         for_bot_id: {
           type: "string",
           description:
@@ -661,7 +692,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "manage_trigger",
     description:
-      "Change one of this bot's triggers, its routines or webhooks: update, pause, resume, run once now (a webhook gets a test call) or delete. Get the id from list_triggers. It applies at once, with an Undo where possible. for_bot_id: ANOTHER bot's trigger in your section.",
+      "Change one of this bot's triggers (schedules, app events or webhooks): update, pause, resume, run once now (an app event or webhook gets a test event) or delete. Get the id from list_triggers. It applies at once, with an Undo where possible. for_bot_id: ANOTHER bot's trigger in your section.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

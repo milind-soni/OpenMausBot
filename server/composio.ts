@@ -191,7 +191,7 @@ export function setManagedBrokerAccess(access: unknown): void {
   managedBrokerAccess = { url: normalizeManagedBrokerUrl(parsed.url), token: parsed.token };
 }
 
-function brokerAccess(): { url: string; token: string } | null {
+export function brokerAccess(): { url: string; token: string } | null {
   if (managedBrokerAccess !== undefined) return managedBrokerAccess;
   const url = process.env.OMB_COMPOSIO_BROKER_URL?.trim();
   const token = process.env.OMB_COMPOSIO_BROKER_TOKEN?.trim();

@@ -13,6 +13,7 @@ import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
 import type { WebhookRequestCardData } from "./webhook-request.ts";
+import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
@@ -582,6 +583,8 @@ export interface OptionCardData {
   routineRequest?: RoutineRequestCardData;
   /** A webhook trigger a bot made or changed from chat. */
   webhookRequest?: WebhookRequestCardData;
+  /** An app-event automation a bot made or changed from chat. */
+  appTriggerRequest?: AppTriggerRequestCardData;
   /** A durable profile-change proposal (propose_profile). */
   profileRequest?: ProfileRequestCardData;
   /** A durable default-model proposal (propose_model). */
@@ -896,6 +899,10 @@ export type ServerFrame =
   | { kind: "webhook"; webhook: WebhookTrigger }
   | { kind: "webhook.attempt"; attempt: WebhookAttempt }
   | { kind: "webhook.deleted"; webhookId: string }
+  | { kind: "app-trigger"; botId: string; trigger: AppTrigger }
+  | { kind: "app-trigger.attempt"; botId: string; attempt: AppEventAttempt }
+  | { kind: "app-trigger.deleted"; triggerId: string }
+  | { kind: "app-trigger.service"; service: AppTriggerService }
   | { kind: "runtime"; event: RuntimeEvent }
   | { kind: "screen"; botId: string; threadId: string; png: string; mime?: string }
   /** A bot's computer is being set up or woken for a turn; the chat shows

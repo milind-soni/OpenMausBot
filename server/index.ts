@@ -455,7 +455,7 @@ import { createBrowserHost } from "./host/browser.ts";
 import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts";
-import { listTriggers, parseTriggerRequest, triggerTarget } from "./trigger-tools.ts"; import { WebhookRequestError, WebhookRequestService } from "./webhook-requests.ts";
+import { parseTriggerRequest, triggerTarget } from "./trigger-tools.ts"; import { WebhookRequestError, WebhookRequestService } from "./webhook-requests.ts"; import { createAppTriggerHost } from "./app-trigger-host.ts";
 import { appliesNow, directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { createTeamMemoryRequests } from "./team-memory-requests.ts";
 import { createAgentCard } from "./chat-widgets.ts";
@@ -10166,8 +10166,8 @@ async function undoAppliedChange(res: ServerResponse, threadId: string, requestI
       }
     }
     result = undone;
-  } else if (card.webhookRequest) {
-    result = webhookRequests.undo({ botId, threadId, requestId });
+  } else if (card.webhookRequest || card.appTriggerRequest) {
+    result = card.webhookRequest ? webhookRequests.undo({ botId, threadId, requestId }) : await appTriggers.undo({ botId, threadId, requestId });
   } else if (card.profileRequest) {
     const undone = profileRequests.undo({ botId, threadId, requestId });
     if (undone.claimed && undone.state === "undone") {
@@ -10221,6 +10221,10 @@ const webhooks = new WebhookManager({
   },
 });
 const webhookRequests = new WebhookRequestService({ store, webhooks, botName: (botId) => store.bot(botId)?.name ?? "the bot" });
+const appTriggers = createAppTriggerHost({ store, webhooks, routines: () => routines!, botState: unattendedDispatchState, timeZone: routineTimeZone, emit: broadcast, connectionMode: () => composio.connectionMode(cfg),
+  access: composio.brokerAccess, connectedApps: () => composio.connectedServices(cfg), visibleBot: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId),
+  audit: (row) => appendDecision(DATA_DIR, { ...row, decision: "auto-approved", source: "routine" }) });
+ROUTES.push(appTriggers.routes);
 
 let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
@@ -14637,19 +14641,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         return json(res, 200, { rooms: rooms.slice(0, 50), unpostable: unpostable.slice(0, 50) });
       }
-      if (method === "GET" && path === "/api/internal/triggers") {
-        if (!connectorThread(internalSender.id, internalCapability.threadId)) return json(res, 403, { error: "source conversation does not belong to sender" });
-        const target = triggerTarget(internalSender, url.searchParams.get("forBotId") ?? undefined, (id) => store.bot(id));
-        if ("error" in target) return json(res, target.status, { error: target.error });
-        return json(res, 200, listTriggers({ botId: target.forBot?.botId ?? internalSender.id, triggerId: url.searchParams.get("triggerId") ?? undefined,
-          routines: routines!.listRoutines(), webhooks: webhooks.list(), runs: routines!.listRuns(), timeZone: routineTimeZone(), now: Date.now() }));
-      }
+      const triggerContext = { from: internalSender, threadId: internalCapability.threadId, ownsThread: (botId: string, threadId: string) => Boolean(connectorThread(botId, threadId)), guestDriven: cloudGuestDriven(internalCapability.threadId), canCommit: () => internalCapabilityIsActive(internalCapability) };
+      if (await dispatchRoutes([appTriggers.internalRoutes(triggerContext)], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/trigger-requests") {
         const from = internalSender;
         const fromThreadId = internalCapability.threadId;
         const owner = connectorThread(from.id, fromThreadId);
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
-        const request = parseTriggerRequest(await readInternalBody(), (id) => routines!.listRoutines().some((routine) => routine.id === id));
+        const request = parseTriggerRequest(await readInternalBody(), (id) => routines!.listRoutines().some((routine) => routine.id === id) ? "schedule" : appTriggers.isApp(id) ? "app" : "webhook");
         if (!request.ok) return json(res, 400, { error: request.error });
         const target = triggerTarget(from, request.forBotId, (id) => store.bot(id));
         if ("error" in target) return json(res, target.status, { error: target.error });
@@ -14659,6 +14658,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, persistence.status, { error: persistence.error });
         }
         const sender = owner.group ? { botId: from.id, name: from.name, color: from.color } : undefined;
+        if (request.kind === "app") return appTriggers.submit(res, json, { ...triggerContext, operation: request.operation, forBot, sender });
         if (request.kind === "webhook") {
           // Its calls start the owner's bot: a turn the Cloud's owner did not drive cannot add or change one.
           if (cloudGuestDriven(fromThreadId)) return json(res, 403, { error: "Only the Cloud's owner can set up or change webhook triggers. Tell the person to ask from their own conversation." });
@@ -17181,7 +17181,7 @@ restoreChannelMessages();
 server.listen(PORT, "127.0.0.1", async () => {
   companyRuntimeReady();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
-  browserSweep.start(); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
+  browserSweep.start(); appTriggers.start(); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
   if (builtInBrowserEnabled(cfg)) chromeLauncher.start();
   followupsReady = true;
   drainQueuedSends();
@@ -17251,7 +17251,7 @@ const gracefulShutdown = createGracefulShutdown({
       cloudComputerPower.close();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();
-      routines?.close();
+      routines?.close(); void appTriggers.stop();
       calendarCalls?.stop();
       memoryUpkeep.stop();
       cacheKeepWarm.dispose();

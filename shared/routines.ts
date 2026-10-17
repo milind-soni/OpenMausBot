@@ -135,6 +135,8 @@ export interface RoutineRun {
   status: RoutineRunStatus;
   manual: boolean;
   triggerSource?: RoutineRunTrigger;
+  /** "app": a connected-app event started it; triggerSource is then "webhook" (an outside event). */
+  eventSource?: "app";
   webhookId?: string;
   deliveryId?: string;
   /** Room task created for a team-goal run. */

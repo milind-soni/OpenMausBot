@@ -14,6 +14,7 @@ describe("built-in agent tool read policy", () => {
       "session_read",
       "tool_result_read",
       "list_triggers",
+      "list_trigger_events",
       "skills_list",
     ]);
     for (const name of READ_ONLY_AGENT_TOOL_NAMES) {

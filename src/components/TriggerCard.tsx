@@ -6,28 +6,33 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
 import { api, ApiError, useStore, type OptionCardData } from "@/state/store";
-import { useAutomationActions } from "./automations/actions";
+import { appWaitingLine } from "@/lib/app-automations";
+import { useAppTriggers } from "@/lib/app-triggers";
+import { useAllAutomationActions } from "./automations/app-actions";
 
 // The editors live with the Automations page; a chat only loads one when Edit is pressed.
 const RoutineEditor = lazy(async () => ({ default: (await import("./RoutinesPage")).RoutineEditor }));
 const WebhookEditor = lazy(async () => ({ default: (await import("./WebhookTrigger")).WebhookEditor }));
+const AppEventEditor = lazy(async () => ({ default: (await import("./automations/AppEventEditor")).AppEventEditor }));
 
 const ACTION = "rounded-md px-1.5 py-0.5 font-medium hover:bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50";
 
 /** What a chat-made automation leaves in the conversation: one sentence, what happens next or what happened last. */
 export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId?: string }) {
   const { state, dispatch } = useStore();
-  const actions = useAutomationActions();
+  const actions = useAllAutomationActions();
+  const appTriggers = useAppTriggers();
   const [editing, setEditing] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [error, setError] = useState<string>();
   const ref = cardAutomation(card);
   if (!ref) return null;
-  const automation = automationFor(ref, { routines: state.routines, webhooks: state.webhooks, runs: state.routineRuns });
-  const fallbackName = card.routineRequest?.undo?.name ?? card.webhookRequest?.undo?.name ?? card.title;
+  const automation = automationFor(ref, { routines: state.routines, webhooks: state.webhooks, appTriggers: appTriggers.triggers, runs: state.routineRuns });
+  const fallbackName = card.routineRequest?.undo?.name ?? card.webhookRequest?.undo?.name ?? card.appTriggerRequest?.undo?.name ?? card.title;
 
   if (card.undone || !automation) {
     if (!card.undone && ref.kind === "schedule" && state.routinesLoadState === "loading") return null;
+    if (!card.undone && ref.kind === "app" && !appTriggers.loaded) return null;
     return (
       <div data-trigger-card={ref.id} className="flex w-full max-w-[840px] items-center gap-2 text-[12.5px] text-ink-tertiary">
         {card.undone ? <Undo2 size={13} /> : <Zap size={13} />}
@@ -47,7 +52,7 @@ export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId
   else if (last) {
     const result = runLine(last);
     line = [`${t("automations.card.lastRan", { when: lastWhen(last.startedAt ?? last.scheduledFor) })} ${result.mark} ${result.text}`, next && t("automations.next", { when: next })].filter(Boolean).join(" · ");
-  } else line = next ? t("automations.card.next", { when: next }) : t("automations.notRunYet");
+  } else line = next ? t("automations.card.next", { when: next }) : automation.appTrigger ? appWaitingLine(automation.appTrigger) : t("automations.notRunYet");
 
   const undo = () => {
     if (!threadId || !card.requestId || undoing) return;
@@ -82,7 +87,7 @@ export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId
       {(error || actions.error) && <div role="alert" className="mt-1 pl-[22px] text-[12px] text-warning">{error ?? actions.error}</div>}
       {editing && (
         <Suspense fallback={null}>
-          {automation.kind === "schedule"
+          {automation.kind === "app" ? <AppEventEditor trigger={automation.appTrigger} bots={visibleBots} onClose={() => setEditing(false)} /> : automation.kind === "schedule"
             ? <RoutineEditor routine={state.routines.find((routine) => routine.id === automation.id)} bots={visibleBots} plain onClose={() => setEditing(false)} />
             : <WebhookEditor webhook={state.webhooks.find((webhook) => webhook.id === automation.id)} bots={visibleBots} onClose={() => setEditing(false)} onCredential={(credential, id) => saveWebhookCredential(webhookCredentialStore(), id, credential)} />}
         </Suspense>

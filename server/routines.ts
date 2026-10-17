@@ -22,6 +22,7 @@ import {
   dispatchRefusal, engineFacts, loadOwnerNotices, recoverRun, requeueOnce, weekRuns, type RoutineAlert, type RoutineFailureFacts, type RoutineOwnerNotice,
 } from "./routine-recovery.ts";
 import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./routine-waits.ts";
+import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
 
@@ -134,6 +135,8 @@ export interface RoutineRun {
   /** Time spent waiting on the person's answers, which the run limit does not count. */
   waitedMs?: number;
   triggerSource?: RoutineRunTrigger;
+  /** "app": a connected-app event started it (its triggerSource stays "webhook", an outside event). */
+  eventSource?: "app";
   webhookId?: string;
   deliveryId?: string;
   sourceThreadId?: string;
@@ -199,20 +202,11 @@ interface RoutineFile {
   routines: Routine[];
   runs: RoutineRun[];
   routineRequestReceipts?: RoutineRequestReceipt[];
-  webhookRunReceipts?: WebhookRunReceipt[];
+  webhookRunReceipts?: EventRunReceipt[];
   startupLaunchId?: string;
   ownerNotices?: RoutineOwnerNotice[];
 }
 
-const webhookRunReceiptSchema = z.object({
-  webhookId: z.string().min(1).max(200),
-  deliveryId: z.string().min(1).max(200),
-  runId: z.string().min(1),
-  acceptedAt: z.number().finite().nonnegative(),
-});
-type WebhookRunReceipt = z.infer<typeof webhookRunReceiptSchema>;
-const WEBHOOK_RETRY_WINDOW_MS = 7 * 24 * 60 * 60_000;
-const MAX_WEBHOOK_RECEIPTS = 20_000;
 
 export type RoutineRequestOwner = Pick<RoutineRequestReceipt, "requestId" | "messageId" | "botId" | "threadId">;
 
@@ -674,7 +668,7 @@ export class RoutineManager {
   private unloadedRoutines: Routine[] = [];
   private runs: RoutineRun[] = [];
   private routineRequestReceipts: RoutineRequestReceipt[] = [];
-  private webhookRunReceipts: WebhookRunReceipt[] = [];
+  private webhookRunReceipts: EventRunReceipt[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private startupRunsQueued = false;
   private startupLaunchId: string | undefined;
@@ -759,23 +753,10 @@ export class RoutineManager {
             Number.isFinite(receipt?.appliedAt)
           )
         : [];
-      this.webhookRunReceipts = Array.isArray(disk.webhookRunReceipts)
-        ? disk.webhookRunReceipts.flatMap((receipt) => {
-            const parsed = webhookRunReceiptSchema.safeParse(receipt);
-            return parsed.success ? [parsed.data] : [];
-          })
-        : [];
+      this.webhookRunReceipts = loadEventReceipts(disk.webhookRunReceipts, this.runs, this.now());
       this.frozenPending = disk.frozenResultsCleared !== true;
       this.ownerNotices = loadOwnerNotices(disk.ownerNotices);
       if (typeof disk.startupLaunchId === "string") this.startupLaunchId = disk.startupLaunchId;
-      const known = new Set(this.webhookRunReceipts.map((r) => JSON.stringify([r.webhookId, r.deliveryId])));
-      for (const run of this.runs) {
-        if (!run.webhookId || !run.deliveryId || run.createdAt < this.now() - WEBHOOK_RETRY_WINDOW_MS) continue;
-        const key = JSON.stringify([run.webhookId, run.deliveryId]);
-        if (known.has(key)) continue;
-        this.webhookRunReceipts.push({ webhookId: run.webhookId, deliveryId: run.deliveryId, runId: run.id, acceptedAt: run.createdAt });
-        known.add(key);
-      }
     } catch (error) {
       this.routines = [];
       this.unloadedRoutines = [];
@@ -1166,7 +1147,7 @@ export class RoutineManager {
   webhookRunReceipt(webhookId: string, deliveryId: string): { id: string } | null {
     const receipt = this.webhookRunReceipts.find((candidate) =>
       candidate.webhookId === webhookId && candidate.deliveryId === deliveryId &&
-      candidate.acceptedAt >= this.now() - WEBHOOK_RETRY_WINDOW_MS);
+      candidate.acceptedAt >= this.now() - EVENT_RETRY_WINDOW_MS);
     if (receipt) return { id: receipt.runId };
     const active = this.runs.find((run) => run.webhookId === webhookId && run.deliveryId === deliveryId &&
       ["queued", "running", "waiting"].includes(run.status));
@@ -1181,6 +1162,7 @@ export class RoutineManager {
     runOn: RoutineRunOn;
     deliveryId: string;
     receivedAt: number;
+    eventSource?: "app";
   }): { id: string } {
     this.assertWritable();
     const existing = this.webhookRunReceipt(input.webhookId, input.deliveryId);
@@ -1189,43 +1171,48 @@ export class RoutineManager {
       throw Object.assign(new Error("The assigned MAUS no longer exists"), { status: 410 });
     }
     const run: RoutineRun = {
-      id: randomUUID(),
-      routineId: input.webhookId,
-      routineName: input.webhookName,
-      prompt: input.prompt,
-      target: "bot",
-      botId: input.botId,
-      runOn: input.runOn,
-      scheduledFor: input.receivedAt,
-      status: "queued",
-      manual: false,
-      triggerSource: "webhook",
-      webhookId: input.webhookId,
-      deliveryId: input.deliveryId,
-      attachments: [],
-      createdAt: this.now(),
+      id: randomUUID(), routineId: input.webhookId, routineName: input.webhookName, prompt: input.prompt, target: "bot",
+      botId: input.botId, runOn: input.runOn, scheduledFor: input.receivedAt, status: "queued", manual: false,
+      triggerSource: "webhook", webhookId: input.webhookId, deliveryId: input.deliveryId, attachments: [], createdAt: this.now(),
+      ...(input.eventSource ? { eventSource: input.eventSource } : {}),
     };
+    this.commitEvent(run, input.deliveryId, () => { this.runs.push(run); });
+    return cloneRun(run);
+  }
+
+  /** Adds an outside event to its trigger's run that has not started yet, so a burst becomes one run. Null when there
+   *  is no such run or `merge` declines (the run is full). */
+  mergeIntoQueuedRun(webhookId: string, deliveryId: string, merge: (prompt: string) => string | null): { id: string } | null {
+    this.assertWritable();
+    const existing = this.webhookRunReceipt(webhookId, deliveryId);
+    if (existing) return existing;
+    const run = this.runs.findLast((candidate) => candidate.webhookId === webhookId && candidate.status === "queued" && !candidate.threadId);
+    const merged = run?.prompt === undefined ? null : merge(run.prompt);
+    if (!run || merged === null) return null;
+    const before = run.prompt;
+    this.commitEvent(run, deliveryId, () => { run.prompt = merged; }, () => { run.prompt = before; });
+    return { id: run.id };
+  }
+
+  private commitEvent(run: RoutineRun, deliveryId: string, apply: () => void, revert?: () => void): void {
     const previousReceipts = this.webhookRunReceipts;
-    const receipts = previousReceipts.filter((receipt) =>
-      receipt.acceptedAt >= this.now() - WEBHOOK_RETRY_WINDOW_MS);
+    const receipts = previousReceipts.filter((receipt) => receipt.acceptedAt >= this.now() - EVENT_RETRY_WINDOW_MS);
     // Never evict a promised retry identity to admit fresh work.
-    if (receipts.length >= MAX_WEBHOOK_RECEIPTS) {
-      throw Object.assign(new Error("Webhook retry history is full; try again later"), { status: 429 });
-    }
-    receipts.push({ webhookId: input.webhookId, deliveryId: input.deliveryId, runId: run.id, acceptedAt: this.now() });
+    if (receipts.length >= MAX_EVENT_RECEIPTS) throw Object.assign(new Error("Webhook retry history is full; try again later"), { status: 429 });
+    receipts.push({ webhookId: run.webhookId!, deliveryId, runId: run.id, acceptedAt: this.now() });
     const previousRuns = this.runs.slice();
-    this.runs.push(run);
+    apply();
     this.webhookRunReceipts = receipts;
     try { this.save(); }
     catch (error) {
       // Keep the live run objects tick() may be awaiting, not cloned snapshots.
       this.runs = previousRuns;
       this.webhookRunReceipts = previousReceipts;
+      revert?.();
       throw error;
     }
     this.emitRun(run);
     queueMicrotask(() => void this.tick());
-    return cloneRun(run);
   }
 
   activeWebhookRunCount(webhookId: string): number {
