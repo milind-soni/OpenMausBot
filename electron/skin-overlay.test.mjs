@@ -51,4 +51,9 @@ describe("skin overlay chrome", () => {
     expect(skinChrome("meadow")).toEqual({ color: "#ffffff", symbolColor: "#4d5a52" });
     expect(isKnownSkin("meadow")).toBe(true);
   });
+
+  it("paints Pop's cream page behind the caption buttons", () => {
+    expect(skinChrome("pop")).toEqual({ color: "#fdf5ea", symbolColor: "#3a322d" });
+    expect(isKnownSkin("pop")).toBe(true);
+  });
 });

@@ -9,6 +9,7 @@ function Miniature({ skin }: { skin: SkinId }) {
   return (
     <div
       data-skin={skin}
+      data-skin-preview=""
       aria-hidden="true"
       className="flex h-[78px] w-full overflow-hidden rounded-lg bg-app ring-1 ring-hairline/60"
     >

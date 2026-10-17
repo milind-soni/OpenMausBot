@@ -768,6 +768,63 @@
   --identity-coral: #db3a20;
 }
 
+/* ── Pop ──────────────────────────────────────────────────────────────────
+   Cream paper, white cards, ink outlines and hard offset shadows. Light-only,
+   with an ink bubble for your own messages, so it takes the same @scope
+   treatment as Daylight and Meadow. The brand grape #8b5cf6 carries white at
+   only 4.2:1, so the filled accent is one step deeper; the brand grape stays
+   as the accent border. Mint, butter and coral are fills for ink text only.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="pop"] {
+  --code-color-scheme: light;
+  --color-app: #fdf5ea;           /* the page */
+  --color-panel: #f6ebdb;         /* sidebar */
+  --color-raised: #efe3d1;
+  --color-raised-hover: #e4d4bc;  /* the selected row */
+  --color-card: #ffffff;
+  --color-inset: #f2e8d7;
+  --color-control: #ece0cc;
+  --color-hairline: #1b1613;
+
+  --color-ink: #1b1613;
+  --color-ink-secondary: #3a322d;
+  --color-ink-tertiary: #5f5650;
+
+  --color-accent: #7f52f0;
+  --color-accent-border: #8b5cf6;
+  --color-accent-text: #6d28d9;
+  --color-focus: #7f52f0;
+  --color-accent-ink: #ffffff;
+  --color-composer: #ffffff;
+  --color-composer-ring: #1b1613;
+  --color-menu: #ffffff;
+  --color-bubble-user: #1b1613;   /* your own messages, inverted */
+  --color-bubble-user-ink: #ffffff;
+
+  --color-success: #1f7a4d;
+  --color-danger: #d93a2b;
+  --color-danger-ink: #ffffff;
+  --color-success-ink: #ffffff;
+  --color-warning: #8a5a00;
+  --color-scrollbar: #d0bfa6;
+  --color-maus-line: #6b625b;
+
+  --font-sans: "Plus Jakarta Sans", ui-rounded, "SF Pro Rounded", "Inter",
+    -apple-system, system-ui, "Segoe UI", sans-serif;
+  --radius-lg: 12px;
+  --radius-xl: 18px;
+  --identity-green: #00824a;
+  --identity-blue: #1c6de0;
+  --identity-red: #d4323a;
+  --identity-orange: #ae5b14;
+  --identity-purple: #8057C8;
+  --identity-cyan: #0a7b94;
+  --identity-pink: #cf2e75;
+  --identity-yellow: #8d6c1a;
+  --identity-teal: #017f72;
+  --identity-coral: #d1381f;
+}
+
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
    re-tokenizing. Scope the scheme to code; native controls keep their styling. */
 .chat-md .shiki {
@@ -1023,7 +1080,7 @@ body {
 
 /* Liquid glass: the surface for centred pop-ups (Settings, Apps, Triggers).
    Every value is derived from the active skin's own tokens, so each of the
-   nine skins gets a glass of its own colour and no skin block changes. The
+   ten skins gets a glass of its own colour and no skin block changes. The
    app behind stays visible, blurred, through a light scrim. Unlayered so a
    leftover `bg-panel` on the same element cannot win. */
 .glass-surface {
@@ -2053,6 +2110,137 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   }
 }
 
+/* Pop's own bubble is ink on cream: the same inverted context, with butter,
+   coral and mint as the fills that carry ink text on it. */
+@scope ([data-skin="pop"]) to ([data-skin]) {
+  .bg-bubble-user {
+    --color-ink: #ffffff;
+    --color-ink-secondary: #e4dad0;
+    --color-ink-tertiary: #bdb1a6;
+    --color-panel: #2a221d;
+    --color-inset: #2f2722;
+    --color-raised: #3a322d;
+    --color-raised-hover: #4a4039;
+    --color-control: #3a322d;
+    --color-hairline: #8a7e74;
+    --color-accent: #ffd966;
+    --color-accent-text: #ffd966;
+    --color-accent-ink: #1b1613;
+    --color-focus: #ffd966;
+    --color-danger: #ff7a66;
+    --color-danger-ink: #1b1613;
+    --color-success: #8ee3b0;
+    --color-success-ink: #1b1613;
+  }
+}
+
+/* Pop's sticker look: ink outlines and hard offset shadows with no blur.
+   Unlayered, so it wins over the utilities it restyles. A picker miniature
+   is not a scope root, so its few pixels keep the plain palette. */
+@scope ([data-skin="pop"]:not([data-skin-preview])) to ([data-skin]) {
+  .bg-bubble-user {
+    box-shadow: 3px 3px 0 var(--color-accent-border);
+  }
+  .bg-app {
+    background-image: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--color-raised-hover) 75%, transparent) 1.2px,
+      transparent 1.4px
+    );
+    background-size: 18px 18px;
+  }
+  .bg-card {
+    border: 2px solid var(--color-ink);
+    box-shadow: 3px 3px 0 var(--color-ink);
+  }
+  .shadow-sm { --tw-shadow: 2px 2px 0 var(--color-ink); }
+  .shadow-md { --tw-shadow: 3px 3px 0 var(--color-ink); }
+  .shadow-lg { --tw-shadow: 4px 4px 0 var(--color-ink); }
+  .shadow-xl { --tw-shadow: 6px 6px 0 var(--color-ink); }
+  .shadow-2xl { --tw-shadow: 8px 8px 0 var(--color-ink); }
+  .bg-menu,
+  [role="menu"],
+  [role="dialog"] {
+    border: 2px solid var(--color-ink);
+  }
+  .ui-button,
+  .ui-pill {
+    border: 2px solid var(--color-ink);
+    box-shadow: 2px 2px 0 var(--color-ink);
+    font-weight: 700;
+    transition: transform 90ms ease, box-shadow 90ms ease, background-color 120ms ease, color 120ms ease;
+  }
+  .ui-icon-button {
+    border: 2px solid var(--color-ink);
+    border-radius: 9999px;
+    box-shadow: 2px 2px 0 var(--color-ink);
+    background: var(--color-card);
+    color: var(--color-ink);
+  }
+  button.bg-accent.text-accent-ink,
+  button.bg-danger.text-danger-ink {
+    border: 2px solid var(--color-ink);
+    box-shadow: 2px 2px 0 var(--color-ink);
+  }
+  .glass-surface {
+    background: var(--color-menu);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border: 3px solid var(--color-ink);
+    box-shadow: 6px 6px 0 var(--color-ink);
+  }
+  .glass-card {
+    background: var(--color-card);
+    border: 2px solid var(--color-ink);
+  }
+  .glass-surface .bg-card {
+    background-color: var(--color-card);
+  }
+  .glass-rail {
+    background: var(--color-panel);
+  }
+  :is([role="progressbar"], [role="meter"]).overflow-hidden {
+    height: 0.75rem;
+    border: 2px solid var(--color-ink);
+    background:
+      repeating-linear-gradient(135deg, #efe4d4 0 4px, #e4d4bc 4px 6px);
+  }
+  :is([role="progressbar"], [role="meter"]).overflow-hidden > .bg-accent,
+  :is([role="progressbar"], [role="meter"]).overflow-hidden > .bg-success {
+    background-color: #8ee3b0;
+  }
+  :is([role="progressbar"], [role="meter"]).overflow-hidden > .bg-warning {
+    background-color: #ffd966;
+  }
+  :is([role="progressbar"], [role="meter"]).overflow-hidden > .bg-danger {
+    background-color: #ff7a66;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .ui-button:enabled:hover,
+    button.ui-pill:enabled:hover,
+    a.ui-pill:hover {
+      transform: translate(-1px, -1px);
+      box-shadow: 3px 3px 0 var(--color-ink);
+    }
+    .ui-button:enabled:active,
+    button.ui-pill:enabled:active,
+    a.ui-pill:active {
+      transform: translate(2px, 2px);
+      box-shadow: 0 0 0 var(--color-ink);
+    }
+  }
+}
+
+[data-skin="pop"][data-skin-preview] {
+  box-shadow: 0 0 0 1.5px var(--color-ink), 2px 2px 0 1.5px var(--color-ink);
+}
+[data-skin="pop"][data-skin-preview] .bg-card {
+  box-shadow: 0 0 0 1px var(--color-ink);
+}
+[data-skin="pop"][data-skin-preview] .bg-bubble-user {
+  box-shadow: 1.5px 1.5px 0 var(--color-accent-border);
+}
+
 /* Disabled buttons.
    Upstream fades them with `disabled:opacity-40`. On a dark ground that holds:
    the button stays darker than the page and the white label survives. On a
@@ -2170,6 +2358,15 @@ button:disabled.bg-danger {
     --color-success: color(display-p3 0.1985 0.4783 0.2864);
     --color-danger: color(display-p3 0.7202 0.1738 0.2207);
     --color-warning: color(display-p3 0.5270 0.3546 0.0278);
+  }
+  :is([data-skin="pop"]) {
+    --color-accent: color(display-p3 0.4751 0.2990 0.9505);
+    --color-accent-border: color(display-p3 0.5215 0.3418 0.9730);
+    --color-accent-text: color(display-p3 0.4002 0.1038 0.8623);
+    --color-focus: color(display-p3 0.4751 0.2990 0.9505);
+    --color-success: color(display-p3 0.2127 0.4772 0.3073);
+    --color-danger: color(display-p3 0.8102 0.2412 0.1727);
+    --color-warning: color(display-p3 0.5248 0.3557 0.0473);
   }
 }
 

@@ -45,7 +45,7 @@ describe("glass surface", () => {
 
   it("lives outside every skin block, and every skin still defines the tokens it reads", () => {
     const blocks = skinBlocks();
-    expect(blocks).toHaveLength(9);
+    expect(blocks).toHaveLength(10);
     for (const block of blocks) {
       expect(block).not.toContain("glass");
       for (const token of ["--color-menu", "--color-card", "--color-ink"]) expect(block).toContain(`${token}:`);
