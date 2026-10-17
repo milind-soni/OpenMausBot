@@ -97,6 +97,13 @@ describe("sign-in requests", () => {
 });
 
 describe("summarize", () => {
+  it("shows a model's markdown as plain text on the banner, keeping issue numbers and identifiers", () => {
+    expect(summarize("## Done\n\n**PR #1234** merged — see [the PR](https://github.com/o/r/pull/1234).\n- `pnpm test` green\n- *deploy* at 4 pm\n> note")).toBe("Done PR #1234 merged — see the PR. pnpm test green deploy at 4 pm note");
+    expect(summarize("| PR | state |\n|---|---|\n| #1234 | merged |")).toBe("PR · state #1234 · merged");
+    expect(summarize("run snake_case_name and 2 * 3 * 4")).toBe("run snake_case_name and 2 * 3 * 4");
+    expect(summarize("__done__ and ~~old~~ <b>ok</b>")).toBe("done and old ok");
+  });
+
   it("flattens a model's answer into one lock-screen line", () => {
     expect(summarize("line one\n\nline two")).toBe("line one line two");
     expect(summarize("before\n```js\nconst x = 1;\n```\nafter")).toBe("before after");
