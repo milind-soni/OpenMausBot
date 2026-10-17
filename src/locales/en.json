@@ -1402,6 +1402,7 @@
   "sidebar.bot.removeChief": "Remove Chief of Staff",
   "sidebar.bot.chiefNeedsEngine": "Choose Claude or an ACP model provider first",
   "sidebar.bot.chiefOfStaff": "Chief of Staff",
+  "sidebar.bot.modelBadge": "Model: {model} ({engine})",
   "sidebar.bot.moveToSection": "Move to team",
   "sidebar.bot.markUnread": "Mark as Unread",
   "sidebar.bot.markAllRead": "Mark all conversations as read",
