@@ -1,4 +1,5 @@
-import { join } from "node:path";
+           import { join } from "node:path";
+import { runningApprovalMode } from "../shared/approval-mode.ts";
 
 import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
@@ -9,26 +10,25 @@ import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
 import type { Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 
-const NOT_RUNNING = "The originating room task is no longer running";
+ const NOT_RUNNING = "The originating room task is no longer running";
 const WRONG_SPEAKER = "The handoff belongs to a different room speaker";
 const ANCESTOR = "Cannot assign work back to an ancestor; results return automatically";
 const ALREADY_COMPLETED = "This agent already completed your assignment. Do not send acknowledgements or approvals as new work. Finish with your decision; results return automatically. Only use rework=true for concrete additional work.";
 const ROOM_ANCESTOR = "A room request cannot return to an ancestor room; results are returned automatically";
 const DEPTH = "Room handoff depth limit reached";
 const BUDGET = "Room handoff budget exhausted";
-const NO_TURN = "The requesting turn has no root (no turn)";
+ const NO_TURN = "The requesting turn has no root (no turn)";
 
 const BRIEF_MAX = 12_000;
-const RUNTIME_DEPTH = /^Assignment depth limit reached/;
+ const RUNTIME_DEPTH = /^Assignment depth limit reached/;
 const NEEDS_INPUT = /^needs input:/i;
 
-/** Per-turn stalls belong to the host's watchdog: this only keeps the runtime's window out of its way. */
-const TURN_STALL_MS = 24 * 60 * 60_000;
+ const TURN_STALL_MS = 24 * 60 * 60_000;
 
-const REQUESTS_PER_ROOT = 64;
+ const REQUESTS_PER_ROOT = 64;
 const EXECUTIONS_PER_ROOT = 96;
 
-const PRUNE_AFTER_MS = 30 * 24 * 60 * 60_000;
+ const PRUNE_AFTER_MS = 30 * 24 * 60 * 60_000;
 const PRUNE_EVERY_MS = 24 * 60 * 60_000;
 
 const address = (a: Assignment): RoomAddress => {
@@ -39,26 +39,26 @@ const address = (a: Assignment): RoomAddress => {
 const sameSpeaker = (a: Assignment, source: RoomAddress): boolean =>
   a.assignee.destination.groupId === source.groupId && a.assignee.destination.threadId === source.threadId && a.assignee.botId === source.botId;
 
-const ancestorOf = (ancestor: RoomAddress, target: RoomAddress): boolean =>
+ const ancestorOf = (ancestor: RoomAddress, target: RoomAddress): boolean =>
   ancestor.botId === target.botId && (!ancestor.groupId || !target.groupId || ancestor.groupId === target.groupId);
 
-const kindOf = (groupId: string | undefined, parent: Assignment | undefined): HandoffView["kind"] =>
+ const kindOf = (groupId: string | undefined, parent: Assignment | undefined): HandoffView["kind"] =>
   groupId !== undefined && parent?.assignee.destination.groupId === groupId ? "assignment" : "work";
 
-function legacyOrigin(origin: Origin): WorkOrigin | undefined {
+ function legacyOrigin(origin: Origin): WorkOrigin | undefined {
   if (origin.kind !== "person") return { kind: "outside" };
   return origin.quote ? { kind: "user", request: origin.quote } : undefined;
 }
 
-const hostFirstTurn = (a: Assignment): boolean => !a.parentId && a.status === "running" && a.executions === 1;
+ const hostFirstTurn = (a: Assignment): boolean => !a.parentId && a.status === "running" && a.executions === 1;
 
-function runtimeOrigin(origin: WorkOrigin | undefined, source: RoomAddress): Origin {
+ function runtimeOrigin(origin: WorkOrigin | undefined, source: RoomAddress): Origin {
   return origin?.kind === "user"
     ? { kind: "person", source: "chat", ref: source.threadId, quote: origin.request }
     : { kind: "outside", source: "chat", ref: source.threadId };
 }
 
-export function needsInputQuestion(text: string): string | undefined {
+ export function needsInputQuestion(text: string): string | undefined {
   const lines = text.split(/\r?\n/);
   let last = lines.length - 1;
   while (last >= 0 && lines[last]!.trim() === "") last -= 1;
@@ -69,14 +69,14 @@ export function needsInputQuestion(text: string): string | undefined {
   return question || undefined;
 }
 
-export function view(a: Assignment, parent?: Assignment): HandoffView {
+ export function view(a: Assignment, parent?: Assignment): HandoffView {
   const groupId = a.assignee.destination.groupId;
   const status: HandoffView["status"] = hostFirstTurn(a) ? "source" : a.status === "needs_input" ? "waiting" : a.status;
   const node: HandoffView = {
     id: a.id, rootId: a.rootId, threadId: a.assignee.destination.threadId, botId: a.assignee.botId, key: a.assignee.botId,
     text: a.brief, createdAt: a.createdAt, status, result: a.result, reported: a.reportedAt !== undefined, executions: a.executions,
-    lastProgressAt: a.lastActivityAt, approvalGranted: a.approved ?? false, kind: kindOf(groupId, parent), restarts: a.restarts,
-    mode: a.mode, reply: a.reply,
+    lastProgressAt: a.lastActivityAt, approvalGranted: a.approved ?? false, level: a.level, kind: kindOf(groupId, parent), restarts: a.restarts,
+    mode: a.mode, reply: a.reply, originKind: a.origin.kind,
   };
   if (a.outcome !== undefined) node.outcome = a.outcome;
   if (a.outcomeDetail !== undefined) node.outcomeDetail = a.outcomeDetail;
@@ -121,7 +121,6 @@ export class RuntimeCoordinator implements Coordinator {
     });
   }
 
-  /** Not at construction: reconciling calls the host, which is still initialising then. */
   private ready(): void {
     if (this.opened) return;
     this.opened = true;
@@ -144,6 +143,7 @@ export class RuntimeCoordinator implements Coordinator {
     }
     this.runtime.open();
   }
+
 
   node(id: string): HandoffView | undefined {
     this.ready();
@@ -174,6 +174,7 @@ export class RuntimeCoordinator implements Coordinator {
     return this.store.children(id).map(child => view(child, parent));
   }
 
+
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
     options: HandoffOptions = {}): { node: HandoffView; duplicate: boolean } {
     this.ready();
@@ -198,7 +199,7 @@ export class RuntimeCoordinator implements Coordinator {
     const reply: Reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
     const requester: Requester = { kind: "bot_turn", botId: parent.assignee.botId, threadId: parent.assignee.destination.threadId,
       chief: this.host.chiefOf(address(parent)), ...(parent.id === root.id && root.requester.runId !== undefined ? { runId: root.requester.runId } : {}) };
-    const level = this.host.levelOf(target, address(parent));
+    const level = this.host.levelOf(target, address(parent), parent.origin.kind, mode);
     const result = this.runtime.enqueue({
       parentId: parent.id,
       origin: parent.origin,
@@ -326,6 +327,7 @@ export class RuntimeCoordinator implements Coordinator {
     return { id: batch[0]!.id, botIds: batch.map(c => c.assignee.botId) };
   }
 
+
   cancelRoom(groupId: string, threadId?: string, reason = "Stopped by user", status: "failed" | "cancelled" = "cancelled"): void {
     this.ready();
     for (const n of this.live()) {
@@ -343,6 +345,7 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     return this.runtime.stopRequester({ threadId }, reason).map(a => this.project(a));
   }
+
 
   activeDirect(threadId: string): boolean {
     this.ready();
@@ -384,6 +387,8 @@ export class RuntimeCoordinator implements Coordinator {
       (n.status === "running" && (n.restart !== "rerun" || childrenSince(this.store, n).length > 0)) ||
       ((n.status === "queued" || n.status === "resume") && n.restart === "rerun")));
   }
+
+
 
   note(id: string): string | undefined {
     this.ready();
@@ -432,11 +437,18 @@ export class RuntimeCoordinator implements Coordinator {
     return this.parkedIn(threadId) !== undefined;
   }
 
+
   private runner(): TurnRunner {
     const host = this.host;
     return {
       validate: (a, parent) => host.validate(view(a, parent), parent && this.project(parent)),
       canStart: a => !host.busy(this.project(a)),
+      approvalLevel: a => {
+        if (!a.parentId) return { level: a.level, source: a.levelSource };
+        const parent = a.parentId ? this.store.get(a.parentId) : undefined;
+        const selected = host.levelOf(address(a), parent && address(parent), a.origin.kind).level;
+        return { level: runningApprovalMode(a.level, selected, false), source: a.levelSource };
+      },
       run: (a, input, signal) => this.run(a, input, signal),
       park: (a, question, restored) => host.park(this.project(a), question, restored),
       report: (a, parent) => host.report(view(a, parent), parent && this.project(parent)),
@@ -480,6 +492,7 @@ export class RuntimeCoordinator implements Coordinator {
     return { kind: "completed", text: result.text, ...evidence(result) };
   }
 
+
   private live(): Assignment[] {
     return this.store.all({ nonTerminal: true });
   }
@@ -492,7 +505,6 @@ export class RuntimeCoordinator implements Coordinator {
     return a.assignee.destination.groupId === undefined && a.assignee.destination.threadId === threadId;
   }
 
-  /** A route or membership that no longer admits the child withholds its words; only the reason travels. */
   private readable(child: Assignment, parent: Assignment, parentView: HandoffView): Assignment {
     const problem = this.host.validate(view(child, parent), parentView);
     if (!problem) return child;

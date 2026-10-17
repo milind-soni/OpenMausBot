@@ -8,8 +8,7 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { recordEvents } from "../testing/events.ts";
 import { CLAUDE_ACCOUNT_ENV_KEYS, ClaudeDriver, resolveClaudeConfigDir } from "./claude.ts";
 
-// Reads synthetic account labels and records its spawn contract; never the real CLI, Keychain or network.
-const FAKE_CLI = `#!/usr/bin/env node
+  const FAKE_CLI = `#!/usr/bin/env node
 import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -111,7 +110,7 @@ describe("Claude account configuration", () => {
       await recorder.until(event => event.type === "turn.completed");
       expect(recorder.events.some(event => event.type === "item.completed" && event.itemType === "assistant_text" && event.text === `${name}@example.test`)).toBe(true);
       recorder.stop();
-      expect(await provider.reviewPermission?.("review fixture only")).toBe(`${name}@example.test`);
+      expect(await provider.reviewPermission?.("review fixture only", { model: provider.models.default })).toBe(`${name}@example.test`);
       const recorded = calls(dirs[index]!);
       expect(recorded).toHaveLength(5);
       expect(recorded.filter(call => call.args[0] === "--help")).toHaveLength(1);
@@ -142,7 +141,7 @@ describe("Claude account configuration", () => {
       CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR: "99",
       UNSLOTH_STUDIO_AUTH_TOKEN: "fixture-local-key",
     });
-    await provider.reviewPermission?.("fixture review");
+    await provider.reviewPermission?.("fixture review", { model: provider.models.default });
     expect(calls(dir)[0]?.env).toEqual({ ANTHROPIC_BASE_URL: "http://127.0.0.1:9999", ANTHROPIC_AUTH_TOKEN: "fixture-custom-key" });
     const recorder = recordEvents(provider.adapter);
     await provider.adapter.sendTurn({ threadId: "account-injected", text: "hello", model: "unsloth::fixture-model" });

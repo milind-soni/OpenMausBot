@@ -72,7 +72,7 @@ describe("engineCapabilities", () => {
 
   it("keeps the chat family's step cap equal to MAX_CHAT_ROUNDS in openai-chat.ts", () => {
     const source = readFileSync(new URL("../drivers/openai-chat.ts", import.meta.url), "utf8");
-    const found = /^const MAX_CHAT_ROUNDS = (\d+);/m.exec(source);
+    const found = /^[ \t]*const\s+MAX_CHAT_ROUNDS\s*=\s*(\d+);/m.exec(source);
     expect(found, "MAX_CHAT_ROUNDS moved or was renamed; update server/runtime/capabilities.ts").not.toBeNull();
     expect(engineCapabilities("openai-compat").stepCap).toBe(Number(found![1]));
   });

@@ -1,3 +1,4 @@
+import { hasAppAutoReview } from "../../shared/approval-mode.ts";
 import { describe, expect, it } from "vitest";
 
 import { ENGINE_KINDS, engineCapabilities } from "./capabilities.ts";
@@ -51,9 +52,15 @@ describe("assignmentLevel", () => {
       expect(level({ chief: "edits", driverKind: "antigravityAgent" })).toEqual({ level: "edits", source: "chief" });
       for (const driverKind of ["opencodeGo", "openai-compat", "groq", "kimiAgent", "piAgent", undefined]) {
         expect(level({ chief: "full", driverKind })).toEqual({ level: "full", source: "chief" });
-        expect(level({ chief: "auto", driverKind })).toEqual({ level: "ask", source: "engine_cap" });
+        expect(level({ chief: "auto", driverKind })).toEqual(hasAppAutoReview(driverKind)
+          ? { level: "auto", source: "chief" } : { level: "ask", source: "engine_cap" });
         expect(level({ chief: "edits", driverKind })).toEqual({ level: "ask", source: "engine_cap" });
       }
+    });
+
+    it.each(["openai-compat", "groq"])("inherits reviewed Auto for the app-owned %s tool loop", driverKind => {
+      expect(level({ own: "ask", chief: "auto", driverKind })).toEqual({ level: "auto", source: "chief" });
+      expect(level({ own: "ask", chief: "auto", driverKind, origin: "outside" })).toEqual({ level: "ask", source: "own" });
     });
 
     it("says engine_cap whenever the cap lowered the inherited level, down to own included", () => {
@@ -67,7 +74,7 @@ describe("assignmentLevel", () => {
     it("agrees with the capability flags for every engine that has a row", () => {
       const expected = (inherited: Level, driverKind: string): { level: Level; source: LevelSource } => {
         const caps = engineCapabilities(driverKind);
-        const runs: Record<Level, boolean> = { ask: true, edits: caps.edits, auto: caps.nativeReviewer, full: caps.full, custom: false };
+        const runs: Record<Level, boolean> = { ask: true, edits: caps.edits, auto: caps.nativeReviewer || hasAppAutoReview(driverKind), full: caps.full, custom: false };
         const from = TRAVELS.indexOf(inherited);
         for (let i = from; i >= 0; i--) {
           const candidate = TRAVELS[i]!;

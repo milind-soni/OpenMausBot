@@ -1,3 +1,4 @@
+import type { ApprovalReviewSettings } from "../../shared/approval-review";
 // What GET /api/config tells the app about the server and its settings (re-exported by store.tsx).
 import type { EffortLevel, LiveSettings } from "../../shared/wire";
 import type { OnboardingStatus } from "@/lib/onboarding";
@@ -5,6 +6,7 @@ import type { ModelSelection } from "./store";
 
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
+  approvalReview?: ApprovalReviewSettings;
   xai?: { configured: boolean };
   mistral?: { configured: boolean };
   cerebras?: { configured: boolean };
@@ -102,7 +104,6 @@ export interface ConfigStatus {
   /** Which browser this server can give bots: the desktop app's surface, the
    * agent-browser engine, or nothing yet (with the reason). */
   browserEngine?: BrowserEngineSummary;
-  /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
   /** The enrolled organisation's read-only desktop policy; null when this
    * desktop is not enrolled or its Admin sends no policy. */

@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utime
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_APPROVAL_REVIEW_INSTRUCTIONS_LENGTH } from "../shared/approval-review.ts";
 import type { JsonValue } from "./schema.ts";
 
 import { cacheUntilConfigChanges,
@@ -50,10 +51,27 @@ import { cacheUntilConfigChanges,
   type AppConfig,
 } from "./config.ts";
 
-const reloaded = (patch: object, cfg: AppConfig = {}) =>
+ const reloaded = (patch: object, cfg: AppConfig = {}) =>
   changedInstanceIds(engineLaunches(instanceConfigs(cfg), {}), engineLaunches(instanceConfigs({ ...cfg, ...patch } as AppConfig), {}));
 
 describe("configuration boundaries", () => {
+  it("keeps review model settings exact, permits clearing, and rejects unsupported configuration fields", () => {
+    const model = { instanceId: "fixture", model: "registered-reviewer", variant: "deep" };
+    const approvalReview = { model, instructions: "Ask before sending mail." };
+    expect(parseStoredConfig({ approvalReview }).approvalReview).toEqual(approvalReview);
+    expect(parseConfigPatch({ approvalReview }).approvalReview).toEqual(approvalReview);
+    expect(parseConfigPatch({ approvalReview: { model: null } }).approvalReview).toEqual({ model: null });
+    expect(parseStoredConfig({}).approvalReview).toBeUndefined();
+    expect(reloaded({ approvalReview })).toEqual([]);
+    const invalidSettings: JsonValue[] = [
+      { model: { ...model, effort: "high" } }, { model: { ...model, endpoint: "https://unexpected.test" } },
+      { key: "secret" }, { instructions: "x".repeat(MAX_APPROVAL_REVIEW_INSTRUCTIONS_LENGTH + 1) },
+      { model: { instanceId: "fixture", model: "" } }, { instructions: false },
+    ];
+    for (const invalid of invalidSettings) expect(() => parseConfigPatch({ approvalReview: invalid })).toThrow("approvalReview");
+    expect(() => parseStoredConfig({ approvalReview: { model: null } })).toThrow("approvalReview");
+  });
+
   it("requires an explicit backup to opt into automatic recovery without reloading engines", () => {
     expect(parseStoredConfig({}).automaticRecovery).toBeUndefined();
     expect(parseConfigPatch({ automaticRecovery: { enabled: false } })).toEqual({ automaticRecovery: { enabled: false } });
@@ -381,7 +399,6 @@ describe("configuration boundaries", () => {
       const second = browserProfilePartitionTarget(once, aliases.get("foo-2-2")!);
       expect(first).toEqual({ profileId: "foo-2-3", partitionId: "foo-2-2" });
       expect(second).toEqual({ profileId: "foo-2-2-2", partitionId: "FOO-2" });
-      // bots.json may be migrated before config.json is rewritten: a second hydration must leave migrated references fixed.
       expect(aliases.get(first!.profileId) ?? first!.profileId).toBe(first!.profileId);
       expect(aliases.get(second!.profileId) ?? second!.profileId).toBe(second!.profileId);
       expect(parseStoredConfig(JSON.parse(JSON.stringify(once)))).toEqual(once);
@@ -1407,8 +1424,20 @@ describe("credential env preference", () => {
     rmSync(join(DATA_DIR, "config.json"), { force: true });
   });
 
+  it("saves review instructions independently and clears the complete old model selection", () => {
+    const model = { instanceId: "fixture", model: "registered-reviewer", effort: "high" as const };
+    saveConfig({ approvalReview: { model, instructions: "Ask before sending mail." } });
+    saveConfig({ approvalReview: { instructions: "Ask before making purchases." } });
+    expect(loadConfig().approvalReview).toEqual({ model, instructions: "Ask before making purchases." });
+    saveConfig({ approvalReview: { model: { instanceId: "second", model: "different" } } });
+    expect(loadConfig().approvalReview?.model).toEqual({ instanceId: "second", model: "different" });
+    saveConfig({ approvalReview: { model: null } });
+    expect(loadConfig().approvalReview).toEqual({ instructions: "Ask before making purchases." });
+    saveConfig({ approvalReview: { instructions: "" } });
+    expect(loadConfig().approvalReview).toEqual({ instructions: "" });
+  });
+
   it("prefers env over the config file for every credential", () => {
-    // The desktop shell hands secrets over as env and leaves the file without them: env must win over a leftover plaintext value.
     writeFileSync(
       join(DATA_DIR, "config.json"),
       JSON.stringify({
@@ -1713,7 +1742,6 @@ describe("credential env preference", () => {
   });
 
   it("treats a blanked file field as absent when env supplies the secret", () => {
-    // The desktop shell may leave "" behind (a key cleared mid-session); the env-injected value must still win.
     writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ xai: { key: "" } }));
     process.env.XAI_API_KEY = "env-xai";
     expect(loadConfig().xai?.key).toBe("env-xai");
@@ -1805,13 +1833,11 @@ describe("workspace credential env strip", () => {
   });
 
   it("keeps a hosted tenant's control-plane secrets out of every child env, and only those", () => {
-    // What a hosting control plane and a fleet put in the server's env; OMB_CLOUD_FUTURE_SECRET stands for a name added later.
     const operator = {
       OMB_CLOUD_READY_TOKEN: "ready", OMB_CLOUD_BOOTSTRAP: "bootstrap", OMB_CLOUD_GATEWAY_TOKEN: "gateway",
       OMB_CLOUD_MODELS: "models", OMB_CLOUD_REVISION: "revision", OMB_CLOUD_FUTURE_SECRET: "later",
       OMB_LICENSE_KEY: "license", OMB_INSTALLATION_CREDENTIAL: "fleet", omb_cloud_ready_token: "windows-spelling",
     };
-    // What an engine deliberately receives (the hosted model token as its provider key), plus look-alike names.
     const engine = {
       PATH: "/usr/bin", ANTHROPIC_API_KEY: "hosted-token", ANTHROPIC_AUTH_TOKEN: "hosted-token",
       ANTHROPIC_BASE_URL: "https://admin.example.test/api/gateway/w/anthropic", OPENMAUSBOT_COMPANY_API_KEY: "hosted-token",
@@ -2111,7 +2137,6 @@ describe("a value derived from config.json", () => {
     // In place, as a hand edit does: the size and the time change.
     writeSettled({ members: ["one@example.test"] }, 2);
     expect(read()).toEqual(["one@example.test"]);
-    // Renamed over the file, as the CLI and the fleet agent write it: same size and time, only the file identity differs.
     const before = statSync(path);
     writeFileSync(`${path}.next`, JSON.stringify({ signIn: { members: ["two@example.test"] } }));
     utimesSync(`${path}.next`, before.atime, before.mtime);
