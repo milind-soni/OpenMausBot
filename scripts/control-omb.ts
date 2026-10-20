@@ -192,6 +192,12 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   }
   const tregUrl = parentEnv.OMB_TREG_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(tregUrl)) childEnv.OMB_TREG_URL = tregUrl;
+  // Loopback only, for harness mechanics: a fake ElevenLabs the measurement
+  // substrate can drive without a key. Never a real address.
+  const elevenApi = parentEnv.OMB_ELEVENLABS_API?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(elevenApi)) childEnv.OMB_ELEVENLABS_API = elevenApi;
+  // Live calls need Pro; without it the fixture refuses a call with 402 needsPro.
+  if (parentEnv.OMB_PRO_PLAN?.trim() === "1") childEnv.OMB_PRO_PLAN = "1";
   // Arms the one-shot audio-append failure inside the fixture server.
   if (parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE) {
     childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE = parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE;

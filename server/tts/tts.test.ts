@@ -2,6 +2,15 @@ import { createServer, type Server } from "node:http";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../config.ts";
+import * as elevenlabs from "./elevenlabs.ts";
+
+// tsconfig.server.json targets ES2023: Promise.withResolvers is ES2024.
+function withResolvers<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
 
 let server: Server;
 const seen: Array<{ method: string; url: string; headers: Record<string, string>; body: string }> = [];
@@ -13,6 +22,8 @@ let modelsFail = false;
 let modelsDrop = false;
 let audioVoicesFail = false;
 let stubBase = "";
+// The streamed-response case: the first chunk goes out at once, the rest only when the test releases them.
+let speakStreamed: { first: Buffer; rest: Buffer; release: Promise<void> } | null = null;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
@@ -39,7 +50,15 @@ beforeAll(async () => {
           voices: [{ voice_id: "v-1", name: "Rachel", labels: { accent: "american", description: "calm" } }],
         });
       }
-      if (path.startsWith("/v1/text-to-speech/")) {
+      if (/^\/v1\/text-to-speech\/[^/]+\/stream$/.test(path)) {
+        if (speakStreamed) {
+          const { first, rest, release } = speakStreamed;
+          speakStreamed = null;
+          res.writeHead(200, { "content-type": "audio/mpeg" });
+          res.write(first);
+          void release.then(() => res.end(rest));
+          return;
+        }
         res.writeHead(200, { "content-type": "audio/mpeg" });
         return res.end(MP3);
       }
@@ -192,7 +211,7 @@ describe("ElevenLabs", () => {
 
     const call = seen.at(-1)!;
     expect(call.method).toBe("POST");
-    expect(call.url).toContain("/v1/text-to-speech/v-1");
+    expect(call.url).toContain("/v1/text-to-speech/v-1/stream");
     expect(call.url).toContain("output_format=mp3");
     expect(call.headers["xi-api-key"]).toBe("el-key");
     expect(call.url).not.toContain("el-key");
@@ -203,7 +222,36 @@ describe("ElevenLabs", () => {
     seen.length = 0;
     const { speak } = await voice();
     await speak(cfg(ready), "hello", "v-other");
-    expect(seen.at(-1)!.url).toContain("/v1/text-to-speech/v-other");
+    expect(seen.at(-1)!.url).toContain("/v1/text-to-speech/v-other/stream");
+  });
+
+  it("requests streamed delivery from ElevenLabs", async () => {
+    seen.length = 0;
+    const { speak } = await voice();
+    const audio = await speak(cfg(ready), "hello there");
+    expect(Buffer.from(audio.bytes)).toEqual(MP3);
+    expect(new URL(seen.at(-1)!.url, "http://stub").pathname).toBe("/v1/text-to-speech/v-1/stream");
+  });
+
+  it("returns first audio before the clip completes", async () => {
+    const release = withResolvers<void>();
+    speakStreamed = { first: MP3.subarray(0, 4), rest: MP3.subarray(4), release: release.promise };
+    const clip = elevenlabs.synthesize("hello there", "v-1", "el-key", `${stubBase}/v1`);
+
+    const first = await clip.firstAudio;
+    expect(first.mime).toBe("audio/mpeg");
+    expect(Buffer.from(first.bytes)).toEqual(MP3.subarray(0, 4));
+    // The stub still holds the final chunk, so completion cannot have happened yet.
+    let settled = false;
+    void clip.audio.then(() => (settled = true));
+    const flushed = withResolvers<void>();
+    setImmediate(flushed.resolve);
+    await flushed.promise;
+    expect(settled).toBe(false);
+
+    release.resolve();
+    const whole = await clip.audio;
+    expect(Buffer.from(whole.bytes)).toEqual(MP3);
   });
 
   it("surfaces the service's own refusal rather than a bare status", async () => {
@@ -544,7 +592,7 @@ describe("included voice", () => {
     expect(voiceConfigured(settings)).toBe(true);
     expect((await listVoices(settings)).map((v) => v.id)).toEqual(["v-1"]);
     expect((await speak(settings, "hello")).mime).toBe("audio/mpeg");
-    expect(relayed().map((request) => request.url.split("?")[0])).toEqual(["/relay/v1/voices", "/relay/v1/text-to-speech/v-1"]);
+    expect(relayed().map((request) => request.url.split("?")[0])).toEqual(["/relay/v1/voices", "/relay/v1/text-to-speech/v-1/stream"]);
     expect(direct()).toEqual([]);
     expect(seen.every((request) => request.headers["xi-api-key"] === INCLUDED)).toBe(true);
   });

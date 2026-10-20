@@ -107,6 +107,45 @@ describe("toUtterances", () => {
     expect(toUtterances("```\ncode only\n```")).not.toContain("code only");
     expect(toUtterances("")).toEqual([]);
   });
+
+  it("caps a long first block at firstBlockMaxChars without losing or emptying text", () => {
+    const long = `I looked at ${Array.from({ length: 30 }, (_, i) => `item ${i}`).join(", ")} and finished.`;
+    const out = toUtterances(long, { firstBlockMaxChars: 90 });
+    expect(out.length).toBeGreaterThan(1);
+    expect(out[0]!.length).toBeLessThanOrEqual(90);
+    for (const piece of out) expect(piece.length).toBeGreaterThan(0);
+    expect(out.join(" ")).toBe(toUtterances(long).join(" "));
+  });
+
+  it("leaves a first block at exactly the cap untouched", () => {
+    const text = `${Array.from({ length: 18 }, () => "word").join(" ")}. Second sentence here.`;
+    const capped = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(capped[0]!.length).toBe(90);
+    expect(capped).toEqual(toUtterances(text));
+  });
+
+  it("leaves a short first block and every later block on today's rules", () => {
+    const tail = `${Array.from({ length: 63 }, () => "word").join(" ")}.`;
+    const text = `The tests pass now. ${tail}`;
+    const capped = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(capped[0]!.length).toBeLessThanOrEqual(90);
+    expect(capped.at(-1)!.length).toBe(315);
+    expect(capped).toEqual(toUtterances(text));
+  });
+
+  it("keeps a short remainder from the capped block as its own block", () => {
+    const text = `${Array.from({ length: 18 }, () => "word").join(" ")} plus.`;
+    const out = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(out).toEqual([Array.from({ length: 18 }, () => "word").join(" "), "plus."]);
+    expect(out.join(" ")).toBe(toUtterances(text).join(" "));
+  });
+
+  it("keeps an unbreakable first token whole rather than slicing mid-word", () => {
+    const text = `${"a".repeat(95)} and then more words here.`;
+    const capped = toUtterances(text, { firstBlockMaxChars: 90 });
+    expect(capped).toEqual(toUtterances(text));
+    expect(capped[0]).toContain("a".repeat(95));
+  });
 });
 
 describe("narrateTool", () => {

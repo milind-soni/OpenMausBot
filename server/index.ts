@@ -326,7 +326,7 @@ import { createLiveSession, liveAttachUrl, liveHistoryFrom, LiveSessionError, ty
 import { LiveCallController, LiveCallSignedOutError, type LiveSocket } from "./live-call-controller.ts";
 import { liveCallKey, liveSettingsFor } from "./live-settings.ts";
 import { recordLiveCall, spokenLineFields, titleLiveCall } from "./live-call-record.ts";
-import { narrateTool, toUtterances } from "./tts/speech-text.ts";
+import { narrateTool, toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "./tts/speech-text.ts";
 import { turnStartLogLine } from "./turn-log.ts";
 import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
@@ -16485,7 +16485,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const body = await readBody(req);
       return json(res, 200, {
         ready: tts.voiceReady(cfg, typeof body.voiceId === "string" ? body.voiceId : undefined),
-        utterances: toUtterances(String(body.text ?? "")),
+        utterances: toUtterances(String(body.text ?? ""), { firstBlockMaxChars: VOICE_FIRST_BLOCK_MAX_CHARS }),
       });
     }
     if (method === "GET" && path === "/api/tts/voices") {

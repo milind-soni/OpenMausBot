@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "../../shared/runtime-events";
-import type { ServerFrame } from "../../shared/wire";
+import type { LiveCallState, ServerFrame } from "../../shared/wire";
 import type { AppState, BotAnnouncement } from "./store";
 
 class FixtureEventSource {
@@ -126,5 +126,19 @@ describe("live frames the store does not keep", () => {
     stop();
     expect(missed).toHaveBeenCalledTimes(1);
     expect(FixtureEventSource.opened).toHaveLength(1);
+  });
+
+  it("hand a live.call frame's call to spoken reply speech", async () => {
+    // Loaded after the globals are stubbed, like the store above: it pulls in the tts speaker.
+    const { spokenReplyStream } = await import("@/lib/spoken-reply-stream");
+    const onLiveCall = vi.spyOn(spokenReplyStream, "onLiveCall");
+    const call = { callId: "c1", botId: "bot", threadId: "thread", client: "desktop", voice: "vo", startedAt: 1, status: "live" } as LiveCallState;
+    await send({ kind: "live.call", botId: "bot", threadId: "thread", call });
+    expect(onLiveCall).lastCalledWith(call);
+    await send({ kind: "live.call", botId: "bot", threadId: "thread", call: null });
+    expect(onLiveCall).lastCalledWith(null);
+    await send({ kind: "live.call", botId: "bot", threadId: "thread" } as ServerFrame);
+    expect(onLiveCall).toHaveBeenCalledTimes(2);
+    onLiveCall.mockRestore();
   });
 });

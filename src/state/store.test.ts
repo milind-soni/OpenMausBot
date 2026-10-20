@@ -22,7 +22,6 @@ import {
   pinBotThreadAction,
   reducer,
   requestConfirmedBotDeletion,
-  runtimeFrameAction,
   StoreProvider,
   useStore,
   visibleMessages,
@@ -2609,23 +2608,6 @@ describe("conversation model variant discoveries", () => {
   const run = (state: AppState, event: RuntimeEvent) => reducer(state, { type: "modelVariantRuntime", event });
   const discovery = (variants: ModelVariantState = { options: [{ id: "minimal", label: "Minimal" }], currentValue: "minimal" }, threadId = "first", turnId = "turn-1"): RuntimeEvent =>
     ({ ...base(threadId, turnId), type: "session.model-variants", model: selection.model, variants });
-
-  it("ignores reply and reasoning deltas but still folds model-variant frames", () => {
-    const apply = (state: AppState, event: RuntimeEvent) => {
-      const action = runtimeFrameAction(event);
-      return action ? reducer(state, action) : state;
-    };
-    let state = apply(start(), { ...base(), type: "turn.started" });
-    for (const streamKind of ["assistant_text", "reasoning_text"] as const) {
-      const delta: RuntimeEvent = { ...base(), type: "content.delta", streamKind, delta: "partial" };
-      expect(runtimeFrameAction(delta)).toBeNull();
-      expect(apply(state, delta)).toBe(state);
-    }
-    state = apply(state, discovery());
-    expect(state.modelVariantSessions.first.variants?.currentValue).toBe("minimal");
-    state = apply(state, { ...base(), type: "turn.completed", ok: true });
-    expect(state.modelVariantSessions.first.acceptingUpdates).toBe(false);
-  });
 
   it("keeps capabilities on their thread, separate from catalog and persisted choices", () => {
     let state = run(start(), { ...base(), type: "turn.started" });

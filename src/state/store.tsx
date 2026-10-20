@@ -55,7 +55,7 @@ import { readLastConversation, rememberConversation } from "@/lib/last-conversat
 import { readLastBotSection, rememberBotSection } from "@/lib/last-bot-section";
 import { showNotification } from "@/lib/notify";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { speaker } from "@/lib/tts";
+import { spokenReplyStream, type SpokenReplyOwner } from "@/lib/spoken-reply-stream";
 import { roleProfilePatch, type BotRole } from "@/lib/bot-roles";
 import { t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
@@ -2069,10 +2069,7 @@ export function liveCallFromFrame(frame: unknown): { call: LiveCallState | null 
 }
 
 let liveCallLookups = 0;
-export function nextLiveCallLookup(): number {
-  liveCallLookups += 1;
-  return liveCallLookups;
-}
+export const nextLiveCallLookup = (): number => ++liveCallLookups;
 
 export { api, ApiError };
 
@@ -3291,6 +3288,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     const hydrationFallback = setTimeout(hydrate, 1_000);
 
+    const speechOwnerFor = (threadId: string): SpokenReplyOwner | null => {
+      const owner = stateRef.current.bots.find((b) => b.threadId === threadId || b.tasks?.some((task) => task.threadId === threadId));
+      const live = stateRef.current.liveCall;
+      if (!owner?.speakReplies || currentCall() !== null || (live && live.status !== "ended" && live.botId === owner.id)) return null;
+      return { botId: owner.id, voiceId: owner.voice };
+    };
+
     handleFrame = (frame) => {
       if (frame.kind === "config") bumpPeripheralVersion("config", "instances");
       else if (frame.kind === "routine" || frame.kind === "routine.deleted" || frame.kind === "routine.run") {
@@ -3319,16 +3323,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           }
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
-            const owner = stateRef.current.bots.find((b) => b.threadId === frame.threadId || b.tasks?.some((task) => task.threadId === frame.threadId));
-            const live = stateRef.current.liveCall;
-            const onLiveCall = Boolean(live && live.status !== "ended" && live.botId === owner?.id);
-            if (owner?.speakReplies && currentCall() === null && !onLiveCall && frame.message.text?.trim()) {
-              void speaker.speak(frame.message.text, {
-                botId: owner.id,
-                messageId: frame.message.id,
-                voiceId: owner.voice,
-              });
-            }
+            spokenReplyStream.completeBotText(frame.threadId, frame.message.turnId, frame.message.text ?? "", speechOwnerFor(frame.threadId), frame.message.id);
           }
           break;
         }
@@ -3396,6 +3391,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rawDispatch({ type: "webhookDeleted", webhookId: frame.webhookId });
           break;
         case "runtime": {
+          spokenReplyStream.onRuntimeEvent(frame.event, speechOwnerFor(frame.event.threadId));
           const action = runtimeFrameAction(frame.event);
           if (action) rawDispatch(action);
           break;
@@ -3428,7 +3424,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "live.call": {
           const framed = liveCallFromFrame(frame);
           // Rendered at once: the next bot frame decides auto-speak from stateRef.
-          if (framed) flushSync(() => rawDispatch({ type: "liveCall", call: framed.call }));
+          if (framed) {
+            spokenReplyStream.onLiveCall(framed.call);
+            flushSync(() => rawDispatch({ type: "liveCall", call: framed.call }));
+          }
           break;
         }
         case "config":
