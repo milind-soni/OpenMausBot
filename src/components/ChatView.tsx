@@ -71,7 +71,7 @@ import { optionsCardRow } from "./OptionsCardRow";
 import { MessageBoundary } from "./MessageBoundary";
 import { WidgetMessage } from "./widget/WidgetMessage";
 import { Composer } from "./Composer";
-import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
+import { ChatErrorBanner, ChatNotice, TwinCopyLine } from "./ChatErrorBanner";
 import { ThreadContextWarning } from "./ContextWarning";
 import { EngineLimitNotice, useLimitResetContinue } from "./LimitResetContinue";
 import { ChatFindBar } from "./ChatFindBar";
@@ -1315,6 +1315,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
 
       <ChatErrorBanner message={state.error} onDismiss={() => dispatch({ type: "error", message: null })} />
       <ChatNotice notice={state.notice} />
+      <TwinCopyLine bot={bot} />
 
       <PinnedBanner
         bot={bot}
@@ -1327,7 +1328,6 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           dispatch({ type: "updateTask", botId: bot.id, threadId: bot.threadId, patch: { pinnedMessageId: "" } })
         }
       />
-
 
       </GlassBar>
 

@@ -6,7 +6,8 @@
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { BACKGROUND_HEADERS } from "./cloud-power.mjs";
 import { createLoginHandoffClient, handoffWhat } from "./cloud-logins.mjs";
-import { createCloudSend, sendNotice } from "./cloud-send.mjs";
+import { itemKey } from "./cloud-send-parts.mjs";
+import { AUTO_SENDS_CHATS, createCloudSend, sendNotice } from "./cloud-send.mjs";
 
 const SESSION_LABEL = "Send to My Cloud";
 const NOT_READY = {
@@ -47,6 +48,15 @@ export async function openOwnerSession(target, fetchImpl, label = SESSION_LABEL)
     upload: async (route, bytes, type) => answer(await request("POST", route, { headers: { "content-type": type }, body: bytes })),
     close: async () => { await request("POST", "/api/auth/logout", { headers: { "content-type": "application/json" }, body: "{}" }).then((response) => response.body?.cancel()); },
   };
+}
+
+/** Whether this computer's messages with a bot reach My Cloud by themselves: Keep My Cloud up to date is on and sends
+ * chats, the bot's own switch is on, and the last send neither failed nor left the chats or that bot out. */
+export function chatsArrive(snapshot, botId, sendsChats = AUTO_SENDS_CHATS) {
+  if (!sendsChats || snapshot?.auto !== true || !snapshot.last || snapshot.last.error) return false;
+  const key = itemKey.bot(botId);
+  if (snapshot.rows.some((row) => row.key === key && (row.state === "off" || row.state === "removed"))) return false;
+  return !(snapshot.last.result?.failed ?? []).some((entry) => entry.kind === "chats" || entry.key === key);
 }
 
 /** What Settings → Logins compares: My Cloud's logins (site and username) and whether 1Password is connected there. */
@@ -170,6 +180,8 @@ export function installCloudSend({ ipcMain, localOnly, cloudPage, server, local,
   if (keepUpToDate) send.start();
   return {
     receive: handoff.receive,
+    /** For the one workspace: whether this computer's messages with `botId` reach My Cloud by themselves. */
+    chatsArrive: (botId) => chatsArrive(send.snapshot(), botId),
     /** The switcher: what waits, from the last comparison (refreshed in the background), and its Send. */
     menu: () => {
       void fresh();

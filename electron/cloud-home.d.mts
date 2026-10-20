@@ -1,4 +1,5 @@
 export { createCloudPowerGate, openSleepingCloud } from "./cloud-power.mjs";
+export { installOneWorkspace } from "./one-workspace.mjs";
 export type CloudMachineStatus = "provisioning" | "ready" | "stopped" | "payment-problem" | "failed";
 export type CloudSetupStep = "reserving" | "storage" | "starting" | "checking";
 export type CloudUnreachableCause = "host" | "no_answer";

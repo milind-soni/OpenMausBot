@@ -39,7 +39,7 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
 const savedServer = id => isLocalPage && typeof id === "string" && /^[\w-]{1,64}$/.test(id) ? [id] : [];
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "windowControls"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudMove", "cloudLending", "cloudPlan", "cloudSendPage", "oneWorkspace", "desktopNotices", "desktopAnalytics", "windowControls"]);
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
@@ -376,6 +376,20 @@ const bridge = {
       ipcRenderer.on("cloud-send:notice-changed", handler);
       return () => ipcRenderer.removeListener("cloud-send:notice-changed", handler);
     },
+  } : undefined,
+  // This computer and My Cloud as one workspace: the other side's bots and rooms, read by main. My Cloud's page may
+  // only ask to open one of this computer's from the person's click; main checks the id against what it read itself.
+  oneWorkspace: process.argv.includes("--omb-company-desktop=1") ? {
+    view: () => ipcRenderer.invoke("one-workspace:view"),
+    onView: cb => {
+      const handler = (_event, view) => cb(view);
+      ipcRenderer.on("one-workspace:view", handler);
+      return () => ipcRenderer.removeListener("one-workspace:view", handler);
+    },
+    open: target => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("one-workspace:open", { side: target?.side === "computer" ? "computer" : "cloud", id: String(target?.id ?? ""), ...(typeof target?.threadId === "string" ? { threadId: target.threadId } : {}) })
+      : Promise.reject(new Error("Choose the bot to open it.")),
+    take: () => ipcRenderer.invoke("one-workspace:take"),
   } : undefined,
   cloudPlan: process.argv.includes("--omb-company-desktop=1") ? {
     state: () => ipcRenderer.invoke("cloud-plan:state"),

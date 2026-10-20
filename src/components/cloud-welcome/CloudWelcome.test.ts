@@ -34,6 +34,7 @@ vi.mock("@/components/TeamLibraryPanel", async () => {
 import { CloudWelcome } from "./CloudWelcome";
 import { CLOUD_SETUP_MOVE_SKIPPED, CLOUD_WELCOME_DONE, CLOUD_WELCOME_SHOWN as SHOWN, welcomeStepHint } from "@/lib/cloud-setup";
 import { resetCloudWelcome, useCloudWelcome } from "@/lib/cloud-welcome";
+import { setOneWorkspaceForTests } from "@/lib/one-workspace";
 
 const local = { bots: 6, rooms: 1, chats: 142, bytes: 1.2 * 1024 ** 3, files: 900, routines: 4 };
 const emptyCloud = { contents: { bots: 1, rooms: 0, chats: 0 }, empty: true, freeBytes: 9 * 1024 ** 3, previous: null, heldBytes: 0 };
@@ -309,6 +310,39 @@ describe("CloudWelcome", () => {
     expect(hintsPut().at(-1)).toContain(CLOUD_WELCOME_DONE);
     expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "showChat" }, { type: "select", id: "b2" }]);
     expect(welcome.current!.ended).toBe(true);
+  });
+
+  it("with all bots together, greets a bot made on My Cloud rather than a copy of this computer's; with only copies, it opens this computer's", async () => {
+    const roster = (id: string, name: string) => ({ id, threadId: `t-${id}`, name, title: "", color: "blue", avatarUrl: null, unread: false });
+    const together = { page: "cloud" as const, twinHome: "computer" as const, cloudName: "Studio Cloud",
+      other: { side: "computer" as const, state: "ready" as const, at: 1, bots: [roster("b1", "Maus"), roster("b2", "Ada")], rooms: [], sections: [] } };
+    const open = vi.fn(async () => {});
+    window.ogb = { ...window.ogb, oneWorkspace: { open, view: async () => together, onView: () => () => {}, take: async () => null } } as unknown as typeof window.ogb;
+    setOneWorkspaceForTests({ view: together });
+    try {
+      fixture.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [welcomeStepHint("bring"), welcomeStepHint("engine"), welcomeStepHint("files")] };
+      fixture.state.bots = [...fixture.state.bots, { id: "b3", threadId: "t3", name: "Clover" }];
+      render();
+      await vi.waitFor(() => expect(text()).toContain("Studio Cloud is ready"));
+      expect(button("Say hi to your Chief of Staff")).toBeUndefined();
+      fixture.dispatch.mockClear();
+      click("Say hi to Clover");
+      expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "showChat" }, { type: "select", id: "b3" }]);
+      expect(open).not.toHaveBeenCalled();
+
+      flushSync(() => root.unmount());
+      root = createRoot(host);
+      resetCloudWelcome();
+      fixture.state.bots = fixture.state.bots.filter((bot: { id: string }) => bot.id !== "b3");
+      render();
+      await vi.waitFor(() => expect(text()).toContain("Studio Cloud is ready"));
+      fixture.dispatch.mockClear();
+      click("Say hi to your Chief of Staff");
+      expect(open).toHaveBeenCalledWith({ side: "computer", id: "b2" });
+      expect(fixture.dispatch.mock.calls.map(([action]) => action).some((action) => action.type === "select")).toBe(false);
+    } finally {
+      setOneWorkspaceForTests(null);
+    }
   });
 
   it("Skip setup ends it for good, and picking a bot in the sidebar only steps it aside", () => {

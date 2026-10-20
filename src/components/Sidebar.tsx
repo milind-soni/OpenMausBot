@@ -28,8 +28,6 @@ import {
   PinOff,
   Plus,
   Search,
-  Share2,
-  SlidersHorizontal,
   Trash2,
   Users,
   X,
@@ -109,7 +107,6 @@ import {
   sidebarSectionLabel,
   simpleSidebarSections,
   userSectionId,
-  userSectionName,
   type SectionDropPlace,
 } from "@/lib/sidebar-layout";
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
@@ -118,10 +115,12 @@ import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
 import { SidebarAppsButton, SidebarFooterNav, SidebarTodayNav } from "./SidebarFooterNav";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
+import { OneWorkspaceStatus, OtherSideRows, OwnHomeBadge, OwnTwinWork, ownSectionName, useSidebarWorkspace } from "./OneWorkspace";
 import { useCloudOwner } from "./CloudOwner";
 import { SidebarProfileMenu } from "./SidebarProfileMenu";
 import { UpdateIndicator } from "./UpdateIndicator";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
+import { TeamMenuItems } from "./TeamMenuItems";
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
 import { SIMPLE_RAIL_BUTTON, SIMPLE_TOP_BUTTON, SidebarEdgeToggle, SidebarSearchPill, SidebarSearchToggle } from "./SidebarSimpleTop";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
@@ -142,6 +141,7 @@ import { ArchivedBotsPanel, botConfirmCopy, type BotConfirmKind } from "./Archiv
 
 export { PinnedBotCircle, PinnedCircleThreadPanel, PinnedCircleThreadSection } from "./PinnedCircleThreads";
 export { ArchivedBotRow, ArchivedBotsPanel, archivedDeleteAllCopy, botConfirmCopy, type BotConfirmKind } from "./ArchivedBotsPanel";
+export { TeamMenuItems } from "./TeamMenuItems";
 
 /** Coupled to electron/window-chrome.mjs: trafficLightPosition.y = 16 and 14px-tall buttons. */
 export const MAC_TRAFFIC_LIGHT_CENTER_Y = 23;
@@ -228,7 +228,7 @@ export function GroupListItem({
       title={density === "icons" ? group.name : undefined}
       aria-label={density === "icons" ? group.name : undefined}
     >
-      <StackedMauses members={members} density={railTile ? "comfortable" : density} large={simpleRow || railTile} />
+      <span className="relative flex shrink-0"><StackedMauses members={members} density={railTile ? "comfortable" : density} large={simpleRow || railTile} /><OwnHomeBadge id={group.id} /></span>
       <div className={cn("min-w-0 flex-1", density === "icons" && "hidden")}>
         <div className="flex items-baseline justify-between gap-2">
           <span className={cn("truncate text-[14px] text-ink", simpleRow ? "font-normal leading-[19px]" : "font-semibold")}>{group.name}</span>
@@ -1226,6 +1226,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
             </Phone>
           </span>
         )}
+        {!(advanced && iconOnly && bot.chiefOfStaff) && <OwnHomeBadge id={bot.id} corner={advanced && iconOnly ? "top" : "bottom"} />}
       </span>
       <div className={cn("min-w-0 flex-1", iconOnly && "hidden")}>
         <div className="flex items-baseline justify-between gap-2">
@@ -1360,29 +1361,11 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       activityLabel={liveActivityLabel(last)}
       query={bot.name.toLowerCase().includes(query.toLowerCase()) || bot.title.toLowerCase().includes(query.toLowerCase()) ? "" : query} />}
     {!expanded && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} />}
+    <OwnTwinWork bot={bot} density={density} />
     {showThreads && creatingProject && <BotProjectDialog bot={bot} onClose={() => setCreatingProject(false)} />}
     </>
   );
 });
-
-export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetForAll }: {
-  onAddBots: () => void;
-  onRename: () => void;
-  onShare: () => void;
-  onDelete: () => void;
-  onSetForAll?: () => void;
-}) {
-  const item = "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised";
-  return (
-    <>
-      <button type="button" role="menuitem" autoFocus className={item} onClick={onAddBots}><Users size={14} />{t("team.addBots")}</button>
-      {onSetForAll && <button type="button" role="menuitem" className={item} onClick={onSetForAll}><SlidersHorizontal size={14} />{t("teamSettings.menu")}</button>}
-      <button type="button" role="menuitem" className={item} onClick={onRename}><Pencil size={14} />{t("team.rename")}</button>
-      <button type="button" role="menuitem" className={item} onClick={onShare}><Share2 size={14} />{t("team.share")}</button>
-      <button type="button" role="menuitem" className={cn(item, "text-danger")} onClick={onDelete}><Trash2 size={14} />{t("team.delete")}</button>
-    </>
-  );
-}
 
 export function Sidebar({ open, onClose, collapseToIcons = false }: {
   open: boolean;
@@ -1569,9 +1552,10 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     : undefined;
 
   const q = query.trim().toLowerCase();
+  const one = useSidebarWorkspace(state, q);
 
   const matchingBots = state.bots
-    .filter((b) => !b.hidden)
+    .filter((b) => !b.hidden && !one?.merged.hidden.has(b.id))
     .filter(
       (b) =>
         !q ||
@@ -1581,7 +1565,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         b.tasks?.some((task) => !task.routineRunId && task.title.toLowerCase().includes(q)) ||
         b.projects?.some((folder) => folder.name.toLowerCase().includes(q)),
     );
-  const visibleGroups = state.groups.filter((g) => !q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q)));
+  const visibleGroups = state.groups.filter((g) => !one?.merged.hidden.has(g.id) && (!q || g.name.toLowerCase().includes(q) || g.tasks?.some((task) => task.title.toLowerCase().includes(q))));
   const {
     unsectionedChief,
     pinnedBots,
@@ -1591,7 +1575,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   } = partitionSidebarBots(matchingBots, { universalPins });
   const { botChats, sectionedRooms, unsectionedRooms } = partitionSidebarGroups(visibleGroups);
 
-  const sectionNames: string[] = (state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase()));
+  const sectionNames: string[] = (one?.merged.teams ?? state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase()));
   for (const bot of sectionedBots) {
     if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
   }
@@ -1601,11 +1585,12 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   for (const group of sectionedRooms) {
     if (!sectionNames.includes(group.section!)) sectionNames.push(group.section!);
   }
+  for (const name of one?.searched.sections ?? []) if (!sectionNames.includes(name)) sectionNames.push(name);
   const naturalSectionIds = [
     ...(pinnedBots.length > 0 && !universalPins ? [PINNED_SECTION_ID] : []),
-    ...(unsectionedRooms.length > 0 ? [CHANNELS_SECTION_ID] : []),
+    ...(unsectionedRooms.length > 0 || one?.needs.channels ? [CHANNELS_SECTION_ID] : []),
     ...(botChats.length > 0 ? [BOT_CHATS_SECTION_ID] : []),
-    ...(unsectionedBots.length > 0 ? [BOTS_SECTION_ID] : []),
+    ...(unsectionedBots.length > 0 || one?.needs.bots ? [BOTS_SECTION_ID] : []),
     ...sectionNames.map(userSectionId),
   ];
   const orderedIds = orderedSidebarSections(naturalSectionIds, sectionOrder);
@@ -1967,6 +1952,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
 
       <GlassScroller className={rail ? "[scrollbar-gutter:stable_both-edges]" : "px-2"}>
         <div className={cn("flex flex-col", advanced ? "gap-0.5" : "gap-1 pt-2")}>
+          <OneWorkspaceStatus merged={one?.merged ?? null} density={density} />
           {matchingBots.length === 0 && visibleGroups.length === 0 && q && q.length < MIN_QUERY && (
             <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{t("sidebar.noMatch", { query })}</div>
           )}
@@ -1976,7 +1962,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             </div>
           )}
           {sectionIds.map((id, index) => {
-            const sectionName = userSectionName(id);
+            const sectionName = ownSectionName(one, id);
             const sectionChiefItems = sectionName
               ? sectionChiefs.filter((bot) => bot.section === sectionName)
               : [];
@@ -2057,6 +2043,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                   className="mx-3 mb-1 inline-flex h-7 items-center self-start rounded-full bg-raised/50 px-3 text-[13px] font-medium leading-4 text-ink-secondary hover:text-ink">{t("task.queued")} · {queued.length}</button>}
                 {!collapsed && (
                   <>
+                    <OtherSideRows merged={one?.searched ?? null} sectionId={id} density={density} place="before" />
                     {sectionChiefItems.map((bot) => <BotListItem key={bot.id} {...botRow(bot)} />)}
                     {sectionGroupItems.map((group) => (
                       <GroupListItem
@@ -2077,6 +2064,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                         listItem={BotListItem}
                       />
                     ) : sectionBotItems.map((bot) => <BotListItem key={bot.id} {...botRow(bot)} />)}
+                    <OtherSideRows merged={one?.searched ?? null} sectionId={id} density={density} place="after" />
                     {!remoteClient && sectionName && layoutInteractive && (!simple || sectionChiefItems.length + sectionGroupItems.length + sectionBotItems.length === 0) && (
                       <button onClick={() => setMoveToTeam(sectionName)} aria-label={t(state.bots.some(bot => !bot.hidden && bot.section?.trim() === sectionName) ? "team.manageBotsIn" : "team.addBotsTo", { name: sectionName })}
                         className="mx-3 my-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">

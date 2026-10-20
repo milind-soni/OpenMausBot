@@ -83,3 +83,25 @@ it("draws Simple mode's switcher as a rounded pill that names the server in full
   expect(visibleText(browser)).toBe("My Cloud");
   expect(browser).toMatch(/class="[^"]*\bh-8\b[^"]*\brounded-full\b/);
 });
+
+it("says All bots, with both icons, while This computer and My Cloud show together, and nothing new while they are apart", async () => {
+  const { setOneWorkspaceForTests } = await import("@/lib/one-workspace");
+  vi.stubGlobal("window", { ogb: { workspaces: { state: () => new Promise(() => {}), menu: () => Promise.resolve() } } });
+  setOneWorkspaceForTests({ view: { page: "computer", twinHome: "computer", cloudName: "My Cloud", other: { side: "cloud", state: "ready", at: 1, bots: [], rooms: [], sections: [] } } });
+  try {
+    // Advanced's narrow inline switcher shows the words alone, so "All bots" is never cut short.
+    expect(renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true }))).not.toContain("data-switcher-both");
+    for (const props of [{ inline: true, pill: true }, {}, { rail: true }]) {
+      const html = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, props));
+      expect(html).toContain('aria-label="Switch server: All bots (This computer and My Cloud)"');
+      expect(html).toContain("data-switcher-both");
+    }
+    expect(visibleText(renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true, pill: true })))).toBe("All bots");
+    setOneWorkspaceForTests(null);
+    const apart = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true, pill: true }));
+    expect(apart).not.toContain("All bots");
+    expect(apart).not.toContain("data-switcher-both");
+  } finally {
+    setOneWorkspaceForTests(null);
+  }
+});

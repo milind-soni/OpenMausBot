@@ -90,7 +90,7 @@ import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNo
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
 import { DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
 import { createDesktopIncludedX } from "./included-x.mjs";
-import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
+import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, installOneWorkspace, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { DEFAULT_FOLDERS, grantSentence, installCloudLending, usualFolders } from "./cloud-lending-ipc.mjs";
@@ -1495,7 +1495,6 @@ function desktopWorkspaceForEvent(event, create = false) {
   return create ? ensureDesktopWorkspace(owner) : desktopWorkspaceManager;
 }
 
-
 ipcMain.on("screen:preview-intent", localOnlySync("screen:preview-intent", (event) => {
   event.returnValue = displayMediaGuard.begin(event.senderFrame);
 }));
@@ -1651,7 +1650,6 @@ function writeEnvironments(state) {
 function activeOrigin() {
   return activeEnvironment(environmentsState)?.origin ?? rendererOrigin();
 }
-
 
 function refreshApplicationMenu() {
   Menu.setApplicationMenu(
@@ -2893,7 +2891,9 @@ const savedWorkspace = id => {
 const cloudLook = createCloudLook({ store: lookFile(() => path.join(app.getPath("userData"), cloudTarget(process.env).look), fs), accountId: () => cloudAccount?.state().account?.id ?? null,
   homeEntry: cloudHomeEntry, saveEntry: (origin, look) => persistEnvironments(withEnvironmentLook(environmentsState, origin, look)) });
 const cloudBuy = installCloudBuy({ ipcMain, guard: localWorkspaceOnly, client: ensureCloudAccount, offersReady: cloudOffersReady, clipboard, look: cloudLook });
-const cloudLogins = installCloudSend({ ipcMain, localOnly, cloudPage: cloudPageAsking, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null), power: cloudPower, file: () => path.join(app.getPath("userData"), "cloud-send.json"), local: route => (serverProc && serverReady ? fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { redirect: "error", credentials: "omit", signal: AbortSignal.timeout(30_000), headers: { [DESKTOP_MUTATION_HEADER]: desktopMutationToken } }) : Promise.reject(new Error("not running"))), reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }), window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, openSettings: () => void openLendingSettings(), bringChats: app.isPackaged ? () => ensureCloudMove().bring(destinationFor(cloudHomeEntry() ?? { id: null, name: CLOUD_HOME_NAME, origin: myCloud(), cloud: true })) : null });
+const localServer = route => (serverProc && serverReady ? fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { redirect: "error", credentials: "omit", signal: AbortSignal.timeout(30_000), headers: { [DESKTOP_MUTATION_HEADER]: desktopMutationToken } }) : Promise.reject(new Error("not running"))), reconnectCloud = origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) });
+const cloudLogins = installCloudSend({ ipcMain, localOnly, cloudPage: cloudPageAsking, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null), power: cloudPower, file: () => path.join(app.getPath("userData"), "cloud-send.json"), local: localServer, reconnect: reconnectCloud, window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, openSettings: () => void openLendingSettings(), bringChats: app.isPackaged ? () => ensureCloudMove().bring(destinationFor(cloudHomeEntry() ?? { id: null, name: CLOUD_HOME_NAME, origin: myCloud(), cloud: true })) : null });
+const oneWorkspace = installOneWorkspace({ ipcMain, page: cloudPageAsking, window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, file: () => path.join(app.getPath("userData"), "one-workspace.json"), cloud: () => (myCloud() ? { origin: myCloud(), name: cloudHomeEntry()?.name ?? CLOUD_HOME_NAME } : null), cookieFetch: (...args) => session.defaultSession.fetch(...args), reconnect: reconnectCloud, power: cloudPower, local: localServer, localDefault: () => !desktopRemoteAccess && (runningDataDir ?? desktopDataDir()) === desktopDataDir(), twinHome: () => (moveChoices().movedHome(myCloud()) ? "cloud" : "computer"), reason: () => cloudUnreachableText(cloudAccount?.state() ?? null), chatsArrive: (id) => cloudLogins.chatsArrive(id), goCloud: () => connectCloudHome(), goLocal: () => switchEnvironment(LOCAL_ID) });
 ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_event, id) => {
   await requireSharedComputers();
   return sharingController().state(savedWorkspace(id).id);
@@ -2998,7 +2998,7 @@ ipcMain.handle("workspaces:menu", workspaceOnly(async (_event, from) => {
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
       ...cloudMenuOptions(from === "howto" ? "app_howto" : "app_menu"),
-      ...(await placesMenuOptions({ cloud: cloudHomeEntry(), activeId: environmentsState.activeId, platform: process.platform, port: SERVER_PORT, send: cloudLogins.menu() })),
+      ...(await placesMenuOptions({ cloud: cloudHomeEntry(), activeId: environmentsState.activeId, platform: process.platform, port: SERVER_PORT, send: cloudLogins.menu() })), ...oneWorkspace.menu(cloudHomeEntry()),
     }));
     await new Promise((resolve) => menu.popup({ window: mainWindow, callback: resolve }));
   } finally {

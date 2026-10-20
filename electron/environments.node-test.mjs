@@ -158,6 +158,33 @@ test("Add a Cloud… sits just under the saved servers only where main offers it
   assert.deepEqual(calls, [["add-cloud"]]);
 });
 
+test("together, This computer and My Cloud are one entry, checked on either page, with the setting to show them apart", async () => {
+  const cloud = { id: "cloud", name: "My Cloud", origin: "https://omb-u-1.fly.dev" };
+  const office = { id: "office", name: "Office", origin: "https://office.example" };
+  const calls = [];
+  const together = { cloudId: "cloud", label: "All bots", detail: "This computer and My Cloud", on: true, onToggle: () => calls.push("toggle") };
+  const base = { onSwitch: (id) => calls.push(["switch", id]), onConnect() {}, onForget() {}, sublabels: { cloud: "Sleeps when idle" }, places: "These bots live on this computer: Ember.", together };
+  for (const activeId of ["local", "cloud"]) {
+    const items = env.workspaceMenuTemplate({ environments: [cloud, office], activeId }, base);
+    assert.deepEqual(items.map((item) => item.id ?? item.type), ["workspace-local", "workspace-office", "workspace-together", "separator", "workspace-connect", ...(activeId === "cloud" ? ["workspace-forget"] : [])]);
+    const both = items.find((item) => item.id === "workspace-local");
+    assert.deepEqual([both.label, both.sublabel, both.checked], ["All bots", "This computer and My Cloud · Sleeps when idle", true]);
+    both.click();
+    assert.deepEqual(items.find((item) => item.id === "workspace-together"), { id: "workspace-together", label: "Show all bots together", type: "checkbox", checked: true, click: together.onToggle });
+  }
+  assert.deepEqual(calls, []);
+  const fromOffice = env.workspaceMenuTemplate({ environments: [cloud, office], activeId: "office" }, base);
+  assert.equal(fromOffice.find((item) => item.id === "workspace-local").checked, false);
+  fromOffice.find((item) => item.id === "workspace-local").click();
+  fromOffice.find((item) => item.id === "workspace-together").click();
+  assert.deepEqual(calls, [["switch", "local"], "toggle"]);
+  const windows = env.workspaceMenuTemplate({ environments: [cloud], activeId: "local" }, { ...base, foldSublabels: true });
+  assert.equal(windows.find((item) => item.id === "workspace-local").label, "All bots · This computer and My Cloud · Sleeps when idle");
+  const apart = env.workspaceMenuTemplate({ environments: [cloud], activeId: "local" }, { ...base, together: { ...together, on: false } });
+  assert.deepEqual(apart.map((item) => item.id ?? item.type), ["workspace-places", "separator", "workspace-local", "workspace-cloud", "workspace-together", "separator", "workspace-connect"]);
+  assert.equal(apart.find((item) => item.id === "workspace-together").checked, false);
+});
+
 test("with My Cloud, the switcher says first which side has which bots, and under My Cloud what is not on it yet, with Send", async () => {
   const state = { environments: [{ id: "cloud", name: "My Cloud", origin: "https://omb-u-1.fly.dev" }], activeId: "cloud" };
   const clicked = [];

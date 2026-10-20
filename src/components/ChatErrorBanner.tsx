@@ -3,6 +3,8 @@ import { t } from "@/lib/i18n";
 import { plainErrorLine } from "@/lib/plain-error";
 import type { AppState } from "@/state/store";
 
+export { TwinCopyLine } from "./OneWorkspace";
+
 export function ChatNotice({ notice }: { notice: AppState["notice"] }) {
   if (!notice) return null;
   return (

@@ -547,3 +547,6 @@ export function createCloudSend({ local, cloud, handoff, chats = null, store, on
     },
   };
 }
+
+/** Keep My Cloud up to date sends this computer's chats too, not only its bots, skills, logins and settings. */
+export const AUTO_SENDS_CHATS = CHAT_REASONS.has("auto");

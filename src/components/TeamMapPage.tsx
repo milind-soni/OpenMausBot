@@ -25,6 +25,8 @@ import { useMapComputers, useShowComputers } from "@/lib/map-computers";
 import { MapComposer } from "./MapComposer";
 import { openBotSettings } from "./bot-panel/panel-link";
 import type { TeamComputer } from "../../shared/team-computer";
+import { elsewhereOnMap } from "./OneWorkspace";
+import { openElsewhere, useMergedWorkspace } from "@/lib/one-workspace";
 
 export function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
   const { state, dispatch } = useStore();
@@ -283,14 +285,17 @@ export function TeamMapPage() {
   const pendingMoveRef = useRef(pendingMove);
   pendingMoveRef.current = pendingMove;
   useEffect(() => () => pendingMoveRef.current?.resolve(false), []);
-  const bots = useMemo(() => state.bots.filter((bot) => !bot.hidden), [state.bots]);
+  const merged = useMergedWorkspace({ hydrated: state.hydrated === true, bots: state.bots, groups: state.groups, sections: state.sections, selectedId: state.selectedId });
+  const elsewhere = useMemo(() => elsewhereOnMap(merged), [merged]);
+  const ownBots = useMemo(() => state.bots.filter((bot) => !bot.hidden && !merged?.hidden.has(bot.id)), [state.bots, merged]);
+  const bots = useMemo(() => [...ownBots, ...(elsewhere?.bots ?? [])], [ownBots, elsewhere]);
   const sections = useMemo(() => {
-    const names = [...new Set([...(state.sections ?? []), ...state.groups.flatMap((group) => group.section ? [group.section] : [])])];
+    const names = [...new Set([...(state.sections ?? []), ...state.groups.flatMap((group) => group.section ? [group.section] : []), ...(merged?.sections ?? [])])];
     const order = (key: string) => key === "" ? -1 : names.includes(key) ? names.indexOf(key) : names.length;
     return buildTeamMapSections(bots, names).sort((a, b) => order(a.key) - order(b.key));
-  }, [bots, state.sections, state.groups]);
+  }, [bots, state.sections, state.groups, merged]);
   const edges = useMemo(() => buildTeamMapEdges(bots, snapshot), [bots, snapshot]);
-  const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null);
+  const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null) || Boolean(elsewhere?.computers.length);
   const { show: showComputers, loaded: computersChoiceLoaded, choose: setShowComputers } = useShowComputers(anyComputer);
   const mapComputers = useMapComputers(!remoteClient && computersChoiceLoaded && showComputers);
   const [taggedBotIds, setTaggedBotIds] = useState<string[]>([]);
@@ -302,7 +307,7 @@ export function TeamMapPage() {
     sentTimer.current = window.setTimeout(() => setSent(null), SENT_HIGHLIGHT_MS);
   }, []);
   useEffect(() => () => window.clearTimeout(sentTimer.current), []);
-  const composerTeams = useMemo(() => sections.map((section) => ({ key: section.key, name: section.name, count: section.chiefs.length + section.members.length })), [sections]);
+  const composerTeams = useMemo(() => sections.map((section) => ({ key: section.key, name: section.name, count: [...section.chiefs, ...section.members].filter((bot) => !elsewhere?.ids.has(bot.id)).length })), [sections, elsewhere]);
 
   // `background`: the 3-second poll, which never wakes a Cloud home that went to sleep.
   const refresh = useCallback(async (background = false) => {
@@ -385,11 +390,11 @@ export function TeamMapPage() {
       </div>}
       <div className="relative flex min-h-0 flex-1">
       <div className="relative flex min-h-0 min-w-0 flex-1">
-      <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={bots.length ? 96 : 0}
+      <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={ownBots.length ? 96 : 0}
         connectedBotIds={state.settingsOpen ? edges.flatMap((edge) => edge.sourceBotId === state.selectedId ? [edge.targetBotId] : edge.targetBotId === state.selectedId ? [edge.sourceBotId] : []) : []}
         onComputer={(bot) => openBotSettings(dispatch, "access", { botId: bot.id })}
-        computers={showComputers && computersChoiceLoaded && !remoteClient ? mapComputers.computers : undefined} computerFrames={mapComputers.frames}
-        onOpenComputer={(computer) => computer.kind === "team" ? setComputersOpen(true) : dispatch({ type: "toggleComputer", open: true, botId: computer.id })}
+        computers={showComputers && computersChoiceLoaded && !remoteClient ? [...mapComputers.computers, ...(elsewhere?.computers ?? [])] : undefined} computerFrames={mapComputers.frames} elsewhere={elsewhere}
+        onOpenComputer={(computer) => elsewhere?.ids.has(computer.id) ? void openElsewhere({ side: elsewhere.merged.other, id: computer.id }) : computer.kind === "team" ? setComputersOpen(true) : dispatch({ type: "toggleComputer", open: true, botId: computer.id })}
         teamComputers={Object.fromEntries(computers.filter((computer) => computer.section !== null).map((computer) => [computer.section!, { name: computer.name, state: computer.state }]))}
         onTeamComputer={() => setComputersOpen(true)}
         onComputerDrop={(id, section) => { if (!remoteClient) { setComputersOpen(true); setComputerDrop({ id, section }); } }}
@@ -397,8 +402,8 @@ export function TeamMapPage() {
         onMemory={(section, label) => setMemoryEditor({ section, label })}
         onEditTeam={(section, rename) => setTeamEditor({ section, rename })}
         onDeleteTeam={setDeletingTeam}
-        isEmpty={(key) => ![...state.bots, ...state.groups].some((record) => record.section?.trim() === key)} />
-      {bots.length > 0 && <MapComposer bots={bots} teams={composerTeams} onTagged={setTaggedBotIds} onSent={acknowledgeSent} />}
+        isEmpty={(key) => ![...state.bots, ...state.groups, ...(elsewhere?.bots ?? [])].some((record) => record.section?.trim() === key)} />
+      {ownBots.length > 0 && <MapComposer bots={ownBots} teams={composerTeams} onTagged={setTaggedBotIds} onSent={acknowledgeSent} />}
       </div>
       {!remoteClient && <CanvasComputers open={computersOpen} createRequest={createComputerRequest} drop={computerDrop} sections={sections}
         onClose={() => setComputersOpen(false)} onDropHandled={clearComputerDrop} onChange={setComputers} />}

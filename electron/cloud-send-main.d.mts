@@ -5,6 +5,7 @@ interface CloudTarget { origin: string; grant(): Promise<{ origin: string; code:
 
 export function openOwnerSession(target: CloudTarget, fetchImpl: typeof fetch, label?: string): Promise<CloudSendSession>;
 export function loginsView(snapshot: CloudSendSnapshot): CloudLoginsState;
+export function chatsArrive(snapshot: CloudSendSnapshot, botId: string, sendsChats?: boolean): boolean;
 
 export function installCloudSend(deps: {
   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void };
@@ -25,5 +26,6 @@ export function installCloudSend(deps: {
   keepUpToDate?: boolean;
 }): {
   receive(proc: unknown, message: unknown): boolean;
+  chatsArrive(botId: string): boolean;
   menu(): { waiting: { bots: number; total: number } | null; onSend(): void; onOpen(): void };
 };

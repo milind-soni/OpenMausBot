@@ -112,6 +112,10 @@ The [Send to My Cloud fixture](cloud-send.md) runs this computer's server and a
 Cloud home with the desktop's own wiring between them, and shows Settings →
 MausBot Cloud and My Cloud's strip in the real renderer.
 
+The [one workspace fixture](one-workspace.md) runs the same two servers with
+main's own reading of the other side between them, and shows This computer's
+and My Cloud's bots together in the real renderer.
+
 The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
 paste-back, MCP tools and logout cancellation through the real settings panel
 and a synthetic OAuth provider in a disposable workspace.

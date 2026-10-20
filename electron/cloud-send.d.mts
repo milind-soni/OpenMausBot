@@ -112,3 +112,5 @@ export function createCloudSend(deps: {
   stop(): void;
   waiting(): { bots: number; total: number } | null;
 };
+
+export const AUTO_SENDS_CHATS: boolean;

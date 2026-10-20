@@ -12,6 +12,7 @@ import { endWelcomeHere, markWelcomeSeen, saveWelcomeHints, stepAsideWelcome, ta
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { hintSeen } from "@/lib/onboarding";
+import { awayFromHome, greetedBot, openElsewhere, useOneWorkspace } from "@/lib/one-workspace";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
 import { openBot, useStore } from "@/state/store";
@@ -41,7 +42,9 @@ export function CloudWelcome() {
   const move = useCloudMove(bridge);
   const copied = move.state.phase === "done" && move.state.action !== "restore";
   const visible = state.bots.filter((bot) => !bot.hidden);
-  const bot = visible.find((candidate) => candidate.chiefOfStaff) ?? visible[0] ?? null;
+  const { view: together } = useOneWorkspace();
+  const { bot, elsewhere } = greetedBot(visible, (id) => awayFromHome(together, id));
+  const openAtHome = () => { if (bot && together) void openElsewhere({ side: together.other.side, id: bot.id }); };
   const cloudHasWork = move.overview?.cloud ? !move.overview.cloud.empty : visible.length > 1 || state.groups.length > 0;
 
   useEffect(() => {
@@ -88,12 +91,14 @@ export function CloudWelcome() {
 
   const sayHi = () => {
     end("done");
+    if (elsewhere) return openAtHome();
     dispatch({ type: "showChat" });
     if (bot) openBot(dispatch, bot, showThreads);
   };
   const giveJob = () => {
     if (!bot) return;
     end("done");
+    if (elsewhere) return openAtHome();
     dispatch({ type: "showChat" });
     dispatch({ type: "select", id: bot.id });
     reopenCloudIntent(true);

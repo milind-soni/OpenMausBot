@@ -2,6 +2,7 @@
 import environments from "./environments.cjs";
 
 export { createCloudPowerGate, openSleepingCloud } from "./cloud-power.mjs";
+export { installOneWorkspace } from "./one-workspace.mjs";
 
 export const CLOUD_HOME_NAME = "My Cloud";
 export const CLOUD_MACHINE_STATUSES = Object.freeze(["provisioning", "ready", "stopped", "payment-problem", "failed"]);

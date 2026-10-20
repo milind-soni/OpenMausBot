@@ -129,6 +129,7 @@ const __APP_VERSION__: string;
       cloudSend?: import("../../electron/cloud-send.mjs").CloudSendBridge;
       /** My Cloud's own page in this app: what this computer has that My Cloud lacks, and Bring them over. */
       cloudSendPage?: import("../../electron/cloud-send.mjs").CloudSendPageBridge;
+      oneWorkspace?: import("../../shared/one-workspace").OneWorkspaceBridge;
       /** Settings on the person's own Cloud: the plan, read only. */
       cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
       desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;
