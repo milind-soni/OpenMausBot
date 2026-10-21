@@ -43,8 +43,9 @@ async function main(): Promise<void> {
   const reply = corpus.replies.find((row) => row.id === REPLY_ID);
   if (!reply) throw new Error(`corpus has no reply ${REPLY_ID}`);
 
-  // The app synthesizes per utterance block, so the row speaks block 0 — the
-  // pinned worst first block — exactly as /api/tts/prepare splits it.
+  // The app synthesizes per utterance block, so the row speaks the pinned
+  // worst block size: 319 chars, which after the first-block cap still reaches
+  // synthesis as a later block (corpus mixed-late-319).
   const block = toUtterances(reply.text)[0] ?? "";
   if ([...block].length !== BLOCK_CHARS) {
     throw new Error(`${REPLY_ID}: first block is ${[...block].length} chars, expected ${BLOCK_CHARS}`);

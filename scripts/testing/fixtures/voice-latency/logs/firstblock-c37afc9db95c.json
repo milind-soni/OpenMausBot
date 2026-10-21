@@ -1,0 +1,342 @@
+{
+  "kind": "voice-latency-firstblock-listing",
+  "label": "firstblock",
+  "corpusFixtureId": "c37afc9db95cb56f4b9bad17f5f88c4ba4ff9952c9280c9b4f5e777ea87ddfec",
+  "splitter": {
+    "entry": "server/tts/speech-text.ts#toUtterances",
+    "option": "firstBlockMaxChars, set by /api/tts/prepare",
+    "minChars": 12,
+    "maxChars": 320,
+    "firstBlockMaxChars": 90
+  },
+  "replies": [
+    {
+      "id": "unpunctuated-run-319",
+      "shape": "unpunctuated-run",
+      "firstBlockChars": 86,
+      "blocks": 4,
+      "blockChars": [
+        86,
+        77,
+        77,
+        76
+      ]
+    },
+    {
+      "id": "code-list-211",
+      "shape": "code-list",
+      "firstBlockChars": 84,
+      "blocks": 3,
+      "blockChars": [
+        84,
+        85,
+        40
+      ]
+    },
+    {
+      "id": "em-dash-list-153",
+      "shape": "em-dash-list",
+      "firstBlockChars": 77,
+      "blocks": 2,
+      "blockChars": [
+        77,
+        75
+      ]
+    },
+    {
+      "id": "typical-medium-26",
+      "shape": "typical-medium",
+      "firstBlockChars": 26,
+      "blocks": 3,
+      "blockChars": [
+        26,
+        97,
+        30
+      ]
+    },
+    {
+      "id": "staccato-92",
+      "shape": "staccato",
+      "firstBlockChars": 88,
+      "blocks": 2,
+      "blockChars": [
+        88,
+        3
+      ]
+    },
+    {
+      "id": "mixed-late-319",
+      "shape": "mixed-late-block",
+      "firstBlockChars": 58,
+      "blocks": 8,
+      "blockChars": [
+        58,
+        58,
+        65,
+        62,
+        63,
+        66,
+        62,
+        319
+      ]
+    },
+    {
+      "id": "typical-01",
+      "shape": "typical",
+      "firstBlockChars": 42,
+      "blocks": 5,
+      "blockChars": [
+        42,
+        75,
+        47,
+        75,
+        47
+      ]
+    },
+    {
+      "id": "typical-02",
+      "shape": "typical",
+      "firstBlockChars": 75,
+      "blocks": 7,
+      "blockChars": [
+        75,
+        47,
+        73,
+        43,
+        51,
+        73,
+        46
+      ]
+    },
+    {
+      "id": "typical-03",
+      "shape": "typical",
+      "firstBlockChars": 51,
+      "blocks": 5,
+      "blockChars": [
+        51,
+        73,
+        46,
+        74,
+        47
+      ]
+    },
+    {
+      "id": "typical-04",
+      "shape": "typical",
+      "firstBlockChars": 74,
+      "blocks": 6,
+      "blockChars": [
+        74,
+        47,
+        76,
+        43,
+        70,
+        42
+      ]
+    },
+    {
+      "id": "typical-05",
+      "shape": "typical",
+      "firstBlockChars": 43,
+      "blocks": 5,
+      "blockChars": [
+        43,
+        70,
+        42,
+        75,
+        52
+      ]
+    },
+    {
+      "id": "typical-06",
+      "shape": "typical",
+      "firstBlockChars": 75,
+      "blocks": 7,
+      "blockChars": [
+        75,
+        52,
+        74,
+        63,
+        49,
+        74,
+        53
+      ]
+    },
+    {
+      "id": "typical-07",
+      "shape": "typical",
+      "firstBlockChars": 49,
+      "blocks": 5,
+      "blockChars": [
+        49,
+        74,
+        53,
+        77,
+        50
+      ]
+    },
+    {
+      "id": "typical-08",
+      "shape": "typical",
+      "firstBlockChars": 77,
+      "blocks": 6,
+      "blockChars": [
+        77,
+        50,
+        74,
+        51,
+        67,
+        49
+      ]
+    },
+    {
+      "id": "typical-09",
+      "shape": "typical",
+      "firstBlockChars": 51,
+      "blocks": 5,
+      "blockChars": [
+        51,
+        67,
+        49,
+        70,
+        49
+      ]
+    },
+    {
+      "id": "typical-10",
+      "shape": "typical",
+      "firstBlockChars": 70,
+      "blocks": 7,
+      "blockChars": [
+        70,
+        49,
+        70,
+        65,
+        48,
+        73,
+        50
+      ]
+    },
+    {
+      "id": "typical-11",
+      "shape": "typical",
+      "firstBlockChars": 48,
+      "blocks": 5,
+      "blockChars": [
+        48,
+        73,
+        50,
+        75,
+        49
+      ]
+    },
+    {
+      "id": "typical-12",
+      "shape": "typical",
+      "firstBlockChars": 75,
+      "blocks": 6,
+      "blockChars": [
+        75,
+        49,
+        70,
+        46,
+        76,
+        46
+      ]
+    },
+    {
+      "id": "typical-13",
+      "shape": "typical",
+      "firstBlockChars": 46,
+      "blocks": 5,
+      "blockChars": [
+        46,
+        76,
+        46,
+        69,
+        48
+      ]
+    },
+    {
+      "id": "typical-14",
+      "shape": "typical",
+      "firstBlockChars": 69,
+      "blocks": 7,
+      "blockChars": [
+        69,
+        48,
+        73,
+        43,
+        48,
+        73,
+        48
+      ]
+    },
+    {
+      "id": "typical-15",
+      "shape": "typical",
+      "firstBlockChars": 48,
+      "blocks": 5,
+      "blockChars": [
+        48,
+        73,
+        48,
+        69,
+        52
+      ]
+    },
+    {
+      "id": "typical-16",
+      "shape": "typical",
+      "firstBlockChars": 69,
+      "blocks": 6,
+      "blockChars": [
+        69,
+        52,
+        65,
+        44,
+        68,
+        48
+      ]
+    },
+    {
+      "id": "typical-17",
+      "shape": "typical",
+      "firstBlockChars": 44,
+      "blocks": 5,
+      "blockChars": [
+        44,
+        68,
+        48,
+        73,
+        45
+      ]
+    },
+    {
+      "id": "typical-18",
+      "shape": "typical",
+      "firstBlockChars": 73,
+      "blocks": 4,
+      "blockChars": [
+        73,
+        45,
+        70,
+        63
+      ]
+    }
+  ],
+  "totals": {
+    "replies": 24,
+    "worstFirstBlockChars": 88,
+    "cap": 90,
+    "repliesOverCap": 0
+  },
+  "measuredBuildCommit": "71d57b4d0",
+  "date": "2026-10-18T18:06:40.430Z",
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "offline": true
+}

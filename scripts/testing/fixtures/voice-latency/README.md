@@ -18,6 +18,10 @@ replays before and after it.
   `logs/after-<sha12>.json` with the same corpus sha in the name.
 - `logs/firstbyte-<sha12>.json` — the synthesis-leg row for the
   319-char reply (see Streamed delivery below).
+- `logs/firstblock-<sha12>.json` — the first-block listing: every
+  corpus reply's first-block char count from the capped splitter
+  (`node --experimental-strip-types scripts/testing/voice-latency-firstblock.ts`),
+  offline and deterministic (no engine, no key, no audio).
 
 Regenerate (must reproduce the committed bytes exactly):
 
