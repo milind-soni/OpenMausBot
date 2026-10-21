@@ -15,6 +15,7 @@ export function cloudTarget(env = process.env) {
 const TOKEN = /^omc_[A-Za-z0-9_-]{43}$/;
 const CODE = /^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/;
 const PRIVATE_CODE = /^[A-Za-z0-9_-]{43}$/;
+const SCIENCE_TOKEN = /^omb_sd_[A-Za-z0-9_-]{43}$/;
 const TIER = /^[a-z][a-z0-9-]{0,23}$/;
 const REFRESH_MS = 60_000;
 const STEADY_MS = 15 * 60_000;
@@ -28,7 +29,13 @@ const CHECKING_AFTER = 2;
 const MAX_ENROLL_SECONDS = 1800;
 const OFFER_MS = 10 * 60_000, OFFER_RETRY_MS = 30_000;
 const CHECKOUT_WATCH_MS = 30 * 60_000, CHECKOUT_KEPT_MS = 24 * 3600_000;
-export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding"]);
+/** The Admin's plan change waits on Dodo's charge, which can take about two minutes. */
+const UPGRADE_TIMEOUT_MS = 180_000;
+/** Node's fetch failure causes that mean the request never left this computer. */
+const UNSENT_CAUSES = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ENETUNREACH", "EHOSTUNREACH", "UND_ERR_CONNECT_TIMEOUT"]);
+/** A gateway that stopped waiting while the Admin may still finish: 504, and Cloudflare's origin timeout 524. */
+const GATEWAY_TIMEOUTS = [504, 524];
+export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding", "science"]);
 const CHECKOUT_ORIGIN = "https://checkout.dodopayments.com", TEST_CHECKOUT_ORIGIN = "https://test.checkout.dodopayments.com";
 /** Only Dodo's own HTTPS checkout origin, with no credentials and no fragment; anything else is never opened. Staging's
  * Admin sells in Dodo's test mode, so its checkouts are only Dodo's test page. */
@@ -107,11 +114,11 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; emailed = null; verifiedUntil = 0; failures = 0; return generation; };
   const current = stamp => !closed && generation === stamp;
   const versionHeader = text(appVersion, 40) && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(appVersion) ? { "x-openmausbot-version": appVersion } : {};
-  async function request(route, { method = "GET", body, token, signal = controller.signal, path = `/api/cloud/desktop/${route}` } = {}) {
+  async function request(route, { method = "GET", body, token, signal = controller.signal, timeout = 20_000, path = `/api/cloud/desktop/${route}` } = {}) {
     const response = await fetcher(`${origin}${path}`, {
       method, redirect: "error", credentials: "omit", cache: "no-store",
       headers: { accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }), ...(token ? { authorization: `Bearer ${token}`, ...versionHeader } : {}) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.any([signal, AbortSignal.timeout(timeout)]),
     });
     const reader = response.body?.getReader(), chunks = []; let size = 0;
     try {
@@ -356,6 +363,43 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     schedule(refresh, WATCH_REFRESH_MS);
     return { outcome: "opened", state: state() };
   }
+  /** Runs a signed-in desktop request; a 401 `invalid_token` means the sign-in ended, so the session is read again and the error still surfaces. */
+  async function signedRequest(signedIn, route, options) {
+    try { return await request(route, { ...options, token: signedIn.token }); }
+    catch (error) { if (signInEnded(error)) await refresh().catch(() => {}); throw error; }
+  }
+  /** Choosing Max from a paid plan: every answer of the Admin's upgrade route becomes one outcome; only `not_subscribed` goes on to checkout. */
+  async function upgrade(plan, source) {
+    if (typeof plan !== "string" || !TIER.test(plan) || !CHECKOUT_SOURCES.includes(source)) throw new Error("Invalid Cloud upgrade.");
+    if (state().status !== "connected" || !grant) throw new Error("Sign in to MausBot Cloud before choosing a plan.");
+    const signedIn = grant;
+    const done = async outcome => (grant === signedIn ? { outcome, state: await refresh() } : { outcome: "unknown", state: state() });
+    let result;
+    try { result = await request("upgrade", { method: "POST", body: { plan, source }, token: signedIn.token, timeout: UPGRADE_TIMEOUT_MS }); }
+    catch (error) {
+      const status = error?.status;
+      if (!Number.isInteger(status)) return done(UNSENT_CAUSES.has(error?.cause?.code) ? "unknown" : "pending");
+      if (GATEWAY_TIMEOUTS.includes(status)) return done("pending");
+      if ([404, 405, 501].includes(status)) {
+        if (grant !== signedIn) return { outcome: "failed", state: state() };
+        await openBrowser(`${origin}/cloud`);
+        return { outcome: "opened", state: state() };
+      }
+      if ([502, 503].includes(status)) return { outcome: "failed", state: state() };
+      if (status === 429) return { outcome: "rate-limited", state: state() };
+      if (error.opaque) return done("unknown");
+      if (status === 402 && error.code === "payment_failed") return { outcome: "payment-failed", state: state() };
+      if (status === 409 && error.code === "not_subscribed") return openCheckout(plan, source).catch(() => ({ outcome: "not-subscribed", state: state() }));
+      if (status === 409 && error.code === "already_on_plan") return done("already-on-plan");
+      if (status === 409 && error.code === "plan_change_unavailable") return { outcome: "unavailable", state: state() };
+      if (signInEnded(error)) return { outcome: "failed", state: await refresh() };
+      if (status >= 400 && status < 500) return { outcome: "failed", state: state() };
+      return done("unknown");
+    }
+    if (result?.cloudContractVersion === 1 && result.status === "upgraded") return done("upgraded");
+    if (result?.cloudContractVersion === 1 && result.status === "pending") return done("pending");
+    return done("unknown");
+  }
   /** Reopen checkout: the same page again, never a new one from the Admin; only with none kept here (the browser
    * sign-in led to it, or the app restarted) is the Admin asked, and it reopens the open one. Watches 30 minutes more. */
   async function reopenCheckout(plan, source) {
@@ -509,6 +553,29 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
       return { url: result.url, token: result.token };
     },
+    /** The science catalog as the Admin serves it (never kept); null with no sign-in. */
+    async scienceCatalog() {
+      const current = grant;
+      if (!current) return null;
+      const result = await signedRequest(current, "catalog");
+      if (result?.cloudContractVersion !== 1 || !Number.isSafeInteger(result.version) || !Array.isArray(result.sections)) throw new Error("Invalid Cloud catalog.");
+      const { cloudContractVersion: _version, ...catalog } = result;
+      return catalog;
+    },
+    /** This sign-in's own science relay access while its plan allows it: `{ url, token, expiresAt }` for the local server,
+     * or null with no sign-in, no active plan (402) or no science service (404). The relay is only the Cloud's own exact
+     * route and the token goes nowhere else. Never kept on disk or logged. */
+    async scienceAccess() {
+      const current = grant;
+      if (!current) return null;
+      let result;
+      try { result = await signedRequest(current, "services/science", { method: "POST", body: {} }); }
+      catch (error) { if (error?.status === 402 || error?.status === 404) return null; throw error; }
+      if (result?.cloudContractVersion !== 1 || result.url !== `${origin}/api/cloud/services/science` || typeof result.token !== "string" ||
+        !SCIENCE_TOKEN.test(result.token) || !Number.isSafeInteger(result.expiresAt) || result.expiresAt <= now()) throw new Error("Invalid Cloud science response.");
+      return { url: result.url, token: result.token, expiresAt: result.expiresAt };
+    },
+    upgrade,
     close() { closed = true; reset(); },
   };
 }

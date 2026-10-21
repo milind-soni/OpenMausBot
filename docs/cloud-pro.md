@@ -1161,6 +1161,8 @@ For each service the Admin has configured, it also sets:
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
 | `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, and `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
 | `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
+| `OMB_CLOUD_SCIENCE_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/science`, the Admin's science relay base. |
+| `OMB_CLOUD_SCIENCE_TOKEN` | secret | This machine's science relay token, honoured only while the plan has the science allowance. |
 
 A service is included only when both its URL and its token are set
 (`server/included-services.ts`). The real Boat, ElevenLabs and Jev keys stay

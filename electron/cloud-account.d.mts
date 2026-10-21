@@ -56,6 +56,14 @@ export interface CloudHomeLook { name: string; color: import("./cloud-buy.mjs").
  * again); `rate-limited`; or `failed` (nothing was opened). */
 export type CloudCheckoutOutcome = "opened" | "signing-in" | "conflict" | "rate-limited" | "failed";
 export interface CloudCheckoutResult { outcome: CloudCheckoutOutcome; state: CloudAccountState }
+/** What asking the Admin for Max did: `upgraded` or `already-on-plan`; `pending`
+ * (the charge is still going through, or the request may have reached the Admin
+ * with no answer: wait for the plan to change); `payment-failed`, `unavailable`,
+ * `not-subscribed` and `failed` (the Admin said the plan is unchanged);
+ * `rate-limited`; or `unknown` (nothing says whether the plan changed). A 404
+ * opens the Cloud page instead (`opened`). */
+export type CloudUpgradeOutcome = "upgraded" | "pending" | "payment-failed" | "unavailable" | "not-subscribed" | "already-on-plan" | "rate-limited" | "failed" | "unknown";
+export type CloudUpgradeResult = { outcome: CloudUpgradeOutcome; state: CloudAccountState } | CloudCheckoutResult;
 export interface CloudAccountBridge {
   state(): Promise<CloudAccountState>;
   begin(): Promise<CloudAccountState>;
@@ -70,6 +78,8 @@ export interface CloudAccountBridge {
   offer?(): Promise<import("./cloud-home.mjs").CloudOffer | null>;
   /** Opens a checkout for a plan of the offer in the browser; `source` is one of CHECKOUT_SOURCES. */
   checkout?(plan: string, source: string): Promise<CloudCheckoutResult>;
+  /** Moves a paid plan to Max from the Science section: only `("max", "science")`; the outcome and state, never a token. Absent on an older app. */
+  upgrade?(plan: string, source: string): Promise<CloudUpgradeResult>;
   /** The email-code sign-in; the attempt and the token never reach the page. Absent on an older app. */
   signInStart?(email: string): Promise<CloudSignInStart>;
   signInVerify?(code: string): Promise<CloudSignInVerify>;
@@ -175,6 +185,11 @@ export interface CloudAccountClient {
   growDisk(sizeGb: number): Promise<{ supported: false } | { supported: true; refused: true } | { supported: true; disk: { gb: number; maxGb: number } }>;
   /** This sign-in's own X research relay access while its plan is paid; null without one. */
   xResearchAccess(): Promise<{ url: string; token: string } | null>;
+  /** The Admin's science catalog; null with no sign-in. */
+  scienceCatalog(): Promise<unknown | null>;
+  /** This sign-in's own science relay access; null without a sign-in, an active plan or the service. */
+  scienceAccess(): Promise<{ url: string; token: string; expiresAt: number } | null>;
+  upgrade(plan: string, source: string): Promise<CloudUpgradeResult>;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {

@@ -16,7 +16,7 @@ export interface McpProbeTool {
 
 export type McpProbeResult =
   | { ok: true; tools: McpProbeTool[]; total?: number }
-  | { ok: false; error: string; auth?: "required" };
+  | { ok: false; error: string; auth?: "required"; status?: number };
 
 export const SIGN_IN_REQUIRED = "This server needs you to sign in.";
 
@@ -101,7 +101,7 @@ async function probeRemoteMcpServer(
       if (meta) return { ok: false, auth: "required", error: SIGN_IN_REQUIRED };
     }
     if (error instanceof McpHttpError && error.kind === "status") {
-      return { ok: false, error: `The server answered HTTP ${error.status}. Check the address and headers.` };
+      return { ok: false, error: `The server answered HTTP ${error.status}. Check the address and headers.`, ...(error.status ? { status: error.status } : {}) };
     }
     if (error instanceof McpHttpError && error.kind === "protocol") {
       return { ok: false, error: "The server did not return a valid MCP tools list." };

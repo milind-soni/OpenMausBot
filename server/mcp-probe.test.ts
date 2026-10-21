@@ -167,7 +167,7 @@ describe("remote MCP probe", () => {
     const fake = await startFakeHttpMcp({ requireHeader: { name: "Authorization", value: "Bearer right" } });
     try {
       const result = await probeMcpServer({ type: "http", url: fake.url, headers: { Authorization: "Bearer wrong-token" }, enabled: false }, 2_000);
-      expect(result).toEqual({ ok: false, error: "The server answered HTTP 401. Check the address and headers." });
+      expect(result).toEqual({ ok: false, error: "The server answered HTTP 401. Check the address and headers.", status: 401 });
       expect(JSON.stringify(result)).not.toContain("wrong-token");
     } finally {
       await fake.close();

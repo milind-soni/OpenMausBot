@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
 import { IMPORTED_SKILLS_DIR, importedSkillListings, importedSkillsFor, readImportedSkills, setImportedSkillEnabled } from "./imported-skills.ts";
+import { MAX_MCP_SERVERS } from "./mcp-registry.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import {
   applySetupImport, detectSetup, secretName, setupPaths, SKILL_COPY_LIMITS, thisMachine, topLevelJsonMember, withoutJsonComments,
@@ -295,7 +296,7 @@ describe("finding what another AI tool already set up on this computer", () => {
     };
     const names = detectSetup(machine, hostFor({ servers, refuse: ["filesystem"] }).host).tools.map((tool) => tool.name);
     expect(names).toEqual(["linear", "sentry", "figma", "context7", "legacy", "local-tool"]);
-    const full = Object.fromEntries(Array.from({ length: 20 }, (_, i) => [`s${i}`, { command: `tool-${i}`, args: [], env: {}, enabled: false }]));
+    const full = Object.fromEntries(Array.from({ length: MAX_MCP_SERVERS }, (_, i) => [`s${i}`, { command: `tool-${i}`, args: [], env: {}, enabled: false }]));
     expect(detectSetup(machine, hostFor({ servers: full }).host).tools).toEqual([]);
   });
 
@@ -611,7 +612,7 @@ describe("bringing MCP servers in", () => {
     const home = fixtureHome();
     plantTools(home);
     const { machine } = machineFor(home);
-    const existing = Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`s${i}`, { command: `tool-${i}`, args: [], env: {}, enabled: true }]));
+    const existing = Object.fromEntries(Array.from({ length: MAX_MCP_SERVERS - 3 }, (_, i) => [`s${i}`, { command: `tool-${i}`, args: [], env: {}, enabled: true }]));
     const { host, servers } = hostFor({ servers: { ...existing, notion: { type: "http", url: "https://MCP.notion.com/mcp", headers: {}, enabled: true } }, refuse: ["github"] });
     expect(applySetupImport(machine, host, { tools: true }).tools).toEqual({
       added: ["linear", "filesystem"],
@@ -621,7 +622,7 @@ describe("bringing MCP servers in", () => {
         { name: "legacy", reason: "limit" }, { name: "local-tool", reason: "limit" }, { name: "github", reason: "policy" },
       ],
     });
-    expect(Object.keys(servers())).toHaveLength(20);
+    expect(Object.keys(servers())).toHaveLength(MAX_MCP_SERVERS);
     expect((servers().notion as { enabled: boolean }).enabled).toBe(true);
     expect(applySetupImport(machine, host, { tools: true }).tools?.added).toEqual([]);
   });

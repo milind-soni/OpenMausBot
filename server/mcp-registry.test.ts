@@ -329,6 +329,49 @@ describe("a server's result size limit", () => {
   });
 });
 
+const RELAY_PUBMED = "https://relay.example.com/api/science/pubmed/mcp";
+const servers = (count: number) =>
+  Object.fromEntries(Array.from({ length: count }, (_, i) => [`s${i}`, { command: "x", args: [], env: {}, enabled: false }]));
+
+describe("catalog marker and the 50-server limit", () => {
+  it("keeps a catalog entry's marker and lists it", () => {
+    const parsed = parseMcpServerMutation("pubmed", { type: "http", url: RELAY_PUBMED, enabled: false, catalog: { id: "pubmed", auth: "cloud" } });
+    expect(parsed).toMatchObject({ ok: true, server: { catalog: { id: "pubmed", auth: "cloud" } } });
+    expect(listMcpServers({ pubmed: (parsed as { server: unknown }).server })[0]).toMatchObject({ catalog: { id: "pubmed", auth: "cloud" } });
+  });
+
+  it("refuses an Authorization header on a MausBot Cloud entry and a tenant address that is not Benchling's", () => {
+    expect(parseMcpServerMutation("pubmed", { type: "http", url: RELAY_PUBMED, headers: { authorization: "Bearer x" }, catalog: { id: "pubmed", auth: "cloud" } }))
+      .toEqual({ ok: false, error: "A MausBot Cloud server takes no Authorization header." });
+    expect(parseMcpServerMutation("benchling", { type: "http", url: "https://acme.example.com/mcp", catalog: { id: "benchling", auth: "tenant" } }))
+      .toEqual({ ok: false, error: "Use your Benchling address, like https://acme.mcp.benchling.com/mcp." });
+  });
+
+  it("keeps the marker through an edit at the same address and drops it when the address moves", () => {
+    const stored = { type: "http", url: RELAY_PUBMED, headers: {}, enabled: true, catalog: { id: "pubmed", auth: "cloud" } } as const;
+    const kept = parseMcpServerMutation("pubmed", { type: "http", url: RELAY_PUBMED, resultBudget: 0 }, stored);
+    expect(kept.ok).toBe(true);
+    expect(kept).toMatchObject({ server: { catalog: { id: "pubmed" } } });
+    const moved = parseMcpServerMutation("pubmed", { type: "http", url: "https://example.com/mcp" }, stored);
+    expect(moved.ok).toBe(true);
+    expect(moved.ok && "catalog" in moved.server).toBe(false);
+  });
+
+  it("never lets a bot mark a server as a catalog entry", () => {
+    const added = addDisabledMcpServer({}, { name: "pubmed", type: "http", url: RELAY_PUBMED, catalog: { id: "pubmed", auth: "cloud" } });
+    expect(added.ok).toBe(true);
+    expect(added.ok && "catalog" in added.server).toBe(false);
+  });
+
+  it("allows 50 and refuses the 51st", () => {
+    expect(MAX_MCP_SERVERS).toBe(50);
+    expect(listMcpServers(servers(20))).toHaveLength(20);
+    expect(addDisabledMcpServer(servers(49), { name: "s49", command: "x" }).ok).toBe(true);
+    expect(addDisabledMcpServer(servers(50), { name: "s50", command: "x" })).toEqual({ ok: false, status: 400, error: "You can add at most 50 MCP servers." });
+    expect(parseMcpServersImport(JSON.stringify({ mcpServers: servers(51) })).ok).toBe(false);
+  });
+});
+
 describe("a server of another computer's", () => {
   const MAC = { environmentId: "env-desktop-1", label: "Milind's MacBook" };
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { ArrowUp, CalendarClock, Check, Folder, Plug } from "lucide-react";
 import { MausAvatar } from "@/components/Avatar";
-import { ServiceIcon, type ToolkitCard } from "@/components/PluginsPanel";
+import { ServiceIcon } from "@/components/ServiceIcon";
+import type { ToolkitCard } from "@/components/PluginsPanel";
 import { cn } from "@/lib/cn";
 import { reducedMotion } from "@/lib/onboarding";
 import { api } from "@/state/store";

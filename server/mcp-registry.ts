@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { CATALOG_ENTRY_ID, isBenchlingTenantUrl, type CatalogAuth } from "../shared/connector-catalog.ts";
 import type { McpServerSpec, RemoteMcpSpec, StdioMcpSpec } from "./contracts.ts";
 
 /** The computer a server runs on when its program, files or address are that computer's own: kept with its entry so a
@@ -28,6 +29,7 @@ export interface StoredRemoteMcpServer extends RemoteMcpSpec {
   enabled: boolean;
   oauth?: McpOAuthClientConfig;
   resultBudget?: number;
+  catalog?: { id: string; auth: CatalogAuth };
   runsOn?: McpRunsOn;
 }
 export type StoredMcpServer = StoredStdioMcpServer | StoredRemoteMcpServer;
@@ -50,6 +52,7 @@ export interface RemoteMcpServerListing {
   enabled: boolean;
   resultBudget?: number;
   oauth?: { clientId: string; scopes: string[]; clientSecretConfigured: boolean };
+  catalog?: { id: string; auth: CatalogAuth };
   runsOn?: McpRunsOn;
 }
 export type McpServerListing = StdioMcpServerListing | RemoteMcpServerListing;
@@ -58,7 +61,7 @@ export function isRemoteMcpServer(server: McpServerSpec): server is RemoteMcpSpe
   return "url" in server;
 }
 
-export const MAX_MCP_SERVERS = 20;
+export const MAX_MCP_SERVERS = 50;
 const MAX_ARGS = 64;
 const MAX_ENV = 64;
 const MAX_HEADERS = 32;
@@ -167,6 +170,7 @@ const remoteEntrySchema = z.object({
   oauth: oauthClientSchema.optional(),
   enabled: z.boolean().optional(),
   resultBudget: resultBudgetSchema.optional(),
+  catalog: z.object({ id: z.string().regex(CATALOG_ENTRY_ID), auth: z.enum(["cloud", "oauth", "tenant"]) }).strict().optional(),
   runsOn: runsOnSchema.optional(),
 }).strict();
 
@@ -277,6 +281,14 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
   if (invalidHeader) return { ok: false, error: invalidHeader };
   const oauth = resolveOAuthClient(parsed.data.oauth, existing && isRemoteMcpServer(existing) ? existing.oauth : undefined);
   if (!oauth.ok) return oauth;
+  const keptCatalog = existing && isRemoteMcpServer(existing) && existing.url === parsed.data.url ? existing.catalog : undefined;
+  const catalog = parsed.data.catalog ?? (mutation ? keptCatalog : undefined);
+  if (catalog?.auth === "cloud" && Object.keys(headers.values).some((name) => name.toLowerCase() === "authorization")) {
+    return { ok: false, error: "A MausBot Cloud server takes no Authorization header." };
+  }
+  if (catalog?.auth === "tenant" && !isBenchlingTenantUrl(parsed.data.url)) {
+    return { ok: false, error: "Use your Benchling address, like https://acme.mcp.benchling.com/mcp." };
+  }
   return {
     ok: true,
     server: {
@@ -284,6 +296,7 @@ function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer
       url: parsed.data.url,
       headers: headers.values,
       ...(oauth.value ? { oauth: oauth.value } : {}),
+      ...(catalog ? { catalog } : {}),
       enabled: enabledFor(parsed.data.enabled, mutation, existing),
       ...(parsed.data.resultBudget !== undefined ? { resultBudget: parsed.data.resultBudget } : {}),
       ...runsOnFor(parsed.data.runsOn, mutation, existing),
@@ -331,7 +344,7 @@ export function mcpServerBody(body: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (!body || typeof body !== "object") return out;
   const record = body as Record<string, unknown>;
-  for (const key of ["command", "args", "env", "type", "url", "headers", "oauth", "enabled", "resultBudget", "runsOn"]) {
+  for (const key of ["command", "args", "env", "type", "url", "headers", "oauth", "enabled", "resultBudget", "runsOn", "catalog"]) {
     if (record[key] !== undefined) out[key] = record[key];
   }
   return out;
@@ -376,6 +389,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
         headerKeys: Object.keys(server.headers).sort(),
         enabled: server.enabled,
         ...(server.resultBudget !== undefined ? { resultBudget: server.resultBudget } : {}),
+        ...(server.catalog ? { catalog: server.catalog } : {}),
         ...(server.oauth ? {
           oauth: { clientId: server.oauth.clientId, scopes: server.oauth.scopes ?? [], clientSecretConfigured: Boolean(server.oauth.clientSecret) },
         } : {}),

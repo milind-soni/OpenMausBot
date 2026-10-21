@@ -13,6 +13,9 @@ export interface ConfigStatus {
   /** X research comes with MausBot Cloud plans: `included` while this server holds the plan's relay credential;
    * `unavailable` when the Admin said no to this desktop's paid sign-in. */
   xResearch?: { included: boolean; unavailable?: boolean };
+  /** Changes whenever the science access or catalog this server holds changes, and with every server start, so the
+   * Connectors page refetches. */
+  science?: { revision: string };
   /** The person's own treg key for research: configured or not, never the key. */
   treg?: { configured: boolean };
   /** `everyClaudeBot`: the key runs every Claude bot, not only "Claude (API key)". */

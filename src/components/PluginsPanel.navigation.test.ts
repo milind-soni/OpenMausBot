@@ -45,6 +45,13 @@ vi.mock("./McpServersPanel", () => ({
     ? createElement("div", { "data-whop-card": true }, "Connect Whop")
     : createElement("div", { "data-embedded": String(Boolean(embedded)) }, "MCP inventory"),
 }));
+const science = vi.hoisted(() => ({ props: [] as Array<Record<string, unknown>> }));
+vi.mock("./ScienceCatalog", () => ({
+  ScienceCatalog: (props: Record<string, unknown>) => {
+    science.props.push(props);
+    return createElement("div", { "data-science-marker": String(props.view) });
+  },
+}));
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 vi.mock("./Avatar", () => ({ BotAvatar: ({ bot }: { bot: Bot }) => createElement("span", { "data-avatar": bot.id }) }));
 // The native HighLevel card has its own DOM suite; here it is a marker so tile counts stay the catalog's.
@@ -59,7 +66,9 @@ const CARDS = 0;
 const CONFIGURED = 3;
 const STATUS = 6;
 const PHASE = 13;
+const TAB = 16;
 const HIGHLEVEL_CONNECTED = 21;
+const SCIENCE_CONNECTED = 22;
 
 type Node = ReactElement<{ children?: ReactNode; "aria-pressed"?: boolean; "data-apps-filter"?: string; onClick?: () => void; [key: string]: unknown }>;
 function nodes(value: ReactNode): Node[] {
@@ -91,6 +100,7 @@ beforeEach(() => {
   fixture.dispatch.mockReset();
   fixture.track.mockReset();
   fixture.effects = [];
+  science.props = [];
   fixture.bots = [];
   fixture.instances = [];
   fixture.overrides = new Map<number, unknown>([
@@ -101,6 +111,77 @@ beforeEach(() => {
   ]);
 });
 afterEach(() => vi.unstubAllGlobals());
+
+describe("Science in the Apps pop-up", () => {
+  const pills = (tree: Node[]) => tree.filter((node) => node.props["data-apps-filter"] === "all" || node.props["data-apps-filter"] === "science" || node.props["data-apps-category"] !== undefined)
+    .map((node) => String(node.props["data-apps-filter"] ?? node.props["data-apps-category"]));
+  const marker = () => science.props[science.props.length - 1]!;
+
+  it("sits right after All and opens the Science view", () => {
+    fixture.overrides.set(CARDS, [{ ...card("gmail"), categories: ["Files"] }, { ...card("slack"), categories: ["Files"] }]);
+    const { nodes: tree } = render();
+    expect(pills(tree).slice(0, 2)).toEqual(["all", "science"]);
+    expect(pills(tree)).not.toContain("Files");
+    expect(chip(tree, "science").props["aria-pressed"]).toBe(false);
+    chip(tree, "science").props.onClick!();
+    expect(fixture.overrides.get(TAB)).toBe("science");
+    fixture.overrides.set(TAB, "science");
+    const science_ = render();
+    expect(chip(science_.nodes, "science").props["aria-pressed"]).toBe(true);
+    expect(marker().view).toBe("science");
+    expect(science_.nodes.some((node) => node.props["data-apps-grid"] !== undefined)).toBe(false);
+    expect(science_.html).not.toContain("MCP inventory");
+    expect(science_.html).not.toContain("Connect HighLevel");
+  });
+  it("puts Science first in the All view", () => {
+    const { html } = render();
+    expect(marker().view).toBe("all");
+    expect(html.indexOf("data-science-marker")).toBeLessThan(html.indexOf("data-apps-grid"));
+    expect(marker().search).toBe("");
+  });
+  it("keeps the All view while searching", () => {
+    fixture.overrides.set(15, "pub");
+    render();
+    expect(marker()).toMatchObject({ view: "all", search: "pub" });
+  });
+  it("counts science connections and shows their icons", () => {
+    fixture.overrides.set(SCIENCE_CONNECTED, [
+      { id: "pubmed", name: "PubMed", domain: "pubmed.ncbi.nlm.nih.gov" },
+      { id: "chembl", name: "ChEMBL", domain: "chembl.gitbook.io" },
+    ]);
+    const { html } = render();
+    expect(html).toContain("3 connected");
+    expect(html).toContain("domain=pubmed.ncbi.nlm.nih.gov");
+    expect(html).toContain("domain=chembl.gitbook.io");
+  });
+  it("hides Science but keeps it mounted under a category", () => {
+    fixture.overrides.set(CARDS, [{ ...card("gmail"), categories: ["Files"] }]);
+    fixture.overrides.set(20, "Files");
+    render();
+    expect(marker().view).toBe("hidden");
+  });
+  it("shows Science on the Connected view and wires its callbacks", () => {
+    fixture.overrides.set(TAB, "connected");
+    render();
+    const props = marker();
+    expect(props.view).toBe("connected");
+    (props.onViewAll as () => void)();
+    expect(fixture.overrides.get(TAB)).toBe("science");
+    (props.onServersChanged as () => void)();
+    expect(fixture.overrides.get(19)).toBe(1);
+  });
+  it("does not call the Connected view empty while a science connection exists", () => {
+    fixture.overrides.set(CARDS, []);
+    fixture.overrides.set(STATUS, {});
+    fixture.overrides.set(18, false);
+    fixture.overrides.set(HIGHLEVEL_CONNECTED, false);
+    fixture.overrides.set(TAB, "connected");
+    expect(render().html).toContain("No connected apps yet");
+    fixture.overrides.set(SCIENCE_CONNECTED, [{ id: "pubmed", name: "PubMed", domain: "pubmed.ncbi.nlm.nih.gov" }]);
+    const empty = render().html;
+    expect(empty).not.toContain("No connected apps yet");
+  });
+});
 
 describe("Apps pop-up", () => {
   it("connects Whop inside the apps grid without a Composio key or MCP detour", () => {
@@ -451,7 +532,7 @@ describe("Apps pop-up", () => {
     const { html, nodes: tree } = render();
     const headings = [...html.matchAll(/<h3 id="[^"]*"[^>]*>([^<]*)/g)].map((match) => match[1]);
     expect(headings).toEqual(["Connected", "Productivity", "Communication", "Analytics", "All apps"]);
-    expect(tree.filter((node) => node.props["data-apps-category"]).map((node) => node.props["data-apps-category"])).toEqual(["Productivity", "Communication", "Analytics", "Design", "Files"]);
+    expect(tree.filter((node) => node.props["data-apps-category"]).map((node) => node.props["data-apps-category"])).toEqual(["Productivity", "Communication", "Analytics", "Design"]);
     expect(html).toContain('aria-label="More categories"');
     tree.find((node) => node.props["data-apps-category"] === "Design")!.props.onClick!();
     const design = render();

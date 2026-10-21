@@ -4,6 +4,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { createServer, type Server } from "node:http";
 
 import type { McpServerSpec } from "./contracts.ts";
+import type { CloudMcpAuth } from "./mcp-catalog-auth.ts";
 import { discoverMcpAuth, type McpAuthMetadata } from "./mcp-oauth-discovery.ts";
 import { McpOAuthStore, type McpOAuthRecord, type McpOAuthTokens } from "./mcp-oauth-store.ts";
 import type { McpOAuthClientConfig } from "./mcp-registry.ts";
@@ -35,7 +36,7 @@ export class McpOAuthError extends Error {
   }
 }
 
-export type McpAuthState = "signed-in" | "needs-sign-in" | "none";
+export type McpAuthState = "signed-in" | "needs-sign-in" | "none" | "needs-max";
 
 const DEFAULT_LIFETIME_MS = 5 * 60_000;
 const REFRESH_MARGIN_MS = 2 * 60_000;
@@ -191,13 +192,15 @@ export class McpOAuthManager {
   private readonly starting = new Map<string, StartingFlow>();
   private readonly refreshing = new Map<string, Promise<string | null>>();
   private readonly clients: (name: string, url: string) => McpOAuthClientConfig | undefined;
+  private readonly cloud: (name: string, url: string) => CloudMcpAuth;
 
   /** `clients` is read when needed: an app's secret is never copied into this store. */
-  constructor(options: { file: string; lifetimeMs?: number; clients?: (name: string, url: string) => McpOAuthClientConfig | undefined; isOwnerLive?: (owner: string) => boolean }) {
+  constructor(options: { file: string; lifetimeMs?: number; clients?: (name: string, url: string) => McpOAuthClientConfig | undefined; cloud?: (name: string, url: string) => CloudMcpAuth; isOwnerLive?: (owner: string) => boolean }) {
     this.store = new McpOAuthStore(options.file);
     this.isOwnerLive = options.isOwnerLive ?? (() => true);
     this.lifetimeMs = options.lifetimeMs ?? DEFAULT_LIFETIME_MS;
     this.clients = options.clients ?? (() => undefined);
+    this.cloud = options.cloud ?? (() => null);
   }
 
   private recordClient(name: string, record: McpOAuthRecord): ClientAuth | null {
@@ -210,6 +213,8 @@ export class McpOAuthManager {
   }
 
   authState(name: string, url: string): McpAuthState {
+    const cloud = this.cloud(name, url);
+    if (cloud) return cloud === "needs-max" ? "needs-max" : "signed-in";
     const record = this.store.get(name, url);
     if (!record) return "none";
     return record.state === "signed-in" && record.tokens ? "signed-in" : "needs-sign-in";
@@ -232,11 +237,13 @@ export class McpOAuthManager {
   }
 
   markNeedsSignIn(name: string, url: string): void {
+    if (this.cloud(name, url)) return;
     const { tokens: _dropped, ...rest } = this.store.get(name, url) ?? { url };
     this.store.put(name, { ...rest, url, state: "needs-sign-in" });
   }
 
   start(name: string, url: string, wwwAuthenticate?: string | null, owner = "loopback", browser: McpSignInBrowser = { remote: false }): Promise<McpSignInStatus> {
+    if (this.cloud(name, url)) return Promise.reject(new McpSignInError("MausBot Cloud servers need no sign-in.", 400));
     const current = this.flows.get(name);
     if (current?.status.phase === "waiting" && !this.isOwnerLive(current.owner)) {
       this.finish(current, "cancelled", "Your session ended. Start again.");
@@ -331,6 +338,8 @@ export class McpOAuthManager {
   }
 
   accessToken(name: string, url: string): Promise<string | null> {
+    const cloud = this.cloud(name, url);
+    if (cloud) return Promise.resolve(cloud === "needs-max" ? null : cloud.token);
     const record = this.store.get(name, url);
     if (!record || record.state !== "signed-in" || !record.tokens) return Promise.resolve(null);
     const { tokens } = record;
@@ -613,7 +622,7 @@ export function withoutPendingSignIn(
   manager: McpOAuthManager,
 ): Record<string, McpServerSpec> {
   return Object.fromEntries(Object.entries(servers).filter(([name, server]) =>
-    !isUrlServer(server) || manager.authState(name, server.url) !== "needs-sign-in"));
+    !isUrlServer(server) || !["needs-sign-in", "needs-max"].includes(manager.authState(name, server.url))));
 }
 
 export async function withMcpSignIn(

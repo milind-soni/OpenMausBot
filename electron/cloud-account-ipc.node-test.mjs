@@ -65,7 +65,8 @@ test("main opens a checkout only for a plan the offer sells now and one of this 
   const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
     rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" }, CHECKOUT_SOURCES, cloudOffersReady: async () => allowed,
-    ensureCloudAccount: () => ({ offer: async () => offer, checkout: async (...args) => { calls.push(args); return { outcome: "opened", state: { status: "connected" } }; } }),
+    ensureCloudAccount: () => ({ offer: async () => offer, checkout: async (...args) => { calls.push(args); return { outcome: "opened", state: { status: "connected" } }; },
+      upgrade: async (...args) => { calls.push(["upgrade", ...args]); return { outcome: "upgraded", state: { status: "connected" } }; } }),
     connectCloudHome: () => ({ status: "connected" }),
   });
   vm.runInContext(source.slice(start, end), context);
@@ -79,4 +80,36 @@ test("main opens a checkout only for a plan the offer sells now and one of this 
   allowed = false;
   await assert.rejects(handle(event, "pro", "app_card"), /isn't offered/);
   assert.deepEqual(calls, [["pro", "app_card"], ["pro", "app_onboarding"]]);
+});
+
+test("the science upgrade carries only a plan and a source, as text, and main accepts only Max from the Science section", async () => {
+  const f = preload();
+  await f.bridge.cloudAccount.upgrade("max", "science", { paid: true, token: "forged" });
+  assert.deepEqual(f.invoked, [["cloud-account:upgrade", "max", "science"]]);
+  const { CHECKOUT_SOURCES } = await import("./cloud-account.mjs");
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8"), start = source.indexOf("const workspaceOnly ="), end = source.indexOf('ipcMain.handle("organization:settings-opened"', start);
+  const handlers = new Map(), calls = [], frame = { url: `${origin}/` }, contents = { mainFrame: frame };
+  localOrigin.setLocalOrigin(origin);
+  let plans = ["pro", "max"];
+  const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
+    rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" }, CHECKOUT_SOURCES, cloudOffersReady: async () => true,
+    ensureCloudAccount: () => ({ offer: async () => (plans.length ? { plans: plans.map(tier => ({ tier })) } : null),
+      upgrade: async (...args) => { calls.push(args); return { outcome: "upgraded", state: { status: "connected" } }; } }),
+    connectCloudHome: () => ({ status: "connected" }),
+  });
+  vm.runInContext(source.slice(start, end), context);
+  const handle = handlers.get("cloud-account:upgrade"), event = { sender: contents, senderFrame: frame };
+  assert.deepEqual(await handle(event, "max", "science", { token: "forged" }), { outcome: "upgraded", state: { status: "connected" } });
+  assert.deepEqual(calls, [["max", "science"]]);
+  for (const [plan, from] of [["pro", "science"], ["max", "app_card"], ["max", undefined], [{ tier: "max" }, "science"]]) {
+    await assert.rejects(handle(event, plan, from), /Choose a plan/, `${plan} ${from}`);
+  }
+  plans = [];
+  calls.length = 0;
+  assert.deepEqual(await handle(event, "max", "science"), { outcome: "upgraded", state: { status: "connected" } });
+  assert.deepEqual(calls, [["max", "science"]]);
+  calls.length = 0;
+  assert.throws(() => handle({ sender: contents, senderFrame: { url: "https://remote.example.test/" } }, "max", "science"), /only available/);
+  assert.equal(calls.length, 0);
 });

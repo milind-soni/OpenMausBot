@@ -55,7 +55,7 @@ function mainRule() {
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
     createCloudAccountStore: () => ({}), rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null,
     sendUpdaterState: () => {}, refreshCloudMenus: () => {}, announceCloudReady: () => {},
-    includedX: { onState: async () => {} }, cloudPower: { changed: () => {}, awaiting: () => false }, cloudLogins: { kick: () => {} },
+    included: { onState: async () => {} }, cloudPower: { changed: () => {}, awaiting: () => false }, cloudLogins: { kick: () => {} },
     createCloudAccountClient: (options) => {
       signIn.options = options;
       return {

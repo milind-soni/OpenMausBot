@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { applyIncludedMessage, scienceStatus } from "./connector-catalog.ts";
 import { jevEndpoint } from "./decider/jev.ts";
-import { applyIncludedXMessage, boatCredential, deciderCredential, researchCredential, trialCreditCredential, voiceCredential, xCredential, xResearchStatus } from "./included-services.ts";
+import { applyIncludedScienceMessage, applyIncludedXMessage, boatCredential, deciderCredential, researchCredential, trialCreditCredential, scienceAccessRevision, scienceRelayCredential, voiceCredential, xCredential, xResearchStatus } from "./included-services.ts";
 
 const RELAY_BOAT = "https://cloud.example.test/api/cloud/services/boat/api/box/v1";
 const RELAY_VOICE = "https://cloud.example.test/api/cloud/services/voice/v1";
@@ -228,3 +229,88 @@ describe("research credential", () => {
   });
 });
 
+
+describe("science relay credential", () => {
+  const SCIENCE = "https://cloud.example.test/api/cloud/services/science";
+  const token = `omb_sd_${"a".repeat(43)}`;
+  const grant = { url: SCIENCE, token, expiresAt: 2_000 };
+  const send = (access: unknown) => applyIncludedScienceMessage({ type: "openmausbot:included-science", access });
+  afterEach(() => { send(null); vi.resetModules(); });
+
+  it("holds a Cloud home's science token and drops it from the environment", async () => {
+    vi.resetModules();
+    const services = await import("./included-services.ts");
+    const env = { OMB_CLOUD_SCIENCE_URL: `${SCIENCE}/`, OMB_CLOUD_SCIENCE_TOKEN: "omb_science_home" };
+    services.holdIncludedServices(env);
+    expect(services.scienceRelayCredential()).toEqual({ api: SCIENCE, token: "omb_science_home", included: true });
+    expect(env).not.toHaveProperty("OMB_CLOUD_SCIENCE_TOKEN");
+  });
+
+  it("holds a desktop's token until its expiry", () => {
+    expect(send(grant)).toBe(true);
+    expect(scienceRelayCredential(1_000, {})).toEqual({ api: SCIENCE, token, included: true });
+    expect(scienceRelayCredential(1_999, {})?.token).toBe(token);
+  });
+
+  it("an expired desktop token is not used", () => {
+    send(grant);
+    expect(scienceRelayCredential(2_000, {})).toBeNull();
+    expect(scienceRelayCredential(3_000, {})).toBeNull();
+  });
+
+  it("ignores other messages", () => {
+    expect(applyIncludedScienceMessage({ type: "openmausbot:included-x", access: null })).toBe(false);
+    expect(applyIncludedScienceMessage(null)).toBe(false);
+  });
+
+  it("refuses a malformed message and keeps what it held", () => {
+    send(grant);
+    const revision = scienceAccessRevision();
+    for (const access of [{ ...grant, url: "http://cloud.example/x" }, { ...grant, token: "short" }, { url: SCIENCE, token }, { ...grant, expiresAt: 1.5 }, { ...grant, url: "nope" }, undefined])
+      expect(() => send(access)).toThrow();
+    expect(scienceRelayCredential(1_000, {})?.token).toBe(token);
+    expect(scienceAccessRevision()).toBe(revision);
+  });
+
+  it("accepts a loopback http relay", () => {
+    expect(send({ ...grant, url: "http://127.0.0.1:9/science/" })).toBe(true);
+    expect(scienceRelayCredential(1_000, {})?.api).toBe("http://127.0.0.1:9/science");
+  });
+
+  it("null clears the desktop's token; each change bumps the revision", () => {
+    const before = scienceAccessRevision();
+    send(grant);
+    applyIncludedScienceMessage({ type: "openmausbot:included-science", access: null, offered: false });
+    expect(scienceRelayCredential(1_000, {})).toBeNull();
+    expect(scienceAccessRevision()).toBe(before + 2);
+  });
+
+  it("a Cloud home's token wins over a desktop's", async () => {
+    vi.resetModules();
+    const services = await import("./included-services.ts");
+    services.holdIncludedServices({ OMB_CLOUD_SCIENCE_URL: SCIENCE, OMB_CLOUD_SCIENCE_TOKEN: "omb_science_home" });
+    services.applyIncludedScienceMessage({ type: "openmausbot:included-science", access: grant });
+    expect(services.scienceRelayCredential(1_000)?.token).toBe("omb_science_home");
+  });
+});
+
+describe("included message dispatcher", () => {
+  it("applies the three included-service messages and ignores any other", () => {
+    expect(applyIncludedMessage({ type: "openmausbot:managed-composio" })).toBe(false);
+    expect(applyIncludedMessage({ type: "openmausbot:included-x", access: null })).toBe(true);
+    expect(applyIncludedMessage({ type: "openmausbot:included-science", access: null })).toBe(true);
+    expect(applyIncludedMessage({ type: "openmausbot:science-catalog", catalog: null })).toBe(true);
+  });
+
+  it("changes the science revision on each applied message", () => {
+    const before = scienceStatus().revision;
+    applyIncludedMessage({ type: "openmausbot:included-science", access: null });
+    const afterAccess = scienceStatus().revision;
+    applyIncludedMessage({ type: "openmausbot:science-catalog", catalog: null });
+    expect(new Set([before, afterAccess, scienceStatus().revision]).size).toBe(3);
+  });
+
+  it("a malformed message throws instead of being applied", () => {
+    expect(() => applyIncludedMessage({ type: "openmausbot:included-science", access: { url: "x" } })).toThrow();
+  });
+});

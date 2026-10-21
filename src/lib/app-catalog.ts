@@ -17,6 +17,13 @@ export function rankCategories(cards: readonly CatalogCard[], inline = INLINE_CA
   return { inline: ranked.slice(0, inline), more: ranked.slice(inline) };
 }
 
+export function withSciencePill(ranked: { inline: string[]; more: string[] }): { inline: string[]; more: string[] } {
+  const files = ranked.inline.indexOf("Files");
+  const moved = files >= 0 ? files : ranked.inline.length - 1;
+  if (moved < 0) return ranked;
+  return { inline: ranked.inline.filter((_, index) => index !== moved), more: [ranked.inline[moved]!, ...ranked.more] };
+}
+
 export function inCategory(card: CatalogCard, category: string | null): boolean {
   return category === null || (card.categories ?? []).includes(category);
 }

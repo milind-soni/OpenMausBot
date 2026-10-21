@@ -4,6 +4,7 @@
 //   OMB_CLOUD_DECIDER_URL + OMB_CLOUD_DECIDER_TOKEN  the Jev relay, a Jev base URL
 //   OMB_CLOUD_AI_URL      + OMB_CLOUD_AI_TOKEN       the trial's Claude credit, an OpenAI-compatible base URL
 //   OMB_CLOUD_X_URL       + OMB_CLOUD_X_TOKEN        the X research relay (a desktop gets its own over the parent port)
+//   OMB_CLOUD_SCIENCE_URL + OMB_CLOUD_SCIENCE_TOKEN  the science catalog relay (a desktop gets its own over the parent port)
 // The person's own key always wins and is resolved per request; an included token goes only to its relay and is never
 // written to config.json or reported to a client.
 import { JEV_DEFAULT_BASE_URL } from "./decider/jev.ts";
@@ -11,7 +12,7 @@ import { JEV_DEFAULT_BASE_URL } from "./decider/jev.ts";
 export const BOAT_API_DEFAULT = "https://boat.dev/api/v1";
 export const ELEVENLABS_API_DEFAULT = "https://api.elevenlabs.io/v1";
 /** Must also be on WORKSPACE_CREDENTIAL_ENV. */
-export const INCLUDED_TOKEN_ENV = ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_AI_TOKEN", "OMB_CLOUD_X_TOKEN"] as const;
+export const INCLUDED_TOKEN_ENV = ["OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_AI_TOKEN", "OMB_CLOUD_X_TOKEN", "OMB_CLOUD_SCIENCE_TOKEN"] as const;
 
 export interface ServiceCredential {
   token: string;
@@ -26,6 +27,7 @@ interface Included {
   decider: ServiceCredential | null;
   ai: ServiceCredential | null;
   x: ServiceCredential | null;
+  science: ServiceCredential | null;
 }
 
 function includedService(url: string | undefined, token: string | undefined): ServiceCredential | null {
@@ -40,6 +42,7 @@ const includedFrom = (env: NodeJS.ProcessEnv): Included => ({
   decider: includedService(env.OMB_CLOUD_DECIDER_URL, env.OMB_CLOUD_DECIDER_TOKEN),
   ai: trialCreditService(env.OMB_CLOUD_AI_URL, env.OMB_CLOUD_AI_TOKEN),
   x: includedService(env.OMB_CLOUD_X_URL, env.OMB_CLOUD_X_TOKEN),
+  science: includedService(env.OMB_CLOUD_SCIENCE_URL, env.OMB_CLOUD_SCIENCE_TOKEN),
 });
 
 /** The token is a key the chat engine sends here, so the address must be HTTPS (loopback for tests) and the token the Admin's shape. */
@@ -144,6 +147,52 @@ export function xResearchStatus(env: NodeJS.ProcessEnv = process.env): { include
 export function xCredential(env: NodeJS.ProcessEnv = process.env): ServiceCredential | null {
   return (held ?? includedFrom(env)).x ?? desktopX;
 }
+
+/** The science relay token on a signed-in desktop, handed over on the private parent port and held in memory only,
+ * never written to config. It is used only until `expiresAt` (epoch ms). */
+let desktopScience: { credential: ServiceCredential; expiresAt: number } | null = null;
+let scienceRevision = 0;
+
+/** `{ type: "openmausbot:included-science", access: { url, token, expiresAt } | null, offered?: false }` from the
+ * desktop's main process. True when it was one (then applied), false for any other message; a malformed one throws
+ * and changes nothing. */
+export function applyIncludedScienceMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object" || (message as { type?: unknown }).type !== "openmausbot:included-science") return false;
+  const access = (message as { access?: unknown }).access;
+  if (access === null) {
+    desktopScience = null;
+    scienceRevision += 1;
+    return true;
+  }
+  const { url, token, expiresAt } = (access && typeof access === "object" ? access : {}) as { url?: unknown; token?: unknown; expiresAt?: unknown };
+  if (typeof token !== "string" || !/^omb_sd_[A-Za-z0-9_-]{43}$/.test(token) || typeof url !== "string" || !Number.isSafeInteger(expiresAt)) {
+    throw new Error("invalid science access");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("invalid science relay URL");
+  }
+  // The token goes only to our relay: https, or a loopback relay in development and tests.
+  if (!(parsed.protocol === "https:" || (parsed.protocol === "http:" && LOOPBACK.has(parsed.hostname)))) throw new Error("invalid science relay URL");
+  desktopScience = { credential: { token, api: url.trim().replace(/\/+$/, ""), included: true }, expiresAt: expiresAt as number };
+  scienceRevision += 1;
+  return true;
+}
+
+/** A Cloud home's included token, else a signed-in desktop's while it has not expired. */
+export function scienceRelayCredential(now: number = Date.now(), env: NodeJS.ProcessEnv = process.env): ServiceCredential | null {
+  const home = (held ?? includedFrom(env)).science;
+  if (home) return home;
+  return desktopScience && desktopScience.expiresAt > now ? desktopScience.credential : null;
+}
+
+/** The science credential a Cloud home was started with; a desktop never has one. */
+export const scienceHomeCredential = (env: NodeJS.ProcessEnv = process.env): ServiceCredential | null => (held ?? includedFrom(env)).science;
+
+/** Changes whenever the desktop's science access is replaced or cleared. */
+export const scienceAccessRevision = (): number => scienceRevision;
 
 export const TREG_API_DEFAULT = "https://treg.to";
 /** Security: the person's treg key goes only to treg (https), or to a loopback stand-in in development and tests. */

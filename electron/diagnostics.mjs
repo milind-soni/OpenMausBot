@@ -34,6 +34,7 @@ export const CREDENTIAL_ENV_NAMES = [
   "OMB_CLOUD_DECIDER_TOKEN",
   "OMB_CLOUD_AI_TOKEN",
   "OMB_CLOUD_X_TOKEN",
+  "OMB_CLOUD_SCIENCE_TOKEN",
   "OMB_CLOUD_CONNECTED_APPS_GRANT",
   // Private even though they are not traditional API credentials.
   "OMB_BROWSER_CONNECTION",
@@ -43,6 +44,7 @@ export const CREDENTIAL_ENV_NAMES = [
 
 // Kept in parity with server/redact.ts: unmistakable token formats are masked wherever they appear, keyed or not.
 const CREDENTIAL_TOKEN_FORMATS = [
+  /\bomb_sd_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g,
   /\bsk-[A-Za-z0-9_-]{16,}/g,
   /\bxai-[A-Za-z0-9]{16,}/g,
   /\bgsk_[A-Za-z0-9]{40,}/g,

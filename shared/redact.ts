@@ -15,6 +15,7 @@ export const mask = (value: string) => (REDACTION_MARKER.test(value) ? value : `
 
 const KEY_PREFIXES: RegExp[] = [
   /\bom[dg]_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, // desktop device and model-only credentials
+  /\bomb_sd_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g, // desktop science relay token
   /\bsk-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{16,}/g, // anthropic / openai
   /\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}/g, // stripe secret and restricted keys
   /\bxai-[A-Za-z0-9_-]{20,}/g, // xai (grok)

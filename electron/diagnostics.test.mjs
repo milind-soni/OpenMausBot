@@ -190,6 +190,11 @@ describe("buildDiagnosticsReport", () => {
     expect(redactSecretsInLine(line)).toBe(`spawn env ${name}=«redacted ${value.length} chars» ready`);
   });
 
+  it("masks a bare desktop science token in the log tail", () => {
+    const token = `omb_sd_${"a".repeat(43)}`;
+    expect(redactSecretsInLine(`relay sent ${token} ok`)).toBe(`relay sent «redacted ${token.length} chars» ok`);
+  });
+
   it("masks generic key=value secrets and content-shaped tokens in the log tail", () => {
     const report = buildDiagnosticsReport({
       appInfo,

@@ -141,7 +141,7 @@ export function cloudNoticeKind(view: CloudPlanView, account: CloudAccountState 
 }
 
 
-export const CLOUD_SOURCES = ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding"] as const;
+export const CLOUD_SOURCES = ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding", "science"] as const;
 export type CloudSource = (typeof CLOUD_SOURCES)[number];
 
 export function offerPlanLabel(plan: CloudOfferPlan): string {

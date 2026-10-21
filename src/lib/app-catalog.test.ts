@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CATEGORY_SECTION_SIZE, catalogSections, inCategory, rankCategories } from "./app-catalog";
+import { CATEGORY_SECTION_SIZE, catalogSections, inCategory, rankCategories, withSciencePill } from "./app-catalog";
 
 const card = (slug: string, ...categories: string[]) => ({ slug, categories });
 
@@ -41,5 +41,21 @@ describe("catalogSections", () => {
 
   it("keeps the catalog section even when empty, and skips empty ones", () => {
     expect(catalogSections([], connected, ["Design"])).toEqual([{ kind: "all", cards: [] }]);
+  });
+});
+
+describe("withSciencePill", () => {
+  const row = ["Productivity", "Developer tools", "Communication", "Files", "Sales and CRM"];
+  it("Science takes Files' place in the row", () => {
+    expect(withSciencePill({ inline: row, more: ["Social", "Analytics"] }))
+      .toEqual({ inline: ["Productivity", "Developer tools", "Communication", "Sales and CRM"], more: ["Files", "Social", "Analytics"] });
+  });
+  it("moves the last inline category into More when Files is not inline, matching exactly", () => {
+    const inline = ["Productivity", "Developer tools", "Communication", "files", "Sales and CRM"];
+    expect(withSciencePill({ inline, more: ["Files"] }))
+      .toEqual({ inline: inline.slice(0, 4), more: ["Sales and CRM", "Files"] });
+  });
+  it("leaves an empty row alone", () => {
+    expect(withSciencePill({ inline: [], more: [] })).toEqual({ inline: [], more: [] });
   });
 });

@@ -13,7 +13,8 @@ async function fixture(t, options = {}) {
   const f = { now: 1_800_000_000_000, requests: [], browsers: [], states: [], saved: null, approved: false, revoked: false,
     sessionStatus: 200, invalidIdentity: false, invalidEntitlement: false, badUrl: false, failWrite: false, slowToken: null,
     entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 }, timer: null, delay: null, cloud: undefined, expiresIn: 600,
-    disk: { status: 404, body: "<!doctype html>not here" }, x: { status: 404, body: { error: "unsupported" } }, sessionPage: null, sessionError: null, tokenPage: null, publicConfig: { status: 404, body: { error: "not_found" } },
+    disk: { status: 404, body: "<!doctype html>not here" }, x: { status: 404, body: { error: "unsupported" } }, catalog: { status: 200, body: { cloudContractVersion: 1, version: 1, sections: [] } },
+    science: { status: 404, body: { error: "unsupported" } }, upgrade: { status: 500, body: { error: "down" } }, sessionPage: null, sessionError: null, tokenPage: null, publicConfig: { status: 404, body: { error: "not_found" } },
     offer: undefined, checkout: { status: 404, body: "<!doctype html>not here" }, interest: { status: 200, body: { ok: true } } };
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "fixture-device" }, account: { id: "fixture-account", email: "person@example.test" } });
   const server = createServer(async (req, res) => {
@@ -32,8 +33,11 @@ async function fixture(t, options = {}) {
       return send(f.disk.status, f.disk.body);
     }
     if (req.url === "/api/cloud/desktop/services/x" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.x.status, f.x.body);
-    for (const [route, answer] of [["/api/cloud/desktop/checkout", f.checkout], ["/api/cloud/desktop/interest", f.interest]]) {
+    if (req.url === "/api/cloud/desktop/catalog" && req.method === "GET" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.catalog.status, f.catalog.body);
+    for (const [route, answer] of [["/api/cloud/desktop/services/science", f.science], ["/api/cloud/desktop/upgrade", f.upgrade], ["/api/cloud/desktop/checkout", f.checkout], ["/api/cloud/desktop/interest", f.interest]]) {
       if (req.url !== route || req.method !== "POST" || req.headers.authorization !== `Bearer ${accessToken}`) continue;
+      if (answer.reset) return req.socket.destroy();
+      if (answer.delay) await sleep(answer.delay);
       if (typeof answer.body === "string") { res.writeHead(answer.status, { "content-type": "text/html" }); return res.end(answer.body); }
       return send(answer.status, answer.body);
     }
@@ -246,7 +250,7 @@ test("Dodo's own checkout page is the only checkout address ever opened", () => 
     assert.equal(checkoutDestination(url), null, String(url));
   }
   assert.equal(checkoutDestination("https://test.checkout.dodopayments.com/session/cks_123", { fixture: true }), "https://test.checkout.dodopayments.com/session/cks_123");
-  assert.deepEqual([...CHECKOUT_SOURCES], ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding"]);
+  assert.deepEqual([...CHECKOUT_SOURCES], ["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "update_popup", "app_onboarding", "science"]);
 });
 
 test("signed in, a checkout is the Admin's for this account, opened in the browser only when it is Dodo's; then the session is asked every 3 seconds for 30 minutes", async t => {
@@ -693,6 +697,120 @@ test("X research access: this sign-in's own relay token, null without a plan or 
   f.x = { status: 200, body: { cloudContractVersion: 1, url: "https://elsewhere.example.test/api/cloud/services/x", token } }; await assert.rejects(f.client.xResearchAccess(), /Invalid/);
   f.x = { status: 200, body: { cloudContractVersion: 1, url, token: "short" } }; await assert.rejects(f.client.xResearchAccess(), /Invalid/);
   f.x = { status: 500, body: { error: "down" } }; await assert.rejects(f.client.xResearchAccess());
+});
+
+test("science catalog: null signed out, the Admin's JSON signed in, invalid otherwise", async t => {
+  const f = await fixture(t);
+  assert.equal(await f.client.scienceCatalog(), null);
+  assert.equal(f.requests.length, 0);
+  await f.connect();
+  const sections = [{ id: "research", locked: false }];
+  f.catalog = { status: 200, body: { cloudContractVersion: 1, version: 1, sections } };
+  assert.deepEqual(await f.client.scienceCatalog(), { version: 1, sections });
+  const row = f.requests.find(r => r.route === "/api/cloud/desktop/catalog");
+  assert.equal(row.method, "GET"); assert.equal(row.token, `Bearer ${accessToken}`);
+  for (const body of [{ version: 1, sections }, { cloudContractVersion: 1, sections }, { cloudContractVersion: 1, version: 1 }, { cloudContractVersion: 1, version: 1, sections: {} }]) {
+    f.catalog = { status: 200, body }; await assert.rejects(f.client.scienceCatalog(), /Invalid Cloud catalog/);
+  }
+  f.catalog = { status: 401, body: { cloudContractVersion: 1, error: "invalid_token" } };
+  await assert.rejects(f.client.scienceCatalog());
+});
+
+test("science access is this sign-in's own relay token while the Cloud allows it", async t => {
+  const f = await fixture(t);
+  assert.equal(await f.client.scienceAccess(), null);
+  assert.equal(f.requests.length, 0);
+  await f.connect();
+  const token = `omb_sd_${"a".repeat(43)}`, url = `${f.origin}/api/cloud/services/science`, expiresAt = f.now + 3600_000;
+  const ok = { cloudContractVersion: 1, url, token, expiresAt };
+  f.science = { status: 200, body: ok };
+  assert.deepEqual(await f.client.scienceAccess(), { url, token, expiresAt });
+  assert.ok(f.requests.some(r => r.route === "/api/cloud/desktop/services/science" && r.method === "POST" && r.token === `Bearer ${accessToken}`));
+  f.science = { status: 402, body: { error: "subscription_inactive" } }; assert.equal(await f.client.scienceAccess(), null);
+  f.science = { status: 404, body: { error: "unsupported" } }; assert.equal(await f.client.scienceAccess(), null);
+  f.science = { status: 401, body: { error: "invalid_token" } }; await assert.rejects(f.client.scienceAccess());
+  const { cloudContractVersion: _version, ...unversioned } = ok;
+  for (const body of [
+    { ...ok, url: "https://elsewhere.example.test/api/cloud/services/science" }, { ...ok, url: `${f.origin}/api/cloud/services/x` },
+    { ...ok, url: `${url}/` }, { ...ok, url: `${url}?a=1` }, { ...ok, token: "short" }, { ...ok, token: `omb_xd_${"a".repeat(43)}` }, unversioned,
+    { ...ok, expiresAt: f.now - 1 }, { ...ok, expiresAt: new Date(expiresAt).toISOString() }, { ...ok, expiresAt: expiresAt + 0.5 }, { ...ok, expiresAt: undefined },
+  ]) { f.science = { status: 200, body }; await assert.rejects(f.client.scienceAccess(), /Invalid/); }
+  f.science = { status: 500, body: { error: "down" } }; await assert.rejects(f.client.scienceAccess());
+});
+
+test("upgrade to Max", async t => {
+  const f = await fixture(t);
+  await assert.rejects(f.client.upgrade("max", "science"), /Sign in/);
+  await f.connect();
+  await assert.rejects(f.client.upgrade("max", "nope"), /Invalid/);
+  await assert.rejects(f.client.upgrade("Max!", "science"), /Invalid/);
+  assert.ok(!f.requests.some(r => r.route.endsWith("/upgrade")));
+  const run = async (status, body) => { f.upgrade = { status, body }; return f.client.upgrade("max", "science"); };
+  const sessions = () => f.requests.filter(r => r.route.endsWith("/session") && r.method === "GET").length;
+  let before = sessions();
+  let result = await run(200, { cloudContractVersion: 1, status: "upgraded", tier: "max", trial: false });
+  assert.equal(result.outcome, "upgraded"); assert.equal(result.state.status, "connected"); assert.equal(sessions(), before + 1);
+  const post = f.requests.findLast(r => r.route === "/api/cloud/desktop/upgrade");
+  assert.equal(post.method, "POST"); assert.equal(post.token, `Bearer ${accessToken}`); assert.deepEqual(JSON.parse(post.body), { plan: "max", source: "science" });
+  assert.equal((await run(202, { cloudContractVersion: 1, status: "pending" })).outcome, "pending");
+  assert.equal((await run(200, { status: "upgraded" })).outcome, "unknown");
+  assert.equal((await run(402, { cloudContractVersion: 1, error: "payment_failed" })).outcome, "payment-failed");
+  assert.equal((await run(409, { cloudContractVersion: 1, error: "already_on_plan" })).outcome, "already-on-plan");
+  assert.equal((await run(409, { cloudContractVersion: 1, error: "plan_change_unavailable" })).outcome, "unavailable");
+  assert.equal((await run(409, { cloudContractVersion: 1, error: "other" })).outcome, "failed");
+  assert.equal((await run(429, { error: "rate_limited" })).outcome, "rate-limited");
+  for (const status of [502, 503]) assert.equal((await run(status, { error: "upstream_unavailable" })).outcome, "failed", String(status));
+  for (const status of [504, 524]) assert.equal((await run(status, "<!doctype html>timed out")).outcome, "pending", String(status));
+  assert.equal((await run(500, { error: "down" })).outcome, "unknown");
+  assert.equal((await run(500, "<!doctype html>oops")).outcome, "unknown");
+  const checkouts = () => f.requests.filter(r => r.route === "/api/cloud/desktop/checkout").length;
+  const had = checkouts();
+  result = await run(409, { cloudContractVersion: 1, error: "not_subscribed" });
+  assert.equal(checkouts(), had + 1); assert.ok(["opened", "failed", "conflict", "rate-limited"].includes(result.outcome));
+  assert.deepEqual(JSON.parse(f.requests.findLast(r => r.route === "/api/cloud/desktop/checkout").body), { plan: "max", source: "science" });
+  before = sessions();
+  result = await run(401, { cloudContractVersion: 1, error: "invalid_token" });
+  assert.equal(result.outcome, "failed"); assert.equal(sessions(), before + 1);
+  assert.ok(!JSON.stringify(f.states).includes(accessToken));
+});
+
+test("an upgrade that outlasts the usual timeout, or loses its connection once sent, is pending; one never sent is unknown", async t => {
+  const timeouts = [], original = AbortSignal.timeout;
+  AbortSignal.timeout = ms => { timeouts.push(ms); return original.call(AbortSignal, ms >= 150_000 ? 50 : ms); };
+  t.after(() => { AbortSignal.timeout = original; });
+  let refuse = false;
+  const f = await fixture(t, { fetch: (url, init) => (refuse && url.endsWith("/upgrade")
+    ? Promise.reject(new TypeError("fetch failed", { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) }))
+    : fetch(url, init)) });
+  await f.connect();
+  const sessions = () => f.requests.filter(r => r.route.endsWith("/session") && r.method === "GET").length;
+  const posts = () => f.requests.filter(r => r.route === "/api/cloud/desktop/upgrade").length;
+  f.upgrade = { status: 200, body: { cloudContractVersion: 1, status: "upgraded", tier: "max", trial: false }, delay: 300 };
+  timeouts.length = 0;
+  let before = sessions();
+  let result = await f.client.upgrade("max", "science");
+  assert.ok(Math.max(...timeouts) >= 150_000, `upgrade timeout ${Math.max(...timeouts)}`);
+  assert.equal(result.outcome, "pending"); assert.equal(posts(), 1); assert.equal(sessions(), before + 1);
+  f.entitlement = { plan: "pro", tier: "max", status: "active", expiresAt: f.now + 3600_000, version: 2 };
+  assert.equal((await f.client.refresh()).entitlement.tier, "max");
+  f.upgrade = { reset: true };
+  before = sessions();
+  result = await f.client.upgrade("max", "science");
+  assert.equal(result.outcome, "pending"); assert.equal(posts(), 2); assert.equal(sessions(), before + 1);
+  refuse = true;
+  result = await f.client.upgrade("max", "science");
+  assert.equal(result.outcome, "unknown"); assert.equal(posts(), 2);
+});
+
+test("an upgrade the Admin has no billing for opens the Cloud page", async t => {
+  const f = await fixture(t); await f.connect();
+  for (const body of [{ cloudContractVersion: 1, error: "not_found" }, "<!doctype html>not here"]) {
+    f.upgrade = { status: 404, body };
+    const result = await f.client.upgrade("max", "science");
+    assert.equal(result.outcome, "opened");
+    assert.equal(f.browsers.at(-1), `${f.origin}/cloud`);
+  }
+  assert.ok(!f.requests.some(r => r.route === "/api/cloud/desktop/checkout"));
 });
 
 test("My Cloud's line in the server menus says what is true now: the trial's end while it is ahead, always on while paid for, stopped when not, nothing when unknown", () => {

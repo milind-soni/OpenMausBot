@@ -67,7 +67,6 @@ export function cloudProPopupView(account: CloudAccountState | null, offer: Clou
       current: null,
     };
   }
-  // Every plan manages in the app. Personal → Pro is not self-serve yet, so no "Upgrade" that ends at "email us".
   return manageView(who, "settings", view.kind === "reauth" ? t("pro.reauthShort") : cloudPlanLine(view));
 }
 

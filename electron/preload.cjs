@@ -282,6 +282,8 @@ const bridge = {
     openDashboard: () => ipcRenderer.invoke("cloud-account:openDashboard"),
     offer: () => ipcRenderer.invoke("cloud-account:offer"),
     checkout: (plan, source) => ipcRenderer.invoke("cloud-account:checkout", String(plan), String(source)),
+    // Choosing Max from a paid plan (the Science section's only call): main accepts ("max", "science") and answers with the outcome and state, never a token.
+    upgrade: (plan, source) => ipcRenderer.invoke("cloud-account:upgrade", String(plan), String(source)),
     // The buying sheet: plain text in, outcomes out; the attempt, the token and the checkout page stay in main.
     signInStart: email => ipcRenderer.invoke("cloud-account:signInStart", String(email)),
     signInVerify: code => ipcRenderer.invoke("cloud-account:signInVerify", String(code)),

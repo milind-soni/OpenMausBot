@@ -685,3 +685,36 @@ describe("mcpCallbackOrigin", () => {
     expect(mcpCallbackOrigin(null, [])).toBeNull();
   });
 });
+
+describe("MausBot Cloud servers", () => {
+  const RELAY = "https://cloud.example.com/api/cloud/services/science/pubmed/mcp";
+  const spec = (url: string, headers: Record<string, string> = {}) => ({ type: "http", url, headers, enabled: true }) as never;
+  const cloudManager = (cloud: (name: string, url: string) => { token: string } | "needs-max" | null) =>
+    new McpOAuthManager({ file: join(dir, "mcp-oauth.json"), cloud });
+
+  it("a cloud entry reads signed-in and gets the relay token as its bearer", async () => {
+    const m = cloudManager((name) => (name === "pubmed" ? { token: "omb_sd_t" } : null));
+    expect(m.authState("pubmed", RELAY)).toBe("signed-in");
+    const out = await withMcpSignIn({ pubmed: spec(RELAY, { authorization: "Bearer stale", "X-A": "1" }) }, m);
+    expect((out.pubmed as { headers: Record<string, string> }).headers).toEqual({ "X-A": "1", Authorization: "Bearer omb_sd_t" });
+  });
+
+  it("needs-max entries are left out of turns", async () => {
+    const m = cloudManager(() => "needs-max");
+    const servers = { pubmed: spec(RELAY) };
+    expect(m.authState("pubmed", RELAY)).toBe("needs-max");
+    expect(withoutPendingSignIn(servers, m)).toEqual({});
+    expect(await withMcpSignIn(servers, m)).toEqual({});
+  });
+
+  it("a relay refusal leaves the entry alone", () => {
+    const m = cloudManager(() => "needs-max");
+    m.markNeedsSignIn("pubmed", RELAY);
+    expect(() => readFileSync(join(dir, "mcp-oauth.json"), "utf8")).toThrow();
+  });
+
+  it("MausBot Cloud servers need no sign-in", async () => {
+    const m = cloudManager(() => ({ token: "omb_sd_t" }));
+    await expect(m.start("pubmed", RELAY)).rejects.toMatchObject({ status: 400, message: expect.stringContaining("need no sign-in") });
+  });
+});

@@ -122,6 +122,10 @@ The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
 consent, discovery failures, reconnect and disconnect using that same registry
 and a synthetic provider, without accessing a real Whop account.
 
+The [science catalog fixture](science-catalog.md) checks the Science filter, its
+locked teaser and the connected state of public databases against a stand-in
+for the Cloud's science relay, and states what only a staging run can prove.
+
 The [Connected Apps OAuth fixture](connected-apps-oauth.md) checks blocked-popup
 recovery, safe authorization links and abandoned-account retries through real
 renderer components and isolated HTTP routes.
