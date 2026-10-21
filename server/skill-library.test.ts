@@ -105,3 +105,50 @@ describe("bundled verification skill", () => {
     }
   });
 });
+
+describe("bundled reverse-engineering skill", () => {
+  const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const rea = skills.find((skill) => skill.manifest.id === "reverse-engineer-anything");
+
+  it("ships with the manifest the loader can read", () => {
+    expect(rea).toBeDefined();
+    expect(rea!.manifest.defaultEnabled).toBe(true);
+    expect(rea!.manifest.requiredCapabilities).toEqual(["customMcp"]);
+  });
+
+  it("mounts for a reverse-engineering request on a driver that can mount MCP servers", () => {
+    for (const text of [
+      "reverse engineer this app and tell me how the search works",
+      "can you decompile the installer",
+      "disassemble this binary for me",
+    ]) {
+      expect(selectBundledSkills(text, ["customMcp"], skills).map((skill) => skill.manifest.id))
+        .toEqual(["reverse-engineer-anything"]);
+    }
+  });
+
+  it("stays off a driver that can mount neither the MCP server nor a local shell", () => {
+    // A cloud API driver has no local shell and cannot mount a user's MCP
+    // servers; telling its bot to use REA would burn turns hunting for tools
+    // that are not there.
+    expect(selectBundledSkills("reverse engineer this app", [], skills)).toEqual([]);
+  });
+
+  it("stays off for requests that are not about reverse engineering", () => {
+    for (const text of [
+      "write a poem about the sea",
+      "what is the weather like today",
+      "add a button to the settings page",
+    ]) {
+      expect(selectBundledSkills(text, ["customMcp"], skills)).toEqual([]);
+    }
+  });
+
+  it("tells the agent how to connect when the tools are not mounted", () => {
+    // The skill alone cannot register the MCP server, so the instructions
+    // have to carry the recipe or the agent dead-ends at "no such tool".
+    expect(rea!.instructions).toContain("Plugins → MCP servers");
+    expect(rea!.instructions).toContain("rea-agents");
+    expect(rea!.instructions).toContain("binary_session");
+  });
+});

@@ -1,0 +1,23 @@
+{
+  "id": "reverse-engineer-anything",
+  "name": "Reverse Engineer Anything (REA)",
+  "version": "0.1.0",
+  "description": "Investigate applications and binaries you are allowed to analyze with REA - its MCP tools when mounted, or its CLI - and report findings with evidence.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "reverse engineer",
+    "reverse-engineer",
+    "reverse engineering",
+    "decompile",
+    "decompilation",
+    "disassemble",
+    "disassembly",
+    "ghidra",
+    "hopper",
+    "ida pro",
+    "apk",
+    "firmware",
+    "asar"
+  ],
+  "requiredCapabilities": ["customMcp"]
+}
