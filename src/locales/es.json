@@ -1588,6 +1588,8 @@
   "chat.digestTitle": "Lo que hizo este turno",
   "chat.compactionTitle": "Contexto anterior resumido",
   "chat.compactionHint": "Tu conversación completa sigue aquí. El agente usa este resumen y los mensajes recientes para continuar.",
+  "chat.compactionExcerptTitle": "Contexto anterior reducido a fragmentos recientes",
+  "chat.compactionExcerptHint": "No había un resumen escrito disponible, así que el agente continúa con estos fragmentos y los mensajes recientes. Pueden faltar detalles anteriores en su contexto. Tu conversación completa sigue aquí.",
   "contextWarning.short": "Contexto {percent}%",
   "contextWarning.threadHint": "El contexto de {name} está al {percent}%. «Compactar ahora» resume los mensajes antiguos en una nota breve; toda la conversación se queda aquí.",
   "contextWarning.compactNow": "Compactar ahora",

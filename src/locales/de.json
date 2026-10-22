@@ -2003,5 +2003,7 @@
   "chat.page.freeLimit": "Du hast deine {limit} kostenlosen Seiten aufgebraucht. MausBot Cloud gibt dir mehr, und Seiten ohne das Badge.",
   "chat.page.planLimit": "Du hast alle {limit} Seiten deines {plan}-Tarifs genutzt. Nimm eine Seite offline, um Platz zu schaffen.",
   "chat.page.morePages": "Mehr Seiten holen",
-  "chat.activity.publishPage": "Veröffentlicht eine Seite"
+  "chat.activity.publishPage": "Veröffentlicht eine Seite",
+  "chat.compactionExcerptTitle": "Früherer Kontext auf aktuelle Auszüge gekürzt",
+  "chat.compactionExcerptHint": "Es gab keine geschriebene Zusammenfassung, deshalb macht der Agent mit diesen Auszügen und den letzten Nachrichten weiter. Ältere Details können in seinem Kontext fehlen. Dein ganzes Gespräch ist weiterhin hier."
 }

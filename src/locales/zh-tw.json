@@ -1158,6 +1158,8 @@
   "chat.digestTitle": "本回合的工作摘要",
   "chat.compactionTitle": "較早的上下文摘要",
   "chat.compactionHint": "完整對話仍會保留。機器人會在繼續時參考此摘要與最近的訊息。",
+  "chat.compactionExcerptTitle": "較早的上下文已縮減為近期摘錄",
+  "chat.compactionExcerptHint": "沒有可用的書面摘要，因此機器人會根據這些摘錄與最近的訊息繼續。較早的細節可能不在其上下文中。完整對話仍會保留。",
   "chat.emptyPrompt": "傳送訊息以開始對話。",
   "chat.chiefOfStaff": "幕僚長",
   "chat.openProfile": "開啟機器人角色資料",

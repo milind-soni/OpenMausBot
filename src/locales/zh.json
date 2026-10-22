@@ -830,6 +830,8 @@
   "chat.digestTitle": "本回合的工作摘要",
   "chat.compactionTitle": "较早的上下文摘要",
   "chat.compactionHint": "完整对话仍会保留。代理程序会在继续时参考此摘要与最近的消息。",
+  "chat.compactionExcerptTitle": "较早的上下文已缩减为近期摘录",
+  "chat.compactionExcerptHint": "没有可用的书面摘要，因此代理程序会根据这些摘录和最近的消息继续。较早的细节可能不在其上下文中。完整对话仍会保留。",
   "chat.emptyPrompt": "发送一条消息即可开始对话。",
   "chat.chiefOfStaff": "总协调机器人",
   "chat.openProfile": "打开智能体资料",

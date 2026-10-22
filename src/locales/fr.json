@@ -1985,5 +1985,7 @@
   "chat.page.freeLimit": "Vous avez utilisé vos {limit} pages gratuites. MausBot Cloud vous en donne plus, et des pages sans le badge.",
   "chat.page.planLimit": "Vous avez utilisé les {limit} pages de votre forfait {plan}. Retirez une page pour faire de la place.",
   "chat.page.morePages": "Obtenir plus de pages",
-  "chat.activity.publishPage": "Publie une page"
+  "chat.activity.publishPage": "Publie une page",
+  "chat.compactionExcerptTitle": "Contexte antérieur réduit à des extraits récents",
+  "chat.compactionExcerptHint": "Aucun résumé rédigé n'était disponible : l'agent continue donc à partir de ces extraits et des messages récents. Des détails plus anciens peuvent manquer dans son contexte. Toute votre conversation est toujours là."
 }

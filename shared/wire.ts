@@ -422,6 +422,9 @@ export type CardAnswerer = (
   via?: "call" | "reaction";
 };
 
+/** Opens every compaction summary written without a model (recent excerpts only); the chat labels stored records by it. */
+export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
+
 /** One transcript line, serialized as stored. */
 export interface WireMessage {
   roomRequest?: { id: string; phase: "request" | "result" };

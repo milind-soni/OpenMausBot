@@ -1723,6 +1723,8 @@
   "chat.digestTitle": "What this turn did",
   "chat.compactionTitle": "Earlier context summarized",
   "chat.compactionHint": "Your full conversation is still here. The agent uses this summary and recent messages when continuing.",
+  "chat.compactionExcerptTitle": "Earlier context shortened to recent excerpts",
+  "chat.compactionExcerptHint": "A written summary wasn't available, so the agent continues from these excerpts and recent messages. Older details may be missing from its context. Your full conversation is still here.",
   "contextWarning.short": "Context {percent}%",
   "contextWarning.threadHint": "{name}'s context is {percent}% full. Compact now summarizes older messages into a short note; the whole conversation stays here.",
   "contextWarning.compactNow": "Compact now",

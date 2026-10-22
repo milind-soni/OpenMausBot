@@ -1379,6 +1379,8 @@
   "chat.digestTitle": "Hoạt động trong lượt này",
   "chat.compactionTitle": "Đã tóm tắt ngữ cảnh trước đó",
   "chat.compactionHint": "Toàn bộ cuộc trò chuyện của bạn vẫn ở đây. Agent sử dụng bản tóm tắt này và các tin nhắn gần đây khi tiếp tục.",
+  "chat.compactionExcerptTitle": "Ngữ cảnh trước đó đã được rút gọn còn các đoạn trích gần đây",
+  "chat.compactionExcerptHint": "Không có bản tóm tắt được viết sẵn, vì vậy Agent tiếp tục từ các đoạn trích này và các tin nhắn gần đây. Các chi tiết cũ hơn có thể bị thiếu trong ngữ cảnh của nó. Toàn bộ cuộc trò chuyện của bạn vẫn ở đây.",
   "contextWarning.short": "Ngữ cảnh {percent}%",
   "contextWarning.threadHint": "Ngữ cảnh của {name} đã đầy {percent}%. Thu gọn ngay sẽ tóm tắt các tin nhắn cũ hơn thành một ghi chú ngắn; toàn bộ cuộc trò chuyện vẫn được giữ ở đây.",
   "contextWarning.compactNow": "Thu gọn ngay",

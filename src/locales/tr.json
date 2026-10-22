@@ -1379,6 +1379,8 @@
   "chat.digestTitle": "Bu turun yaptıkları",
   "chat.compactionTitle": "Önceki bağlam özetlendi",
   "chat.compactionHint": "Tüm sohbetiniz hâlâ burada. Ajan devam ederken bu özeti ve son mesajları kullanır.",
+  "chat.compactionExcerptTitle": "Önceki bağlam son alıntılara kısaltıldı",
+  "chat.compactionExcerptHint": "Yazılı bir özet yoktu, bu yüzden ajan bu alıntılar ve son mesajlarla devam ediyor. Daha eski ayrıntılar bağlamında eksik olabilir. Tüm sohbetiniz hâlâ burada.",
   "contextWarning.short": "Bağlam %{percent}",
   "contextWarning.threadHint": "{name} adlı botun bağlamı %{percent} dolu. Şimdi sıkıştır, eski mesajları kısa bir notta özetler; sohbetin tamamı burada kalır.",
   "contextWarning.compactNow": "Şimdi sıkıştır",
