@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, Check, Copy, Download, Maximize2, Search, WrapText, X } from "lucide-react";
 import { isTableNumber, tableCsv, tableRowOrder, type TableSort } from "@/lib/table-data";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
 
 export interface TableCell { text: string; content?: ReactNode; align?: TableAlign; vAlign?: "top" | "middle" | "bottom" }
@@ -84,7 +84,7 @@ export function RichTable({ columns, rows, name = t("table.title"), expanded = f
       <TableViewport columns={columns} rows={rows} order={order} name={name} wrap={wrap} large={large} sort={sort} direction={direction} headless={headless}
         onSort={(column) => setSort(sort?.column !== column ? { column, descending: false } : !sort.descending ? { column, descending: true } : null)} />
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline/40 px-3 py-2 text-[11px] text-ink-secondary">
-        <span role="status">{t("table.count", { shown: order.length.toLocaleString(), total: rows.length.toLocaleString(), columns: columns.length })}</span>
+        <span role="status">{t("table.count", { shown: order.length.toLocaleString(intlLocale()), total: rows.length.toLocaleString(intlLocale()), columns: columns.length })}</span>
         {copyState !== "idle" && <span role={copyState === "failed" ? "alert" : "status"}>{t(copyState === "failed" ? "table.copyFailed" : "table.copied")}</span>}
       </footer>
     </div>

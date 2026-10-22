@@ -3,12 +3,13 @@ import { Check, TerminalSquare } from "lucide-react";
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { reducedMotion } from "@/lib/onboarding";
+import { t } from "@/lib/i18n";
 import type { SceneProps } from "./types";
 
 const AGENT_CHAT_MS = 5400;
 
-const ASK = "Can you check whether the deploy script still passes its tests?";
-const REPLY = "Ran the suite on this machine: 42 tests, all green. One warning about a deprecated flag in deploy.sh, want me to fix it?";
+const ASK = () => t("onboarding.reel.demo.chatAsk");
+const REPLY = () => t("onboarding.reel.demo.chatReply");
 
 const THINK_AT = 700;
 const REPLY_AT = 2000;
@@ -17,7 +18,7 @@ const CHARS_PER_S = 48;
 export function AgentChat({ playing, onCue, onEnded, label }: SceneProps) {
   const still = reducedMotion() || !playing;
   const [phase, setPhase] = useState<"ask" | "think" | "reply">(still ? "reply" : "ask");
-  const [shown, setShown] = useState(still ? REPLY.length : 0);
+  const [shown, setShown] = useState(still ? REPLY().length : 0);
 
   useEffect(() => {
     if (still) return;
@@ -46,18 +47,18 @@ export function AgentChat({ playing, onCue, onEnded, label }: SceneProps) {
     const step = Math.max(1, Math.round(CHARS_PER_S / 20));
     const timer = setInterval(() => {
       setShown((n) => {
-        if (n >= REPLY.length) {
+        if (n >= REPLY().length) {
           clearInterval(timer);
           return n;
         }
-        return Math.min(REPLY.length, n + step);
+        return Math.min(REPLY().length, n + step);
       });
     }, 50);
     return () => clearInterval(timer);
   }, [phase, still]);
 
   const replied = phase === "reply";
-  const done = shown >= REPLY.length;
+  const done = shown >= REPLY().length;
 
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-inset px-6" role="img" aria-label={label}>
@@ -70,10 +71,10 @@ export function AgentChat({ playing, onCue, onEnded, label }: SceneProps) {
       >
         <div className="flex items-end justify-end gap-2.5">
           <div className="animate-rise max-w-[300px] rounded-2xl rounded-br-md bg-bubble-user px-3.5 py-2.5 text-[13px] leading-snug text-ink shadow-md shadow-black/15">
-            {ASK}
+            {ASK()}
           </div>
           <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-raised text-[11px] font-semibold text-ink">
-            You
+            {t("onboarding.reel.demo.you")}
           </div>
         </div>
 
@@ -109,10 +110,10 @@ export function AgentChat({ playing, onCue, onEnded, label }: SceneProps) {
                 >
                   {done ? <Check size={11} strokeWidth={3} /> : <TerminalSquare size={11} />}
                   <code className="font-mono">pnpm test</code>
-                  <span>{done ? "passed" : "running…"}</span>
+                  <span>{t(done ? "onboarding.reel.demo.passed" : "onboarding.reel.demo.running")}</span>
                 </div>
                 <p className="text-[13px] leading-relaxed text-ink">
-                  {REPLY.slice(0, shown)}
+                  {REPLY().slice(0, shown)}
                   {!done && <span className="animate-caret ml-0.5 inline-block h-[13px] w-[2px] translate-y-[2px] bg-ink" />}
                 </p>
               </div>

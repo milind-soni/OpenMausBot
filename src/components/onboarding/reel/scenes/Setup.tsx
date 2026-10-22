@@ -6,6 +6,7 @@ import { cn } from "@/lib/cn";
 import { reducedMotion } from "@/lib/onboarding";
 import { api } from "@/state/store";
 import type { SceneProps } from "./types";
+import { t } from "@/lib/i18n";
 
 const SETUP_MS = 6600;
 
@@ -170,7 +171,7 @@ export function Setup({ playing, onCue, onEnded, label }: SceneProps) {
               </div>
               {replied ? (
                 <div className="animate-spot-in origin-left rounded-2xl rounded-tl-md bg-card px-3 py-2 text-[12.5px] text-ink">
-                  Got it. Setting myself up.
+                  {t("onboarding.reel.demo.setupReply")}
                 </div>
               ) : (
                 <div className="animate-spot-in inline-flex origin-left items-center gap-1 rounded-2xl rounded-tl-md bg-card px-3 py-2.5">
@@ -189,7 +190,7 @@ export function Setup({ playing, onCue, onEnded, label }: SceneProps) {
           <div className="mt-1 flex items-end gap-2 rounded-2xl border border-hairline/50 bg-card px-3 py-2.5 shadow-lg shadow-black/20">
             <div className="min-h-[34px] min-w-0 flex-1">
               {sent ? (
-                <span className="text-[12.5px] text-ink-secondary">Message</span>
+                <span className="text-[12.5px] text-ink-secondary">{t("onboarding.reel.demo.message")}</span>
               ) : (
                 <Typed text={TYPED.slice(0, typed)} caret />
               )}
@@ -217,18 +218,18 @@ export function Setup({ playing, onCue, onEnded, label }: SceneProps) {
             <div className="min-w-0 flex-1">
               <div className="text-[13px] font-semibold text-ink">
                 <Reveal shown={steps >= 1} bar="w-24">
-                  Bug triager
+                  {t("onboarding.reel.demo.bugTriager")}
                 </Reveal>
               </div>
               <div className="mt-1 text-[10.5px] text-ink-secondary">
-                {configured ? "Ready" : sent ? "Setting up…" : "New bot"}
+                {t(configured ? "onboarding.reel.demo.ready" : sent ? "onboarding.reel.demo.settingUp" : "onboarding.reel.demo.newBot")}
               </div>
             </div>
           </div>
-          <Row icon={CalendarClock} label="When" done={steps >= 2}>
-            Every 15 min
+          <Row icon={CalendarClock} label={t("onboarding.reel.demo.when")} done={steps >= 2}>
+            {t("routines.interval.minutes", { minutes: 15 })}
           </Row>
-          <Row icon={Plug} label="Apps" done={steps >= 3} bar="w-14">
+          <Row icon={Plug} label={t("onboarding.reel.demo.apps")} done={steps >= 3} bar="w-14">
             <span className="inline-flex items-center gap-3">
               {APPS.map((app) => (
                 <span key={app.slug} className="inline-flex items-center gap-1">
@@ -238,7 +239,7 @@ export function Setup({ playing, onCue, onEnded, label }: SceneProps) {
               ))}
             </span>
           </Row>
-          <Row icon={Folder} label="Folder" done={steps >= 4} bar="w-16">
+          <Row icon={Folder} label={t("onboarding.reel.demo.folder")} done={steps >= 4} bar="w-16">
             <code className="font-mono text-[11.5px]">~/bug-triage</code>
           </Row>
         </div>

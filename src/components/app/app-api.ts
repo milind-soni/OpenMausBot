@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import { api, ApiError } from "@/state/store";
 import type { AppBlockedReason, AppDocument } from "../../../shared/app";
 import { RPC_HOST_REFUSED, type AppContextUpdate, type AppRpcMethod, type JsonRpcError } from "../../../shared/app-frame/bridge";
@@ -33,7 +34,7 @@ function failureOf(error: unknown): AppFetchFailure {
 export async function fetchAppDocument(threadId: string, messageId: string, signal?: AbortSignal): Promise<AppDocument> {
   try {
     const doc = await api<AppDocument>(appDocumentPath(threadId, messageId), { signal });
-    if (!isRecord(doc) || typeof doc.srcdoc !== "string" || !isRecord(doc.can)) throw new AppDocumentError({ offline: false, status: 500, error: "The app's page did not arrive whole." });
+    if (!isRecord(doc) || typeof doc.srcdoc !== "string" || !isRecord(doc.can)) throw new AppDocumentError({ offline: false, status: 500, error: t("app.strip.incomplete") });
     return doc;
   } catch (error) {
     if (error instanceof AppDocumentError) throw error;

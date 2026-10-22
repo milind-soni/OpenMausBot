@@ -2,6 +2,8 @@
 import React, { useEffect, useId, useMemo, useRef } from 'react'
 
 import { MASCOT_BODIES } from "../../shared/mascot-bodies"
+import { t } from "@/lib/i18n"
+import { silhouetteName } from "@/lib/mascot-names"
 import {
   EXPRESSIONS,
   EXPRESSION_COUNT,
@@ -1237,7 +1239,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     }, [])
 
     const dimension = typeof size === 'number' ? `${size}px` : size
-    const label = title === undefined ? `${silhouette.name} mascot` : title
+    const label = title === undefined ? t("mascot.label", { name: silhouetteName(silhouette.name) }) : title
     const body = silhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
 
     return (

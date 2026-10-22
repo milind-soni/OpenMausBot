@@ -120,17 +120,17 @@ export type ChipTone = "ok" | "danger" | "accent" | "warn";
 export function outcomeChip(outcome: ActivityOutcome): { text: string; tone: ChipTone } {
   switch (outcome) {
     case "ran":
-      return { text: "Ran", tone: "ok" };
+      return { text: t("activity.outcome.ran"), tone: "ok" };
     case "failed":
-      return { text: "Failed", tone: "danger" };
+      return { text: t("activity.outcome.failed"), tone: "danger" };
     case "running":
-      return { text: "Running", tone: "accent" };
+      return { text: t("activity.outcome.running"), tone: "accent" };
     case "allowed":
-      return { text: "Allowed", tone: "ok" };
+      return { text: t("activity.outcome.allowed"), tone: "ok" };
     case "denied":
-      return { text: "Denied", tone: "danger" };
+      return { text: t("activity.outcome.denied"), tone: "danger" };
     case "waiting":
-      return { text: "Needs you", tone: "warn" };
+      return { text: t("activity.outcome.waiting"), tone: "warn" };
   }
 }
 

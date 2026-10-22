@@ -114,7 +114,7 @@ export function AvatarImageGenerator({
       const url = provider === "custom" ? normalizeImageGenerationUrl(customUrl.trim()) : "";
       const model = customModel.trim();
       if (provider === "custom" && (model.length > 200 || ["\r", "\n", "\0"].some((character) => model.includes(character)))) {
-        throw new Error("Use a model ID of at most 200 characters without control characters");
+        throw new Error(t("botIdentity.ai.modelInvalid"));
       }
       if (imageKey.trim()) await saveCredential(imageKey.trim());
       if (provider === "custom") {
@@ -169,13 +169,13 @@ export function AvatarImageGenerator({
               value={customModel}
               disabled={busy}
               onChange={(event) => setModelDraft(event.target.value)}
-              placeholder="Model ID from your image provider"
+              placeholder={t("botIdentity.ai.modelPlaceholder")}
               autoComplete="off"
               className={`${INPUT_CLASS} mt-1`}
             />
           </label>
           <p className="text-[11px] leading-relaxed text-ink-secondary">
-            OpenAI-compatible Images API. localhost refers to the OpenMausBot server, including when you open this page remotely.
+            {t("botIdentity.ai.customApiHint")}
           </p>
         </>
       )}
@@ -198,10 +198,10 @@ export function AvatarImageGenerator({
         />
       </label>
       {provider === "xai" && (
-        <p className="text-[11px] leading-relaxed text-ink-secondary">Shares the Grok API key in Settings. Changing or removing it also affects other Grok features.</p>
+        <p className="text-[11px] leading-relaxed text-ink-secondary">{t("botIdentity.ai.xaiSharedKey")}</p>
       )}
       {provider === "custom" && keyConfigured && (
-        <p className="text-[11px] leading-relaxed text-ink-secondary">The saved custom key will be used. Remove it for a keyless connection.</p>
+        <p className="text-[11px] leading-relaxed text-ink-secondary">{t("botIdentity.ai.customSavedKey")}</p>
       )}
       <div className="flex items-center justify-end gap-2">
         {keyConfigured && (
@@ -230,7 +230,7 @@ export function AvatarImageGenerator({
       <label className="mt-3 block text-[11.5px] text-ink-secondary">
         {t("botIdentity.ai.provider")}
         <Select value={provider} onChange={(event) => void chooseProvider(event.target.value as AvatarImageProvider)} disabled={busy || !state.config} className="mt-1 w-full">
-          {Object.entries(PROVIDERS).map(([value, info]) => <option key={value} value={value}>{info.label}</option>)}
+          {Object.entries(PROVIDERS).map(([value, info]) => <option key={value} value={value}>{value === "custom" ? t("botIdentity.ai.customProvider") : info.label}</option>)}
         </Select>
       </label>
       <p className="mt-1.5 text-[11px] leading-relaxed text-ink-secondary">

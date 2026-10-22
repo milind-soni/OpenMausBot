@@ -3,6 +3,8 @@
 // access, a viewer that may operate sizes the page while it only watches, a larger frame cap is sent in place and a
 // reconnect opens with the newest size and cap, and OpenMausBot's own messages are passed on.
 
+import { t } from "./i18n";
+
 /** The browser's host cannot run Chrome until it is set up; the close reason names the fix. */
 export const PREVIEW_STREAM_HOST_SETUP_CLOSE_CODE = 4503;
 export const PREVIEW_STREAM_TAB_GONE_CODE = 4404;
@@ -182,7 +184,7 @@ export async function uploadPreviewStreamFiles(
     try {
       message = (JSON.parse(text) as { error?: string }).error ?? text;
     } catch {}
-    throw new Error(message || "The upload was refused.");
+    throw new Error(message || t("browser.page.uploadRefused"));
   }
 }
 

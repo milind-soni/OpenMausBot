@@ -1,4 +1,6 @@
 import type { SendKey } from "./send-key";
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 
 export interface ShortcutItem {
   id: string;
@@ -119,6 +121,19 @@ export const SHORTCUT_GROUPS: readonly ShortcutGroup[] = [
   },
 ];
 
+const CATEGORY_KEY: Record<string, LocaleKey> = {
+  Navigation: "shortcuts.category.navigation",
+  "Chat & Composer": "shortcuts.category.chat",
+  Calls: "shortcuts.category.calls",
+  "Management & Groups": "shortcuts.category.groups",
+};
+
+export const shortcutDescription = (item: ShortcutItem): string => t(`shortcuts.${item.id}` as LocaleKey) || item.description;
+export const shortcutCategory = (group: ShortcutGroup): string => {
+  const key = CATEGORY_KEY[group.category];
+  return key ? t(key) : group.category;
+};
+
 type Keys = Pick<ShortcutItem, "macKeys" | "winKeys">;
 const ENTER: Keys = { macKeys: ["Return"], winKeys: ["Enter"] };
 const SHIFT_ENTER: Keys = { macKeys: ["⇧", "Return"], winKeys: ["Shift", "Enter"] };
@@ -180,8 +195,8 @@ export function filterShortcutGroups(
       const filteredItems = group.items.filter((item) => {
         const keys = shortcutKeysForPlatform(item, isMac).join(" ").toLowerCase();
         return (
-          item.description.toLowerCase().includes(normalized) ||
-          group.category.toLowerCase().includes(normalized) ||
+          shortcutDescription(item).toLowerCase().includes(normalized) ||
+          shortcutCategory(group).toLowerCase().includes(normalized) ||
           keys.includes(normalized)
         );
       });

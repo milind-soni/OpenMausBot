@@ -4,20 +4,22 @@ import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import type { MausColor } from "@/lib/mascot";
 import { reducedMotion } from "@/lib/onboarding";
+import { t } from "@/lib/i18n";
+import type { LocaleKey } from "@/locales";
 import type { SceneProps } from "./types";
 
 const CHANNELS_MS = 6000;
 
-const MEMBERS: Array<{ name: string; title: string; color: MausColor }> = [
-  { name: "Maus", title: "Chief of staff", color: "green" },
-  { name: "Researcher", title: "Finds and checks facts", color: "blue" },
-  { name: "Writer", title: "Drafts and edits", color: "orange" },
+const MEMBERS: Array<{ name: string; title: LocaleKey; color: MausColor }> = [
+  { name: "Maus", title: "onboarding.reel.demo.chiefTitle", color: "green" },
+  { name: "Researcher", title: "onboarding.reel.demo.researcherTitle", color: "blue" },
+  { name: "Writer", title: "onboarding.reel.demo.writerTitle", color: "orange" },
 ];
 const RESEARCHER = 1;
 
 const TYPED = "@Res";
-const REST = " pull last week's numbers";
-const REPLY = "Found them. Revenue up 12% week over week, churn flat. Full table in the folder.";
+const REST = () => t("onboarding.reel.demo.channelsAsk");
+const REPLY = () => t("onboarding.reel.demo.channelsReply");
 
 const TYPE_AT = 600;
 const MENU_AT = 1150;
@@ -86,15 +88,15 @@ export function Channels({ playing, onCue, onEnded, label }: SceneProps) {
   }, [playing, still]);
 
   const typed = useTypewriter(TYPED, phase === "typing" || phase === "menu", still, 1, 110);
-  const rest = useTypewriter(REST, reached(phase, "rest") && !reached(phase, "sent"), still, 2, 40);
-  const reply = useTypewriter(REPLY, phase === "reply", still, 3, 45);
+  const rest = useTypewriter(REST(), reached(phase, "rest") && !reached(phase, "sent"), still, 2, 40);
+  const reply = useTypewriter(REPLY(), phase === "reply", still, 3, 45);
 
   const menuOpen = phase === "menu";
   const picked = reached(phase, "picked");
   const sent = reached(phase, "sent");
   const thinking = phase === "thinking";
   const replied = phase === "reply";
-  const busy = thinking || (replied && reply.length < REPLY.length);
+  const busy = thinking || (replied && reply.length < REPLY().length);
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-inset" role="img" aria-label={label}>
@@ -104,7 +106,7 @@ export function Channels({ playing, onCue, onEnded, label }: SceneProps) {
         <header className="flex items-center justify-between border-b border-hairline/40 px-3.5 py-2.5">
           <div className="flex items-center gap-2">
             <Hash size={14} className="text-ink-secondary" />
-            <span className="text-[13px] font-semibold text-ink">Work</span>
+            <span className="text-[13px] font-semibold text-ink">{t("onboarding.reel.demo.workGroup")}</span>
           </div>
           <div className="flex -space-x-2">
             {MEMBERS.map((m, i) => {
@@ -131,7 +133,7 @@ export function Channels({ playing, onCue, onEnded, label }: SceneProps) {
             <div className="animate-rise flex justify-end">
               <div className="max-w-[260px] rounded-2xl rounded-br-md bg-bubble-user px-3 py-2 text-[12px] leading-snug text-ink shadow-md shadow-black/15">
                 <span className="rounded bg-accent/20 px-1 font-medium text-accent-text">@Researcher</span>
-                {REST}
+                {REST()}
               </div>
             </div>
           )}
@@ -151,7 +153,7 @@ export function Channels({ playing, onCue, onEnded, label }: SceneProps) {
                 ) : (
                   <div className="animate-spot-in max-w-[300px] rounded-2xl rounded-tl-md border border-hairline/40 bg-card px-3 py-2 text-[12px] leading-relaxed text-ink shadow-[0_10px_30px_-12px_rgba(0,0,0,0.55)]">
                     {reply}
-                    {reply.length < REPLY.length && <span className="animate-caret ml-0.5 inline-block h-[12px] w-[2px] translate-y-[2px] bg-ink" />}
+                    {reply.length < REPLY().length && <span className="animate-caret ml-0.5 inline-block h-[12px] w-[2px] translate-y-[2px] bg-ink" />}
                   </div>
                 )}
               </div>
@@ -165,12 +167,12 @@ export function Channels({ playing, onCue, onEnded, label }: SceneProps) {
                   <MausAvatar color={m.color} state="happy" size={20} animated={false} trackPointer={false} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[11.5px] font-medium text-ink">{m.name}</span>
-                    <span className="block truncate text-[9.5px] text-ink-secondary">{m.title}</span>
+                    <span className="block truncate text-[9.5px] text-ink-secondary">{t(m.title)}</span>
                   </span>
                 </div>
               ))}
               <div className="flex items-center gap-2 rounded-lg px-2 py-1 text-[11px] text-ink-secondary">
-                <span className="flex size-5 items-center justify-center rounded-full bg-raised text-[10px]">@</span> everyone
+                <span className="flex size-5 items-center justify-center rounded-full bg-raised text-[10px]">@</span> {t("onboarding.reel.demo.everyone")}
               </div>
             </div>
           )}
@@ -179,7 +181,7 @@ export function Channels({ playing, onCue, onEnded, label }: SceneProps) {
         <div className="m-2.5 mt-0 flex items-center gap-2 rounded-xl border border-hairline/50 bg-inset px-3 py-2">
           <div className="flex min-h-[16px] flex-1 items-center text-[12px] text-ink">
             {sent ? (
-              <span className="text-ink-secondary">Message #Work</span>
+              <span className="text-ink-secondary">{t("composer.placeholder.bot", { name: `#${t("onboarding.reel.demo.workGroup")}` })}</span>
             ) : (
               <>
                 {picked ? <span className="rounded bg-accent/20 px-1 font-medium text-accent-text">@Researcher</span> : <span>{typed}</span>}

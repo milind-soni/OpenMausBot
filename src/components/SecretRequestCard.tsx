@@ -4,6 +4,7 @@ import { ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "luci
 import { credentialResumeOutcome, credentialSaveRequest, isConfigCredentialTarget } from "../../shared/credential-request";
 import { credentialProvider } from "@/lib/analytics-allowlist";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import { keySaved, keySaveFailure, savedKeyResult } from "@/lib/product-events";
 import { api, useStore, type ConfigStatus, type Message } from "@/state/store";
 import { ASK_FIELD, ASK_PRIMARY_BUTTON, ASK_QUIET_BUTTON, AskCard, AskSettledLine, returnFocusToComposer } from "./AskCard";
@@ -34,25 +35,25 @@ export function SecretRequestCard({
   const superseded = secret.superseded === true;
   const stopped = secret.stopped === true;
   const description = superseded
-    ? "This request was replaced by a newer one for the same key. Use the newest card to provide it."
+    ? t("chat.secret.superseded")
     : provided
     ? stopped
-      ? "Saved securely."
+      ? t("chat.secret.saved")
       : secret.resumed
-      ? "Saved securely. Your bot is continuing the task."
-      : "Saved securely. Your bot will continue when its current turn settles."
+      ? t("chat.secret.savedContinuing")
+      : t("chat.secret.savedWaiting")
     : declined
-      ? "You chose not to provide this credential. OpenMausBot could not resume the bot yet."
+      ? t("chat.secret.declined")
       : secret.description;
   const footerLabel = stopped
-    ? "Stopped"
+    ? t("chat.secret.stopped")
     : declined
-    ? "Continuing without this credential failed"
+    ? t("chat.secret.declinedFailed")
     : secret.resumed
-      ? "Bot resumed without seeing the key"
+      ? t("chat.secret.resumedWithout")
       : error
-        ? "The key is safe; resuming failed"
-        : "Waiting to resume safely";
+        ? t("chat.secret.resumeFailed")
+        : t("chat.secret.waiting");
 
   if (declined && (secret.resumed || !error)) return null;
 
@@ -124,7 +125,7 @@ export function SecretRequestCard({
     return (
       <AskSettledLine icon={<X size={13} />} ariaLabel={secret.label}>
         <span className="text-ink-secondary" title={description}>{secret.label}</span>
-        <span> · Superseded by a newer request</span>
+        <span> · {t("chat.secret.supersededShort")}</span>
       </AskSettledLine>
     );
   }
@@ -133,7 +134,7 @@ export function SecretRequestCard({
     return (
       <AskSettledLine icon={<X size={13} />} ariaLabel={secret.label}>
         <span className="text-ink-secondary" title={secret.description}>{secret.label}</span>
-        <span> · Stopped</span>
+        <span> · {t("chat.secret.stopped")}</span>
       </AskSettledLine>
     );
   }
@@ -142,7 +143,7 @@ export function SecretRequestCard({
     const retry = !secret.resumed && !stopped && error ? (
       <button type="button" onClick={() => void retryResume()} disabled={saving} className={cn(ASK_QUIET_BUTTON, "text-accent-text")}>
         {saving ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-        Try again
+        {t("common.tryAgain")}
       </button>
     ) : undefined;
     return (
@@ -158,7 +159,7 @@ export function SecretRequestCard({
         action={retry}
         detail={error && <p role="alert" className="ms-[19px] mt-1 text-[12px] text-danger">{error}</p>}
       >
-        <span className="text-ink-secondary" title={description}>{provided ? `${secret.label} saved securely` : secret.label}</span>
+        <span className="text-ink-secondary" title={description}>{provided ? t("chat.secret.labelSaved", { label: secret.label }) : secret.label}</span>
         <span className={declined ? "text-danger" : undefined}> · {footerLabel}</span>
       </AskSettledLine>
     );
@@ -171,11 +172,11 @@ export function SecretRequestCard({
       title={secret.label}
       explanation={description}
       onDismiss={dismiss}
-      dismissLabel="Not now"
+      dismissLabel={t("notice.notNow")}
     >
       {remoteClient ? (
         <div className="text-[12.5px] leading-relaxed text-ink-secondary">
-          This key must be saved on the host computer. Open this conversation on the host to continue securely.
+          {t("chat.secret.remoteClient")}
         </div>
       ) : (
         <form onSubmit={(event) => void save(event)}>
@@ -194,12 +195,12 @@ export function SecretRequestCard({
             />
             <button type="submit" disabled={saving || (!value.trim() && !savedLocally)} className={ASK_PRIMARY_BUTTON}>
               {saving ? <Loader2 size={14} className="animate-spin" /> : <LockKeyhole size={14} />}
-              {savedLocally ? "Continue task" : "Save securely"}
+              {t(savedLocally ? "chat.secret.continue" : "chat.secret.save")}
             </button>
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-ink-tertiary">
             <span className="flex items-center gap-1">
-              <LockKeyhole size={11} /> Stored securely by OpenMausBot and never added to chat.
+              <LockKeyhole size={11} /> {t("chat.secret.storedHint")}
             </span>
             <a
               href={secret.helpUrl}
@@ -207,7 +208,7 @@ export function SecretRequestCard({
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 text-accent-text hover:underline"
             >
-              Where to get this key <ExternalLink size={11} />
+              {t("chat.secret.whereToGet")} <ExternalLink size={11} />
             </a>
           </div>
         </form>

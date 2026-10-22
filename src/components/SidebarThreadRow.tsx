@@ -4,7 +4,7 @@ import { Archive, ArchiveRestore, BellOff, Check, ChevronRight, Clock, Clock3, F
 import type { AppState, BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
 import { isTickable, opensRowMenuFromKey } from "@/lib/bulk-select";
 import { threadRefUrl } from "@/lib/thread-refs";
@@ -27,7 +27,7 @@ type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "a
 
 export function formatUpdatedAt(at: number): string {
   if (!Number.isFinite(at) || at <= 0) return "";
-  return new Date(at).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+  return new Date(at).toLocaleString(intlLocale(), { dateStyle: "short", timeStyle: "short" });
 }
 
 export function threadUpdatedLabel(at: number, now: number): string {

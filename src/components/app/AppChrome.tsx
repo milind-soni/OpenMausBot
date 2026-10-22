@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { AppWindow, CircleAlert, Info, Loader2, RotateCw } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import type { AppNetwork } from "../../../shared/app";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_QUIET_BUTTON } from "../AskCard";
 
@@ -9,11 +9,14 @@ export const APP_SURFACE = "w-full overflow-hidden rounded-3xl bg-composer ring-
 const ICON_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/[0.07] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
 
+const decimal = (value: number, digits: number) =>
+  new Intl.NumberFormat(intlLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(value);
+
 export function formatAppBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return "";
   if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024 * 1024) return `${decimal(bytes / 1024, bytes < 10 * 1024 ? 1 : 0)} KB`;
+  return `${decimal(bytes / (1024 * 1024), 1)} MB`;
 }
 
 export function AppHeader({

@@ -10,6 +10,7 @@ import {
   openExternalLink,
   platformLabel,
 } from "@/lib/app-links";
+import { t } from "@/lib/i18n";
 
 export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -47,17 +48,17 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
           {APP_NAME}
         </h2>
         <p className="mt-1 text-[13px] text-ink-secondary">
-          Version {appVersion()}
+          {t("about.version", { version: appVersion() })}
           {platform ? ` · ${platform}` : ""}
         </p>
         <p className="mt-3 text-[13px] leading-relaxed text-ink-secondary">
-          An open-source desktop home for your agents. Apache 2.0 licensed.
+          {t("about.tagline")}
         </p>
         <div className="mt-4 flex flex-wrap justify-center gap-x-4 gap-y-1.5 text-[13px]">
           <AboutLink href={APP_REPOSITORY} label="GitHub" />
-          <AboutLink href={DOCS_URL} label="Docs" />
-          <AboutLink href={RELEASES_URL} label="Releases" />
-          <AboutLink href={LICENSE_URL} label="License" />
+          <AboutLink href={DOCS_URL} label={t("about.docs")} />
+          <AboutLink href={RELEASES_URL} label={t("about.releases")} />
+          <AboutLink href={LICENSE_URL} label={t("about.license")} />
         </div>
         <button
           ref={closeRef}
@@ -65,7 +66,7 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
           onClick={onClose}
           className="mt-5 w-full rounded-xl bg-raised px-4 py-2 text-[13px] font-medium text-ink hover:brightness-110"
         >
-          Close
+          {t("common.close")}
         </button>
       </div>
     </div>

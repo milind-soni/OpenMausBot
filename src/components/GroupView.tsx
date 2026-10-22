@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { activeLocale, t } from "@/lib/i18n";
+import { activeLocale, intlLocale, t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { Check, ChevronDown, ChevronRight, Folder, FolderOpen, Loader2, Pause, Pin, Plus, Search, Square, X } from "lucide-react";
 import {
@@ -215,7 +215,7 @@ function RoomTextMessage({
               ? "text-ink"
               : cn(user ? "chat-text whitespace-pre-wrap bg-bubble-user px-4 py-2.5 text-ink" : "bg-card px-4 py-2.5 text-ink", simple && SIMPLE_BUBBLE),
           )}
-          title={new Date(m.at).toLocaleString()}
+          title={new Date(m.at).toLocaleString(intlLocale())}
         >
           {m.replyToId && (() => {
             const target = transcript.find((candidate) => candidate.id === m.replyToId);
@@ -253,7 +253,7 @@ function RoomTextMessage({
                 }}
               />}
               {m.via === "api" && (
-                <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
+                <div className="mt-1 text-[11px] text-ink-secondary">{t("room.viaApi")}</div>
               )}
               {collapsible && (
                 <button type="button" onClick={() => setExpanded(true)} className="mt-1 text-[12.5px] text-ink-secondary hover:text-ink">
@@ -866,7 +866,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                 disabled={saving}
                 className="flex shrink-0 items-center gap-1.5 rounded-xl border border-hairline/50 bg-raised px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:opacity-50"
               >
-                <FolderOpen size={14} /> Choose
+                <FolderOpen size={14} /> {t("room.folder.chooseShort")}
               </button>
             )}
           </div>
@@ -1243,7 +1243,7 @@ export function GroupView({ group }: { group: Group }) {
             ? t("room.holds.avatarHeld", { name: b.name })
             : queueTitle ?? (busyElsewhere
               ? t("room.memberWorkingElsewhere", { name: b.name })
-              : `${b.name}${busy ? " — working…" : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
+              : `${b.name}${busy ? ` — ${t("room.member.working")}` : ""}${contextWarning ? ` — ${t("contextWarning.short", { percent: contextWarning.percent })}` : ""}`)
         }
         className={cn(
           "relative inline-flex rounded-full",

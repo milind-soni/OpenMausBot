@@ -2,9 +2,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import {
-  BROWSER_SIGN_IN_FAILED, previewBrowserSignIn, readSessionState, SERVICE_TRUST_REASON, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
+  previewBrowserSignIn, readSessionState, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
 } from "./lib/session";
 import { bootstrapBrand } from "./lib/brand";
+import { setLocale, t } from "./lib/i18n";
+import { startupLocaleTag } from "./lib/language-preference";
 import { applySkin, readSkin } from "./lib/skins";
 import { applyChatWidth, readChatWidth } from "./lib/chat-width";
 import { applyFont, readFont } from "./lib/fonts";
@@ -19,6 +21,7 @@ settleAdvancedModeDefault();
 applySkin(readSkin());
 applyFont(readFont());
 applyChatWidth(readChatWidth());
+setLocale(startupLocaleTag());
 
 async function chooseRoot(): Promise<React.ReactNode> {
   const home = window.ogb?.home;
@@ -27,7 +30,7 @@ async function chooseRoot(): Promise<React.ReactNode> {
     const signIn = takeBrowserSignInFromLocation();
     if (signIn) {
       const preview = await previewBrowserSignIn(signIn);
-      return preview ? <BrowserSignInPage credential={signIn} owner={preview.owner} /> : <PairPage initialCode={null} reason={BROWSER_SIGN_IN_FAILED} />;
+      return preview ? <BrowserSignInPage credential={signIn} owner={preview.owner} /> : <PairPage initialCode={null} reason={t("pair.browser.signInFailed")} />;
     }
     return <PairPage initialCode={takePairingCodeFromLocation()} initialEmail={takeInvitedEmailFromLocation()} />;
   }
@@ -36,7 +39,7 @@ async function chooseRoot(): Promise<React.ReactNode> {
     const pair = <PairPage initialCode={null} reason={session.error} />;
     return home ? <SignedOutAtHome bridge={home} fallback={pair} /> : pair;
   }
-  if (session.kind === "loopback" && session.trust === "service") return <PairPage initialCode={null} reason={SERVICE_TRUST_REASON} />;
+  if (session.kind === "loopback" && session.trust === "service") return <PairPage initialCode={null} reason={t("pair.serviceTrust")} />;
   if (location.pathname === "/desktop-viewer") {
     const { DesktopViewer } = await import("./components/DesktopViewer");
     return <DesktopViewer />;

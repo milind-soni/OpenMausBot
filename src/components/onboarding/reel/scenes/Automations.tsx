@@ -3,6 +3,8 @@ import { CheckCircle2, Loader2, MousePointer2, Zap } from "lucide-react";
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { reducedMotion } from "@/lib/onboarding";
+import { intlLocale, t } from "@/lib/i18n";
+import { dayName } from "@/lib/schedule-label";
 import type { SceneProps } from "./types";
 
 const AUTOMATIONS_MS = 6200;
@@ -42,7 +44,7 @@ function Receipt({ name, running, tone }: { name: string; running: boolean; tone
       <div className="min-w-0">
         <div className="truncate text-[12px] font-semibold text-ink">{name}</div>
         <div className={cn("text-[10.5px] font-medium transition-colors duration-300", running ? "text-ink-secondary" : "text-success")}>
-          {running ? "Running…" : "Ran · result in chat"}
+          {t(running ? "onboarding.reel.demo.running2" : "onboarding.reel.demo.ranInChat")}
         </div>
       </div>
     </div>
@@ -103,7 +105,7 @@ export function Automations({ playing, onCue, onEnded, label }: SceneProps) {
               className={cn("animate-rise border-l border-hairline/40 py-1.5 text-center", i === 0 && "bg-gradient-to-b from-accent/[0.09] to-accent/[0.03]")}
               style={{ "--i": i + 1 } as React.CSSProperties}
             >
-              <div className={cn("text-[8.5px] font-medium uppercase tracking-[0.14em]", i === 0 ? "text-accent" : "text-ink-secondary")}>{day}</div>
+              <div className={cn("text-[8.5px] font-medium uppercase tracking-[0.14em]", i === 0 ? "text-accent" : "text-ink-secondary")}>{dayName(i + 1)}</div>
               <div className={cn("mx-auto mt-0.5 flex size-5 items-center justify-center rounded-full text-[10.5px] font-medium tabular-nums", i === 0 ? "bg-accent text-white shadow-[0_4px_12px_-4px_var(--color-accent)]" : "text-ink")}>
                 {14 + i}
               </div>
@@ -114,7 +116,7 @@ export function Automations({ playing, onCue, onEnded, label }: SceneProps) {
           <div className="relative">
             {HOURS.map((hour, i) => (
               <div key={hour} className="absolute right-1.5 -translate-y-1/2 text-[8.5px] tabular-nums text-ink-tertiary" style={{ top: i * ROW }}>
-                {hour} AM
+                {new Date(2000, 0, 1, hour).toLocaleTimeString(intlLocale(), { hour: "numeric" })}
               </div>
             ))}
           </div>
@@ -141,8 +143,8 @@ export function Automations({ playing, onCue, onEnded, label }: SceneProps) {
                   >
                     <MausAvatar color="green" state={busy ? "working" : "idle"} size={16} animated={!still} trackPointer={false} />
                     <div className="min-w-0">
-                      <div className="truncate text-[9.5px] font-semibold leading-tight text-ink">Weekly report</div>
-                      <div className="text-[8px] leading-tight tabular-nums text-ink-secondary">9:00 · weekly</div>
+                      <div className="truncate text-[9.5px] font-semibold leading-tight text-ink">{t("onboarding.reel.demo.weeklyReport")}</div>
+                      <div className="text-[8px] leading-tight tabular-nums text-ink-secondary">9:00 · {t("onboarding.reel.demo.weekly")}</div>
                     </div>
                   </div>
                 </>
@@ -170,8 +172,8 @@ export function Automations({ playing, onCue, onEnded, label }: SceneProps) {
       )}
 
       <div className="absolute bottom-4 right-5 z-20 flex flex-col items-end gap-2">
-        {firing && <Receipt name="Weekly report" running={!done} tone="accent" />}
-        {hook && <Receipt name="Webhook task" running={!hookDone} tone="warning" />}
+        {firing && <Receipt name={t("onboarding.reel.demo.weeklyReport")} running={!done} tone="accent" />}
+        {hook && <Receipt name={t("onboarding.reel.demo.webhookTask")} running={!hookDone} tone="warning" />}
       </div>
 
       {hook && (

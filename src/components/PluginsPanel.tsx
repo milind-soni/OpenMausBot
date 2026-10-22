@@ -3,7 +3,7 @@ import { Check, ChevronDown, ChevronRight, Loader2, RefreshCw, Search, Server, T
 import { api, useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
 import { reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
@@ -790,8 +790,8 @@ export function PluginsPanel() {
                   && (pagination.stalled || (pagination.totalItems !== undefined && pagination.items < pagination.totalItems))
                   ? `${pagination.totalItems !== undefined && pagination.items < pagination.totalItems
                     ? t("connectors.marketplace.partialCount", {
-                      shown: pagination.items.toLocaleString(),
-                      total: pagination.totalItems.toLocaleString(),
+                      shown: pagination.items.toLocaleString(intlLocale()),
+                      total: pagination.totalItems.toLocaleString(intlLocale()),
                     })
                     : t("connectors.marketplace.partialStalled")}${pagination.reason
                     ? ` — ${t("connectors.marketplace.partialReason", { reason: pagination.reason })}`
@@ -812,7 +812,7 @@ export function PluginsPanel() {
                           onClick={() => setShowAllApps(true)}
                           className={cn(pill, "bg-control/70 px-4 text-ink hover:bg-raised-hover")}
                         >
-                          {t("apps.showAll", { count: allCards.length.toLocaleString() })}
+                          {t("apps.showAll", { count: allCards.length.toLocaleString(intlLocale()) })}
                         </button>
                       </div>
                     )}

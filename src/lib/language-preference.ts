@@ -26,6 +26,14 @@ export function effectiveLanguage(choice: string | null, serverDefault: string |
   return choice ?? serverDefault ?? "";
 }
 
+export function localeTag(language: string, system: string | undefined = globalThis.navigator?.language): string | undefined {
+  return language || system;
+}
+
+export function startupLocaleTag(system: string | undefined = globalThis.navigator?.language): string | undefined {
+  return localeTag(effectiveLanguage(languageChoice(), undefined), system);
+}
+
 function notify() {
   for (const listener of listeners) listener();
 }

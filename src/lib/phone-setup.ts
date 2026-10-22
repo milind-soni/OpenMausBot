@@ -305,8 +305,8 @@ interface PhonePairingWindowSnapshot {
   pairing: { code?: string; expiresAt?: number; token: string } | null;
 }
 
-const PAIRING_OPEN_FAILURE_MESSAGE =
-  "Device pairing did not open. Open Advanced & troubleshooting, confirm Remote access is on, then try again.";
+const pairingOpenFailureMessage = () =>
+  t("phone.setup.pairingOpenFailed", { advanced: t("remote.advanced"), remote: t("remote.title") });
 
 export function companionPairingOpenFailure(
   companion: PhonePairingWindowSnapshot & { enabled: boolean; error?: string },
@@ -324,7 +324,7 @@ export function companionPairingOpenFailure(
     || !Number.isFinite(pairing.expiresAt)
     || (pairing.expiresAt ?? 0) <= now
   ) {
-    return PAIRING_OPEN_FAILURE_MESSAGE;
+    return pairingOpenFailureMessage();
   }
   return null;
 }
@@ -395,14 +395,14 @@ export function startNonOverlappingPhoneSetupPoll<T>(
   };
 }
 
-const START_FAILURE_MESSAGE =
-  "Remote access could not start. Open Advanced & troubleshooting, then try turning Remote access on again.";
+const startFailureMessage = () =>
+  t("phone.setup.startFailed", { advanced: t("remote.advanced"), remote: t("remote.title") });
 
 export function companionStartFailure(
   companion: Pick<PhoneSetupCompanionSnapshot, "enabled"> & { error?: string },
 ): string | null {
   if (companion.enabled && !companion.error) return null;
-  return companion.error?.trim() || START_FAILURE_MESSAGE;
+  return companion.error?.trim() || startFailureMessage();
 }
 
 const REQUEST_REFERENCE =

@@ -3,7 +3,7 @@ import { useStore, type Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import type { AppDocument, AppPayload } from "../../../shared/app";
-import { appBlockedText } from "../../../shared/app";
+import { appBlockedLine } from "./app-blocked";
 import { APP_FRAME_LIMITS } from "../../../shared/app-frame/bridge";
 import { AppDocumentError, fetchAppDocument, type AppFetchFailure } from "./app-api";
 import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
@@ -166,15 +166,18 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
   const strip = (() => {
     if (problem?.kind === "sign-in") return { text: t("app.strip.signIn", { server: serverName || problem.server }), action: { label: t("app.strip.signInAction"), onClick: signIn } };
     if (problem?.kind === "offline") return { text: t("app.strip.offline"), action: { label: t("app.strip.retry"), onClick: reloadNow } };
-    if (problem?.kind === "blocked") return { text: problem.text || appBlockedText(problem.reason, serverName) };
+    if (problem?.kind === "blocked") return { text: appBlockedLine(problem.reason, serverName, problem.text) };
     if (loaded?.failure) {
       return loaded.failure.offline
         ? { text: t("app.strip.offline"), action: { label: t("app.strip.retry"), onClick: reloadNow } }
         : { text: loaded.failure.error };
     }
     const blocked = current?.blocked;
-    if (blocked) return blocked.reason === "signed-out" ? { text: blocked.text, action: { label: t("app.strip.signInAction"), onClick: signIn } } : { text: blocked.text };
-    if (payload.blocked) return { text: appBlockedText(payload.blocked, serverName) };
+    if (blocked) {
+      const text = appBlockedLine(blocked.reason, serverName, blocked.text);
+      return blocked.reason === "signed-out" ? { text, action: { label: t("app.strip.signInAction"), onClick: signIn } } : { text };
+    }
+    if (payload.blocked) return { text: appBlockedLine(payload.blocked, serverName) };
     return null;
   })();
 

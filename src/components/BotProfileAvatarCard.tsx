@@ -10,13 +10,14 @@ import {
   type MausState,
 } from "@/lib/mascot";
 import { BOT_AVATAR_CROPS } from "../../shared/bot-avatar";
-import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
-import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
+import { MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
+import { HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
 import type { BotBodyId } from "../../shared/bot-body";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
 import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "./avatar-editing";
 import { t } from "@/lib/i18n";
+import { bodyName, colorName, expressionName } from "@/lib/mascot-names";
 
 export function BotProfileAvatarCard({
   bot,
@@ -131,8 +132,8 @@ export function BotProfileAvatarCard({
                     "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-control disabled:opacity-50",
                     activeState === expression && "ring-2 ring-accent-border",
                   )}
-                  title={expression}
-                  aria-label={`Use ${expression} expression`}
+                  title={expressionName(expression)}
+                  aria-label={t("mascot.useExpression", { expression: expressionName(expression) })}
                 >
                   <MausAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state={expression} size={42} animated={false} />
                 </button>
@@ -155,8 +156,8 @@ export function BotProfileAvatarCard({
                     bot.color === color && "ring-2 ring-accent-border ring-offset-2 ring-offset-card",
                   )}
                   style={{ backgroundColor: MAUS_COLORS[color] }}
-                  title={color}
-                  aria-label={`Use ${color} mascot color`}
+                  title={colorName(color)}
+                  aria-label={t("mascot.useColor", { color: colorName(color) })}
                 />
               ))}
             </div>
@@ -166,7 +167,7 @@ export function BotProfileAvatarCard({
             </div>
             <div className="grid grid-cols-5 gap-1.5">
               {MASCOT_BODY_IDS.map((id) => (
-                <BodyButton key={id} id={id} name={MASCOT_BODIES[id].name} bot={bot} busy={busy} onPatch={onPatch} />
+                <BodyButton key={id} id={id} name={bodyName(id)} bot={bot} busy={busy} onPatch={onPatch} />
               ))}
             </div>
             <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
@@ -174,7 +175,7 @@ export function BotProfileAvatarCard({
             </div>
             <div className="grid grid-cols-5 gap-1.5" data-halloween-bodies>
               {HALLOWEEN_BODY_IDS.map((id) => (
-                <BodyButton key={id} id={id} name={HALLOWEEN_BODIES[id].name} bot={bot} busy={busy} onPatch={onPatch} />
+                <BodyButton key={id} id={id} name={bodyName(id)} bot={bot} busy={busy} onPatch={onPatch} />
               ))}
             </div>
           </>
@@ -207,7 +208,7 @@ function BodyButton({ id, name, bot, busy, onPatch }: {
       type="button"
       disabled={busy}
       aria-pressed={selected}
-      aria-label={`Use the ${name} body`}
+      aria-label={t("mascot.useBody", { name })}
       onClick={() => onPatch({ mascotBody: id })}
       className={cn(
         "flex items-center justify-center rounded-lg py-1.5 disabled:opacity-50",

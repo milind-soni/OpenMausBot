@@ -13,6 +13,7 @@ import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, 
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
+import { t } from "@/lib/i18n";
 import { CarvedAvatar } from "./CarvedAvatar";
 
 export const EYE_SCALE = 1.12;
@@ -270,7 +271,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
     >
       <img
         src={profile.avatarUrl}
-        alt={label ?? (bot.name ? `${bot.name} avatar` : "Bot avatar")}
+        alt={label ?? (bot.name ? t("avatar.alt", { name: bot.name }) : t("avatar.altFallback"))}
         width={size}
         height={size}
         draggable={false}

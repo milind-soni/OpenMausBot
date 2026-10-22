@@ -1,17 +1,18 @@
 import { useState, type KeyboardEvent } from "react";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import { WIDGET_WEEKDAYS, type WidgetNode } from "../../../shared/widget";
 import { useWidgetField } from "./WidgetControls";
 
-let names: { narrow: string[]; short: string[]; long: string[] } | undefined;
+let names: { locale: string; narrow: string[]; short: string[]; long: string[] } | undefined;
 
 /** 1 January 2024 was a Monday. */
 export function widgetDayNames(): { narrow: string[]; short: string[]; long: string[] } {
-  if (names) return names;
+  const locale = intlLocale();
+  if (names?.locale === locale) return names;
   const days = WIDGET_WEEKDAYS.map((_, index) => new Date(2024, 0, 1 + index));
-  const name = (weekday: "narrow" | "short" | "long") => days.map((day) => new Intl.DateTimeFormat(undefined, { weekday }).format(day));
-  names = { narrow: name("narrow"), short: name("short"), long: name("long") };
+  const name = (weekday: "narrow" | "short" | "long") => days.map((day) => new Intl.DateTimeFormat(locale, { weekday }).format(day));
+  names = { locale, narrow: name("narrow"), short: name("short"), long: name("long") };
   return names;
 }
 

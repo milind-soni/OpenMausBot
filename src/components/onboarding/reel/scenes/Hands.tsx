@@ -3,12 +3,13 @@ import { Check, ExternalLink, Hand, Loader2, MousePointer2, Settings2, X } from 
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { reducedMotion } from "@/lib/onboarding";
+import { intlLocale, t } from "@/lib/i18n";
 import type { SceneProps } from "./types";
 
 const HANDS_MS = 6400;
 
-const ASK = "Book the 3 pm slot on the clinic's site.";
-const REPLY = "Booked. 3:00 pm, confirmation #4821.";
+const ASK = () => t("onboarding.reel.demo.handsAsk");
+const REPLY = () => t("onboarding.reel.demo.handsReply");
 
 const PANEL_AT = 500;
 const WAKE_AT = 1600;
@@ -21,7 +22,7 @@ type Phase = "chat" | "panel" | "awake" | "moving" | "clicked" | "done" | "reply
 const ORDER: Phase[] = ["chat", "panel", "awake", "moving", "clicked", "done", "reply"];
 const reached = (phase: Phase, target: Phase) => ORDER.indexOf(phase) >= ORDER.indexOf(target);
 
-const TABS = ["Computer", "Android", "Browser", "Routines"];
+const TABS = ["computer.tab.computerName", "computer.tab.android", "computer.tab.browser", "computer.tab.routines"] as const;
 
 export function Hands({ playing, onCue, onEnded, label }: SceneProps) {
   const still = reducedMotion() || !playing;
@@ -78,7 +79,7 @@ export function Hands({ playing, onCue, onEnded, label }: SceneProps) {
           </div>
           <div className="flex flex-1 flex-col justify-end gap-2 px-3 pb-2.5">
             <div className="flex justify-end">
-              <div className="max-w-[200px] rounded-2xl rounded-br-md bg-bubble-user px-3 py-2 text-[11.5px] leading-snug text-ink shadow-md shadow-black/15">{ASK}</div>
+              <div className="max-w-[200px] rounded-2xl rounded-br-md bg-bubble-user px-3 py-2 text-[11.5px] leading-snug text-ink shadow-md shadow-black/15">{ASK()}</div>
             </div>
             {awake && (
               <div className="animate-rise flex items-start gap-2">
@@ -86,17 +87,17 @@ export function Hands({ playing, onCue, onEnded, label }: SceneProps) {
                 <div className="min-w-0">
                   <div className={cn("inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium transition-colors duration-300", done ? "bg-success/15 text-success" : "bg-raised text-ink-secondary")}>
                     {done ? <Check size={10} strokeWidth={3} /> : <Loader2 size={10} className="animate-spin" />}
-                    {done ? "clicked Book" : clicked ? "clicking Book…" : "using the computer"}
+                    {done ? t("onboarding.reel.demo.clicked") : clicked ? t("onboarding.reel.demo.clicking") : "using the computer"}
                   </div>
                   {replied && (
                     <div className="animate-spot-in mt-1.5 max-w-[210px] rounded-2xl rounded-tl-md border border-hairline/40 bg-card px-3 py-2 text-[11.5px] leading-relaxed text-ink shadow-[0_10px_30px_-12px_rgba(0,0,0,0.55)]">
-                      {REPLY}
+                      {REPLY()}
                     </div>
                   )}
                 </div>
               </div>
             )}
-            <div className="mt-1 h-7 rounded-lg border border-hairline/40 bg-inset px-2.5 text-[10.5px] leading-7 text-ink-secondary">Message Maus</div>
+            <div className="mt-1 h-7 rounded-lg border border-hairline/40 bg-inset px-2.5 text-[10.5px] leading-7 text-ink-secondary">{t("composer.placeholder.bot", { name: "Maus" })}</div>
           </div>
         </div>
 
@@ -111,7 +112,7 @@ export function Hands({ playing, onCue, onEnded, label }: SceneProps) {
             <div className="flex overflow-hidden rounded-md border border-hairline/40">
               {TABS.map((tab, i) => (
                 <span key={tab} className={cn("px-2 py-0.5 text-[9px] font-medium", i === 0 ? "bg-raised text-ink" : "text-ink-secondary")}>
-                  {tab}
+                  {t(tab)}
                 </span>
               ))}
             </div>
@@ -133,9 +134,9 @@ export function Hands({ playing, onCue, onEnded, label }: SceneProps) {
                   <span className="ml-1 flex-1 rounded-sm bg-white px-1 text-[5.5px] leading-[9px] text-[#5f6368]">clinic.example/book</span>
                 </div>
                 <div className="p-2">
-                  <div className="text-[7px] font-semibold text-[#202124]">Book an appointment</div>
+                  <div className="text-[7px] font-semibold text-[#202124]">{t("onboarding.reel.demo.bookTitle")}</div>
                   <div className="mt-1 grid grid-cols-3 gap-1">
-                    {["2:30 pm", "3:00 pm", "3:30 pm"].map((slot, i) => (
+                    {[[14, 30], [15, 0], [15, 30]].map(([hour, minute]) => new Date(2000, 0, 1, hour, minute).toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit" })).map((slot, i) => (
                       <div key={slot} className={cn("rounded-sm border px-1 py-0.5 text-center text-[6px] tabular-nums", i === 1 ? "border-[#1a73e8] bg-[#e8f0fe] text-[#1a73e8]" : "border-[#dadce0] text-[#5f6368]")}>
                         {slot}
                       </div>
@@ -148,7 +149,7 @@ export function Hands({ playing, onCue, onEnded, label }: SceneProps) {
                       clicked && !done && "scale-95",
                     )}
                   >
-                    {done ? "Booked ✓" : "Book"}
+                    {t(done ? "onboarding.reel.demo.booked" : "onboarding.reel.demo.book")}
                   </div>
                 </div>
               </div>
@@ -172,14 +173,14 @@ export function Hands({ playing, onCue, onEnded, label }: SceneProps) {
           <div className="mx-2.5 mt-2 flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-[9.5px] text-ink-secondary">
               <span className="size-1.5 rounded-full bg-success" />
-              Cloud screen connected
+              {t("onboarding.reel.demo.cloudConnected")}
             </div>
             <div className="flex items-center gap-1">
               <span className="flex items-center gap-1 rounded-md bg-raised px-1.5 py-0.5 text-[9px] text-ink">
-                <ExternalLink size={9} /> Open live desktop
+                <ExternalLink size={9} /> {t("computer.openLiveDesktop")}
               </span>
               <span className="flex items-center gap-1 rounded-md bg-raised px-1.5 py-0.5 text-[9px] text-ink">
-                <Hand size={9} /> Take control
+                <Hand size={9} /> {t("computer.takeControl")}
               </span>
             </div>
           </div>

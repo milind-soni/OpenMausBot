@@ -69,6 +69,23 @@ describe("app language preference", () => {
     expect(preference.languageChoice()).toBe("de");
   });
 
+  it("starts the pairing and sign-in pages in the saved language, not the browser's", async () => {
+    local.setItem("omb-language", "pt-br");
+    const preference = await import("./language-preference");
+    expect(preference.startupLocaleTag("en-US")).toBe("pt-br");
+    const { setLocale, t } = await import("./i18n");
+    expect(setLocale(preference.startupLocaleTag("en-US"))).toBe("pt-br");
+    expect(t("pair.signIn")).toBe("Entrar");
+    setLocale("en");
+  });
+
+  it("starts in the browser's language until this device picks one", async () => {
+    const preference = await import("./language-preference");
+    expect(preference.startupLocaleTag("de-DE")).toBe("de-DE");
+    preference.setLanguageChoice("");
+    expect(preference.startupLocaleTag("de-DE")).toBe("de-DE");
+  });
+
   it("keeps an explicit follow-the-system choice over the server's language", async () => {
     const preference = await import("./language-preference");
     preference.setLanguageChoice("");

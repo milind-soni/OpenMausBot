@@ -106,10 +106,10 @@ export function buildTeamMapEdges(bots: TeamMapBot[], snapshot: TeamMapSnapshot)
 }
 
 export function teamMapStatus(bot: TeamMapBot): TeamMapStatus {
-  if (bot.activity === "waiting-on-you") return { label: "Waiting for you", tone: "warning" };
-  if (bot.activity === "dead" || bot.activity === "no-signal") return { label: "No signal", tone: "danger" };
-  if (bot.busy || bot.activity === "working") return { label: "Working", tone: "success" };
-  return { label: "Ready", tone: "idle" };
+  if (bot.activity === "waiting-on-you") return { label: t("canvas.status.waiting"), tone: "warning" };
+  if (bot.activity === "dead" || bot.activity === "no-signal") return { label: t("canvas.status.noSignal"), tone: "danger" };
+  if (bot.busy || bot.activity === "working") return { label: t("canvas.status.working"), tone: "success" };
+  return { label: t("canvas.status.ready"), tone: "idle" };
 }
 
 export function teamMapBotCount(count: number): string {

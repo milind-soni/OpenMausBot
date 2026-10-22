@@ -1,4 +1,5 @@
 import type { Bot, InstanceInfo } from "@/state/store";
+import { t } from "@/lib/i18n";
 
 export function instanceSupportsLocalComputer(
   instances: InstanceInfo[],
@@ -30,28 +31,28 @@ export function localComputerDisabledReason({
   providerSupportsLocal: boolean;
 }): string | null {
   if (!providerSupportsLocal) {
-    return "The selected provider cannot request approvals for local computer actions.";
+    return t("computer.localReason.provider");
   }
   if (capabilities.localComputer.available) return null;
   if (capabilities.host.platform === "linux") {
     if (capabilities.localComputer.reasonCode === "linux-wayland-seat-safety-blocked") {
-      return "Local computer control is not available on Wayland yet. Sign out and choose Ubuntu on Xorg to use This computer.";
+      return t("computer.localReason.wayland", { place: t("place.local") });
     }
     if (capabilities.localComputer.reasonCode === "wayland-compositor-unsupported") {
-      return "Wayland local control is currently limited to GNOME. Xorg remains available on supported desktops.";
+      return t("computer.localReason.compositor");
     }
     if (!capabilities.localComputer.enabled) {
-      return "Enable the local control beta and complete the Cua Driver checks first.";
+      return t("computer.localReason.beta");
     }
-    return capabilities.localComputer.message ?? "Cua Driver is not ready for local control.";
+    return capabilities.localComputer.message ?? t("computer.localReason.cuaNotReady");
   }
   if (capabilities.host.label === "Browser") {
-    return "Local computer control requires the desktop app.";
+    return t("computer.localReason.desktopApp");
   }
   if (capabilities.host.platform === "win32") {
-    return "The bundled Cua Driver could not start. Restart OpenMausBot and check Diagnostics if it still fails.";
+    return t("computer.localReason.windows");
   }
-  return "CUA Driver is not ready for local computer control.";
+  return t("computer.localReason.notReady");
 }
 
 export type BoatPanelAction =

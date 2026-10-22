@@ -3,7 +3,7 @@ import { ChevronRight, Download, Loader2, RefreshCw } from "lucide-react";
 
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import { ACTIVITY_WHATS, activityQuery, describeEntry, formatValue, whoLabel, type ActivityEntry, type ActivityFilters, type ActivityWhat } from "@/lib/activity";
 import type { LocaleKey } from "@/locales";
 import { Select } from "./Select";
@@ -17,7 +17,7 @@ export function ActivityRow({ entry }: { entry: ActivityEntry }) {
   return (
     <li className="border-b border-hairline/20 py-2 text-[13px]" data-activity-entry={entry.type}>
       <div className="grid grid-cols-[auto_1fr] items-start gap-x-3">
-        <time className="whitespace-nowrap tabular-nums text-ink-secondary" dateTime={entry.at}>{new Date(entry.at).toLocaleString()}</time>
+        <time className="whitespace-nowrap tabular-nums text-ink-secondary" dateTime={entry.at}>{new Date(entry.at).toLocaleString(intlLocale())}</time>
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="font-medium text-ink">{whoLabel(entry.who)}</span>

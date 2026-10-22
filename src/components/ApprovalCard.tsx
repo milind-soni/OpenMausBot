@@ -67,7 +67,7 @@ export function approvalCardOutcome(card: OptionCardData): string | undefined {
   if (card.undone === true) return t("approval.status.undone");
   const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest);
   if (card.answered !== "allow") return isProposal ? t("approval.status.cancelled") : t("approval.status.denied");
-  if (card.teamSetupRequest) return card.teamSetupRequest.deletion ? "Bot deleted" : "Team setup applied";
+  if (card.teamSetupRequest) return t(card.teamSetupRequest.deletion ? "approval.status.botDeleted" : "approval.status.teamApplied");
   const routineAction = card.routineRequest?.operation.action;
   if (routineAction) return t(ROUTINE_SETTLED_LABEL[routineAction]);
   const skillAction = card.skillRequest?.action;

@@ -2,6 +2,7 @@ import { Check, X } from "lucide-react";
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { brand } from "@/lib/brand";
+import { intlLocale, t } from "@/lib/i18n";
 
 export function PhonePreview({ className }: { className?: string }) {
   return (
@@ -23,26 +24,26 @@ export function PhonePreview({ className }: { className?: string }) {
           </div>
           <div className="flex flex-col gap-1.5 px-2.5 py-2.5">
             <div className="max-w-[112px] self-end rounded-xl rounded-br-sm bg-bubble-user px-2 py-1.5 text-[8.5px] leading-snug text-ink">
-              Book the 3 pm slot
+              {t("onboarding.reel.demo.phoneAsk")}
             </div>
             <div className="max-w-[124px] rounded-xl rounded-tl-sm bg-card px-2 py-1.5 text-[8.5px] leading-snug text-ink">
-              Found it. Confirm the booking?
+              {t("onboarding.reel.demo.phoneReply")}
             </div>
             <div className="rounded-lg border border-hairline/50 bg-card p-2">
-              <div className="text-[8px] font-medium text-ink">Run: book-slot</div>
-              <div className="mt-0.5 text-[7.5px] text-ink-secondary">clinic.example · 3:00 pm</div>
+              <div className="text-[8px] font-medium text-ink">{t("onboarding.reel.demo.phoneRun", { command: "book-slot" })}</div>
+              <div className="mt-0.5 text-[7.5px] text-ink-secondary">clinic.example · {new Date(2000, 0, 1, 15).toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit" })}</div>
               <div className="mt-1.5 flex gap-1">
                 <span className="flex flex-1 items-center justify-center gap-0.5 rounded-md bg-accent py-1 text-[8px] font-semibold text-white">
-                  <Check size={8} strokeWidth={3} /> Allow
+                  <Check size={8} strokeWidth={3} /> {t("onboarding.reel.demo.allow")}
                 </span>
                 <span className="flex flex-1 items-center justify-center gap-0.5 rounded-md bg-raised py-1 text-[8px] font-medium text-ink">
-                  <X size={8} strokeWidth={3} /> Deny
+                  <X size={8} strokeWidth={3} /> {t("approval.action.deny")}
                 </span>
               </div>
             </div>
           </div>
           <div className="mx-2.5 mb-2.5 rounded-full border border-hairline/40 bg-inset px-2.5 py-1.5 text-[8px] text-ink-secondary">
-            Message {brand().name === "OpenMausBot" ? "Maus" : brand().name}
+            {t("composer.placeholder.bot", { name: brand().name === "OpenMausBot" ? "Maus" : brand().name })}
           </div>
         </div>
       </div>

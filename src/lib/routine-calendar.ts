@@ -1,6 +1,7 @@
 import type { CalendarCall } from "./calendar-calls";
 import type { Routine, RoutineRun, RoutineSchedule } from "./routines";
 import { nextCronRuns } from "../../shared/routine-schedule";
+import { intlLocale, t } from "@/lib/i18n";
 
 export const CALENDAR_SLOT_MINUTES = 5;
 const ROUTINE_MARKER_MINUTES = 30;
@@ -157,7 +158,7 @@ export function slotAt(day: number, clientY: number, top: number, hourHeight: nu
 export function scheduleAt(schedule: Exclude<RoutineSchedule, { type: "interval" | "cron" }>, occurrenceAt: number, nextAt: number): Exclude<RoutineSchedule, { type: "interval" | "cron" }>;
 export function scheduleAt(schedule: RoutineSchedule, occurrenceAt: number, nextAt: number): RoutineSchedule;
 export function scheduleAt(schedule: RoutineSchedule, occurrenceAt: number, nextAt: number): RoutineSchedule {
-  if (schedule.type === "cron") throw new Error("Edit this routine's schedule to change its cron timing.");
+  if (schedule.type === "cron") throw new Error(t("routines.cron.editToMove"));
   if (schedule.type === "once" || schedule.type === "limit_reset") return { type: "once", at: nextAt };
   if (schedule.type === "interval") {
     return {
@@ -274,12 +275,10 @@ export function calendarRangeLabel(from: number, days: number): string {
   const start = new Date(from);
   const end = new Date(to);
   if (days === 1) {
-    return start.toLocaleDateString([], { month: "long", day: "numeric", year: "numeric" });
+    return start.toLocaleDateString(intlLocale(), { month: "long", day: "numeric", year: "numeric" });
   }
-  if (start.getMonth() === end.getMonth()) {
-    return `${start.toLocaleDateString([], { month: "long" })} ${start.getDate()} – ${end.getDate()}, ${end.getFullYear()}`;
-  }
-  return `${start.toLocaleDateString([], { month: "short", day: "numeric" })} – ${end.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`;
+  const month = start.getMonth() === end.getMonth() ? "long" : "short";
+  return new Intl.DateTimeFormat(intlLocale(), { month, day: "numeric", year: "numeric" }).formatRange(start, end);
 }
 
 export type CallOccurrence = {
