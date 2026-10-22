@@ -372,6 +372,25 @@ test("what a move carries last is never taken for removed on My Cloud, so a rout
   assert.deepEqual(put, ["routine:r1", "routine:r1"], "changed here since, it goes again in the final pass");
 });
 
+test("a routine on both sides whose only difference is its runs goes in a move, so the runs made here reach My Cloud; one changed on both keeps My Cloud's", async () => {
+  // Seen in the real app on Oct 22: a computer whose workspace My Cloud already held (an earlier Copy) kept running a
+  // routine; the move kept My Cloud's run list, and its check found "1 runs missing" on every pass, so it never finished.
+  const routine = (def, runs) => ({ key: "routine:r1", kind: "routine", label: "Digest", id: "r1", bot: "ember", parts: { def, runs } });
+  const make = (here, there) => {
+    const put = [];
+    const move = sides({ here: [bot("ember", { soul: "s" }), here], there: [bot("ember", { soul: "s" }), there], bots: { ember: { soul: "s" } },
+      onCall: (method, route, body) => { if (method === "PUT" && route === "/api/cloud-send/kind") { put.push(body.key); return reply(200, { v: 1, ok: true }); } return null; } });
+    return { move, put };
+  };
+  const runsOnly = make(routine("d1", "runs-here"), routine("d1", "runs-there"));
+  await createCloudSend(runsOnly.move.deps).send({ reason: "move" });
+  assert.deepEqual(runsOnly.put, ["routine:r1"], "its runs go: My Cloud adds them by id");
+
+  const both = make(routine("d-here", "runs-here"), routine("d-there", "runs-there"));
+  await createCloudSend(both.move.deps).send({ reason: "move" });
+  assert.deepEqual(both.put, [], "changed on both: My Cloud's routine is kept");
+});
+
 test("a bot's fields only a move carries go over My Cloud's move route, absent ones as cleared; any other send never carries them", async () => {
   const fields = [];
   const make = () => sides({ here: [bot("ember", { soul: "s", pinned: "p1", projects: "j1" })], there: [bot("ember", { soul: "s", pinned: "-", projects: "-" })], bots: { ember: { soul: "s" } },
@@ -385,4 +404,23 @@ test("a bot's fields only a move carries go over My Cloud's move route, absent o
   const sending = make();
   await createCloudSend(sending.deps).send({ reason: "button" });
   assert.deepEqual(fields, []);
+});
+
+test("while the chats go, the move's progress counts chats only: the automations after them never add to it", async () => {
+  // Seen in the real app on Oct 22: the line read "5 of 5 chats" for a moment, and what went after the chats counted on.
+  const routine = (id) => ({ key: `routine:${id}`, kind: "routine", label: id, id, bot: "ember", parts: { def: id } });
+  const conversations = ["a", "b"].map((threadId) => ({ bot: "ember", threadId, last: 1, lastId: `${threadId}-1`, busy: false }));
+  const here = [bot("ember", { soul: "s" }), routine("r1"), routine("r2")];
+  const move = sides({ here, there: [bot("ember", { soul: "s" })], bots: { ember: { soul: "s" } }, conversations,
+    onCall: (method, route, body, cloud) => {
+      if (method === "PUT" && route === "/api/cloud-send/kind") { cloud.set(body.key, here.find((item) => item.key === body.key)); return reply(200, { v: 1, ok: true }); }
+      return null;
+    } });
+  const seen = [];
+  move.deps.onChange = (snapshot) => { if (snapshot.running?.phase === "chats") seen.push(snapshot.running.progress ?? null); };
+  await createCloudSend(move.deps).send({ reason: "move" });
+  const counted = seen.filter(Boolean);
+  assert.ok(counted.length > 0, "the chats are counted as they go");
+  assert.ok(counted.every((progress) => progress.total === 2 && progress.done <= 2), `every count is of the 2 chats: ${JSON.stringify(counted)}`);
+  assert.deepEqual(counted.at(-1), { done: 2, total: 2 });
 });

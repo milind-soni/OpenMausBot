@@ -512,12 +512,13 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       return pairing;
     },
     /** A Cloud that ended and that the Admin still holds, started for its owner's export only: a one-time code for it
-     * (main only, not kept), `starting` while it starts, `notHeld` when it is not held (yet), `deleted` once it is gone. */
-    async exportHome() {
+     * (main only, not kept), `starting` while it starts, `notHeld` when it is not held (yet), `deleted` once it is gone.
+     * `installation`: this computer, which the Admin lets take it only if it is the one the Cloud's things come home to. */
+    async exportHome({ installation } = {}) {
       const current = grant;
       if (!current) throw new Error("Sign in to MausBot Cloud first.");
       let result;
-      try { result = await request("export", { method: "POST", body: {}, token: current.token }); } catch (error) {
+      try { result = await request("export", { method: "POST", body: installation ? { installation } : {}, token: current.token }); } catch (error) {
         if (error?.status === 409) return { notHeld: true };
         if (error?.status === 410) return { deleted: true };
         throw error;
@@ -526,6 +527,14 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const pairing = typeof result?.origin === "string" && result.origin.startsWith("https://") ? parsePairingGrant(result, result.origin, now()) : null;
       if (!pairing) throw new Error("Invalid Cloud export response.");
       return { grant: pairing };
+    },
+    /** Tells the Admin that this computer's move to My Cloud is done, as `installation` (POST /api/cloud/desktop/moved):
+     * only such a computer can be the one an ended Cloud's things come home to. False when the Admin can't take it yet. */
+    async reportMove({ installation }) {
+      const current = grant;
+      if (!current) return false;
+      try { await request("moved", { method: "POST", body: { installation }, token: current.token }); return true; }
+      catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
     },
     /** This sign-in's own X research relay access while its plan is paid:
      * `{ url, token }` for the local server (electron/included-x.mjs), or null

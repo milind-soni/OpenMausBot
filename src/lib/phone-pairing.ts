@@ -32,6 +32,8 @@ export interface PhonePairingAccess {
 export interface ConnectPhoneEntry {
   target: PhonePairingTarget;
   subtitleKey: LocaleKey;
+  /** A Team Cloud's name: everyone in the team opens it on their own phone. */
+  team?: string;
 }
 
 const SUBTITLE: Record<PhonePairingTarget, LocaleKey> = {
@@ -41,6 +43,8 @@ const SUBTITLE: Record<PhonePairingTarget, LocaleKey> = {
 };
 
 export function connectPhoneEntry(target: PhonePairingTarget, access: PhonePairingAccess | null): ConnectPhoneEntry | null {
+  const team = access?.session?.kind === "session" ? access.session.team?.name : undefined;
+  if (team) return { target, subtitleKey: "sidebar.menu.connectPhone.team", team };
   if (target !== "computer" && !(access && access.pairingCodes && isOwnerOrAdmin(access.session))) return null;
   return { target, subtitleKey: SUBTITLE[target] };
 }

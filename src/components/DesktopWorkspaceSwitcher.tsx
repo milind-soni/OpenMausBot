@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, Cloud, Laptop } from "lucide-react";
 import { cn } from "@/lib/cn";
+import type { CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import { cloudColor } from "@/lib/cloud-look";
 import { t } from "@/lib/i18n";
 import { CloudTile } from "./cloud-buy/parts";
@@ -14,21 +15,28 @@ function PowerLine({ text }: { text: string }) {
   return <span className="font-normal text-ink-secondary"> · {text}</span>;
 }
 
-/** On My Cloud's page in the app, whether its plan sleeps when idle (main's verified plan); on this computer's page,
- * whether opening My Cloud waits for it to wake. A browser knows neither. */
-export function useCloudPower(cloudHome: boolean): { sleeps: boolean; waking: boolean } {
+/** Whether a plan sleeps when idle, from main's verified plan: an active plan whose Cloud the Admin never sleeps does not;
+ * null while that isn't known. */
+export function planSleeps(plan: CloudPlanSnapshot | null): boolean | null {
+  if (plan?.sleeps === true) return true;
+  return plan?.status === "paid" ? false : null;
+}
+
+/** On My Cloud's page in the app, whether its plan sleeps when idle (planSleeps; null while unknown, and always in a
+ * browser); on this computer's page, whether opening My Cloud waits for it to wake. */
+export function useCloudPower(cloudHome: boolean): { sleeps: boolean | null; waking: boolean } {
   const plan = cloudHome && !window.ogb?.remoteClient?.active ? window.ogb?.cloudPlan : undefined;
   const account = cloudHome || window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
-  const [sleeps, setSleeps] = useState(false);
+  const [sleeps, setSleeps] = useState<boolean | null>(null);
   const [waking, setWaking] = useState(false);
   useEffect(() => {
     if (!plan) return;
     let alive = true;
-    void plan.state().then((state) => { if (alive) setSleeps(state.sleeps === true); }).catch(() => {});
+    void plan.state().then((state) => { if (alive) setSleeps(planSleeps(state)); }).catch(() => {});
     return () => { alive = false; };
   }, [plan]);
   useEffect(() => account?.onState((state) => setWaking(state.waking === true)), [account]);
-  return { sleeps, waking };
+  return { sleeps: plan ? sleeps : null, waking };
 }
 
 /**
@@ -39,9 +47,6 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
   compact?: boolean; inline?: boolean; pill?: boolean; rail?: boolean; cloudHome?: boolean; owner?: string | null; howTo?: boolean; onMenuClosed?: () => void;
 }) {
   const bridge = window.ogb?.workspaces;
-  const power = useCloudPower(cloudHome);
-  const onLine = t(power.sleeps ? "cloudSetup.sleepsWhenIdle" : "cloudSetup.alwaysOn");
-  const waking = power.waking ? t("cloudHome.waking") : "";
   const [current, setCurrent] = useState<{ local: boolean; name: string; localPath?: string; origin?: string; color?: string; home?: boolean } | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
@@ -50,11 +55,15 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
     void bridge?.state().then((state) => { if (alive) setCurrent(state); }).catch(() => {});
     return () => { alive = false; };
   }, [bridge]);
+  const power = useCloudPower(cloudHome || current?.home === true);
+  const onLine = power.sleeps === null ? "" : t(power.sleeps ? "cloudSetup.sleepsWhenIdle" : "cloudSetup.alwaysOn");
+  const waking = power.waking ? t("cloudHome.waking") : "";
+  const withPower = (name: string) => (onLine ? `${name} · ${onLine}` : name);
   // This window's home is My Cloud: it opens nothing else, so there is nothing to switch.
   if (!bridge || current?.home === true) {
     if (!cloudHome && !current?.home) return null;
     const whose = owner ? t("sidebar.cloudOwner", { email: owner }) : "";
-    const label = `${t("cloudSetup.myCloud")} · ${onLine}${whose ? ` · ${whose}` : ""}`;
+    const label = `${withPower(t("cloudSetup.myCloud"))}${whose ? ` · ${whose}` : ""}`;
     if (rail) return <div data-cloud-home-indicator data-workspace-switcher="rail" role="img" aria-label={label} title={label} className="flex size-9 items-center justify-center text-ink-secondary">
       <Cloud size={18} aria-hidden="true" />
     </div>;
@@ -62,19 +71,19 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
       className={pill ? "flex h-8 min-w-0 items-center gap-1 rounded-full bg-raised/50 px-3 text-[13px] font-medium text-ink" : "flex min-w-0 items-center gap-1.5 px-1.5 text-[12.5px] font-medium text-ink"}>
       <Cloud size={pill ? 15 : 14} aria-hidden="true" className={pill ? "hidden shrink-0 text-ink-secondary @max-[124px]/sidebar-top:block" : "shrink-0 text-ink-secondary"} />
       <span className={pill ? "min-w-0 truncate @max-[124px]/sidebar-top:hidden" : "min-w-0 truncate"}>{t("cloudSetup.myCloud")}</span>
-      <span className="sr-only"> · {onLine}{whose ? ` · ${whose}` : ""}</span>
+      {(onLine || whose) && <span className="sr-only">{onLine ? ` · ${onLine}` : ""}{whose ? ` · ${whose}` : ""}</span>}
     </div>;
     return <div data-cloud-home-indicator className={cn("py-1.5", compact ? "px-2" : "px-3")}>
       <div title={label} className={cn("flex items-center gap-2 py-2 text-[13px] font-medium text-ink", compact ? "justify-center px-1" : "px-2")}>
         <Cloud size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-        {compact ? <span className="sr-only">{label}</span> : <span className="min-w-0 flex-1 truncate">{t("cloudSetup.myCloud")}<PowerLine text={onLine} />
+        {compact ? <span className="sr-only">{label}</span> : <span className="min-w-0 flex-1 truncate">{t("cloudSetup.myCloud")}{onLine && <PowerLine text={onLine} />}
           {whose && <span className="block truncate text-[11.5px] font-normal text-ink-secondary">{whose}</span>}</span>}
       </div>
     </div>;
   }
   const name = current ? (current.local && !current.localPath ? t("place.local") : current.name) : cloudHome ? t("cloudSetup.myCloud") : t("sidebar.servers");
   const Icon = current?.local === false || (cloudHome && !current) ? Cloud : Laptop;
-  const shown = cloudHome ? `${name} · ${onLine}` : name;
+  const shown = cloudHome ? withPower(name) : name;
   const title = current?.origin ? `${shown} · ${current.origin}` : shown;
   const label = t("sidebar.switchServer", { name: shown });
   const openMenu = () => {
@@ -113,7 +122,7 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
       className={cn("flex w-full items-center gap-2 rounded-lg py-2 text-left text-[13px] font-medium text-ink hover:bg-control focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus", compact ? "justify-center px-1" : "px-2")}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
       {cloudColor(current?.color) ? <CloudTile color={current?.color} size={20} /> : <Icon size={16} className="shrink-0 text-ink-secondary" />}
-      {!compact && <><span className="min-w-0 flex-1 truncate">{name}{cloudHome && <PowerLine text={onLine} />}</span><ChevronDown size={13} className="shrink-0 text-ink-secondary" /></>}
+      {!compact && <><span className="min-w-0 flex-1 truncate">{name}{cloudHome && onLine && <PowerLine text={onLine} />}</span><ChevronDown size={13} className="shrink-0 text-ink-secondary" /></>}
     </button>
     {error && <p role="alert" className="mt-1 text-[11px] text-danger">{error}</p>}
     {waking && !error && <p role="status" data-cloud-waking className="mt-1 text-[11px] text-ink-secondary">{waking}</p>}

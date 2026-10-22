@@ -2590,3 +2590,30 @@ button:disabled.bg-danger {
   15%, 70% { opacity: 1; }
   100% { opacity: 0; transform: translate(20px, -34px) scale(1.1); }
 }
+
+/* Trace waterfall: AI steps lavender, tools pale teal, errors red, each mixed into the skin's card so every skin keeps its contrast. */
+.trace-bar { border: 1px solid transparent; }
+.trace-bar-step {
+  --trace-hue: #8b7cf6;
+  background: color-mix(in srgb, var(--trace-hue) 20%, var(--color-card));
+  border-color: color-mix(in srgb, var(--trace-hue) 42%, var(--color-card));
+}
+.trace-bar-tool {
+  --trace-hue: #2aa79a;
+  background: color-mix(in srgb, var(--trace-hue) 14%, var(--color-card));
+  border-color: color-mix(in srgb, var(--trace-hue) 36%, var(--color-card));
+}
+.trace-bar-group { background: color-mix(in srgb, #2aa79a 9%, var(--color-card)); border-style: dashed; }
+.trace-bar-error {
+  background: color-mix(in srgb, var(--color-danger) 20%, var(--color-card));
+  border-color: color-mix(in srgb, var(--color-danger) 60%, var(--color-card));
+}
+.trace-bar-span {
+  background: color-mix(in srgb, var(--color-ink) 6%, var(--color-card));
+  border-color: color-mix(in srgb, var(--color-ink) 13%, var(--color-card));
+}
+.trace-bar-span-error { border-color: color-mix(in srgb, var(--color-danger) 55%, var(--color-card)); }
+.trace-bar-running { mask-image: linear-gradient(to right, #000 70%, rgb(0 0 0 / 0.35)); }
+.trace-step-box { background: color-mix(in srgb, #8b7cf6 14%, var(--color-card)); border-color: color-mix(in srgb, #8b7cf6 30%, var(--color-card)); }
+.trace-step-ink { color: color-mix(in srgb, #7c6cf0 85%, var(--color-ink)); }
+.trace-tool-ink { color: color-mix(in srgb, #1f9a8c 80%, var(--color-ink)); }

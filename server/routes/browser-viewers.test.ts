@@ -9,6 +9,7 @@ import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BrowserHostError, SETUP_COMMAND } from "../browser/chrome/host-setup.ts";
+import type { Audience } from "../audience.ts";
 import type { Download } from "../browser/cdp/downloads.ts";
 import type { BrowserService } from "../browser/service.ts";
 import type { Viewer, ViewerOptions, ViewerOutput } from "../browser/viewers/core.ts";
@@ -51,6 +52,11 @@ interface Fixture {
   pickerChecks: number;
   /** The v1 views opened, by the view each asked to carry on from. */
   resumes: Array<string | null | undefined>;
+  /** Whose browser each view was opened on, and each check that the view still shows it. */
+  opened: Audience[];
+  checked: Audience[];
+  /** The last v1 view's check that it still shows the browser it opened on. */
+  isCurrent: () => boolean;
   dataDir: string;
 }
 
@@ -61,12 +67,13 @@ afterEach(async () => {
   for (const folder of folders.splice(0)) await removeTempDir(folder);
 });
 
-async function serve({ attach, current = () => true, download }: {
+async function serve({ attach, current = () => true, download, audience = () => "team" }: {
   attach?: (options: ViewerOptions, push: (output: ViewerOutput) => void) => Promise<Viewer>;
   current?: () => boolean;
   download?: (id: string) => Download | undefined;
+  audience?: (threadId: string | null) => Audience | null;
 } = {}): Promise<Fixture> {
-  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
+  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], opened: [], checked: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
   folders.push(fixture.dataDir);
   const viewer = { id: "viewer", input: async (message: unknown) => { fixture.inputs.push(message); }, close: async () => {} } as unknown as Viewer;
   const service = {
@@ -85,6 +92,7 @@ async function serve({ attach, current = () => true, download }: {
     viewers: {
       open: async (options) => {
         fixture.resumes.push(options.resume);
+        fixture.isCurrent = options.isCurrent;
         options.res.writeHead(204).end();
       },
       action: async () => ({ ok: true }),
@@ -102,9 +110,13 @@ async function serve({ attach, current = () => true, download }: {
       },
       download: (_browser, id) => download?.(id),
     },
-    browser: async (botId) => (botId === "pepper" ? { botId, session: "bot-pepper", spec: { command: "omb-cdp", args: ["bot:pepper"], env: {} } } : { status: 404, error: "no such bot" }),
+    audience: (_auth, threadId) => audience(threadId),
+    browser: async (botId, opened) => {
+      fixture.opened.push(opened);
+      return botId === "pepper" ? { botId, session: "bot-pepper", spec: { command: "omb-cdp", args: ["bot:pepper"], env: {} } } : { status: 404, error: "no such bot" };
+    },
     authorize: async () => null,
-    current: () => current(),
+    current: (_botId, _session, _auth, checked) => { fixture.checked.push(checked); return current(); },
     restartRefusal: () => null,
   };
   const route = createBrowserViewerRoutes(deps);
@@ -362,5 +374,32 @@ describe("the page's file picker and downloads", () => {
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(await response.text()).toBe("report contents");
     expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/download/other`)).status).toBe(404);
+  });
+});
+
+describe("whose browser a view shows on a Team Cloud", () => {
+  it("opens the browser of the conversation shown, the person's own with none named, and nothing for a conversation hidden from them", async () => {
+    const hidden = new Set(["cleo-chat"]);
+    const fixture = await serve({ audience: (threadId) => (threadId === null ? "member:p_ada" : hidden.has(threadId) ? null : threadId === "room-chat" ? "room:launch" : "member:p_ada") });
+    const get = (query: string) => fetch(`http://${fixture.origin}/api/bots/pepper/browser/live${query}`).then((res) => res.status);
+    expect(await get("?threadId=ada-chat")).toBe(204);
+    expect(await get("?threadId=room-chat")).toBe(204);
+    expect(await get("")).toBe(204);
+    expect(await get("?threadId=cleo-chat"), "a member never reaches another member's browser").toBe(404);
+    expect(fixture.opened).toEqual(["member:p_ada", "room:launch", "member:p_ada"]);
+  });
+
+  it("ends a view once its conversation is hidden from the person, and checks the browser for that same audience", async () => {
+    let sees = true;
+    const fixture = await serve({ audience: (threadId) => (threadId === "ada-chat" && sees ? "member:p_ada" : threadId === null ? "team" : null) });
+    const act = () => fetch(`http://${fixture.origin}/api/bots/pepper/browser/action?threadId=ada-chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ viewerId: "v-1", type: "key" }) }).then((res) => res.status);
+    expect(await act()).toBe(200);
+    expect(fixture.checked).toEqual(["member:p_ada"]);
+    expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/live?threadId=ada-chat`)).status).toBe(204);
+    expect(fixture.isCurrent()).toBe(true);
+    sees = false;
+    expect(fixture.isCurrent(), "an open view stops showing a conversation the person no longer sees").toBe(false);
+    expect(await act()).toBe(404);
+    expect(fixture.opened).toEqual(["member:p_ada", "member:p_ada"]);
   });
 });

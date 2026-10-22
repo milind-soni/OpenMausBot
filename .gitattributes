@@ -28,3 +28,8 @@ third_party/opencode/LICENSE text eol=lf
 # joins and every layering, healthcheck and trust check fails for a reason
 # that has nothing to do with the image. Docker itself reads LF everywhere.
 Dockerfile text eol=lf
+# shared/app-frame/host-page.test.ts compares the committed app host page with
+# what scripts/build-app-host.ts writes (LF), and checks the sha256 on its first
+# line against the body after it; the phone apps copy it byte for byte. A CRLF
+# checkout on Windows fails both for a reason that has nothing to do with the page.
+shared/app-frame/app-host.html text eol=lf

@@ -26,6 +26,11 @@ export interface Automation {
   nextRunAt: number | null;
   /** This automation's runs, newest first. */
   runs: RoutineRun[];
+  /** A routine with checks: when they last found nothing new, and why they cannot read an app. */
+  checkedAt?: number;
+  checkTrouble?: string;
+  /** Its runs read and draft only. */
+  readsAndDrafts?: boolean;
 }
 
 const runTime = (run: RoutineRun) => run.startedAt ?? run.scheduledFor ?? run.createdAt;
@@ -39,6 +44,8 @@ export function automationsFrom(sources: { routines: readonly Routine[]; webhook
     ...sources.routines.map((routine): Automation => ({
       kind: "schedule", id: routine.id, name: routine.name, botId: routine.botId, instructions: routine.prompt, enabled: routine.enabled,
       schedule: routine.schedule, nextRunAt: routine.enabled ? routine.nextRunAt : null, runs: runsOf(routine.id),
+      ...(routine.checkedAt !== undefined ? { checkedAt: routine.checkedAt } : {}), ...(routine.checkTrouble ? { checkTrouble: routine.checkTrouble } : {}),
+      ...(routine.access === "read-and-draft" ? { readsAndDrafts: true } : {}),
     })),
     ...sources.webhooks.map((webhook): Automation => ({
       kind: "webhook", id: webhook.id, name: webhook.name, botId: webhook.botId, instructions: webhook.prompt, enabled: webhook.enabled,
@@ -236,10 +243,11 @@ function ownerFix(run: RoutineRun): { reason: string; fix: AutomationFix } | nul
 /** Done when a one-time automation's time has passed, Paused when switched off. Needs you when its last run waits on the
  * person, its app needs reconnecting, failed for a reason only the person can fix, or failed twice running. A run that
  * failed and then recovered is Working. */
-export function automationStatus(automation: Pick<Automation, "enabled" | "runs"> & Partial<Pick<Automation, "schedule" | "appTrigger">>, now = Date.now()): AutomationStatus {
+export function automationStatus(automation: Pick<Automation, "enabled" | "runs"> & Partial<Pick<Automation, "schedule" | "appTrigger" | "checkTrouble">>, now = Date.now()): AutomationStatus {
   if (!automation.enabled) return isDone(automation, now) ? { state: "done" } : { state: "paused" };
   const app = automation.appTrigger && appProblem(automation.appTrigger);
   if (app) return { state: "needs-you", ...app };
+  if (automation.checkTrouble) return { state: "needs-you", reason: automation.checkTrouble, fix: SIGNED_OUT.test(automation.checkTrouble) ? "reconnect" : "run" };
   const settled = automation.runs.filter((run) => run.status !== "cancelled" && run.status !== "queued");
   const latest = settled[0];
   if (latest?.status === "waiting") return { state: "needs-you", reason: t("automations.reason.answer"), fix: "answer" };
@@ -280,10 +288,12 @@ export function statusLine(automation: Automation, now = Date.now()): string {
   const latest = automation.runs.find((run) => run.status !== "queued");
   const parts = [t(STATUS_WORD[status.state])];
   if (latest?.status === "running") parts.push(t("automations.runningNow"));
+  else if (automation.checkedAt !== undefined && (!latest || automation.checkedAt >= (latest.finishedAt ?? runTime(latest)))) parts.push(t("automations.checkedNothingNew", { when: lastWhen(automation.checkedAt, now) }));
   else if (latest) parts.push(`${t("automations.lastRan", { when: lastWhen(runTime(latest), now) })}${isProblem(latest) ? " ✗" : ""}`);
   else if (!automation.appTrigger) parts.push(t("automations.notRunYet"));
   if (automation.appTrigger) parts.push(...appStatusParts(automation.appTrigger, Boolean(latest)), ...[skippedToday(automation.appTrigger, now) ?? []].flat());
   if (automation.nextRunAt != null) parts.push(t("automations.next", { when: nextWhen(automation.nextRunAt, now) }));
+  if (automation.readsAndDrafts) parts.push(t("automations.readsAndDrafts"));
   else if (automation.enabled && automation.schedule?.type === "limit_reset") parts.push(t("automations.limit.timeUnknown"));
   return parts.join(" · ");
 }

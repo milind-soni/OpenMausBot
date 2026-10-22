@@ -129,7 +129,7 @@ export function undeliveredApprovalTool(
 
 /** The client translates by key and falls back to this text, which the server keeps sending for older cards. */
 export const HELD_NOTE = {
-  "approval.held.outbound": "This sends something on your behalf, so it always asks first.",
+  "approval.held.outbound": "This sends something on your behalf, so it asks you first.",
   "approval.held.native": "The provider requires your approval for this action.",
   "approval.held.sandbox":
     "This loosens the AI's own safety limits, so only Full access can approve it automatically.",

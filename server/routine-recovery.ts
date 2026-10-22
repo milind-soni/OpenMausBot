@@ -129,7 +129,8 @@ export function recoverRun(run: RoutineRun, failure: string, facts: RoutineFailu
   const again = run.retried ? `Failed after one automatic retry: ${failure}` : failure;
   if (verdict.kind === "busy") {
     run.deferredAt ??= now;
-    if (now - run.deferredAt >= ROUTINE_BUSY_WAIT_MS) return { queued: false, error: `Did not start: still busy after ${ROUTINE_BUSY_WAIT_MS / 60_000} minutes (${failure})` };
+    // A run of checked items waits as long as it takes: its bot is busy with the person, which is not a failure.
+    if (now - run.deferredAt >= ROUTINE_BUSY_WAIT_MS && run.checkKey === undefined) return { queued: false, error: `Did not start: still busy after ${ROUTINE_BUSY_WAIT_MS / 60_000} minutes (${failure})` };
     run.status = "queued";
     run.retryAt = now + ROUTINE_BUSY_RECHECK_MS;
     run.attention = `Waiting to start: ${failure}`.slice(0, 500);

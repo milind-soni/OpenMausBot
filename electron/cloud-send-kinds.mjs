@@ -16,6 +16,19 @@ const SETTINGS_BATCH = 500;
 const AUTOMATIONS = new Set(AUTOMATION_KINDS);
 const ATTACHMENT_NAMES = 2000;
 
+/** A routine changed both here and on My Cloud since it last went is still one routine: its runs are history My Cloud
+ * adds by id, so this computer's always go, and its definition is the one changed last (`newer`), which sendKind settles
+ * from both sides' records. */
+export function mergeRoutines(rows) {
+  for (const row of rows) {
+    if (row.kind !== "routine" || !row.differs?.length) continue;
+    if (row.differs.includes("def")) row.newer = true;
+    row.parts = [...(row.parts ?? []), ...row.differs];
+    row.state = "to-update";
+    delete row.differs;
+  }
+}
+
 /** The name a file arriving beside My Cloud's own different one takes: "notes (MacBook Air).md". */
 export function keptBoth(path, label) {
   const at = path.lastIndexOf("/");
@@ -70,12 +83,26 @@ const parseFiles = (value) => list(value?.files).filter((file) => record(file) &
 export function createMoveKinds({ localJson, localBytes, localSend, entry, persist, progress, space, refusal, scoped = (route) => route }) {
   const failed = (ctx, key, kind, label, error, final = false) => ctx.result.failed.push({ key, kind, label, error: sentence(error) ?? "It did not move.", ...(final ? { final: true } : {}) });
 
+  /** The definition a routine goes with in the person's own move: this computer's when only it changed it or it changed it
+   * last, or else My Cloud's own, sent back with this computer's runs so they arrive without undoing what changed there.
+   * Which side changed last comes from each side's record (`changedAt`); one that can't say keeps My Cloud's. */
+  async function routineDefinition(ctx, row, held) {
+    const here = ctx.localItems.get(row.key)?.parts.def, there = ctx.cloudItems.get(row.key)?.parts.def;
+    if (!there || there === here || (row.parts?.includes("def") && !row.newer)) return held.record;
+    const theirs = await ctx.session.call("GET", `/api/cloud-send/kind?key=${encodeURIComponent(row.key)}`);
+    if (!theirs.ok || !record(theirs.body?.record)) throw new Error(refusal(theirs, "My Cloud's copy of this routine could not be read, so it was left as it is."));
+    const changed = (side) => (Number.isSafeInteger(side?.changedAt) ? side.changedAt : null);
+    const mine = changed(held), cloud = changed(theirs.body);
+    return row.newer && mine !== null && cloud !== null && mine > cloud ? held.record : theirs.body.record;
+  }
+
   /** One item only a move carries, as this computer holds it; an automation's switch here is kept (`on`) for the switch
    * that turns on there what was on here; an app event this computer then lets go of, so only My Cloud collects it. */
   async function sendKind(ctx, row) {
     const held = await localJson(`/api/cloud-send/kind?key=${encodeURIComponent(row.key)}`);
     if (!record(held) || !("record" in held)) throw Object.assign(new Error("It could not be read on this computer."), { code: "local" });
-    const answer = await ctx.session.call("PUT", "/api/cloud-send/kind", { v: 1, key: row.key, dataDir: held.dataDir, record: held.record, ...(Array.isArray(held.runs) ? { runs: held.runs } : {}) });
+    const sent = row.kind === "routine" && ctx.ownMove ? await routineDefinition(ctx, row, held) : held.record;
+    const answer = await ctx.session.call("PUT", "/api/cloud-send/kind", { v: 1, key: row.key, dataDir: held.dataDir, record: sent, ...(Array.isArray(held.runs) ? { runs: held.runs } : {}) });
     if (!answer.ok) throw Object.assign(new Error(refusal(answer, "My Cloud could not take it.")), answer.status === 400 || answer.status === 403 ? { final: true } : {});
     if (AUTOMATIONS.has(row.kind) && record(held.record)) {
       entry(ctx.origin).on[row.key] = row.kind === "call" ? held.record.nextRunAt !== null && held.record.nextRunAt !== undefined : held.record.enabled === true;

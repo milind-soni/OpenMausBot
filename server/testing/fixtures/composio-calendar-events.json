@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "id": "demo-1", "status": "confirmed", "summary": "Supamaus demo with Jake",
+      "start": { "dateTime": "2026-10-17T17:00:00.000Z" }, "end": { "dateTime": "2026-10-17T17:30:00.000Z" },
+      "hangoutLink": "https://meet.google.com/abc-defg-hij",
+      "description": "Walk Pin through the bot dashboard.",
+      "attendees": [
+        { "email": "me@example.test", "self": true, "organizer": true, "responseStatus": "accepted" },
+        { "email": "Jake@Pin.example", "displayName": "Jake Price", "responseStatus": "accepted" },
+        { "email": "room-1@resource.calendar.google.com", "resource": true }
+      ]
+    },
+    {
+      "id": "weekly-2_20261017", "recurringEventId": "weekly-2", "status": "confirmed", "summary": "Weekly with Ada",
+      "start": { "dateTime": "2026-10-17T09:00:00+05:30" }, "end": { "dateTime": "2026-10-17T09:30:00+05:30" },
+      "conferenceData": { "entryPoints": [{ "entryPointType": "phone", "uri": "tel:+1" }, { "entryPointType": "video", "uri": "https://zoom.us/j/1" }] },
+      "attendees": [{ "email": "me@example.test", "self": true, "responseStatus": "declined" }, { "email": "ada@example.test" }]
+    },
+    { "id": "holiday", "status": "confirmed", "summary": "Diwali", "start": { "date": "2026-10-20" }, "end": { "date": "2026-10-21" } },
+    { "id": "gone", "status": "cancelled", "start": { "dateTime": "2026-10-17T12:00:00Z" }, "end": { "dateTime": "2026-10-17T12:30:00Z" } },
+    { "status": "confirmed", "summary": "No id, skipped" }
+  ]
+}

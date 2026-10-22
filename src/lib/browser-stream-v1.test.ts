@@ -39,6 +39,19 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
+describe("the v1 view of one conversation's browser", () => {
+  it("asks for that conversation's browser on a Team Cloud, and for the bot's own browser elsewhere", () => {
+    createLiveStreamClient("scout", events(), vi.fn(), { viewer: "" }, { threadId: "ada-chat" });
+    createLiveStreamClient("scout", events(), vi.fn(), { viewer: "v-1" }, { threadId: "ada-chat" });
+    createLiveStreamClient("scout", events(), vi.fn());
+    expect(FixtureEventSource.instances.map((source) => source.url)).toEqual([
+      "/api/bots/scout/browser/live?threadId=ada-chat",
+      "/api/bots/scout/browser/live?resume=v-1&threadId=ada-chat",
+      "/api/bots/scout/browser/live",
+    ]);
+  });
+});
+
 describe("the v1 view in the stream's words", () => {
   it("turns v2 input into the frozen v1 actions, within their limits", () => {
     expect(liveAction({ type: "mouse", action: "down", x: -4, y: 9000, button: "left", buttons: 1, clickCount: 7, modifiers: 2 }))

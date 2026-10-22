@@ -229,6 +229,12 @@ export function todayReport(sources: TodaySources, viewer: TodayViewer, requeste
   };
 }
 
+/** What only the person can fix right now, across every conversation the viewer may see. */
+export function needsYouNow(sources: TodaySources, viewer: TodayViewer, now = Date.now()): NeedsYouItem[] {
+  const owners = threadOwners(sources);
+  return needsYou(sources, viewer, owners, (threadId): threadId is string => Boolean(threadId && owners.has(threadId) && viewer.thread(threadId)), now);
+}
+
 function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string, Owner>, seen: (threadId: string | undefined) => threadId is string, now: number): NeedsYouItem[] {
   const rows = attentionRows(now - NEEDS_YOU_WINDOW_MS).filter((row) => seen(row.threadId));
   const botOf = (row: AttentionRow) => row.digestBotId ?? row.fromBotId ?? owners.get(row.threadId)?.botId;

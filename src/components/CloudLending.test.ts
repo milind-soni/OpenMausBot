@@ -171,6 +171,24 @@ it("an off switch says why and since when, keeps the choices, and the switch len
   expect(vi.mocked(bridge.save).mock.calls).toEqual([[{ folders: [folder], screen: true, internet: false }]]);
 });
 
+it("while the bots move to My Cloud, an off switch says it turns on by itself once they are there, unless the person turned it off", async () => {
+  const view = async (snapshot: CloudLendingSnapshot, moving: boolean) => {
+    f.values = []; vi.mocked(bridge.state).mockResolvedValue(snapshot);
+    const draw = () => { f.index = 0; f.effects = []; return renderToStaticMarkup(createElement(() => CloudLending({ bridge, moving }))); };
+    draw(); f.effects[0]!(); await flush(); return draw();
+  };
+  const AFTER = "It turns on by itself once your bots are on My Cloud.";
+  expect(await view(off, true)).toContain(AFTER);
+  expect(await view(off, false)).not.toContain(AFTER);
+  expect(await view(lent, true)).not.toContain(AFTER);
+  const starting = await view({ ...lent, state: { ...lent.state!, connected: false } }, true);
+  expect(starting, "on and starting: it says so").not.toContain(AFTER); expect(starting).toContain("Starting…");
+  const at = new Date(2026, 9, 7, 14, 2).getTime();
+  const yours = await view({ ...off, state: { ...off.state!, stopped: { reason: "you", at } } }, true);
+  expect(yours).not.toContain(AFTER); expect(yours).toContain("you turned it off");
+  expect(await view({ ...off, state: { ...off.state!, stopped: { reason: "signed-out", at } } }, true)).toContain(AFTER);
+});
+
 it("says how it is lent when Computer access lent it, terminal included, and when My Cloud last used it", async () => {
   const viaAccess: CloudLendingSnapshot = { available: true, screenAvailable: true,
     activity: [{ at: Date.now() - 3 * 60_000, server: "My Cloud", origin: "https://omb-u-1.fly.dev", action: "computer_call", detail: "", ok: true }],

@@ -15,10 +15,12 @@ afterEach(async () => {
 
 async function serve() {
   const asked: BrowserSitesRef[] = [];
+  const threads: Array<string | null> = [];
   const signedOut: Array<{ session: string; site: string | null }> = [];
   const routes = [createBrowserSiteRoutes({
-    target: (which) => {
+    target: (which, threadId) => {
       asked.push(which);
+      threads.push(threadId);
       if ("bot" in which && which.bot === "guest-bot") return { status: 409, error: "A temporary browser saves no sign-ins." };
       return { binaryPath: "/engine", session: "bot-pepper", env: {}, encryptionKey: "k" } satisfies BrowserSitesTarget;
     },
@@ -34,7 +36,7 @@ async function serve() {
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const post = (body: unknown, type = "application/json") => fetch(`${base}/api/browser-sites/sign-out`, { method: "POST", headers: { "content-type": type }, body: JSON.stringify(body) });
-  return { base, asked, signedOut, post };
+  return { base, asked, threads, signedOut, post };
 }
 
 describe("signed-in sites routes", () => {
@@ -76,5 +78,16 @@ describe("signed-in sites routes", () => {
     expect((await post({ profile: "profile-work", site: 7 })).status).toBe(400);
     expect((await post({ site: "example.com" })).status).toBe(400);
     expect(signedOut).toEqual([]);
+  });
+});
+
+describe("signed-in sites of one conversation's browser on a Team Cloud", () => {
+  it("name the conversation for the server to find its audience's browser, and nothing without one", async () => {
+    const { base, threads, post } = await serve();
+    expect((await fetch(`${base}/api/browser-sites?bot=pepper&threadId=ada-chat`)).status).toBe(200);
+    expect((await fetch(`${base}/api/browser-sites?bot=pepper`)).status).toBe(200);
+    expect((await post({ bot: "pepper", threadId: "ada-chat", site: "example.com" })).status).toBe(200);
+    expect((await post({ bot: "pepper" })).status).toBe(200);
+    expect(threads).toEqual(["ada-chat", null, "ada-chat", null]);
   });
 });

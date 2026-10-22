@@ -4,6 +4,7 @@
 import { TOOL_BRIDGE_ENV, createToolBridge } from "./agents-bridge.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
+import { sendToolReceipt } from "./agents-timing.ts";
 import type { Json } from "./agents-client.ts";
 
 export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json | undefined> {
@@ -43,11 +44,14 @@ export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json |
           const unknown = `Unknown tool: ${name}`;
           return bridged ? textResult(id, unknown, true) : rpcErr(id, -32602, unknown);
         }
+        const startedAt = Date.now();
         try {
           const { text, isError, passthrough } = await callTool(name, args, context);
+          sendToolReceipt(context, name, args, startedAt, { ok: !isError, error: text });
           if (passthrough) return ok(id, passthrough);
           return textResult(id, name === "tool_result_read" ? text : await capResult(text, context), isError);
         } catch (e) {
+          sendToolReceipt(context, name, args, startedAt, { ok: false, error: (e as Error).message });
           return textResult(id, await capResult((e as Error).message, context), true);
         }
       }

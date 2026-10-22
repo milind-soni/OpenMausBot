@@ -51,7 +51,7 @@ COPY . .
 # The Data engine's native modules (server/data/engine.ts), staged like the
 # desktop app's extraResources; the runtime stages copy this tree.
 RUN node scripts/prepare-duckdb.mjs && chmod -R go-w dist-native/duckdb
-RUN pnpm build:server && pnpm exec vite build && chmod -R go-w dist dist-server
+RUN pnpm build:server && pnpm exec vite build && chmod -R go-w dist dist-server skills
 
 FROM node:24-bookworm-slim AS runtime
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
@@ -111,8 +111,8 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 poppler-utils unzip bubblewrap socat \
   && rm -rf /var/lib/apt/lists/* \
   && HOME=/tmp/omb-build-home npm install -g pnpm@10.33.0 \
-  && rm -rf /tmp/omb-build-home /tmp/node-compile-cache \
-  && bwrap --version && socat -V | head -1 && pnpm --version
+  && bwrap --version && socat -V | head -1 && HOME=/tmp/omb-build-home pnpm --version \
+  && rm -rf /tmp/omb-build-home /tmp/node-compile-cache
 # Caddy and Grok are pinned, so they sit beneath the engines, which change
 # more often.
 COPY --from=edge /caddy /usr/local/bin/caddy
@@ -152,6 +152,8 @@ COPY deploy/fly/Caddyfile /app/cloud/Caddyfile
 COPY --from=build /src/dist-native/duckdb/linux-x64 ./duckdb
 COPY --from=build /src/dist-server ./dist-server
 COPY --from=build /src/dist ./dist
+# The bundled skills (server/skill-library.ts reads ./skills from /app).
+COPY --from=build /src/skills ./skills
 RUN export HOME=/tmp/omb-build-home \
  && chmod go-w /app/cloud /app/cloud/Caddyfile \
  && caddy version \
@@ -181,6 +183,7 @@ RUN if [ -n "$ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $ENGINES 
 COPY --from=build --chown=maus:maus /src/dist-native/duckdb/linux-x64 ./duckdb
 COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
 COPY --from=build --chown=maus:maus /src/dist ./dist
+COPY --from=build --chown=maus:maus /src/skills ./skills
 ENV HOME=/data
 VOLUME ["/data"]
 USER maus

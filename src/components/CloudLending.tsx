@@ -88,8 +88,9 @@ export function lendingStatusKey(snapshot: CloudLendingSnapshot | null, switched
   return state?.problem && state.problem !== "paused" ? PROBLEMS[state.problem] ?? null : null;
 }
 
-/** Security: main picks the Cloud from the verified sign-in; nothing here names a server. */
-export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
+/** Security: main picks the Cloud from the verified sign-in; nothing here names a server. `moving`: the bots are on their
+ * way to My Cloud, which lends this computer once they are there unless the person turned lending off. */
+export function CloudLending({ bridge, moving = false }: { bridge: CloudLendingBridge; moving?: boolean }) {
   const [snapshot, setSnapshot] = useState<CloudLendingSnapshot | null>(null);
   const [draftOn, setDraftOn] = useState(false);
   const [folders, setFolders] = useState<SharedFolder[]>([]);
@@ -142,7 +143,7 @@ export function CloudLending({ bridge }: { bridge: CloudLendingBridge }) {
     void perform(() => bridge.save(choiceOf(folders, screen, internet, false)));
   };
   if (!snapshot?.available) return null;
-  const status = lendingStatusKey(snapshot, on);
+  const status = moving && !on && snapshot.state?.stopped?.reason !== "you" ? "lending.status.afterMove" : lendingStatusKey(snapshot, on);
   const updating = enabled && snapshot.state?.link === "unsupported";
   const lent = enabled && snapshot.state?.connected && !snapshot.state.busy ? lentWhat(snapshot.state.folders, snapshot.state.screen, snapshot.state.internet === true && !updating, snapshot.state.terminal === true) : "";
   const stopped = on ? null : lendingStoppedLine(snapshot.state);

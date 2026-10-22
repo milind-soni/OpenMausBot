@@ -166,6 +166,16 @@ describe("publishing a page", () => {
     expect([...published.files.keys()].sort()).toEqual(["img/logo.svg", "index.html", "style.css"]);
   });
 
+  it("publishes a dashboard's csv, parquet and arrow data with it, and leaves out a wasm file", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "dash"), { "index.html": "<p>Sales</p>", "data.parquet": "PAR1", "data/backup.csv": "a\n1\n", "data/live.arrow": "ARROW1", "duckdb.wasm": "x" });
+    const outcome = await f.publish({ path: "dash" });
+    expect(outcome.text).toContain("Left out 1 file a page can't serve: duckdb.wasm");
+    const [published] = [...f.service.pages.values()];
+    expect([...published!.files.keys()].sort()).toEqual(["data.parquet", "data/backup.csv", "data/live.arrow", "index.html"]);
+  });
+
   it("refuses a folder over a page's bytes or files before asking for a token", async () => {
     const f = setup();
     signIn();

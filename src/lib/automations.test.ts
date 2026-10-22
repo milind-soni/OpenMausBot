@@ -178,6 +178,14 @@ describe("order and the grey line", () => {
     expect(statusLine(automation([run("completed", at(-1, 9))], { enabled: false }), NOW)).toBe("Paused · last ran yesterday");
   });
 
+  it("a routine with checks says when it last checked and found nothing new, that it reads and drafts only, and a failed read needs you", () => {
+    const watch = { checks: ["calendar", "mail"] as Routine["checks"], access: "read-and-draft" as const, nextRunAt: at(0, 12, 15) };
+    expect(statusLine(automation([run("completed", at(0, 9, 2))], { ...watch, checkedAt: at(0, 11, 45) }), NOW)).toBe("Working · checked today 11:45 AM, nothing new · next: today 12:15 PM · reads and drafts only");
+    expect(statusLine(automation([run("completed", at(0, 11, 50))], { ...watch, checkedAt: at(0, 11, 45) }), NOW)).toBe("Working · last ran today 11:50 AM · next: today 12:15 PM · reads and drafts only");
+    const trouble = automation([], { ...watch, checkTrouble: "Couldn't read Gmail. Reconnect it in Connected apps." });
+    expect(automationStatus(trouble, NOW)).toEqual({ state: "needs-you", reason: "Couldn't read Gmail. Reconnect it in Connected apps.", fix: "reconnect" });
+  });
+
   it("writes recent runs as a time, a mark and one line", () => {
     expect(runLine(run("completed", at(0, 9, 2), { output: "3 emails overnight.\nMore detail." }), NOW)).toEqual({ when: "Today 9:02 AM", mark: "✓", text: "3 emails overnight." });
     expect(runLine(run("failed", at(-1, 9), { error: "token expired, sign in again" }), NOW)).toMatchObject({ mark: "✗", text: "It's signed out. Sign in again so it can run." });

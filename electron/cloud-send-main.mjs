@@ -64,13 +64,15 @@ export async function openOwnerSession(target, fetchImpl, { label = SESSION_LABE
  *   space?: { disk(): unknown, grow(sizeGb: number): Promise<unknown> },
  *   move?: () => { view(): unknown, seen(): unknown, retry(): Promise<unknown> } | null,
  *   teamMove?: () => { view(): unknown, seen(): unknown } | null,
+ *   moveSession?: { open(target: { origin: string, grant(): Promise<{ origin: string, code: string }> }): Promise<any> },
  * }} deps `engineWaitMs`: how long a
  * move waits for My Cloud's engines (cloud-connections.mjs). `space`: My Cloud's plan disk and the Admin's grow, so a
  * move makes room for the files it carries. `move`: the one-time move (one-home.mjs), whose line either page shows.
  * `teamMove`: a bot moving from My Cloud into a team (team-move-main.mjs), whose line My Cloud's page shows.
+ * `moveSession`: the one session every pass of the move uses (move-session.mjs); without it each pass opens its own.
  */
 export function installCloudSend({ ipcMain, cloudPage, server, local, home, cookieFetch, reconnect, power, file, window, localOrigin,
-  fetch: fetchImpl = globalThis.fetch, engineWaitMs, space, move = () => null, teamMove = () => null }) {
+  fetch: fetchImpl = globalThis.fetch, engineWaitMs, space, move = () => null, teamMove = () => null, moveSession = null }) {
   const handoff = createLoginHandoffClient();
   const pageOf = () => {
     const win = window();
@@ -107,6 +109,7 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
       open: (options) => {
         const target = home();
         if (!target) return Promise.reject(new Error("This computer has no My Cloud yet."));
+        if (options?.move && moveSession) return moveSession.open(target);
         return openOwnerSession(target, fetchImpl, options?.move ? { label: MOVE_LABEL, background: false } : {});
       },
     },

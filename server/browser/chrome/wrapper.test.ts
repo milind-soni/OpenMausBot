@@ -75,6 +75,42 @@ describe("the launcher agent-browser runs instead of Chrome", () => {
   });
 });
 
+describe("the launcher of a Team Cloud's boxed browsers", () => {
+  const settings: LauncherSettings = { chrome: "/opt/chrome/chrome", userAgent: UA, screen: { width: 1920, height: 1080 } };
+
+  it.skipIf(!posix)("starts Chrome through bubblewrap with only the profile it was given, the seccomp filter on descriptor 9 and HOME private", () => {
+    const folder = mkdtempSync(join(tmpdir(), "omb-boxed-launcher-"));
+    folders.push(folder);
+    const bwrap = join(folder, "bwrap");
+    // A stand-in for bubblewrap: what it was asked, and whether descriptor 9 holds the filter.
+    writeFileSync(bwrap, `#!/bin/sh\nprintf '%s\\0' "$@" > "$ARGV_OUT"\ncat <&9 > "$ARGV_OUT.fd9" 2>/dev/null || printf none > "$ARGV_OUT.fd9"\nps -o args= -p $PPID > "$ARGV_OUT.parent"\n`, { mode: 0o755 });
+    const filter = join(folder, "seccomp.bpf");
+    writeFileSync(filter, "FILTER");
+    const path = launcherPath(join(folder, "data"), "linux");
+    writeLauncher(path, { ...settings, box: { bwrap, options: ["--unshare-user", "--seccomp", "9", "--ro-bind", "/usr", "/usr"], seccomp: filter } }, "linux");
+    const out = join(folder, "argv");
+    const profile = join(folder, "profiles", "ada's profile");
+    const engine = ["--remote-debugging-port=0", "--headless=new", `--user-data-dir=${profile}`, "--x=it's $HOME"];
+    execFileSync(path, engine, { env: { PATH: "/usr/bin:/bin", ARGV_OUT: out } });
+    const argv = readFileSync(out, "utf8").split("\0").slice(0, -1);
+    expect(argv).toEqual(["--unshare-user", "--seccomp", "9", "--ro-bind", "/usr", "/usr", "--bind", profile, profile, "--setenv", "HOME", "/tmp", "--", "/opt/chrome/chrome", ...engine, ...launcherFlags(settings, "linux")]);
+    expect(statSync(profile).isDirectory(), "the profile exists before bubblewrap binds it").toBe(true);
+    expect(readFileSync(`${out}.fd9`, "utf8")).toBe("FILTER");
+    // bubblewrap's --die-with-parent follows the thread that started it; the launcher, not agent-browser's thread, is its parent.
+    expect(readFileSync(`${out}.parent`, "utf8"), "the launcher stays bubblewrap's parent").toContain("chrome-launcher.sh");
+    // Without a profile (the launcher's own check), still boxed, binding nothing of the disk.
+    execFileSync(path, ["--version"], { env: { PATH: "/usr/bin:/bin", ARGV_OUT: out } });
+    const bare = readFileSync(out, "utf8").split("\0").slice(0, -1);
+    expect(bare.slice(0, 10)).toEqual(["--unshare-user", "--seccomp", "9", "--ro-bind", "/usr", "/usr", "--setenv", "HOME", "/tmp", "--"]);
+    expect(bare).not.toContain("--bind");
+  });
+
+  it("is the plain launcher off a team", () => {
+    expect(launcherScript(settings, "linux")).not.toContain("bwrap");
+    expect(launcherScript(settings, "linux").split("\n").at(-2)).toMatch(/^exec '\/opt\/chrome\/chrome' "\$@" /u);
+  });
+});
+
 describe("the display, language and time zone the launcher gives Chrome", () => {
   const answer = (output: string) => async () => output;
   const fail = async () => { throw new Error("no display"); };

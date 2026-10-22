@@ -91,6 +91,18 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
       if (!team || viewer.kind !== "member") return undefined;
       return { of: audienceOf, person: viewer.email ? personKey({ id: "", email: viewer.email }) : null };
     },
+    /** Whose browser a conversation's turns use: on a team its audience's (the member's, the group chat's or the team's),
+     * the bot's own elsewhere. */
+    browserAudience(threadId: string): Audience {
+      return team ? audienceOf(threadId) : "team";
+    },
+    /** Whose browser a person's live view of a bot shows: the conversation's when they name one they see, their own
+     * when they name none, and null when they name one hidden from them. The bot's own off a team. */
+    viewerBrowserAudience(input: { threadId: string | null; sees(threadId: string): boolean; person: string | null }): Audience | null {
+      if (!team) return "team";
+      if (input.threadId !== null) return input.sees(input.threadId) ? audienceOf(input.threadId) : null;
+      return input.person ? memberAudience(input.person) : "team";
+    },
     /** A session's team, for the app: the team's name and the person's role. */
     sessionInfo(session: { teamRole?: TeamRole }): TeamSessionInfo | null {
       return team && session.teamRole ? { id: team.id, name: team.name, role: session.teamRole } : null;

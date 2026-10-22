@@ -2,6 +2,9 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { CircleAlert, X } from "lucide-react";
 import { useStore, type Message } from "@/state/store";
 import { openExternalLink } from "@/lib/app-links";
+import { useShowThreads } from "@/lib/thread-preferences";
+import { resolvedThreadTarget } from "@/lib/thread-target";
+import { openThread } from "@/state/thread-navigation";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
@@ -10,7 +13,7 @@ import {
 } from "../../../shared/widget";
 import { ASK_QUIET_BUTTON, AskSettledLine, returnFocusToComposer } from "../AskCard";
 import { WidgetBody } from "./WidgetBody";
-import { WIDGET_COMPACT_BELOW, widgetActionUrl, WidgetButton, WidgetFormProvider, WidgetGlyph, type WidgetForm } from "./WidgetControls";
+import { WIDGET_COMPACT_BELOW, widgetActionUrl, widgetThreadTarget, WidgetButton, WidgetFormProvider, WidgetGlyph, type WidgetForm } from "./WidgetControls";
 import { kids } from "./widget-style";
 import { newWidgetSendId, sendWidgetAction, type WidgetSendResult } from "./widget-send";
 
@@ -43,7 +46,8 @@ export function WidgetMessage({ botId, threadId, message }: { botId: string; thr
 
 function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; threadId?: string; messageId: string; payload: WidgetPayload }) {
   const root = payload.root;
-  const { flushBotPatches } = useStore();
+  const { state, dispatch, flushBotPatches } = useStore();
+  const showThreads = useShowThreads();
   const [settledHere, setSettledHere] = useState<WidgetSettled>();
   /**
    * Once the row has spoken since this card's last press, only the row decides, whichever of the patch frame and the
@@ -110,6 +114,8 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
     if (entry.client) {
       const url = widgetActionUrl(entry);
       if (url) void openExternalLink(url);
+      const target = resolvedThreadTarget(widgetThreadTarget(entry), state);
+      if (target) openThread(dispatch, target, state, showThreads);
       return;
     }
     if (settled) return;

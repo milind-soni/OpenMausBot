@@ -73,6 +73,15 @@ describe("signed-in sites", () => {
     expect(listed()).toEqual(["example.com"]);
   });
 
+  it("on a Team Cloud, reads and signs out of the browser of the conversation shown", async () => {
+    fixture.api.mockResolvedValueOnce({ running: true, sites: [example] }).mockResolvedValueOnce({ running: true, sites: [] });
+    await render({ bare: true, target: { bot: "pepper" }, scope: { threadId: "ada-chat" }, sharedBy: ["Pepper"] });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(fixture.api).toHaveBeenCalledWith("/api/browser-sites?bot=pepper&threadId=ada-chat");
+    await click("Sign out of example.com");
+    expect(fixture.api).toHaveBeenLastCalledWith("/api/browser-sites/sign-out", { method: "POST", body: JSON.stringify({ bot: "pepper", threadId: "ada-chat", site: "example.com" }) });
+  });
+
   it("signs out of all, and says when nothing is left", async () => {
     fixture.api.mockResolvedValueOnce({ running: false, sites: [example, google] }).mockResolvedValueOnce({ running: false, sites: [] });
     await render({ target: { profile: "profile-work" }, sharedBy: ["Pepper", "Scout"] });

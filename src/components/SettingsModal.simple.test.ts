@@ -100,7 +100,7 @@ describe("Settings in Simple mode", () => {
     expect(SIMPLE_PAGES.length).toBeLessThanOrEqual(6);
     expect(html).not.toContain("data-settings-group=");
     expect(html).not.toContain("data-settings-section=");
-    for (const hidden of ["usage", "backups", "experimental", "workspaces", "skills"]) expect(html).not.toContain(`value="${hidden}"`);
+    for (const hidden of ["backups", "experimental", "workspaces", "skills"]) expect(html).not.toContain(`value="${hidden}"`);
     const picker = html.match(/<select aria-label="Settings"[\s\S]*?<\/select>/)![0];
     expect([...picker.matchAll(/<option value="([^"]+)"/g)].map((match) => match[1])).toEqual(["general", "appearance", "ai", "computers", "cloud", "account"]);
   });
@@ -109,7 +109,7 @@ describe("Settings in Simple mode", () => {
     const placed = SIMPLE_PAGES.flatMap((page) => page.sections);
     expect(new Set(placed).size).toBe(placed.length);
     const hidden = SECTIONS.map((entry) => entry.id).filter((id) => !placed.includes(id));
-    expect(hidden).toEqual(["skills", "usage", "backups", "workspaces", "experimental"]);
+    expect(hidden).toEqual(["skills", "backups", "workspaces", "experimental"]);
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
 
@@ -142,7 +142,7 @@ describe("Settings in Simple mode", () => {
     expect(html).toContain('aria-label="Enable the built-in browser"');
   });
 
-  it("gives MausBot Cloud its own page, and stacks Organization and Import on Account in the desktop app", () => {
+  it("gives MausBot Cloud its own page, and stacks Organization, Import and Usage on Account in the desktop app", () => {
     fixture.section = "cloudAccount";
     let html = render();
     expect(currentPage(html)).toBe("cloud");
@@ -150,23 +150,26 @@ describe("Settings in Simple mode", () => {
     fixture.section = "organization";
     html = render();
     expect(currentPage(html)).toBe("account");
-    expect(blocks(html)).toEqual(["organization", "import"]);
+    expect(blocks(html)).toEqual(["organization", "import", "usage"]);
     expect(markers(html)).toContain("import");
   });
 
-  it("adds People and Activity to Account for a hosted workspace's admins in a browser", () => {
+  it("adds People and Activity to Account, above Usage, for a hosted workspace's admins in a browser", () => {
     vi.stubGlobal("window", {});
     fixture.ownerOrAdmin = true;
     fixture.section = "people";
     const html = render();
     expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account"]);
-    expect(blocks(html)).toEqual(["people", "activity"]);
+    expect(blocks(html)).toEqual(["people", "activity", "usage"]);
   });
 
-  it("drops Account when nothing on it is shown", () => {
+  it("keeps Account for Usage alone when nothing else on it is shown", () => {
     vi.stubGlobal("window", {});
     fixture.config = { ...fixture.config, cloudHome: true };
-    expect(pages(render())).toEqual(["general", "appearance", "ai", "computers"]);
+    fixture.section = "usage";
+    const html = render();
+    expect(pages(html)).toEqual(["general", "appearance", "ai", "computers", "account"]);
+    expect(blocks(html)).toEqual(["usage"]);
   });
 
   it("keeps a paired remote client's reduced set: Appearance, and Devices with Remote access and Servers", () => {
@@ -200,7 +203,6 @@ describe("Settings in Simple mode", () => {
   });
 
   it.each<[AppSettingsSection, string]>([
-    ["usage", "usage"],
     ["backups", "backups"],
     ["experimental", "skillAuthoring"],
   ])("opens a hidden page (%s) for as long as it is the open one", (section, content) => {

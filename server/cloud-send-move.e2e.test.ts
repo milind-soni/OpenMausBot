@@ -148,7 +148,10 @@ it("lines My Cloud already held of this computer's become its owner's when the m
   await turn(local, kai, "Keep the Acme notes.");
   const lux = await newBot("Lux");
   await turn(local, lux, "Draft the launch memo.");
-  expect((await fx.olderSend({ keys: [itemKey.bot(kai.id), itemKey.bot(lux.id)] })).result.bots.sort()).toEqual(["Kai", "Lux"]);
+  // An older app's whole Send everything, which carried the chats too (a send of some items never does).
+  const sent = (await fx.olderSend()).result;
+  expect(sent.bots.sort()).toEqual(["Kai", "Lux"]);
+  expect(sent.chats?.messages, "the chats went with the bots").toBeGreaterThan(0);
   await asABringLeftThem([kai.threadId, lux.threadId]);
   for (const bot of [kai, lux]) {
     const brought = (await history(onCloud, bot.threadId)).rows.filter((row) => row.role === "user");

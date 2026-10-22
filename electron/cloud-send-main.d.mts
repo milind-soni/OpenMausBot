@@ -20,6 +20,8 @@ export function installCloudSend(deps: {
   engineWaitMs?: number;
   space?: { disk(): unknown; grow(sizeGb: number): Promise<unknown> };
   move?: () => { view(): unknown; seen(): unknown; retry(): Promise<unknown> } | null;
+  /** The one session every pass of the move uses (move-session.mjs). */
+  moveSession?: { open(target: CloudTarget): Promise<CloudSendSession> };
 }): {
   receive(proc: unknown, message: unknown): boolean;
   move(options?: { final?: boolean }): Promise<CloudSendOutcome>;

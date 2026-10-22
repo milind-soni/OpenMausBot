@@ -2,7 +2,8 @@
 // fresh session; when it ends with something to say, its last reply lands in that chat as one bot message named after
 // the automation, and a run with nothing to tell writes nothing. A card a run waits on is copied there, and answering
 // the copy answers the run. Nothing is written into a chat while a turn runs or settles in it: a line waits for the
-// next flush, which the server runs whenever it releases what was queued behind a turn, ahead of that queue.
+// next flush, which the server runs whenever it releases what was queued behind a turn, ahead of that queue. A routine
+// that delivers to the brief posts no line: its answer goes to the brief, which reads it as a small JSON result.
 import { liveCardKind } from "../shared/live-approval.ts";
 import type { AutomationLine } from "../shared/routine-run.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
@@ -74,6 +75,8 @@ export interface AutomationReportDeps {
   /** After a line this conversation's session did not write: it marks the chat unread and reaches the next turn. */
   wrote(bot: BotRecord, threadId: string): void;
   notify(kind: "done" | "question", bot: BotRecord, threadId: string, detail: string): void;
+  /** A run that delivers to the brief completed: its answer is the brief's to read. */
+  brief?(run: RoutineRun, turnId?: string): void;
 }
 
 export function createAutomationReports(deps: AutomationReportDeps) {
@@ -205,6 +208,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     /** A run's turn ended: once the run is complete, its reply becomes one line in the chat it reports to, or nothing. */
     runSettled(run: RoutineRun, turnId?: string): void {
       if (run.target !== "bot" || run.status !== "completed" || !run.threadId) return;
+      if (run.deliver === "brief") return deps.brief?.(run, turnId);
       const said = turnId ? store.activePath(run.threadId).findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === turnId) : replyOf(run);
       const reply = read(said);
       const bot = store.bot(run.botId);
@@ -214,7 +218,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     },
     /** A run failed in a way the person is told about: one line says so where its reports go. */
     runFailed(run: RoutineRun, detail: string): void {
-      if (run.target === "bot" && run.status === "failed" && run.threadId && destination(run)) hold(run.id, { kind: "failure", run, detail });
+      if (run.target === "bot" && run.status === "failed" && run.deliver !== "brief" && run.threadId && destination(run)) hold(run.id, { kind: "failure", run, detail });
     },
     /** This run's result, questions and failure come to its bot's chat as lines of their own. */
     speaksFor(run: RoutineRun): boolean {
@@ -223,7 +227,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     /** This conversation is a run's own, and only its last reply reaches the chat the run reports to. */
     reportsElsewhere(threadId: string): boolean {
       const run = deps.routines()?.runForThread(threadId);
-      return run?.target === "bot" && destination(run) !== null;
+      return run?.target === "bot" && run.deliver !== "brief" && destination(run) !== null;
     },
     /** Where an answer to this card goes: a copy of a run's card answers it in the run's own conversation. */
     answeredIn(threadId: string, requestId: string): string {

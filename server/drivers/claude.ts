@@ -12,7 +12,7 @@ import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
 import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
-import { claudeBilling } from "./claude-billing.ts";
+import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
 import { claudeModelExtras } from "./claude-model-extras.ts";
 import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptFor } from "../resume-recovery.ts";
@@ -1551,7 +1551,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // Subagent narration is dropped: parallel Tasks would interleave prose into one bubble.
             if (o.parent_tool_use_id) break;
             const ev = o.event ?? {};
-            if (ev.type !== "content_block_delta") break;
+            if (ev.type !== "content_block_delta") { const call = claudeCallUsage(session, ev); if (call) emit({ ...base(threadId, currentTurnId()), ...call }); break; }
             const d = ev.delta ?? {};
             if (d.type === "text_delta" && typeof d.text === "string" && d.text) {
               if (session.turn) session.turn.sawStreamDelta = true;
@@ -1605,7 +1605,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             }
             if (msg.usage) {
               emit({
-                ...base(threadId, currentTurnId()),
+                ...base(threadId, currentTurnId()), ...(typeof msg.id === "string" ? { itemId: msg.id } : {}),
                 type: "thread.token-usage.updated",
                 input: (msg.usage.input_tokens || 0) + (msg.usage.cache_read_input_tokens || 0),
                 output: msg.usage.output_tokens || 0,

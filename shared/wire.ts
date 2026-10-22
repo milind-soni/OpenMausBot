@@ -449,6 +449,10 @@ export interface WireMessage {
   /** widget rows (kind "widget"): a bot-authored UI tree. `text` is its
    * readable fallback for clients that do not know the kind. */
   widget?: WidgetPayload;
+  /** widget rows the server built from records (mail, calendar, other
+   * bots' work) rather than the bot: replayed to the bot only as labelled
+   * data, never as its own words, and never edited by a bot. */
+  serverCard?: true;
   /** app rows (kind "app"): bot HTML or an MCP server's UI. `text` is always the readable fallback. */
   app?: AppPayload;
   /** user rows sent by an app's ui/message: the app row that sent them. Every client draws "Sent from <title>". */

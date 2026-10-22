@@ -53,7 +53,7 @@ export function buildNotification(
     : bot.name;
   const title = kind === "sign-in"
     ? `${who} needs you to sign in to ${extra?.site ?? "a website"}`
-    : formatServerText(NOTIFICATION_TITLE[kind === "spend" ? NOTIFY_TITLE_KEY.done : NOTIFY_TITLE_KEY[kind]], { who });
+    : formatServerText(NOTIFICATION_TITLE[kind === "spend" || kind === "brief" ? NOTIFY_TITLE_KEY.done : NOTIFY_TITLE_KEY[kind]], { who });
 
   if ((kind === "done" || kind === "mention") && !body) return null;
 

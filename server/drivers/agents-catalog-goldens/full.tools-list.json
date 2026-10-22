@@ -429,7 +429,7 @@
     },
     {
       "name": "show_html",
-      "description": "Show a small self-contained web page inline in this chat: an interactive mini app, a game, a chart or visualization, a calculator, a formatted report. For forms and choices use show_widget instead, and for plain data a markdown table. `html` is one HTML document (a fragment is wrapped) with inline style and script. It runs in a locked sandbox: no network requests (fetch, XHR and WebSockets fail), no cookies or storage, no popups, no form posts. Scripts, styles and fonts load only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com and Google Fonts; images must be inline data: URLs or come from those CDNs. Embed the data you need. The page sizes itself to its content, up to about 640px tall. Use the CSS variables --color-text-primary, --color-background-primary, --color-border-primary and --font-sans so it matches the person's theme. In the page, mausbot.send(text) sends text as the person's next message (only after they click in the page), mausbot.open(url) opens a link, and mausbot.setContext(text) tells you what the person is looking at, with their next message. At most 256 KB. Never put secrets in it. Not available in rooms.",
+      "description": "Show a small self-contained web page inline in this chat: an interactive mini app, a game, a chart or visualization, a calculator, a formatted report. For forms and choices use show_widget instead, and for plain data a markdown table. `html` is one HTML document (a fragment is wrapped) with inline style and script. It runs in a locked sandbox: no network requests (fetch, XHR and WebSockets fail), no cookies or storage, no popups, no form posts. Scripts, styles and fonts load only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com and Google Fonts; images must be inline data: URLs or come from those CDNs. Embed the data you need. The page sizes itself to its content, up to about 640px tall. Use the CSS variables --color-text-primary, --color-background-primary, --color-border-primary and --font-sans so it matches the person's theme. In the page, mausbot.send(text) sends text as the person's next message (only after they click in the page), mausbot.open(url) opens a link, and mausbot.setContext(text) tells you what the person is looking at, with their next message. At most 256 KB. Never put secrets in it. Not available in rooms. For a data dashboard, follow the data-dashboards skill.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -482,7 +482,7 @@
     },
     {
       "name": "publish_page",
-      "description": "Publish a page you made to a public link, only when the person asks to share or publish it: an .html file, or a folder with an index.html (static files, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets or personal details the person didn't ask to share.",
+      "description": "Publish a page you made to a public link, only when the person asks to share or publish it: an .html file, or a folder with an index.html (static files, csv and parquet data too, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets or personal details the person didn't ask to share. For a data dashboard, follow the data-dashboards skill.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

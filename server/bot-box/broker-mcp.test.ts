@@ -14,14 +14,17 @@ const custom = {
 
 describe("remote MCP servers through the broker", () => {
   let dir: string, credentials: CredentialBroker;
-  afterEach(async () => { await credentials?.close(); rmSync(dir, { recursive: true, force: true }); forgetBrokeredMcp(); });
+  afterEach(async () => { await credentials?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); forgetBrokeredMcp(); });
+  // The broker listens on a unix socket, which Windows refuses at a file path; the box runs only on a Linux Cloud home
+  // (detect.ts says "not-linux" anywhere else), so Windows gets "off" below.
+  const withBroker = it.skipIf(process.platform === "win32");
   const broker = async (): Promise<BoxBroker> => {
     dir = mkdtempSync(join(tmpdir(), "omb-bmcp-"));
     credentials = await openCredentialBroker({ socketPath: join(dir, "b.sock") });
     return { port: BOX_BROKER_PORT, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revokeThread: credentials.revokeThread, lookup: credentials.lookup };
   };
 
-  it("moves a URL server's headers to the broker and leaves stdio servers alone", async () => {
+  withBroker("moves a URL server's headers to the broker and leaves stdio servers alone", async () => {
     const out = brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, await broker());
     expect(out.files).toEqual(custom.files);
     const notion = out.notion as { type: string; url: string; headers: Record<string, string> };
@@ -34,7 +37,7 @@ describe("remote MCP servers through the broker", () => {
     expect(credentials.lookup(match![1]!, "mcp-files").ok).toBe(false);
   });
 
-  it("the same conversation keeps its token across turns; another conversation or changed headers get a new one", async () => {
+  withBroker("the same conversation keeps its token across turns; another conversation or changed headers get a new one", async () => {
     const b = await broker();
     const url = (servers: Record<string, unknown>) => (servers.notion as { url: string }).url;
     const first = url(brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, b));

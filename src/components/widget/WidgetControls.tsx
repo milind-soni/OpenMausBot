@@ -3,7 +3,7 @@ import { Calendar, Check, ChevronsUpDown, LoaderCircle, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
-  WIDGET_LIMITS, widgetNumber, widgetString, widgetTakesOther, type WidgetActionEntry, type WidgetField, type WidgetNode, type WidgetOther, type WidgetValues,
+  WIDGET_LIMITS, threadActionTarget, widgetNumber, widgetString, widgetTakesOther, type WidgetActionEntry, type WidgetField, type WidgetNode, type WidgetOther, type WidgetValues,
 } from "../../../shared/widget";
 import { isWidgetDot, widgetIcon, widgetIconFilled } from "./widget-icons";
 
@@ -76,6 +76,12 @@ export function widgetActionUrl(entry: WidgetActionEntry | undefined): string | 
   const payload = entry?.client ? entry.action.payload : undefined;
   const url = payload && typeof payload === "object" && !Array.isArray(payload) ? payload.url : undefined;
   return typeof url === "string" && /^https?:\/\//i.test(url) ? url : undefined;
+}
+
+export function widgetThreadTarget(entry: WidgetActionEntry | undefined): { botId: string; threadId: string } | { groupId: string; threadId: string } | undefined {
+  const target = entry?.client ? threadActionTarget(entry.action) : undefined;
+  if (!target) return undefined;
+  return target.groupId !== undefined ? { groupId: target.groupId, threadId: target.threadId } : { botId: target.botId!, threadId: target.threadId };
 }
 
 export function WidgetButton({ actionRef, label, look, iconStart, iconEnd, block = false, disabled = false }: {

@@ -14,7 +14,7 @@ async function fixture(t, options = {}) {
     sessionStatus: 200, invalidIdentity: false, invalidEntitlement: false, badUrl: false, failWrite: false, slowToken: null,
     entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 }, timer: null, delay: null, cloud: undefined, expiresIn: 600,
     disk: { status: 404, body: "<!doctype html>not here" }, x: { status: 404, body: { error: "unsupported" } }, pages: { status: 404, body: { error: "unsupported" } }, sessionPage: null, sessionError: null, tokenPage: null, publicConfig: { status: 404, body: { error: "not_found" } },
-    offer: undefined, checkout: { status: 404, body: "<!doctype html>not here" }, interest: { status: 200, body: { ok: true } }, teams: undefined, teamPairing: { status: 404, body: { error: "not_found" } } };
+    offer: undefined, checkout: { status: 404, body: "<!doctype html>not here" }, interest: { status: 200, body: { ok: true } }, teams: undefined, teamPairing: { status: 404, body: { error: "not_found" } }, moved: { status: 404, body: { error: "not_found" } } };
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "fixture-device" }, account: { id: "fixture-account", email: "person@example.test" } });
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
@@ -34,6 +34,7 @@ async function fixture(t, options = {}) {
     if (req.url === "/api/cloud/desktop/services/x" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.x.status, f.x.body);
     if (/^\/api\/cloud\/desktop\/teams\/[^/]+\/pairing$/.test(req.url) && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.teamPairing.status, f.teamPairing.body);
     if (req.url === "/api/cloud/desktop/services/pages" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.pages.status, f.pages.body);
+    if (req.url === "/api/cloud/desktop/moved" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.moved.status, f.moved.body);
     for (const [route, answer] of [["/api/cloud/desktop/checkout", f.checkout], ["/api/cloud/desktop/interest", f.interest]]) {
       if (req.url !== route || req.method !== "POST" || req.headers.authorization !== `Bearer ${accessToken}`) continue;
       if (typeof answer.body === "string") { res.writeHead(answer.status, { "content-type": "text/html" }); return res.end(answer.body); }
@@ -753,4 +754,21 @@ test("the session's teams come with a verified session, each with its Cloud; a t
   await until(() => f.client.state().teams === undefined);
   f.teams = undefined; await f.client.refresh();
   assert.equal(f.client.state().teams, undefined, "an older Admin: no teams");
+});
+
+test("this computer tells the Admin its move is done, and asks for an ended Cloud's export, as itself; as before when it can't say", async t => {
+  const f = await fixture(t), computer = "C".repeat(43);
+  assert.equal(await f.client.reportMove({ installation: computer }), false, "nobody signed in");
+  await f.connect();
+  assert.equal(await f.client.reportMove({ installation: computer }), false, "an Admin that can't take it yet");
+  f.moved = { status: 200, body: { cloudContractVersion: 1, recorded: true } };
+  assert.equal(await f.client.reportMove({ installation: computer }), true);
+  const said = f.requests.findLast(r => r.route === "/api/cloud/desktop/moved");
+  assert.deepEqual([said.method, said.token, JSON.parse(said.body)], ["POST", `Bearer ${accessToken}`, { installation: computer }]);
+  f.moved = { status: 409, body: { error: "not_moved" } };
+  await assert.rejects(f.client.reportMove({ installation: computer }));
+  await assert.rejects(f.client.exportHome({ installation: computer }));
+  assert.deepEqual(JSON.parse(f.requests.findLast(r => r.route === "/api/cloud/desktop/export").body), { installation: computer });
+  await assert.rejects(f.client.exportHome());
+  assert.deepEqual(JSON.parse(f.requests.findLast(r => r.route === "/api/cloud/desktop/export").body), {});
 });

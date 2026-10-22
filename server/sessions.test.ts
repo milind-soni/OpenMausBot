@@ -607,3 +607,59 @@ describe("telling the server a session opened", () => {
     expect(opened).toEqual([["client"], ["admin", "client"]]);
   });
 });
+
+describe("a member's own phone on a Team Cloud", () => {
+  const ADA = { email: "ada@acme.test", role: "member" as const };
+  const HOUR = 60 * 60_000;
+  /** Ada's session from the Admin's signed pairing, as the desktop gets it. */
+  const fromAdmin = (member: { email: string; role: "owner" | "admin" | "member" } = ADA) => {
+    const { code } = registry.openPairing({ scopes: ["client"], member });
+    const paired = registry.exchange({ code, label: "Desktop", source: "a" });
+    if (!paired.ok) throw new Error(paired.error);
+    return registry.authenticate(paired.token)!;
+  };
+  /** A code Ada made from that session, redeemed by her phone. */
+  const phoneOf = (session: { email?: string; teamRole?: "owner" | "admin" | "member"; createdAt: number; memberCheckedAt?: number }) => {
+    const { code } = registry.openPairing({ scopes: ["client"], member: { email: session.email!, role: session.teamRole! }, memberCheckedAt: session.memberCheckedAt ?? session.createdAt });
+    const paired = registry.exchange({ code, label: "Ada's phone", source: "p" });
+    if (!paired.ok) throw new Error(paired.error);
+    return paired;
+  };
+
+  it("opens a session with her address and role that ends within the hour of the Admin's last check, not of the scan", () => {
+    const desktop = fromAdmin();
+    clock += 40 * 60_000;
+    const phone = phoneOf(desktop);
+    const record = registry.authenticate(phone.token)!;
+    expect(record).toMatchObject({ email: ADA.email, teamRole: "member", membershipAuthority: "team", scopes: ["client"], memberCheckedAt: desktop.createdAt });
+    expect(record.expiresAt).toBe(desktop.createdAt + HOUR);
+    clock = record.expiresAt - 60_000;
+    expect(registry.renew(record.id), "renewing never moves past the Admin's check").toBe(false);
+    expect(registry.authenticate(phone.token)?.expiresAt).toBe(desktop.createdAt + HOUR);
+    clock = desktop.createdAt + HOUR;
+    expect(registry.authenticate(phone.token)).toBeNull();
+  });
+
+  it("lives on while the Admin keeps vouching for her in the same role, and ends after a removal or a role change", () => {
+    const desktop = fromAdmin();
+    const phone = phoneOf(desktop);
+    clock += 45 * 60_000;
+    fromAdmin();
+    expect(registry.authenticate(phone.token)?.expiresAt, "the desktop's silent renewal keeps the phone signed in").toBe(clock + HOUR);
+    clock += 45 * 60_000;
+    fromAdmin({ ...ADA, role: "admin" });
+    const end = registry.authenticate(phone.token)!.expiresAt;
+    expect(end, "a phone opened as a member never rides an admin's check").toBe(clock - 45 * 60_000 + HOUR);
+    fromAdmin({ email: "cleo@acme.test", role: "member" });
+    expect(registry.authenticate(phone.token)!.expiresAt, "someone else's check moves nothing").toBe(end);
+    clock = end;
+    expect(registry.authenticate(phone.token), "no check within the hour: removed from the team, the phone signs out").toBeNull();
+  });
+
+  it("never stretches a session the Admin opened itself", () => {
+    const desktop = fromAdmin();
+    clock += 30 * 60_000;
+    fromAdmin();
+    expect(registry.list().find((session) => session.id === desktop.id)?.expiresAt).toBe(desktop.createdAt + HOUR);
+  });
+});

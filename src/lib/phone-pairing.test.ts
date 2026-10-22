@@ -66,6 +66,14 @@ describe("Connect your phone in the account menu", () => {
     expect(connectPhoneEntry("cloud", access(chatOnly))).toBeNull();
   });
 
+  it("on a Team Cloud: to the team, for every member, whatever their role", () => {
+    const member = { kind: "session" as const, id: "s", label: "Desktop", scopes: ["client"], expiresAt: 1, team: { id: "team-acme-1", name: "Acme", role: "member" } };
+    const entry = connectPhoneEntry("cloud", access(member, false));
+    expect(entry).toMatchObject({ target: "cloud", team: "Acme" });
+    expect(t("sidebar.menu.connectPhone.team", { team: entry!.team! })).toBe("to Acme");
+    expect(phoneDestinations(entry, null)).toEqual([{ ...entry, id: "here" }]);
+  });
+
   it("on another server: to the bots here, only for a session that may make a pairing code", () => {
     expect(subtitle(connectPhoneEntry("server", access(admin)))).toBe("to the bots here");
     expect(subtitle(connectPhoneEntry("server", access(owner)))).toBe("to the bots here");

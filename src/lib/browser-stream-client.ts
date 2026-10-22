@@ -36,12 +36,12 @@ export const withAccessQuery = (url: string, access: PreviewStreamAccess): strin
 };
 
 /** The same origin's routes for a bot's browser. */
-export function browserStreamAccess(botId: string, location: Pick<Location, "protocol" | "host"> = window.location): PreviewStreamAccess {
+export function browserStreamAccess(botId: string, location: Pick<Location, "protocol" | "host"> = window.location, scope: Readonly<Record<string, string>> = {}): PreviewStreamAccess {
   const path = `/api/bots/${encodeURIComponent(botId)}/browser`;
   return {
     httpBase: `${location.protocol}//${location.host}${path}`,
     wsBase: `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}${path}`,
-    query: {},
+    query: { ...scope },
     credentials: true,
   };
 }

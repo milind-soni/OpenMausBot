@@ -402,8 +402,10 @@ describe("encrypted full workspace backups", () => {
     const source = directory();
     mkdirSync(join(source, "box"), { mode: 0o700 });
     writeFileSync(join(source, "box", "seccomp.bpf"), Buffer.from([0x20, 0, 0, 0]), { mode: 0o600 });
-    const broker = createNetServer();
-    await new Promise<void>((resolve) => broker.listen(join(source, "box", "broker.sock"), resolve));
+    // The live socket is the Linux box's (a Cloud home): Windows refuses a unix socket at a file path, so there the
+    // folder holds only the filter, and must still be left out.
+    const broker = process.platform === "win32" ? null : createNetServer();
+    if (broker) await new Promise<void>((resolve) => broker.listen(join(source, "box", "broker.sock"), resolve));
     try {
       mkdirSync(join(source, "attachments"));
       writeFileSync(join(source, "attachments", "note.txt"), "ordinary user file");
@@ -412,7 +414,7 @@ describe("encrypted full workspace backups", () => {
       const paths: string[] = readJson(join(source, ".backups", staged.id, "staged", "manifest.json")).entries.map((entry: { path: string }) => entry.path);
       expect(paths).toContain("attachments/note.txt");
       expect(paths.filter((path) => path === "box" || path.startsWith("box/"))).toEqual([]);
-    } finally { await new Promise<void>((resolve) => broker.close(() => resolve())); }
+    } finally { if (broker) await new Promise<void>((resolve) => broker.close(() => resolve())); }
   });
 
   it("leaves the Organization library's downloaded catalog and release files out, and keeps what the runtime added", async () => {

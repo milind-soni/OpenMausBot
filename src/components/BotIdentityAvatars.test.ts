@@ -41,7 +41,7 @@ vi.mock("./DesktopCapabilities", () => ({
 }));
 vi.mock("react-dom", async (original) => ({ ...await original<object>(), createPortal: (children: unknown) => children }));
 import { GroupView, RoomToolChip } from "./GroupView";
-import { UsageSection } from "./UsageSection";
+import { RunRow } from "./UsageSection";
 import { TeamMapPage } from "./TeamMapPage";
 import { BotInstructionsDialog } from "./BotInstructionsDialog";
 const render = (component: Parameters<typeof renderToStaticMarkup>[0]) => {
@@ -72,8 +72,17 @@ describe("uploaded bot identity portraits", () => {
     const html = render(createElement(GroupView, { group: { ...avatarGroup, messages: [] } }));
     expect(html.match(/<img src="\/api\/attachments\/fixture-0.png"/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
   });
-  it.each([["usage", UsageSection], ["team map", TeamMapPage]] as const)("renders the uploaded portrait in %s", (_name, Component) => {
-    expect(render(createElement(Component))).toContain('<img src="/api/attachments/fixture-0.png"');
+  it("renders the uploaded portrait in the team map", () => {
+    expect(render(createElement(TeamMapPage))).toContain('<img src="/api/attachments/fixture-0.png"');
+  });
+  it("renders the uploaded portraits of every bot a usage run brought in", () => {
+    const root = { id: "thread-atlas~t1", title: "Plan the launch", source: "person" as const, startedAt: fixtureAt, endedAt: fixtureAt + 5_000,
+      running: false, timed: true, usageStatus: "complete" as const, bots: [{ id: "atlas", name: "Atlas" }, { id: "juniper", name: "Juniper" }],
+      durationMs: 5_000, costUsd: 0.12, tokens: 1_200, input: 1_000, cachedInput: 400, output: 200, steps: 3, tools: 2, errors: 0 };
+    const html = render(createElement(RunRow, { root, onOpen: vi.fn() }));
+    expect(html).toContain('<img src="/api/attachments/fixture-0.png"');
+    expect(html).toContain('<img src="/api/attachments/fixture-1.png"');
+    expect(html).toContain("Plan the launch");
   });
   it("renders the instructions portrait without losing dialog semantics", () => {
     const html = render(createElement(BotInstructionsDialog, { bot: avatarBots[0]!, onClose: vi.fn() }));

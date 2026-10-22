@@ -1353,7 +1353,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                 ...base(threadId, turnId),
                 type: "thread.token-usage.updated",
                 input: t.inputTokens ?? 0,
-                output: t.outputTokens ?? 0,
+                output: t.outputTokens ?? 0, ...(typeof t.reasoningOutputTokens === "number" ? { reasoning: t.reasoningOutputTokens } : {}),
                 ...(typeof t.cachedInputTokens === "number" ? { cachedInput: t.cachedInputTokens } : {}),
                 ...(last && typeof last.inputTokens === "number" ? { contextTokens: last.inputTokens } : {}),
                 ...(typeof window === "number" && window > 0 ? { contextWindow: window } : {}),

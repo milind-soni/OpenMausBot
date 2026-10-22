@@ -353,6 +353,28 @@ describe("the Product Hunt launch card", () => {
     expect(await launch()).not.toContain(PH);
   });
 
+  it("never while the bots move to My Cloud, nor in the first minutes after; the star and the Cloud offers wait too", async () => {
+    fresh(); returning(); storage.delete(STAR_NOTICE);
+    const line = (move: unknown) => desk.handlers.set("cloud-send:notice", () => ({ ready: true, bots: [], move }));
+    for (const move of [{ phase: "copy", chats: { done: 1, total: 5 } }, { phase: "wait" }, { phase: "finishing" }, { phase: "copy", failing: { error: null } }, { phase: "home-again" }]) {
+      line(move);
+      const html = await launch();
+      expect(html, JSON.stringify(move)).not.toContain(PH); expect(html, JSON.stringify(move)).not.toContain(STAR);
+    }
+    line({ phase: "done", at: NOW - 60_000, phone: false, held: [] });
+    expect(await launch(), "a minute after: still quiet").not.toContain(PH);
+    line(undefined);
+    expect(await settle(), "the done line closed a minute after: still quiet").not.toContain(PH);
+    line({ phase: "done", at: NOW - 6 * 60_000, phone: false, held: [] });
+    expect(await launch(), "some minutes after: the card shows").toContain(PH);
+    line(undefined);
+    expect(await launch(), "no move at all").toContain(PH);
+    desk.handlers.set("cloud-send:notice", () => { throw new Error("cloud-send:notice is only available in this app's window"); });
+    expect(await launch(), "a page main tells nothing").toContain(PH);
+    desk.handlers.set("cloud-send:notice", () => new Promise(() => {}));
+    expect(await launch(), "until main says whether a move goes, nothing shows").not.toContain(PH);
+  });
+
   it("never on a branded build or an organization's desktop, never after the launch window, never over setup or an update", async () => {
     fresh(); f.brand = "file";
     expect(await launch()).not.toContain(PH);

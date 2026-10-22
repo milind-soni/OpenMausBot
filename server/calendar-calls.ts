@@ -274,6 +274,17 @@ export class CalendarCallManager {
     return cloneCall(updated);
   }
 
+  /** Not scheduled again until it is saved again, which works out its next time. */
+  switchOff(id: string): boolean {
+    const call = this.calls.find((candidate) => candidate.id === id);
+    if (!call || call.nextRunAt === null) return false;
+    this.commit(() => {
+      call.nextRunAt = null;
+      call.updatedAt = this.now();
+    });
+    return true;
+  }
+
   linkRoom(id: string, roomId: string): CalendarCall {
     const call = this.calls.find((candidate) => candidate.id === id);
     if (!call) throw new Error("Call not found");

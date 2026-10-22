@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { namedUploadPaths, uploadableFiles } from "./browser-upload.ts";
@@ -69,5 +69,24 @@ describe("the name a page sees", () => {
     const [fresh] = namedUploadPaths([{ file: join(attachments, "cv.pdf"), name: "new.pdf" }], folder);
     expect(existsSync(old!)).toBe(false);
     expect(existsSync(fresh!)).toBe(true);
+  });
+});
+
+describe("the files a boxed browser is given", () => {
+  it("links every file into the one folder the box shows Chrome, under the person's name or its own", () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-boxed-upload-"));
+    const source = join(root, "work", "report.txt"), stored = join(root, "attachments", "a1b2.pdf");
+    mkdirSync(dirname(source), { recursive: true });
+    mkdirSync(dirname(stored), { recursive: true });
+    writeFileSync(source, "report");
+    writeFileSync(stored, "pdf");
+    const folder = join(root, "profile", "omb-uploads");
+    const linked = namedUploadPaths([{ file: source, name: null }, { file: stored, name: "Invoice.pdf" }], folder, Date.now(), { everyFile: true });
+    expect(linked.every((path) => path.startsWith(folder + sep))).toBe(true);
+    expect(linked.map((path) => basename(path))).toEqual(["report.txt", "Invoice.pdf"]);
+    expect(readFileSync(linked[0]!, "utf8")).toBe("report");
+    // Unboxed, a file already under its own name is given as it is.
+    expect(namedUploadPaths([{ file: source, name: null }], folder)).toEqual([source]);
+    rmSync(root, { recursive: true, force: true });
   });
 });

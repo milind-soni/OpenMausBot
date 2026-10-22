@@ -18,8 +18,10 @@ export interface CloudMachine {
   power?: import("./cloud-power.mjs").CloudPower;
   /** The Admin lets this account's computer move to it now (its `moves` gate). */
   moves?: true;
-  /** It ended (a trial not paid, a plan cancelled) and the Admin still holds it until it is deleted. */
-  hold?: { until: number };
+  /** It ended (a trial not paid, a plan cancelled) and the Admin still holds it until it is deleted. `homecoming`: the one
+   * computer its things come home to (its installation id and name), among those whose move is done; every other computer
+   * keeps its own copy. Absent while none can be chosen: every computer comes home. */
+  hold?: { until: number; homecoming?: { installationId: string; name: string } };
 }
 /** A payment received but not yet linked to this account: nobody pays twice. */
 export interface CloudPurchase { state: "confirming" | "held"; tier?: string; paidAt?: number }
@@ -98,6 +100,7 @@ export declare const CLOUD_MACHINE_STATUSES: readonly CloudMachineStatus[];
 export declare const CLOUD_MACHINE_CONNECTABLE: readonly CloudMachineStatus[];
 export declare const CLOUD_SETUP_STEPS: readonly CloudSetupStep[];
 export declare const CLOUD_UNREACHABLE_CAUSES: readonly CloudUnreachableCause[];
+export declare const INSTALLATION_ID: RegExp;
 export declare function parseCloudPower(input: unknown): import("./cloud-power.mjs").CloudPower | null;
 export declare function parseCloudSummary(input: unknown): CloudMachine | null;
 export type CloudTeamRole = "owner" | "admin" | "member";

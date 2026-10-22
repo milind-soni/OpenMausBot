@@ -8,6 +8,7 @@ import type { IncomingMessage } from "node:http";
 import { dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
 
+import type { Audience } from "../audience.ts";
 import { storeUploads } from "../browser-upload.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { LiveRouter } from "../browser/engines.ts";
@@ -31,12 +32,15 @@ type Failure = { status: number; error: string };
 export interface BrowserViewerRouteDeps {
   upgrades: Upgrades;
   viewers: Pick<LiveRouter, "open" | "action" | "stream" | "fileChooserOffered" | "answerFileChooser" | "download">;
-  /** A bot with its browser on, and the session and spec that browser runs as. */
-  browser(botId: string): Promise<{ botId: string; session: string; spec: Spec } | Failure>;
+  /** Whose browser of the bot this person's view shows (`threadId` names the conversation they look at); null when
+   * they may not see that conversation. */
+  audience(auth: RequestAuth, threadId: string | null): Audience | null;
+  /** A bot with its browser on, and the session and spec that audience's browser runs as. */
+  browser(botId: string, audience: Audience): Promise<{ botId: string; session: string; spec: Spec } | Failure>;
   /** Hosted workspaces check the member's sign-in again before a view opens. */
   authorize(req: IncomingMessage, auth: RequestAuth): Promise<Failure | null>;
   /** Whether a view opened for `session` still shows the bot's current browser to a live sign-in. */
-  current(botId: string, session: string, auth: RequestAuth): boolean;
+  current(botId: string, session: string, auth: RequestAuth, audience: Audience): boolean;
   /** Why a person may not restart this browser now, or null. */
   restartRefusal(session: string): string | null;
   dataDir: string;
@@ -109,13 +113,16 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       if (!pending) return json(res, 426, { error: "WebSocket upgrade required" });
       if (!isSameOrigin(req)) return json(res, 403, { error: "forbidden: cross-origin request" });
     }
-    const browser = await deps.browser(botId);
+    const threadId = url.searchParams.get("threadId");
+    const audience = deps.audience(auth, threadId);
+    if (!audience) return json(res, 404, { error: "no such conversation" });
+    const browser = await deps.browser(botId, audience);
     if ("error" in browser) return json(res, browser.status, { error: browser.error });
     // Discovery may have awaited while the portal closed this owner's streams: never open a late replacement on the earlier authorization.
     const failure = await deps.authorize(req, auth);
     if (failure) return json(res, failure.status, { error: failure.error });
     const owner = ownerOf(auth);
-    const isCurrent = () => deps.current(browser.botId, browser.session, auth);
+    const isCurrent = () => deps.audience(auth, threadId) === audience && deps.current(browser.botId, browser.session, auth, audience);
 
     if (live) {
       if (method === "GET" && live[2] === "live") {

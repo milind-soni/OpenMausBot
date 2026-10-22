@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { arrivedCounts, CHECK_PASSES, createOneHome, FAILING_LINE_MS, FROZEN_RETRY_MS, KEPT_MS, QUIET_MS, switchOn } from "./one-home.mjs";
+import { arrivedCounts, CHECK_PASSES, COPY_RETRY_MS, createOneHome, FAILING_LINE_MS, FROZEN_RETRY_MS, KEPT_MS, QUIET_MS, switchOn } from "./one-home.mjs";
 import { oneHomeCloud } from "./one-home-main.mjs";
 
 const CLOUD = "https://omb-t-1.fly.dev";
@@ -44,7 +44,7 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
           },
           async check() { w.checked++; return { ok: checks.shift() ?? true }; },
           switches: () => switches,
-          snapshot: () => ({ running: null, whole: { result: { notes: [{ kind: "held", connection: "OpenRouter" }] } } }),
+          snapshot: () => ({ running: w.running ?? null, whole: { result: { notes: [{ kind: "held", connection: "OpenRouter" }] } } }),
         },
         local: {
           async freeze() {
@@ -108,13 +108,39 @@ test("a new buyer's move runs every phase and ends with home on My Cloud, this c
   assert.equal(w.phone.stopped, 1);
   assert.deepEqual(w.opened, ["cloud"]);
   assert.equal(w.home.away(), true);
-  assert.deepEqual(w.home.view(), { phase: "done", counts: { bots: 2, skills: 0, logins: 1, onePassword: false, chats: 1, routines: 1 }, phone: true, held: ["OpenRouter"] });
+  assert.deepEqual(w.home.view(), { phase: "done", at: w.journal.doneAt, counts: { bots: 2, skills: 0, logins: 1, onePassword: false, chats: 1, routines: 1 }, phone: true, held: ["OpenRouter"] });
   assert.equal(w.home.seen(), null, "the done line shows until it is closed");
 
   await w.relaunch().kick();
   assert.equal(w.lent.length, 1, "a relaunch lends nothing again");
   assert.equal(w.phone.stopped, 1);
   assert.equal(w.server.unfreezes, 0);
+});
+
+test("a Cloud too old to take a move says My Cloud is updating, never that the move fails, and the move starts once it has", async () => {
+  // Seen in the real app on Oct 22: a new app with a Cloud still on the older image, and the line said "Moving your bots to
+  // My Cloud…" for good.
+  const outdated = () => Object.assign(new Error("My Cloud is updating. Your bots move there by themselves when it's done."), { code: "outdated" });
+  const w = world({ moves: [outdated(), outdated(), new Error("My Cloud did not answer.")] });
+  await w.home.kick();
+  assert.deepEqual(w.home.view(), { phase: "copy", updating: true });
+  assert.equal(w.journal.failingSince, undefined, "My Cloud updating is not the move failing");
+  assert.equal(w.journal.retryAt, w.now() + COPY_RETRY_MS[0]);
+  w.advance(FAILING_LINE_MS + COPY_RETRY_MS[0]);
+  await w.tick();
+  assert.deepEqual(w.home.view(), { phase: "copy", updating: true }, "a day of it still says why, with nothing to try again");
+  w.running = { reason: "move" };
+  assert.deepEqual(w.home.view(), { phase: "copy" }, "a pass on its way is the move again");
+  w.running = null;
+  // Updated, My Cloud failed once in an ordinary way: the line is the move's own again.
+  w.advance(COPY_RETRY_MS[1]);
+  await w.tick();
+  assert.deepEqual(w.home.view(), { phase: "copy" });
+  assert.equal(w.journal.failingSince, w.now());
+  w.advance(COPY_RETRY_MS[2]);
+  await w.tick();
+  assert.equal(w.journal.phase, "done");
+  assert.equal(w.journal.updating, undefined);
 });
 
 test("the freeze waits for a quiet moment: nobody typing for 30 s, and no bot still working", async () => {
@@ -181,6 +207,22 @@ test("a refusal My Cloud named by a serverError key reaches the failing line wit
   await other.home.kick();
   for (let hour = 0; hour < 25; hour++) { other.advance(FROZEN_RETRY_MS); await other.tick(); }
   assert.deepEqual(other.home.view().failing, { error: "No." }, "no key but a serverError one is kept");
+});
+
+test("a frozen pass the Admin refused for too many connections lifts the freeze and goes again in minutes, never an hour", async () => {
+  // Seen in the real app on Oct 22: killed in the final pass and relaunched, the move's next owner session got 429 from the
+  // Admin's pairing limit (10 a device in 10 minutes; every pass opens one), and the move waited an hour.
+  const limited = new Error("Cloud request failed.", { cause: new Error("Cloud request failed.", { cause: Object.assign(new Error("Cloud request failed."), { status: 429 }) }) });
+  const w = world({ moves: [undefined, limited] });
+  await w.home.kick();
+  assert.deepEqual(w.passes, ["copy", "final"]);
+  assert.equal(w.journal.phase, "copy");
+  assert.equal(w.server.frozen, false, "the freeze is lifted");
+  assert.equal(w.journal.hourly, undefined);
+  assert.equal(w.journal.retryAt, w.now() + COPY_RETRY_MS[0]);
+  w.advance(COPY_RETRY_MS[0]);
+  await w.tick();
+  assert.equal(w.journal.phase, "done");
 });
 
 test("an app killed at any phase goes on from the journal: nothing is switched on twice, and nothing is lifted after the switch", async () => {
@@ -256,7 +298,8 @@ test("when My Cloud ends after the move, this computer is home again at once, th
   assert.equal(w.journal.phase, "back");
   assert.equal(w.restarted, 1, "the app opens again to finish the restore");
   await w.relaunch().kick();
-  assert.deepEqual(w.localCalls.map(([method, route, body]) => [method, route, body]).sort(), [["PATCH", "/api/routines/r1", { enabled: true }], ["PATCH", "/api/routines/r9", { enabled: true }]]);
+  assert.deepEqual(w.localCalls.map(([method, route, body]) => [method, route, body]).sort(), [["PATCH", "/api/routines/r1", { enabled: true }], ["PATCH", "/api/routines/r9", { enabled: true }],
+    ["POST", "/api/cloud-send/home", { v: 1 }]], "and the bots whose webhooks moved say their address is here again");
   assert.equal(w.journal.switchBack, undefined);
   assert.deepEqual(w.home.view(), { phase: "back" });
   w.home.seen();

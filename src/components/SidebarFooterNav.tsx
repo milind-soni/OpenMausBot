@@ -1,4 +1,4 @@
-import { FolderOpen, Puzzle, Sun, UsersRound, Zap } from "lucide-react";
+import { FolderOpen, Puzzle, UsersRound, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useAppTriggers } from "@/lib/app-triggers";
@@ -59,25 +59,6 @@ function NavRow({
         />
       )}
     </button>
-  );
-}
-
-/** The Today page, at the top of the sidebar in every mode, like an inbox. */
-export function SidebarTodayNav({ density }: { density: SidebarDensity }) {
-  const { state, dispatch } = useStore();
-  const iconsOnly = density === "icons";
-  const active = state.activeView === "today";
-  return (
-    <div className={iconsOnly ? "flex justify-center px-2 pb-1" : "px-2 pb-2"}>
-      <NavRow
-        id="today"
-        label={t("sidebar.nav.today")}
-        iconsOnly={iconsOnly}
-        active={active}
-        icon={(on) => <Sun size={iconsOnly ? 20 : 18} className={on ? "text-accent" : "text-ink-secondary"} />}
-        onClick={() => dispatch({ type: "showToday" })}
-      />
-    </div>
   );
 }
 

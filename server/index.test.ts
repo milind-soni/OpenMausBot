@@ -171,6 +171,9 @@ let connectorAccountsGate: DeferredGate | null = null;
 // Project keys served by the stubbed marketplace catalog; empty means composio falls back to its curated list.
 let connectorCatalogToolkits: Array<{ slug: string; name: string }> = [];
 const connectorLinkRequests: Array<{ toolkit: string; alias?: string }> = [];
+// The ak_good project's own auth configs (a Xero OAuth app), and the auth_configs each new Session named.
+let connectorAuthConfigs: Array<{ id: string; status: string; is_composio_managed: boolean; toolkit: { slug: string } }> = [];
+const connectorSessionAuthConfigs: Array<Record<string, string> | undefined> = [];
 const connectorRelayCalls: Array<{ transportSessionId: string; body: any }> = [];
 const browserCapabilityCalls: Array<{ operation: string; authorization?: string; body: any }> = [];
 let browserRevokeFailuresRemaining = 0;
@@ -881,6 +884,12 @@ beforeAll(async () => {
         items: req.url.startsWith("/api/v3.1/connected_accounts") ? connectorAccounts : connectorCatalogToolkits,
       }));
     }
+    if (req.url?.startsWith("/api/v3.1/auth_configs") && req.headers["x-api-key"] === "ak_good") {
+      const id = req.url.match(/^\/api\/v3\.1\/auth_configs\/([\w-]+)/)?.[1];
+      const found = id ? connectorAuthConfigs.find((config) => config.id === id) : undefined;
+      res.writeHead(id && !found ? 404 : 200, { "content-type": "application/json" });
+      return res.end(JSON.stringify(id ? found ?? { error: { message: "Auth config not found" } } : { items: connectorAuthConfigs }));
+    }
     if (req.url?.startsWith("/api/v3.1/tool_router/session")) {
       if (req.headers["x-api-key"] !== "ak_good") {
         res.writeHead(401, { "content-type": "application/json" });
@@ -898,6 +907,7 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ redirect_url: "https://connect.composio.dev/fixture-only" }));
       }
+      if (req.method === "POST") connectorSessionAuthConfigs.push(body.auth_configs);
       res.writeHead(201, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         session_id: "trs_config_test",
@@ -8796,6 +8806,29 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("mounts the data-dashboards skill, with the folder that holds its template, when the person asks for a dashboard", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, {
+        text: "Build me a sales dashboard from orders.csv",
+      })).status).toBe(202);
+      const seen = await readJsonFileWhenReady<{ systemPrompt?: string }>(fakeClaudeDump, 15_000);
+      const system = seen.systemPrompt ?? "";
+      const root = /<openmaus-skill id="data-dashboards" version="[^"]+" root="([^"]+)">/.exec(system)?.[1];
+      expect(root).toBeTruthy();
+      expect(existsSync(join(root!, "dashboard.html"))).toBe(true);
+      expect(system).toContain("publish_page");
+      expect(system).not.toContain('<openmaus-skill id="create-verification-skill"');
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("injects the bot's standing instructions (soul) into a real turn, directly after the persona", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Kiwi", title: "Tracker" })).body.bot;
     try {
@@ -11392,6 +11425,38 @@ describe("harness HTTP API", () => {
       expect((await api("GET", `${card(other, "status")}?threadId=${bot.threadId}`)).body.connected).toBe(false);
     } finally {
       connectorAccounts = [];
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("checks a bot's auth_config_id in the person's Composio project before its card shows, and connects with it", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    connectorAuthConfigs = [{ id: "ac_xero_e2e", status: "ENABLED", is_composio_managed: false, toolkit: { slug: "xero" } }];
+    try {
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const request = async (authConfigId: string) => {
+        const response = await fetch(`${BASE}/api/internal/connectors/request`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({ botId: bot.id, threadId: bot.threadId, resumeKey: "auth-config-fixture", items: [{ slug: "xero", authConfigId }] }),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+      const cards = async () => ((await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages as any[])
+        .filter((message) => message.kind === "connector");
+      const missing = await request("ac_missing_e2e");
+      expect(missing).toMatchObject({ status: 400, body: { error: expect.stringMatching(/has no auth config ac_missing_e2e/) } });
+      expect(await cards()).toEqual([]);
+
+      const requested = await request("ac_xero_e2e");
+      expect(requested.status).toBe(200);
+      const authorized = await api("POST", `/api/bots/${bot.id}/connector-cards/${requested.body.messageIds[0]}/authorize`, { threadId: bot.threadId });
+      expect(authorized.status).toBe(200);
+      expect(connectorLinkRequests.at(-1)).toEqual({ toolkit: "xero" });
+      expect(connectorSessionAuthConfigs).toContainEqual({ xero: "ac_xero_e2e" });
+    } finally {
+      connectorAuthConfigs = [];
       await api("DELETE", `/api/bots/${bot.id}`);
     }
   });

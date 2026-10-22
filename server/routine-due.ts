@@ -2,11 +2,13 @@
 // (server/cloud-power.ts). Pure over RoutineManager's routines and runs.
 import type { Routine, RoutineRun } from "./routines.ts";
 
-type Due = Pick<Routine, "enabled" | "nextRunAt">;
+type Due = Pick<Routine, "enabled" | "nextRunAt" | "checks" | "wakeAt">;
 type Run = Pick<RoutineRun, "status" | "retryAt">;
 const startsLater = (run: Run, now: number) => run.status === "queued" && (run.retryAt ?? 0) > now;
-/** Every time a run is due: enabled routines' next runs and queued runs' retries. */
-const dueTimes = (routines: readonly Due[], runs: readonly Run[], now: number) => [...routines.filter((routine) => routine.enabled).map((routine) => routine.nextRunAt),
+/** Every time a run is due: enabled routines' next runs and queued runs' retries. A routine with checks counts only the
+ * next time they have something to do on time: its plain checks run whenever the machine is awake anyway, and never keep
+ * it awake or wake it. */
+const dueTimes = (routines: readonly Due[], runs: readonly Run[], now: number) => [...routines.filter((routine) => routine.enabled).map((routine) => routine.checks ? routine.wakeAt : routine.nextRunAt),
   ...runs.filter((run) => startsLater(run, now)).map((run) => run.retryAt)].filter((at): at is number => typeof at === "number");
 
 /** Hold the desktop awake: a run that started (or waits on a person), or one due within the horizon. */

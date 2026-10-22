@@ -2,11 +2,13 @@
 // journal, this computer's server's freeze, My Cloud's owner sessions, the person's typing, and coming home when My
 // Cloud ends (one-home-again.mjs). The Admin's word decides: a move starts only for an account it lets move, to a Cloud
 // that is ready, and a Cloud it holds after it ended is the one signal that brings everything home.
+import { createHash } from "node:crypto";
 import { createReadStream, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
+import { createMoveSession } from "./move-session.mjs";
 import { createHomeAgain } from "./one-home-again.mjs";
 import { createOneHome } from "./one-home.mjs";
 import { installTeamMove } from "./team-move-main.mjs";
@@ -14,12 +16,20 @@ import { installTeamMove } from "./team-move-main.mjs";
 const MOVE_LABEL = "Move to My Cloud";
 const HOME_LABEL = "Bring My Cloud home";
 
-/** One home's view of the person's Cloud, from the Admin's last verified word; null while nobody is signed in. */
+/** This computer as the Admin knows it, the same across sign-outs and sign-ins: a hash of its own server's identity, so
+ * the identity itself never leaves it. */
+export function installationOf(environmentId) {
+  return createHash("sha256").update(`openmausbot-installation:${environmentId}`).digest("base64url");
+}
+
+/** One home's view of the person's Cloud, from the Admin's last verified word; null while nobody is signed in. An ended
+ * Cloud's `homecoming` is the computer its things come home to; `signIn`, this app's sign-in. */
 export function oneHomeCloud(state) {
   const account = state?.account?.id;
   if (typeof account !== "string" || !account) return null;
   const connected = state.status === "connected", machine = connected ? state.machine ?? null : null;
   const trialOn = ["active", "ending"].includes(state.trial?.state ?? "");
+  const homecoming = machine?.hold?.homecoming ?? null;
   return {
     origin: machine?.origin ?? null,
     account,
@@ -28,6 +38,8 @@ export function oneHomeCloud(state) {
     moves: connected && machine?.moves === true,
     ended: connected && Boolean(machine?.hold),
     paid: connected && state.entitlement?.status === "active" && !trialOn,
+    ...(homecoming ? { homecoming: { installationId: homecoming.installationId, name: homecoming.name } } : {}),
+    ...(connected && typeof state.deviceId === "string" && state.deviceId ? { signIn: state.deviceId } : {}),
   };
 }
 
@@ -76,7 +88,10 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
   let lastInput = 0;
   const watched = new WeakSet();
   let teamMove = null;
-  const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }), move: () => home, teamMove: () => teamMove });
+  // One owner session for the whole move, every pass and check and the switch: each new one is one of the Admin's codes.
+  const moveSession = createMoveSession({ open: (target) => openOwnerSession(target, fetchImpl, { label: MOVE_LABEL, background: false }) });
+  const send = installCloudSend({ ...sendDeps, local: (route, init) => localRequest(route, { method: init?.method ?? "GET", signal: AbortSignal.timeout(30_000) }), move: () => home, teamMove: () => teamMove,
+    moveSession });
   teamMove = installTeamMove({ ipcMain: sendDeps.ipcMain, cloudPage: sendDeps.cloudPage, home: sendDeps.home, account: () => account(), fetch: fetchImpl, openTeam,
     file: () => join(dirname(journalFile()), "team-move-send.json"), journalFile: () => join(dirname(journalFile()), "team-moves.json"), ...(teamJournal ? { journal: teamJournal } : {}),
     onChange: () => send.publish(), log });
@@ -103,6 +118,14 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     },
   };
   const cloudOrigin = () => journal.read()?.cloud?.origin ?? null;
+  let known = null;
+  /** This computer's installation (`installationOf`), once its server has said who it is; null until then. */
+  const installation = async () => {
+    if (known) return known;
+    const id = (await local.json("/.well-known/openmausbot/environment").catch(() => null))?.environmentId;
+    if (typeof id === "string" && id) known = installationOf(id);
+    return known;
+  };
   const target = () => {
     const client = account(), origin = cloudOrigin() ?? oneHomeCloud(client?.state())?.origin;
     if (!client || !origin) throw new Error("This computer has no My Cloud yet.");
@@ -111,7 +134,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
 
   const again = createHomeAgain({
     async exportGrant() {
-      const asked = await account()?.exportHome();
+      const asked = await account()?.exportHome({ installation: (await installation()) ?? undefined });
       if (!asked) throw new Error("Sign in to MausBot Cloud first.");
       // The code goes only to the Cloud this computer moved to.
       if ("grant" in asked && asked.grant.origin !== cloudOrigin()) throw new Error("This is not the Cloud this computer moved to.");
@@ -139,8 +162,8 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
         if (!got.ok || got.body?.frozen !== true) throw Object.assign(new Error("OpenMausBot on this computer could not pause."), { status: got.status });
         return { frozen: true };
       },
-      async unfreeze() {
-        const got = await local.call("DELETE", "/api/move/freeze");
+      async unfreeze(options) {
+        const got = await local.call("DELETE", "/api/move/freeze", options?.automations === "off" ? { automations: "off" } : undefined);
         if (!got.ok) throw Object.assign(new Error("OpenMausBot on this computer could not go on again."), { status: got.status });
       },
       frozen: async () => (await local.json("/api/move/freeze"))?.frozen === true,
@@ -149,9 +172,15 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
         if (!got.ok) throw Object.assign(new Error("This computer's copy could not be deleted."), { status: got.status });
       },
     },
-    session: () => openOwnerSession(target(), fetchImpl, { label: MOVE_LABEL, background: false }),
+    session: () => moveSession.open(target()),
+    release: () => moveSession.end(),
     lend, phone, openHome, openLocal, restart, version, log,
     again,
+    installation,
+    async reportMove() {
+      const client = account(), mine = await installation();
+      return Boolean(client?.reportMove && mine && await client.reportMove({ installation: mine }));
+    },
     lastInput: typed,
     onChange: () => send.publish(),
   });
@@ -163,7 +192,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     /** Home is My Cloud: this computer's own server is frozen for good, and its phone link stays off. */
     away: () => home.away(),
     view: () => home.view(),
-    close: () => { teamMove.close(); home.close(); },
+    close: () => { teamMove.close(); home.close(); void moveSession.end(); },
     /** A bot moving from My Cloud into a team (team-move-main.mjs). */
     teamMove,
     oneHome: home,

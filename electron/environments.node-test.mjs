@@ -163,7 +163,7 @@ test("with My Cloud, the switcher says first which side has which bots, and unde
   const state = { environments: [{ id: "cloud", name: "My Cloud", origin: "https://omb-u-1.fly.dev" }], activeId: "cloud" };
   const clicked = [];
   const send = { waiting: { bots: 2, total: 2 }, onSend: () => clicked.push("send"), onOpen: () => clicked.push("open") };
-  const options = await env.placesMenuOptions({ cloud: state.environments[0], activeId: "cloud", platform: "win32", send,
+  const options = await env.placesMenuOptions({ cloud: state.environments[0], home: true, platform: "win32", send,
     localBots: async () => ({ bots: [{ name: "Ember" }] }) });
   const items = env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {}, sublabels: { cloud: "Always on" }, ...options });
   assert.deepEqual(items.map((item) => item.id ?? item.type), ["workspace-places", "separator", "workspace-local", "workspace-cloud", "workspace-copy-to-cloud", "separator", "workspace-connect", "workspace-forget"]);
@@ -176,7 +176,7 @@ test("with My Cloud, the switcher says first which side has which bots, and unde
   line.click();
   assert.deepEqual(clicked, ["send"]);
   const mac = env.workspaceMenuTemplate(state, { onSwitch() {}, onConnect() {}, onForget() {}, sublabels: { cloud: "Always on" },
-    ...await env.placesMenuOptions({ cloud: state.environments[0], activeId: "local", platform: "darwin", send: { ...send, waiting: { bots: 0, total: 0 } }, localBots: async () => ({ bots: [] }) }) });
+    ...await env.placesMenuOptions({ cloud: state.environments[0], platform: "darwin", send: { ...send, waiting: { bots: 0, total: 0 } }, localBots: async () => ({ bots: [] }) }) });
   assert.equal(mac.find((item) => item.id === "workspace-cloud").label, "My Cloud");
   assert.equal(mac.find((item) => item.id === "workspace-cloud").sublabel, "Always on");
   assert.equal(mac.find((item) => item.id === "workspace-places").label, "This computer has no bots of its own yet. My Cloud has its own.");
@@ -184,6 +184,14 @@ test("with My Cloud, the switcher says first which side has which bots, and unde
   assert.equal(open.label, "This computer and My Cloud…");
   open.click();
   assert.deepEqual(clicked, ["send", "open"]);
+});
+
+test("someone who has not moved hears their bots live on this computer, even with My Cloud open in the window", async () => {
+  // Seen in the real app on Oct 22: moves not on yet, My Cloud opened from the switcher, and it said "Your bots live on My Cloud".
+  const options = await env.placesMenuOptions({ cloud: { id: "cloud", name: "My Cloud" }, platform: "linux", localBots: async () => ({ bots: [{ name: "Scout" }, { name: "Quill" }] }) });
+  assert.equal(options.places, "These bots live on this computer: Scout and Quill. My Cloud has its own.");
+  const moved = await env.placesMenuOptions({ cloud: { id: "cloud", name: "My Cloud" }, home: true, platform: "linux", localBots: async () => ({ bots: [{ name: "Scout" }] }) });
+  assert.equal(moved.places, "Your bots live on My Cloud. This computer has its own: Scout.");
 });
 
 test("the send line counts bots first, then everything else, and is absent when nothing waits", () => {
@@ -199,10 +207,10 @@ test("the places line names this computer's bots briefly, says nothing when its 
   assert.equal(env.placesLine({ onCloud: true, localBots: ["Ember", "Juno", "Kit", "Lark"] }), "Your bots live on My Cloud. This computer has its own: Ember, Juno and 2 more.");
   assert.equal(env.placesLine({ onCloud: false, cloudName: "Studio Cloud", localBots: ["Ember"] }), "These bots live on this computer: Ember. Studio Cloud has its own.");
   assert.equal(env.placesLine({ onCloud: true, localBots: [] }), "Your bots live on My Cloud. This computer has none of its own.");
-  const quiet = await env.placesMenuOptions({ cloud: { id: "cloud", name: "My Cloud" }, activeId: "cloud", platform: "win32", send: { waiting: null, onSend() {}, onOpen() {} }, localBots: async () => { throw new Error("timeout"); } });
+  const quiet = await env.placesMenuOptions({ cloud: { id: "cloud", name: "My Cloud" }, home: true, platform: "win32", send: { waiting: null, onSend() {}, onOpen() {} }, localBots: async () => { throw new Error("timeout"); } });
   assert.equal("places" in quiet, false);
   assert.ok(quiet.copyToCloud);
-  assert.deepEqual(await env.placesMenuOptions({ cloud: null, activeId: "local", platform: "win32", localBots: async () => ({ bots: [] }) }), { foldSublabels: true });
+  assert.deepEqual(await env.placesMenuOptions({ cloud: null, platform: "win32", localBots: async () => ({ bots: [] }) }), { foldSublabels: true });
 });
 
 test("native window identity distinguishes hosted HTML, companion data, and the local workspace", () => {

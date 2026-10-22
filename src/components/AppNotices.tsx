@@ -19,6 +19,7 @@ import { CLOUD_NOTICE_CARD, cloudNoticeStep, CloudNoticeCard } from "./CloudNoti
 import { CLOUD_PRO_POPUP_SOURCE, CloudProPopup, cloudProCloudPageView, cloudProPopupView, reportCloudProPopup, useDesktopNotices, useOtherDialogOpen,
   type CloudProPopupAction } from "./CloudProPopup";
 import { CloudTrialIntroCard } from "./CloudTrialIntro";
+import { useMoveQuiet } from "./CloudSendStrip";
 import { CloudTrialNoticeCard, useCloudPlanSnapshot } from "./CloudTrialNotice";
 import { LinkButton, NoticeCard, NoticeToast, NotNowButton } from "./NoticeCard";
 import { localDesktopPage } from "./onboarding/WelcomeGate";
@@ -69,6 +70,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const [popupShown, setPopupShown] = useState(false);
   const updater = useUpdaterState();
   const intent = useCloudIntent();
+  const moving = useMoveQuiet(now);
   useEffect(() => {
     if (!bridge) return;
     let active = true, updated = false;
@@ -132,14 +134,14 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   };
   const cards = Boolean(bridge || planBridge);
   const notice = !closed && !waits && (cards || popupHere) ? nextNotice({
-    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending ? false : popupState === "loading" || (popupView !== null && popupBlocked) ? null : popupView !== null,
-    [PRODUCT_HUNT_NOTICE]: !cards || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
-      : organization === null ? null : !organization,
-    [CLOUD_INTRO]: introDue(),
+    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving ? false : popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
+    [PRODUCT_HUNT_NOTICE]: !cards || moving || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
+      : organization === null || moving === null ? null : !organization,
+    [CLOUD_INTRO]: moving ? false : moving === null ? null : introDue(),
     [CLOUD_TRIAL_NOTICE]: planBridge && plan === null ? null : Boolean(key && (trialDue || trialOpen === key)),
     [CLOUD_NOTICE]: !view ? false : view.kind === "unknown" ? null
       : Boolean(kind && !noticeSeen(record, CLOUD_NOTICE_CARD[kind].dismissed)),
-    [STAR_NOTICE]: Boolean(bridge) && brandStatus().source !== "file" && usedBefore(state.bots),
+    [STAR_NOTICE]: !bridge || moving || brandStatus().source === "file" || !usedBefore(state.bots) ? false : moving === null ? null : true,
   }, id => id === CLOUD_INTRO ? stage === "done" && !introOpen
     : id === STAR_NOTICE || id === PRODUCT_HUNT_NOTICE ? noticeSeen(record, id) : false) : null;
 

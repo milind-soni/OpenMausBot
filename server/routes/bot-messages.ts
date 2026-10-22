@@ -4,6 +4,7 @@ import { z } from "zod";
 import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { isPersistentQuestionCard } from "../../shared/ask-question.ts";
 import { normalizeReaction, reactionAnswer } from "../../shared/reactions.ts";
+import type { WidgetAction } from "../../shared/widget.ts";
 import type { ResolvedSender, SteerQueueReason } from "../../shared/wire.ts";
 import { admit } from "../admission.ts";
 import { dismissQuestionCard } from "../card-dismissal.ts";
@@ -108,6 +109,10 @@ export interface BotMessageRouteDeps {
   closeOpenApprovals(threadId: string): void;
   /** The outcome of a card the harness raised itself (a peer approval, a quota-switch offer); undefined for any other card. */
   harnessCardOutcome(threadId: string, requestId: string, behavior: Behavior, message: unknown): Promise<string | undefined>;
+  /** What a press on one of the bot's own server-built cards is about, from the server's records; null leaves the press the person's plain answer. */
+  pressRecords(bot: BotRecord, action: WidgetAction): string | null;
+  /** A press the server answers itself, with no turn: handled, refused (not the owner or an admin), or null for an ordinary press. */
+  serverPress(bot: BotRecord, threadId: string, messageId: string, action: WidgetAction, auth: RequestAuth): "handled" | "refused" | null;
   /** Shows a 👍 or 👎 relayed from another app on the message it answered, as that person's reaction. */
   relayedReaction(threadId: string, messageId: string, person: { email?: string; name?: string }, emoji: string): void;
   /** The conversation an answer to this card belongs to: a run's own, for the copy its automation posted in a chat. */
@@ -142,7 +147,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup,
     resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
     deliverLateQuestionAnswer, interruptDirectThread, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
-    cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, relayedReaction, answeredIn,
+    cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, pressRecords, serverPress, relayedReaction, answeredIn,
   } = deps;
   const pinnedClientThread = pinnedClientThreadGuard(store);
   /** widget -> sendId of a press on its way in: a second tap before acceptance must not send a second answer. */
@@ -191,19 +196,25 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const trigger: UsageTrigger = onBehalfOf
         ? { kind: "user", ...(onBehalfOf.email ? { email: onBehalfOf.email } : {}), ...(onBehalfOf.name ? { label: onBehalfOf.name } : {}) }
         : usageTriggerFor(auth);
-      // acceptDirectSend checks these again; nothing awaits between.
-      const refused = directSendRefusal(bot.id, threadId);
-      if (refused) return json(res, refused.status, refused.body);
+      // Security invariant: another bot's thread answers like a missing one, before anything reads a widget in it.
+      if (pressed && !store.taskByThread(bot.id, threadId)) return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
       const sendId = parseSendId(body.sendId);
       const press = pressed ? prepareWidgetPress(store, threadId, body.widgetAction, sendId) : null;
       if (press && !press.ok) return json(res, press.status, { error: press.error });
+      const answered = press ? serverPress(bot, threadId, press.messageId, press.action, auth) : null;
+      if (answered === "handled") return json(res, 202, { ok: true, threadId, handled: true });
+      if (answered === "refused") return json(res, 403, { error: "Only the owner or an admin can do that." });
+      // acceptDirectSend checks these again; nothing awaits between.
+      const refused = directSendRefusal(bot.id, threadId);
+      if (refused) return json(res, refused.status, refused.body);
       const appSent = fromAnApp ? prepareAppMessage(store, threadId, body.appMessage) : null;
       if (appSent && !appSent.ok) return json(res, appSent.status, { error: appSent.error });
       const text = press ? press.text : appSent ? appSent.text : typed;
       const target = resolveReplyTarget(threadId, press ? press.messageId : appSent ? appSent.messageId : body.replyToId);
       if (relayed && target?.role !== "bot") return json(res, 400, { error: "a relayed reaction answers a bot's message" });
       // Only a real press or reaction, or an app's own words, marks the reply; a typed reply to the same row never does, whatever its words.
-      const replyTo: ReplyTarget | undefined = press && target ? { ...target, widgetPress: { label: press.label, action: press.action } }
+      const records = press && target ? pressRecords(bot, press.action) : null;
+      const replyTo: ReplyTarget | undefined = press && target ? { ...target, widgetPress: { label: press.label, action: press.action, ...(records ? { records } : {}) } }
         : appSent && target ? { ...target, appMessage: { title: appSent.title, origin: appSent.origin } }
           : relayed && target ? { ...target, reactedWith: relayed } : target;
       const pressKey = press?.settles ? `${threadId}:${press.messageId}` : undefined;

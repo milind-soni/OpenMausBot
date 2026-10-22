@@ -28,6 +28,19 @@ describe("pairing devices from a hosted server's settings", () => {
     expect(renderToStaticMarkup(createElement(ServerPairingCard))).toBe("");
   });
 
+  it("offers every member of a Team Cloud a code for their own phone, never the admins' pairing", () => {
+    const member = { kind: "session" as const, id: "s", label: "Desktop", scopes: ["client"], expiresAt: 1, team: { id: "team-acme-1", name: "Acme", role: "member" } };
+    const html = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: member, cloudHome: true, team: "Acme" }));
+    expect(html).toContain("Open on your phone");
+    expect(html).toContain("Your phone opens Acme as you");
+    expect(html).toContain("data-phone-pairing-action");
+    expect(html).not.toContain("data-server-pairing-chat-only");
+    expect(html).not.toContain("server-pairing-scope");
+    const admin = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: { ...member, scopes: ["admin", "client"], team: { ...member.team, role: "admin" } }, cloudHome: true, team: "Acme" }));
+    expect(admin).toContain("Open on your phone");
+    expect(admin).not.toContain("Pair a phone or another computer");
+  });
+
   it("explains a chat-only connection instead of showing nothing", () => {
     const chatOnly = { kind: "session" as const, id: "s", label: "Mac Studio", scopes: ["client"], expiresAt: 1 };
     expect(pairingBlockedReason(chatOnly)).toBe("chat-only");

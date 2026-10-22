@@ -121,7 +121,8 @@ it("a member's private chat with a team bot reads her notes and the team's, neve
   const seen = await turn(ada, adaThread, "My cat is called Kumquat.");
   expect(seen.systemPrompt).toContain("Fernando");
   expect(seen.systemPrompt).not.toContain("4471");
-  expect(seen.systemPrompt).toContain(ws(layerOf(`member-${adaKey}`), "MEMORY.md"));
+  // Named as the prompt quotes a path (workspace.ts, JSON.stringify): Windows' backslashes come doubled.
+  expect(seen.systemPrompt).toContain(JSON.stringify(ws(layerOf(`member-${adaKey}`), "MEMORY.md")));
   // Her note landed in her own layer, not the team's.
   expect(readFileSync(ws(layerOf(`member-${adaKey}`), "MEMORY.md"), "utf8")).toContain("oolong");
   expect(readFileSync(ws(bot.id, "MEMORY.md"), "utf8")).not.toContain("oolong");

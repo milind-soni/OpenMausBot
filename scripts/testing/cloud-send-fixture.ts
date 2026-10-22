@@ -66,9 +66,10 @@ export interface CloudSendFixture {
   handoff(what: ConnectionAsk): Promise<any>;
   /** The one-time move (one-home.mjs), as main runs it in the app that is open now. */
   oneHome: { kick(): Promise<void>; view(): OneHomeView | null; away(): boolean };
-  /** The MausBot Cloud sign-in main reads: the Admin's word on this account's Cloud, and its export of a held one; and
-   * the Admin's team pairing for one of the account's teams (`state.teams`). */
-  account: { state: Record<string, any>; exportHome(): Promise<any>; pairTeam(teamId: string): Promise<{ origin: string; code: string; expiresAt: number }> };
+  /** The MausBot Cloud sign-in main reads: the Admin's word on this account's Cloud, its export of a held one, the Admin
+   * taking a computer's word that its move is done (when a test sets it), and the Admin's team pairing for one of the
+   * account's teams (`state.teams`). */
+  account: CloudSendAccount;
   /** A bot moving from My Cloud into a team, as main runs it (team-move-main.mjs). */
   teamMove: { start(input: { bot: { id: string; name: string }; team: { id: string; name: string; origin?: string } }): Promise<void>; kick(): Promise<void>; view(): any; retry(): Promise<void>; seen(): any; journal(): any };
   /** The team moves' journal, and a look at each write before it lands: throwing there is the app killed. */
@@ -87,7 +88,30 @@ export interface CloudSendFixture {
   /** The Team Cloud started with `team` (docs/team-cloud.md), paired the way the Admin pairs it: a signed body with
    * the member claim, redeemed at /api/auth/pair. Null without `team`. */
   team: CloudTeamFixture | null;
+  /** Another computer of the same person, with its own server, app and MausBot Cloud sign-in, that can move to the same
+   * My Cloud. `label`: its name (OMB_ENVIRONMENT_LABEL). */
+  addDesk(options: { label: string }): Promise<CloudSendDesk>;
   close(): Promise<void>;
+}
+
+export interface CloudSendAccount {
+  state: Record<string, any>;
+  exportHome(options?: { installation?: string }): Promise<any>;
+  reportMove?(options: { installation: string }): Promise<boolean>;
+  pairTeam(teamId: string): Promise<{ origin: string; code: string; expiresAt: number }>;
+}
+
+/** One more of the person's computers (CloudSendFixture `addDesk`): what the fixture has for its own, for this one. */
+export interface CloudSendDesk {
+  base: string;
+  dataDir: string;
+  local(method: string, path: string, body?: unknown): Promise<{ status: number; body: any }>;
+  oneHome: { kick(): Promise<void>; view(): OneHomeView | null; away(): boolean };
+  account: CloudSendAccount;
+  journalFile: string;
+  spies: { lent: string[][]; phoneStops: number; phoneStarts: number; opened: string[]; relaunches: number };
+  /** The app quits or is killed, and opens again; its server too, on the same data. */
+  relaunch(options?: { kill?: boolean }): Promise<void>;
 }
 
 export interface CloudTeamFixture {
@@ -244,10 +268,15 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   if (team) {
     const teamPort = await freePortBlock([0, 1]);
     const teamBase = `http://127.0.0.1:${teamPort}`;
+    // Windows' child.kill("SIGTERM") ends a process at once, without Node's signal handlers, so the server never closes
+    // its session registry and its next start drops every member's session, as after a crash. There the team server is
+    // asked to stop over IPC and runs its own SIGTERM shutdown (as server/acp-shutdown.e2e.test.ts does).
+    const stopOverIpc = process.platform === "win32";
+    const stopOnMessage = `data:text/javascript,${encodeURIComponent('process.on("message", (message) => { if (message === "stop") process.emit("SIGTERM"); }); process.channel?.unref();')}`;
     const startTeam = (more: NodeJS.ProcessEnv = {}) => start("team", { OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: team.id, OMB_CLOUD_TEAM_NAME: team.name,
       OMB_CLOUD_MACHINE_ID: "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
       OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...team.env, ...more },
-      teamPort, [], false, onePasswordToken, 0, team.engine ?? "", true);
+      teamPort, stopOverIpc ? ["--import", stopOnMessage] : [], stopOverIpc, onePasswordToken, 0, team.engine ?? "", true);
     let teamServer = await startTeam();
     const as: CloudTeamFixture["as"] = async (token, method, path, body, headers = {}) => {
       const init: RequestInit = { method, headers: { ...EDGE, authorization: `Bearer ${token}`, ...headers,
@@ -288,7 +317,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
         return answer.token as string;
       },
       async relaunch(more = {}) {
-        await waitForExit(teamServer, { signal: "SIGTERM" });
+        if (teamServer.connected) {
+          teamServer.send("stop");
+          await waitForExit(teamServer, { graceMs: 10_000 });
+        } else await waitForExit(teamServer, { signal: "SIGTERM" });
         teamServer = await startTeam(more);
       },
     };
@@ -349,8 +381,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     fetch: throughEdge(null) as typeof fetch,
     engineWaitMs: 2_000,
     ...(space ? { space } : {}),
-    account: () => ({ state: () => account.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: () => account.exportHome(),
-      pairTeam: (teamId: string) => account.pairTeam(teamId) }),
+    account: () => ({ state: () => account.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: (options) => account.exportHome(options),
+      reportMove: async (options) => (account.reportMove ? account.reportMove(options) : false), pairTeam: (teamId: string) => account.pairTeam(teamId) }),
     teamJournal: {
       read: () => { try { return JSON.parse(readFileSync(teamJournalFile, "utf8")); } catch { return null; } },
       write: (value: unknown) => { fixture.beforeTeamJournalWrite?.(value); writeFileSync(`${teamJournalFile}.tmp`, JSON.stringify(value ?? null)); renameSync(`${teamJournalFile}.tmp`, teamJournalFile); },
@@ -387,6 +419,77 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     },
   });
   const reopened = () => { main.close(); main = wire(); };
+  const desks: Array<{ close(): void }> = [];
+  async function addDesk({ label }: { label: string }): Promise<CloudSendDesk> {
+    const name = `desktop-${desks.length + 2}`, deskPort = await freePortBlock([0, 1]), base = `http://127.0.0.1:${deskPort}`;
+    const capability = randomBytes(32).toString("base64url");
+    const startIt = async () => {
+      const child = await start(name, { OMB_DESKTOP_PARENT: "1", OMB_ENVIRONMENT_LABEL: label }, deskPort, ["--import", parentPort], true, onePasswordToken, toolCalls, desktopEngine);
+      child.send({ type: "openmausbot:desktop-mutation-token", token: capability });
+      return child;
+    };
+    let child = await startIt();
+    const deskLocal: CloudSendDesk["local"] = async (method, path, body) => {
+      const response = await remember(await fetch(`${base}${path}`, { method, headers: { "x-openmausbot-desktop-owner": capability, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));
+      return { status: response.status, body: parse(await response.text()) };
+    };
+    const ready = async () => { for (let tries = 0; (await deskLocal("GET", "/api/bots")).status !== 200 && tries < 50; tries++) await new Promise((resolve) => setTimeout(resolve, 100)); };
+    await ready();
+    const journalFile = join(root, `${name}-one-home.json`);
+    const deskAccount: CloudSendDesk["account"] = { state: structuredClone(account.state), exportHome: async () => ({ notHeld: true }),
+      pairTeam: async () => { throw Object.assign(new Error("You're no longer in this team."), { gone: true }); } };
+    const teamJournal = join(root, `${name}-team-moves.json`);
+    const spies: CloudSendDesk["spies"] = { lent: [], phoneStops: 0, phoneStarts: 0, opened: [], relaunches: 0 };
+    const ipc = { postMessage: (message: unknown) => { child.send(message as object); } };
+    const throughOwner = ((url: string | URL | Request, init?: RequestInit) => throughEdge(owner)(url, init)) as typeof fetch;
+    const wireIt = () => installOneHome({
+      ipcMain: { handle: () => {} },
+      cloudPage: (event) => (event as { page?: "local" | "cloud" })?.page ?? null,
+      server: () => ipc,
+      localRequest: async (route, init = {}) => remember(await fetch(`${base}${route}`, { ...init, headers: { ...init.headers as Record<string, string>, "x-openmausbot-desktop-owner": capability } })),
+      home: () => ({ origin: cloudBase, grant: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)") }) }),
+      cookieFetch: throughOwner,
+      reconnect: async () => false,
+      power: { asleep: () => false },
+      file: () => join(root, `${name}-cloud-send.json`),
+      window: () => null,
+      localOrigin: () => base,
+      fetch: throughEdge(null) as typeof fetch,
+      engineWaitMs: 2_000,
+      account: () => ({ state: () => deskAccount.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: (options) => deskAccount.exportHome(options),
+        reportMove: async (options) => (deskAccount.reportMove ? deskAccount.reportMove(options) : false), pairTeam: (teamId: string) => deskAccount.pairTeam(teamId) }),
+      teamJournal: {
+        read: () => { try { return JSON.parse(readFileSync(teamJournal, "utf8")); } catch { return null; } },
+        write: (value: unknown) => { writeFileSync(`${teamJournal}.tmp`, JSON.stringify(value ?? null)); renameSync(`${teamJournal}.tmp`, teamJournal); },
+      },
+      journalFile: () => journalFile,
+      tempRoot: () => join(root, `${name}-one-home-temp`),
+      lend: async (projects) => { spies.lent.push(projects); },
+      phone: { paired: () => true, stop: async () => { spies.phoneStops++; }, start: async () => { spies.phoneStarts++; } },
+      openHome: () => { spies.opened.push("cloud"); },
+      openLocal: () => { spies.opened.push("local"); },
+      restart: () => { spies.relaunches++; },
+      version: "0.1.120",
+      log: (line: string) => { logs += `[main ${label}] ${line}\n`; },
+    });
+    let deskMain = wireIt();
+    const listenIt = () => { child.on("message", (message) => deskMain.receive(ipc, message)); };
+    listenIt();
+    desks.push({ close: () => deskMain.close() });
+    return {
+      base, dataDir: join(root, name, ".openmausbot"), local: deskLocal, account: deskAccount, journalFile, spies,
+      oneHome: { kick: () => deskMain.kick(), view: () => deskMain.view(), away: () => deskMain.away() },
+      async relaunch({ kill = true } = {}) {
+        deskMain.close();
+        await waitForExit(child, { signal: kill ? "SIGKILL" : "SIGTERM" });
+        child = await startIt();
+        await ready();
+        deskMain = wireIt();
+        listenIt();
+      },
+    };
+  }
   const listen = () => {
     desktop.on("message", (message) => main.receive(port, message));
     desktop.on("message", (message) => { asks.receive(port, message); });
@@ -434,8 +537,10 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     chatRequests,
     team: teamFixture,
     grant: async (label) => ({ origin: cloudBase, code: await mintCode(label), expiresAt: Date.now() + 300_000 }),
+    addDesk,
     async close() {
       main.close();
+      for (const desk of desks) desk.close();
       for (const child of children) await waitForExit(child, { signal: "SIGTERM" });
       await removeTempDir(root);
     },

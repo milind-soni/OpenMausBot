@@ -3,6 +3,8 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
+import { defuse } from "./records-block.ts";
+
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRunOn } from "./routines.ts";
@@ -299,19 +301,20 @@ function eventPrompt(trigger: StoredWebhookTrigger, event: WebhookEvent, receive
   const instructionBlock = configured
     ? ["[USER-CONFIGURED WEBHOOK INSTRUCTIONS]", configured, "[/USER-CONFIGURED WEBHOOK INSTRUCTIONS]"]
     : requestedTask
-      ? ["[AUTHENTICATED WEBHOOK TASK]", requestedTask, "[/AUTHENTICATED WEBHOOK TASK]"]
+      ? ["[AUTHENTICATED WEBHOOK TASK]", defuse(requestedTask), "[/AUTHENTICATED WEBHOOK TASK]"]
       : [
           "[DEFAULT WEBHOOK INSTRUCTIONS]",
           "Review the incoming event and summarize what happened. Do not take external actions unless the event clearly requires them and existing permissions allow them.",
           "[/DEFAULT WEBHOOK INSTRUCTIONS]",
         ];
+  // The payload and its headers are the sender's: they never close the data block or open an instructions block.
   return [
     ...instructionBlock,
     "",
     WEBHOOK_EVENT_DATA,
-    ...metadata,
+    ...metadata.map((line) => defuse(String(line))),
     "",
-    serializePayload(event.payload),
+    defuse(serializePayload(event.payload)),
     "[/UNTRUSTED WEBHOOK EVENT DATA]",
   ].join("\n");
 }

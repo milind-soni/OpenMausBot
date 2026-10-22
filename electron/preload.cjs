@@ -47,11 +47,15 @@ function updaterOffered() {
 function homePage() {
   try { return ipcRenderer.sendSync("home:page") === true; } catch { return false; }
 }
+function reloadedForUpdate() {
+  try { return ipcRenderer.sendSync("home:updating") === true; } catch { return false; }
+}
 function savedAnalyticsChoice() {
   try { const saved = ipcRenderer.sendSync("desktop-analytics:read"); return typeof saved === "boolean" ? saved : null; } catch { return null; }
 }
 let analyticsChoice;
-const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : []), ...(homePage() ? HOME_PAGE : [])]);
+const onHomePage = !isLocalPage && homePage();
+const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : []), ...(onHomePage ? HOME_PAGE : [])]);
 
 // Keep in parity with shared/workspace-backup-client.ts (a sandboxed preload cannot import it).
 const COMPANY_BACKUP_CLIENT_KEYS = [
@@ -416,6 +420,7 @@ const bridge = {
     signIn: () => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("home:sign-in") : Promise.reject(new Error("Choose Sign in to sign in again.")),
     repair: () => ipcRenderer.invoke("home:repair"),
+    updating: onHomePage && reloadedForUpdate(),
   },
   desktopNotices: {
     state: () => ipcRenderer.invoke("desktop-notices:state"),

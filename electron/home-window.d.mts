@@ -19,6 +19,8 @@ export interface HomeBridge {
   signIn(): Promise<void>;
   /** My Cloud's own page only: its session ended, so the app signs it in again by itself. */
   repair(): Promise<void>;
+  /** My Cloud's own page only: the window reloaded it just now for its newer version. */
+  updating?: boolean;
 }
 
 export type Home = { kind: "computer" } | { kind: "cloud"; origin: string } | { kind: "signin"; other?: true };
@@ -34,6 +36,7 @@ export declare const RETRY_MS: readonly number[];
 export declare const QUIET_MS: number;
 export declare const VERSION_EVERY_MS: number;
 export declare const SPLASH_HANDOFF_MS: number;
+export declare const UPDATING_MS: number;
 export declare const SPLASH_TEXT: Readonly<{ opening: string; waking: string }>;
 export declare const TEAM_RENEW_MS: number;
 export declare const TEAM_RENEW_EARLY_MS: number;
@@ -64,6 +67,8 @@ export interface HomeWindow {
   navigated(url: string): void;
   failed(url: string): void;
   homePage(event: unknown): boolean;
+  /** Asked once by the home page as it loads: the window reloaded it just now for its newer version. */
+  updating(event: unknown): boolean;
   screenPage(event: unknown): boolean;
   /** Signs the team on screen in again now, without moving the page. */
   renew(): Promise<void>;

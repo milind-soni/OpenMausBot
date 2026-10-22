@@ -20,7 +20,11 @@ function call(socketPath: string, method: string, path: string, headers: Record<
   });
 }
 
-describe("the credential broker", () => {
+// The box runs only on a Linux Cloud home (detect.ts says "not-linux" anywhere else): its broker listens on a unix
+// socket, which Windows refuses at a file path (EACCES).
+const linuxBox = describe.skipIf(process.platform === "win32");
+
+linuxBox("the credential broker", () => {
   let upstream: Server, broker: CredentialBroker, dir: string, clock = 1_800_000_000_000;
   const seen: Array<{ method: string; url: string; headers: Record<string, string | string[] | undefined>; body: string }> = [];
   afterEach(async () => {

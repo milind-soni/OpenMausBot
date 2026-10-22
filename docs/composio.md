@@ -108,6 +108,16 @@ OpenMausBot uses your project's own auth config for an app automatically, in pla
 
 On a MausBot Cloud plan, connected apps run through OpenMausBot's managed connection service rather than your own Composio project, so you cannot add permissions yourself; ask OpenMausBot support instead.
 
+## Apps with no Composio-managed sign-in
+
+Some apps, such as Xero and Buffer, have no sign-in that Composio provides: they connect only through an auth config holding your own OAuth app. Without one, Composio answers "Composio does not manage auth for toolkit … and no auth config without required fields is available".
+
+With your own Composio project key, create the auth config in the Composio dashboard (**Auth Configs → Create**), keep it enabled and available to Tool Router, then connect the app. OpenMausBot reads the project's enabled auth configs (at most once a minute, and again right after Composio reports a missing one) and names them in the Session, so the app connects with no further input. A Session that predates a new auth config is replaced once, under the same Composio user, so existing connections stay. If the auth configs cannot be read, the Session keeps the ones it last read; if Composio refuses the Session with them, it is created without them, and connecting that app says why.
+
+A bot can also name one auth config for an app: `COMPOSIO_MANAGE_CONNECTIONS` with `toolkits: [{ "name": "xero", "action": "add", "auth_config_id": "ac_…" }]` (`auth_config_override` is read as well). OpenMausBot checks the id in your project before it shows the Connect card (it must exist, belong to that app, be enabled and be available to Tool Router) and keeps the choice in `composio-auth-configs.json` in the data folder, so later Sessions use it while it stays usable.
+
+OpenMausBot's managed connection service (the desktop default and MausBot Cloud) runs on OpenMausBot's own Composio project, which cannot use an auth config in yours. For such an app it says so in one line: add your own Composio project key in **Settings → API keys**, with an enabled auth config for that app in that project.
+
 ## Browser authorization recovery
 
 The web UI reserves an authorization tab during your click, before requesting

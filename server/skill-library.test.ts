@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { APP_LIMITS } from "../shared/app.ts";
+import { BOT_HTML_CDNS } from "../shared/app-frame/csp.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, parseSkillManifest, renderSkillInstructions, selectBundledSkills, type BundledSkill } from "./skill-library.ts";
 
 const instructionsFor = (text: string, capabilities: string[], skills: BundledSkill[], options?: { includeRoot?: boolean }) =>
@@ -103,5 +105,36 @@ describe("bundled verification skill", () => {
     ]) {
       expect(selectBundledSkills(text, ["skillAuthoring"], skills)).toEqual([]);
     }
+  });
+});
+
+describe("bundled data-dashboards skill", () => {
+  const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const guide = skills.find((skill) => skill.manifest.id === "data-dashboards")?.instructions ?? "";
+  const template = readFileSync(join(process.cwd(), "skills", "data-dashboards", "dashboard.html"), "utf8");
+  const ids = (text: string) => selectBundledSkills(text, [], skills).map((skill) => skill.manifest.id);
+
+  it("mounts for dashboards and charts with no capability, and stays out of other turns", () => {
+    for (const text of ["Build me a sales dashboard", "Chart revenue by month", "can you visualise this?", "Show our KPIs on a page", "make a graph of signups", "graph it by week"]) {
+      expect(ids(text), text).toContain("data-dashboards");
+    }
+    for (const text of ["Write a paragraph about photography", "fix the typo in my biography", "summarize this email", "book a call for Friday"]) {
+      expect(ids(text), text).not.toContain("data-dashboards");
+    }
+  });
+
+  it("keeps the guide short, in plain words, and pointing at its template", () => {
+    expect(guide.split("\n").length).toBeLessThanOrEqual(150);
+    expect(guide).not.toMatch(/\b(engines?|servers?)\b/i);
+    expect(guide).toContain("dashboard.html");
+  });
+
+  it("ships a template that loads exact versions from a CDN a chat page allows, with room left for embedded data", () => {
+    const urls = [...template.matchAll(/https:\/\/[^\s"'`)]+/g)].map((match) => match[0]);
+    expect(urls.length).toBeGreaterThan(0);
+    for (const url of urls) expect(BOT_HTML_CDNS.some((cdn) => url === cdn || url.startsWith(`${cdn}/`)), url).toBe(true);
+    for (const url of urls.filter((each) => each.includes("/npm/"))) expect(url, url).toMatch(/\/npm\/(@[\w-]+\/)?[\w.-]+@\d+\.\d+\.\d+\//);
+    expect(template).toContain('id="embedded-data"');
+    expect(Buffer.byteLength(template)).toBeLessThan(APP_LIMITS.htmlBytes / 4);
   });
 });

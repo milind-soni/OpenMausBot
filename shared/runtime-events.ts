@@ -165,6 +165,9 @@ export type RuntimeEvent = RuntimeEventBase &
          * whole prompt, cache reads included — and the window's size when the
          * driver knows it. The figure that predicts the next message's cost. */
         contextTokens?: number; contextWindow?: number;
+        /** The part of `output` spent reasoning, where the engine reports it. A per-call report carries the call's own
+         * message id in `itemId`, repeated on every frame of that call. */
+        reasoning?: number;
       }
     // `setup`: fixed by installing or configuring something, not by retrying.
     // `terminal`: the complete turn failed, not a transient error.

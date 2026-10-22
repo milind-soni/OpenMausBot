@@ -185,6 +185,10 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/live\/call$/ },
   { method: "PATCH", path: /^\/api\/live\/settings$/ },
 
+  // The harness records only the owner's activation; a guest's is answered and
+  // dropped.
+  { method: "POST", path: /^\/api\/presence\/active$/ },
+
   // Webhook management stays denied below.
   { method: "GET", path: /^\/api\/routines$/ },
   { method: "POST", path: /^\/api\/routines$/ },

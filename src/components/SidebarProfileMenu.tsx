@@ -271,7 +271,7 @@ export function phoneMenuItems({
     ...destinations.map((destination) => ({
       key: destination.id === "cloud" ? "connect-phone-cloud" : "connect-phone",
       label: t("sidebar.menu.connectPhone"),
-      subtitle: t(destination.subtitleKey),
+      subtitle: destination.team ? t("sidebar.menu.connectPhone.team", { team: destination.team }) : t(destination.subtitleKey),
       ...(destination.noteKey ? { note: t(destination.noteKey) } : {}),
       icon: <Smartphone size={18} />,
       trailing:
@@ -438,7 +438,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnl
         onClose={() => setPhoneAppOpen(false)}
         connect={destinations.map((destination) => ({
           key: destination.id,
-          subtitle: t(destination.subtitleKey),
+          subtitle: destination.team ? t("sidebar.menu.connectPhone.team", { team: destination.team }) : t(destination.subtitleKey),
           onSelect: () => connectTo(destination),
         }))}
       />

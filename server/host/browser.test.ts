@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -7,9 +7,12 @@ import { BUILT_IN_BROWSER_SYSTEM_PROMPT, browserEngineStatus, clearBrowserSessio
 import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
 import { TOOL_LIST } from "../browser/tools.ts";
 import { browserEgress } from "../browser/egress/registry.ts";
-import type { AppConfig } from "../config.ts";
+import type { Audience } from "../audience.ts";
+import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { Store } from "../store.ts";
 import type { TurnOwner } from "../turn-resources.ts";
+import { audienceBrowserSuffix } from "../browser/audience.ts";
+import { chromeLauncher } from "../browser/chrome/launcher.ts";
 import { createBrowserHost, type BrowserHostDeps } from "./browser.ts";
 
 vi.mock("../browser-engine.ts", async (original) => {
@@ -33,8 +36,9 @@ afterEach(async () => { await Promise.all(hosts.splice(0).map((host) => host.bro
 
 const turn = { threadId: "thread-1", generation: "gen-1" };
 
-function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, device, mayLend, holder }: {
+function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, device, mayLend, holder, audienceOf, bots: botIds = ["scout"], browserBox }: {
   cloudHome?: boolean; device?: BrowserHostDeps["device"]; mayLend?: BrowserHostDeps["mayLend"]; holder?: (resource: string) => TurnOwner | undefined;
+  audienceOf?: BrowserHostDeps["audienceOf"]; bots?: string[]; browserBox?: BrowserHostDeps["browserBox"];
 } = {}) {
   const cfg = {
     features: { browser: true },
@@ -44,7 +48,7 @@ function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = fal
       { id: "mine", name: "Mine", browser: "chrome", partitionId: "p-mine" },
     ],
   } as unknown as AppConfig;
-  const bots = [{ id: "scout", name: "Scout", browser: true }];
+  const bots = botIds.map((id) => ({ id, name: id, browser: true }));
   const minted: unknown[] = [];
   const host = createBrowserHost({
     cfg,
@@ -57,6 +61,8 @@ function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = fal
     PORT: 4100,
     device,
     mayLend,
+    audienceOf,
+    browserBox,
   });
   hosts.push(host);
   return { cfg, host, minted, bots };
@@ -267,6 +273,36 @@ describe("a deleted bot's browser", () => {
     await host.browserSweep.closeAll();
   });
 
+  it("on a Team Cloud, is erased for every audience it had: each member's, each group chat's and the team's", async () => {
+    engines();
+    forgetAudiences();
+    const { host } = setup(undefined, { cloudHome: true, audienceOf: teamAudiences });
+    host.currentBrowserSession("gone", undefined, "member:p_ada");
+    host.currentBrowserSession("gone", undefined, "room:launch");
+    expect(await host.eraseDeletedBrowser(deleted)).toBe(true);
+    expect(vi.mocked(clearBrowserSessionState).mock.calls.map(([, session]) => session)).toEqual(["bot-gone", `bot-gone${ADA}`, `bot-gone${ROOM}`]);
+    vi.mocked(clearBrowserSessionState).mockClear();
+    // After a restart too: which audiences had browsers is kept on disk.
+    const again = setup(undefined, { cloudHome: true, audienceOf: teamAudiences });
+    expect(await again.host.eraseDeletedBrowser({ ...deleted, type: "openmausbot:browser-profile-deleted", botId: undefined, partitionId: "p-work" })).toBe(true);
+    expect(vi.mocked(clearBrowserSessionState).mock.calls.map(([, session]) => session)).toEqual(["p-work", `p-work${ADA}`, `p-work${ROOM}`]);
+  });
+
+  it("on a Team Cloud, keeps each member's browser of a live bot open between turns, and closes a deleted bot's", async () => {
+    engines();
+    forgetAudiences();
+    daemons([`bot-scout${ADA}`, `bot-gone${ADA}`]);
+    const { host } = setup(undefined, { cloudHome: true, audienceOf: teamAudiences });
+    host.currentBrowserSession("scout", undefined, "member:p_ada");
+    for (const session of [`bot-scout${ADA}`, `bot-gone${ADA}`]) host.usedBrowserSessions.set(session, { command: PATH_ENGINE, env: {} });
+    host.browserSweep.start();
+    await vi.waitFor(() => expect(closed()).toContain(`${PATH_ENGINE} bot-gone${ADA}`));
+    expect(closed()).toEqual([`${PATH_ENGINE} bot-gone${ADA}`]);
+    await host.browserSweep.closeAll();
+  });
+
+  afterEach(() => forgetAudiences());
+
   it("off a Cloud home, is left to the deletion, as anything else under the same HOME", async () => {
     engines();
     daemons(["bot-gone", "default"]);
@@ -276,5 +312,84 @@ describe("a deleted bot's browser", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(closed()).toEqual([]);
     await host.browserSweep.closeAll();
+  });
+});
+
+const teamAudiences = (threadId: string): Audience => ({ "ada-chat": "member:p_ada", "cleo-chat": "member:p_cleo", "room-chat": "room:launch" } as Record<string, Audience>)[threadId] ?? "team";
+const at = (threadId: string) => ({ threadId, generation: "gen-1" });
+const AUDIENCES_FILE = join(DATA_DIR, "browser", "audiences.json");
+const ADA = audienceBrowserSuffix("member:p_ada"), CLEO = audienceBrowserSuffix("member:p_cleo"), ROOM = audienceBrowserSuffix("room:launch");
+function forgetAudiences() { rmSync(AUDIENCES_FILE, { force: true }); }
+
+describe("a Team Cloud's browsers, one per audience", () => {
+  afterEach(forgetAudiences);
+
+  it("gives each member's private chat, a group chat and the team's chat a profile of its own", async () => {
+    const { host, minted } = setup("chrome", { audienceOf: teamAudiences });
+    const browsers = await Promise.all(["ada-chat", "cleo-chat", "room-chat", "main-chat"].map((thread) => host.browserIntegration("scout", undefined, at(thread))));
+    expect(browsers.map((browser) => browser?.spec.args), "one profile per audience; the team's keeps the bot's own").toEqual([
+      [`bot:scout${ADA}`], [`bot:scout${CLEO}`], [`bot:scout${ROOM}`], ["bot:scout"],
+    ]);
+    expect(browsers.map((browser) => browser?.session)).toEqual([`bot-scout${ADA}`, `bot-scout${CLEO}`, `bot-scout${ROOM}`, "bot-scout"]);
+    expect(minted.map((capability) => (capability as { browserSession: string }).browserSession), "each turn's tools reach its own audience's browser").toEqual(browsers.map((browser) => browser?.session));
+    // The live view and the agent name the same browser.
+    expect(host.currentBrowserSession("scout", undefined, "member:p_ada")).toBe(browsers[0]!.session);
+    expect(host.browserSessionsOf("scout", undefined).sort()).toEqual(browsers.map((browser) => browser!.session).sort());
+  });
+
+  it("splits a shared profile and a temporary browser by audience too", async () => {
+    const { host } = setup("chrome", { audienceOf: teamAudiences });
+    expect((await host.browserIntegration("scout", "work", at("ada-chat")))?.spec.args).toEqual([`shared:p-work${ADA}`]);
+    expect((await host.browserIntegration("scout", "work", at("room-chat")))?.spec.args).toEqual([`shared:p-work${ROOM}`]);
+    expect((await host.browserIntegration("scout", "work", at("main-chat")))?.spec.args).toEqual(["shared:p-work"]);
+    const ada = await host.browserIntegration("scout", "guest", at("ada-chat"));
+    const cleo = await host.browserIntegration("scout", "guest", at("cleo-chat"));
+    expect(ada?.session).not.toBe(cleo?.session);
+    expect(await host.browserIntegration("scout", "guest", at("ada-chat"))).toMatchObject({ session: ada?.session });
+    await host.forgetTemporaryBrowser("scout");
+    expect(host.temporaryBrowserSessions.size, "a deleted bot's temporary browsers go for every audience").toBe(0);
+  });
+
+  it("names a shared profile's saved sign-ins by audience on agent-browser too", () => {
+    const { host } = setup(undefined, { audienceOf: teamAudiences });
+    expect(host.currentBrowserSession("scout", "work", "member:p_ada")).toBe(`p-work${ADA}`);
+    expect(host.currentBrowserSession("scout", "work", "room:launch")).toBe(`p-work${ROOM}`);
+    expect(host.currentBrowserSession("scout", "work", "team")).toBe("p-work");
+    expect(host.currentBrowserSession("scout", undefined, "member:p_ada")).toBe(`bot-scout${ADA}`);
+  });
+
+  it("names every browser as before off a team, whoever's conversation it is", async () => {
+    const { host } = setup("chrome");
+    const browser = await host.browserIntegration("scout", undefined, at("ada-chat"));
+    expect(browser?.spec.args).toEqual(["bot:scout"]);
+    expect(browser?.session).toBe("bot-scout");
+    expect((await host.browserIntegration("scout", "work", at("ada-chat")))?.spec.args).toEqual(["shared:p-work"]);
+    expect(host.browserSessionsOf("scout", undefined)).toEqual(["bot-scout"]);
+    expect(existsSync(AUDIENCES_FILE), "nothing is written off a team").toBe(false);
+  });
+
+  it("remembers on disk which audiences have a browser", async () => {
+    const { host } = setup("chrome", { audienceOf: teamAudiences });
+    await host.browserIntegration("scout", undefined, at("ada-chat"));
+    expect(JSON.parse(readFileSync(AUDIENCES_FILE, "utf8"))).toEqual({ suffixes: [ADA] });
+  });
+});
+
+describe("a Team Cloud's boxed browsers and the files a turn uploads", () => {
+  afterEach(() => chromeLauncher.boxWith(() => null));
+
+  it("are linked into that browser's own profile, the one folder of the disk its box shows Chrome", () => {
+    const work = mkdtempSync(join(tmpdir(), "omb-host-upload-"));
+    const file = join(work, "report.txt");
+    writeFileSync(file, "report");
+    const box = { bwrap: "/usr/bin/bwrap", options: ["--unshare-pid"], seccomp: null };
+    const boxed = setup(undefined, { cloudHome: true, browserBox: () => box }).host;
+    const session = `bot-scout${ADA}`;
+    const [linked] = boxed.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} });
+    expect(linked!.startsWith(join(DATA_DIR, "agent-browser-profiles"))).toBe(true);
+    expect(readFileSync(linked!, "utf8")).toBe("report");
+    const plain = setup(undefined, { cloudHome: true }).host;
+    expect(plain.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} }), "unboxed, the file is given as it is").toEqual([file]);
+    rmSync(work, { recursive: true, force: true });
   });
 });

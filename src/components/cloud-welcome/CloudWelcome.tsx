@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { Check, Loader2, Minus } from "lucide-react";
 import { useCloudSendNotice } from "@/components/CloudSendStrip";
 import { countedList } from "@/lib/cloud-send";
 import { WindowDragStrip } from "@/components/DesktopCapabilities";
@@ -12,7 +12,7 @@ import {
 import { endWelcomeHere, markWelcomeSeen, saveWelcomeHints, stepAsideWelcome, takeWelcomeRequest, useCloudWelcome, withEarlyHints } from "@/lib/cloud-welcome";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { hintSeen } from "@/lib/onboarding";
+import { hintSeen, type OnboardingStatus } from "@/lib/onboarding";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
 import type { CloudSendNotice } from "../../../electron/cloud-send.mjs";
@@ -35,7 +35,7 @@ const WHOLE_SENDS = new Set(["button", "my-cloud", "menu", "move", "first", "aut
  * arrived); "sending" while one runs, or while an older desktop that sends by itself has not sent yet; null otherwise
  * (none yet, a whole send failed, or a desktop too old to say, which sends no `whole`), which keeps the choice to copy
  * or start fresh. */
-export function sentHere(notice: CloudSendNotice | null): { state: "sending" | "sent"; last: CloudSendNotice["last"] } | null {
+export function sentHere(notice: CloudSendNotice | null | undefined): { state: "sending" | "sent"; last: CloudSendNotice["last"] } | null {
   if (!notice || notice.whole === undefined) return null;
   const last = notice.last;
   const whole = Boolean(last && WHOLE_SENDS.has(last.reason));
@@ -43,6 +43,17 @@ export function sentHere(notice: CloudSendNotice | null): { state: "sending" | "
   if (whole && !last!.error) return { state: "sent", last };
   if (notice.auto === true && !whole) return { state: "sending", last };
   return null;
+}
+
+/** How a step shows on the rail. Bring your stuff is done only once something came over: started fresh with nothing
+ * from this computer (moves not on yet, say), it shows as skipped, and while things come over, as on its way. */
+export function railStatus(record: OnboardingStatus | undefined, step: WelcomeStep, sent: ReturnType<typeof sentHere>): "done" | "skipped" | "bringing" | "todo" {
+  if (step !== "bring") return welcomeStepFinished(record, step) ? "done" : "todo";
+  if (sent?.state === "sent") return "done";
+  const skipped = hintSeen(record, CLOUD_SETUP_MOVE_SKIPPED);
+  if (welcomeStepFinished(record, step) && !skipped) return "done";
+  if (sent?.state === "sending") return "bringing";
+  return skipped ? "skipped" : "todo";
 }
 
 const requestedView = (value: string | null): WelcomeView | null =>
@@ -72,7 +83,7 @@ export function CloudWelcome() {
     const timer = setTimeout(() => setNoticeLate(true), 1500);
     return () => clearTimeout(timer);
   }, [sendBridge]);
-  const asking = Boolean(sendBridge) && notice === null && !noticeLate;
+  const asking = Boolean(sendBridge) && notice === undefined && !noticeLate;
 
   useEffect(() => {
     markWelcomeSeen();
@@ -160,22 +171,22 @@ export function CloudWelcome() {
         <div className="mt-3 flex items-center justify-between gap-2 @2xl/welcome:mt-4 @2xl/welcome:flex-1 @2xl/welcome:flex-col @2xl/welcome:items-stretch @2xl/welcome:justify-start">
           <ol className="flex min-w-0 gap-1 @2xl/welcome:flex-col @2xl/welcome:gap-1.5">
             {WELCOME_STEPS.map((step, index) => {
-              const finished = welcomeStepFinished(record, step) || (step === "bring" && sent?.state === "sent");
-              const bringing = step === "bring" && !finished && sent?.state === "sending";
+              const status = railStatus(record, step, sent);
+              const finished = status === "done", bringing = status === "bringing", skipped = status === "skipped";
               const current = view === step;
               return <li key={step} className="min-w-0">
-                <button type="button" data-welcome-rail={step} data-finished={finished || undefined} data-bringing={bringing || undefined} aria-current={current ? "step" : undefined} onClick={() => go(step)}
+                <button type="button" data-welcome-rail={step} data-finished={finished || undefined} data-bringing={bringing || undefined} data-skipped={skipped || undefined} aria-current={current ? "step" : undefined} onClick={() => go(step)}
                   className={cn("flex w-full min-w-0 items-center gap-2 rounded-full text-left transition-colors duration-150 motion-reduce:transition-none @2xl/welcome:items-start @2xl/welcome:gap-2.5 @2xl/welcome:rounded-[10px] @2xl/welcome:p-2.5",
                     current ? "bg-raised py-1.5 pl-1.5 pr-3" : "p-1.5 hover:bg-raised/60")}>
                   <span aria-hidden="true" className={cn("flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] text-[11.5px] font-semibold tabular-nums",
                     finished ? "check-in border-success bg-success" : current ? "border-accent text-accent-text" : "border-ink-secondary/40 text-ink-secondary")}>
-                    {finished ? <Check size={12} strokeWidth={3} /> : bringing ? <Loader2 size={12} strokeWidth={2.5} className="animate-spin" /> : index + 1}
+                    {finished ? <Check size={12} strokeWidth={3} /> : bringing ? <Loader2 size={12} strokeWidth={2.5} className="animate-spin" /> : skipped ? <Minus size={11} strokeWidth={3} /> : index + 1}
                   </span>
                   <span className={cn("min-w-0", !current && "sr-only @2xl/welcome:not-sr-only")}>
                     <span className={cn("block truncate text-[13px] font-medium @2xl/welcome:whitespace-normal @2xl/welcome:text-[13.5px]", current ? "text-ink" : "text-ink-secondary")}>{t(STEP_TEXT[step].title)}</span>
                     <span className="hidden text-[12px] text-ink-tertiary @2xl/welcome:block">{t(STEP_TEXT[step].hint)}</span>
                   </span>
-                  <span className="sr-only"> ({t(finished ? "cloudSetup.stepDone" : "cloudSetup.stepTodo")})</span>
+                  <span className="sr-only"> ({t(finished ? "cloudSetup.stepDone" : skipped ? "cloudSetup.skipped" : "cloudSetup.stepTodo")})</span>
                 </button>
               </li>;
             })}

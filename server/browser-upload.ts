@@ -39,11 +39,13 @@ export function uploadableFiles(files: unknown, roots: readonly string[]): { fil
 }
 
 /** Chrome names an uploaded file after its file on disk and reads it only when the form is sent, so an attachment stored
- * under a random id gets a link with the person's own name that outlives the call. */
-export function namedUploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, folder: string, now = Date.now()): string[] {
+ * under a random id gets a link with the person's own name that outlives the call. `everyFile`: a boxed Chrome sees only
+ * `folder`, so each file gets a link there. */
+export function namedUploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, folder: string, now = Date.now(), { everyFile = false } = {}): string[] {
   sweepNamedCopies(folder, now);
-  return files.map(({ file, name }) => {
-    if (!name || basename(name) !== name || name === basename(file)) return file;
+  return files.map(({ file, name: given }) => {
+    const name = given && basename(given) === given ? given : everyFile ? basename(file) : null;
+    if (!name || (name === basename(file) && !everyFile)) return file;
     const dir = join(folder, randomUUID());
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const named = join(dir, name);

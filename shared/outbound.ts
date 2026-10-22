@@ -1,6 +1,8 @@
 // Outbound actions: calls that reach a person outside the app or move money.
-// They get their own confirmation regardless of approval level, and an optional
-// daily allowance per bot. Shared by the harness (which enforces it) and the app.
+// Below Full access they get their own confirmation, or spend an optional daily
+// allowance per bot; at Full access they run. A read-and-draft routine run never
+// reaches them: the relay refuses every send there. Shared by the harness (which
+// enforces it) and the app.
 
 export type OutboundPolicy = {
   /** ask: every outbound call waits for a tap. allow: up to dailyCap a day. */
@@ -41,6 +43,18 @@ const SENT_NOUNS = new Set(["MESSAGE", "COMMENT", "POST", "EMAIL", "MAIL", "INVO
  * REDDIT_GET_POST fetches a post, it does not post. */
 const READ_VERBS = new Set(["GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "RETRIEVE", "LOOKUP", "DOWNLOAD", "VIEW", "CHECK", "COUNT"]);
 
+/** Composio reads known by slug, since some put the noun first (GOOGLECALENDAR_EVENTS_LIST lists events). */
+export const KNOWN_READ_SLUGS: ReadonlySet<string> = new Set([
+  "GMAIL_FETCH_EMAILS",
+  "GMAIL_GET_PROFILE",
+  "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+  "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+  "GOOGLECALENDAR_EVENTS_LIST",
+  "GOOGLECALENDAR_EVENTS_GET",
+  "GOOGLECALENDAR_FIND_EVENT",
+  "GOOGLECALENDAR_LIST_CALENDARS",
+]);
+
 /** The action part of a tool name, as upper-case word tokens. Composio's
  * TOOLKIT_ACTION drops its toolkit; an MCP server's mcp__server__action
  * drops its server; a bare built-in like Bash stays as it is. */
@@ -64,6 +78,7 @@ function actionTokens(name: string): string[] {
  * narrower than "not outbound": updates, deletes and other writes do not
  * become reads merely because they send nothing to another person. */
 export function isReadOnlyTool(name: string): boolean {
+  if (KNOWN_READ_SLUGS.has(name.replace(/^mcp__composio__/, ""))) return true;
   const tokens = actionTokens(name);
   return tokens.length > 0 && READ_VERBS.has(tokens[0]);
 }

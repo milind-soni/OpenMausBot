@@ -61,7 +61,9 @@ test("the home folder is lent only when asked for by the picker; its parents and
     assert.equal(lent.write, false, "the home folder is read only even when edits are asked for");
     // The flag buys nothing for any other folder, for a parent of home, or for the system disk.
     await assert.rejects(validateSharedFolders([{ id, path: base, write: false, home: true }]), { code: "HOME_OR_ROOT" });
-    await assert.rejects(validateSharedFolders([{ id, path: "/", write: false, home: true }]), { code: "HOME_OR_ROOT" });
+    // The system disk is the one the home folder is on: "/" here, its drive letter on Windows. A bare "/" there is the
+    // current drive's root, which on CI (D:\, the checkout) is a separate data drive and may be shared whole.
+    await assert.rejects(validateSharedFolders([{ id, path: path.parse(home).root, write: false, home: true }]), { code: "HOME_OR_ROOT" });
     const [docs] = await validateSharedFolders([{ id, path: path.join(home, "Documents"), write: false, home: true }]);
     assert.equal(docs.home, undefined);
   } finally {

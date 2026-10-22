@@ -2,6 +2,7 @@
 // prompt, where events that arrive together share one run.
 import type { AppTrigger, AppTriggerFilter } from "../shared/app-triggers.ts";
 import { filtersAtSource } from "../shared/app-triggers.ts";
+import { defuse as defused } from "./records-block.ts";
 
 /** Event data in one run, as for a webhook delivery; and how many events one run takes before another starts. */
 export const MAX_EVENT_CHARS = 48_000;
@@ -47,10 +48,6 @@ export function eventPreview(data: Record<string, unknown>): string | undefined 
   return line ? line.slice(0, 160) : undefined;
 }
 
-/** Event text may imitate the prompt's own markers; it never closes the data block it sits in. */
-function defused(text: string): string {
-  return text.replace(/\[(\/?)\s*(UNTRUSTED|USER-CONFIGURED|AUTHENTICATED|DEFAULT)/gi, "($1$2");
-}
 
 export function eventBlock(trigger: Pick<AppTrigger, "appName" | "eventName" | "accountLabel">, event: { id: string; receivedAt: number; test: boolean; data: Record<string, unknown> }): string {
   let text: string;

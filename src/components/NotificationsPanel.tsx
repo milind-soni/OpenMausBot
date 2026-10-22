@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, LogIn, Pin, RotateCcw, Wallet, X, type LucideIcon } from "lucide-react";
+import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, LogIn, Newspaper, Pin, RotateCcw, Wallet, X, type LucideIcon } from "lucide-react";
 import { api, useStore, openNotificationTarget, type Action } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -23,6 +23,7 @@ const KIND_LOOK: Record<NotifyKind, { Icon: LucideIcon; className: string; statu
   "routine-failed": { Icon: AlertTriangle, className: "text-danger", status: "notifications.status.failed" },
   "routine-deferred": { Icon: RotateCcw, className: "text-accent", status: "notifications.status.deferred" },
   spend: { Icon: Wallet, className: "text-accent", status: "notifications.status.spend" },
+  brief: { Icon: Newspaper, className: "text-accent", status: "notifications.status.brief" },
 };
 
 interface TitledThread { threadId: string; title: string }

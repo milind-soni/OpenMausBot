@@ -1,7 +1,7 @@
 // POST /api/cloud-send/arrived, at the end of the move, over the owner's own session: My Cloud keeps which computer the
 // bots came from, so each bot knows what stayed there (cloud-connections-prompt.ts), and each bot whose webhook has a new
 // address here says so once in its own chat. The address itself never goes in a chat: it stays on the webhook's card.
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -26,6 +26,9 @@ export function movedFrom(dataDir: string): MovedFrom | null {
 
 export const webhookMovedLine = (name: string) =>
   `Now that I live on My Cloud, my webhook "${name}" has a new address. Open Automations, choose Copy address on "${name}", and paste it into the app that sends to it.`;
+
+export const webhookHomeLine = (name: string) =>
+  `I'm back on this computer, so my webhook "${name}" has an address here again. Open Automations, choose Copy address on "${name}", and paste it into the app that sends to it.`;
 
 export interface ArrivedDeps {
   dataDir: string;
@@ -56,6 +59,27 @@ export async function arrivedRoute(deps: ArrivedDeps, { req, res, path, method, 
   // Recorded before the lines go: a move cut short here never has a bot say it twice.
   writeFileAtomic(join(deps.dataDir, FILE), JSON.stringify({ computer: body.data.computer, at: kept?.at ?? Date.now(), told: [...told] }), { mode: 0o600 });
   for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookMovedLine(line.name) });
+  json(res, 200, { v: 1, told: telling.length });
+  return true;
+}
+
+/** POST /api/cloud-send/home, on this computer once My Cloud ended and the bots came home with what they did there: each bot
+ * that said on My Cloud that its webhook had a new address says once that it has an address here again. The record of
+ * where the bots came from came home with them and goes now. False when the path is not this route. */
+export async function homeRoute(deps: Omit<ArrivedDeps, "owner">, { req, res, path, method, json, readBody }: RouteContext): Promise<boolean> {
+  if (path !== "/api/cloud-send/home") return false;
+  if (method !== "POST") { req.resume(); json(res, 405, { error: "method not allowed" }); return true; }
+  if (!z.object({ v: z.literal(1) }).safeParse(await readBody(req, 1024)).success) { json(res, 400, { error: "send { v: 1 }" }); return true; }
+  const told = movedFrom(deps.dataDir)?.told ?? [];
+  const hooks = deps.webhooks()?.list() ?? [];
+  const telling = told.flatMap((id) => {
+    const hook = hooks.find((candidate) => candidate.id === id);
+    const bot = hook ? deps.store.bot(hook.botId) : null;
+    return hook && bot ? [{ name: hook.name, threadId: bot.threadId }] : [];
+  });
+  // Gone before the lines go: coming home again after a crash here never has a bot say it twice.
+  rmSync(join(deps.dataDir, FILE), { force: true });
+  for (const line of telling) deps.store.appendMessage(line.threadId, { role: "bot", kind: "text", text: webhookHomeLine(line.name) });
   json(res, 200, { v: 1, told: telling.length });
   return true;
 }

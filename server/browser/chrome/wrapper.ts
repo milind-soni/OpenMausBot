@@ -19,7 +19,20 @@ export interface LauncherSettings {
   timeZone?: string;
   /** macOS: Chrome with any HOME but the person's own asks, in a dialog on their screen, for a keychain it cannot find. */
   home?: string;
+  /** Every Chrome this launcher starts runs in this box (a Team Cloud's), with only the profile it was started on. */
+  box?: LauncherBox;
 }
+
+/** bubblewrap's options for a browser's box, before `--` and without the profile, which the launcher binds per start. */
+export interface LauncherBox {
+  bwrap: string;
+  options: string[];
+  /** The seccomp filter, read on LAUNCHER_SECCOMP_FD; bubblewrap closes that descriptor before Chrome runs. */
+  seccomp: string | null;
+}
+
+/** agent-browser hands Chrome only stdio (it speaks to it over a port), so 9 is free for the filter. */
+export const LAUNCHER_SECCOMP_FD = 9;
 
 /** Last on the command line, so they win over any switch of the same name: Chrome keeps the last value of a switch. A bot's
  * Chrome never touches the person's keychain or keyring (agent-browser 0.37 passes these too). */
@@ -53,13 +66,34 @@ export function launcherScript(settings: LauncherSettings, platform: NodeJS.Plat
   if (platform === "win32") {
     return ["@echo off", `${batchQuote(settings.chrome)} %* ${flags.map(batchQuote).join(" ")}`, ""].join("\r\n");
   }
+  const chrome = `${shellQuote(settings.chrome)} "$@" ${flags.map(shellQuote).join(" ")}`;
   return [
     "#!/bin/sh",
     ...(settings.home ? [`HOME=${shellQuote(settings.home)}`, "export HOME"] : []),
     ...(settings.timeZone ? [`TZ=${shellQuote(settings.timeZone)}`, "export TZ"] : []),
-    `exec ${shellQuote(settings.chrome)} "$@" ${flags.map(shellQuote).join(" ")}`,
+    ...(settings.box ? boxedLaunch(settings.box, chrome) : [`exec ${chrome}`]),
     "",
   ].join("\n");
+}
+
+/** Chrome in its box: its profile (agent-browser's --user-data-dir=) bound back read-write, and nothing else of the home
+ * or the data folder; HOME is the box's private /tmp. Without a profile it still runs boxed, on a throwaway one. The shell
+ * stays bubblewrap's parent rather than exec'ing it: --die-with-parent ends the box with the thread that started it, and
+ * agent-browser 0.37 starts Chrome from a worker thread that ends right after. */
+function boxedLaunch(box: LauncherBox, chrome: string): string[] {
+  return [
+    "profile=",
+    'for arg in "$@"; do case "$arg" in --user-data-dir=*) profile=${arg#--user-data-dir=} ;; esac; done',
+    ...(box.seccomp ? [`exec ${LAUNCHER_SECCOMP_FD}<${shellQuote(box.seccomp)} || exit 70`] : []),
+    'if [ -n "$profile" ]; then',
+    '  mkdir -p "$profile" || exit 70',
+    `  set -- --bind "$profile" "$profile" --setenv HOME /tmp -- ${chrome}`,
+    "else",
+    `  set -- --setenv HOME /tmp -- ${chrome}`,
+    "fi",
+    `${shellQuote(box.bwrap)} ${box.options.map(shellQuote).join(" ")} "$@"`,
+    "exit $?",
+  ];
 }
 
 export function writeLauncher(path: string, settings: LauncherSettings, platform: NodeJS.Platform = process.platform): void {

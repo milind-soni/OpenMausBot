@@ -17,7 +17,7 @@
 import { createHash } from "node:crypto";
 import { AUTOMATION_KINDS, BOT_PARTS, EMPTY, MOVE_BOT_PARTS, MOVE_KINDS, PICTURE_PART, differenceSignature, failedSummary, itemKey, parseSendSummary, pendingRows, planSend, resultKey } from "./cloud-send-parts.mjs";
 import { collectConnections, releaseConnections, sendConnections } from "./cloud-connections.mjs";
-import { createMoveKinds } from "./cloud-send-kinds.mjs";
+import { createMoveKinds, mergeRoutines } from "./cloud-send-kinds.mjs";
 import { botsOnCloud } from "./cloud-logins.mjs";
 import { checkChats, checkPassed, checkSecrets, manifestGaps, missingAttachments, rowIdChunks } from "./cloud-send-check.mjs";
 
@@ -283,6 +283,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   function plan(origin, mine, theirs, force = [], { everything = false } = {}) {
     const kept = entry(origin);
     const planned = planSend({ local: mine, cloud: theirs, sent: kept.sent, off: everything ? removedOnly(kept.off) : kept.off, force: [...force, ...Object.keys(kept.created)] });
+    if (everything && !team) mergeRoutines(planned.rows);
     let changed = false;
     for (const [key, parts] of Object.entries(planned.baseline)) { kept.sent[key] = { ...kept.sent[key], ...parts }; changed = true; }
     for (const key of planned.removed) { kept.off[key] = "removed"; delete kept.sent[key]; delete kept.created[key]; changed = true; }
@@ -291,6 +292,13 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       // move's check (manifestGaps) agrees with this plan instead of calling it missing on every pass.
       const here = new Map((mine?.items ?? []).map((item) => [item.key, item])), there = new Map((theirs?.items ?? []).map((item) => [item.key, item]));
       for (const row of planned.rows) {
+        // A routine's runs are history My Cloud adds by id and never drops: when they are all that differs, it goes.
+        if (row.kind === "routine" && row.differs?.includes("runs") && !row.differs.includes("def")) {
+          row.differs = row.differs.filter((part) => part !== "runs");
+          row.parts = [...(row.parts ?? []), "runs"];
+          row.state = "to-update";
+          if (!row.differs.length) delete row.differs;
+        }
         for (const part of row.differs ?? []) {
           kept.sent[row.key] = { ...kept.sent[row.key], [part]: [here.get(row.key).parts[part], there.get(row.key)?.parts[part] ?? EMPTY] };
           changed = true;
@@ -398,14 +406,14 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const localItems = new Map(mine.items.map((item) => [item.key, item]));
       const cloudItems = new Map(theirs.items.map((item) => [item.key, item]));
       const ctx = { origin, session, result, cloudBots, localItems, cloudItems, planned: new Map(planned.rows.map((row) => [row.key, row])), bots: null, skillLists: new Map(),
-        sentKeys: new Set(), sentParts: {}, recorded: new Set(), move, summaryRoute, computer: computer?.label ?? null };
+        sentKeys: new Set(), sentParts: {}, recorded: new Set(), move, ownMove: move && !team, summaryRoute, computer: computer?.label ?? null };
       const order = { "library-skill": 0, "imported-skill": 0, bot: 1, skill: 2, setting: 3, login: 4, "1password": 5 };
       const automations = new Set(AUTOMATION_KINDS);
       const goRow = async (row) => {
         try { await sendRow(ctx, row); }
         catch (error) { result.failed.push({ key: row.key, kind: row.kind, label: row.label, error: sentence(error?.message) ?? "It could not be sent.", ...(error?.final === true ? { final: true } : {}) }); }
         await recordItem(ctx, row.key).catch(() => {});
-        if (progress) progress = { done: progress.done + 1, total };
+        if (progress && !job.chats) progress = { done: progress.done + 1, total };
         publish();
       };
       for (const row of rows.filter((entry) => !automations.has(entry.kind)).sort((a, b) => order[a.kind] - order[b.kind])) await goRow(row);

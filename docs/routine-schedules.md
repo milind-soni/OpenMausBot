@@ -5,9 +5,13 @@ Ask a bot in ordinary language, for example:
 > Prepare a report at 9 am on the first of every month, in Asia/Kolkata.
 
 The bot turns calendar timing into a cron expression, and OpenMausBot validates
-it. The existing confirmation card shows the rule, its timezone and the next
-three dates. Nothing is scheduled until you confirm. The scheduler wakes the
-bot at the matching time; no model runs in the background to check the date.
+it. The change applies at once; its card shows the rule, its timezone and the
+next three dates, with Edit, Pause and Undo. The scheduler wakes the bot at the
+matching time; no model runs in the background to check the date.
+
+A routine can also name **checks** (calendar, mail, other routines' runs): plain
+code that runs on each tick before any AI turn, so a quiet tick costs nothing.
+See [Proactive routines](proactive-routines.md).
 
 In **Automations → Schedule**, choose **Monthly**, **Yearly**, or **Custom cron
 (advanced)** in the existing routine editor. Monthly offers days 1–31 and

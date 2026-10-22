@@ -7,7 +7,7 @@ import { cloudPlanSnapshot } from "./cloud-account.mjs";
 import { cloudPageSenderAllowed, myCloudOrigin } from "./cloud-home.mjs";
 import environments from "./environments.cjs";
 import localOrigin from "./local-origin.cjs";
-import { createHomeWindow, HOME_SCREEN_PATH, homeOf, installHomeWindowIpc, LOOK_MS, placeOf, QUIET_MS, routeOf, SPLASH_TEXT, splashText, TEAM_RENEW_EARLY_MS, TEAM_RENEW_MS, TEAM_RENEW_RETRY_MS } from "./home-window.mjs";
+import { createHomeWindow, HOME_SCREEN_PATH, homeOf, installHomeWindowIpc, LOOK_MS, placeOf, QUIET_MS, routeOf, SPLASH_TEXT, splashText, TEAM_RENEW_EARLY_MS, TEAM_RENEW_MS, TEAM_RENEW_RETRY_MS, UPDATING_MS } from "./home-window.mjs";
 
 const CLOUD = "https://omb-t-1.fly.dev";
 const TEAM = "https://omb-u-acme.fly.dev";
@@ -163,6 +163,18 @@ test("launching with My Cloud awake: a quick look, then My Cloud's page on the w
   assert.deepEqual([w.went.length, w.fetched], [1, []], "a window already on My Cloud is only brought forward");
 });
 
+test("a window that showed My Cloud as a saved server before the move is opened again as home, and goes home when My Cloud ends", async () => {
+  // Seen in the real app on Oct 22: with moves off, the person opened My Cloud from the switcher; after the move the
+  // window kept "Hosted: My Cloud", the switcher and "This computer", and when My Cloud ended it stayed on the ended Cloud.
+  const w = world({ url: `${CLOUD}/` });
+  await w.home.show({ place: "cloud" });
+  assert.equal(w.went.length, 1, `opened as home, not left as the saved server it was: ${JSON.stringify(w.went)}`);
+  w.state = connected({ hold: { until: 9 } });
+  w.journal = { ...done(), phase: "home-again" };
+  await w.home.show();
+  assert.equal(w.local.at(-1), true, "My Cloud ended: the window leaves it for this computer");
+});
+
 test("launching with My Cloud asleep says Waking My Cloud… and wakes it through the Admin, never by a look, then shows the page", async () => {
   const w = world({ power: { state: "asleep", since: 1, sleeps: true } });
   await w.home.show();
@@ -275,6 +287,18 @@ test("a plan problem shows the Admin's state and never knocks on My Cloud", asyn
   }
 });
 
+test("while home is My Cloud the startup screen says Opening My Cloud…, whichever screen comes next; otherwise it keeps its own words", async () => {
+  for (const [state, cloud] of [[connected({ status: "stopped" }), {}], [{ status: "signed-out" }, {}], [connected(), { down: true }], [connected(), {}]]) {
+    const w = world({ state, cloud });
+    await w.home.show();
+    assert.deepEqual(w.splash, [SPLASH_TEXT.opening], `${JSON.stringify(state)} ${JSON.stringify(cloud)}`);
+  }
+  for (const w of [world({ journal: null }), world({ state: connected({ hold: { until: 9 } }) }), world({ journal: { ...done(), phase: "copy" } })]) {
+    await w.home.show();
+    assert.deepEqual(w.splash, [], "home is this computer");
+  }
+});
+
 test("a slow wake never moves the window after a newer request; a long one hands the startup screen to this computer's", async () => {
   let woken;
   const w = world({ power: { state: "asleep", since: 1, sleeps: true }, cloud: { wakeGate: new Promise((resolve) => { woken = resolve; }) } });
@@ -319,6 +343,31 @@ test("a newer My Cloud page reloads at a quiet moment; an asleep My Cloud is nev
   w.clock += QUIET_MS;
   await w.tick();
   assert.deepEqual([w.fetched.length, w.reloads], [asked, 1]);
+});
+
+test("My Cloud's page that the window reloaded for its newer version learns it once, as it loads, to say Updating My Cloud…", async () => {
+  const w = world();
+  await w.home.show();
+  const listeners = new Map();
+  installHomeWindowIpc({ ipcMain: { handle() {}, on: (channel, listener) => listeners.set(channel, listener) }, homeWindow: w.home, cloudPage: () => null });
+  const asks = (event = { sender: w.contents, senderFrame: w.contents.mainFrame }) => { listeners.get("home:updating")(event); return event.returnValue; };
+  w.url = `${CLOUD}/`;
+  w.home.navigated(w.url);
+  await w.tick();
+  assert.equal(asks(), false, "a page that loads for any other reason");
+  w.cloud.version = "0.1.131";
+  w.clock += QUIET_MS;
+  await w.tick();
+  assert.equal(w.reloads, 1);
+  assert.equal(asks({ sender: {}, senderFrame: w.contents.mainFrame }), false, "another window is never told");
+  assert.equal(asks(), true, "the reloaded page");
+  assert.equal(asks(), false, "once");
+  w.cloud.version = "0.1.132";
+  w.clock += QUIET_MS;
+  await w.tick();
+  assert.equal(w.reloads, 2);
+  w.clock += UPDATING_MS;
+  assert.equal(asks(), false, "a page that loads long after is not that version");
 });
 
 test("My Cloud ending brings the window back to this computer's page", async () => {
@@ -391,6 +440,8 @@ test("My Cloud's own page, once it is home, gets this app's chat links, Settings
   const home = preload(CLOUD, { home: true });
   for (const key of keys) assert.ok(home.bridge[key], key);
   assert.ok(home.synced.includes("home:page"));
+  assert.equal(home.bridge.home.updating, false);
+  assert.ok(home.synced.includes("home:updating"), "My Cloud's page asks once whether it was reloaded for its newer version");
   for (const key of ["cloudAccount", "companion", "environments", "credential", "setCredential", "saveFile", "revealInFolder", "pickFolder"]) assert.equal(home.bridge[key], undefined, key);
   await home.bridge.home.repair();
   await assert.rejects(home.bridge.home.signIn(), /Choose Sign in/, "only from the person's click");
@@ -403,6 +454,8 @@ test("My Cloud's own page, once it is home, gets this app's chat links, Settings
   const local = preload(LOCAL);
   for (const key of keys) assert.ok(local.bridge[key], key);
   assert.equal(local.synced.includes("home:page"), false, "this computer's page never needs to ask");
+  assert.equal(local.synced.includes("home:updating"), false);
+  assert.equal(local.bridge.home.updating, false);
   await local.bridge.home.retry(); await local.bridge.home.state(); await local.bridge.home.signIn();
   assert.deepEqual(local.invoked.map(([channel]) => channel), ["home:retry", "home:state", "home:sign-in"]);
 });

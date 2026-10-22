@@ -6,7 +6,11 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
+import type { AppTriggerManager } from "./app-triggers.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import type { CalendarCallManager } from "./calendar-calls.ts";
+import type { RoutineManager } from "./routines.ts";
+import type { WebhookManager } from "./webhooks.ts";
 
 export const MOVED_REFUSAL = "This bot lives on My Cloud now.";
 /** The one page a frozen copy serves: the desktop app's screen while My Cloud can't be opened (electron/home-window.mjs). */
@@ -26,6 +30,27 @@ const DEVICE_STATE = new Set(["moved.json", "environment-id", "sync", "tools", "
 const kept = (name: string) => DEVICE_STATE.has(name) || name.startsWith("openmausbot-server.lease.");
 
 export type MoveFreeze = ReturnType<typeof createMoveFreeze>;
+
+/** This computer's automations, for a copy that lifts its freeze while another computer is the person's home. */
+export interface MoveAutomations {
+  routines(): Pick<RoutineManager, "listRoutines" | "update"> | null;
+  calls(): Pick<CalendarCallManager, "list" | "switchOff"> | null;
+  webhooks(): Pick<WebhookManager, "list" | "update"> | null;
+  appEvents(): Pick<AppTriggerManager, "list" | "update"> | null;
+}
+
+/** Switches off every automation that is on; the person can switch each on again by hand. Done while frozen, so none of
+ * them runs once the freeze lifts. One that can't be switched off is logged, never a reason to stay frozen. */
+export async function switchAutomationsOff(automations: MoveAutomations): Promise<void> {
+  const off = async (kind: string, id: string, work: () => unknown) => {
+    try { await work(); } catch (error) { console.warn(`move freeze: could not switch ${kind} ${id} off (${(error as Error).message})`); }
+  };
+  const routines = automations.routines(), calls = automations.calls(), webhooks = automations.webhooks(), appEvents = automations.appEvents();
+  for (const routine of routines?.listRoutines() ?? []) if (routine.enabled) await off("routine", routine.id, () => routines!.update(routine.id, { enabled: false }));
+  for (const call of calls?.list() ?? []) if (call.nextRunAt !== null) await off("call", call.id, () => calls!.switchOff(call.id));
+  for (const webhook of webhooks?.list() ?? []) if (webhook.enabled) await off("webhook", webhook.id, () => webhooks!.update(webhook.id, { enabled: false }));
+  for (const trigger of appEvents?.list() ?? []) if (trigger.enabled) await off("app event", trigger.id, () => appEvents!.update(trigger.id, { enabled: false }));
+}
 
 export function createMoveFreeze({ dataDir, exportOnly = false }: { dataDir: string; exportOnly?: boolean }) {
   const file = join(dataDir, "moved.json");
@@ -79,6 +104,8 @@ export function createMoveFreeze({ dataDir, exportOnly = false }: { dataDir: str
       for (const name of readdirSync(dataDir)) if (!kept(name)) rmSync(join(dataDir, name), { recursive: true, force: true });
       return true;
     },
+    /** False for a server that may never be lifted: a Cloud that ended. */
+    lifts: () => !exportOnly,
     /** False when this server may never be lifted: a Cloud that ended. */
     unfreeze(): boolean {
       if (exportOnly) return false;

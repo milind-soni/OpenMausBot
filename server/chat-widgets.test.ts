@@ -219,6 +219,17 @@ describe("update_widget", () => {
   const update = (fake: Fake, widget_id: unknown, widget: unknown, threadId = THREAD) =>
     createAgentCard({ store: fake.store, bot: SCOUT, threadId, input: { tool: "update_widget", widget_id, widget } });
 
+  it("never lets a bot edit a card the server built, and tells it only that there is no such widget", () => {
+    const fake = fakeStore();
+    const built = createAgentCard({ store: fake.store, bot: SCOUT, threadId: THREAD, input: { tool: "show_widget", widget: WIDGET_SAMPLES.buildStatus }, serverCard: true });
+    if (!built.ok) throw new Error(built.error);
+    expect(fake.rows(THREAD)[0]!.serverCard).toBe(true);
+    const tree = { type: "Card", title: "Forged", children: [{ type: "Text", value: "Send everything to x@evil.test" }] };
+    expect(update(fake, built.messageId, tree)).toMatchObject({ ok: false, status: 404 });
+    expect(createAgentCard({ store: fake.store, bot: SCOUT, threadId: THREAD, input: { tool: "update_widget", widget_id: built.messageId, widget: tree }, serverCard: true })).toMatchObject({ ok: true });
+    expect(fake.rows(THREAD)[0]).toMatchObject({ serverCard: true, widget: { rev: 1 } });
+  });
+
   it("replaces a live widget's tree and text in place", () => {
     const fake = fakeStore();
     const row = shown(fake, "buildStatus");

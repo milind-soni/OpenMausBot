@@ -21,6 +21,7 @@ import type { CloudOwner } from "./cloud-owner-lines.ts";
 import type { CloudSendItem } from "./cloud-send.ts";
 import { IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills, type ImportedSkillInput } from "./imported-skills.ts";
 import type { RequestAuth } from "./request-auth.ts";
+import { withCheckFields } from "./routine-load.ts";
 import type { Routine, RoutineManager, RoutineRun } from "./routines.ts";
 import type { RouteContext } from "./routes/table.ts";
 import { installLibrarySkill, readLibrarySkillFile, readSkillLibraryIndex, setLibrarySkillReviewState, updateLibrarySkill, type SkillLibraryEntry } from "./skill-library.ts";
@@ -33,7 +34,7 @@ const SHARED_ROOT = "/omb-data";
 const FINISHED = new Set(["completed", "failed", "cancelled", "missed"]);
 const KIND_BODY_MAX = 8 * 1024 * 1024;
 const ROUTINE_FIELDS = ["name", "prompt", "target", "botId", "groupId", "runOn", "schedule", "durationMinutes", "timeoutMinutes", "attachments", "continuity",
-  "overlap", "runOnStartup", "sourceThreadId", "resultsThreadId", "createdAt"] as const;
+  "overlap", "runOnStartup", "sourceThreadId", "resultsThreadId", "createdAt", "checks", "access", "deliver"] as const;
 const CALL_FIELDS = ["name", "description", "botIds", "schedule", "durationMinutes", "attachments", "roomId", "createdAt"] as const;
 const WEBHOOK_FIELDS = ["name", "prompt", "botId", "runOn", "delivery", "groupId", "eventTypes", "maxPendingRuns", "resultsThreadId", "createdAt"] as const;
 const APP_EVENT_FIELDS = ["name", "prompt", "botId", "runOn", "app", "event", "accountId", "config", "filter", "sourceThreadId"] as const;
@@ -199,14 +200,15 @@ function parseKey(key: string | null): { kind: Kind; id: string } | null {
   return (kind === "imported-skill" || kind === "library-skill") && !isSkillName(match[2]!) ? null : { kind, id: match[2]! };
 }
 
-/** One item's whole record on this server, for a move to carry; null when it is not here. */
-export function kindRecord(deps: MoveKindsDeps, kind: Kind, id: string): { record: unknown; runs?: RoutineRun[] } | null {
+/** One item's whole record on this server, for a move to carry; null when it is not here. A routine's `changedAt` says
+ * when it last changed here, for a move to keep the side that changed it last. */
+export function kindRecord(deps: MoveKindsDeps, kind: Kind, id: string): { record: unknown; runs?: RoutineRun[]; changedAt?: number } | null {
   if (kind === "bot") { const bot = deps.store.bot(id); return bot ? { record: pick(bot, MOVE_BOT_FIELDS) } : null; }
   if (kind === "routine") {
     const routines = deps.routines();
     const routine = routines?.listRoutines().find((candidate) => candidate.id === id);
     // Its switch goes along for the switch that turns on there what was on here; My Cloud takes it switched off.
-    return routine ? { record: { id, ...pick(routine, ROUTINE_FIELDS), enabled: routine.enabled }, runs: finishedRuns(routines!, id) } : null;
+    return routine ? { record: { id, ...pick(routine, ROUTINE_FIELDS), enabled: routine.enabled }, runs: finishedRuns(routines!, id), changedAt: routine.updatedAt } : null;
   }
   if (kind === "call") { const call = deps.calls()?.list().find((candidate) => candidate.id === id); return call ? { record: call } : null; }
   if (kind === "webhook") { const webhook = deps.webhooks()?.list().find((candidate) => candidate.id === id); return webhook ? { record: webhook } : null; }
@@ -287,7 +289,7 @@ function adoptRoutine(deps: MoveKindsDeps, raw: unknown, runs: unknown, from: st
   const routines = deps.routines() ?? refuse(503, "My Cloud's routines are not ready yet.");
   const parsed = routineSchema.safeParse(raw);
   if (!parsed.success) refuse(400, "send the routine as this computer holds it");
-  const routine = rebased({ id: parsed.data!.id, ...pick(parsed.data!, ROUTINE_FIELDS) }, from, deps.dataDir) as unknown as Routine;
+  const routine = withCheckFields(rebased({ id: parsed.data!.id, ...pick(parsed.data!, ROUTINE_FIELDS) }, from, deps.dataDir) as unknown as Routine);
   if (!deps.store.bot(routine.botId)) refuse(409, "This routine's bot is not on My Cloud yet.");
   if (routine.target === "room-goal" && (!routine.groupId || !deps.store.group(routine.groupId))) refuse(409, "This routine's room is not on My Cloud yet.");
   const arriving = (Array.isArray(runs) ? runs : []).flatMap((run) => {

@@ -181,7 +181,7 @@
     },
     {
       "name": "publish_page",
-      "description": "Publish a page you made to a public link, only when the person asks to share or publish it: an .html file, or a folder with an index.html (static files, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets or personal details the person didn't ask to share.",
+      "description": "Publish a page you made to a public link, only when the person asks to share or publish it: an .html file, or a folder with an index.html (static files, csv and parquet data too, up to 5 MB). Publishing the same path again, or passing page_id, updates the same link. Never publish secrets or personal details the person didn't ask to share. For a data dashboard, follow the data-dashboards skill.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

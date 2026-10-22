@@ -222,8 +222,9 @@ function sendLine({ cloudName = "My Cloud", waiting }) {
 
 /** The switcher's extra options once the person has My Cloud: the places line, the send line, and the Cloud's status
  * beside its name where menus show no sublabels. Bot names come from this computer's own server; when it does not
- * answer at once the line is left out, never guessed. `send`: what waits (main's last comparison) and its actions. */
-async function placesMenuOptions({ cloud, activeId, platform, port, send = null, text = englishText,
+ * answer at once the line is left out, never guessed. `home`: the bots moved and home is My Cloud, which the line says
+ * only then, whichever place the window shows. `send`: what waits (main's last comparison) and its actions. */
+async function placesMenuOptions({ cloud, home = false, platform, port, send = null, text = englishText,
   localBots = () => fetch(`http://127.0.0.1:${port}/api/bots`, { signal: AbortSignal.timeout(700) }).then((response) => response.json()) }) {
   const foldSublabels = platform !== "darwin";
   if (!cloud) return { foldSublabels };
@@ -233,7 +234,7 @@ async function placesMenuOptions({ cloud, activeId, platform, port, send = null,
   return {
     foldSublabels,
     ...(send ? { copyToCloud: waiting ? { label: waiting, click: send.onSend } : { label: `This computer and ${cloud.name}…`, click: send.onOpen } } : {}),
-    ...(names ? { places: placesLine({ cloudName: cloud.name, onCloud: activeId === cloud.id, localBots: names, text }) } : {}),
+    ...(names ? { places: placesLine({ cloudName: cloud.name, onCloud: home === true, localBots: names, text }) } : {}),
   };
 }
 

@@ -102,6 +102,8 @@ export interface AgentCardArgs {
   input: unknown;
   /** The row a widget call wrote: the calling session made it, so it is never offered back to it as unseen. */
   authored?(messageId: string): void;
+  /** The server built this card from records, not the bot. */
+  serverCard?: true;
   apps?: Pick<ChatApps, "createAppCard" | "recordMcpAppCall">;
 }
 
@@ -129,13 +131,16 @@ export function createAgentCard(args: AgentCardArgs): AgentCardResult | Promise<
     const widget = canonicalWidget(input);
     if (!widget.ok) return widget;
     // No `from`: in a direct thread a bot-authored row carrying one is replayed as another bot's line.
-    const message = store.appendMessage(threadId, { role: "bot", kind: "widget", text: widget.text, widget: { v: 1, root: widget.root } });
+    const message = store.appendMessage(threadId, { role: "bot", kind: "widget", text: widget.text, widget: { v: 1, root: widget.root }, ...(args.serverCard ? { serverCard: true as const } : {}) });
     args.authored?.(message.id);
     return { ok: true, messageId: message.id, ...(widget.masked ? { masked: true as const } : {}) };
   }
 
   const existing = store.messagesFor(threadId).find((message) => message.id === input.widget_id);
-  if (!existing || existing.kind !== "widget" || !existing.widget || (existing.from && existing.from.botId !== bot.id)) {
+  // A server-built card keeps `serverCard` through an edit, and that mark is what replay and presses trust; only the server
+  // may edit it, and a bot is told nothing more than that the id is missing.
+  if (!existing || existing.kind !== "widget" || !existing.widget || (existing.from && existing.from.botId !== bot.id) ||
+      (existing.serverCard && !args.serverCard)) {
     return { ok: false, status: 404, error: NO_SUCH_WIDGET };
   }
   if (existing.widget.settled) return { ok: false, status: 409, error: "The person already answered that widget. Show a new one." };

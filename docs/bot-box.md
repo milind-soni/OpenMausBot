@@ -60,7 +60,9 @@ checks it guards.
   stay in the environment until the credential broker (T0b) replaces them with per-turn tokens.
 - The box runs as the server's own user inside a user namespace; a separate Linux user per bot needs a privileged
   spawn service (T0c notes).
-- The bots' browser engine (agent-browser) is not boxed yet; its Chrome goes through its own gate.
+- On a Team Cloud each Chrome of the bots' browsers runs in a box of its own (`BotBox.browserBox`, written into the
+  launcher agent-browser runs, see [team-cloud.md](team-cloud.md)); the agent-browser daemon is not boxed, and on a My
+  Cloud no browser is.
 
 ## The credential broker
 

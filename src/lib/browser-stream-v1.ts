@@ -2,6 +2,7 @@
 // speaks both: v1 is what agent-browser serves, and what an older server or companion still offers.
 import type { ControlTransport } from "./browser-control";
 import { t } from "./i18n";
+import { withBrowserScope } from "./team-browser";
 import type { PreviewStreamClient, PreviewStreamControl, PreviewStreamEvents, PreviewStreamInput } from "./browser-stream-client";
 
 type Body = Record<string, unknown>;
@@ -169,7 +170,7 @@ export function liveControl(value: { held?: unknown; owned?: unknown; controllin
  * reconnects a few times after a dropped connection, never replaying input, and asks the server for the hold its last
  * view had. It reconnects at once when the window is focused, shown or back online, also after its retries ran out.
  */
-export function createLiveStreamClient(botId: string, events: PreviewStreamEvents, post: LivePost, resume: LiveResume = { viewer: "" }): LiveStreamClient {
+export function createLiveStreamClient(botId: string, events: PreviewStreamEvents, post: LivePost, resume: LiveResume = { viewer: "" }, scope: Readonly<Record<string, string>> = {}): LiveStreamClient {
   let stopped = false;
   /** Stopped because its retries ran out, not refused for good: coming back to the window tries again. */
   let revivable = false;
@@ -224,7 +225,7 @@ export function createLiveStreamClient(botId: string, events: PreviewStreamEvent
   const connect = () => {
     retry = null;
     if (stopped) return;
-    const query = resume.viewer ? `?resume=${encodeURIComponent(resume.viewer)}` : "";
+    const query = withBrowserScope(resume.viewer ? `?resume=${encodeURIComponent(resume.viewer)}` : "", scope);
     const live = new EventSource(`/api/bots/${encodeURIComponent(botId)}/browser/live${query}`);
     source = live;
     heardAt = Date.now();

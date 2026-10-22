@@ -13,7 +13,7 @@ import { needsNoSandbox, type ChromeIdentity } from "./identity.ts";
 import { installChromeForTesting, type ChromeForTestingPin, type DownloadProgress } from "./install.ts";
 import { chromeHost, resolveChromePlan, type ChromeEngine, type ChromeHost, type ChromePlan, type FoundChrome } from "./resolve.ts";
 import { IdentitySidecars } from "./sidecar.ts";
-import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, writeLauncher, type LauncherSettings, type Screen } from "./wrapper.ts";
+import { browserLanguage, browserTimeZone, languageList, launcherPath, primaryScreen, writeLauncher, type LauncherBox, type LauncherSettings, type Screen } from "./wrapper.ts";
 
 type Ready = { kind: "ready"; chrome: FoundChrome; identity: ChromeIdentity; product: string; fingerprint: string; launcher?: LauncherSettings };
 type State =
@@ -79,6 +79,7 @@ export class ChromeLauncher implements BrowserLaunch {
   private readonly options: Required<Pick<ChromeLauncherOptions, "dataDir" | "env" | "platform" | "readyWaitMs">> & ChromeLauncherOptions;
   private readonly host: ChromeHost;
   private readonly sidecars: IdentitySidecars;
+  private box: (() => LauncherBox | null) | null = null;
 
   constructor(options: ChromeLauncherOptions) {
     const env = options.env ?? process.env;
@@ -87,6 +88,21 @@ export class ChromeLauncher implements BrowserLaunch {
     this.host = options.host ?? chromeHost({ dataDir: options.dataDir, env, platform, arch: options.arch });
     this.sidecars = options.sidecars ?? new IdentitySidecars();
     this.path = launcherPath(options.dataDir, platform);
+  }
+
+  /** Every Chrome started from now on runs in the box this returns (a Team Cloud's); the launcher is written again. */
+  boxWith(box: () => LauncherBox | null): void {
+    this.box = box;
+    if (this.state.kind === "ready" && this.state.launcher) {
+      const launcher = { ...this.state.launcher, ...this.boxed() };
+      writeLauncher(this.path, launcher, this.options.platform);
+      this.state = { ...this.state, launcher };
+    }
+  }
+
+  private boxed(): { box?: LauncherBox } {
+    const box = this.box?.() ?? null;
+    return box ? { box } : {};
   }
 
   plan(): ChromePlan {
@@ -215,6 +231,7 @@ export class ChromeLauncher implements BrowserLaunch {
         chrome: chrome.path, userAgent: identity.userAgent, screen: await this.screen,
         language: browserLanguage(env), timeZone: browserTimeZone(env, platform),
         ...(platform === "darwin" ? { home: userInfo().homedir } : {}),
+        ...this.boxed(),
       };
       writeLauncher(this.path, launcher, platform);
       if (platform !== "win32") await (this.options.checkLauncher ?? runsLauncher)(this.path, this.chromeEnv());

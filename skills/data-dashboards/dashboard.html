@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sales dashboard</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<script defer src="https://cdn.jsdelivr.net/npm/echarts@6.1.0/dist/echarts.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f5f6f8; --surface: #ffffff; --border: #e3e5ea; --grid: #eceef1; --axis: #c9cdd4;
+  --ink: #16181d; --ink-2: #4b5260; --muted: #646b78; --deemph: #c4c9d1;
+  --good: #1a7f37; --bad: #c62a2f; --accent: #0b6bcb;
+  --series-1: #0b6bcb; --series-2: #c76a00; --series-3: #00866b; --series-4: #d1452b; --series-5: #8a5cc7; --series-6: #c2407e;
+  --font: var(--font-sans, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0f1115; --surface: #17191e; --border: #2a2e36; --grid: #23272e; --axis: #3a3f48;
+    --ink: #eceef2; --ink-2: #b4bac5; --muted: #8e96a3; --deemph: #3d434d;
+    --good: #3fb950; --bad: #f47067; --accent: #3a8ae8;
+    --series-1: #3a8ae8; --series-2: #c97a00; --series-3: #109c7c; --series-4: #e0573a; --series-5: #9b78e0; --series-6: #d4568f;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0f1115; --surface: #17191e; --border: #2a2e36; --grid: #23272e; --axis: #3a3f48;
+  --ink: #eceef2; --ink-2: #b4bac5; --muted: #8e96a3; --deemph: #3d434d;
+  --good: #3fb950; --bad: #f47067; --accent: #3a8ae8;
+  --series-1: #3a8ae8; --series-2: #c97a00; --series-3: #109c7c; --series-4: #e0573a; --series-5: #9b78e0; --series-6: #d4568f;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--page); color: var(--ink); font: 14px/1.45 var(--font); -webkit-font-smoothing: antialiased; }
+.dash { max-width: 1200px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s6); display: grid; gap: var(--s4); }
+.head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--s3) var(--s5); }
+h1 { font-size: 22px; line-height: 1.2; font-weight: 650; letter-spacing: -0.01em; margin: 0; }
+h2 { font-size: 15px; line-height: 1.3; font-weight: 600; margin: 0; }
+.sub, .note { margin: var(--s1) 0 0; color: var(--ink-2); }
+.note { font-size: 13px; }
+.filters { display: flex; flex-wrap: wrap; gap: var(--s3); }
+.filters label { display: grid; gap: 2px; font-size: 12px; font-weight: 550; color: var(--ink-2); }
+.select { position: relative; }
+.select::after { content: ""; position: absolute; right: 12px; top: 50%; width: 6px; height: 6px; border-right: 1.5px solid var(--ink-2); border-bottom: 1.5px solid var(--ink-2); transform: translateY(-75%) rotate(45deg); pointer-events: none; }
+select { appearance: none; font: inherit; font-size: 14px; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; min-height: 36px; padding: 6px 32px 6px 10px; min-width: 150px; cursor: pointer; }
+select:hover { border-color: var(--axis); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.status { display: flex; align-items: center; gap: var(--s2); padding: 10px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); color: var(--ink-2); }
+.status[hidden] { display: none; }
+.status.is-error { color: var(--bad); border-color: currentColor; }
+.spinner { width: 14px; height: 14px; flex: none; border-radius: 50%; border: 2px solid var(--grid); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+.is-error .spinner { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: var(--s3); margin: 0; padding: 0; list-style: none; }
+.kpi, .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: opacity .2s; }
+.kpi { padding: var(--s4); }
+.kpi-label { margin: 0; font-size: 12px; font-weight: 550; color: var(--ink-2); }
+.kpi-value { margin: 6px 0 2px; font-size: 28px; line-height: 1.1; font-weight: 650; letter-spacing: -0.02em; }
+.kpi-delta { margin: 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; min-height: 17px; }
+.kpi-delta .up { color: var(--good); font-weight: 600; }
+.kpi-delta .down { color: var(--bad); font-weight: 600; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s4); }
+@media (min-width: 760px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.card { margin: 0; padding: var(--s4); min-width: 0; }
+.wide { grid-column: 1 / -1; }
+.chart { height: 260px; margin-top: var(--s3); }
+.is-updating .kpi, .is-updating .card { opacity: .55; }
+details { margin-top: var(--s2); font-size: 13px; }
+summary { width: fit-content; cursor: pointer; color: var(--ink-2); border-radius: 6px; }
+.table-wrap { overflow-x: auto; margin-top: var(--s3); }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+caption { text-align: left; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.num { text-align: right; }
+.share { display: inline-block; width: 64px; height: 6px; margin-left: var(--s2); vertical-align: middle; border-radius: 3px; background: var(--grid); overflow: hidden; }
+.share > span { display: block; height: 100%; width: var(--w, 0); background: var(--accent); border-radius: 3px; }
+.foot { margin: 0; font-size: 12px; color: var(--muted); }
+@media (max-width: 520px) { .optional, .share { display: none; } }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main class="dash" id="dash" aria-busy="true">
+  <header class="head">
+    <div>
+      <h1>Sales</h1>
+      <p class="sub">Revenue, orders and best sellers</p>
+    </div>
+    <div class="filters" role="group" aria-label="Filters">
+      <label>Region <span class="select"><select id="filter-region"><option value="">All regions</option></select></span></label>
+      <label>Period <span class="select"><select id="filter-period"></select></span></label>
+    </div>
+  </header>
+
+  <div class="status" id="status" role="status"><span class="spinner" aria-hidden="true"></span><span id="status-text">Loading the data…</span></div>
+
+  <ul class="kpis" aria-label="Key figures">
+    <li class="kpi"><p class="kpi-label">Revenue</p><p class="kpi-value" id="kpi-revenue">–</p><p class="kpi-delta" id="delta-revenue"></p></li>
+    <li class="kpi"><p class="kpi-label">Orders</p><p class="kpi-value" id="kpi-orders">–</p><p class="kpi-delta" id="delta-orders"></p></li>
+    <li class="kpi"><p class="kpi-label">Average order</p><p class="kpi-value" id="kpi-average">–</p><p class="kpi-delta" id="delta-average"></p></li>
+    <li class="kpi"><p class="kpi-label">Units sold</p><p class="kpi-value" id="kpi-units">–</p><p class="kpi-delta" id="delta-units"></p></li>
+  </ul>
+
+  <section class="grid" aria-label="Charts">
+    <figure class="card wide">
+      <h2>How is revenue trending?</h2>
+      <p class="note" id="note-trend">Revenue by month</p>
+      <div class="chart" id="chart-trend" role="img" aria-label="Revenue by month"></div>
+      <details><summary>Show the numbers</summary><div class="table-wrap"><table id="numbers-trend"></table></div></details>
+    </figure>
+    <figure class="card">
+      <h2>Which regions sell the most?</h2>
+      <p class="note" id="note-regions">Revenue by region</p>
+      <div class="chart" id="chart-regions" role="img" aria-label="Revenue by region"></div>
+      <details><summary>Show the numbers</summary><div class="table-wrap"><table id="numbers-regions"></table></div></details>
+    </figure>
+    <figure class="card">
+      <h2>Which categories are growing?</h2>
+      <p class="note" id="note-mix">Revenue by category and month</p>
+      <div class="chart" id="chart-mix" role="img" aria-label="Revenue by category and month"></div>
+      <details><summary>Show the numbers</summary><div class="table-wrap"><table id="numbers-mix"></table></div></details>
+    </figure>
+  </section>
+
+  <section class="card">
+    <h2>Best-selling products</h2>
+    <p class="note">Top 10 by revenue in the selected period</p>
+    <div class="table-wrap"><table id="table-top"></table></div>
+  </section>
+
+  <p class="foot" id="foot"></p>
+</main>
+
+<!-- Chat pages: put CSV text in this tag (the whole page must stay under 256 KB). Published pages: leave it empty and
+     ship data.parquet or data.csv next to index.html. -->
+<script type="text/csv" id="embedded-data"></script>
+
+<script type="module">
+const DUCKDB_URL = "https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.32.0/+esm";
+const CONFIG = {
+  dataFile: "data.parquet",
+  source: "Orders export (sample data)",
+  updated: "2026-10-22T09:00:00Z",
+  currency: "USD",
+};
+const PERIODS = [{ months: 3, label: "Last 3 months" }, { months: 6, label: "Last 6 months" }, { months: 12, label: "Last 12 months" }, { months: 0, label: "All time" }];
+const state = { region: "", months: 12 };
+
+const $ = (id) => document.getElementById(id);
+const fmt = {
+  money: new Intl.NumberFormat(undefined, { style: "currency", currency: CONFIG.currency, maximumFractionDigits: 0 }),
+  moneyShort: new Intl.NumberFormat(undefined, { style: "currency", currency: CONFIG.currency, notation: "compact", maximumFractionDigits: 1 }),
+  money2: new Intl.NumberFormat(undefined, { style: "currency", currency: CONFIG.currency, maximumFractionDigits: 2 }),
+  int: new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }),
+  short: new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }),
+  pct: new Intl.NumberFormat(undefined, { style: "percent", maximumFractionDigits: 1 }),
+  month: new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric", timeZone: "UTC" }),
+  day: new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }),
+  stamp: new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }),
+};
+const monthLabel = (ym) => fmt.month.format(new Date(`${ym}-01T00:00:00Z`));
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const quote = (text) => `'${String(text).replaceAll("'", "''")}'`;
+
+async function fetchData() {
+  const embedded = $("embedded-data").textContent.trim();
+  if (embedded) return { name: "embedded.csv", text: embedded };
+  const response = await fetch(new URL(CONFIG.dataFile, document.baseURI));
+  if (!response.ok) throw new Error(`${CONFIG.dataFile} could not be loaded (HTTP ${response.status}).`);
+  return { name: CONFIG.dataFile, bytes: new Uint8Array(await response.arrayBuffer()) };
+}
+
+// A page may not start a Worker from another origin's script, so the worker is a blob that imports DuckDB's. The
+// single-threaded bundles need no cross-origin isolation headers, so this also runs in a sandboxed chat page.
+async function openDatabase() {
+  const duckdb = await import(DUCKDB_URL);
+  const { mvp, eh } = duckdb.getJsDelivrBundles();
+  const bundle = await duckdb.selectBundle({ mvp, eh });
+  const workerUrl = URL.createObjectURL(new Blob([`importScripts("${bundle.mainWorker}");`], { type: "text/javascript" }));
+  const db = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), new Worker(workerUrl));
+  try { await db.instantiate(bundle.mainModule, bundle.pthreadWorker); } finally { URL.revokeObjectURL(workerUrl); }
+  return db;
+}
+
+let conn;
+async function rows(sql) {
+  const table = await conn.query(sql);
+  return table.toArray().map((row) => Object.fromEntries(Object.entries(row.toJSON()).map(([key, value]) => [key, typeof value === "bigint" ? Number(value) : value])));
+}
+
+/** The WHERE clause for the filters. `shift: 1` is the period just before the selected one. */
+function where({ region = state.region, months = state.months, shift = 0 } = {}) {
+  const parts = [];
+  if (region) parts.push(`region = ${quote(region)}`);
+  if (months) {
+    const end = `(SELECT max(date) FROM data) - INTERVAL ${Number(shift * months)} MONTH`;
+    parts.push(`date > ${end} - INTERVAL ${Number(months)} MONTH AND date <= ${end}`);
+  }
+  return parts.length ? `WHERE ${parts.join(" AND ")}` : "";
+}
+
+const QUERIES = {
+  totals: (w) => `SELECT sum(revenue)::DOUBLE AS revenue, count(*)::DOUBLE AS orders, sum(units)::DOUBLE AS units FROM data ${w}`,
+  trend: (w) => `SELECT strftime(date_trunc('month', date), '%Y-%m') AS month, sum(revenue)::DOUBLE AS revenue FROM data ${w} GROUP BY 1 ORDER BY 1`,
+  regions: (w) => `SELECT region, sum(revenue)::DOUBLE AS revenue FROM data ${w} GROUP BY 1 ORDER BY 2 DESC`,
+  mix: (w) => `SELECT strftime(date_trunc('month', date), '%Y-%m') AS month, category, sum(revenue)::DOUBLE AS revenue FROM data ${w} GROUP BY 1, 2 ORDER BY 1`,
+  top: (w) => `SELECT product, category, sum(units)::DOUBLE AS units, sum(revenue)::DOUBLE AS revenue,
+    (sum(revenue) / sum(sum(revenue)) OVER ())::DOUBLE AS share FROM data ${w} GROUP BY 1, 2 ORDER BY revenue DESC LIMIT 10`,
+};
+
+/** The CSS colour tokens as the browser resolved them, for the charts: light and dark are defined once, in the CSS. */
+function theme() {
+  const probe = document.createElement("span");
+  probe.style.display = "none";
+  document.body.append(probe);
+  const read = (name) => { probe.style.color = `var(${name})`; return getComputedStyle(probe).color; };
+  const names = ["surface", "border", "grid", "axis", "ink", "ink-2", "muted", "deemph", "accent"];
+  const t = Object.fromEntries(names.map((name) => [name.replace("-2", "2"), read(`--${name}`)]));
+  t.series = [1, 2, 3, 4, 5, 6].map((i) => read(`--series-${i}`));
+  t.font = getComputedStyle(document.body).fontFamily;
+  probe.remove();
+  return t;
+}
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+const base = (t) => ({
+  animation: !reducedMotion.matches, animationDuration: 300,
+  textStyle: { fontFamily: t.font, color: t.ink2, fontSize: 12 },
+  tooltip: { confine: true, backgroundColor: t.surface, borderColor: t.border, borderWidth: 1, padding: [8, 10],
+    textStyle: { color: t.ink, fontSize: 12, fontFamily: t.font }, extraCssText: "border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.14)" },
+});
+const valueAxis = (t, format) => ({ type: "value", axisLine: { show: false }, axisTick: { show: false },
+  axisLabel: { color: t.muted, fontSize: 11, formatter: format }, splitLine: { lineStyle: { color: t.grid, width: 1 } } });
+const categoryAxis = (t, data, extra = {}) => ({ type: "category", data, axisTick: { show: false },
+  axisLine: { lineStyle: { color: t.axis } }, axisLabel: { color: t.muted, fontSize: 11 }, ...extra });
+const tooltipRow = (color, label, value) =>
+  `<div style="display:flex;align-items:center;gap:8px"><span style="width:10px;height:2px;background:${color}"></span><b>${escapeHtml(value)}</b><span style="opacity:.75">${escapeHtml(label)}</span></div>`;
+
+const charts = {};
+const chart = (id) => (charts[id] ??= window.echarts.init($(id), null, { renderer: "svg" }));
+
+function fillTable(table, columns, data, caption) {
+  const head = document.createElement("tr");
+  for (const column of columns) {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = column.label;
+    th.className = [column.num && "num", column.optional && "optional"].filter(Boolean).join(" ");
+    head.append(th);
+  }
+  const body = data.map((row) => {
+    const tr = document.createElement("tr");
+    for (const column of columns) {
+      const td = document.createElement("td");
+      const value = column.value(row);
+      if (value instanceof Node) td.append(value); else td.textContent = value;
+      td.className = [column.num && "num", column.optional && "optional"].filter(Boolean).join(" ");
+      tr.append(td);
+    }
+    return tr;
+  });
+  const parts = [document.createElement("thead"), document.createElement("tbody")];
+  parts[0].append(head);
+  parts[1].append(...body);
+  table.replaceChildren(...(caption ? [Object.assign(document.createElement("caption"), { className: "sr", textContent: caption })] : []), ...parts);
+}
+
+function renderDelta(id, now, before, label) {
+  const el = $(id);
+  el.replaceChildren();
+  if (!before || !Number.isFinite(now) || !Number.isFinite(before)) return;
+  const change = (now - before) / before;
+  const up = change >= 0;
+  const mark = Object.assign(document.createElement("span"), { className: up ? "up" : "down", textContent: `${up ? "▲" : "▼"} ${fmt.pct.format(Math.abs(change))}` });
+  el.append(Object.assign(document.createElement("span"), { className: "sr", textContent: up ? "Up " : "Down " }), mark, ` vs previous ${label}`);
+}
+
+function renderKpis(now, before) {
+  const average = (row) => (row && row.orders ? row.revenue / row.orders : NaN);
+  $("kpi-revenue").textContent = fmt.moneyShort.format(now.revenue ?? 0);
+  $("kpi-orders").textContent = fmt.int.format(now.orders ?? 0);
+  $("kpi-average").textContent = now.orders ? fmt.money.format(average(now)) : "–";
+  $("kpi-units").textContent = fmt.short.format(now.units ?? 0);
+  const label = `${state.months} months`;
+  renderDelta("delta-revenue", now.revenue, before?.revenue, label);
+  renderDelta("delta-orders", now.orders, before?.orders, label);
+  renderDelta("delta-average", average(now), average(before), label);
+  renderDelta("delta-units", now.units, before?.units, label);
+}
+
+function renderTrend(data, t) {
+  const months = data.map((d) => monthLabel(d.month)), values = data.map((d) => d.revenue);
+  const peak = values.indexOf(Math.max(...values)), last = values.length - 1;
+  const note = !data.length ? "No orders in this selection"
+    : peak === last ? `${months[last]} is the best month yet: ${fmt.moneyShort.format(values[last])}`
+    : `Peak ${fmt.moneyShort.format(values[peak])} in ${months[peak]}; latest ${fmt.moneyShort.format(values[last])} in ${months[last]}`;
+  $("note-trend").textContent = note;
+  $("chart-trend").setAttribute("aria-label", `Line chart of revenue by month. ${note}.`);
+  const b = base(t);
+  chart("chart-trend").setOption({
+    ...b,
+    grid: { left: 4, right: 32, top: 28, bottom: 4, containLabel: true },
+    tooltip: { ...b.tooltip, trigger: "axis", axisPointer: { type: "line", lineStyle: { color: t.axis } },
+      formatter: (items) => `<div style="margin-bottom:4px">${escapeHtml(items[0].name)}</div>${tooltipRow(t.accent, "revenue", fmt.money.format(items[0].value))}` },
+    xAxis: categoryAxis(t, months, { boundaryGap: false }),
+    yAxis: valueAxis(t, (v) => fmt.moneyShort.format(v)),
+    series: [{
+      type: "line", data: values, showSymbol: false, symbolSize: 8, lineStyle: { width: 2, color: t.accent, cap: "round", join: "round" },
+      itemStyle: { color: t.accent }, areaStyle: { color: t.accent, opacity: 0.1 },
+      markPoint: data.length ? { symbol: "circle", symbolSize: 9, itemStyle: { color: t.accent, borderColor: t.surface, borderWidth: 2 },
+        label: { show: true, position: "top", distance: 6, align: peak === last ? "right" : "center", color: t.ink, fontWeight: 600, fontSize: 12, formatter: `Peak ${fmt.moneyShort.format(values[peak])}` },
+        data: [{ coord: [months[peak], values[peak]] }] } : undefined,
+    }],
+  }, true);
+  fillTable($("numbers-trend"), [{ label: "Month", value: (d) => monthLabel(d.month) }, { label: "Revenue", num: true, value: (d) => fmt.money.format(d.revenue) }], data, "Revenue by month");
+}
+
+function renderRegions(data, t) {
+  const ordered = [...data].reverse();
+  const total = data.reduce((sum, d) => sum + d.revenue, 0);
+  const lead = data[0];
+  const note = lead ? `${lead.region} leads with ${fmt.pct.format(lead.revenue / total)} of revenue${state.region ? `; ${state.region} highlighted` : ""}` : "No orders in this selection";
+  $("note-regions").textContent = note;
+  $("chart-regions").setAttribute("aria-label", `Bar chart of revenue by region. ${data.map((d) => `${d.region} ${fmt.moneyShort.format(d.revenue)}`).join(", ")}.`);
+  const b = base(t);
+  chart("chart-regions").setOption({
+    ...b,
+    grid: { left: 4, right: 64, top: 4, bottom: 4, containLabel: true },
+    tooltip: { ...b.tooltip, trigger: "item", formatter: (p) => tooltipRow(p.color, p.name, fmt.money.format(p.value)) },
+    xAxis: { type: "value", show: false },
+    yAxis: categoryAxis(t, ordered.map((d) => d.region), { axisLine: { show: false }, axisLabel: { color: t.ink2, fontSize: 12 } }),
+    series: [{
+      type: "bar", barMaxWidth: 24, barCategoryGap: "35%",
+      data: ordered.map((d) => ({ value: d.revenue, itemStyle: { color: !state.region || d.region === state.region ? t.accent : t.deemph, borderRadius: [0, 4, 4, 0] } })),
+      label: { show: true, position: "right", color: t.ink2, fontSize: 12, formatter: (p) => fmt.moneyShort.format(p.value) },
+    }],
+  }, true);
+  fillTable($("numbers-regions"), [{ label: "Region", value: (d) => d.region }, { label: "Revenue", num: true, value: (d) => fmt.money.format(d.revenue) },
+    { label: "Share", num: true, value: (d) => fmt.pct.format(d.revenue / total) }], data, "Revenue by region");
+}
+
+let CATEGORIES = [];
+function renderMix(data, t) {
+  const months = [...new Set(data.map((d) => d.month))];
+  const byKey = new Map(data.map((d) => [`${d.month}|${d.category}`, d.revenue]));
+  const present = CATEGORIES.filter((c) => data.some((d) => d.category === c));
+  const growth = present.map((c) => {
+    const first = byKey.get(`${months[0]}|${c}`) ?? 0, last = byKey.get(`${months.at(-1)}|${c}`) ?? 0;
+    return { c, change: first ? (last - first) / first : 0 };
+  }).sort((a, b) => b.change - a.change)[0];
+  const note = growth && months.length > 1 ? `${growth.c} grew most: ${growth.change >= 0 ? "up" : "down"} ${fmt.pct.format(Math.abs(growth.change))} from ${monthLabel(months[0])} to ${monthLabel(months.at(-1))}` : "Revenue by category and month";
+  $("note-mix").textContent = note;
+  $("chart-mix").setAttribute("aria-label", `Line chart of revenue by category and month, one line each for ${present.join(", ")}. ${note}.`);
+  const b = base(t);
+  chart("chart-mix").setOption({
+    ...b,
+    grid: { left: 4, right: 84, top: 12, bottom: 4, containLabel: true },
+    tooltip: { ...b.tooltip, trigger: "axis", axisPointer: { type: "line", lineStyle: { color: t.axis } },
+      formatter: (items) => `<div style="margin-bottom:4px">${escapeHtml(items[0].name)}</div>${[...items].sort((x, y) => y.value - x.value).map((i) => tooltipRow(i.color, i.seriesName, fmt.money.format(i.value))).join("")}` },
+    xAxis: categoryAxis(t, months.map(monthLabel), { boundaryGap: false }),
+    yAxis: valueAxis(t, (v) => fmt.moneyShort.format(v)),
+    series: present.map((c) => {
+      const color = t.series[CATEGORIES.indexOf(c) % t.series.length];
+      return { type: "line", name: c, data: months.map((m) => byKey.get(`${m}|${c}`) ?? 0), showSymbol: false, symbolSize: 8,
+        lineStyle: { width: 2, color }, itemStyle: { color }, emphasis: { focus: "series" },
+        endLabel: { show: true, formatter: "{a}", color: t.ink2, fontSize: 12, distance: 6 }, labelLayout: { moveOverlap: "shiftY" } };
+    }),
+  }, true);
+  fillTable($("numbers-mix"), [{ label: "Month", value: (m) => monthLabel(m) },
+    ...present.map((c) => ({ label: c, num: true, value: (m) => fmt.money.format(byKey.get(`${m}|${c}`) ?? 0) }))], months, "Revenue by category and month");
+}
+
+function shareCell(share) {
+  const wrap = document.createElement("span");
+  wrap.append(fmt.pct.format(share));
+  const bar = Object.assign(document.createElement("span"), { className: "share" });
+  const fill = document.createElement("span");
+  fill.style.setProperty("--w", `${Math.round(share * 100)}%`);
+  bar.setAttribute("aria-hidden", "true");
+  bar.append(fill);
+  wrap.append(bar);
+  return wrap;
+}
+
+function renderTop(data) {
+  fillTable($("table-top"), [
+    { label: "Product", value: (d) => d.product }, { label: "Category", optional: true, value: (d) => d.category },
+    { label: "Units", num: true, optional: true, value: (d) => fmt.int.format(d.units) }, { label: "Revenue", num: true, value: (d) => fmt.money.format(d.revenue) },
+    { label: "Share", num: true, value: (d) => shareCell(d.share) },
+  ], data, "Best-selling products");
+}
+
+let latest = null, range = null;
+function render() {
+  if (!latest) return;
+  const t = theme();
+  renderKpis(latest.totals, latest.previous);
+  renderTrend(latest.trend, t);
+  renderRegions(latest.regions, t);
+  renderMix(latest.mix, t);
+  renderTop(latest.top);
+}
+
+/** Deltas only compare whole periods: the data must reach back two selected periods. */
+function hasFullPreviousPeriod() {
+  if (!state.months || !range) return false;
+  const month = (date) => Number(date.slice(0, 4)) * 12 + Number(date.slice(5, 7));
+  return month(range.last) - month(range.first) + 1 >= 2 * state.months;
+}
+
+let pending = 0;
+async function refresh() {
+  const ticket = ++pending;
+  $("dash").classList.add("is-updating");
+  const w = where();
+  const result = {
+    totals: (await rows(QUERIES.totals(w)))[0],
+    previous: hasFullPreviousPeriod() ? (await rows(QUERIES.totals(where({ shift: 1 }))))[0] : null,
+    trend: await rows(QUERIES.trend(w)),
+    regions: await rows(QUERIES.regions(where({ region: "" }))),
+    mix: await rows(QUERIES.mix(w)),
+    top: await rows(QUERIES.top(w)),
+  };
+  if (ticket !== pending) return;
+  latest = result;
+  render();
+  $("dash").classList.remove("is-updating");
+  const period = PERIODS.find((p) => p.months === state.months)?.label ?? "";
+  window.mausbot?.setContext?.(`The person is looking at ${state.region || "all regions"}, ${period.toLowerCase()}.`)?.catch(() => {});
+}
+
+function showError(error) {
+  console.error(error);
+  const status = $("status");
+  status.hidden = false;
+  status.classList.add("is-error");
+  status.setAttribute("role", "alert");
+  $("status-text").textContent = `The dashboard couldn't load: ${error?.message ?? error}`;
+  $("dash").setAttribute("aria-busy", "false");
+}
+
+async function start() {
+  const data = fetchData();
+  data.catch(() => {});
+  const db = await openDatabase();
+  const file = await data;
+  if (file.text !== undefined) await db.registerFileText(file.name, file.text);
+  else await db.registerFileBuffer(file.name, file.bytes);
+  conn = await db.connect();
+  const reader = file.name.endsWith(".parquet") ? `read_parquet(${quote(file.name)})` : `read_csv(${quote(file.name)}, header = true)`;
+  await conn.query(`CREATE TABLE data AS SELECT * FROM ${reader}`);
+  if (!window.echarts) throw new Error("the chart library didn't load from cdn.jsdelivr.net.");
+
+  [range] = await rows(`SELECT min(date)::VARCHAR AS first, max(date)::VARCHAR AS last, count(*)::DOUBLE AS n FROM data`);
+  CATEGORIES = (await rows(`SELECT DISTINCT category FROM data ORDER BY 1`)).map((r) => r.category);
+  const regionSelect = $("filter-region"), periodSelect = $("filter-period");
+  for (const { region } of await rows(`SELECT DISTINCT region FROM data ORDER BY 1`)) regionSelect.append(new Option(region, region));
+  for (const p of PERIODS) periodSelect.append(new Option(p.label, String(p.months), false, p.months === state.months));
+  regionSelect.addEventListener("change", () => { state.region = regionSelect.value; refresh().catch(showError); });
+  periodSelect.addEventListener("change", () => { state.months = Number(periodSelect.value); refresh().catch(showError); });
+
+  const updated = CONFIG.updated ? ` · Updated ${fmt.stamp.format(new Date(CONFIG.updated))}` : "";
+  $("foot").textContent = `Source: ${CONFIG.source} · ${fmt.int.format(range.n)} orders from ${fmt.day.format(new Date(`${range.first}T00:00:00Z`))} to ${fmt.day.format(new Date(`${range.last}T00:00:00Z`))}${updated}`;
+
+  await refresh();
+  $("status").hidden = true;
+  $("dash").setAttribute("aria-busy", "false");
+  new ResizeObserver(() => Object.values(charts).forEach((c) => c.resize())).observe($("dash"));
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", render);
+  new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  document.documentElement.dataset.ready = "true";
+}
+
+start().catch(showError);
+</script>
+</body>
+</html>

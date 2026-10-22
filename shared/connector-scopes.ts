@@ -2,6 +2,7 @@
 // only to read. Absent means every connected app, read and write; present, an
 // app not listed is off and "read" refuses anything that is not a read. The
 // harness enforces it at the connector relay; the app shows the control.
+import { KNOWN_READ_SLUGS } from "./outbound.ts";
 
 const READ_VERBS = new Set(["GET", "LIST", "FETCH", "SEARCH", "READ", "FIND", "RETRIEVE", "LOOKUP", "DOWNLOAD", "VIEW", "CHECK", "COUNT"]);
 
@@ -29,6 +30,7 @@ export function toolkitOf(slug: string): string {
  * account even though it sends nothing, so it is a write here. */
 export function isReadOnlyAction(slug: string, toolkit?: string): boolean {
   if (slug === "COMPOSIO_PROXY_EXECUTE") return false;
+  if (KNOWN_READ_SLUGS.has(slug)) return true;
   const cut = toolkit ? toolkit.length : slug.indexOf("_");
   const action = cut > 0 ? slug.slice(cut + 1) : "";
   const first = action.toUpperCase().split(/[^A-Z0-9]+/).find(Boolean);

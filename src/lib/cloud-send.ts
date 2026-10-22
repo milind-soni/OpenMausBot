@@ -42,8 +42,20 @@ export function arrivedList(counts: OneHomeCounts): string[] {
   ];
 }
 
+/** How long after the move is done the corner cards that sell or ask for something still wait. */
+export const MOVE_QUIET_MS = 5 * 60_000;
+
+/** Until when the corner cards that sell or ask for something (Product Hunt, the star, Cloud offers) wait for the
+ * one-time move: for good while it goes or brings things home (Infinity), and MOVE_QUIET_MS after it is done. */
+export function moveQuietUntil(move: OneHomeView | null | undefined): number {
+  if (!move) return 0;
+  if (move.phase === "done") return move.at ? move.at + MOVE_QUIET_MS : 0;
+  return Infinity;
+}
+
 /** The one-time move's line on either page: on its way (with progress, or who it waits for), almost done, failing for a
- * day (with Try again), what arrived (on My Cloud's page, once), or coming home. `page`: which page shows it. */
+ * day (with Try again), what arrived (on My Cloud's page, once), coming home, or where the bots came home instead.
+ * `page`: which page shows it. */
 export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "sending" | "failed" | "done"; text: string; extra: string[]; phone?: true; retry?: true } | null {
   if (move.phase === "done") {
     if (page !== "cloud") return null;
@@ -53,8 +65,15 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
   }
   if (move.phase === "home-again" || move.phase === "back") {
     if (page !== "local") return null;
+    const elsewhere = move.phase === "back" ? move.elsewhere : undefined;
+    if (elsewhere) {
+      return { kind: "done", extra: [], text: elsewhere.since
+        ? t("cloudSend.move.elsewhere", { name: elsewhere.name, date: new Intl.DateTimeFormat(activeLocale(), { dateStyle: "long" }).format(elsewhere.since) })
+        : t("cloudSend.move.elsewhereEmpty", { name: elsewhere.name }) };
+    }
     return { kind: "done", text: t(move.phase === "home-again" ? "cloudSend.move.homeAgain" : move.lost ? "cloudSend.move.backLost" : "cloudSend.move.back"), extra: [] };
   }
+  if (move.phase === "copy" && move.updating) return { kind: "sending", text: t("cloudSend.move.updating"), extra: [] };
   const failing = "failing" in move ? move.failing : undefined;
   if (failing) return { kind: "failed", text: failing.error ? t("cloudSend.move.failing", { error: serverErrorText(failing, failing.error) }) : t("cloudSend.move.failingPlain"), extra: [], retry: true };
   if (move.phase === "finishing") return { kind: "sending", text: t("cloudSend.move.finishing"), extra: [] };

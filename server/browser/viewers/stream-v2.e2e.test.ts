@@ -70,6 +70,7 @@ suite("the v2 stream on real Chrome", () => {
         answerFileChooser: (_browser, owner, chooser, paths) => real.service.answerFileChooser(target.session, owner, chooser, paths),
         download: (_browser, id) => real.service.download(target.session, id),
       },
+      audience: () => "team",
       browser: async (botId) => ({ botId, session: target.session, spec: { command: "omb-cdp", args: [target.key], env: {} } }),
       authorize: async () => null,
       current: () => true,

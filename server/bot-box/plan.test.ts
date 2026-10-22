@@ -16,7 +16,11 @@ const turn = (mutate?: BoxMutation[]) => planBox(setup(mutate), {
   cwd, env: { PATH: "/usr/bin", HOME: home, CLAUDE_CONFIG_DIR: "/data/.claude" }, rw: [join(dataDir, "perm-abc.sock")],
 });
 
-describe("the box plan", () => {
+// The box runs only on a Linux Cloud home (detect.ts says "not-linux" anywhere else): its plan is bubblewrap's argv
+// over POSIX paths, which Windows' path module would write with drive letters and backslashes.
+const linuxBox = describe.skipIf(process.platform === "win32");
+
+linuxBox("the box plan", () => {
   it("shows the turn its own folders and the code, and nothing else of the data folder", () => {
     const plan = turn();
     expect(plan.botId).toBe("bot-a");

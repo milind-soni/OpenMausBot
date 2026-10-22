@@ -2,9 +2,12 @@
 // A stand-in Claude Code CLI that RUNS the shell commands in its prompt, for proving the bot box on a real machine
 // (_plans/team-mode-2026-10-21/T0-BUILD.md): the server starts it like the real CLI (stream-json both ways), and every
 // prompt line that starts with `$ ` is run with /bin/sh inside whatever box the server put this process in. The reply is
-// a JSON report of each command's exit code and output, so a test can read what the box let through. Never shipped in
-// an image; copied onto a test machine by hand. No model is called.
+// a JSON report of each command's exit code and output, so a test can read what the box let through. A line
+// `@ <server> <tool> <json>` calls that tool of one of the turn's MCP servers instead, as a model's tool call would (a Team
+// Cloud's per-member browser, _plans/team-mode-2026-10-21). Never shipped in an image; copied onto a test machine by hand.
+// No model is called.
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
 
 const argv = process.argv.slice(2);
@@ -29,10 +32,49 @@ function run(command) {
   };
 }
 
+// One JSON-RPC request to a stdio MCP server, answered by the first line that carries its id.
+const MCP_CALL = `
+const { spawn } = require("node:child_process");
+const { command, args, env, request } = JSON.parse(process.argv[1]);
+const child = spawn(command, args, { env: { ...process.env, ...env }, stdio: ["pipe", "pipe", "inherit"] });
+let buffer = "";
+child.stdout.on("data", (chunk) => {
+  buffer += chunk;
+  for (const line of buffer.split("\\n").slice(0, -1)) {
+    let reply;
+    try { reply = JSON.parse(line); } catch { continue; }
+    if (reply.id !== request.id) continue;
+    process.stdout.write(JSON.stringify(reply) + "\\n");
+    child.kill();
+    process.exit(0);
+  }
+  buffer = buffer.slice(buffer.lastIndexOf("\\n") + 1);
+});
+child.on("exit", () => process.exit(1));
+child.stdin.write(JSON.stringify(request) + "\\n");
+`;
+
+function callTool(line) {
+  const started = Date.now();
+  const [, server = "", tool = "", ...rest] = line.split(" ");
+  let input = {};
+  try { input = rest.length ? JSON.parse(rest.join(" ")) : {}; } catch (error) { return { command: line, status: 2, signal: null, ms: 0, stdout: "", stderr: `bad input: ${error.message}` }; }
+  let config = null;
+  try { config = JSON.parse(readFileSync(argAfter("--mcp-config") ?? "", "utf8")).mcpServers?.[server] ?? null; } catch {}
+  if (!config?.command) return { command: line, status: 3, signal: null, ms: 0, stdout: "", stderr: `no ${server} MCP server in this turn` };
+  const request = { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: input } };
+  const ran = spawnSync(process.execPath, ["-e", MCP_CALL, JSON.stringify({ command: config.command, args: config.args ?? [], env: config.env ?? {}, request })], { encoding: "utf8", timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
+  let reply = {};
+  try { reply = JSON.parse(ran.stdout.trim().split("\n")[0] ?? ""); } catch { reply = { error: { message: ran.stderr || "no answer" } }; }
+  const text = reply.error ? reply.error.message : (reply.result?.content ?? []).map((part) => part?.text ?? (part?.type === "image" ? "[image]" : JSON.stringify(part))).join("\n");
+  return { command: line, status: reply.error || reply.result?.isError ? 1 : 0, signal: null, ms: Date.now() - started, stdout: String(text).slice(0, 4000), stderr: "" };
+}
+
 function report(prompt) {
-  const commands = prompt.split("\n").map((line) => line.trim()).filter((line) => line.startsWith("$ ")).map((line) => line.slice(2));
+  const lines = prompt.split("\n").map((line) => line.trim());
+  const steps = lines.filter((line) => line.startsWith("$ ") || line.startsWith("@ "));
   const facts = { pid: process.pid, hostname: hostname(), cwd: process.cwd(), user: process.env.USER ?? null, envNames: Object.keys(process.env).sort(), proxy: process.env.HTTPS_PROXY ?? null };
-  return { probe: "box-probe-engine", facts, results: commands.map(run) };
+  return { probe: "box-probe-engine", facts, results: steps.map((line) => (line.startsWith("@ ") ? callTool(line) : run(line.slice(2)))) };
 }
 
 // One-shot modes (titles, digests): answer at once.
@@ -54,7 +96,8 @@ if (["text", "json"].includes(argAfter("--output-format") ?? "") && !argv.includ
     const answer = report(text);
     for (const [index, result] of answer.results.entries()) {
       const id = `probe-${index}`;
-      out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: "Bash", input: { command: result.command } }], usage } });
+      const [, server, tool] = result.command.startsWith("@ ") ? result.command.split(" ") : [];
+      out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: tool ? `mcp__${server}__${tool}` : "Bash", input: tool ? {} : { command: result.command } }], usage } });
       out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: result.status !== 0, content: [{ type: "text", text: `exit ${result.status}\n${result.stdout}${result.stderr}` }] }] } });
     }
     out({ type: "assistant", message: { content: [{ type: "text", text: `BOX-PROBE-REPORT ${JSON.stringify(answer)}` }], usage } });

@@ -2,10 +2,12 @@
 // the integration a turn mounts. browserEngine.engine picks agent-browser (the default) or the new Chrome engine; a
 // person's own Chrome (My Chrome) stays on agent-browser either way.
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import type { Audience } from "../audience.ts";
 import type { AppConfig } from "../config.ts";
-import { browserEngineAttachCdpUrl, browserProfilePartitionTarget, builtInBrowserEnabled, DATA_DIR } from "../config.ts";
+import { browserEngineAttachCdpUrl, browserProfilePartitionId, browserProfilePartitionTarget, builtInBrowserEnabled, DATA_DIR } from "../config.ts";
 import { BrowserRuntime, TransportError, attachesToChrome, browserRuntimeEnv, formatBrowserTiming } from "../browser-runtime.ts";
 import { RelayTimeout, relay, relayCommand, relayInput } from "../browser-relay.ts";
 import { browserSteps } from "../browser-steps.ts";
@@ -21,12 +23,17 @@ import {
   closeBrowserSession,
   browserEngineStatus,
   inRunningBrowser,
-  browserSessionId, isTemporaryBrowserSession,
+  browserSessionId, isTemporaryBrowserSession, browserProfileDirectory,
   noteBrowserEngineUnavailable,
   setBrowserViewport,
 } from "../browser-engine.ts";
 import { BrowserSweep, browserIdleMs, type BrowserCleanupWireRequest } from "../browser-lifecycle-cleanup.ts";
+import { AudienceBrowsers, audienceBrowserSuffix } from "../browser/audience.ts";
+import type { BrowserSitesTarget } from "../browser-sites.ts";
+import { namedUploadPaths } from "../browser-upload.ts";
+import type { BrowserSitesRef } from "../routes/browser-sites.ts";
 import { chromeLauncher } from "../browser/chrome/launcher.ts";
+import { LAUNCHER_SECCOMP_FD, type LauncherBox } from "../browser/chrome/wrapper.ts";
 import type { HostKind } from "../browser/chrome/flags.ts";
 import { browserEngineKind, type BrowserEngineKind } from "../browser/config.ts";
 import { ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter } from "../browser/engines.ts";
@@ -59,6 +66,11 @@ export interface BrowserHostDeps {
   mayLend?(turn: TurnOwner): boolean;
   /** The engine memory guard, told which browsers each thread's turn starts or holds. */
   engineMemory?: { useBrowsers(browsers: EngineBrowsers): void };
+  /** Whose browser a conversation's turns use on a Team Cloud: the member's, the group chat's or the team's. Every
+   * browser is the bot's own without it. */
+  audienceOf?(threadId: string): Audience;
+  /** The box every Chrome of the bots' browsers runs in (a Team Cloud's), or none. */
+  browserBox?(seccompFd: number, ro: readonly string[]): LauncherBox | null;
 }
 
 /** The lent computer's connection for a browser's pages, under the rule for everything it lends: only while the last
@@ -90,6 +102,9 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     steps: browserSteps,
     onTiming: process.env.OMB_BROWSER_TIMING === "1" ? (timing) => console.info(formatBrowserTiming(timing)) : undefined,
   });
+  const browserBox = deps.browserBox;
+  const boxed = Boolean(browserBox?.(LAUNCHER_SECCOMP_FD, []));
+  if (browserBox) chromeLauncher.boxWith(() => browserBox(LAUNCHER_SECCOMP_FD, []));
   const agentBrowserLive = new BrowserLive({ runtime: agentBrowserRuntime, devTools: {
     url: (port) => relay(port, { action: "cdp_url" }, { timeoutMs: 5_000, maxBytes: 65_536 }).then((answer) => answer.data?.cdpUrl),
   } });
@@ -111,11 +126,14 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   });
   const browserLive = new LiveRouter(agentBrowserLive, chromeEngine);
   const usedBrowserSessions = new Map<string, Spec>();
+  const audiences = new AudienceBrowsers(join(DATA_DIR, "browser", "audiences.json"));
+  const browserAudience = (threadId: string | undefined): Audience => (threadId && deps.audienceOf ? deps.audienceOf(threadId) : "team");
   const device = deps.device && lentDevice(deps.device, (session) => turnResources.holder(`browser:${session}`), deps.mayLend ?? (() => false));
   browserEgress.configure({ host: DESKTOP_MANAGED ? "desktop" : CLOUD_HOME ? "cloud" : "server", config: () => cfg.browserEngine?.egress, ...(device ? { device } : {}) });
-  /** A live bot's, profile's or temporary browser of this data dir. */
-  const belongs = (session: string) => isTemporaryBrowserSession(session) || store.bots.some((bot) => browserSessionId(bot.id, "") === session)
-    || (cfg.browserProfiles ?? []).some((profile) => !usesMyChrome(profile.id) && currentBrowserSession("", profile.id) === session);
+  /** A live bot's, profile's or temporary browser of this data dir, for any audience. */
+  const belongs = (session: string) => isTemporaryBrowserSession(session) || audiences.variants().some((suffix) =>
+    store.bots.some((bot) => browserSessionId(bot.id + suffix, "") === session)
+    || (cfg.browserProfiles ?? []).some((profile) => !usesMyChrome(profile.id) && browserSessionId("", browserProfilePartitionId(profile) + suffix) === session));
   // The agent-browser daemon outlives its MCP transport and this server; My Chrome is the person's own. A Cloud home's
   // HOME is this server's alone, so a deleted bot's browser there is closed too.
   const agentBrowserSweep = new BrowserSweep({
@@ -135,22 +153,43 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   };
   // The viewer and the agent must address the SAME temporary browser.
   const temporaryBrowserSessions = new Map<string, string>();
-  function currentBrowserSession(botId: string, profile: string | undefined): string {
+  /** The suffix an audience gives a browser's name, remembered so a deletion erases every audience's browser. */
+  function noted(audience: Audience): string {
+    const suffix = audienceBrowserSuffix(audience);
+    audiences.note(suffix);
+    return suffix;
+  }
+  function sessionFor(botId: string, profile: string | undefined, suffix: string): string {
     if (profile === "guest") {
-      let session = temporaryBrowserSessions.get(botId);
+      const key = botId + suffix;
+      let session = temporaryBrowserSessions.get(key);
       if (!session) {
-        session = browserSessionId(botId, "guest");
-        temporaryBrowserSessions.set(botId, session);
+        session = browserSessionId(key, "guest");
+        temporaryBrowserSessions.set(key, session);
       }
       return session;
     }
     const target = profile ? browserProfilePartitionTarget(cfg, profile) : null;
-    return browserSessionId(botId, target?.partitionId ?? "");
+    return browserSessionId(botId + suffix, target ? target.partitionId + suffix : "");
+  }
+  function currentBrowserSession(botId: string, profile: string | undefined, audience: Audience = "team"): string {
+    return sessionFor(botId, profile, noted(audience));
+  }
+  /** Every audience's browser of a bot as it is named now; a temporary one only once it started. */
+  function browserSessionsOf(botId: string, profile: string | undefined): string[] {
+    return audiences.variants().flatMap((suffix) => {
+      if (profile !== "guest") return [sessionFor(botId, profile, suffix)];
+      const session = temporaryBrowserSessions.get(botId + suffix);
+      return session ? [session] : [];
+    });
   }
   async function forgetTemporaryBrowser(botId: string): Promise<void> {
-    const session = temporaryBrowserSessions.get(botId);
+    await Promise.all(audiences.variants().map((suffix) => forgetTemporaryKey(botId + suffix)));
+  }
+  async function forgetTemporaryKey(key: string): Promise<void> {
+    const session = temporaryBrowserSessions.get(key);
     if (!session) return;
-    temporaryBrowserSessions.delete(botId);
+    temporaryBrowserSessions.delete(key);
     const spec = usedBrowserSessions.get(session);
     usedBrowserSessions.delete(session);
     if (chromeTarget(session, spec)) {
@@ -189,10 +228,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   function onChrome(profile: string | undefined): boolean {
     return browserEngineKind(cfg) === "chrome" && !usesMyChrome(browserProfileIdOf(profile));
   }
-  function chromeSpec(botId: string, profile: string | undefined): { session: string; spec: ReturnType<ChromeEngine["spec"]> } {
-    const session = currentBrowserSession(botId, profile);
+  function chromeSpec(botId: string, profile: string | undefined, audience: Audience): { session: string; spec: ReturnType<ChromeEngine["spec"]> } {
+    const suffix = noted(audience);
+    const session = sessionFor(botId, profile, suffix);
     const target = profile && profile !== "guest" ? browserProfilePartitionTarget(cfg, profile) : null;
-    return { session, spec: chromeEngine.spec(session, profileKey(botId, session, { guest: profile === "guest", partitionId: target?.partitionId ?? null })) };
+    return { session, spec: chromeEngine.spec(session, profileKey(botId + suffix, session, { guest: profile === "guest", partitionId: target ? target.partitionId + suffix : null })) };
   }
   /** Chrome for the new engine, the installed agent-browser otherwise. */
   function browserReady(profile: string | undefined): boolean {
@@ -207,12 +247,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       },
     };
   }
-  async function browserIntegration(botId: string, profile: string | undefined, turn?: { threadId: string; generation: string }) {
+  async function browserIntegration(botId: string, profile: string | undefined, turn?: { threadId: string; generation: string }, audience = browserAudience(turn?.threadId)) {
     const profileTarget = profile && profile !== "guest" ? browserProfilePartitionTarget(cfg, profile) : null;
     const partitionId = profile === "guest" ? "guest" : (profileTarget?.partitionId ?? "");
     const browserProfileId = profileTarget?.profileId ?? profile;
     if (onChrome(profile)) {
-      const { session, spec } = chromeSpec(botId, profile);
+      const { session, spec } = chromeSpec(botId, profile, audience);
       usedBrowserSessions.set(session, spec);
       return { profile: partitionId, session, spec, integration: turn ? turnIntegration(botId, session, turn) : spec };
     }
@@ -221,24 +261,24 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       noteBrowserEngineUnavailable(status);
       return null;
     }
-    const session = currentBrowserSession(botId, profile);
+    const session = currentBrowserSession(botId, profile, audience);
     const spec = browserSessionSpec(status.binaryPath, session, browserProfileId, usesMyChrome(browserProfileId) ? undefined : await browserEgress.open(session));
     usedBrowserSessions.set(session, spec);
     await prepareBrowserSessionState(status.binaryPath, session, { env: spec.env, persistent: profile !== "guest" && !attachesToChrome(spec.env), isCurrent: () => {
       const current = store.bot(botId);
       return !!current && current.browser !== false && builtInBrowserEnabled(cfg)
-        && currentBrowserSession(current.id, current.browserProfile) === session
+        && currentBrowserSession(current.id, current.browserProfile, audience) === session
         && (!turn || activeInternalGenerationByThread.get(turn.threadId) === turn.generation);
     } });
     if (!turn) return { profile: partitionId, session, spec, integration: spec };
     return { profile: partitionId, session, spec, integration: turnIntegration(botId, session, turn) };
   }
   /** A bot's browser as it runs or would run now, without preparing it; null while its engine is not installed. */
-  async function currentBrowserSpec(botId: string, profile: string | undefined): Promise<{ session: string; spec: Spec } | null> {
-    if (onChrome(profile)) return chromeSpec(botId, profile);
+  async function currentBrowserSpec(botId: string, profile: string | undefined, audience: Audience = "team"): Promise<{ session: string; spec: Spec } | null> {
+    if (onChrome(profile)) return chromeSpec(botId, profile, audience);
     const engine = browserEngineStatus();
     if (engine.kind !== "ready") return null;
-    const session = currentBrowserSession(botId, profile);
+    const session = currentBrowserSession(botId, profile, audience);
     return { session, spec: usedBrowserSessions.get(session) ?? browserSessionSpec(engine.binaryPath, session, browserProfileIdOf(profile), await browserEgress.open(session)) };
   }
   /** fill_login's reads and typing, on whichever engine runs the session. */
@@ -283,7 +323,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   function threadBrowser(threadId: string): { session: string | undefined; spec: Spec | undefined } | null {
     const bot = store.botByThread(threadId);
     if (!bot || bot.browser === false || bot.computer === "off" || !builtInBrowserEnabled(cfg) || usesMyChrome(bot.browserProfile)) return null;
-    const session = bot.browserProfile === "guest" ? temporaryBrowserSessions.get(bot.id) : currentBrowserSession(bot.id, bot.browserProfile);
+    const audience = browserAudience(threadId);
+    const session = bot.browserProfile === "guest" ? temporaryBrowserSessions.get(bot.id + audienceBrowserSuffix(audience)) : currentBrowserSession(bot.id, bot.browserProfile, audience);
     return { session, spec: session === undefined ? undefined : usedBrowserSessions.get(session) };
   }
   /** Tried until no turn holds the browser and no call runs in it, or for 30 s: the stopped turn may still be settling. */
@@ -324,8 +365,15 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const used = browserEngineStatus();
     return CLOUD_HOME && used.kind === "ready" ? used : null;
   }
-  /** A deleted bot's or profile's browser on both engines: stopped and its saved sign-ins erased; true once that is done. */
+  /** A deleted bot's or profile's browser on both engines, for every audience: stopped and its saved sign-ins erased;
+   * true once that is done. */
   async function eraseDeletedBrowser(request: BrowserCleanupWireRequest): Promise<boolean> {
+    const results = await Promise.all(audiences.variants().map((suffix) => eraseOneBrowser({
+      ...request, ...(request.botId ? { botId: request.botId + suffix } : {}), ...(request.partitionId ? { partitionId: request.partitionId + suffix } : {}),
+    })));
+    return results.every(Boolean);
+  }
+  async function eraseOneBrowser(request: BrowserCleanupWireRequest): Promise<boolean> {
     const session = request.type === "openmausbot:browser-bot-deleted" && request.botId ? browserSessionId(request.botId, "")
       : request.partitionId ? browserSessionId("", request.partitionId) : null;
     const engine = cleanupEngine();
@@ -342,6 +390,33 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const results = await Promise.all([eraseChromeBrowser(request), ...session ? [erased(session)] : []]);
     return results.every(Boolean);
   }
+  /** Where a page's file input finds the files a turn uploads: a boxed Chrome sees only its own profile's folder. */
+  function uploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, session: string, spec: Spec): string[] {
+    if (!boxed || chromeTarget(session, spec)) return namedUploadPaths(files, join(DATA_DIR, "browser-uploads"));
+    return namedUploadPaths(files, join(browserProfileDirectory(session), "omb-uploads"), Date.now(), { everyFile: true });
+  }
+  /** The saved sign-ins of a bot's or a shared profile's browser, for one audience. */
+  async function signedInSitesTarget(which: BrowserSitesRef, audience: Audience = "team"): Promise<BrowserSitesTarget | { status: number; error: string }> {
+    const engine = browserEngineStatus();
+    if (engine.kind !== "ready") return { status: 409, error: engine.reason };
+    let session: string;
+    let profile: string | undefined;
+    if ("profile" in which) {
+      const target = browserProfilePartitionTarget(cfg, which.profile);
+      if (!target) return { status: 404, error: "This browser profile was removed." };
+      session = browserSessionId("", target.partitionId + noted(audience));
+      profile = target.profileId;
+    } else {
+      const bot = store.bot(which.bot);
+      if (!bot) return { status: 404, error: "no such bot" };
+      if (bot.browserProfile === "guest") return { status: 409, error: "A temporary browser saves no sign-ins." };
+      session = currentBrowserSession(bot.id, bot.browserProfile, audience);
+      profile = bot.browserProfile;
+    }
+    const refusal = signedInSitesRefusal(profile);
+    if (refusal) return { status: 409, error: refusal };
+    return { binaryPath: engine.binaryPath, session, env: browserSessionSpec(engine.binaryPath, session, profile, await browserEgress.open(session)).env, encryptionKey: browserEngineEncryptionKey() };
+  }
   /** What Settings shows of the engine that runs bots' browsers here; My Chrome stays on agent-browser. */
   function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind } {
     if (browserEngineKind(cfg) !== "chrome") return { ...agentBrowser, engine: "agent-browser" };
@@ -352,6 +427,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions, browserIdleMs: idleMs,
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
-    eraseDeletedBrowser, engineSummary, engineBrowsers,
+    eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,
   };
 }
