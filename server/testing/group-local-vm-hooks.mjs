@@ -56,6 +56,10 @@ registerHooks({
         const state = read();
         return state.containers ? state.containers.includes(target.key) : !state.noContainers;
       }
+      export async function containerComputerManagedPerBotNames() {
+        const state = read();
+        return (state.containers ?? []).filter(key => key.startsWith('bot:')).map(key => 'openmausbot-computer-' + key.slice(-16));
+      }
       export async function containerComputerStatus(_run, _platform, target = SHARED_LOCAL_VM_TARGET) {
         writeFileSync(file + '.entered', target.key);
         while (read().blocked || read().blockedTarget === target.key) await new Promise(r => setTimeout(r, 30));

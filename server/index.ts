@@ -11966,8 +11966,8 @@ function perBotLocalVmWorkspaceNames(): string[] | null {
   if (!existsSync(PER_BOT_VM_HOMES_DIR)) return [];
   try {
     const entries = readdirSync(PER_BOT_VM_HOMES_DIR, { withFileTypes: true });
-    if (entries.some((entry) => !entry.isDirectory() || !/^[0-9a-f]{16}$/.test(entry.name))) return null;
-    return entries.map((entry) => entry.name);
+    if (entries.some((entry) => !entry.isDirectory() || (!/^[0-9a-f]{16}$/.test(entry.name) && !/^pool-\d+$/.test(entry.name)))) return null;
+    return entries.filter((entry) => /^[0-9a-f]{16}$/.test(entry.name)).map((entry) => entry.name);
   } catch {
     return null;
   }
