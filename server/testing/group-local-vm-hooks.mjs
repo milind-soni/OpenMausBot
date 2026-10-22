@@ -86,7 +86,8 @@ registerHooks({
           return containerComputerStatus(_run, _platform, target);
         }
         const state = read();
-        if (!state.containers || !['run', 'start', 'stop', 'remove'].includes(action)) throw new Error('Unexpected container mutation in VM routing test');
+        if (!['run', 'start', 'stop', 'remove'].includes(action)) throw new Error('Unexpected container mutation in VM routing test');
+        state.containers ??= action === 'run' ? [] : [target.key];
         if (action === 'run') {
           mkdirSync(target.workspaceDir, { recursive: true });
           state.containers.push(target.key);
