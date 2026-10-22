@@ -889,16 +889,16 @@ export function LocalComputerSection() {
   }, []);
 
   useEffect(() => {
-    const configuredSource = state.config?.localVm.source ?? status?.source;
+    const configuredSource = state.config?.localVm?.source ?? status?.source;
     if (configuredSource) setSource(configuredSource);
-  }, [state.config?.localVm.source, status?.source]);
+  }, [state.config?.localVm?.source, status?.source]);
 
   const existingStatusAlias = status?.source === "existing" ? status.sshAlias ?? "" : null;
 
   useEffect(() => {
-    if (state.config?.localVm.sshAlias !== undefined) setAlias(state.config.localVm.sshAlias);
+    if (state.config?.localVm?.sshAlias !== undefined) setAlias(state.config.localVm.sshAlias);
     else if (existingStatusAlias !== null) setAlias(existingStatusAlias);
-  }, [state.config?.localVm.sshAlias, existingStatusAlias]);
+  }, [state.config?.localVm?.sshAlias, existingStatusAlias]);
 
   useEffect(() => {
     if (cloudHome) return;

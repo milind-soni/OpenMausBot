@@ -621,7 +621,7 @@ describe("Technical controls", () => {
     fixture.seed = {
       phase: "vm",
       resolved: { botId: "scout", threadId: "thread-scout", computer: "vm", cloudBackend: "box" },
-      vmStatus: { mode: "per-bot", container: "running", ready: true, viewer_url: "http://127.0.0.1/viewer", target_key: `bot:${"a".repeat(64)}` },
+      vmStatus: { source: "managed", mode: "per-bot", container: "running", ready: true, viewer_url: "http://127.0.0.1/viewer", target_key: `bot:${"a".repeat(64)}` },
     };
     const vm = () => makeBot({ computer: "vm" });
     const onOpenVmWorkspace = () => {};

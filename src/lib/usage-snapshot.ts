@@ -137,7 +137,7 @@ export function buildUsageSnapshot(input: UsageInput): EventProps {
     trial_credit: allow(instances.find((instance) => instance.trialCredit !== undefined)?.trialCredit ?? "none", TRIAL_CREDIT),
     ...appFacts(input.apps),
     connectors_mode: allow(config.composio?.mode?.replace("-", "_"), CONNECTORS_MODE),
-    local_vm_mode: allow(config.localVm?.source === "managed" ? config.localVm.mode.replace("-", "_") : undefined, LOCAL_VM_MODE),
+    local_vm_mode: allow(config.localVm?.source === "existing" ? undefined : config.localVm?.mode?.replace("-", "_"), LOCAL_VM_MODE),
     vps_configured: config.vps?.configured === true,
     voice: config.tts?.configured ? allow(config.tts.provider, VOICE) : "none",
     voice_included: config.tts?.included === true,
