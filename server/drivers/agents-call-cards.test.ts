@@ -156,7 +156,7 @@ describe("the chat-app tools", () => {
     }
     const tools = new Map(availableTools(PROFILE).map((tool) => [tool.name, tool as { description: string; inputSchema: { required: string[] }; annotations?: unknown }]));
     expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page inline in this chat: /);
-    expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. Never put secrets in it\. Not available in rooms\.$/);
+    expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. Never put secrets in it\. Not available in rooms\. For a data dashboard, follow the data-dashboards skill\.$/);
     expect(tools.get("show_html")!.inputSchema.required).toEqual(["html", "title"]);
     expect(tools.get("update_html")!.description).toBe("Replace a page you showed with show_html, in place. `app_id` is the id show_html returned. The page reloads, so anything the person did in it is lost.");
     expect(tools.get("update_html")!.inputSchema.required).toEqual(["app_id", "html"]);
