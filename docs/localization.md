@@ -13,6 +13,8 @@ are partial overlays that fall back to English for missing keys.
 3. Register a new pack in `src/locales/index.ts`.
 4. Run `pnpm i18n:check` and test the language from **Settings → General**.
 
+Follow the language's style guide and glossary when one exists: [Brazilian Portuguese](localization-pt-br.md).
+
 `pnpm i18n:check` is deterministic. It validates JSON structure, unknown or
 empty entries, locale filename casing, placeholder parity, and the English
 source hash attached to every translated value. If English copy changes, the

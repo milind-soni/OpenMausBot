@@ -228,7 +228,7 @@ describe("Brazilian Portuguese approval cards", () => {
       }),
     ));
 
-    expect(markup).toContain("Cancelar execução");
+    expect(markup).toContain("Cancelar turno");
     expect(markup).toContain("Negar");
     expect(markup).toContain("Sempre permitir");
     expect(markup).toContain("Permitir uma vez");
