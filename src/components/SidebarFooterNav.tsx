@@ -62,44 +62,32 @@ function NavRow({
   );
 }
 
-/** The Today page, at the top of the sidebar in every mode, like an inbox. */
-export function SidebarTodayNav({ density }: { density: SidebarDensity }) {
+/** Today and Apps, at the top of the sidebar in every mode, like an inbox and its address book. */
+export function SidebarPagesNav({ density }: { density: SidebarDensity }) {
   const { state, dispatch } = useStore();
   const iconsOnly = density === "icons";
-  const active = state.activeView === "today";
+  const iconSize = iconsOnly ? 20 : 18;
+  const tone = (on: boolean) => (on ? "text-accent" : "text-ink-secondary");
   return (
-    <div className={iconsOnly ? "flex justify-center px-2 pb-1" : "px-2 pb-2"}>
+    <div className={iconsOnly ? "flex flex-col items-center gap-1 px-2 pb-1" : "flex flex-col gap-0.5 px-2 pb-2"}>
       <NavRow
         id="today"
         label={t("sidebar.nav.today")}
         iconsOnly={iconsOnly}
-        active={active}
-        icon={(on) => <Sun size={iconsOnly ? 20 : 18} className={on ? "text-accent" : "text-ink-secondary"} />}
+        active={state.activeView === "today"}
+        icon={(on) => <Sun size={iconSize} className={tone(on)} />}
         onClick={() => dispatch({ type: "showToday" })}
       />
+      <NavRow
+        id="apps"
+        label={t("sidebar.nav.apps")}
+        tourId="nav-apps"
+        iconsOnly={iconsOnly}
+        active={state.activeView === "apps"}
+        icon={(on) => <Puzzle size={iconSize} className={tone(on)} />}
+        onClick={() => dispatch({ type: "showApps" })}
+      />
     </div>
-  );
-}
-
-export function SidebarAppsButton() {
-  const { state, dispatch } = useStore();
-  const label = t("sidebar.nav.apps");
-  return (
-    <button
-      type="button"
-      data-tour="nav-apps"
-      data-sidebar-nav="apps"
-      onClick={() => dispatch({ type: "togglePlugins", open: true })}
-      aria-label={label}
-      title={label}
-      aria-pressed={state.pluginsOpen}
-      className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors",
-        state.pluginsOpen ? "bg-raised text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
-      )}
-    >
-      <Puzzle size={18} />
-    </button>
   );
 }
 
@@ -141,7 +129,6 @@ export function SidebarBottomButtons() {
           onClick={() => dispatch({ type: "showTeamMap" })}
         />
       </>}
-      <SidebarAppsButton />
       <UpdateIndicator />
     </div>
   );
@@ -192,16 +179,6 @@ export function SidebarFooterNav({
   const rows = (
     <>
       {automationsRow}
-      {iconsOnly && <NavRow
-        id="apps"
-        label={t("sidebar.nav.apps")}
-        tourId="nav-apps"
-        iconsOnly={iconsOnly}
-        rail={rail}
-        active={state.pluginsOpen}
-        icon={(active) => <Puzzle size={iconSize} className={tone(active)} />}
-        onClick={() => dispatch({ type: "togglePlugins", open: true })}
-      />}
       {(advanced || iconsOnly) && (
         <NavRow
           id="team-map"

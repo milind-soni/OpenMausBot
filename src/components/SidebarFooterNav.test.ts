@@ -16,7 +16,7 @@ vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
   useSidebarToolsLayout: () => fixture.toolsLayout,
 }));
 vi.mock("./UpdateIndicator", () => ({ UpdateIndicator: () => null }));
-import { SidebarAppsButton, SidebarBottomButtons, SidebarFooterNav } from "./SidebarFooterNav";
+import { SidebarBottomButtons, SidebarFooterNav } from "./SidebarFooterNav";
 
 type Props = { children?: ReactNode; [key: string]: unknown };
 function nodes(value: ReactNode): ReactElement<Props>[] {
@@ -44,7 +44,7 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("sidebar footer places", () => {
-  it.each(["comfortable", "compact"] as const)("leads Advanced mode's places with Automations, then Team map, with Apps beside the profile instead (%s)", (density) => {
+  it.each(["comfortable", "compact"] as const)("leads Advanced mode's places with Automations, then Team map, with Apps up beside Today instead (%s)", (density) => {
     fixture.advanced = true;
     const { html } = render(density);
     const order = ["automations", "team-map"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
@@ -60,12 +60,12 @@ describe("sidebar footer places", () => {
     expect(render(density).html).toBe("");
   });
 
-  it.each([false, true])("puts Automations on the avatars-only rail ahead of Apps, with Team map (advanced: %s)", (advanced) => {
+  it.each([false, true])("puts Automations and Team map on the avatars-only rail, leaving Apps to the top of the sidebar (advanced: %s)", (advanced) => {
     fixture.advanced = advanced;
     for (const html of [render("icons").html, renderToStaticMarkup(createElement(() => SidebarFooterNav({ density: "icons", rail: true })))]) {
       expect(html).toContain('aria-label="Automations" title="Automations"');
       expect(html).toContain('aria-label="Team map" title="Team map"');
-      expect(html.indexOf('data-sidebar-nav="automations"')).toBeLessThan(html.indexOf('data-sidebar-nav="apps"'));
+      expect(html).not.toContain('data-sidebar-nav="apps"');
     }
   });
 
@@ -181,13 +181,14 @@ const press = (tree: ReactElement<Props>[], id: string) =>
   (tree.find((node) => node.props.id === id && typeof node.props.onClick === "function")!.props.onClick as () => void)();
 
 describe("the bottom bar beside the profile", () => {
-  it("carries Automations and Team map as icons with tooltips in Simple mode, ahead of Apps", () => {
+  it("carries Automations and Team map as icons with tooltips in Simple mode", () => {
     const { html } = renderBottom();
     for (const label of ["Automations", "Team map"]) {
       expect(html).toContain(`aria-label="${label}" title="${label}"`);
       expect(html).not.toContain(`>${label}</span>`);
     }
-    const order = ["automations", "team-map", "apps"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
+    expect(html).not.toContain('data-sidebar-nav="apps"');
+    const order = ["automations", "team-map"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
     expect(order.every((index) => index >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(html).toMatch(/data-tour="nav-automations" data-sidebar-nav="automations"/);
@@ -198,7 +199,7 @@ describe("the bottom bar beside the profile", () => {
     const { html } = renderBottom();
     expect(html).not.toContain('data-sidebar-nav="automations"');
     expect(html).not.toContain('data-sidebar-nav="team-map"');
-    expect(html).toContain('data-sidebar-nav="apps"');
+    expect(html).not.toContain('data-sidebar-nav="apps"');
   });
 
   it("opens Automations and Team map, marks the open one, and carries the failed-run dot on Automations", () => {
@@ -213,19 +214,6 @@ describe("the bottom bar beside the profile", () => {
     const dot = html.indexOf('data-testid="routines-attention"');
     expect(dot).toBeGreaterThan(html.indexOf('data-sidebar-nav="automations"'));
     expect(dot).toBeLessThan(html.indexOf('data-sidebar-nav="team-map"'));
-  });
-});
-
-describe("Apps beside the profile", () => {
-  it.each([false, true])("is one icon button that opens Apps and carries the tour's Apps anchor (advanced: %s)", (advanced) => {
-    fixture.advanced = advanced;
-    let tree!: ReturnType<typeof SidebarAppsButton>;
-    function Capture() { tree = SidebarAppsButton(); return tree; }
-    const html = renderToStaticMarkup(createElement(Capture));
-    expect(html).toMatch(/data-tour="nav-apps" data-sidebar-nav="apps"/);
-    expect(html).toContain('aria-label="Apps"');
-    (tree.props.onClick as () => void)();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "togglePlugins", open: true });
   });
 });
 

@@ -69,12 +69,12 @@ function nodes(value: ReactNode): Node[] {
     return [node, ...nodes(node.props.children)];
   });
 }
-function render() {
+function render(page = false) {
   let tree!: ReturnType<typeof PluginsPanel>;
   function Capture() {
     fixture.index = 0;
     fixture.counting = true;
-    try { tree = PluginsPanel(); } finally { fixture.counting = false; }
+    try { tree = PluginsPanel({ page }); } finally { fixture.counting = false; }
     return tree;
   }
   const html = renderToStaticMarkup(createElement(Capture));
@@ -369,7 +369,7 @@ describe("Apps pop-up", () => {
     const { nodes: tree } = render();
     const dialog = tree.find((node) => node.props.role === "dialog")!;
     (dialog.props.ref as { current: unknown }).current = pane;
-    const cleanup = fixture.effects.find(({ deps }) => deps?.length === 1 && deps[0] === fixture.dispatch)!.effect();
+    const cleanup = fixture.effects.find(({ deps }) => deps?.length === 2 && deps[0] === fixture.dispatch)!.effect();
     expect(mobileSearch.focus).toHaveBeenCalledOnce();
     expect(hiddenDesktopSearch.focus).not.toHaveBeenCalled();
 
@@ -404,6 +404,21 @@ describe("Apps pop-up", () => {
     expect(html).toContain("MCP inventory");
     expect(html).toContain('data-embedded="true"');
     expect(html).not.toContain('role="tab"');
+  });
+
+  it("shows the same apps as a page, without the pop-up's glass, close button or focus trap", () => {
+    const { html, nodes: tree } = render(true);
+    expect(html).toContain(">Apps</h1>");
+    expect(html).toMatch(/^<main[^>]*aria-labelledby="plugins-title"/);
+    expect(html).not.toContain("glass-surface");
+    expect(html).not.toContain('role="dialog"');
+    expect(html).not.toContain('data-tour="apps-close"');
+    expect(html).toContain('data-tour="apps-panel"');
+    for (const slug of ["gmail", "slack", "notion"]) expect(html).toContain(`data-app-tile="${slug}"`);
+    expect(html).toContain("MCP inventory");
+    expect(tree.find((node) => node.props["data-testid"] === "apps-page")).toBeDefined();
+    const focusTrap = fixture.effects.find(({ deps }) => deps?.length === 2 && deps[0] === fixture.dispatch)!;
+    expect(focusTrap.effect()).toBeUndefined();
   });
 
   it("filters with chips, keeping the MCP chip on the store's surface", () => {

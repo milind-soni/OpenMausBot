@@ -30,6 +30,7 @@ import { appCategoryLabel, CATEGORY_SECTION_SIZE, catalogSections, connectorDesc
 import { McpServersPanel } from "./McpServersPanel";
 import { HighLevelCard } from "./HighLevelCard";
 import { openBotSettings } from "./bot-panel/panel-link";
+import { useCaptionChrome } from "./DesktopCapabilities";
 
 export interface ToolkitCard {
   slug: string;
@@ -225,8 +226,9 @@ export function botsUsingService(bots: Bot[], instances: InstanceInfo[], slug: s
     connectorServiceAccess(bot.connectorTools, slug).level !== "none");
 }
 
-export function PluginsPanel() {
+export function PluginsPanel({ page = false }: { page?: boolean } = {}) {
   const { state, dispatch } = useStore();
+  const { dragProps } = useCaptionChrome();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const dialogRef = useRef<HTMLDivElement>(null);
   const surface = state.pluginsSurface;
@@ -382,6 +384,7 @@ export function PluginsPanel() {
   }, [loadConnectionInventory]);
 
   useEffect(() => {
+    if (page) return;
     const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
     const focusable = () =>
@@ -425,7 +428,7 @@ export function PluginsPanel() {
       window.removeEventListener("keydown", onKeyDown);
       returnFocus?.focus();
     };
-  }, [dispatch]);
+  }, [dispatch, page]);
 
   const openConnectUrl = async (url: string) => {
     if (opening.current) return;
@@ -568,27 +571,33 @@ export function PluginsPanel() {
     ? "bg-ink text-app"
     : "bg-control/70 text-ink-secondary hover:bg-raised-hover hover:text-ink";
 
+  const Frame = page ? "main" : "div";
+  const Title = page ? "h1" : "h2";
   return (
-    <div
-      className="glass-popup-frame"
-      style={glassPopupFrameStyle()}
-      onMouseDown={(event) => event.target === event.currentTarget && close()}
+    <Frame
+      className={page ? "flex min-w-0 flex-1 flex-col overflow-hidden bg-app text-ink" : "glass-popup-frame"}
+      style={page ? undefined : glassPopupFrameStyle()}
+      onMouseDown={page ? undefined : (event) => event.target === event.currentTarget && close()}
+      aria-labelledby={page ? "plugins-title" : undefined}
+      data-testid={page ? "apps-page" : undefined}
     >
       {/* A sibling, not the parent: a backdrop-filter on an ancestor would stop the pop-up's own glass from seeing the app behind it. */}
-      <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />
+      {!page && <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />}
       <div
         ref={dialogRef}
         data-tour="apps-panel"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="plugins-title"
+        role={page ? undefined : "dialog"}
+        aria-modal={page ? undefined : true}
+        aria-labelledby={page ? undefined : "plugins-title"}
         tabIndex={-1}
-        className="glass-surface glass-popup animate-pop-in relative flex max-w-[780px] flex-col overflow-hidden rounded-[24px]"
+        className={page
+          ? "mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col"
+          : "glass-surface glass-popup animate-pop-in relative flex max-w-[780px] flex-col overflow-hidden rounded-[24px]"}
       >
-        <header className="flex flex-col gap-4 px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
+        <header {...(page ? dragProps : {})} className={cn("flex flex-col gap-4 px-5 pb-4 pt-5 sm:px-7 sm:pt-6", page && "max-md:pl-12")}>
           <div>
           <div className="flex items-center justify-between gap-3">
-            <h2 id="plugins-title" className="min-w-0 truncate text-[20px] font-semibold leading-7 tracking-[-0.01em] text-ink">{t("apps.title")}</h2>
+            <Title id="plugins-title" className="min-w-0 truncate text-[20px] font-semibold leading-7 tracking-[-0.01em] text-ink">{t("apps.title")}</Title>
             <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
@@ -623,13 +632,13 @@ export function PluginsPanel() {
               >
                 <RefreshCw size={16} className={cn(refreshing && "animate-spin")} />
               </button>
-              <button data-tour="apps-close"
+              {!page && <button data-tour="apps-close"
                 onClick={close}
                 aria-label={t("connectors.closeAria")}
                 className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
               >
                 <X size={18} />
-              </button>
+              </button>}
             </div>
           </div>
           <p className="mt-0.5 text-[13px] leading-5 text-ink-secondary">{t("apps.subtitle")}</p>
@@ -858,7 +867,7 @@ export function PluginsPanel() {
           )}
         </div>
       </div>
-    </div>
+    </Frame>
   );
 
   function renderTile(card: ToolkitCard) {

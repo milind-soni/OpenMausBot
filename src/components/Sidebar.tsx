@@ -116,7 +116,7 @@ import {
 import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import { botListItemPointerIntent } from "@/lib/sidebar-selection";
 import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
-import { SidebarBottomButtons, SidebarFooterNav, SidebarTodayNav } from "./SidebarFooterNav";
+import { SidebarBottomButtons, SidebarFooterNav, SidebarPagesNav } from "./SidebarFooterNav";
 import { GlassBar, GlassScrollFrame, GlassScroller } from "./GlassScrollFrame";
 import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
 import { useCloudOwner } from "./CloudOwner";
@@ -1895,7 +1895,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           />
         </div>
       </div>}
-      <SidebarTodayNav density={density} />
+      <SidebarPagesNav density={density} />
       {universalPins && pinnedBots.length > 0 && (
         <div
           data-sidebar-universal-pins=""

@@ -80,7 +80,7 @@ export function GuidedTour() {
           if (!press("nav-apps")) dispatch({ type: "togglePlugins", open: true });
           return;
         case "closeApps":
-          dispatch({ type: "togglePlugins", open: false });
+          dispatch(state.activeView === "apps" ? { type: "showChat" } : { type: "togglePlugins", open: false });
           return;
         case "openAutomations":
           if (!press("nav-automations") && readAdvancedMode()) dispatch({ type: "showRoutines" });
@@ -92,7 +92,7 @@ export function GuidedTour() {
           return;
       }
     },
-    [dispatch, state.computerOpen],
+    [dispatch, state.computerOpen, state.activeView],
   );
 
   const save = useCallback(
