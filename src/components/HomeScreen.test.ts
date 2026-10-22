@@ -15,3 +15,10 @@ it("names a team's Cloud on every screen that waits on it, and keeps My Cloud's 
   expect(homeScreenText({ screen: "waking", name: "Acme" }).title, "only My Cloud is woken").toBe("Waking My Cloud…");
   expect(homeScreenText(null).title).toBe("Opening My Cloud…");
 });
+
+it("says why My Cloud can't be reached in the app's language, and keeps the Admin's English when no cause comes", () => {
+  setLocale("pt-br");
+  expect(homeScreenText({ screen: "offline", reason: "The server My Cloud runs on is being restarted.", cause: "host" }).reason).toMatch(/^Nosso provedor de hospedagem/);
+  expect(homeScreenText({ screen: "offline", reason: "My Cloud hasn't answered.", cause: "no_answer" }).reason).toMatch(/^O Cloud não responde/);
+  expect(homeScreenText({ screen: "offline", reason: "An older desktop's words." }).reason).toBe("An older desktop's words.");
+});

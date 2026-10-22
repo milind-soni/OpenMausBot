@@ -5,7 +5,7 @@ import type { UpdaterState } from "@/lib/updater";
 
 const fixture = vi.hoisted(() => ({ update: { status: "idle" } as UpdaterState }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: {} }, dispatch: vi.fn() }) }));
-vi.mock("@/lib/updater", () => ({ useUpdaterState: () => fixture.update }));
+vi.mock("@/lib/updater", async (original) => ({ ...(await original<typeof import("@/lib/updater")>()), useUpdaterState: () => fixture.update }));
 vi.mock("./SidebarPhoneButton", () => ({ useSidebarPhoneStatus: () => ({ kind: "unavailable" }) }));
 
 import { SidebarProfileMenu } from "./SidebarProfileMenu";

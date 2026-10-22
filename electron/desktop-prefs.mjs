@@ -2,6 +2,7 @@
 // has shown and its usage-analytics switch.
 import fs from "node:fs";
 import { localDay } from "./cloud-trial-notice.mjs";
+import nativeText from "./native-text.cjs";
 import { ONBOARDING_CLOUD_HINT, onboardingHints } from "./onboarding-record.mjs";
 
 export { DESKTOP_PORTS } from "./desktop-ports.mjs";
@@ -35,7 +36,8 @@ function parse(raw) {
     const day = record.shown && typeof record.shown === "object" ? record.shown[id] : undefined;
     return typeof day === "string" && DAY.test(day) ? [[id, day]] : [];
   }));
-  return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}) };
+  const language = nativeText.nativeLanguage(record.language);
+  return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}), ...(language ? { language } : {}) };
 }
 
 /** A record that cannot be written is still kept for this launch. */
@@ -64,6 +66,13 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
     /** null until a choice is saved. */
     analytics: () => current().analytics ?? null,
     setAnalytics(enabled) { save({ ...current(), analytics: enabled === true }); },
+    language: () => current().language ?? null,
+    setLanguage(code) {
+      const language = code === "" ? null : nativeText.nativeLanguage(code);
+      if (code !== "" && !language) return;
+      const { language: _previous, ...rest } = current();
+      save(language ? { ...rest, language } : rest);
+    },
   };
 }
 
@@ -72,8 +81,8 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
  * another saved server open in this desktop's window, null for anything else. `cloudOffered()`: this desktop sells
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
  */
-export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered, localConfig = () => null, now = Date.now }) {
-  let prefs = null;
+export function registerDesktopPrefs({ ipcMain, read, write, prefs: given = null, page, cloudOffered, localConfig = () => null, onLanguage = () => {}, now = Date.now }) {
+  let prefs = given;
   const store = () => prefs ??= createDesktopPrefs({ read, write, now });
   const from = (channel, pages, handler) => (event, ...args) => {
     const asking = page(event);
@@ -100,4 +109,10 @@ export function registerDesktopPrefs({ ipcMain, read, write, page, cloudOffered,
     } catch { event.returnValue = null; }
   });
   ipcMain.handle("desktop-analytics:set", from("desktop-analytics:set", ["local"], (_, enabled) => { store().setAnalytics(enabled === true); }));
+  // Security: only this app's own pages choose the language main draws in, never another server's page.
+  ipcMain.handle("desktop-language:set", from("desktop-language:set", ["local", "cloud"], (_, code) => {
+    if (typeof code !== "string" || code.length > 35) return;
+    store().setLanguage(code);
+    onLanguage(store().language() ?? "");
+  }));
 }

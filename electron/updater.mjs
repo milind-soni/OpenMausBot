@@ -11,6 +11,7 @@ import {
   stagedInstallFile,
 } from "./package-install-command.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
+import { UPDATE_TEXT } from "./update-errors.mjs";
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
 
 const require = createRequire(import.meta.url);
@@ -51,7 +52,8 @@ export function handOffDownloadedPackage(packageType) {
 }
 
 function setState(patch) {
-  state = { ...state, ...patch };
+  const { messageCode: _stale, ...kept } = state;
+  state = { ...(Object.hasOwn(patch, "message") ? kept : state), ...patch };
   try {
     const contents = win?.webContents;
     if (contents && pageAllowed({ sender: contents, senderFrame: contents.mainFrame })) contents.send("update:state", state);
@@ -89,7 +91,7 @@ export function startUpdater() {
     ({ autoUpdater } = require("./vendor/electron-updater.cjs"));
   } catch {
     updaterCoordinator = null;
-    setState({ status: "error", message: "updater unavailable" });
+    setState({ status: "error", message: UPDATE_TEXT.unavailable, messageCode: "unavailable" });
     return;
   }
   // The coordinator starts each download itself, so it owns macOS staging and quiet failures.

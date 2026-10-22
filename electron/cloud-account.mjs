@@ -1,6 +1,9 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
 import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudTrial, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
+import nativeText from "./native-text.cjs";
+
+const { englishText } = nativeText;
 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
 /** The staging Admin (Dodo test mode, real test Clouds): a fixed address, on only with OMB_CLOUD_STAGING=1. */
@@ -562,14 +565,14 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   };
 }
 
-export function cloudMenuSublabel(state, date) {
+export function cloudMenuSublabel(state, date, t = englishText.t) {
   if (state?.status !== "connected") return null;
   const trial = state.trial;
   if (state.entitlement?.plan === "pro" && state.entitlement.status === "active") {
-    if (trial?.state === "active" || trial?.state === "ending") return `Free trial until ${date(trial.endsAt)}`;
-    return state.machine?.power?.sleeps ? "Sleeps when idle" : "Always on";
+    if (trial?.state === "active" || trial?.state === "ending") return t("native.cloud.sub.trialUntil", { date: date(trial.endsAt) });
+    return t(state.machine?.power?.sleeps ? "native.cloud.sub.sleeps" : "native.cloud.sub.alwaysOn");
   }
-  return state.machine || trial ? "Stopped" : null;
+  return state.machine || trial ? t("native.cloud.sub.stopped") : null;
 }
 
 /** What the person's own Cloud page may show of the plan: never the account, a credential or an address. */

@@ -85,23 +85,24 @@ test("shown counts once a day on this desktop, whichever page asks, until the po
 
 const WELCOMED = { onboarding: { completedAt: "2026-10-01T09:00:00.000Z", version: WELCOME_VERSION, hintsSeen: [] } };
 function desktopMain({ offered = true, page = event => event.page, config = () => WELCOMED } = {}) {
-  const handlers = new Map(), listeners = new Map(), calls = [];
+  const handlers = new Map(), listeners = new Map(), calls = [], languages = [];
   let saved = null, now = NOON;
   registerDesktopPrefs({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler), on: (channel, listener) => listeners.set(channel, listener) },
     read: () => saved, write: value => { saved = structuredClone(value); }, page,
     cloudOffered: async () => { calls.push("offered"); return offered; },
     localConfig: () => config(),
+    onLanguage: code => languages.push(code),
     now: () => now,
   });
   const ask = (channel, page, ...args) => handlers.get(channel)({ page }, ...args);
   const read = page => { const event = { page }; listeners.get("desktop-analytics:read")(event); return event.returnValue; };
-  return { ask, read, calls, channels: [...handlers.keys()], saved: () => saved, later: ms => { now += ms; } };
+  return { ask, read, calls, languages, channels: [...handlers.keys()], saved: () => saved, later: ms => { now += ms; } };
 }
 
 test("every page of this desktop's window reads and records the same notices; nothing else is answered", async () => {
   const main = desktopMain();
-  assert.deepEqual(main.channels, ["desktop-notices:state", "desktop-notices:seen", "desktop-notices:shown", "desktop-analytics:set"]);
+  assert.deepEqual(main.channels, ["desktop-notices:state", "desktop-notices:seen", "desktop-notices:shown", "desktop-analytics:set", "desktop-language:set"]);
   for (const page of ["local", "cloud", "server"]) assert.deepEqual(await main.ask("desktop-notices:state", page), { seen: [], cloud: true });
   assert.equal(await main.ask("desktop-notices:shown", "server", POPUP), true);
   assert.equal(await main.ask("desktop-notices:shown", "local", POPUP), false, "once a day for the desktop, not per page");
@@ -152,8 +153,44 @@ test("the analytics switch is This computer's page's to set; a server's page in 
   assert.equal(broken.read("local"), null);
 });
 
+test("the app's language is kept as a pack's own code, survives the analytics switch and a restart, and nothing else is kept", () => {
+  let saved = null;
+  const file = { read: () => saved, write: value => { saved = structuredClone(value); } };
+  const prefs = createDesktopPrefs(file);
+  assert.equal(prefs.language(), null, "the system's until a page says");
+  prefs.setLanguage("pt-BR");
+  assert.equal(prefs.language(), "pt-br");
+  prefs.setAnalytics(false);
+  const restarted = createDesktopPrefs(file);
+  assert.equal(restarted.language(), "pt-br");
+  assert.equal(restarted.analytics(), false);
+  for (const code of ["../en", "source-hashes", "xx", "pt-br/../../x"]) restarted.setLanguage(code);
+  assert.equal(restarted.language(), "pt-br", "a code with no pack changes nothing");
+  restarted.setLanguage("");
+  assert.equal(restarted.language(), null, "back to the system's");
+  assert.equal(saved.language, undefined);
+  for (const language of ["../en", "source-hashes", 7, { code: "pt-br" }]) {
+    assert.equal(createDesktopPrefs({ read: () => ({ seen: [], language }), write: () => {} }).language(), null, JSON.stringify(language));
+  }
+  assert.equal(createDesktopPrefs({ read: () => ({ language: "pt" }), write: () => {} }).language(), "pt-br");
+});
+
+test("only this computer's page and My Cloud's own page set the language main draws in", async () => {
+  const main = desktopMain();
+  assert.throws(() => main.ask("desktop-language:set", "server", "pt-br"), /only available/);
+  assert.deepEqual(main.languages, []);
+  await main.ask("desktop-language:set", "local", "pt-br");
+  assert.equal(main.saved().language, "pt-br");
+  await main.ask("desktop-language:set", "cloud", "");
+  assert.equal(main.saved().language, undefined);
+  await main.ask("desktop-language:set", "local", "../en");
+  await main.ask("desktop-language:set", "local", 42);
+  await main.ask("desktop-language:set", "local", "x".repeat(40));
+  assert.deepEqual(main.languages, ["pt-br", "", ""], "main hears only what is kept");
+});
+
 const PRELOAD = readFileSync(new URL("./preload.cjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-function preload(origin, { activation = false, saved = null } = {}) {
+function preload(origin, { activation = false, saved = null, home = false } = {}) {
   let bridge;
   const invoked = [], synced = [];
   vm.runInNewContext(PRELOAD, {
@@ -161,7 +198,7 @@ function preload(origin, { activation = false, saved = null } = {}) {
     location: { origin }, navigator: { userActivation: { isActive: activation } }, TextEncoder, localStorage: { getItem: () => null },
     require: () => ({ webUtils: {}, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
       ipcRenderer: { on() {}, removeListener() {}, send() {},
-        sendSync: channel => { synced.push(channel); return channel === "desktop-analytics:read" ? saved : undefined; },
+        sendSync: channel => { synced.push(channel); return channel === "desktop-analytics:read" ? saved : channel === "home:page" ? home : undefined; },
         invoke: (...args) => { invoked.push(args); return Promise.resolve(true); } } }),
   });
   return { bridge, invoked, synced };
@@ -198,6 +235,15 @@ test("the preload gives every page of the window the notices and the switch's st
   assert.ok(safe.includes('"desktopNotices"')); assert.ok(safe.includes('"desktopAnalytics"'));
 });
 
+test("the preload lets this computer's page and My Cloud's own page tell main the language, and no other server's page", async () => {
+  assert.equal(preload(VPS).bridge.desktopLanguage, undefined);
+  for (const page of [preload(LOCAL), preload(CLOUD, { home: true })]) {
+    await page.bridge.desktopLanguage.set("pt-br");
+    await page.bridge.desktopLanguage.set({ toString: () => "../en" });
+    assert.deepEqual(page.invoked, [["desktop-language:set", "pt-br"], ["desktop-language:set", ""]]);
+  }
+});
+
 test("production wiring: main answers this computer's page, My Cloud's own page and the active saved server's own page, and no other", async () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
   assert.match(main, /for \(const port of DESKTOP_PORTS\)/, "main tries the ports this module names, in order");
@@ -212,6 +258,7 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   let switched = async id => { calls.push(["switch", id]); }, loads = true;
   const context = vm.createContext({
     registerDesktopPrefs: value => { options = value; }, jsonFile: file => ({ read: () => file, write: () => {} }), ipcMain: {},
+    desktopPrefs: { kept: true }, nativeText: { set: code => { calls.push(["language", code]); return code === "pt-br"; } }, applyNativeLanguage: () => calls.push("relabel"),
     path: { join: (...parts) => parts.join("/") }, app: { getPath: () => "/user-data" }, desktopDataDir: () => "/home/.openmausbot",
     navigateMainWindow: async url => { calls.push(["navigate", url]); return loads; },
     senderIsLocal: localOrigin.isLocalSender, workspaceSenderAllowed: environments.workspaceSenderAllowed,
@@ -223,7 +270,8 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
     workspaceMenuAction: async action => { try { await action(); } catch { calls.push("dialog"); } },
   });
   vm.runInContext(main.slice(start, end), context);
-  assert.equal(options.read(), "/user-data/desktop-prefs.json");
+  assert.equal(options.prefs, context.desktopPrefs, "the record main read before the tray and the startup screen");
+  assert.match(main, /const desktopPrefs = createDesktopPrefs\(jsonFile\(path\.join\(app\.getPath\("userData"\), "desktop-prefs\.json"\)\)\);/);
   assert.equal(options.localConfig(), "/home/.openmausbot/config.json", "This computer's own workspace, whichever server the window shows");
   assert.equal(options.page({ sender: { mainFrame: localFrame }, senderFrame: localFrame }), "local");
   assert.equal(options.page({ sender: contents, senderFrame: serverFrame }), "server");
@@ -234,6 +282,8 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   assert.equal(options.page({ sender: { mainFrame: evil }, senderFrame: evil }), null, "a page that is not the active server");
   assert.equal(await options.cloudOffered(), true);
   assert.deepEqual(calls, ["restored", "offers"]);
+  options.onLanguage("pt-br"); options.onLanguage("en");
+  assert.deepEqual(calls.slice(2), [["language", "pt-br"], "relabel", ["language", "en"]], "main draws again only when the words change");
   const navigate = main.slice(main.indexOf("function navigateMainWindow(url) {"), main.indexOf("\n}\n", main.indexOf("function navigateMainWindow(url) {")) + 3);
   const load = vm.runInNewContext(`${navigate}; navigateMainWindow`, { mainWindow: { isDestroyed: () => false, loadURL: async url => { if (url.endsWith("fail")) throw new Error("ERR_CONNECTION_REFUSED"); } } });
   assert.equal(await load(`${LOCAL}/ok`), true); assert.equal(await load(`${LOCAL}/fail`), false, "a failed load answers false, never throws");

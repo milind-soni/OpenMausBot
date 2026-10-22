@@ -27,6 +27,18 @@ export interface TeamMove {
   doneAt?: number;
 }
 
+export type TeamMoveRefusalCode = "notInTeam" | "notABot" | "movingElsewhere";
+/** Why main would not start a bot's move: `code` and `params` for the page to say in its own language, `message` its
+ * English for a code the page does not know. */
+export interface TeamMoveRefusal {
+  code: string;
+  params: Record<string, string>;
+  message: string;
+}
+export declare const TEAM_MOVE_TEXT: Readonly<Record<TeamMoveRefusalCode, (params: Record<string, string>) => string>>;
+/** An Error whose `message` is the English, as an older page reads it. */
+export function teamMoveRefusal(code: TeamMoveRefusalCode, params?: Record<string, string>): Error & { refusal: { code: TeamMoveRefusalCode; params: Record<string, string> } };
+
 export const CHECK_PASSES: number;
 export const RETRY_MS: number[];
 export const BUSY_POLL_MS: number;

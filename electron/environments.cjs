@@ -1,4 +1,6 @@
 // A remote's session credential is the HttpOnly cookie /pair set, held by Chromium's cookie jar, never by this file.
+const { englishText } = require("./native-text.cjs");
+
 const LOCAL_ID = "local";
 const MAX_NAME = 60;
 /** A saved server's colour: one of these names, never a value a page could style with. The renderer maps each to its skin's tone. */
@@ -6,8 +8,8 @@ const ENTRY_COLORS = Object.freeze(["blue", "teal", "purple", "orange", "red", "
 const cleanColor = (value) => (ENTRY_COLORS.includes(value) ? value : null);
 /** A team's Cloud is listed by the verified session (`team`: its id and this person's role), never by a page. */
 const TEAM_ROLES = Object.freeze(["owner", "admin", "member"]);
-const TEAM_ROLE_LABELS = Object.freeze({ owner: "Super admin", admin: "Admin", member: "User" });
-const teamRoleLabel = (role) => TEAM_ROLE_LABELS[role] ?? TEAM_ROLE_LABELS.member;
+const TEAM_ROLE_LABELS = Object.freeze({ owner: "native.teamRole.owner", admin: "native.teamRole.admin", member: "native.teamRole.member" });
+const teamRoleLabel = (role, t = englishText.t) => t(TEAM_ROLE_LABELS[role] ?? TEAM_ROLE_LABELS.member);
 const cleanTeam = (value) => (value && typeof value === "object" && typeof value.id === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.id) && TEAM_ROLES.includes(value.role)
   ? { id: value.id, role: value.role } : null);
 /** My Cloud first, then each team, then saved servers. */
@@ -76,11 +78,11 @@ function workspaceSummary(state) {
 
 /** Native identity must not depend on a hosted renderer's version/title. `homeOrigin`: My Cloud once it is the person's
  * home: alone, it is simply the app; with a team or another place besides, the window names the place it shows. */
-function workspaceWindowTitle(state, companion, homeOrigin = null) {
-  if (companion) return `OpenMausBot — Connected to: ${companion.serverName} (${new URL(companion.endpoint).host})`;
+function workspaceWindowTitle(state, companion, homeOrigin = null, t = englishText.t) {
+  if (companion) return t("native.title.connected", { server: companion.serverName, host: new URL(companion.endpoint).host });
   const active = activeEnvironment(state);
   if (active?.team) return `OpenMausBot — ${active.name}`;
-  if (active && active.kind !== "local" && active.origin !== homeOrigin) return `OpenMausBot — Hosted: ${active.name} (${new URL(active.origin).host})`;
+  if (active && active.kind !== "local" && active.origin !== homeOrigin) return t("native.title.hosted", { name: active.name, host: new URL(active.origin).host });
   if (active && homeOrigin && active.origin === homeOrigin && otherPlaces(state, homeOrigin) > 0) return `OpenMausBot — ${active.name}`;
   return "OpenMausBot";
 }
@@ -107,15 +109,15 @@ function workspaceSenderAllowed(event, contents, state, localOrigin) {
 /** Native menu choices, never renderer-supplied destinations or callbacks. `iconFor`: a saved colour's small dot, when main can draw one.
  * `places`: the one line saying which side has which bots, shown first; `copyToCloud`: the send line under the list. `foldSublabels`: where menus show no sublabels (Windows, Linux), My Cloud's status line
  * joins its name instead of vanishing. */
-function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {}, iconFor = null, places = null, copyToCloud = null, foldSublabels = false, homeOrigin = null }) {
-  const active = activeEnvironment(state);
-  if (homeOrigin) return homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin });
+function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddCloud, sublabels = {}, iconFor = null, places = null, copyToCloud = null, foldSublabels = false, homeOrigin = null, text = englishText }) {
+  const active = activeEnvironment(state), { t } = text;
+  if (homeOrigin) return homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin, t });
   return [
     ...(places ? [{ id: "workspace-places", label: places, enabled: false }, { type: "separator" }] : []),
-    { id: "workspace-local", label: "This computer", type: "radio", checked: !active, click: () => onSwitch(LOCAL_ID) },
+    { id: "workspace-local", label: t("place.local"), type: "radio", checked: !active, click: () => onSwitch(LOCAL_ID) },
     ...[...state.environments].sort((a, b) => Boolean(b.team) - Boolean(a.team)).map((entry) => {
       const icon = iconFor && cleanColor(entry.color) ? iconFor(entry.color) : null;
-      const status = Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : entry.team ? teamRoleLabel(entry.team.role) : null;
+      const status = Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : entry.team ? teamRoleLabel(entry.team.role, t) : null;
       return {
         id: `workspace-${entry.id}`, label: foldSublabels && status ? `${entry.name} · ${status}` : entry.name,
         sublabel: status ?? (entry.kind === "local" ? entry.dataDir : new URL(entry.origin).host),
@@ -123,29 +125,29 @@ function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget, onAddClou
       };
     }),
     ...(copyToCloud ? [{ id: "workspace-copy-to-cloud", label: copyToCloud.label, click: copyToCloud.click }] : []),
-    ...(onAddCloud ? [{ id: "workspace-add-cloud", label: "Add a Cloud…", sublabel: "Keeps your bots running 24/7", click: onAddCloud }] : []),
+    ...(onAddCloud ? [{ id: "workspace-add-cloud", label: t("native.menu.addCloud"), sublabel: t("native.switcher.addCloudSub"), click: onAddCloud }] : []),
     { type: "separator" },
-    { id: "workspace-connect", label: "Connect to a server…", click: onConnect },
-    ...(active && !active.team ? [{ id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),
+    { id: "workspace-connect", label: t("native.menu.connect"), click: onConnect },
+    ...(active && !active.team ? [{ id: "workspace-forget", label: t("native.switcher.forgetNamed", { name: active.name }), click: () => onForget(active.id) }] : []),
   ];
 }
 
 /** Once My Cloud is the person's home: My Cloud, each team's Cloud (with this person's role), then the other saved
  * servers, each a whole place of its own; this computer is not one of them, and nothing here sends or copies. A team is
  * the Admin's to list and remove, so it has no Forget. */
-function homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin }) {
+function homeMenuTemplate(state, { onSwitch, onForget, sublabels, iconFor, foldSublabels, homeOrigin, t }) {
   const active = activeEnvironment(state);
   const places = state.environments.filter((entry) => entry.kind !== "local").sort((a, b) => placeRank(a, homeOrigin) - placeRank(b, homeOrigin));
   return [
     ...places.map((entry) => {
       const icon = iconFor && cleanColor(entry.color) ? iconFor(entry.color) : null;
-      const status = Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : entry.team ? teamRoleLabel(entry.team.role) : null;
+      const status = Object.hasOwn(sublabels, entry.id) ? sublabels[entry.id] : entry.team ? teamRoleLabel(entry.team.role, t) : null;
       return {
         id: `workspace-${entry.id}`, label: foldSublabels && status ? `${entry.name} · ${status}` : entry.name, sublabel: status ?? new URL(entry.origin).host,
         ...(icon ? { icon } : {}), type: "radio", checked: entry.id === state.activeId, click: () => onSwitch(entry.id),
       };
     }),
-    ...(active && active.origin !== homeOrigin && !active.team ? [{ type: "separator" }, { id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),
+    ...(active && active.origin !== homeOrigin && !active.team ? [{ type: "separator" }, { id: "workspace-forget", label: t("native.switcher.forgetNamed", { name: active.name }), click: () => onForget(active.id) }] : []),
   ];
 }
 
@@ -196,17 +198,17 @@ function reconcileTeams(state, teams, makeId, homeOrigin = null) {
   return { state: activeId === next.activeId ? next : { ...next, activeId }, left };
 }
 
-function botList(names, shown = 2) {
+function botList(names, text, shown = 2) {
   const clean = names.filter((name) => typeof name === "string" && name.trim()).map((name) => name.trim().replace(/\s+/g, " ").slice(0, 40));
-  if (clean.length <= shown + 1) return clean.length > 1 ? `${clean.slice(0, -1).join(", ")} and ${clean.at(-1)}` : clean[0] ?? "";
-  return `${clean.slice(0, shown).join(", ")} and ${clean.length - shown} more`;
+  if (clean.length <= shown + 1) return text.listFormat(clean);
+  return text.t("native.switcher.andMore", { names: clean.slice(0, shown).join(", "), count: clean.length - shown });
 }
 
 /** Bots, chats and skills live on each side by design; this says which side has which, from where the person is now. */
-function placesLine({ cloudName = "My Cloud", onCloud, localBots }) {
-  const names = botList(localBots);
-  if (onCloud) return names ? `Your bots live on ${cloudName}. This computer has its own: ${names}.` : `Your bots live on ${cloudName}. This computer has none of its own.`;
-  return names ? `These bots live on this computer: ${names}. ${cloudName} has its own.` : `This computer has no bots of its own yet. ${cloudName} has its own.`;
+function placesLine({ cloudName = "My Cloud", onCloud, localBots, text = englishText }) {
+  const names = botList(localBots, text), cloud = cloudName;
+  if (onCloud) return names ? text.t("native.places.cloudWith", { cloud, names }) : text.t("native.places.cloudNone", { cloud });
+  return names ? text.t("native.places.hereWith", { cloud, names }) : text.t("native.places.hereNone", { cloud });
 }
 
 /** One line under My Cloud: what of this computer's is not on it yet, with Send (Send to My Cloud, cloud-send.mjs), or
@@ -221,7 +223,7 @@ function sendLine({ cloudName = "My Cloud", waiting }) {
 /** The switcher's extra options once the person has My Cloud: the places line, the send line, and the Cloud's status
  * beside its name where menus show no sublabels. Bot names come from this computer's own server; when it does not
  * answer at once the line is left out, never guessed. `send`: what waits (main's last comparison) and its actions. */
-async function placesMenuOptions({ cloud, activeId, platform, port, send = null,
+async function placesMenuOptions({ cloud, activeId, platform, port, send = null, text = englishText,
   localBots = () => fetch(`http://127.0.0.1:${port}/api/bots`, { signal: AbortSignal.timeout(700) }).then((response) => response.json()) }) {
   const foldSublabels = platform !== "darwin";
   if (!cloud) return { foldSublabels };
@@ -231,7 +233,7 @@ async function placesMenuOptions({ cloud, activeId, platform, port, send = null,
   return {
     foldSublabels,
     ...(send ? { copyToCloud: waiting ? { label: waiting, click: send.onSend } : { label: `This computer and ${cloud.name}…`, click: send.onOpen } } : {}),
-    ...(names ? { places: placesLine({ cloudName: cloud.name, onCloud: activeId === cloud.id, localBots: names }) } : {}),
+    ...(names ? { places: placesLine({ cloudName: cloud.name, onCloud: activeId === cloud.id, localBots: names, text }) } : {}),
   };
 }
 

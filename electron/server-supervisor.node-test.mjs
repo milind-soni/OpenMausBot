@@ -12,6 +12,7 @@ import { createServerSupervisor } from "./server-supervisor.mjs";
 
 const require = createRequire(import.meta.url);
 const env = require("./environments.cjs");
+const { englishText } = require("./native-text.cjs");
 const MAIN_SOURCE = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
 // vm realms have their own Object/Array prototypes: bring results home before strict-comparing.
 const plain = (value) => (value === undefined || value === null ? value : Array.isArray(value) ? value.map(plain) : typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, plain(v)])) : value);
@@ -253,6 +254,7 @@ function runForget(state) {
     desktopDataDir: () => "/Users/me/.openmausbot",
     slog: () => {},
     session: { defaultSession: { fetch: async () => ({ ok: true }), clearStorageData: async () => {} } },
+    nativeT: englishText.t,
   };
   const context = vm.createContext(ctx);
   vm.runInContext(`${MAIN_SOURCE.slice(start, end)}; this.forgetEnvironment = forgetEnvironment;`, context);
@@ -359,6 +361,7 @@ function switchFixture(t, { startResults = [], releaseLeaseThrows = false, stopU
     rendererOrigin: () => "http://127.0.0.1:8799",
     dialog: { showErrorBox: () => {} },
     slog: () => {},
+    nativeT: englishText.t,
   });
   const start = MAIN_SOURCE.indexOf("async function switchLocalEnvironmentTo(");
   const body = MAIN_SOURCE.slice(start, MAIN_SOURCE.indexOf("\nasync function switchEnvironment", start));
@@ -406,5 +409,5 @@ test("boot reads the environment decision before the boot lease and never create
   const lease = boot.indexOf("acquireDataDirLease(");
   assert.ok(decision > 0 && decision < lease, "the missing-dir decision must precede the boot lease");
   assert.match(boot, /activeId: LOCAL_ID/);
-  assert.match(boot, /showErrorBox\(\s*"[^"]*missing[^"]*"/i);
+  assert.match(boot, /showErrorBox\(nativeT\("native\.boot\.folderMissing\.title"\)/);
 });

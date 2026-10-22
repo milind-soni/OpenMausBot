@@ -1,15 +1,24 @@
+import nativeText from "./native-text.cjs";
+
 /** The device word the person knows this computer by. */
 export const deviceWord = (platform = process.platform) => platform === "darwin" ? "Mac" : platform === "win32" ? "PC" : "computer";
 
-export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onStop, onOpen, device = deviceWord() }) {
+export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onStop, onOpen, device = deviceWord(), t = nativeText.englishText.t }) {
   let tray = null;
   let shown = { lending: false, busy: false };
+  const named = () => (device === deviceWord("linux") ? t("native.lendTray.computer") : device);
   const menu = busy => Menu.buildFromTemplate([
-    { label: busy ? `Your bots are using this ${device} now` : `Your bots can use this ${device}`, enabled: false },
+    { label: t(busy ? "native.lendTray.busy" : "native.lendTray.idle", { device: named() }), enabled: false },
     { type: "separator" },
-    { label: "Stop sharing", click: () => onStop() },
-    { label: "Sharing settings…", click: () => onOpen() },
+    { label: t("native.lendTray.stop"), click: () => onStop() },
+    { label: t("native.lendTray.settings"), click: () => onOpen() },
   ]);
+  const paint = () => {
+    tray.setToolTip(shown.busy ? t("native.lendTray.tipBusy") : t("native.lendTray.tipIdle", { device: named() }));
+    // macOS shows the title beside the icon: visible while in use.
+    tray.setTitle?.(shown.busy ? t("native.lendTray.inUse") : "");
+    tray.setContextMenu(menu(shown.busy));
+  };
   return {
     update({ lending, busy }) {
       const next = { lending: Boolean(lending), busy: Boolean(lending && busy) };
@@ -20,11 +29,9 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onSt
         tray = new Tray(nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 }));
         tray.on("click", () => tray?.popUpContextMenu?.());
       }
-      tray.setToolTip(next.busy ? "OpenMausBot: in use by your bots" : `OpenMausBot: your bots can use this ${device}`);
-      // macOS shows the title beside the icon: visible while in use.
-      tray.setTitle?.(next.busy ? "In use" : "");
-      tray.setContextMenu(menu(next.busy));
+      paint();
     },
+    relabel() { if (tray && !tray.isDestroyed()) paint(); },
     destroy() { if (tray && !tray.isDestroyed()) tray.destroy(); tray = null; shown = { lending: false, busy: false }; },
   };
 }

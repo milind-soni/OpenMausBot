@@ -45,8 +45,9 @@ import { cloudFirstRun, cloudWelcomeVisible, useCloudWelcome } from "@/lib/cloud
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { setLocale, t } from "@/lib/i18n";
+import { tellDesktopLanguage } from "@/lib/desktop-language";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
-import { effectiveLanguage, useLanguageChoice } from "@/lib/language-preference";
+import { effectiveLanguage, localeTag, useLanguageChoice } from "@/lib/language-preference";
 import { botShowsUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { takeConnectRequest } from "@/lib/connect-link";
 import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
@@ -108,9 +109,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const language = effectiveLanguage(useLanguageChoice(), state.config?.language);
   const [, setLocaleEpoch] = useState(0);
   useEffect(() => {
-    setLocale(language || globalThis.navigator?.language);
+    setLocale(localeTag(language));
     setLocaleEpoch((epoch) => epoch + 1);
   }, [language]);
+  const configLoaded = state.config !== null;
+  useEffect(() => { void tellDesktopLanguage(language, configLoaded); }, [language, configLoaded]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [localVmWorkspaceBotId, setLocalVmWorkspaceBotId] = useState<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -280,7 +283,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {!calendarFocus && <button
         type="button"
         ref={menuButtonRef}
-        aria-label="Open bot list"
+        aria-label={t("app.openBotList")}
         aria-expanded={drawerOpen}
         onClick={() => setDrawerOpen(true)}
         className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink md:hidden"

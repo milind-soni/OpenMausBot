@@ -8,8 +8,9 @@
 // signed-out app (its automations would run twice). The page that counts as home is the main window's main frame at the
 // shown place's verified origin, nothing else. A team is only ever one the Admin's session lists, paired through the
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
-import { cloudHomeConnectUrl, cloudUnreachableText } from "./cloud-home.mjs";
+import { cloudHomeConnectUrl, cloudUnreachableCause, cloudUnreachableText } from "./cloud-home.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
+import nativeText from "./native-text.cjs";
 import { parseJournal } from "./one-home.mjs";
 
 export const HOME_SCREEN_PATH = "/home";
@@ -21,17 +22,21 @@ export const QUIET_MS = 30_000;
 export const VERSION_EVERY_MS = 60_000;
 /** While the startup screen is up, a wake that takes longer hands over to this computer's screen, which says the same. */
 export const SPLASH_HANDOFF_MS = 6_000;
-export const SPLASH_TEXT = Object.freeze({ opening: "Opening My Cloud…", waking: "Waking My Cloud…" });
 /** A team's Cloud ends each session within an hour of its pairing (T2), so the window signs in again before that, without
  * moving the page: every TEAM_RENEW_MS after a pairing, or TEAM_RENEW_EARLY_MS before the end its session reports. The
  * Admin refusing that pairing (404) means the person is no longer in the team. */
 export const TEAM_RENEW_MS = 45 * 60_000;
 export const TEAM_RENEW_EARLY_MS = 10 * 60_000;
 export const TEAM_RENEW_RETRY_MS = 5 * 60_000;
+const SPLASH_KEYS = Object.freeze({
+  opening: ["native.splash.openingCloud", "native.splash.openingNamed"], waking: ["native.splash.wakingCloud", "native.splash.wakingNamed"],
+});
 /** The startup screen's line: My Cloud's words, or the team's name. */
-export function splashText(status, name = null) {
-  return name ? `${status === "waking" ? "Waking" : "Opening"} ${name}…` : SPLASH_TEXT[status];
+export function splashText(status, name = null, t = nativeText.englishText.t) {
+  const [cloud, named] = SPLASH_KEYS[status === "waking" ? "waking" : "opening"];
+  return name ? t(named, { name }) : t(cloud);
 }
+export const SPLASH_TEXT = Object.freeze({ opening: splashText("opening"), waking: splashText("waking") });
 const PLAN_PROBLEMS = new Set(["stopped", "payment-problem", "failed"]);
 const MOVING = new Set(["freeze", "final", "check"]);
 const DEFAULT_TIMERS = {
@@ -117,6 +122,7 @@ export function routeOf(url, origin) {
  *   now?(): number,
  *   timers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void, every(work: () => void, ms: number): unknown },
  *   log?(line: string): void,
+ *   t?(key: string, params?: Record<string, string | number>): string,
  * }} deps `go(url, origin, place)`: main's one way to move the window, to My Cloud or a team's Cloud (`origin`, with the
  * `place` it is) or this computer's screen (null). `showLocal(leaving)`: the window as it was before the move (this computer's page, or a saved server it
  * shows); `leaving`: it showed a place or this computer's screen until now, so it goes back to this computer's page.
@@ -129,7 +135,7 @@ export function createHomeWindow(deps) {
   const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal,
     remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { left(place.name); remember(null); },
     splash = () => null, lastInput = () => 0, publish = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
-    now = Date.now, timers = DEFAULT_TIMERS, log = () => {} } = deps;
+    now = Date.now, timers = DEFAULT_TIMERS, log = () => {}, t = nativeText.englishText.t } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
   /** The place the window was last sent to (My Cloud, or a team's Cloud), and the one being opened now. */
   let shown = null, opening = null, renewal = null;
@@ -170,7 +176,7 @@ export function createHomeWindow(deps) {
   const tell = () => { try { publish(view()); } catch {} };
   function say(next) {
     status = next;
-    if (next) { try { splash()?.status(splashText(next, teamName())); } catch {} }
+    if (next) { try { splash()?.status(splashText(next, teamName(), t)); } catch {} }
     tell();
   }
   const shows = (origin) => {
@@ -198,8 +204,8 @@ export function createHomeWindow(deps) {
   /** The place didn't answer: this computer's screen says so, with the Admin's reason for My Cloud, and looks again by itself. */
   function offline(token) {
     if (!wanted(token)) return;
-    const reason = opening?.kind === "team" ? null : cloudUnreachableText(state(), cloudOrigin());
-    toScreen({ screen: "offline", ...(reason ? { reason } : {}) });
+    const cause = opening?.kind === "team" ? null : cloudUnreachableCause(state(), cloudOrigin());
+    toScreen({ screen: "offline", ...(cause ? { reason: cloudUnreachableText(state(), cloudOrigin()), cause } : {}) });
     later();
   }
   function later() {

@@ -7,7 +7,7 @@ import { dirname } from "node:path";
 
 import { createCloudSend } from "./cloud-send.mjs";
 import { openOwnerSession } from "./cloud-send-main.mjs";
-import { createTeamMove } from "./team-move.mjs";
+import { createTeamMove, teamMoveRefusal } from "./team-move.mjs";
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().replace(/\s+/gu, " ").slice(0, 300) : null);
@@ -170,12 +170,19 @@ export function installTeamMove({ ipcMain, cloudPage, home, account, file, journ
     return handler(...args);
   };
   ipcMain.handle("cloud-send:teams", myCloudPage("cloud-send:teams", () => ({ teams: teams().map(({ id, name, ready }) => ({ id, name, ready })) })));
-  ipcMain.handle("cloud-send:team-move", myCloudPage("cloud-send:team-move", (botId, teamId, name) => {
+  const moveToTeam = (botId, teamId, name) => {
     const team = teamOf(String(teamId));
-    if (!team) throw new Error("You're not in that team.");
-    if (!ID.test(String(botId))) throw new Error("Choose one of your bots to move.");
+    if (!team) throw teamMoveRefusal("notInTeam");
+    if (!ID.test(String(botId))) throw teamMoveRefusal("notABot");
     void moves.start({ bot: { id: String(botId), name: sentence(name) ?? "This bot" }, team: { id: team.id, name: team.name, origin: team.origin } });
     return moves.view();
+  };
+  ipcMain.handle("cloud-send:team-move", myCloudPage("cloud-send:team-move", moveToTeam));
+  ipcMain.handle("cloud-send:team-move-coded", myCloudPage("cloud-send:team-move-coded", (...args) => {
+    try { return { view: moveToTeam(...args) }; } catch (error) {
+      if (!error?.refusal) throw error;
+      return { refused: { ...error.refusal, message: error.message } };
+    }
   }));
   ipcMain.handle("cloud-send:team-retry", myCloudPage("cloud-send:team-retry", () => { void moves.retry(); return moves.view(); }));
   ipcMain.handle("cloud-send:team-open", myCloudPage("cloud-send:team-open", (teamId) => {

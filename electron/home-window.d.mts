@@ -1,9 +1,10 @@
 /** What this computer's screen says while the window can't show the place. `reason`: the Admin's words on why My Cloud
- * doesn't answer; `machine`: a plan problem's state; `other`: another MausBot Cloud account is signed in; `name`: the
- * team whose Cloud is being opened (absent for My Cloud). */
+ * doesn't answer, in English; `cause`: the same as a code the page says in its own language; `machine`: a plan
+ * problem's state; `other`: another MausBot Cloud account is signed in; `name`: the team whose Cloud is being opened
+ * (absent for My Cloud). */
 export type HomeView = { name?: string } & (
   | { screen: "opening" | "waking" | "moving" }
-  | { screen: "offline"; reason?: string }
+  | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" }
   | { screen: "signin"; other?: true }
   | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed" });
 
@@ -37,7 +38,7 @@ export declare const SPLASH_TEXT: Readonly<{ opening: string; waking: string }>;
 export declare const TEAM_RENEW_MS: number;
 export declare const TEAM_RENEW_EARLY_MS: number;
 export declare const TEAM_RENEW_RETRY_MS: number;
-export function splashText(status: "opening" | "waking", name?: string | null): string;
+export function splashText(status: "opening" | "waking", name?: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string;
 export function placeOf(input: { ask?: HomeAsk; remembered?: RememberedPlace; state?: any }): { kind: "cloud"; left?: string | null } | { kind: "team"; id: string; name: string; role: string | null; origin: string | null; machine: any };
 
 export function homeOf(input: { journal?: any; frozenCloud?: string | true | null; state?: any }): Home;
@@ -94,6 +95,7 @@ export function createHomeWindow(deps: {
   now?(): number;
   timers?: Timers;
   log?(line: string): void;
+  t?(key: string, params?: Record<string, string | number>): string;
 }): HomeWindow;
 
 export function installHomeWindowIpc(deps: {

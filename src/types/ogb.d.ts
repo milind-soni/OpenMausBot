@@ -127,6 +127,7 @@ const __APP_VERSION__: string;
       home?: import("../../electron/home-window.mjs").HomeBridge;
       desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;
       desktopAnalytics?: import("../../electron/desktop-prefs.mjs").DesktopAnalyticsBridge;
+      desktopLanguage?: import("../../electron/desktop-prefs.mjs").DesktopLanguageBridge;
       companyBackups?: {
         state(): Promise<CompanyBackupState>;
         list(): Promise<{ backups: CompanyBackupEntry[]; usedBytes: number; limits: { ownerQuotaBytes: number; retainedSnapshots: number } }>;
@@ -141,7 +142,7 @@ const __APP_VERSION__: string;
       workspaces?: {
         /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up); `home`: this window's
          * home is this Cloud, so there is nothing to switch to. */
-        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean; role?: string }>;
+        state: () => Promise<{ local: boolean; name: string; localPath?: string; origin?: string; color?: string; home?: boolean; role?: string }>;
         /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
         menu: (options?: { from?: "howto" }) => Promise<void>;
         /** One plain line for the next page, served once: a team this person is no longer in. */
@@ -388,6 +389,8 @@ export interface UpdaterState {
   releaseNotes?: string;
   percent?: number;
   message?: string;
+  /** `message` as a code the window words in its own language; absent when main has only the updater's own words */
+  messageCode?: "tls" | "integrity" | "disk" | "permission" | "busy" | "feed" | "network" | "prepareTimeout" | "slowRestart" | "unavailable";
   /** native work may still be running; recovery requires an app restart */
   retryable?: boolean;
   /**

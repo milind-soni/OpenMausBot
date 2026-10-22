@@ -62,6 +62,18 @@ it("after a day of failing offers the move's own Try again", async () => {
   expect(html(strip(false))).toContain("Moving to My Cloud… almost done");
 });
 
+it("a failing move My Cloud refused by a serverError key says why in the page's language; any other key, or none, shows main's English", async () => {
+  const english = "Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into Acme.";
+  setLocale("pt-br");
+  await shown({ ...notice, move: { phase: "copy", failing: { error: english, errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" } } } }, false);
+  expect(html(strip(false))).toContain("Seus bots ainda não conseguiram ir para o Cloud: Os bots, as conversas e os logins de um computador só podem ir para o Cloud. Nada pessoal entra em Acme.");
+  for (const failing of [{ error: english, errorKey: "cloudHome.connect", errorParams: {} }, { error: english }]) {
+    f.values = [];
+    await shown({ ...notice, move: { phase: "copy", failing } }, false);
+    expect(html(strip(false))).toContain(`Seus bots ainda não conseguiram ir para o Cloud: ${english}`);
+  }
+});
+
 it("My Cloud's page says once what arrived, with the phone to pair, until closed", async () => {
   const pair = vi.fn();
   await shown({ ...notice, move: { phase: "done", counts: { bots: 4, skills: 2, logins: 2, onePassword: true, chats: 148, routines: 2 }, phone: true, held: [] } });

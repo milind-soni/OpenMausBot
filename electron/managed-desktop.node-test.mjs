@@ -325,7 +325,7 @@ test("a saved company sign-in that can never be read is removed, and signing in 
   ]) {
     await electron43Store(file).write(grant());
     const f = fixture(t, { store: electron43Store(file, undefined, decrypt) });
-    assert.deepEqual(await f.client.start(), { status: "signed-out", message: "This computer's company sign-in couldn't be read, so it was removed. Sign in again." });
+    assert.deepEqual(await f.client.start(), { status: "signed-out", message: "This computer's company sign-in couldn't be read, so it was removed. Sign in again.", messageCodes: ["removed"] });
     await assert.rejects(fs.stat(file), { code: "ENOENT" });
     assert.equal((await f.client.begin({ portalOrigin: origin })).status, "connecting");
   }

@@ -5,6 +5,7 @@ import vm from "node:vm";
 
 import { installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs";
 import { createLendingDialogs, serverAccessDetail } from "./lending-dialogs.mjs";
+import nativeText from "./native-text.cjs";
 
 function fakeDialog({ response = 1, picked = { canceled: true, filePaths: [] } } = {}) {
   const calls = [];
@@ -96,6 +97,29 @@ test("Apps and screen is lent only by the dialog's own button, and never with no
   }
 });
 
+test("in Brazilian Portuguese every consent dialog still defaults to Cancel and says what each part lets the bots do", async () => {
+  const { t } = nativeText.createNativeText({ saved: "pt-br" });
+  const env = { name: "Team server", origin: "https://team.example.test" };
+  const grant = { folders: [{ path: "/Users/me/Plans", write: true }, { path: "/Users/me", write: false, home: true }], terminal: true, computer: true };
+  const win = liveWindow(), { dialog, calls } = fakeDialog({ response: 1, picked: { canceled: false, filePaths: ["/Users/me"] } });
+  const dialogs = createLendingDialogs({ dialog, window: () => win, validate: named, isHome: async () => true, t });
+  assert.equal(await dialogs.confirmServerAccess(env, grant), false);
+  assert.equal(await dialogs.confirmScreen(), false);
+  assert.equal(await dialogs.chooseFolder("Escolha"), null);
+  const boxes = calls.filter(([kind]) => kind === "message").map(([, , options]) => options);
+  assert.deepEqual(boxes.map((options) => [options.message, options.buttons, options.defaultId, options.cancelId]), [
+    ["Permitir acesso ao computador para Team server?", ["Permitir acesso", "Cancelar"], 1, 1],
+    ["Deixar seus bots do My Cloud usarem seus apps e sua tela?", ["Compartilhar apps e tela", "Cancelar"], 1, 1],
+    ["Compartilhar sua pasta pessoal inteira?", ["Compartilhar pasta pessoal", "Cancelar"], 1, 1],
+  ]);
+  const detail = boxes[0].detail.split("\n\n");
+  assert.equal(detail[0], "Servidor: https://team.example.test");
+  assert.deepEqual(detail.slice(1, 3), ["Leitura e escrita: /Users/me/Plans", "Somente leitura: /Users/me (sua pasta pessoal inteira)"]);
+  assert.match(detail[3], /^Terminal: comandos SEM RESTRIÇÃO .*credenciais\.$/);
+  assert.match(detail[4], /^Controle do computador: pode ver sua tela/);
+  assert.match(boxes[1].detail, /Configurações → MausBot Cloud\.$/);
+});
+
 const MAIN = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 function mainSection(start, end) {
   const from = MAIN.indexOf(start), to = MAIN.indexOf(end, from);
@@ -114,7 +138,7 @@ function mainLending({ response }) {
     createLendingDialogs, installCloudLending, usualFolders, usualFolderPaths, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: passThrough, cloudPageAsking: () => "cloud",
     requireSharedComputers: async () => {}, savedWorkspace: () => team, lendingTarget: { environment: () => cloud }, cuaReady: Promise.resolve({ mcpCommand: "cua" }),
-    stopLending: () => {}, app: { getPath: (name) => `/Users/me/${name}` }, os: { homedir: () => "/Users/me" },
+    stopLending: () => {}, app: { getPath: (name) => `/Users/me/${name}` }, os: { homedir: () => "/Users/me" }, nativeT: nativeText.englishText.t,
     sharingController: () => ({
       identity: async () => ({ id: "info" }),
       save: async (env, grant, info) => { saved.push(["server", env.id, grant, info]); },

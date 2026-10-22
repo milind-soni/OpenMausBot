@@ -25,7 +25,7 @@ import { useSidebarPhoneStatus } from "./SidebarPhoneButton";
 import { api, useStore, type Action } from "@/state/store";
 import { serverCheckPhase, serverUpdateRow, type ServerUpdateCheck, type ServerUpdatePhase } from "@/lib/server-update";
 import type { CloudAccountBridge, CloudAccountState } from "../../electron/cloud-account.mjs";
-import { useUpdaterState, type UpdaterState } from "@/lib/updater";
+import { updaterMessage, useUpdaterState, type UpdaterState } from "@/lib/updater";
 import { brand } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -90,7 +90,7 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
       ).replace("  ", " ");
     case "installing":
       return (
-        state?.message ||
+        updaterMessage(state) ||
         (state?.installMode === "handoff"
           ? t("sidebar.update.openingTerminal")
           : t("sidebar.update.installing"))
@@ -100,7 +100,7 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
     case "handed-off":
       return t("sidebar.update.handedOff");
     case "error":
-      return state?.message?.trim() || t("sidebar.update.failed");
+      return updaterMessage(state)?.trim() || t("sidebar.update.failed");
     case "up-to-date":
       return t("sidebar.update.upToDate");
     default:

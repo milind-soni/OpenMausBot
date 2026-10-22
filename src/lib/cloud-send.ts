@@ -1,9 +1,10 @@
 // What either page says about the one-time move to My Cloud (electron/one-home.mjs), and what arrived, in words.
 import type { CloudSendCounts } from "../../electron/cloud-send.mjs";
 import type { OneHomeCounts, OneHomeView } from "../../electron/one-home.mjs";
-import type { TeamMoveView } from "../../electron/team-move.mjs";
+import type { TeamMoveRefusal, TeamMoveRefusalCode, TeamMoveView } from "../../electron/team-move.mjs";
 import type { LocaleKey } from "@/locales";
-import { activeLocale, t } from "@/lib/i18n";
+import { activeLocale, t, tFromServer } from "@/lib/i18n";
+import { serverErrorText } from "@/lib/server-error";
 
 const counted = (count: number, one: LocaleKey, many: LocaleKey) => t(count === 1 ? one : many, { count });
 
@@ -55,7 +56,7 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
     return { kind: "done", text: t(move.phase === "home-again" ? "cloudSend.move.homeAgain" : move.lost ? "cloudSend.move.backLost" : "cloudSend.move.back"), extra: [] };
   }
   const failing = "failing" in move ? move.failing : undefined;
-  if (failing) return { kind: "failed", text: failing.error ? t("cloudSend.move.failing", { error: failing.error }) : t("cloudSend.move.failingPlain"), extra: [], retry: true };
+  if (failing) return { kind: "failed", text: failing.error ? t("cloudSend.move.failing", { error: serverErrorText(failing, failing.error) }) : t("cloudSend.move.failingPlain"), extra: [], retry: true };
   if (move.phase === "finishing") return { kind: "sending", text: t("cloudSend.move.finishing"), extra: [] };
   if (move.phase === "wait") {
     return { kind: "sending", text: move.waitingFor ? t("cloudSend.move.waiting", { name: move.waitingFor }) : t("cloudSend.move.waitingAny"), extra: [] };
@@ -71,4 +72,15 @@ export function teamMoveLine(move: TeamMoveView): { kind: "sending" | "failed" |
   if (move.phase === "done") return { kind: "done", text: t("teamMove.done", names) };
   if (move.phase === "failed") return { kind: "failed", text: t("teamMove.failed", names) };
   return { kind: "sending", text: t("teamMove.moving", names) };
+}
+
+const TEAM_MOVE_REFUSALS: Record<TeamMoveRefusalCode, LocaleKey> = {
+  notInTeam: "teamMove.refused.notInTeam",
+  notABot: "teamMove.refused.notABot",
+  movingElsewhere: "teamMove.refused.movingElsewhere",
+};
+
+export function teamMoveRefusalText(refused: TeamMoveRefusal): string {
+  const params = Object.fromEntries(Object.entries(Object(refused.params)).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  return Object.hasOwn(TEAM_MOVE_REFUSALS, refused.code) ? tFromServer(TEAM_MOVE_REFUSALS[refused.code as TeamMoveRefusalCode], refused.message, params) : refused.message;
 }

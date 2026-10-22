@@ -508,5 +508,5 @@ test("the session's teams are read with their role and their Cloud as the machin
   }
   for (const none of [undefined, null, {}, "x", 3]) assert.deepEqual(parseCloudTeams(none), [], String(none));
   assert.deepEqual(CLOUD_TEAM_ROLES, ["owner", "admin", "member"]);
-  assert.deepEqual(["owner", "admin", "member", "x", undefined].map(teamRoleLabel), ["Super admin", "Admin", "User", "User", "User"]);
+  assert.deepEqual(["owner", "admin", "member", "x", undefined].map((role) => teamRoleLabel(role)), ["Super admin", "Admin", "User", "User", "User"]);
 });

@@ -42,7 +42,7 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
   const power = useCloudPower(cloudHome);
   const onLine = t(power.sleeps ? "cloudSetup.sleepsWhenIdle" : "cloudSetup.alwaysOn");
   const waking = power.waking ? t("cloudHome.waking") : "";
-  const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string; color?: string; home?: boolean } | null>(null);
+  const [current, setCurrent] = useState<{ local: boolean; name: string; localPath?: string; origin?: string; color?: string; home?: boolean } | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -72,7 +72,7 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
       </div>
     </div>;
   }
-  const name = current?.name ?? (cloudHome ? t("cloudSetup.myCloud") : t("sidebar.servers"));
+  const name = current ? (current.local && !current.localPath ? t("place.local") : current.name) : cloudHome ? t("cloudSetup.myCloud") : t("sidebar.servers");
   const Icon = current?.local === false || (cloudHome && !current) ? Cloud : Laptop;
   const shown = cloudHome ? `${name} · ${onLine}` : name;
   const title = current?.origin ? `${shown} · ${current.origin}` : shown;

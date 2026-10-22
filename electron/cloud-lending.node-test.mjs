@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { cloudLendingVerdict, createComputerSharing } from "./computer-sharing.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
+import nativeText from "./native-text.cjs";
 
 const ORIGIN = "https://omb-u-fixture.fly.dev";
 const binding = { accountId: "acct_1", origin: ORIGIN };
@@ -376,6 +377,27 @@ test("the menu-bar indicator exists only while lending, reads In use while bots 
   assert.deepEqual([stops, opens], [1, 1]);
   indicator.update({ lending: false, busy: true });
   assert.equal(trays[0].destroyed, true, "gone as soon as lending ends");
+});
+
+test("the menu-bar indicator speaks the app's language and says it again when the language changes", () => {
+  const trays = [];
+  class Tray {
+    constructor() { this.destroyed = false; trays.push(this); }
+    on() {} setToolTip(value) { this.tip = value; } setTitle(value) { this.title = value; }
+    setContextMenu(menu) { this.menu = menu; } isDestroyed() { return this.destroyed; } destroy() { this.destroyed = true; }
+  }
+  const text = nativeText.createNativeText({ saved: "en" });
+  const indicator = createLendingIndicator({ Tray, Menu: { buildFromTemplate: items => items }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) },
+    iconPath: "icon.png", onStop: () => {}, onOpen: () => {}, device: "computer", t: text.t });
+  indicator.relabel();
+  assert.equal(trays.length, 0, "nothing to say while nothing is lent");
+  indicator.update({ lending: true, busy: true });
+  assert.equal(trays[0].menu[0].label, "Your bots are using this computer now");
+  text.set("pt-br");
+  indicator.relabel();
+  assert.equal(trays.length, 1, "the same icon");
+  assert.deepEqual([trays[0].menu[0].label, trays[0].title, trays[0].tip], ["Seus bots estão usando este computador agora", "Em uso", "OpenMausBot: em uso pelos seus bots"]);
+  assert.deepEqual(trays[0].menu.slice(2).map(item => item.label), ["Parar de compartilhar", "Configurações de compartilhamento…"]);
 });
 
 test("Stop lending is remembered as the person's own choice, with when, and a new lend clears it", async t => {

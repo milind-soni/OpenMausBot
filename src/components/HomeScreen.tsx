@@ -8,13 +8,14 @@ const MACHINE: Record<string, LocaleKey> = {
   "payment-problem": "cloudHome.paymentProblem",
   failed: "cloudHome.failed",
 };
+const UNREACHABLE: Record<string, LocaleKey> = { host: "cloudHome.unreachableHost", no_answer: "cloudHome.unreachable" };
 
 /** The words for what the window is waiting on, and whether the person has anything to press. */
 export function homeScreenText(view: HomeView | null): { title: string; body: string | null; reason: string | null; action: "sign-in" | "manage" | null; busy: boolean } {
   // A team's Cloud is named; My Cloud keeps its own words.
   const name = view?.name ?? null;
   const named = (plain: LocaleKey, withName: LocaleKey) => (name ? t(withName, { name }) : t(plain));
-  if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), reason: view.reason ?? null, action: null, busy: true };
+  if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), reason: view.cause && Object.hasOwn(UNREACHABLE, view.cause) ? t(UNREACHABLE[view.cause]!) : view.reason ?? null, action: null, busy: true };
   if (view?.screen === "signin") return { title: named("homeScreen.signIn", "homeScreen.signInNamed"), body: t(view.other ? "homeScreen.signInOther" : "homeScreen.signInEnded"), reason: null, action: "sign-in", busy: false };
   if (view?.screen === "plan") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t(MACHINE[view.machine] ?? "cloudHome.failed"), reason: null, action: view.machine === "failed" ? null : "manage", busy: false };
   if (view?.screen === "waking") return { title: t("homeScreen.waking"), body: null, reason: null, action: null, busy: true };

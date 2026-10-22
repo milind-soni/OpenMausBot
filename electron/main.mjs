@@ -82,6 +82,7 @@ import {
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
+import nativeTextModule from "./native-text.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
 import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
@@ -90,7 +91,7 @@ import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDes
 import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudPlanSnapshot, cloudTarget, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
 import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice, installCloudBuy, lookFile } from "./cloud-buy.mjs";
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
-import { DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
+import { createDesktopPrefs, DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
 import { createDesktopIncludedX } from "./included-x.mjs"; import { createDesktopIncludedPages } from "./included-pages.mjs";
 import { cloudHomeConnectUrl, cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
@@ -99,7 +100,7 @@ import { createLendingTarget, installCloudLending, usualFolderPaths, usualFolder
 import { installOneHome } from "./one-home-main.mjs";
 import { createHomeWindow, installHomeWindowIpc } from "./home-window.mjs";
 import { createHomePlaces } from "./home-places.mjs";
-import { createEnvironmentsFile } from "./environments-file.mjs";
+import { createEnvironmentsFile, ENVIRONMENTS_SAVE_FAILED } from "./environments-file.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
@@ -211,7 +212,7 @@ function applyUnreadBadge(win = mainWindow) {
     unreadOverlayIcon ??= nativeImage.createFromPath(APP_ICON).resize({ width: 16, height: 16 });
     win.setOverlayIcon(
       count > 0 && !unreadOverlayIcon.isEmpty() ? unreadOverlayIcon : null,
-      count > 0 ? `${count} unread conversation${count === 1 ? "" : "s"}` : "No unread conversations",
+      count > 0 ? nativeT(count === 1 ? "native.badge.one" : "native.badge.many", { count }) : nativeT("native.badge.none"),
     );
     return;
   }
@@ -369,9 +370,8 @@ const serverSupervisor = createServerSupervisor({
   onExhausted() {
     slog("server recovery paused after repeated failures; quit and reopen to retry");
     dialog.showErrorBox(
-      "The bot server stopped",
-      "Automatic recovery could not restart the background server. Quit and reopen OpenMausBot to try again. Interrupted chat turns were not resent.\n\n" +
-        `Server log: ${path.join(LOG_DIR, "server.log")}`,
+      nativeT("native.dialog.serverStopped.title"),
+      nativeT("native.dialog.serverStopped.body", { log: path.join(LOG_DIR, "server.log") }),
     );
   },
   log: slog,
@@ -404,6 +404,11 @@ let desktopRemoteAccess = null;
 let desktopCompanionRelay = null;
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
+
+const desktopPrefs = createDesktopPrefs(jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")));
+// Electron knows the system's language only once the app is ready.
+const nativeText = nativeTextModule.createNativeText({ saved: desktopPrefs.language(), system: () => (app.isReady() ? app.getLocale() : "") });
+const nativeT = nativeText.t;
 
 /** True when the store could not be read, which is not the same as nothing saved. */
 let credentialStoreUnavailable = false;
@@ -910,14 +915,14 @@ async function cloudOffersReady() {
   if (brandedBuild === null && serverReady) await readCloudOfferBrand();
   return cloudOffersAllowed();
 }
-const menuDate = value => new Intl.DateTimeFormat(app.getLocale() || "en-US", { day: "numeric", month: "short" }).format(new Date(value));
+const menuDate = value => new Intl.DateTimeFormat(nativeText.intlTag(), { day: "numeric", month: "short" }).format(new Date(value));
 function cloudHomeEntry() {
   const homeOrigin = cloudAccount?.homeTarget()?.origin ?? null;
   return environmentsState.environments.find(candidate => isCloudHomeEntry(candidate, { homeOrigin, remembered: rememberedHome })) ?? null;
 }
 function cloudMenuSublabels() {
   const entry = cloudHomeEntry();
-  const line = entry ? cloudMenuSublabel(cloudAccount?.state(), menuDate) : null;
+  const line = entry ? cloudMenuSublabel(cloudAccount?.state(), menuDate, nativeT) : null;
   return entry && line ? { [entry.id]: line } : {};
 }
 const cloudColorDot = colorDotIcons(nativeImage);
@@ -943,7 +948,7 @@ async function openCloudAdd(source) {
   else await win.loadURL(`${rendererOrigin()}/?desktop-settings=${action}`);
 }
 const announceCloudReady = createCloudReadyNotice({ Notification, focused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()),
-  sheetOpen: () => cloudBuy.sheetOpen(), name: () => cloudLook.current().name, shown: () => cloudAccount?.checkoutDone(),
+  sheetOpen: () => cloudBuy.sheetOpen(), name: () => cloudLook.current().name, shown: () => cloudAccount?.checkoutDone(), t: nativeT,
   open: () => { if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows()); void workspaceMenuAction(() => (homeWindow.cloudOrigin() ? showHome({ place: "cloud" }) : connectCloudHome())); } });
 
 function ensureManagedDesktop() {
@@ -1343,12 +1348,12 @@ function desktopViewerErrorPage(message, retryUrl) {
       .replaceAll(">", "&gt;");
   return (
     "data:text/html;charset=utf-8," +
-    encodeURIComponent(`<!doctype html><meta name="color-scheme" content="dark"><title>Desktop unavailable</title>
+    encodeURIComponent(`<!doctype html><html lang="${escape(nativeText.intlTag())}"><meta name="color-scheme" content="dark"><title>${escape(nativeT("native.viewer.title"))}</title>
       <body style="margin:0;display:grid;place-items:center;height:100vh;background:#070707;color:#f5f5f5;font:14px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
-        <main style="max-width:420px;padding:32px;text-align:center"><h2 style="margin:0 0 10px;font-size:18px">Couldn't open the live desktop</h2>
+        <main style="max-width:420px;padding:32px;text-align:center"><h2 style="margin:0 0 10px;font-size:18px">${escape(nativeT("native.viewer.heading"))}</h2>
         <p style="margin:0 0 20px;color:#a1a1aa;line-height:1.5">${escape(message)}</p>
-        <a href="${escape(retryUrl)}" target="_blank" rel="noreferrer" style="display:inline-block;border-radius:9px;background:#fff;color:#111;padding:9px 14px;text-decoration:none;font-weight:600">Open in browser</a></main>
-      </body>`)
+        <a href="${escape(retryUrl)}" target="_blank" rel="noreferrer" style="display:inline-block;border-radius:9px;background:#fff;color:#111;padding:9px 14px;text-decoration:none;font-weight:600">${escape(nativeT("native.viewer.open"))}</a></main>
+      </body></html>`)
   );
 }
 
@@ -1356,7 +1361,7 @@ function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
   if (!owner || owner.isDestroyed()) throw new Error("The OpenMausBot window is unavailable");
   const url = desktopViewerUrl(rawUrl);
   const titleCandidate = Object.prototype.toString.call(rawTitle) === "[object String]" ? rawTitle.trim() : "";
-  const title = titleCandidate ? titleCandidate.slice(0, 80) : "Live desktop";
+  const title = titleCandidate ? titleCandidate.slice(0, 80) : nativeT("native.viewer.fallbackTitle");
 
   const nextContextId =
     Object.prototype.toString.call(contextId) === "[object String]" ? contextId.slice(0, 120) : null;
@@ -1441,13 +1446,13 @@ function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
   });
   viewer.webContents.on("did-fail-load", (_event, code, description, failedUrl, isMainFrame) => {
     if (!isMainFrame || code === -3 || viewer.isDestroyed() || failedUrl.startsWith("data:")) return;
-    void viewer.loadURL(desktopViewerErrorPage(description || "The viewer did not respond.", url.toString()));
+    void viewer.loadURL(desktopViewerErrorPage(description || nativeT("native.viewer.noResponse"), url.toString()));
   });
 
   notifyDesktopViewer(true);
   void viewer.loadURL(url.toString()).catch((error) => {
     if (viewer.isDestroyed()) return;
-    void viewer.loadURL(desktopViewerErrorPage(error?.message ?? "The viewer did not respond.", url.toString()));
+    void viewer.loadURL(desktopViewerErrorPage(error?.message ?? nativeT("native.viewer.noResponse"), url.toString()));
   });
   return true;
 }
@@ -1586,7 +1591,7 @@ async function openLendingSettings() {
 let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
-    Tray, Menu, nativeImage, iconPath: APP_ICON,
+    Tray, Menu, nativeImage, iconPath: APP_ICON, t: nativeT,
     onStop: stopLending,
     onOpen: () => void openLendingSettings().catch(error => slog(`lending settings: ${error?.message ?? error}`)),
   });
@@ -1603,9 +1608,9 @@ async function offerComputerSharing(win) {
     const info = await sharingController().observe(env);
     if (!info || win.isDestroyed() || activeEnvironment(environmentsState)?.id !== env.id || new URL(win.webContents.getURL()).origin !== env.origin) return;
     const choice = await dialog.showMessageBox(win, {
-      type: "question", message: `Share this computer with ${env.name}?`,
-      detail: "Let this server’s bots use folders and capabilities you choose while this desktop app is running. Nothing is shared unless you enable it. You can change this later in Settings → Servers.",
-      buttons: ["Choose access", "Not now"], defaultId: 1, cancelId: 1,
+      type: "question", message: nativeT("native.dialog.share.title", { name: env.name }),
+      detail: nativeT("native.dialog.share.detail"),
+      buttons: [nativeT("native.dialog.share.choose"), nativeT("native.dialog.share.notNow")], defaultId: 1, cancelId: 1,
     });
     sharingController().decline(env, info);
     if (choice.response === 0) openWorkspaceSettings(env.id);
@@ -1638,20 +1643,34 @@ function refreshApplicationMenu() {
       },
       ...cloudMenuOptions(),
       home: homeWindow.cloudOrigin() ? { origin: homeWindow.cloudOrigin(), onBack: () => void showHome({ place: "cloud" }) } : null,
+      t: nativeT,
     }),
   );
+}
+
+function mainWindowTitle() {
+  return workspaceWindowTitle(environmentsState, desktopRemoteAccess, homeWindow.cloudOrigin(), nativeT);
 }
 
 function persistEnvironments(next) {
   environmentsStore.write(next);
   environmentsState = next;
   refreshApplicationMenu();
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess, homeWindow.cloudOrigin()));
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(mainWindowTitle());
+}
+
+function applyNativeLanguage() {
+  refreshApplicationMenu();
+  desktopTray?.relabel();
+  lendingTray?.relabel();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(mainWindowTitle());
+  applyUnreadBadge();
 }
 
 async function workspaceMenuAction(action) {
   try { await action(); } catch (error) {
-    await dialog.showMessageBox({ type: "error", message: "Could not update servers", detail: error.message });
+    await dialog.showMessageBox({ type: "error", message: nativeT("native.dialog.updateServers.title"),
+      detail: error?.code === ENVIRONMENTS_SAVE_FAILED ? nativeT("native.dialog.updateServers.saveFailed") : error.message });
   }
 }
 
@@ -1677,10 +1696,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
   let startedProc = null;
   let switchSucceeded = false;
   const failedSwitch = () => {
-    dialog.showErrorBox(
-      "Could not switch environments",
-      "OpenMausBot could not switch to that environment. The app log has the details.",
-    );
+    dialog.showErrorBox(nativeT("native.dialog.switchEnv.title"), nativeT("native.dialog.switchEnv.body"));
     return { ok: false, error: "switch-failed" };
   };
   localSwitchInFlight = true;
@@ -1816,10 +1832,10 @@ const organizationEntry = createOrganizationEntry({
   confirm: async ({ kind, name, origin }) => {
     const { response } = await dialog.showMessageBox({
       type: "question",
-      buttons: [kind === "companion" ? "Disconnect and restart locally" : "Use this computer", "Cancel"],
+      buttons: [nativeT(kind === "companion" ? "native.dialog.org.disconnect" : "native.dialog.org.useHere"), nativeT("native.common.cancel")],
       defaultId: 1, cancelId: 1,
-      message: kind === "companion" ? `Disconnect from ${name} to sign in locally?` : `Leave ${name} and sign in on this computer?`,
-      detail: `${origin}\n\nOrganization sign-in connects company models to this computer. ${kind === "companion" ? "This disconnects desktop companion access and restarts the app. You can pair again later." : "The hosted connection stays saved and can be selected again from the Server menu."} No remote bots, conversations or provider accounts are moved or deleted.`,
+      message: nativeT(kind === "companion" ? "native.dialog.org.msgCompanion" : "native.dialog.org.msgHosted", { name }),
+      detail: `${origin}\n\n${nativeT("native.dialog.org.detail", { consequence: nativeT(kind === "companion" ? "native.dialog.org.consCompanion" : "native.dialog.org.consHosted") })}`,
     });
     return response === 0;
   },
@@ -1903,7 +1919,7 @@ async function addServerFromClipboard() {
   try {
     return await connectHostedWorkspace(clipboard.readText());
   } catch (error) {
-    await dialog.showMessageBox({ type: "info", message: "Could not connect to the server", detail: `${error.message}\nYou can also choose Connect to a server to enter an address in Settings.` });
+    await dialog.showMessageBox({ type: "info", message: nativeT("native.dialog.connectFailed.title"), detail: `${error.message}\n${nativeT("native.dialog.connectFailed.detail")}` });
     return false;
   }
 }
@@ -1911,18 +1927,16 @@ async function addServerFromClipboard() {
 async function connectHostedWorkspace(input, name) {
   const link = parseHostedWorkspaceLink(input);
   if (!link) {
-    throw new Error("Enter an HTTPS server address or a full pairing link. Keep the pairing code after #, not in the URL query.");
+    throw new Error(nativeT("native.dialog.connect.badLink"));
   }
   const host = new URL(link.origin).host;
   const { response } = await dialog.showMessageBox({
     type: "question",
-    buttons: ["Connect", "Cancel"],
+    buttons: [nativeT("native.dialog.connect.button"), nativeT("native.common.cancel")],
     defaultId: 0,
     cancelId: 1,
-    message: `Connect to ${host}?`,
-    detail: link.code
-      ? "The pairing code in the link is used once, then this app stays signed in to that server."
-      : "The link has no pairing code; the server will ask for one.",
+    message: nativeT("native.dialog.connect.title", { host }),
+    detail: nativeT(link.code ? "native.dialog.connect.withCode" : "native.dialog.connect.noCode"),
   });
   if (response !== 0) return false;
   let next = withEnvironment(environmentsState, { origin: link.origin, name }, () => randomUUID());
@@ -1987,11 +2001,11 @@ function askRemoteMicrophone(origin) {
     const ask = (async () => {
       const options = {
         type: "question",
-        buttons: ["Allow", "Don’t Allow"],
+        buttons: [nativeT("native.dialog.mic.allow"), nativeT("native.dialog.mic.deny")],
         defaultId: 1,
         cancelId: 1,
-        message: `Allow “${env.name}” to use the microphone?`,
-        detail: `${new URL(origin).host} wants to hear you for a Live call. Allow only a server you trust; this app remembers your answer for this server until you forget it.`,
+        message: nativeT("native.dialog.mic.title", { name: env.name }),
+        detail: nativeT("native.dialog.mic.detail", { host: new URL(origin).host }),
       };
       const parent = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
       const { response } = parent ? await dialog.showMessageBox(parent, options) : await dialog.showMessageBox(options);
@@ -2010,11 +2024,11 @@ async function forgetEnvironment(id, purge = false) {
   if (env.kind !== "local") {
     const { response } = await dialog.showMessageBox({
       type: "warning",
-      buttons: ["Forget", "Cancel"],
+      buttons: [nativeT("native.dialog.forget.button"), nativeT("native.common.cancel")],
       defaultId: 1,
       cancelId: 1,
-      message: `Forget “${env.name}”?`,
-      detail: "This app signs out of that server. The server keeps its own session list; revoke it there too if the device is gone.",
+      message: nativeT("native.dialog.forget.title", { name: env.name }),
+      detail: nativeT("native.dialog.forget.detail"),
     });
     if (response !== 0) return;
   }
@@ -2051,7 +2065,7 @@ async function forgetEnvironment(id, purge = false) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
   } catch (error) {
     slog(`forget server: logout skipped (${error?.message ?? error})`);
-    await dialog.showMessageBox({ type: "warning", message: "Connection forgotten; server sign-out could not be confirmed", detail: "Computer sharing is stopped. Revoke this desktop’s session on that server when it is reachable again." });
+    await dialog.showMessageBox({ type: "warning", message: nativeT("native.dialog.forgotten.title"), detail: nativeT("native.dialog.forgotten.detail") });
   }
   try {
     // Not cookies: Chromium's cookie storage is host-wide, not port-scoped, so other saved servers would sign out.
@@ -2076,20 +2090,20 @@ function showContextMenu(win, params) {
   }
   if (params.linkURL) {
     menuItems.push(
-      { label: "Copy Link", click: () => clipboard.writeText(params.linkURL) },
+      { label: nativeT("native.context.copyLink"), click: () => clipboard.writeText(params.linkURL) },
       { type: "separator" },
     );
   }
   menuItems.push(
-    { label: "Undo", role: "undo", enabled: params.editFlags.canUndo },
-    { label: "Redo", role: "redo", enabled: params.editFlags.canRedo },
+    { label: nativeT("native.role.undo"), role: "undo", enabled: params.editFlags.canUndo },
+    { label: nativeT("native.role.redo"), role: "redo", enabled: params.editFlags.canRedo },
     { type: "separator" },
-    { label: "Cut", role: "cut", enabled: params.editFlags.canCut },
-    { label: "Copy", role: "copy", enabled: params.editFlags.canCopy },
-    pasteMenuItem(params, clipboard, win.webContents),
-    { label: "Paste and Match Style", role: "pasteAndMatchStyle", enabled: params.editFlags.canPaste },
+    { label: nativeT("native.role.cut"), role: "cut", enabled: params.editFlags.canCut },
+    { label: nativeT("native.role.copy"), role: "copy", enabled: params.editFlags.canCopy },
+    pasteMenuItem(params, clipboard, win.webContents, nativeT),
+    { label: nativeT("native.role.pasteAndMatchStyle"), role: "pasteAndMatchStyle", enabled: params.editFlags.canPaste },
     { type: "separator" },
-    { label: "Select All", role: "selectAll", enabled: params.editFlags.canSelectAll },
+    { label: nativeT("native.role.selectAll"), role: "selectAll", enabled: params.editFlags.canSelectAll },
   );
   Menu.buildFromTemplate(menuItems).popup({ window: win, frame: params.frame });
 }
@@ -2124,12 +2138,11 @@ function createWindow({ deferNavigation = false } = {}) {
       desktopTray.hide(win);
     }
   });
-  const title = () => workspaceWindowTitle(environmentsState, desktopRemoteAccess, homeWindow.cloudOrigin());
-  win.setTitle(title());
+  win.setTitle(mainWindowTitle());
   win.webContents.on("page-title-updated", event => {
     if (!desktopRemoteAccess && !activeEnvironment(environmentsState)) return;
     event.preventDefault();
-    win.setTitle(title());
+    win.setTitle(mainWindowTitle());
   });
   attachUpdaterWindow(win);
   if (startupScreen) startupScreen.attach(win, { maximized: restored.maximized });
@@ -2198,8 +2211,8 @@ function createWindow({ deferNavigation = false } = {}) {
     slog(`remote server unreachable (${errorDescription}); back to Local`);
     void dialog.showMessageBox({
       type: "warning",
-      message: `${remote.name} is not reachable`,
-      detail: `${cloudUnreachableText(cloudAccount?.state(), remote.origin) ?? `${errorDescription}.`} Showing the local server instead; choose it again from the Server menu when it is back.`,
+      message: nativeT("native.dialog.unreachable.title", { name: remote.name }),
+      detail: nativeT("native.dialog.unreachable.detail", { reason: cloudUnreachableText(cloudAccount?.state(), remote.origin, nativeT) ?? `${errorDescription}.` }),
     });
     void workspaceMenuAction(() => switchEnvironment(LOCAL_ID));
   });
@@ -2359,7 +2372,7 @@ ipcMain.handle("clipboard:write-text", localOnly("clipboard:write-text", (_event
 ipcMain.handle("desktop:pick-folder", localOnly("desktop:pick-folder", async (event, current) => {
   const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const result = await dialog.showOpenDialog(win, {
-    title: "Choose a working folder",
+    title: nativeT("native.picker.workingFolder"),
     properties: ["openDirectory", "createDirectory"],
     ...(typeof current === "string" && current ? { defaultPath: current } : {}),
   });
@@ -2371,9 +2384,9 @@ ipcMain.handle("desktop:export-diagnostics", localOrHome("desktop:export-diagnos
   const owner = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const report = await gatherDiagnostics();
   const result = await dialog.showSaveDialog(owner, {
-    title: "Export diagnostics",
+    title: nativeT("native.picker.diagnostics"),
     defaultPath: diagnosticsFileName(),
-    filters: [{ name: "Text", extensions: ["txt"] }],
+    filters: [{ name: nativeT("native.picker.textFilter"), extensions: ["txt"] }],
   });
   if (result.canceled || !result.filePath) return null;
   if (process.platform === "win32") {
@@ -2397,10 +2410,10 @@ ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event,
     const parent = BrowserWindow.fromWebContents(event.sender);
     const defaultPath = await defaultSaveName(app.getPath("downloads"), defaultName);
     const choice = await dialog.showSaveDialog(parent ?? undefined, {
-      title: "Where do you want to save it?",
-      message: "Where do you want to save it?",
+      title: nativeT("native.picker.saveWhere"),
+      message: nativeT("native.picker.saveWhere"),
       defaultPath,
-      buttonLabel: "Save",
+      buttonLabel: nativeT("native.picker.save"),
       properties: ["createDirectory", "showOverwriteConfirmation"],
     });
     if (choice.canceled || !choice.filePath) return null;
@@ -2763,7 +2776,7 @@ const oneHome = installOneHome({ ipcMain, cloudPage: cloudPageAsking, server: ()
 const homePlaces = createHomePlaces({ store: jsonFile(path.join(app.getPath("userData"), "home-place.json")), environments: () => environmentsState, persist: persistEnvironments, makeId: randomUUID, homeOrigin: myCloud, log: slog });
 const homeWindow = createHomeWindow({ journal: oneHome.journal, frozen: oneHome.marker, account: () => (app.isPackaged && !desktopRemoteAccess ? cloudAccount : null), restored: cloudAccountRestored,
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), ensureWindow: () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow({ deferNavigation: true }); },
-  localOrigin: rendererOrigin, cookieFetch: (...args) => session.defaultSession.fetch(...args), power: cloudPower, splash: () => startupScreen, lastInput: oneHome.lastInput, log: slog,
+  localOrigin: rendererOrigin, cookieFetch: (...args) => session.defaultSession.fetch(...args), power: cloudPower, splash: () => startupScreen, lastInput: oneHome.lastInput, log: slog, t: nativeT,
   remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
   publish: view => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("home:state-changed", view); },
   go: (url, origin, place) => { if (place?.kind === "team") activateTeam(place); else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url); },
@@ -2782,10 +2795,10 @@ ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_even
   await requireSharedComputers();
   return sharingController().state(savedWorkspace(id).id);
 }));
-const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders, isHome: isHomeFolder });
+const lendingDialogs = createLendingDialogs({ dialog, window: () => mainWindow, validate: validateSharedFolders, isHome: isHomeFolder, t: nativeT });
 ipcMain.handle("sharing:folder", localWorkspaceOnly("sharing:folder", async () => {
   await requireSharedComputers();
-  return lendingDialogs.chooseFolder("Choose a folder or drive to share");
+  return lendingDialogs.chooseFolder(nativeT("native.picker.shareFolder"));
 }));
 ipcMain.handle("sharing:revoke", localWorkspaceOnly("sharing:revoke", async (_event, id) => {
   await requireSharedComputers();
@@ -2814,7 +2827,7 @@ async function lendingSnapshot() {
 }
 const useMyMac = installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingTarget.environment, save: (env, choice) => sharingController().saveCloud(env, choice), stop: () => { sharingController(); stopLending(); },
   cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
-  chooseFolder: () => lendingDialogs.chooseFolder("Choose a folder or drive My Cloud can use"),
+  chooseFolder: () => lendingDialogs.chooseFolder(nativeT("native.picker.cloudFolder")),
   defaults: () => usualFolders(usualFolderPaths(name => app.getPath(name), os.homedir()), validateSharedFolders), validate: validateSharedFolders,
   confirmScreen: lendingDialogs.confirmScreen });
 const cloudSync = installCloudFiles({
@@ -2830,7 +2843,7 @@ ipcMain.handle("dialog:confirm", localWorkspaceOnly("dialog:confirm", async (_ev
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: "warning",
     message,
-    buttons: ["OK", "Cancel"],
+    buttons: [nativeT("native.common.ok"), nativeT("native.common.cancel")],
     defaultId: 1,
     cancelId: 1,
   });
@@ -2876,7 +2889,8 @@ ipcMain.handle("workspaces:menu", workspaceOnly(async (_event, from) => {
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
       ...cloudMenuOptions(from === "howto" ? "app_howto" : "app_menu"),
-      ...(homeWindow.cloudOrigin() ? { homeOrigin: homeWindow.cloudOrigin() } : await placesMenuOptions({ cloud: cloudHomeEntry(), activeId: environmentsState.activeId, platform: process.platform, port: SERVER_PORT })),
+      ...(homeWindow.cloudOrigin() ? { homeOrigin: homeWindow.cloudOrigin() } : await placesMenuOptions({ cloud: cloudHomeEntry(), activeId: environmentsState.activeId, platform: process.platform, port: SERVER_PORT, text: nativeText })),
+      text: nativeText,
     }));
     await new Promise((resolve) => menu.popup({ window: mainWindow, callback: resolve }));
   } finally {
@@ -2977,7 +2991,7 @@ app.whenReady().then(async () => {
   if (process.platform === "win32") {
     try {
       desktopTray = createSystemTray({
-        Tray, Menu, nativeImage, iconPath: APP_ICON,
+        Tray, Menu, nativeImage, iconPath: APP_ICON, t: nativeT,
         getWindow: () => startupScreen?.window ?? mainWindow ?? (openWindowForLink?.(), mainWindow),
         onQuit: () => app.quit(),
       });
@@ -2987,7 +3001,7 @@ app.whenReady().then(async () => {
   }
   hiddenStart = loginItem.startedHidden();
   startupScreen = hiddenStart ? null : createStartupScreen({
-    BrowserWindow, iconPath: APP_ICON, isQuitting: () => desktopShutdownStarted,
+    BrowserWindow, iconPath: APP_ICON, isQuitting: () => desktopShutdownStarted, t: nativeT, lang: nativeText.intlTag(),
     onQuit: () => app.quit(),
     onHide: desktopTray ? (win) => desktopTray.hide(win) : undefined,
     isHidden: () => desktopTray?.isHidden() ?? false,
@@ -3008,10 +3022,7 @@ app.whenReady().then(async () => {
     if (boot.fellBack) {
       slog(`boot environment ${boot.missingDir} is missing; falling back to the default data dir`);
       persistEnvironments({ ...environmentsState, activeId: LOCAL_ID });
-      dialog.showErrorBox(
-        "The environment's folder is missing",
-        `${boot.missingDir} is not there anymore, so OpenMausBot came up on this computer's default data folder instead. Restore or remount that folder, then choose the environment again from the Server menu.`,
-      );
+      dialog.showErrorBox(nativeT("native.boot.folderMissing.title"), nativeT("native.boot.folderMissing.body", { folder: boot.missingDir }));
     }
     bootDataDir = boot.dataDir;
   }
@@ -3024,8 +3035,8 @@ app.whenReady().then(async () => {
       runningDataDir = bootDataDir;
     } catch (error) {
       dialog.showErrorBox(
-        "OpenMausBot could not start safely",
-        error?.message ?? "Another process is using this OpenMausBot data folder.",
+        nativeT("native.boot.unsafe.title"),
+        error?.message ?? nativeT("native.boot.unsafe.fallback"),
       );
       app.quit();
       return;
@@ -3109,7 +3120,8 @@ app.whenReady().then(async () => {
   registerCuaIpc();
   androidDevice.registerIpc(ipcMain);
   registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
-  registerDesktopPrefs({ ipcMain, ...jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")), localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
+  registerDesktopPrefs({ ipcMain, prefs: desktopPrefs, localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
+    onLanguage: code => { if (nativeText.set(code)) applyNativeLanguage(); },
     page: event => senderIsLocal(event) ? "local" : cloudPageAsking(event) ?? (workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null) });
   // Before the window, so the harness has the CUA descriptor on first render.
   cuaReady =
@@ -3151,8 +3163,8 @@ app.whenReady().then(async () => {
         runningDataDir = desktopDataDir();
       } catch (error) {
         dialog.showErrorBox(
-          "OpenMausBot could not start safely",
-          error?.message ?? "Another process is using this OpenMausBot data folder.",
+          nativeT("native.boot.unsafe.title"),
+          error?.message ?? nativeT("native.boot.unsafe.fallback"),
         );
         app.quit();
         return;
@@ -3160,13 +3172,13 @@ app.whenReady().then(async () => {
       const retried = await startServerPackaged();
       if (retried) {
         dialog.showErrorBox(
-          "The environment was unhealthy",
-          `OpenMausBot could not start on ${bootDataDir} and came up on this computer's default data folder instead. Choose that environment again from the Server menu once it is available.`,
+          nativeT("native.boot.unhealthy.title"),
+          nativeT("native.boot.unhealthy.body", { folder: bootDataDir }),
         );
       } else {
         dialog.showErrorBox(
-          "OpenMausBot could not start",
-          `OpenMausBot could not start on ${bootDataDir} or on this computer's default data folder. Check that both folders are readable, then start the app again.`,
+          nativeT("native.boot.failed.title"),
+          nativeT("native.boot.failed.body", { folder: bootDataDir }),
         );
         app.quit();
       }

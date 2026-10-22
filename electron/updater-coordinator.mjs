@@ -1,4 +1,9 @@
-import { updateErrorMessage, updateErrorNeedsPerson } from "./update-errors.mjs";
+import { UPDATE_TEXT, updateErrorCode, updateErrorMessage, updateErrorNeedsPerson } from "./update-errors.mjs";
+
+const said = (error) => {
+  const code = updateErrorCode(error);
+  return code ? { messageCode: code } : {};
+};
 
 /** electron-updater's GitHub provider gives the release body (HTML); a multi-release feed gives [{ version, note }]. */
 export function releaseNotesText(notes) {
@@ -46,6 +51,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
         status: "error",
         retryable: false,
         message: `${updateErrorMessage(error)} Quit and reopen OpenMausBot before trying the update again.`,
+        ...said(error),
       });
       return;
     }
@@ -53,7 +59,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       setState({ status: "idle" });
       return;
     }
-    setState({ status: "error", message: updateErrorMessage(error) });
+    setState({ status: "error", message: updateErrorMessage(error), ...said(error) });
   };
 
   function handleRejectedOperation(manual, error) {
@@ -192,7 +198,7 @@ export function createUpdaterCoordinator(updater, setState, { handOffInstall = n
       operation.timer = setTimeout(() => {
         if (installOperation !== operation) return;
         updater.logger?.warn?.("Update restart handoff exceeded two minutes; keeping installation locked to prevent overlapping retries.");
-        setState({ status: "installing", message: "Restart is taking longer than expected. Quit and reopen OpenMausBot to finish the update." });
+        setState({ status: "installing", message: UPDATE_TEXT.slowRestart, messageCode: "slowRestart" });
       }, 2 * 60 * 1000);
       operation.timer.unref?.();
     }

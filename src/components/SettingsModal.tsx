@@ -11,7 +11,7 @@ import { AnalyticsRow } from "./AnalyticsRow";
 import { DiagnosticsRow } from "./DiagnosticsRow";
 import { OtherOpenAiCompatServers } from "./OpenAiCompatServers";
 import { DecisionModelSettings } from "./DecisionModelSettings";
-import { useUpdaterState } from "@/lib/updater";
+import { updaterMessage, useUpdaterState } from "@/lib/updater";
 import { brand } from "../lib/brand";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
@@ -174,14 +174,14 @@ export function UpdatesRow() {
               ? t("settings.updates.readyInstall", { app: brand().name, version: s.version ?? "" })
               : t("settings.updates.ready", { app: brand().name, version: s.version ?? "" })
             : s.status === "installing"
-              ? s.message ||
+              ? updaterMessage(s) ||
                 (s.installMode === "handoff"
                   ? t("settings.updates.openingTerminal")
                   : t("settings.updates.restarting"))
               : s.status === "handed-off"
                 ? t("settings.updates.handedOff")
                 : s.status === "error"
-                  ? t("settings.updates.failed", { message: s.message ?? t("settings.updates.unknownError") })
+                  ? t("settings.updates.failed", { message: updaterMessage(s) ?? t("settings.updates.unknownError") })
                   : t("settings.updates.latest");
   return (
     <SettingRow title={t("settings.updates.title")} subtitle={label}>
