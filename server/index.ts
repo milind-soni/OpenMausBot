@@ -582,6 +582,7 @@ import { PASS, ROUTES, dispatchRoutes } from "./routes/table.ts"; import { apply
 import { createHostedSlackRoutes } from "./routes/hosted-slack.ts";
 import { createBotPresetRoutes } from "./routes/bot-presets.ts";
 import { createBotMemoryRoutes } from "./routes/bot-memory.ts";
+import { createSidebarSectionRoutes } from "./routes/sidebar-sections.ts";
 import { createBotCreateRoutes } from "./routes/bots-create.ts";
 import { createBotSettingsRoutes } from "./routes/bot-settings.ts";
 import { createBotPatchRoutes } from "./routes/bot-patch.ts";
@@ -2001,10 +2002,6 @@ function internalCapabilityIsActive(capability: InternalCapability): boolean {
 }
 const MAX_COMMS_DEPTH = 1;
 const MAX_WORKSPACE_BOTS = 100;
-const createSidebarSectionSchema = z.object({
-  name: z.string(),
-  botIds: z.array(z.string().regex(/^[\w-]+$/)).max(MAX_WORKSPACE_BOTS).default([]),
-}).strict();
 const phoneSecretEnvelopeSchema = z.object({
   version: z.literal(PHONE_SECRET_PROTOCOL_VERSION),
   threadId: z.string().regex(/^[\w-]{1,128}$/),
@@ -13256,6 +13253,7 @@ ROUTES.push(createHighLevelRoutes({ service: highlevel }));
 ROUTES.push(createSkillShareRoutes({ enabled: () => skillsHost.mode() !== "off", botExists: (id) => Boolean(store.bot(id)),
   cardRefusal: (auth, threadId, requestId) => cardAnswerRefusal(auth, threadId, requestId, "allow"), shareFromReceipt: skillsHost.shareFromReceipt, shareFromBot: skillsHost.shareFromBot }));
 ROUTES.push(createTeamContextRoutes({ store, teamMemory }));
+ROUTES.push(createSidebarSectionRoutes({ store, teamComputers, maxBots: MAX_WORKSPACE_BOTS, assertTeamComputerChangeIdle, wireBot }));
 ROUTES.push(createBotMemoryRoutes({
   bot: (id) => store.bot(id),
   taskByThread: (botId, threadId) => store.taskByThread(botId, threadId),
@@ -16072,68 +16070,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return;
     }
 
-    if (path === "/api/sidebar-sections" && method === "GET") {
-      return json(res, 200, { sections: store.sections });
-    }
-    if (path === "/api/sidebar-sections" && (method === "PATCH" || method === "DELETE")) {
-      const section = url.searchParams.get("section")?.trim();
-      if (!section) return json(res, 400, { error: "Choose a named team" });
-      if (method === "DELETE" && teamComputers.forSection(section)) return json(res, 409, { error: "Unassign this team's computer before deleting the team" });
-      let nextName: string | null = null;
-      if (method === "PATCH") {
-        const parsed = z.object({ name: z.string().trim().min(1).max(60) }).strict().safeParse(await readBody(req));
-        if (!parsed.success) return json(res, 400, { error: "Team name must be 1 to 60 characters" });
-        nextName = parsed.data.name;
-      }
-      const error = nextName === null ? store.deleteSection(section) : store.renameSection(section, nextName, teamComputers);
-      if (error) return json(res, error === "No such team" ? 404 : 409, { error });
-      return json(res, 200, { sections: store.sections });
-    }
-    if (method === "PUT" && path === "/api/sidebar-sections") {
-      const section = url.searchParams.get("section")?.trim();
-      if (!section || !store.sections.includes(section)) return json(res, 404, { error: "No such team" });
-      const ids = z.array(z.string().regex(/^[\w-]+$/)).max(MAX_WORKSPACE_BOTS);
-      const parsed = z.object({ addBotIds: ids, removeBotIds: ids }).strict().safeParse(await readBody(req));
-      if (!parsed.success) return json(res, 400, { error: "Provide addBotIds and removeBotIds" });
-      for (const [botIds, destination] of [[parsed.data.addBotIds, section], [parsed.data.removeBotIds, undefined]] as const) {
-        for (const id of botIds) {
-          const bot = store.bot(id);
-          if (bot) assertTeamComputerChangeIdle(bot, { ...bot, section: destination });
-        }
-      }
-      const result = store.updateTeamMembers(section, parsed.data.addBotIds, parsed.data.removeBotIds);
-      if (!result.ok) return json(res, result.reason === "unavailable" ? 404 : 409, { error:
-        result.reason === "chief-conflict" ? "A team can have only one Chief of Staff. Change the Chief before moving this bot."
-          : result.reason === "membership-changed" ? "Team membership changed. Reopen the dialog and try again."
-          : "One or more bots are unavailable" });
-      return json(res, 200, { sections: store.sections, bots: result.bots.map(wireBot) });
-    }
-    if (method === "POST" && path === "/api/sidebar-sections") {
-      const parsed = createSidebarSectionSchema.safeParse(await readBody(req));
-      if (!parsed.success) {
-        return json(res, 400, { error: "Provide a team name and up to 100 valid botIds" });
-      }
-      const name = parsed.data.name.trim();
-      if (name.length > 60) {
-        return json(res, 400, { error: "name must be at most 60 characters" });
-      }
-      const botIds = [...new Set(parsed.data.botIds)];
-      if (!name && !botIds.length) return json(res, 400, { error: "Team name is required" });
-      for (const botId of botIds) {
-        const bot = store.bot(botId);
-        if (bot) assertTeamComputerChangeIdle(bot, { ...bot, section: name || undefined });
-      }
-      const result = store.setBotsSection(botIds, name);
-      if (!result.ok) {
-        if (result.reason === "chief-conflict") {
-          return json(res, 409, {
-            error: "A team can have only one Chief of Staff. Choose one Chief or use a team without one.",
-          });
-        }
-        return json(res, 404, { error: "one or more bots are unavailable" });
-      }
-      return json(res, 200, { section: name, sections: store.sections, bots: result.bots.map(wireBot) });
-    }
     if (method === "GET" && path === "/api/bot-defaults") {
       return json(res, 200, {
         defaults: structuredClone(cfg.newBotDefaults ?? newBotDefaultsSchema.parse({})),
