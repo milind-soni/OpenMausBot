@@ -8,7 +8,7 @@ import type { BrowserCleanupCoordinator, BrowserCleanupRequest } from "../browse
 import { finalizeBrowserCleanupMutation, requireBrowserCleanupAcknowledged } from "../browser-lifecycle-cleanup.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
-import { boatAccountResourceChangeError, vpsAliasResourceChangeError } from "../cloud-backend.ts";
+import { boatAccountResourceChangeError, vpsAliasChangeError, vpsAliasResourceChangeError } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
 import {
   browserProfilePartitionTarget,
@@ -18,6 +18,8 @@ import {
   engineLaunches,
   loadConfig,
   localVmMode,
+  localVmSshAlias,
+  localVmSource,
   mergeOpenCodeProviderKeys,
   saveConfig,
   syncCredentialEnv,
@@ -28,6 +30,7 @@ import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
 import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
+import { closeExistingVmScreenshotSessions } from "../existing-vm.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
@@ -78,9 +81,11 @@ export interface ConfigRouteDeps {
   localVmIdleMs(): number;
   localVmIdles: { values(): Iterable<Pick<ComputerIdleTimer, "setIdleMs">> };
   localVmActiveThreads: { readonly size: number };
+  existingVmActiveThreads: { readonly size: number };
+  activeVpsThreads: { readonly size: number };
   localVmLifecycleBusy: { readonly size: number };
   localVmImageBusy: Pick<BusyFlag, "get">;
-  localVmModeChangeBusy: Pick<BusyFlag, "set">;
+  localVmModeChangeBusy: Pick<BusyFlag, "get" | "set">;
   providerConfigBusy: BusyFlag;
   computerProviderConfigTransitions: Pick<Set<RemoteComputerProvider>, "add" | "delete">;
   managedBoatOwners(): boat.ManagedBoatOwner[];
@@ -109,6 +114,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     store, cfg, registry, sessions, browserCleanup, browserLive, browserRuntime, usedBrowserSessions, decider,
     closeBrowser, browserEngineSwitched, sharedComputers, sharedComputerControl, hostedModels, cloudHome: CLOUD_HOME, lendingEnabled, providerConfigs,
     localVmIdleMs, localVmIdles, localVmActiveThreads, localVmLifecycleBusy, localVmImageBusy, localVmModeChangeBusy,
+    existingVmActiveThreads, activeVpsThreads,
     providerConfigBusy, computerProviderConfigTransitions, managedBoatOwners, providerOperationConflict,
     perBotLocalVmCountForModeChange, checkedModelSelection, policyModelRefusal, browserSessionSpec, configStatus,
     configForAccess, resyncOpenCodeProviderKeys, revokeEngineCapabilities, reloadProviders, broadcast, drainQueuedSends, ownProfile, postiz,
@@ -173,6 +179,36 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (changingVoiceProvider && patch.tts?.model === undefined) patch.tts = { ...patch.tts, model: "" };
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      let localVmSourceChanged = false;
+      let localVmConnectionChanged = false;
+      if (patch.vps !== undefined) {
+        const aliasError = vpsAliasChangeError(vpsSshAlias(cfg), vpsSshAlias({ ...cfg, vps: patch.vps }), activeVpsThreads.size > 0);
+        if (aliasError) return json(res, 409, { error: aliasError });
+      }
+      if (patch.localVm !== undefined) {
+        const nextLocalVmConfig = {
+          ...cfg,
+          localVm: { ...cfg.localVm, ...patch.localVm },
+        };
+        const sourceChanged = localVmSource(nextLocalVmConfig) !== localVmSource(cfg);
+        const aliasChanged = localVmSshAlias(nextLocalVmConfig) !== localVmSshAlias(cfg);
+        localVmSourceChanged = sourceChanged;
+        localVmConnectionChanged = sourceChanged || aliasChanged;
+        const vmTurnBusy = store.bots.some((bot) => bot.busy === true && bot.computer === "vm");
+        const existingVmBusy = existingVmActiveThreads.size > 0 ||
+          (localVmSource(cfg) === "existing" && vmTurnBusy);
+        const managedVmBusy = localVmActiveThreads.size > 0 ||
+          (localVmSource(cfg) === "managed" && vmTurnBusy);
+        if ((sourceChanged || aliasChanged) && existingVmBusy) {
+          return json(res, 409, { error: "stop the active Existing VM turn before changing its source or SSH config alias" });
+        }
+        if (sourceChanged && managedVmBusy) {
+          return json(res, 409, { error: "stop the active Local VM turn before changing its source" });
+        }
+        if (sourceChanged && (localVmLifecycleBusy.size > 0 || localVmImageBusy.get() || localVmModeChangeBusy.get())) {
+          return json(res, 409, { error: "stop Local VM setup actions before changing the Local VM source" });
+        }
+      }
       if (patch.browserProfiles !== undefined && body.expectedBrowserProfiles !== undefined) {
         const current = (cfg.browserProfiles ?? []).map(({ id, name, browser }) => ({ id, name, ...(browser ? { browser } : {}) }));
         if (JSON.stringify(body.expectedBrowserProfiles) !== JSON.stringify(current)) {
@@ -243,8 +279,22 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       ];
       providerConfigBusy.set(true);
       const changingLocalVmMode = patch.localVm?.mode !== undefined && patch.localVm.mode !== localVmMode(cfg);
-      if (changingLocalVmMode) localVmModeChangeBusy.set(true);
+      const changingLocalVmPolicy = changingLocalVmMode || localVmSourceChanged;
+      if (changingLocalVmPolicy) localVmModeChangeBusy.set(true);
       try {
+        if (localVmSourceChanged && localVmMode(cfg) === "per-bot") {
+          const existing = await perBotLocalVmCountForModeChange();
+          if (existing === null) {
+            return json(res, 409, {
+              error: "start the container runtime and delete every per-bot Local VM before switching the Local VM source",
+            });
+          }
+          if (existing > 0) {
+            return json(res, 409, {
+              error: `delete the ${existing} per-bot Local VM${existing === 1 ? "" : "s"} before switching the Local VM source`,
+            });
+          }
+        }
         for (const provider of transitioningProviders) {
           const conflict = providerOperationConflict(provider);
           if (conflict) return json(res, 409, { error: conflict });
@@ -568,6 +618,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       postiz?.configSaved(patch);
       // A saved key reaches an engine through the environment its status read uses, often with no reload.
       registry.forgetSnapshots();
+      if (localVmConnectionChanged) closeExistingVmScreenshotSessions();
       if (patch.localVm?.idleTimeoutMinutes !== undefined) {
         for (const idle of localVmIdles.values()) idle.setIdleMs(localVmIdleMs());
       }
@@ -646,8 +697,9 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       return json(res, 200, configForAccess(finalized.value, auth));
       } finally {
         for (const provider of transitioningProviders) computerProviderConfigTransitions.delete(provider);
-        if (changingLocalVmMode) localVmModeChangeBusy.set(false);
+        if (changingLocalVmPolicy) localVmModeChangeBusy.set(false);
         providerConfigBusy.set(false);
+        drainQueuedSends();
       }
     }
     return PASS;

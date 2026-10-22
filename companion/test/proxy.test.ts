@@ -110,7 +110,10 @@ beforeAll(async () => {
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
-    JSON.stringify({ instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } } }),
+    JSON.stringify({
+      instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } },
+      localVm: { source: "existing", sshAlias: "personal-linux-vm" },
+    }),
   );
 
   harness = spawn(process.execPath, [join(ROOT, "server", "index.ts")], {
@@ -260,6 +263,14 @@ describe("the sidecar in front of an unmodified harness", () => {
     const botId = body.bots[0].id;
     expect((await device("PATCH", `/api/bots/${botId}`, { body: { autoApprove: true } })).status).toBe(403);
     expect((await device("PATCH", `/api/groups/not-a-room`, { body: { unread: false } })).status).toBe(404);
+  });
+
+  it("scrubs the Existing VM SSH alias from a paired device's config response", async () => {
+    const response = await device("GET", "/api/config");
+    expect(response.status).toBe(200);
+    expect(response.body.localVm).toMatchObject({ source: "existing" });
+    expect(response.body.localVm).not.toHaveProperty("sshAlias");
+    expect(JSON.stringify(response.body)).not.toContain("personal-linux-vm");
   });
 
   it("lets a device answer an approval, and manage its own chats", async () => {
@@ -518,6 +529,21 @@ describe("the sidecar in front of an unmodified harness", () => {
       expect(frame).not.toBeNull();
       expect(frame).toMatch(/^id: [0-9a-f]+:\d+\n/);
       expect(frame).not.toContain("resumeCursors");
+
+      // Change config through the loopback harness API, then observe the
+      // resulting config SSE frame through the paired-device proxy. This
+      // exercises the real HTTP and SSE scrub paths with an Existing VM alias.
+      await fetch(`${HARNESS}/api/config`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ localVm: { source: "existing", sshAlias: "another-private-vm" } }),
+      });
+      const configFrame = await nextEvent((e) => e.includes('"kind":"config"'));
+      expect(configFrame).not.toBeNull();
+      expect(configFrame).not.toContain("another-private-vm");
+      const configData = JSON.parse(configFrame!.split("\n").find((line) => line.startsWith("data:"))!.slice(5));
+      expect(configData.localVm).toMatchObject({ source: "existing" });
+      expect(configData.localVm).not.toHaveProperty("sshAlias");
     } finally {
       controller.abort();
       const cleanupDeadline = Date.now() + 2_000;

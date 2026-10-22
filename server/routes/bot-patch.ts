@@ -50,6 +50,7 @@ export interface BotPatchRouteDeps {
   supportsApprovalMode: ReturnType<typeof createApprovalModeSupport>;
   routines(): RoutineManager | null;
   activeVpsThreads: { has(botId: string): boolean };
+  existingVmTurnActive(botId: string): boolean;
   /** Full access comes only from the workspace policy. */
   hostedWorkspace: boolean;
   hostedFullAccessRefusal: string;
@@ -84,6 +85,7 @@ export interface BotPatchRouteDeps {
 export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
   const {
     store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode, activeVpsThreads,
+    existingVmTurnActive,
     hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED, maxWorkspaceBots: MAX_WORKSPACE_BOTS,
     broadcast, wireBot, publicGroupState, audienceChanged, storedAvatarExists, requestedTaskBot, threadBusy, activeGroupTurnForBot,
     checkedModelSelection, engineSwitchNeedsAsk, currentBrowserSession, interruptAllDirectThreads, cancelGroupTurnOperations,
@@ -208,6 +210,9 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         } else {
           return json(res, 400, { error: "computer must be null (Auto), cloud, vm, local, browser, or off" });
         }
+      }
+      if (computerSpecified && existingBot && requestedComputer !== existingBot.computer && existingVmTurnActive(existingBot.id)) {
+        return json(res, 409, { error: "stop the active Existing VM turn before changing its computer destination" });
       }
       if (normalizedSelection) patch.modelSelection = normalizedSelection;
       // null/"" clears; the id is not checked against the transcript.

@@ -27,16 +27,24 @@ describe("scrub", () => {
     });
   });
 
-  it("withholds the VPS host label but keeps the configured signal", () => {
+  it("withholds every SSH host label but keeps configured signals", () => {
+    // GET /api/config and the `config` SSE frame echo SSH aliases for both
+    // self-hosted VPS and user-managed Local VM connections. The phone only
+    // renders configured-or-not, so that is all it may receive.
     const status = {
       box: { configured: false },
       vps: { configured: true, sshAlias: "prod-vps" },
+      localVm: { source: "existing", sshAlias: "personal-linux-vm", configured: true },
     };
     const cleaned = scrub(status);
 
     expect(JSON.stringify(cleaned)).not.toContain("sshAlias");
     expect(JSON.stringify(cleaned)).not.toContain("prod-vps");
-    expect(cleaned).toEqual({ box: { configured: false }, vps: { configured: true } });
+    expect(cleaned).toEqual({
+      box: { configured: false },
+      vps: { configured: true },
+      localVm: { source: "existing", configured: true },
+    });
   });
 
   it("withholds per-bot and inventory alias tags but keeps ordinary fields", () => {
@@ -121,13 +129,14 @@ describe("createSseScrubber", () => {
   });
 
   it("scrubs the payload but never the id: line", () => {
-    const frame = 'id: abc123:7\ndata: {"kind":"bot","bot":{"id":"b1","resumeCursors":{"g":"s"}}}\n\n';
+    const frame = 'id: abc123:7\ndata: {"kind":"config","localVm":{"source":"existing","sshAlias":"personal-linux-vm"},"bot":{"id":"b1","resumeCursors":{"g":"s"}}}\n\n';
     const out = createSseScrubber()(frame);
 
     expect(out).toContain("id: abc123:7\n");
     expect(out).not.toContain("resumeCursors");
+    expect(out).not.toContain("personal-linux-vm");
     const data = JSON.parse(out.split("\n").find((l) => l.startsWith("data:"))!.slice(5));
-    expect(data).toEqual({ kind: "bot", bot: { id: "b1" } });
+    expect(data).toEqual({ kind: "config", localVm: { source: "existing" }, bot: { id: "b1" } });
   });
 
   it("strips per-bot alias tags from a bot frame but never the id: line", () => {

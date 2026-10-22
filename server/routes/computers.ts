@@ -1,7 +1,7 @@
 import { z, type ZodString } from "zod";
 import * as boat from "../boat.ts";
 import type { ComputerControl } from "../computer-control.ts";
-import { isValidSshAlias, localVmMaxInstances, localVmMode, type AppConfig } from "../config.ts";
+import { isValidSshAlias, localVmMaxInstances, localVmMode, localVmSource, type AppConfig } from "../config.ts";
 import {
   containerComputerAction,
   containerComputerExists,
@@ -13,6 +13,7 @@ import {
   type Runtime,
 } from "../container-computer.ts";
 import { viewerTargetId } from "../../shared/desktop-viewer.ts";
+import { existingVmScreenshot } from "../existing-vm.ts";
 import { localVmViewerStatus } from "../desktop-viewer-targets.ts";
 import { keepFirefoxProfileBeforeRemove } from "../local-vm-profiles.ts";
 import type { ComputerIdleTimer } from "../computer-idle.ts";
@@ -291,6 +292,11 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
         return json(res, 415, { error: "content-type must be application/json" });
       }
       const action = z.enum(["pull", "run", "start", "stop", "remove"]).parse(m[1]);
+      if (localVmSource(cfg) === "existing") {
+        return json(res, 409, {
+          error: "Existing VM is user-managed; OpenMausBot does not create, start, stop, replace, or delete it",
+        });
+      }
       if (localVmImageBusy.get() || localVmModeChangeBusy.get() || localVmLifecycleBusy.has(SHARED_LOCAL_VM_TARGET.key)) {
         return json(res, 409, { error: "another Local VM setup action is still running" });
       }
@@ -331,6 +337,10 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
       }
     }
     if (method === "POST" && path === "/api/local-computer/screenshot") {
+      if (localVmSource(cfg) === "existing") {
+        const frame = await existingVmScreenshot(cfg);
+        return json(res, 200, { image: `data:image/${frame.format};base64,${frame.png}` });
+      }
       localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
       res.setHeader("cache-control", "private, no-store");
       return json(res, 200, {
@@ -351,6 +361,11 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
       }
       const bot = store.bot(m[1]);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (localVmSource(cfg) === "existing") {
+        return json(res, 409, {
+          error: "Existing VM is user-managed; OpenMausBot does not create, start, stop, replace, or delete it",
+        });
+      }
       if (boatLifecycleBusyBots.has(bot.id)) {
         return json(res, 409, { error: "this bot's computer is being changed or deleted — wait for it to finish" });
       }
@@ -409,6 +424,10 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
     if (m && method === "POST") {
       const bot = computerPreviewBot(m[1], url);
       if (!bot) return json(res, 404, { error: "no such bot" });
+      if (localVmSource(cfg) === "existing") {
+        const frame = await existingVmScreenshot(cfg);
+        return json(res, 200, { image: `data:image/${frame.format};base64,${frame.png}` });
+      }
       if (url.searchParams.has("threadId") && await computerPreviewSurface(bot, bot.threadId) !== "vm") {
         return json(res, 409, { error: "This conversation is not using the Local VM" });
       }

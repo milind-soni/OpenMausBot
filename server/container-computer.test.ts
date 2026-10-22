@@ -22,6 +22,7 @@ import {
   WORKSPACE_LABEL,
   containerComputerAction,
   containerComputerFrame,
+  containerComputerManagedPerBotNames,
   containerComputerMcp,
   containerComputerScreenshot,
   containerComputerStatus,
@@ -36,11 +37,13 @@ import {
   podmanSecurityIsHardened,
   SHARED_LOCAL_VM_TARGET,
   setupCommands,
+  wholeScreenshot,
   type CommandRunner,
   type LocalVmTarget,
   autoLocalVmAttachable,
 } from "./container-computer.ts";
 import { PIDS_LIMIT } from "./container-limits.ts";
+import { validPngFixture } from "./testing/png-fixture.ts";
 
 function runner(responses: Record<string, string | Error>) {
   const calls: string[] = [];
@@ -84,11 +87,36 @@ const readinessProbe =
   `${driverExec} call get_desktop_state {} --socket ${CUA_SOCKET} ` +
   "--screenshot-out-file /tmp/openmausbot-readiness.png";
 const readinessRead = `docker exec ${CONTAINER} base64 -w0 /tmp/openmausbot-readiness.png`;
-const validPng = Buffer.concat([
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  Buffer.alloc(600),
-  Buffer.from("IEND", "ascii"),
-]);
+const validPng = validPngFixture();
+
+function crc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type: string, data: Buffer): Buffer {
+  const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+  const chunk = Buffer.alloc(data.length + 12);
+  chunk.writeUInt32BE(data.length, 0);
+  body.copy(chunk, 4);
+  chunk.writeUInt32BE(crc32(body), data.length + 8);
+  return chunk;
+}
+
+it("rejects a CRC-valid PNG chunk before IHDR", () => {
+  const signatureLength = 8;
+  const malformed = Buffer.concat([
+    validPng.subarray(0, signatureLength),
+    pngChunk("tEXt", Buffer.from("before-header")),
+    validPng.subarray(signatureLength),
+  ]);
+  expect(wholeScreenshot(validPng).ok).toBe(true);
+  expect(wholeScreenshot(malformed).ok).toBe(false);
+});
 
 function preparedImageInspect() {
   return JSON.stringify([
@@ -303,6 +331,16 @@ function perBotReadyInspect(botId: string, viewerPort: number, targetLabel?: str
 }
 
 describe("containerComputerStatus", () => {
+  it("enumerates managed per-bot containers and fails closed on unknown names", async () => {
+    const suffix = "a".repeat(16);
+    const command = `docker ps -a --filter label=${MANAGED_LABEL}=1 --format {{.Names}}`;
+    const listed = runner({ [command]: `${CONTAINER}\n${CONTAINER}-${suffix}\n` });
+    expect(await containerComputerManagedPerBotNames("docker", listed.run)).toEqual([`${CONTAINER}-${suffix}`]);
+
+    const unknown = runner({ [command]: "openmausbot-computer-legacy\n" });
+    expect(await containerComputerManagedPerBotNames("docker", unknown.run)).toBeNull();
+  });
+
   it("prefers the supported Podman image store when Docker is also healthy on Windows", async () => {
     const fake = runner({
       "where.exe podman": "C:\\Program Files\\RedHat\\Podman\\podman.exe\n",

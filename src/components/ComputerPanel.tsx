@@ -86,6 +86,9 @@ type Phase =
   | "off"
   | "error";
 
+interface ManagedLocalVmStatus extends LocalVmStatus {
+  source: "managed";
+}
 interface LocalVmStatus {
   resumable?: boolean;
   stop_reason?: "idle" | null;
@@ -105,6 +108,26 @@ interface LocalVmStatus {
   viewer_url: string;
   target_key: string;
 }
+
+interface ExistingLocalVmStatus {
+  source: "existing";
+  configured: boolean;
+  sshAlias: string | null;
+  ssh: "not-configured" | "connected" | "unreachable";
+  os: "unknown" | "linux" | "unsupported";
+  driver: "unknown" | "compatible" | "missing" | "incompatible";
+  mcp: "unknown" | "ready" | "failed";
+  tools: string[];
+  desktopReady: boolean;
+  ready: boolean;
+  problem: string | null;
+  errorCode: string | null;
+  driver_version: string;
+  viewer_url: "";
+  watch_only: true;
+}
+
+type LocalVmUiStatus = ManagedLocalVmStatus | ExistingLocalVmStatus;
 
 const computerControlSnapshotSchema = z.object({
   held: z.boolean().optional().default(false),
@@ -235,7 +258,7 @@ export function ComputerPanel({
   const [previewRefreshing, setPreviewRefreshing] = useState(false);
   const [previewRetry, setPreviewRetry] = useState(0);
   const [vmFrame, setVmFrame] = useState<string | null>(null);
-  const [vmStatus, setVmStatus] = useState<LocalVmStatus | null>(null);
+  const [vmStatus, setVmStatus] = useState<LocalVmUiStatus | null>(null);
   const [vpsStatus, setVpsStatus] = useState<VpsComputerStatus | null>(null);
   const [localFrame, setLocalFrame] = useState<string | null>(null);
   const [pending, setPending] = useState<
@@ -277,7 +300,6 @@ export function ComputerPanel({
     });
     return () => controller.abort();
   }, [connectionKey, livePlace, computerSelectionPersisted, threadPath, retry]);
-  const vmResumable = phase === "vm-unavailable" && vmStatus?.resumable === true;
   const vmReadinessAttempts = useRef(0);
   const vmActionController = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -290,6 +312,9 @@ export function ComputerPanel({
   const selectedInstance = state.instances.find(
     (instance) => instance.instanceId === bot.modelSelection.instanceId,
   );
+  const managedVmStatus = vmStatus?.source === "managed" ? vmStatus : null;
+  const vmResumable = phase === "vm-unavailable" && managedVmStatus?.resumable === true;
+  const vmWatchOnly = phase === "vm" && vmStatus?.source === "existing" && vmStatus.watch_only;
   const explicitPanelView = useRef(false);
   const selectPanelView = (view: ComputerPanelView) => {
     explicitPanelView.current = true;
@@ -418,12 +443,22 @@ export function ComputerPanel({
       api(threadPath("local-computer"))
         .then((rawStatus) => {
           if (!alive) return;
-          const status: LocalVmStatus = rawStatus;
+          let status: LocalVmUiStatus;
+          if (rawStatus.source === "existing") {
+            // SAFETY: this endpoint's discriminant and existing status shape are owned by the server contract.
+            status = rawStatus as ExistingLocalVmStatus;
+          } else {
+            // SAFETY: managed status fields are returned by the same endpoint and retain the managed shape.
+            status = { source: "managed", ...rawStatus } as ManagedLocalVmStatus;
+          }
           setResolvedComputerSelection({ botId: bot.id, threadId: bot.threadId, computer: bot.computer, cloudBackend });
           setVmStatus(status);
           if (status.ready) {
             vmReadinessAttempts.current = 0;
             setPhase("vm");
+          } else if (status.source === "existing") {
+            setError(`${status.problem ?? "The Existing VM is not ready"}. Open App Settings → Local VM.`);
+            setPhase("vm-unavailable");
           } else if (
             status.container === "running" &&
             status.imageMatches &&
@@ -593,6 +628,7 @@ export function ComputerPanel({
     vmSupported,
     cloudSupported,
     state.config?.vps?.sshAlias,
+    state.config?.localVm?.source,
     panelView,
     computerSelectionPersisted,
     surfaceReady,
@@ -641,7 +677,7 @@ export function ComputerPanel({
     return snap;
   }, [bot.id, dispatch]);
   const liveTarget = !computerStatusCurrent ? null
-    : phase === "vm" && vmStatus?.viewer_url && vmStatus.target_key ? viewerTargetId({ key: vmStatus.target_key })
+    : phase === "vm" && vmStatus?.source === "managed" && vmStatus.viewer_url && vmStatus.target_key ? viewerTargetId({ key: vmStatus.target_key })
       : cloudPreviewReady && cloudBackend === "vps" ? `vps/${bot.id}` : null;
   const takeover = useComputerTakeover({
     botId: bot.id, session: `${viewerConnectionKey}:${panelView}`, held: control.held, request: requestControl,
@@ -859,6 +895,10 @@ export function ComputerPanel({
   );
 
   const openDesktop = async () => {
+    if (vmWatchOnly) {
+      setError("Existing VM is watch-only; OpenMausBot cannot open a live viewer or take control.");
+      return;
+    }
     const controller = new AbortController();
     desktopJoin.current = controller;
     const ownsConnection = () => !controller.signal.aborted && viewerConnection.current === viewerConnectionKey;
@@ -978,20 +1018,30 @@ export function ComputerPanel({
         });
       }
       if (action !== "vm-delete") {
-        const lifecyclePath = action === "vm-start" && vmStatus?.mode !== "per-bot"
+        // Shared mode has one desktop, started from the same route as Settings.
+        const lifecyclePath = action === "vm-start" && managedVmStatus?.mode !== "per-bot"
           ? "/api/local-computer/start"
           : `/api/bots/${bot.id}/local-computer/${action === "vm-start" ? "start" : "run"}`;
-        const started: LocalVmStatus = await api(lifecyclePath, {
+        const rawStatus = await api(lifecyclePath, {
           method: "POST",
           body: "{}",
           signal: controller.signal,
         });
-        const status = await waitForLocalVmReady(started, () => api(threadPath("local-computer"), { signal: controller.signal }), controller.signal);
+        let status: LocalVmUiStatus;
+        if (rawStatus.source === "existing") {
+          // SAFETY: this endpoint's discriminant and existing status shape are owned by the server contract.
+          // Watch-only: nothing to provision, so no readiness wait.
+          status = rawStatus as ExistingLocalVmStatus;
+        } else {
+          // SAFETY: managed status fields are returned by the same endpoint and retain the managed shape.
+          const started = { source: "managed", ...rawStatus } as ManagedLocalVmStatus;
+          status = await waitForLocalVmReady(started, () => api(threadPath("local-computer"), { signal: controller.signal }), controller.signal);
+        }
         if (!status.ready) throw new Error(status.problem ?? t("computer.err.vmNotReady"));
         setVmStatus(status);
         setPhase("vm");
       } else {
-        setVmStatus((current) => current ? { ...current, container: "missing", ready: false } : current);
+        setVmStatus((current) => current?.source === "managed" ? { ...current, container: "missing", ready: false } : current);
         setPhase("vm-unavailable");
       }
     } catch (e) {
@@ -1303,6 +1353,10 @@ export function ComputerPanel({
       ) : (
       <div {...tabPanelProps("computer")} className={cn("flex-1 overflow-y-auto px-5 pb-5", TAB_PANEL_FOCUS)}>
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
+            <span>{bot.name}'s screen</span>
+            {phase === "local" && <span className="text-[11px]">this computer</span>}
+            {phase === "vm" && <span className="text-[11px]">{vmWatchOnly ? "Existing VM · watch-only" : "Local VM"}</span>}
+            {cloudBackend === "vps" && (phase === "ready" || phase === "starting") && <span className="text-[11px]">self-hosted VPS</span>}
             <span>{t("computer.screenOf", { name: bot.name })}</span>
             {currentTeamComputer && <span className="text-[11px]">{autoView.short}</span>}
             {phase === "local" && <span className="text-[11px]">{t("computer.badge.local")}</span>}
@@ -1386,7 +1440,7 @@ export function ComputerPanel({
                   : phase === "ready"
                     ? t("computer.autoChooseCloudOpen")
                   : phase === "vm"
-                    ? t("computer.capturingVm")
+                    ? (vmWatchOnly ? "Showing the Existing VM screen (watch-only)…" : t("computer.capturingVm"))
                   : phase === "local"
                     ? isLinux
                       ? t("computer.linuxReady")
@@ -1430,10 +1484,10 @@ export function ComputerPanel({
               )}
               {pending === null && (phase === "cloud-new" || phase === "cloud-asleep") && placeActionButton(cloudView)}
               {vmResumable && pending !== "vm-start" && (
-                <p className="text-[12px]">{t(vmStatus?.stop_reason === "idle" ? "vm.stopped.idle" : "vm.stopped.detail")}</p>
+                <p className="text-[12px]">{t(managedVmStatus?.stop_reason === "idle" ? "vm.stopped.idle" : "vm.stopped.detail")}</p>
               )}
               {phase === "vm-unavailable" && (
-                canManageVm && vmResumable && vmStatus.mode !== "pool" ? (
+                canManageVm && vmResumable && managedVmStatus !== null && managedVmStatus.mode !== "pool" ? (
                   <button
                     onClick={() => void runVmAction("vm-start")}
                     disabled={pending !== null}
@@ -1443,16 +1497,16 @@ export function ComputerPanel({
                     {pending === "vm-start" && <Loader2 size={13} className="animate-spin" />}
                     {t(pending === "vm-start" ? "vm.setup.starting" : "vm.setup.start")}
                   </button>
-                ) : canManageVm && vmStatus?.mode === "per-bot" && vmStatus.image && vmStatus.create_supported ? (
+                ) : canManageVm && managedVmStatus?.mode === "per-bot" && managedVmStatus.image && managedVmStatus.create_supported ? (
                   <button
-                    onClick={() => void runVmAction(vmStatus.container === "missing" ? "vm-create" : "vm-recreate")}
+                    onClick={() => void runVmAction(managedVmStatus.container === "missing" ? "vm-create" : "vm-recreate")}
                     disabled={pending !== null}
                     className="mt-1 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50"
                   >
                     {(pending === "vm-create" || pending === "vm-recreate") && (
                       <Loader2 size={13} className="mr-1.5 inline animate-spin" />
                     )}
-                    {vmStatus.container === "missing"
+                    {managedVmStatus.container === "missing"
                       ? t("computer.createVm", { name: bot.name })
                       : t("computer.replaceVm", { name: bot.name })}
                   </button>
@@ -1539,7 +1593,7 @@ export function ComputerPanel({
 
         {advanced &&
           phase === "vm" &&
-          vmStatus?.mode === "per-bot" &&
+          managedVmStatus?.mode === "per-bot" &&
           window.ogb?.desktopWorkspace &&
           onOpenVmWorkspace && (
             <button
@@ -1557,9 +1611,38 @@ export function ComputerPanel({
         {signInHelp && signInHelp.place !== "browser" && signInBanner(bannerTakesControl && !control.held
           ? () => phase === "vm" || cloudPreviewReady ? void takeControl() : void controlAction("take")
           : undefined)}
+        {/* Who is driving — take the wheel / hand it back */}
+        {(cloudPreviewReady || phase === "vm" || currentTeamComputer) && control.helpReason && !control.held && (
+          <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-4">
+            <div className="text-[13px] leading-relaxed text-warning">
+              <b>{bot.name}</b> {t("computer.routines.needsYou")} {control.helpReason}
+            </div>
+            <div className="mt-2 flex gap-2">
+              {vmWatchOnly ? (
+                <div className="flex-1 rounded-lg bg-raised px-3 py-2 text-center text-[12px] text-ink-secondary">
+                  {t("computer.watchOnly")}
+                </div>
+              ) : (
+                <button
+                  onClick={() =>
+                    phase === "vm" || cloudBackend === "box" ? void openDesktop() : controlAction("take")
+                  }
+                  disabled={controlPending || pending === "join"}
+                  className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+                >
+                  {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
+                  {t("computer.takeControl")}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
         {(cloudPreviewReady || phase === "vm" || currentTeamComputer) && control.held && (
           <div className="mt-3 rounded-xl border border-accent/25 bg-accent/10 p-4">
             <div className="text-[13px] leading-relaxed text-ink">
+              You have the wheel — the bot's clicks and keystrokes are refused until you hand it back.
+              {phase === "ready" && cloudBackend === "box" && " Use Open desktop to drive."}
+              {phase === "vm" && (vmWatchOnly ? " Existing VM is watch-only; release the stale hold to let the bot continue." : " Use Open desktop to drive — the preview here is watch-only.")}
               {t("computer.youHaveWheel")}
               {cloudPreviewReady && !liveTarget && ` ${t(advanced ? "computer.useOpenDesktop" : "computer.simple.useFullScreen")}`}
             </div>
@@ -1584,7 +1667,7 @@ export function ComputerPanel({
             {t(control.held ? "computer.fullScreen" : "computer.takeControl")}
           </button>
         )}
-        {advanced && canManageVm && phase === "vm" && vmStatus?.mode === "per-bot" && (
+        {advanced && canManageVm && phase === "vm" && managedVmStatus?.mode === "per-bot" && (
           <button
             onClick={() => void runVmAction("vm-delete")}
             disabled={pending !== null || profileBot.busy}
@@ -1678,7 +1761,7 @@ export function ComputerPanel({
 
         {advanced ? <>
           <div className="mt-4 rounded-xl bg-card p-4">
-            <div className="text-[15px] font-medium text-ink">{t("computer.worksOn")}</div>
+          <div className="text-[15px] font-medium text-ink">{t("computer.worksOn")}</div>
             <p className="mt-1 text-[12px] leading-5 text-ink-secondary">
               {t(state.config?.cloudHome ? "computer.worksOnHintCloudHome" : "computer.worksOnHint")}
             </p>

@@ -16,6 +16,8 @@ export interface BridgeLiveness {
   args: string[];
 }
 
+export const MAX_MCP_LINE_CHARS = 16 * 1024 * 1024;
+
 export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOUT_MS, env?: NodeJS.ProcessEnv): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(probe.command, probe.args, {
@@ -42,6 +44,16 @@ export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOU
 export interface WatchdogHandle {
   touch: () => void;
   stop: () => void;
+}
+
+export interface LineSplitter {
+  push: (chunk: Buffer | string) => void;
+  flush: () => void;
+}
+
+export interface LineSplitterOptions {
+  maxLineChars?: number;
+  onOverflow?: () => void;
 }
 
 export function createInactivityWatchdog(options: {
@@ -121,28 +133,45 @@ export interface BridgeOptions {
 }
 
 /** MCP stdio is one JSON-RPC frame per line, so line boundaries are the only safe place to inspect or inject. */
-export function createLineSplitter(onLine: (line: string) => void): {
-  push: (chunk: Buffer | string) => void;
-  flush: () => void;
-} {
+export function createLineSplitter(onLine: (line: string) => void, options: LineSplitterOptions = {}) {
+  const maxLineChars = options.maxLineChars ?? MAX_MCP_LINE_CHARS;
   let pending = "";
+  let overflowed = false;
   const decoder = new StringDecoder("utf8");
-  return {
+  const overflow = () => {
+    if (overflowed) return;
+    overflowed = true;
+    pending = "";
+    options.onOverflow?.();
+  };
+  const emit = (line: string) => {
+    if (line.length > maxLineChars) {
+      overflow();
+      return;
+    }
+    onLine(line);
+  };
+  const splitter: LineSplitter = {
     push(chunk) {
-      pending += typeof chunk === "string" ? chunk : decoder.write(chunk);
+      if (overflowed) return;
+      pending += Buffer.isBuffer(chunk) ? decoder.write(chunk) : chunk;
       let newline: number;
       while ((newline = pending.indexOf("\n")) !== -1) {
         const line = pending.slice(0, newline);
         pending = pending.slice(newline + 1);
-        onLine(line);
+        emit(line);
+        if (overflowed) return;
       }
+      if (pending.length > maxLineChars) overflow();
     },
     flush() {
+      if (overflowed) return;
       pending += decoder.end();
-      if (pending) onLine(pending);
+      if (pending) emit(pending);
       pending = "";
     },
   };
+  return splitter;
 }
 
 /** Serialized: the check is async, and answering frame N+1 before frame N would reorder the agent's protocol stream. */

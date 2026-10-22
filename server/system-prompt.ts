@@ -83,10 +83,10 @@ export function buildSystemPrompt(
 }
 
 // "box" is Boat's persisted kind literal.
-export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "vps" | "local";
+export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "vps" | "local" | "existing-vm";
 
 export type ComputerPromptKindInput = {
-  kind: "vm" | "box" | "vps" | "local" | null;
+  kind: "vm" | "box" | "vps" | "local" | "existing-vm" | null;
   vmPrivate: boolean;
 };
 
@@ -95,6 +95,7 @@ export function resolveComputerPromptKind(input: ComputerPromptKindInput): Compu
   if (input.kind === "box") return "box";
   if (input.kind === "vps") return "vps";
   if (input.kind === "local") return "local";
+  if (input.kind === "existing-vm") return "existing-vm";
   return null;
 }
 
@@ -116,6 +117,8 @@ const COMPUTER_PARAGRAPH: Record<ComputerPromptKind, string> = {
   box: " You control the assigned cloud computer. Inspect it with screenshots; click coordinates refer to the full image. Use the advertised computer tools for desktop actions and shell commands.",
   vps:
     " You have your own self-hosted remote Linux computer through the official Cua tools. This is the user's own VPS; using it does not require a Boat API key. Its filesystem is disposable: everything on it is wiped whenever its container is recreated, so keep long-lived work somewhere durable — push it to a remote, or hand the results back in chat — instead of leaving it only on that computer. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully." + SANDBOX_DESKTOP_INPUT,
+  "existing-vm":
+    " You have a user-managed Linux VM through the official Cua tools. Its filesystem may be persistent and is controlled by the user outside OpenMausBot; do not assume it is disposable, isolated, or owned by OpenMausBot. Inspect the desktop state before acting, prefer accessibility targets over raw coordinates, and act carefully.",
   local:
     " You can act on the user's computer through the computer tools. Discover the target app/window and inspect its state first. Prefer window-targeted accessibility actions with background delivery so the user can keep working in another app; do not bring OpenMausBot or another app to the front just to inspect it. Use the dedicated browser tools for browser work when available, keeping the user's intended browser profile/account, and OpenMausBot's configuration/proposal tools for supported bot setup rather than clicking through this app. Full-desktop input, app activation, and foreground delivery can move the real cursor, change focus, or switch desktops: use them only when the user asked for foreground control or agrees after background control reports it cannot perform the action. Do not silently retry a background refusal as foreground input, including through shell scripts, AppleScript/System Events, or another automation tool. If a background action unexpectedly changes focus, report it and stop that route rather than continuing to interrupt the user. Never promise that arbitrary desktop actions can run in the background.",
 };
