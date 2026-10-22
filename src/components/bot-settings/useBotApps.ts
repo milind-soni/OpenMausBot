@@ -74,6 +74,17 @@ export function botAppsFrom(
 }
 
 export function useBotApps(bot: Bot): BotApps {
+  const { inventory, cards, highlevel } = useAppInventory();
+  return botAppsFrom(bot, inventory, cards, highlevel);
+}
+
+/** The workspace's connected apps, before any one bot's access applies. */
+export function useConnectedApps(): BotApps {
+  const { inventory, cards, highlevel } = useAppInventory();
+  return botAppsFrom({}, inventory, cards, highlevel);
+}
+
+function useAppInventory() {
   const [inventory, setInventory] = useState<ConnectorInventory | null>(null);
   const [cards, setCards] = useState<ReadonlyMap<string, ToolkitCard>>(() => new Map());
   const [highlevel, setHighlevel] = useState<HighLevelStatus | null>(null);
@@ -94,5 +105,5 @@ export function useBotApps(bot: Bot): BotApps {
     };
   }, []);
 
-  return botAppsFrom(bot, inventory, cards, highlevel);
+  return { inventory, cards, highlevel };
 }

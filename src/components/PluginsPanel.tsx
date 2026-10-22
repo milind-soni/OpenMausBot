@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Loader2, RefreshCw, Search, Server, TriangleAlert, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Loader2, RefreshCw, Search, Server, ShieldCheck, TriangleAlert, X } from "lucide-react";
 import { api, useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
@@ -30,6 +30,7 @@ import { appCategoryLabel, CATEGORY_SECTION_SIZE, catalogSections, connectorDesc
 import { McpServersPanel } from "./McpServersPanel";
 import { HighLevelCard } from "./HighLevelCard";
 import { openBotSettings } from "./bot-panel/panel-link";
+import { BotAccessDialog } from "./BotAccessDialog";
 
 export interface ToolkitCard {
   slug: string;
@@ -259,6 +260,9 @@ export function PluginsPanel() {
   const [category, setCategory] = useState<string | null>(null);
   // Appended after the older state so tests that seed state by call order keep their indices.
   const [highLevelConnected, setHighLevelConnected] = useState<boolean | null>(null);
+  const [botAccessOpen, setBotAccessOpen] = useState(false);
+  const botAccessOpenRef = useRef(false);
+  botAccessOpenRef.current = botAccessOpen;
 
   const polls = useRef(new Map<string, () => void>());
   const statusGenerations = useRef(new Map<string, number>());
@@ -394,6 +398,7 @@ export function PluginsPanel() {
     const controls = focusable();
     (controls.find((element) => element.matches("input")) ?? controls[0] ?? dialog)?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
+      if (botAccessOpenRef.current) return;
       if (event.key === "Escape") {
         event.preventDefault();
         dispatch({ type: "togglePlugins", open: false });
@@ -656,6 +661,19 @@ export function PluginsPanel() {
               <span className="hidden sm:inline">{t("apps.filter.mcp")}</span>
               <span className="sr-only sm:hidden">{t("apps.filter.mcp")}</span>
             </button>
+            {!remoteClient && (
+              <button
+                type="button"
+                data-apps-bot-access
+                title={t("apps.botAccessHint")}
+                onClick={() => setBotAccessOpen(true)}
+                className={cn(pill, "h-9 border border-hairline/40 px-3.5 text-ink hover:bg-raised")}
+              >
+                <ShieldCheck size={14} aria-hidden="true" />
+                <span className="hidden sm:inline">{t("apps.botAccess")}</span>
+                <span className="sr-only sm:hidden">{t("apps.botAccess")}</span>
+              </button>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t("apps.categoriesAria")}>
             <button
@@ -858,6 +876,7 @@ export function PluginsPanel() {
           )}
         </div>
       </div>
+      {botAccessOpen && <BotAccessDialog onClose={() => setBotAccessOpen(false)} />}
     </div>
   );
 
