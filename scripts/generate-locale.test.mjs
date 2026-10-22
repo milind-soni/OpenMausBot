@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -13,6 +13,7 @@ import {
   placeholders,
   sourceHash,
   staleTranslationKeys,
+  translationPrompt,
   validateSourceCatalog,
   validateTranslationCatalog,
   validateTranslationHashes,
@@ -142,5 +143,104 @@ describe("locale draft validation", () => {
   it("never generates or accepts the English source catalog", () => {
     expect(() => main(["en", "English", "--force"])).toThrow(/English is the source catalog/i);
     expect(() => main(["en", "--accept"])).toThrow(/English is the source catalog/i);
+  });
+
+  it("asks for pt-BR terms in pt-br drafts and leaves other prompts as they were", () => {
+    const portuguese = translationPrompt({ first: "One" }, "Brazilian Portuguese", "pt-br");
+    expect(portuguese).toContain("Write AI as “IA”");
+    expect(portuguese).toContain("skill as “habilidade”");
+    expect(portuguese).not.toContain("and AI unchanged");
+
+    expect(translationPrompt({ first: "One" }, "German", "de")).toContain(
+      "Keep placeholders such as {name} exactly, including duplicates. Keep OpenMausBot, MausBot Cloud, CLI, and AI unchanged.",
+    );
+  });
+});
+
+describe("complete locale packs", () => {
+  const source = {
+    save: "Save",
+    claude: "Claude",
+    reason: "{reason}",
+    when: "≈ {time}",
+    count: "{count} bots",
+  };
+  const translated = {
+    save: "Salvar",
+    claude: "Claude",
+    reason: "{reason}",
+    when: "≈ {time}",
+    count: "{count} bots",
+  };
+
+  it("flags English left in place unless it is listed or has no words outside placeholders", () => {
+    expect(validateTranslationCatalog(source, translated, {
+      requireComplete: true,
+      sameAsEnglish: ["Claude", "{count} bots"],
+    })).toEqual([]);
+    expect(validateTranslationCatalog(source, { ...translated, save: "Save" }, {
+      requireComplete: true,
+      sameAsEnglish: ["Claude"],
+    })).toEqual([
+      'save: same as English ("Save")',
+      'count: same as English ("{count} bots")',
+    ]);
+  });
+
+  it("lets partial packs repeat English and skip keys", () => {
+    expect(validateTranslationCatalog(source, { save: "Save", claude: "Claude" })).toEqual([]);
+  });
+
+  function writeFixture({ portuguese = translated, sameAsEnglish = ["Claude", "{count} bots"] } = {}) {
+    const directory = temporaryDirectory();
+    const locales = join(directory, "locales");
+    mkdirSync(locales);
+    const hashes = (catalog) => Object.fromEntries(Object.keys(catalog).map((key) => [key, sourceHash(source[key])]));
+    const french = { save: "Save" };
+    writeFileSync(join(locales, "en.json"), JSON.stringify(source));
+    writeFileSync(join(locales, "pt-br.json"), JSON.stringify(portuguese));
+    writeFileSync(join(locales, "fr.json"), JSON.stringify(french));
+    writeFileSync(join(locales, "source-hashes.json"), JSON.stringify({
+      version: 1,
+      locales: { "pt-br": hashes(portuguese), fr: hashes(french) },
+    }));
+    const complete = join(directory, "complete-locales.json");
+    writeFileSync(complete, JSON.stringify({ "pt-br": { sameAsEnglish } }));
+    return { complete, locales };
+  }
+
+  function check({ complete, locales }) {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    try {
+      checkCatalogs(locales, complete);
+    } finally {
+      log.mockRestore();
+    }
+  }
+
+  it("passes a complete pack while partial packs keep their English fallback", () => {
+    expect(() => check(writeFixture())).not.toThrow();
+  });
+
+  it("fails --check for a missing key and says how to fill it", () => {
+    const portuguese = { ...translated };
+    delete portuguese.save;
+    expect(() => check(writeFixture({ portuguese }))).toThrow(
+      /pt-br\.json: save: translation is missing[\s\S]*node scripts\/generate-locale\.mjs pt-br"/,
+    );
+  });
+
+  it("fails --check for unlisted English and names the list to extend", () => {
+    expect(() => check(writeFixture({ sameAsEnglish: ["{count} bots"] }))).toThrow(
+      /pt-br\.json: claude: same as English \("Claude"\)[\s\S]*"sameAsEnglish" under "pt-br" in scripts\/complete-locales\.json/,
+    );
+  });
+
+  it("rejects a malformed list and a list for a pack that does not exist", () => {
+    const fixture = writeFixture();
+    writeFileSync(fixture.complete, JSON.stringify({ "pt-br": ["Claude"] }));
+    expect(() => check(fixture)).toThrow(/complete-locales\.json: invalid locale entry pt-br/);
+    writeFileSync(fixture.complete, JSON.stringify({ it: { sameAsEnglish: [] } }));
+    expect(() => check(fixture)).toThrow(/complete-locales\.json: it has no matching locale catalog/);
   });
 });

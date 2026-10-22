@@ -19,7 +19,8 @@ Follow the language's style guide and glossary when one exists: [Brazilian Portu
 empty entries, locale filename casing, placeholder parity, and the English
 source hash attached to every translated value. If English copy changes, the
 old translation fails the check instead of silently looking current. Missing
-translations remain allowed because the runtime has an English fallback.
+translations remain allowed because the runtime has an English fallback,
+except in packs listed in `scripts/complete-locales.json` (today only pt-BR).
 
 ## Optional model-assisted draft
 
