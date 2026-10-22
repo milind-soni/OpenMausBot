@@ -42,6 +42,9 @@ export function missingOf(report) {
   return [...counts, ...(chats ? [`${chats} chat paths`] : []), ...(report?.attachments?.length ? [`${report.attachments.length} attachments`] : []), ...(secrets ? [`${secrets} credentials`] : [])].join(", ") || "something";
 }
 
+const errorText = (error) => (typeof error?.errorKey === "string" && error.errorKey.startsWith("serverError.")
+  ? { errorKey: error.errorKey, errorParams: record(error.errorParams) ? error.errorParams : {} } : { errorKey: undefined, errorParams: undefined });
+
 /** A journal read back, kept to its known shape; null when there is none. */
 export function parseJournal(value) {
   if (!record(value) || value.v !== 1 || !PHASES.has(value.phase) || !record(value.cloud) || typeof value.cloud.origin !== "string" || typeof value.cloud.account !== "string") return null;
@@ -120,7 +123,8 @@ export function createOneHome(deps) {
     if (journal.phase === "home-again" || journal.phase === "back") return { phase: journal.phase, ...(journal.lost ? { lost: true } : {}) };
     const running = deps.send.snapshot?.()?.running;
     const chats = journal.phase === "copy" && running?.phase === "chats" && running.progress ? { done: running.progress.done, total: running.progress.total } : null;
-    const failing = journal.failingSince && now() - journal.failingSince >= FAILING_LINE_MS ? { error: journal.error ?? null } : null;
+    const failing = journal.failingSince && now() - journal.failingSince >= FAILING_LINE_MS
+      ? { error: journal.error ?? null, ...(journal.error && journal.errorKey ? { errorKey: journal.errorKey, errorParams: journal.errorParams ?? {} } : {}) } : null;
     const phase = FROZEN.has(journal.phase) || journal.phase === "switch" ? "finishing" : journal.phase;
     return { phase, ...(chats ? { chats } : {}), ...(phase === "wait" && waitingFor !== null ? { waitingFor } : {}), ...(failing ? { failing } : {}) };
   }
@@ -138,7 +142,7 @@ export function createOneHome(deps) {
     const said = sentence(error?.message) ?? "My Cloud did not answer.";
     log(`one home: ${journal.phase} failed (${said})`);
     const tries = (journal.tries ?? 0) + 1;
-    const next = write({ ...journal, phase: "copy", passes: 0, tries, error: said, failingSince: journal.failingSince ?? now(),
+    const next = write({ ...journal, phase: "copy", passes: 0, tries, error: said, ...errorText(error), failingSince: journal.failingSince ?? now(),
       retryAt: now() + (frozen ? FROZEN_RETRY_MS : COPY_RETRY_MS[Math.min(tries - 1, COPY_RETRY_MS.length - 1)]), hourly: frozen || undefined, ...(frozen ? { thaw: true } : {}) });
     if (frozen) await thaw(next);
     return null;
@@ -220,13 +224,13 @@ export function createOneHome(deps) {
       if (!arrived.ok) throw Object.assign(new Error(sentence(arrived.body?.error) ?? "My Cloud did not finish the move."), { status: arrived.status });
     } catch (error) {
       log(`one home: switching over goes on later (${error?.message ?? error})`);
-      const next = write({ ...journal, switched, error: sentence(error?.message) ?? undefined, retryAt: now() + 2 * MINUTE });
+      const next = write({ ...journal, switched, error: sentence(error?.message) ?? undefined, ...errorText(error), retryAt: now() + 2 * MINUTE });
       later(next.retryAt - now());
       return null;
     } finally { await session?.close().catch(() => {}); }
     const held = (deps.send.snapshot?.()?.whole?.result?.notes ?? []).filter((note) => note?.kind === "held" && typeof note.connection === "string").map((note) => note.connection);
     const done = write({ ...journal, phase: "done", switched, doneAt: now(), version: deps.version ?? null, phone: deps.phone?.paired() === true, held,
-      error: undefined, failingSince: undefined, retryAt: undefined, tries: undefined });
+      error: undefined, errorKey: undefined, errorParams: undefined, failingSince: undefined, retryAt: undefined, tries: undefined });
     await settle(done);
     deps.openHome?.();
     return null;

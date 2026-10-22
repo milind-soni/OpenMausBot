@@ -30,7 +30,7 @@ describe("intakeFiles", () => {
         allowImages: true, getPath, uploadImage: async () => null,
       });
       expect(out.attachments).toEqual([expect.objectContaining({ kind: "file", path: "/private/attachments/note.ogg" })]);
-      expect(out.notice).toBeNull();
+      expect(out.problems).toEqual([]);
       expect(getPath).not.toHaveBeenCalled();
     } finally {
       fetch.mockRestore();
@@ -46,7 +46,7 @@ describe("intakeFiles", () => {
       ["image", "shot.png"],
       ["file", "notes.txt"],
     ]);
-    expect(out.notice).toBeNull();
+    expect(out.problems).toEqual([]);
   });
 
   it("uses a private uploaded path for supported documents", async () => {
@@ -68,7 +68,7 @@ describe("intakeFiles", () => {
       name: "notes.pdf",
       path: "/private/attachments/id.pdf",
     })]);
-    expect(out.notice).toBeNull();
+    expect(out.problems).toEqual([]);
   });
 
   it("does not fall back to an arbitrary disk path when a private upload fails", async () => {
@@ -80,7 +80,7 @@ describe("intakeFiles", () => {
     });
 
     expect(out.attachments).toEqual([]);
-    expect(out.notice).toContain("notes.pdf: private store is full");
+    expect(out.problems).toEqual([{ kind: "upload-failed", name: "notes.pdf", reason: "private store is full" }]);
   });
 
   it("treats an image as an ordinary file when the engine cannot read one", async () => {
@@ -102,8 +102,7 @@ describe("intakeFiles", () => {
       uploadImage: upload,
     });
     expect(out.attachments).toHaveLength(0);
-    expect(out.notice).toMatch(/ghost\.bin/);
-    expect(out.notice).not.toMatch(/Finder|Save it first/);
+    expect(out.problems).toEqual([{ kind: "unsupported", names: ["ghost.bin"] }]);
   });
 
   it("reports an upload that failed without losing the files that worked", async () => {
@@ -116,6 +115,6 @@ describe("intakeFiles", () => {
       },
     });
     expect(out.attachments).toHaveLength(1);
-    expect(out.notice).toMatch(/bad\.png: too large/);
+    expect(out.problems).toEqual([{ kind: "upload-failed", name: "bad.png", reason: "too large" }]);
   });
 });

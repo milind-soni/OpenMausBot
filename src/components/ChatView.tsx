@@ -36,6 +36,7 @@ import { ClaudeUpdatePrompt } from "./ClaudeUpdatePrompt";
 import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
 import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
 import { failedTurnCause, signedOutEngine } from "@/lib/failed-turn";
+import { activityText, isNoticeCode } from "@/lib/activity-text";
 import { plainErrorLine } from "@/lib/plain-error";
 import { openPlaceAction, placeRowViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
 import type { PlaceRow } from "../../shared/place-view";
@@ -44,7 +45,7 @@ import { TrialCreditNotice } from "./TrialCreditNotice";
 import { isPureLeakedSystemHarnessMessage, stripLeakedSystemHarnessMessages } from "../../shared/system-message-guard.ts";
 import { ConversationalReply, QuickModelNote, isConversational, useReplySegments, useThreadOpenedAt } from "./ConversationalReply";
 import type { LocaleKey } from "@/locales";
-import { isProviderSafetyBlock, PROVIDER_SAFETY_GUIDANCE, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
+import { isProviderSafetyBlock, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
 import { isCancelledTranscriptRow } from "../../shared/client-cancel";
 import { BotAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
@@ -96,7 +97,7 @@ import { LiveCallBar } from "./LiveCallBar";
 import { LiveCallChip } from "./LiveCallPill";
 import { effectivePlace, toolPlace, type EffectivePlace } from "@/lib/place";
 import { cn } from "@/lib/cn";
-import { activeLocale, t } from "@/lib/i18n";
+import { activeLocale, intlLocale, t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { groupTranscript, isStatusActivity } from "@/lib/activity-runs";
 import { StatusActivityRow } from "@/components/StatusActivityRow";
@@ -214,8 +215,8 @@ export function ErrorRow({
           <ClaudeUpdatePrompt instance={claudeUpdateInstance} onRetry={onRetry} />
         ) : isProviderSafetyBlock(message) ? (
           <p className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">
-            {PROVIDER_SAFETY_GUIDANCE}{" "}
-            <a href={PROVIDER_SAFETY_HELP_URL} target="_blank" rel="noreferrer" className="underline">About provider safety checks</a>
+            {t("chat.providerSafety.guidance")}{" "}
+            <a href={PROVIDER_SAFETY_HELP_URL} target="_blank" rel="noreferrer" className="underline">{t("chat.providerSafety.about")}</a>
           </p>
         ) : setupInstance &&
         !(setupInstance.snapshot.state === "available" && setupInstance.snapshot.authenticated !== false) ? (
@@ -288,10 +289,11 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId }: {
   if (credit) return <TrialCreditFailedRow kind={credit} onRetry={onRetry} />;
   const signedOut = signedOutEngine(tool, engine);
   const cause = failedTurnCause(tool.name) ?? tool.name;
+  const notice = isNoticeCode(tool.nameCode) ? activityText(tool, cause) : null;
   return (
     <ErrorRow
-      message={cause}
-      headline={signedOut ? t("chat.error.signedOut", { name: signedOut.displayName }) : plainErrorLine(cause)}
+      message={notice ?? cause}
+      headline={signedOut ? t("chat.error.signedOut", { name: signedOut.displayName }) : notice ?? plainErrorLine(cause)}
       onRetry={onRetry}
       action={resume}
       setupInstance={tool.setup ? engine : undefined}
@@ -492,7 +494,7 @@ const Bubble = memo(function Bubble({
                   : cn("bg-card px-4 py-2.5 text-ink", simple && SIMPLE_BUBBLE),
           )}
           style={user && !webhookView && !attachmentsOnly ? bubbleStyle : undefined}
-          title={new Date(message.at).toLocaleString()}
+          title={new Date(message.at).toLocaleString(intlLocale())}
         >
           {replyTarget && (
             <div className="mb-2">
@@ -1209,7 +1211,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             </button>
           )}
           <span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>{privateChat && <TeamPrivateHeader />}
-          {!bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">Teammates working</span>}
+          {!bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">{t("chat.teammatesWorking")}</span>}
           {awayFromMainThread(profile, showThreads) && (
             <button
               type="button"

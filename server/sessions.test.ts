@@ -21,6 +21,7 @@ import {
   cookieMaxAgeSeconds,
   daysMs,
 } from "./sessions.ts";
+import { userError } from "./user-errors.ts";
 
 let dir: string;
 let clock: number;
@@ -172,6 +173,7 @@ describe("pairing codes", () => {
     const again = registry.exchange({ code, label: "x", source: "a" });
     expect(again.ok).toBe(false);
     if (!again.ok) expect(again.error).toMatch(/wrong or has expired/);
+    expect(again).toMatchObject({ status: 401, errorKey: "serverError.pair.codeWrong" });
     const { code: stale } = registry.openPairing();
     clock += PAIRING_CODE_TTL_MS + 1;
     expect(registry.exchange({ code: stale, label: "x", source: "b" }).ok).toBe(false);
@@ -188,6 +190,7 @@ describe("pairing codes", () => {
     if (!locked.ok) {
       expect(locked.status).toBe(429);
       expect(locked.error).toMatch(/from your address; try again in 60s/);
+      expect(locked).toMatchObject({ errorKey: "serverError.pair.tooMany", errorParams: { seconds: 60 } });
     }
     expect(registry.exchange({ code, label: "", source: "friend" }).ok).toBe(true);
     clock += LOCKOUT.lockMs + 1;
@@ -578,9 +581,9 @@ describe("admin scope only (an OMB Cloud home is personal: server/cloud-owner.ts
     const ticket = stored.ok ? registry.issueStreamTicket(stored.session.id).ticket : "";
     const openWindow = registry.openPairing({ scopes: ["client"] });
     const owner = registry.exchange({ code: registry.openPairing().credential, label: "Mac", source: "a" });
-    registry.requireAdmin(PERSONAL);
+    registry.requireAdmin(userError("serverError.cloud.personal"));
     expect(() => registry.openPairing({ scopes: ["client"] })).toThrow(PERSONAL);
-    expect(registry.exchange({ code: openWindow.credential, label: "Guest", source: "b" })).toEqual({ ok: false, status: 403, error: PERSONAL });
+    expect(registry.exchange({ code: openWindow.credential, label: "Guest", source: "b" })).toEqual({ ok: false, status: 403, error: PERSONAL, errorKey: "serverError.cloud.personal" });
     expect(() => registry.issue({ label: "Friend", scopes: ["client"], email: "friend@example.test" })).toThrow(PERSONAL);
     expect(() => registry.issuePortal({ email: "friend@example.test", grant: "g".repeat(43), scopes: ["client"] })).toThrow(PERSONAL);
     if (!stored.ok || !owner.ok) throw new Error("unreachable");

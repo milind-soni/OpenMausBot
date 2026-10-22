@@ -15,9 +15,11 @@ import type { RoutineManager } from "../routines.ts";
 import { installOrgSkill, installSkill, parseSkillMd, setSkillEnabled } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
 import { writeMemoryFile, writeMemoryTopic } from "../workspace.ts";
+import { refusalBody } from "../user-errors.ts";
+import type { ServerErrorBody } from "../../shared/server-text.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | { ok: false; status: number; error: string };
+export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody);
 
 export interface BotCreateRouteDeps {
   store: Store;
@@ -145,7 +147,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
         selection = await defaultSelection();
       } else {
         const checked = checkedModelSelection(body.modelSelection, undefined, body.requireAvailableModel === true);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         selection = checked.selection;
       }
       if (hostedModels && !hostedModels.allows(selection)) return json(res, 400, { error: hostedModels.error() });

@@ -24,6 +24,7 @@ import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
+import { userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 type RunningInstance = ReturnType<ProviderRegistry["get"]>;
@@ -207,7 +208,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           : relayed && target ? { ...target, reactedWith: relayed } : target;
       const pressKey = press?.settles ? `${threadId}:${press.messageId}` : undefined;
       if (pressKey && pressesInFlight.has(pressKey) && !(sendId && pressesInFlight.get(pressKey) === sendId)) {
-        return json(res, 409, { error: "That answer is already on its way." });
+        return json(res, 409, userError("serverError.chat.answerSent"));
       }
       const dataContext = press || appSent ? undefined : parseDataContext(body.dataContext);
       const retried = Boolean(sendId && (store.messagesFor(threadId).some((message) => message.sendId === sendId) || queuedSteeredMessage(bot.id, threadId, sendId)));
@@ -391,9 +392,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         if (accepted.kind === "match") return json(res, 202, { ok: true, message: accepted.message });
       }
       // Synchronous from here: startTurn flips busy before the next request, so two racing edits cannot both pass.
-      if (threadBusy(bot.id, bot.threadId)) return json(res, 409, { error: "the thread is working — stop it before editing" });
+      if (threadBusy(bot.id, bot.threadId)) return json(res, 409, userError("serverError.chat.busyEdit"));
       if (phoneSecretSubmissions.hasThread(bot.threadId)) {
-        return json(res, 409, { error: "this task is securely saving a credential — try again when it finishes" });
+        return json(res, 409, userError("serverError.chat.savingCredential"));
       }
       const rerunSelection = turnSelection(bot.id, bot.threadId) ?? bot.modelSelection;
       if (!registry.get(rerunSelection.instanceId)) {
@@ -419,9 +420,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const bot = requestedTaskBot(m[1], body.threadId);
       const notYours = cloudThreadRefusal(auth, bot.threadId);
       if (notYours) return json(res, 403, { error: notYours });
-      if (threadBusy(bot.id, bot.threadId)) return json(res, 409, { error: "the thread is working — stop it before switching versions" });
+      if (threadBusy(bot.id, bot.threadId)) return json(res, 409, userError("serverError.chat.busyVersion"));
       if (phoneSecretSubmissions.hasThread(bot.threadId)) {
-        return json(res, 409, { error: "this task is securely saving a credential — try again when it finishes" });
+        return json(res, 409, userError("serverError.chat.savingCredential"));
       }
       const leaf = store.setActiveLeaf(bot.threadId, String(body.messageId ?? ""));
       if (!leaf) return json(res, 404, { error: "no such message" });
@@ -485,7 +486,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         if (dismissed) return json(res, dismissed.status, dismissed.body);
         const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, requestId, behavior, body.message, { id: bot.id, name: bot.name }, body.always === true, body.rememberCommand === true);
         if (outcome === "unavailable" && isPersistentQuestionCard(pending?.card) && behavior === "answer") {
-          if (!pending) return json(res, 404, { error: "this question is no longer available" });
+          if (!pending) return json(res, 404, userError("serverError.chat.questionGone"));
           const answer = typeof body.message === "string" ? body.message.trim() : "";
           if (!answer) return json(res, 400, { error: "a question answer is required" });
           try {
@@ -598,16 +599,16 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           : store.botByThread(threadId);
         // A surviving question belongs to its original asker, never a later speaker.
         if (group && persistentQuestion && !owner) {
-          return json(res, 409, { error: "the bot that asked this question is no longer available" });
+          return json(res, 409, userError("serverError.chat.askerGone"));
         }
         if (!owner && !pending) return json(res, 404, { error: "nothing is waiting on an answer in this conversation" });
         const requestOwner = owner ? botForThread(owner.id, threadId) : null;
         const outcome = await answerRequest(threadId, requestOwner?.modelSelection.instanceId ?? "", requestId, behavior, body.message, owner ? { id: owner.id, name: owner.name } : undefined, body.always === true, body.rememberCommand === true);
         if (outcome === "unavailable" && isPersistentQuestionCard(pending?.card) && behavior === "answer") {
-          if (!pending?.card) return json(res, 404, { error: "this question is no longer available" });
+          if (!pending?.card) return json(res, 404, userError("serverError.chat.questionGone"));
           const answer = typeof body.message === "string" ? body.message.trim() : "";
           if (!answer) return json(res, 400, { error: "a question answer is required" });
-          if (!owner) return json(res, 409, { error: "the bot that asked this question is no longer available" });
+          if (!owner) return json(res, 409, userError("serverError.chat.askerGone"));
           try {
             const reply = await deliverLateQuestionAnswer(auth, threadId, requestId, answer, pending, owner);
             return json(res, 200, { ok: true, outcome: "answered", late: true, ...(reply.queued ? { queued: true } : {}) });
@@ -645,7 +646,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const routineRun = routines!.activeBotRunForBot(bot.id);
       if (routineRun) {
         if (expectedThreadId !== undefined && routineRun.threadId !== expectedThreadId) {
-          return json(res, 409, { error: "this bot is running a routine in another conversation" });
+          return json(res, 409, userError("serverError.chat.routineElsewhere"));
         }
         cancelDirectTurnDispatch(bot.id, routineRun.threadId ?? expectedThreadId);
         if (routineRun.threadId) {
@@ -658,7 +659,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const busyGroup = activeGroupTurnForBot(bot.id);
       if (busyGroup) {
         if (expectedThreadId !== undefined && busyGroup.threadId !== expectedThreadId) {
-          return json(res, 409, { error: `this bot is working in channel ${busyGroup.group.name}` });
+          return json(res, 409, userError("serverError.chat.busyInRoom", { room: busyGroup.group.name }));
         }
         cancelGroupTurnOperations(busyGroup.group.id, busyGroup.threadId);
         revokeInternalCapabilitiesForThread(busyGroup.threadId);

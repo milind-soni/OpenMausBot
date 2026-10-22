@@ -1,6 +1,7 @@
 // The renderer's JSON request helper. A Cloud home that went to sleep is never woken by a background poll
 // (src/lib/cloud-power.ts).
 import { asleepAnswer, BACKGROUND_HEADER, cloudAsleep, markCloudAsleep, markCloudAwake } from "../lib/cloud-power";
+import { serverErrorText } from "../lib/server-error";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -37,7 +38,7 @@ export async function api<T = any>(path: string, init?: RequestInit & { timeoutM
   if (!res.ok) {
     const error = body?.error;
     const message = typeof error === "string" ? error : typeof error?.message === "string" ? error.message : `${res.status} ${res.statusText}`;
-    throw new ApiError(message, res.status, body);
+    throw new ApiError(serverErrorText(body, message), res.status, body);
   }
   return body;
 }

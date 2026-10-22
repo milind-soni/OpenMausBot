@@ -104,6 +104,9 @@ export interface CloudSendPageBridge {
   teams?(): Promise<{ teams: Array<{ id: string; name: string; ready: boolean }> }>;
   /** Moves one bot into one of those teams (a real click). */
   moveToTeam?(botId: string, teamId: string, name: string): Promise<import("./team-move.mjs").TeamMoveView | null>;
+  /** `moveToTeam` with main's refusal as a value, which the page says in its own language; `moveToTeam` keeps rejecting
+   * with the English only, for pages that predate this. Absent from an older desktop. */
+  moveToTeamCoded?(botId: string, teamId: string, name: string): Promise<{ view: import("./team-move.mjs").TeamMoveView | null } | { refused: import("./team-move.mjs").TeamMoveRefusal }>;
   teamRetry?(): Promise<import("./team-move.mjs").TeamMoveView | null>;
   /** Shows that team's page, where the bot now lives. */
   openTeam?(teamId: string): Promise<void>;
@@ -119,8 +122,12 @@ export interface CloudSendSession {
 
 export class CloudSendError extends Error {
   code: string;
+  /** Set when My Cloud refused with a `serverError.*` key: `message` is then My Cloud's own English for it. */
+  errorKey?: string;
+  errorParams?: Record<string, string | number>;
   constructor(code: string, message: string, options?: { cause?: unknown });
 }
+export function namedRefusal(answer: { status: number; body: any }): { message: string; errorKey: string; errorParams: Record<string, string | number> } | null;
 export function unanswered(error: unknown): boolean;
 
 export function botPatch(bot: Record<string, unknown>, parts: string[], cloudBots: ReadonlySet<string>): Record<string, unknown>;

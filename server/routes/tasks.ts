@@ -18,6 +18,8 @@ import type { MessagePage } from "./channels.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
+import { refusalBody } from "../user-errors.ts";
+import type { ServerErrorBody } from "../../shared/server-text.ts";
 
 type HostedModels = NonNullable<ReturnType<typeof hostedModelPolicy>>;
 
@@ -55,10 +57,10 @@ export interface TaskRouteDeps {
   messagePage(threadId: string, limit: number | undefined): MessagePage;
   checkedModelSelection(raw: unknown, current?: { selection: ModelSelection; busy: boolean }, requireAvailableModel?: boolean):
     | { ok: true; selection: ModelSelection }
-    | { ok: false; status: number; error: string };
+    | ({ ok: false; status: number } & ServerErrorBody);
   checkedTaskModelSwitch(current: BotRecord, raw: unknown, updateBotDefault: boolean, resetApprovalToAsk: boolean, requireAvailableModel?: boolean):
     | { ok: true }
-    | { ok: false; status: number; error: string };
+    | ({ ok: false; status: number } & ServerErrorBody);
   threadTitleGate(bot: Pick<BotRecord, "modelSelection">): { ok: true; instance: ProviderInstance } | { ok: false; refusal: string };
   generateThreadTitle(provider: ProviderInstance, text: string, source: ThreadTitleSource): Promise<string | null>;
   settleDirectFollowup(generation: string | undefined): void;
@@ -342,7 +344,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
       if (body.modelSelection !== undefined) {
         if (current.approvalGrant) return json(res, 409, { error: "the bot's approval mode is still being confirmed" });
         const checked = checkedModelSelection(body.modelSelection, { selection: current.modelSelection, busy: threadBusy(current.id, current.threadId) }, body.requireAvailableModel === true);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         patch.modelSelection = checked.selection;
       }
       if (body.approvalMode !== undefined || body.autoApprove !== undefined) {
@@ -371,7 +373,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
         const checked = checkedTaskModelSwitch({ ...current,
           ...(patch.approvalMode ? { approvalMode: patch.approvalMode, autoApprove: patch.autoApprove } : {}),
         }, patch.modelSelection, body.updateBotDefault === true, body.resetApprovalToAsk === true, body.requireAvailableModel === true);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
       }
       const task = patch.modelSelection
         ? store.switchTaskModel(m[1], m[2], patch.modelSelection, body.updateBotDefault === true, body.resetApprovalToAsk === true,

@@ -1,5 +1,6 @@
 import type { Bot, InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { engineDisplayName } from "@/lib/engine-name";
 import { InstanceProviderMark } from "./ProviderIcons";
 
 export function botModel(bot: Pick<Bot, "modelSelection">, instances: InstanceInfo[]): { instance: InstanceInfo; label: string } | null {
@@ -7,7 +8,7 @@ export function botModel(bot: Pick<Bot, "modelSelection">, instances: InstanceIn
   if (!instance) return null;
   const id = bot.modelSelection.model || instance.models?.default || "";
   const label = instance.models?.options?.find((option) => option.id === id)?.label ?? id;
-  return { instance, label: label || instance.displayName };
+  return { instance, label: label || engineDisplayName(instance) };
 }
 
 export function BotModelBadge({ bot, instances, avatarSize }: {
@@ -18,7 +19,7 @@ export function BotModelBadge({ bot, instances, avatarSize }: {
   const model = botModel(bot, instances);
   if (!model) return null;
   const size = Math.max(14, Math.round(avatarSize * 0.4));
-  const description = t("sidebar.bot.modelBadge", { model: model.label, engine: model.instance.displayName });
+  const description = t("sidebar.bot.modelBadge", { model: model.label, engine: engineDisplayName(model.instance) });
   return (
     <span data-testid="model-badge" role="img" aria-label={description} title={model.label}
       className="absolute -bottom-0.5 -left-0.5 flex items-center justify-center rounded-full border-2 border-panel bg-panel"
@@ -32,7 +33,7 @@ export function BotModelBadge({ bot, instances, avatarSize }: {
 export function BotModelMark({ bot, instances }: { bot: Pick<Bot, "modelSelection">; instances: InstanceInfo[] }) {
   const model = botModel(bot, instances);
   if (!model) return null;
-  const description = t("sidebar.bot.modelBadge", { model: model.label, engine: model.instance.displayName });
+  const description = t("sidebar.bot.modelBadge", { model: model.label, engine: engineDisplayName(model.instance) });
   return (
     <span data-testid="model-badge" role="img" aria-label={description} title={model.label}
       className="ml-auto flex shrink-0 items-center self-center text-ink-secondary">

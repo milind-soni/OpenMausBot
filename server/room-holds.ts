@@ -4,6 +4,7 @@
  */
 import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
 import type { RoomHold, RoomHeldMessage } from "../shared/wire.ts";
+import { chatNotice } from "./chat-notices.ts";
 
 const STOP_WINDOW = 2;
 const STOP_WORDS = new Set(["stop", "halt", "pause"]);
@@ -76,9 +77,12 @@ export function addressesEveryone(text: string): boolean {
   return false;
 }
 
+const RESUME_WORDS = new Set(["resume", "retomar", "retome"]);
+const RESUME_TAIL = new Set(["all", "everyone", "please", "todos", "por", "favor"]);
+
 function isBareResume(text: string): boolean {
   const words = maskQuotedAndCode(text).toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
-  return words.length > 0 && words[0] === "resume" && words.slice(1).every((word) => ["all", "everyone", "please"].includes(word));
+  return words.length > 0 && RESUME_WORDS.has(words[0]!) && words.slice(1).every((word) => RESUME_TAIL.has(word));
 }
 
 /** A stop word far from every mention changes nothing: re-dispatching a bot the person just stopped is the one mistake to avoid. */
@@ -141,7 +145,7 @@ export function rememberHeldMessage(
 }
 
 export function heldMemberLine(name: string): string {
-  return `${name} is held (stopped by you) — @mention it or say resume`;
+  return chatNotice("chat.notice.roomHeld", { name });
 }
 
 export function isHeldMemberLine(text: string): boolean {

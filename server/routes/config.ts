@@ -8,7 +8,6 @@ import { finalizeBrowserCleanupMutation, requireBrowserCleanupAcknowledged } fro
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
 import { boatAccountResourceChangeError, vpsAliasResourceChangeError } from "../cloud-backend.ts";
-import { CLOUD_PERSONAL_REFUSAL } from "../cloud-owner.ts";
 import * as composio from "../composio.ts";
 import {
   browserProfilePartitionTarget,
@@ -39,6 +38,8 @@ import { parseSkillMd } from "../skills.ts";
 import type { Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
 import * as vps from "../vps-computer.ts";
+import { refusalBody, userError } from "../user-errors.ts";
+import type { ServerErrorBody } from "../../shared/server-text.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BusyFlag {
@@ -48,7 +49,7 @@ export interface BusyFlag {
 
 export type RemoteComputerProvider = "box" | "vps";
 
-export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | { ok: false; status: number; error: string };
+export type ModelSelectionCheck = { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody);
 
 export type ConfigStatus = Record<string, unknown>;
 
@@ -113,12 +114,12 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatch(body);
       if (CLOUD_HOME && (patch.signIn?.admins?.length || patch.signIn?.members?.length)) {
-        return json(res, 403, { error: CLOUD_PERSONAL_REFUSAL, code: "cloud_personal" });
+        return json(res, 403, { ...userError("serverError.cloud.personal"), code: "cloud_personal" });
       }
       if (patch.newBotDefaults) {
         if (patch.newBotDefaults.profile.modelSelection) {
           const checked = checkedModelSelection(patch.newBotDefaults.profile.modelSelection);
-          if (!checked.ok) return json(res, checked.status, { error: checked.error });
+          if (!checked.ok) return json(res, checked.status, refusalBody(checked));
           patch.newBotDefaults.profile.modelSelection = checked.selection;
         }
         for (const skill of patch.newBotDefaults.skills) {
@@ -128,11 +129,11 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       }
       if (hostedModels && patch.defaultModelSelection) {
         const checked = checkedModelSelection(patch.defaultModelSelection);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
       }
       if (patch.automaticRecovery?.enabled) {
         const checked = checkedModelSelection(patch.automaticRecovery.backup, undefined, true);
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         const target = registry.get(checked.selection.instanceId)!;
         if (!target.enabled) return json(res, 400, { error: "Enable the backup engine before selecting it for recovery." });
         const refusal = policyModelRefusal(target);

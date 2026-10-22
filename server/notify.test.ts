@@ -1,10 +1,23 @@
 import { describe, expect, it } from "vitest";
 
-import { buildNotification, buildSpendNotification, summarize } from "./notify.ts";
+import englishCatalog from "../src/locales/en.json" with { type: "json" };
+import { NOTIFY_IN_ROOM_KEY, NOTIFY_TITLE_KEY } from "../shared/notification.ts";
+import { NOTIFICATION_TITLE, buildNotification, buildSpendNotification, summarize } from "./notify.ts";
 
 const bot = { id: "bot-1", name: "Scout", threadId: "thread-1" };
 
 describe("buildNotification", () => {
+  it("the catalog's banner titles are exactly the ones the server words", () => {
+    const catalog = Object.fromEntries(Object.entries(englishCatalog).filter(([key]) => key.startsWith("notifications.banner.")));
+    expect(catalog).toEqual(NOTIFICATION_TITLE);
+    expect(Object.keys(NOTIFICATION_TITLE).sort()).toEqual([...Object.values(NOTIFY_TITLE_KEY), NOTIFY_IN_ROOM_KEY].sort());
+  });
+
+  it("words a room banner with the room's name", () => {
+    expect(buildNotification("question", bot, "thread-1", "Which file?", { group: { id: "g1", name: "Launch" } })?.title)
+      .toBe("Scout in Launch has a question");
+  });
+
   it("names the bot and carries the detail, per kind", () => {
     expect(buildNotification("approval", bot, "thread-1", "rm -rf ./build")).toMatchObject({
       kind: "approval",

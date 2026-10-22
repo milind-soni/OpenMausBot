@@ -18,6 +18,7 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
 import { t } from "@/lib/i18n";
+import { engineDisplayName } from "@/lib/engine-name";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
 import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
@@ -355,7 +356,7 @@ export function railProviders(instances: InstanceInfo[], selectedInstance: Insta
     return {
       instance,
       target: family ? opensOn[family] ?? instance : instance,
-      label: family ? SIGN_IN_FAMILY_LABEL[family] : instance.displayName,
+      label: family ? SIGN_IN_FAMILY_LABEL[family] : engineDisplayName(instance),
       selected: family ? signInFamily(selectedInstance) === family : instance.instanceId === selectedInstance?.instanceId,
     };
   };
@@ -439,7 +440,7 @@ export function ClaudeAccountSelect({ accounts, selectedId, onSelect }: {
           if (account) onSelect(account);
         }}
       >
-        {accounts.map((account) => <option key={account.instanceId} value={account.instanceId}>{account.displayName}</option>)}
+        {accounts.map((account) => <option key={account.instanceId} value={account.instanceId}>{engineDisplayName(account)}</option>)}
       </Select>
     </label>
   );
@@ -636,7 +637,7 @@ export function ModelPicker({
   const follows = threadId ? profile.tasks?.find((task) => task.threadId === threadId)?.followsBotModel : undefined;
   const botModelInstance = state.instances.find((instance) => instance.instanceId === profile.modelSelection.instanceId);
   const botModelName = botModelInstance
-    ? `${botModelInstance.displayName} · ${modelLabel(botModelInstance, profile.modelSelection.model)}`
+    ? `${engineDisplayName(botModelInstance)} · ${modelLabel(botModelInstance, profile.modelSelection.model)}`
     : profile.modelSelection.model;
   const ownModelThreads = threadsOnOwnModel(profile.modelSelection, profile.tasks ?? []).length;
 
@@ -715,7 +716,7 @@ export function ModelPicker({
   })();
   const simpleFamily = signInFamily(railInstance);
   const simpleAccounts = simpleFamily === "claude" ? claudeAccounts : simpleFamily === "openai" ? openaiAccounts : [];
-  const simpleLabel = simpleProviders.find((provider) => provider.selected)?.label ?? railInstance?.displayName ?? "";
+  const simpleLabel = simpleProviders.find((provider) => provider.selected)?.label ?? (railInstance ? engineDisplayName(railInstance) : "");
   const simpleSignIn = !customOnly && needsSignIn(railInstance);
   const simpleOfficial = customOnly || simpleSignIn ? [] : official;
   const simpleLocal = partitionCustomModels(custom);
@@ -757,7 +758,7 @@ export function ModelPicker({
   );
 
   const summary = active
-    ? `${active.displayName} · ${modelLabel(active, selection.model)}${
+    ? `${engineDisplayName(active)} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
       }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${t("model.effort.summary", { level: effortLabel(selection.effort) })}` : ""}`
     : selection.model;
@@ -793,12 +794,12 @@ export function ModelPicker({
     >
       {active && <InstanceProviderMark instance={active} size={14} />}
       {!contained && active && showActiveAccount && (
-        <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
+        <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{engineDisplayName(active)}</span>
       )}
       <span className={cn("flex min-w-0 items-center gap-1", !contained && active && "@max-4xl/chathead:hidden")}>
         <span className="max-w-[160px] truncate">
           {active && showActiveAccount && (
-            <span data-model-account className="text-ink-secondary">{active.displayName} · </span>
+            <span data-model-account className="text-ink-secondary">{engineDisplayName(active)} · </span>
           )}
           {modelLabel(active, selection.model)}
           {active && modelProvider(active, selection.model) && (
@@ -862,7 +863,7 @@ export function ModelPicker({
                 <ClaudeAccountSelect accounts={simpleAccounts} selectedId={railInstance.instanceId} onSelect={browseSimple} />
               ) : undefined}
               managedBy={railInstance?.policy?.organizationName ?? null}
-              needsSetup={railInstance && simpleSetup ? { name: simpleAccounts.length > 1 ? railInstance.displayName : simpleLabel } : null}
+              needsSetup={railInstance && simpleSetup ? { name: simpleAccounts.length > 1 ? engineDisplayName(railInstance) : simpleLabel } : null}
               signIn={railInstance && simpleSignIn && !simpleSetup ? { name: simpleLabel } : null}
               onSetUp={() => {
                 if (simpleSignIn && hasOfficialModels) setPane("main");
@@ -931,7 +932,7 @@ export function ModelPicker({
               <>
                 <div className="shrink-0 px-4 pb-2 pt-3.5">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="truncate text-[14px] font-semibold text-ink">{signInFamily(railInstance) ? SIGN_IN_FAMILY_LABEL[signInFamily(railInstance)!] : railInstance.displayName}</div>
+                    <div className="truncate text-[14px] font-semibold text-ink">{signInFamily(railInstance) ? SIGN_IN_FAMILY_LABEL[signInFamily(railInstance)!] : engineDisplayName(railInstance)}</div>
                     <div className="flex shrink-0 items-center gap-1">
                       <button
                         type="button"
@@ -940,8 +941,8 @@ export function ModelPicker({
                         onClick={refreshModels}
                         aria-label={
                           refreshing
-                            ? t("model.refreshing", { name: railInstance.displayName })
-                            : t("model.refresh", { name: railInstance.displayName })
+                            ? t("model.refreshing", { name: engineDisplayName(railInstance) })
+                            : t("model.refresh", { name: engineDisplayName(railInstance) })
                         }
                         title={t("model.refreshTitle")}
                         className="flex size-6 items-center justify-center rounded-md text-ink-secondary hover:bg-control hover:text-ink disabled:cursor-wait disabled:opacity-70"
@@ -990,7 +991,7 @@ export function ModelPicker({
                     }}
                     className="mx-2 mb-1 flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[12px] text-ink-secondary hover:bg-control/60"
                   >
-                    <ChevronLeft size={13} /> {t("model.backTo", { name: railInstance.displayName })}
+                    <ChevronLeft size={13} /> {t("model.backTo", { name: engineDisplayName(railInstance) })}
                   </button>
                 )}
 

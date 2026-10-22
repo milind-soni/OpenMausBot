@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Loader2, MoreHorizontal, Plus } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { engineDisplayName } from "@/lib/engine-name";
 import { cn } from "@/lib/cn";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -113,7 +114,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
         {t("accounts.remove")}
       </button>}
       <button type="button" onClick={() => setOpen((value) => !value)} disabled={busy} aria-haspopup="menu" aria-expanded={open}
-        aria-label={t("accounts.menu", { name: instance.displayName })}
+        aria-label={t("accounts.menu", { name: engineDisplayName(instance) })}
         className="flex size-8 items-center justify-center rounded-lg text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50">
         {busy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={16} />}
       </button>
@@ -127,7 +128,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
       {error && <p role="alert" className="absolute right-0 top-full z-30 mt-1 w-[260px] rounded-lg bg-card p-2 text-[11.5px] text-danger shadow-lg">{error}</p>}
       <ConfirmDialog
         open={confirm === "signOut"}
-        title={t("accounts.signOutTitle", { name: instance.displayName })}
+        title={t("accounts.signOutTitle", { name: engineDisplayName(instance) })}
         body={t("accounts.signOutBody")}
         confirmLabel={t("accounts.signOut")}
         onCancel={() => setConfirm(null)}
@@ -135,7 +136,7 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
       />
       <ConfirmDialog
         open={confirm === "remove"}
-        title={t("accounts.removeTitle", { name: instance.displayName })}
+        title={t("accounts.removeTitle", { name: engineDisplayName(instance) })}
         body={t(COPY[group].removeBody)}
         confirmLabel={t("accounts.remove")}
         tone="neutral"
@@ -148,12 +149,12 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
 
 function RenameForm({ instance, onDone }: { instance: InstanceInfo; onDone: () => void }) {
   const { dispatch } = useStore();
-  const [name, setName] = useState(instance.displayName);
+  const [name, setName] = useState(engineDisplayName(instance));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const save = async () => {
     const next = name.trim();
-    if (!next || next === instance.displayName) return onDone();
+    if (!next || next === engineDisplayName(instance)) return onDone();
     setSaving(true);
     setError(null);
     try {
@@ -211,7 +212,7 @@ function AccountRow({ group, instance, signingIn, onSignIn, onSignInDone }: {
         {renaming ? <RenameForm instance={instance} onDone={() => setRenaming(false)} /> : (
           <>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-medium text-ink" title={instance.displayName}>{instance.displayName}</div>
+              <div className="truncate text-[13px] font-medium text-ink" title={engineDisplayName(instance)}>{engineDisplayName(instance)}</div>
               <div className="truncate text-[12px] text-ink-secondary" title={detail}>{detail}</div>
             </div>
             {state !== "signedIn" && state !== "unavailable" && !blocked && !signingIn && (

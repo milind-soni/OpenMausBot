@@ -1,9 +1,10 @@
 import { composioActionPhrase } from "@/lib/approval-summary";
+import { activityText, isNoticeCode } from "@/lib/activity-text";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import type { Message } from "@/state/store";
 
-type StepTool = Pick<NonNullable<Message["tool"]>, "name" | "summary">;
+type StepTool = Pick<NonNullable<Message["tool"]>, "name" | "summary" | "nameCode" | "nameParams">;
 
 const STEP_KEYS: Record<string, LocaleKey> = {
   bash: "toolStep.runCommand",
@@ -61,6 +62,7 @@ export function toolStepLabel(tool: StepTool): string {
   const { name } = tool;
   // Codex and ACP title a command's chip with the command line; only a command carries a summary.
   if (tool.summary) return t("toolStep.runCommand");
+  if (isNoticeCode(tool.nameCode)) return activityText(tool, name);
   if (/\s/.test(name)) return name;
   const bare = name.replace(/^mcp__.+?__(?=.)/, "");
   if (/(?:^|_)browser_/i.test(bare)) return t("toolStep.useBrowser");

@@ -29,6 +29,7 @@ import { parseConnectorTools } from "../connector-tools.ts";
 import { sectionKey, type BotRecord, type GroupRecord, type Store } from "../store.ts";
 import * as vps from "../vps-computer.ts";
 import { vpsSshAliasForBot } from "../vps-hosts.ts";
+import { refusalBody } from "../user-errors.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -149,11 +150,11 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           movedTask ? { selection: movedTask.modelSelection, busy: threadBusy(movedTask.id, movedTask.threadId) } : undefined,
           body.requireAvailableModel === true,
         );
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         normalizedSelection = checked.selection;
         if (existingBot && activeGroupTurnForBot(existingBot.id)) {
           const groupChecked = checkedModelSelection(normalizedSelection, { selection: existingBot.modelSelection, busy: true });
-          if (!groupChecked.ok) return json(res, groupChecked.status, { error: groupChecked.error });
+          if (!groupChecked.ok) return json(res, groupChecked.status, refusalBody(groupChecked));
         }
       }
       const profile = parseBotProfilePatch(body);
@@ -669,10 +670,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         const current = store.projectBotForTask(movedTask.id, movedTask.threadId);
         if (!current) return json(res, 404, { error: "no such task" });
         const checked = checkedModelSelection(normalizedSelection, { selection: current.modelSelection, busy: threadBusy(current.id, current.threadId) });
-        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        if (!checked.ok) return json(res, checked.status, refusalBody(checked));
         if (freshBrowserBot && activeGroupTurnForBot(freshBrowserBot.id)) {
           const groupChecked = checkedModelSelection(normalizedSelection, { selection: freshBrowserBot.modelSelection, busy: true });
-          if (!groupChecked.ok) return json(res, groupChecked.status, { error: groupChecked.error });
+          if (!groupChecked.ok) return json(res, groupChecked.status, refusalBody(groupChecked));
         }
       }
       if (freshBrowserBot && body.browserProfile !== undefined &&

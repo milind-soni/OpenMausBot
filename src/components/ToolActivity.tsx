@@ -7,6 +7,7 @@ import { placeLabelKey, type Place } from "@/lib/place";
 import { nameIsCommand } from "@/lib/verify-steps";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { toolStepLabel } from "@/lib/tool-step-label";
+import { isNoticeCode } from "@/lib/activity-text";
 import { PlaceIcon } from "./PlaceIcon";
 import { WorkingDots } from "./WorkingIndicator";
 
@@ -14,7 +15,8 @@ export function ToolActivity({ tool, place = null }: { tool: NonNullable<Message
   const [expanded, setExpanded] = useState(false);
   const failed = tool.ok === false;
   const advanced = useAdvancedMode();
-  const label = advanced ? tool.name : toolStepLabel(tool);
+  const notice = isNoticeCode(tool.nameCode);
+  const label = advanced && !notice ? tool.name : toolStepLabel(tool);
   const status = tool.ok === undefined ? t("toolDetail.running") : failed ? t("toolDetail.failed") : t("toolDetail.completed");
   return (
     <details onToggle={(event) => setExpanded(event.currentTarget.open)} className="group/tool w-fit max-w-full rounded-xl border border-hairline/40 bg-panel text-[13px] open:w-[min(38rem,100%)]" data-testid="tool-activity">
@@ -26,19 +28,19 @@ export function ToolActivity({ tool, place = null }: { tool: NonNullable<Message
       >
         <span className="shrink-0" aria-hidden="true">{tool.ok === undefined ? <WorkingDots size={3.5} /> : failed ? <X size={13} /> : <Check size={13} className="text-success" />}</span>
         {place && <PlaceIcon place={place} size={13} className="shrink-0 opacity-70" role="img" aria-label={t(placeLabelKey(place))} data-testid="tool-place" />}
-        <span className={cn("min-w-0 max-w-[30rem] truncate leading-5", advanced ? "font-mono" : "font-medium")}>{label}</span>
+        <span className={cn("min-w-0 max-w-[30rem] truncate leading-5", advanced && !notice ? "font-mono" : "font-medium")}>{label}</span>
         {advanced && tool.summary && tool.summary !== tool.name && !nameIsCommand(tool.name) && <span className="min-w-0 flex-1 truncate font-mono" title={tool.summary}>{tool.summary}</span>}
         <ChevronRight size={13} className="ml-auto shrink-0 group-open/tool:rotate-90" aria-hidden="true" />
       </summary>
       <div className="space-y-3 border-t border-hairline/40 p-3 text-ink-secondary">
         <div className={cn("text-[11px] font-medium", failed && "text-danger")}>{status}</div>
-        {label !== tool.name && <div>
+        {label !== tool.name && !notice && <div>
           <div className="mb-1 text-[11px] font-medium">{t("toolDetail.tool")}</div>
           <p dir="ltr" className="break-words font-mono text-xs text-ink" data-testid="tool-name">{tool.name}</p>
         </div>}
         <div>
           <div className="mb-1 text-[11px] font-medium">{t("toolDetail.input")}</div>
-          <pre dir="ltr" className="max-h-52 overflow-auto rounded-lg bg-inset p-2.5 font-mono text-xs whitespace-pre-wrap break-words text-ink">{tool.input ?? tool.summary ?? tool.name}</pre>
+          <pre dir="ltr" className="max-h-52 overflow-auto rounded-lg bg-inset p-2.5 font-mono text-xs whitespace-pre-wrap break-words text-ink">{tool.input ?? tool.summary ?? (notice ? label : tool.name)}</pre>
         </div>
         <div>
           <div className="mb-1 text-[11px] font-medium">{t("toolDetail.output")}</div>

@@ -3,6 +3,7 @@
 // its state, so the app words it again in the reader's language; the words
 // stay English and whole for the phones, which read only them.
 import type { PlaceRow } from "./place-view.ts";
+import type { ServerText, ServerTextParams } from "./server-text.ts";
 
 const MARKER = "error:";
 
@@ -23,12 +24,16 @@ export interface FailedTurnTool {
   place?: PlaceRow;
   /** epoch ms when the usage limit that stopped this turn resets, when the engine said */
   limitResetsAt?: number;
+  /** Catalog key for the cause, when it is one of the server's fixed notices; `name` keeps the English. */
+  nameCode?: string;
+  /** Values for the placeholders of `nameCode`. */
+  nameParams?: ServerTextParams;
 }
 
 /** The activity row a failed turn is stored as. */
 export function failedTurnTool(
   cause: string,
-  flags: { setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; place?: PlaceRow; limitResetsAt?: number } = {},
+  flags: { setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; place?: PlaceRow; limitResetsAt?: number; text?: ServerText } = {},
 ): FailedTurnTool {
   const words = cause.length > FAILED_TURN_MAX_CHARS ? `${cause.slice(0, FAILED_TURN_MAX_CHARS - 1)}…` : cause;
   return {
@@ -39,6 +44,7 @@ export function failedTurnTool(
     ...(flags.claudeUpdate ? { claudeUpdate: true } : {}),
     ...(flags.place ? { place: flags.place } : {}),
     ...(flags.limitResetsAt ? { limitResetsAt: flags.limitResetsAt } : {}),
+    ...(flags.text ? { nameCode: flags.text.key, ...(flags.text.params ? { nameParams: flags.text.params } : {}) } : {}),
   };
 }
 

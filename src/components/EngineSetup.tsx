@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Copy, Download, ExternalLink, KeyRound, Loader2, 
 import { api, type EngineInstall, type InstanceInfo, useStore } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { engineDisplayName } from "@/lib/engine-name";
 import { copyText } from "@/lib/copy-text";
 import { DEVICE_SIGN_IN_COPY, DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ClaudeSignIn } from "./ClaudeSignIn";
@@ -197,7 +198,7 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
         {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
         {busy
           ? t("engineSetup.serverInstalling")
-          : t(mode === "update" ? "engineSetup.serverUpdate" : "engineSetup.serverInstall", { name: instance.displayName })}
+          : t(mode === "update" ? "engineSetup.serverUpdate" : "engineSetup.serverInstall", { name: engineDisplayName(instance) })}
       </button>
       {done && !busy && <p role="status" className="text-center text-[11px] text-success">{t("engineSetup.installVerified")}</p>}
       {error && <p role="alert" className="whitespace-pre-wrap text-[11.5px] leading-relaxed text-danger">{error}</p>}
@@ -442,7 +443,7 @@ function ApiKeyEngineSetup({ instance, className, unframed, configured = false }
           <KeyRound size={14} />
         </span>
         <div className="min-w-0">
-          <div className="text-[13px] font-semibold text-ink">{t(copy.title, { name: instance.displayName })}</div>
+          <div className="text-[13px] font-semibold text-ink">{t(copy.title, { name: engineDisplayName(instance) })}</div>
           <p className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t(copy.description)}</p>
         </div>
       </div>
@@ -493,8 +494,8 @@ export function EngineSetup({
   const provider = deviceSignInProvider(instance.driverKind);
   const command = signInOnly ? signInCommand : installCommand;
   const title = signInOnly
-    ? t("engineSetup.signInTitle", { name: instance.displayName })
-    : t("engineSetup.setupTitle", { name: instance.displayName });
+    ? t("engineSetup.signInTitle", { name: engineDisplayName(instance) })
+    : t("engineSetup.setupTitle", { name: engineDisplayName(instance) });
   const description = descriptionOverride ?? (signInOnly
     ? browserSignIn
       ? t("engineSetup.chatgpt.description")
@@ -526,7 +527,7 @@ export function EngineSetup({
   if (!install || instance.snapshot.authenticationUnavailableReason) {
     return (
       <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
-        <div className="text-[13px] font-semibold text-ink">{t("engineSetup.notReady", { name: instance.displayName })}</div>
+        <div className="text-[13px] font-semibold text-ink">{t("engineSetup.notReady", { name: engineDisplayName(instance) })}</div>
         <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
           {instance.snapshot.authenticationUnavailableReason ?? instance.snapshot.reason ?? t("engineSetup.noReason")}
         </p>

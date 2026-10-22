@@ -1,5 +1,6 @@
-import type { Notification, NotifyKind } from "../shared/notification.ts";
+import { NOTIFY_IN_ROOM_KEY, NOTIFY_TITLE_KEY, type Notification, type NotifyKind } from "../shared/notification.ts";
 import { personMentionExcerpt } from "../shared/person-mention.ts";
+import { formatServerText } from "../shared/server-text.ts";
 
 export type { Notification, NotifyKind } from "../shared/notification.ts";
 
@@ -23,6 +24,20 @@ export function buildSpendNotification(
   return { kind: "spend", botId: bot.id, botName: bot.name, threadId, title: text.title, body: summarize(text.body, 200) };
 }
 
+/** The client words each title by key and falls back to this English, which the server keeps sending for older clients. */
+export const NOTIFICATION_TITLE = {
+  "notifications.banner.approval": "{who} needs approval",
+  "notifications.banner.question": "{who} has a question",
+  "notifications.banner.done": "{who} finished",
+  "notifications.banner.mention": "{who} mentioned you",
+  "notifications.banner.turnFailed": "{who} couldn't start",
+  "notifications.banner.routineFailed": "{who}'s routine failed",
+  "notifications.banner.routineDeferred": "{who}'s routine is waiting",
+  "notifications.banner.incident": "{who} hit a problem",
+  "notifications.banner.delegationSettled": "{who} resumed with results",
+  "notifications.banner.inRoom": "{name} in {room}",
+} as const;
+
 export function buildNotification(
   kind: NotifyKind,
   bot: NotifyBot,
@@ -33,27 +48,12 @@ export function buildNotification(
   if (bot.notifications === false) return null;
 
   const body = summarize(detail);
-  const who = extra?.group ? `${bot.name} in ${extra.group.name}` : bot.name;
-  const title =
-    kind === "approval"
-      ? `${who} needs approval`
-      : kind === "question"
-        ? `${who} has a question`
-        : kind === "sign-in"
-          ? `${who} needs you to sign in to ${extra?.site ?? "a website"}`
-          : kind === "routine-failed"
-            ? `${who}'s routine failed`
-            : kind === "routine-deferred"
-              ? `${who}'s routine is waiting`
-            : kind === "turn-failed"
-              ? `${who} couldn't start`
-              : kind === "incident"
-                ? `${who} hit a problem`
-                : kind === "delegation-settled"
-                  ? `${who} resumed with results`
-                  : kind === "mention"
-                    ? `${who} mentioned you`
-                    : `${who} finished`;
+  const who = extra?.group
+    ? formatServerText(NOTIFICATION_TITLE[NOTIFY_IN_ROOM_KEY], { name: bot.name, room: extra.group.name })
+    : bot.name;
+  const title = kind === "sign-in"
+    ? `${who} needs you to sign in to ${extra?.site ?? "a website"}`
+    : formatServerText(NOTIFICATION_TITLE[kind === "spend" ? NOTIFY_TITLE_KEY.done : NOTIFY_TITLE_KEY[kind]], { who });
 
   if ((kind === "done" || kind === "mention") && !body) return null;
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { setLocale } from "./i18n";
 import { toolStepLabel } from "./tool-step-label";
 
 describe("toolStepLabel", () => {
@@ -27,5 +28,19 @@ describe("toolStepLabel", () => {
   it("keeps a line the server already wrote in words", () => {
     expect(toolStepLabel({ name: "Messaged @Ada" })).toBe("Messaged @Ada");
     expect(toolStepLabel({ name: "Send failed — the sending bot no longer exists" })).toBe("Send failed — the sending bot no longer exists");
+  });
+});
+
+describe("a server notice on a step", () => {
+  const answered = { name: "Answer passed to the waiting work", nameCode: "chat.notice.answerPassed" };
+  it("is worded in the person's language with its code, and stays English without one", () => {
+    setLocale("pt-br");
+    try {
+      expect(toolStepLabel(answered)).toBe("Resposta entregue ao trabalho que estava esperando");
+      expect(toolStepLabel({ name: answered.name })).toBe(answered.name);
+      expect(toolStepLabel({ name: "Answer passed", nameCode: "toolStep.runCommand" })).toBe("Answer passed");
+    } finally {
+      setLocale("en");
+    }
   });
 });

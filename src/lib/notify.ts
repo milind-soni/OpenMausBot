@@ -1,4 +1,5 @@
-import type { Notification } from "../../shared/notification";
+import { NOTIFY_IN_ROOM_KEY, NOTIFY_TITLE_KEY, type Notification } from "../../shared/notification";
+import { t } from "./i18n";
 import { finishedNotificationsEnabled, notificationSoundsEnabled } from "./notification-preferences";
 
 export type NotifyFrame = Notification;
@@ -30,11 +31,28 @@ export function buildNotificationOptions(bot: NotificationBotIdentity): Notifica
   return { tag: `openmausbot:${bot.id}`, icon: bot.avatarUrl ?? undefined };
 }
 
+export interface NotificationRoom {
+  id: string;
+  name: string;
+}
+
+export function notificationTitle(
+  entry: Pick<Notification, "kind" | "botName" | "groupId" | "title">,
+  groups: readonly NotificationRoom[],
+): string {
+  const key = Object.hasOwn(NOTIFY_TITLE_KEY, entry.kind) ? NOTIFY_TITLE_KEY[entry.kind as keyof typeof NOTIFY_TITLE_KEY] : undefined;
+  if (!key) return entry.title;
+  if (!entry.groupId) return t(key, { who: entry.botName });
+  const room = groups.find((group) => group.id === entry.groupId);
+  return room ? t(key, { who: t(NOTIFY_IN_ROOM_KEY, { name: entry.botName, room: room.name }) }) : entry.title;
+}
+
 export function showNotification(
   frame: NotifyFrame,
   onOpen: (target: NotificationTarget) => void,
   avatarUrl?: string | null,
   visibleThreadId?: string | null,
+  groups: readonly NotificationRoom[] = [],
 ) {
   if (typeof Notification === "undefined") return;
   if (frame.kind === "done" && !finishedNotificationsEnabled()) return;
@@ -53,6 +71,7 @@ export function showNotification(
       ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
       ...(notificationSoundsEnabled() ? {} : { silent: true }),
     };
-    new Notification(placeName ? `${placeName} · ${frame.title}` : frame.title, options).onclick = open;
+    const title = notificationTitle(frame, groups);
+    new Notification(placeName ? `${placeName} · ${title}` : title, options).onclick = open;
   }
 }

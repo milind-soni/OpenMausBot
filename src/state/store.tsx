@@ -57,7 +57,7 @@ import { showNotification } from "@/lib/notify";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { speaker } from "@/lib/tts";
 import { roleProfilePatch, type BotRole } from "@/lib/bot-roles";
-import { t } from "@/lib/i18n";
+import { intlLocale, t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import { useChatErrorClear } from "./chat-error";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
@@ -144,7 +144,7 @@ export interface Message extends Pick<import("../../shared/wire").WireMessage, "
   goalRun?: GroupGoalRunCardData;
   call?: import("../../shared/wire").LiveCallRecord;
   channelMode?: "chat" | "goal";
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; claudeUpdate?: boolean; place?: PlaceRow; limitResetsAt?: number; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean };
+  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; claudeUpdate?: boolean; place?: PlaceRow; limitResetsAt?: number; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean; nameCode?: string; nameParams?: Record<string, string | number> };
   steered?: boolean;
   via?: "api" | "call";
   callId?: string;
@@ -2103,7 +2103,7 @@ export async function persistTaskApproval(
 ): Promise<BotAnnouncement> {
   const { approvalMode, autoApprove, acknowledgeLocalAuto, ...ordinary } = patch;
   const mode = approvalMode ?? (autoApprove === undefined ? undefined : autoApprove ? "auto" : "ask");
-  if (mode === "custom" && !bridge) throw new Error("This approval change requires the packaged desktop app");
+  if (mode === "custom" && !bridge) throw new Error(t("approvalMode.needsDesktopApp"));
   if (mode && bridge) {
     if (Object.keys(ordinary).length) await request(`/api/bots/${botId}/tasks/${threadId}`, { method: "PATCH", body: JSON.stringify(ordinary) });
     return bridge.setMode(botId, mode, { threadId, threadOnly: true, acknowledgeLocalAuto: acknowledgeLocalAuto === true });
@@ -2148,7 +2148,7 @@ export async function persistBotUpdate(
   }
 
   if (!trustedApprovals || approvalMode === undefined) {
-    throw new Error("This approval-level change requires the packaged desktop app");
+    throw new Error(t("approvalMode.levelNeedsDesktopApp"));
   }
 
   const trustedOptions = {
@@ -2163,11 +2163,10 @@ export async function persistBotUpdate(
       try {
         await trustedApprovals.setMode(botId, "ask", { acknowledgeLocalAuto: false, ...(applyToAllThreads ? { allThreads: true } : {}) });
       } catch (error) {
-        throw new Error(
-          `The cancelled ${approvalMode === "full" ? "Full access" : "Custom approval"} grant could not be revoked: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+        throw new Error(t("approvalMode.revokeFailed", {
+          mode: t(approvalMode === "full" ? "approvalMode.full.label" : "approvalMode.custom.name"),
+          error: error instanceof Error ? error.message : String(error),
+        }));
       }
     }
     throw new DOMException("The bot update was cancelled", "AbortError");
@@ -2357,7 +2356,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           persisted.modelSelection.effort !== expectedSelection.effort ||
           persisted.modelSelection.variant !== expectedSelection.variant
         ) {
-          throw new Error("The approval level, memory setting, or model could not be saved, so this work was not started");
+          throw new Error(t("approvalMode.settingsNotSaved"));
         }
       })]);
       if (threadId) await taskWrites.get(threadId)?.execution;
@@ -2932,7 +2931,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const bot = stateRef.current.bots.find((candidate) => candidate.id === action.botId);
           const task = bot?.tasks?.find((candidate) => candidate.threadId === action.threadId);
           if (!bot || !task) {
-            showError(new Error("That thread is no longer available"));
+            showError(new Error(t("task.threadGone")));
             break;
           }
           const mode = approvalModeFor(bot);
@@ -2945,7 +2944,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               ? bridge.setMode(action.botId, mode, {
                 threadId: action.threadId, threadOnly: true, refreshPermissions: true, acknowledgeLocalAuto,
               })
-              : Promise.reject(new Error("This approval change requires the packaged desktop app"))
+              : Promise.reject(new Error(t("approvalMode.needsDesktopApp")))
             : api<{ bot: BotAnnouncement }>(`/api/bots/${action.botId}/tasks/${action.threadId}`, {
               method: "PATCH",
               body: JSON.stringify({ refreshPermissions: true, ...(acknowledgeLocalAuto ? { acknowledgeLocalAuto: true } : {}) }),
@@ -3354,6 +3353,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             (target) => openNotificationTarget(dispatch, target, stateRef.current, showThreadsRef.current),
             stateRef.current.bots.find((bot) => bot.id === frame.notification.botId)?.avatarUrl,
             visibleNotificationThread(stateRef.current),
+            stateRef.current.groups,
           );
           rawDispatch({ type: "notificationReceived", entry: frame.notification });
           break;
@@ -3516,10 +3516,13 @@ export function BotEditorStore({ value, children }: { value: ReturnType<typeof u
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
-const TIME_FORMAT = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+let timeFormat: { locale: string; clock: Intl.DateTimeFormat } | undefined;
 
 export function formatTime(at: number) {
   const date = new Date(at);
   // toLocaleTimeString's output, where Intl.DateTimeFormat.format would throw
-  return Number.isNaN(date.getTime()) ? "Invalid Date" : TIME_FORMAT.format(date);
+  if (Number.isNaN(date.getTime())) return "Invalid Date";
+  const locale = intlLocale();
+  if (timeFormat?.locale !== locale) timeFormat = { locale, clock: new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }) };
+  return timeFormat.clock.format(date);
 }

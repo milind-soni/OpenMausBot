@@ -170,6 +170,19 @@ test("a check that still fails after three passes lifts the freeze and tries aga
   assert.ok(failing.passes.length > 25, "Try again goes now, not at the next hourly try");
 });
 
+test("a refusal My Cloud named by a serverError key reaches the failing line with that key beside its English", async () => {
+  const named = () => Object.assign(new Error("Nothing personal comes into Acme."), { errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" } });
+  const w = world({ moves: Array.from({ length: 40 }, named) });
+  await w.home.kick();
+  for (let hour = 0; hour < 25; hour++) { w.advance(FROZEN_RETRY_MS); await w.tick(); }
+  assert.deepEqual(w.home.view().failing, { error: "Nothing personal comes into Acme.", errorKey: "serverError.team.personalMove", errorParams: { team: "Acme" } });
+
+  const other = world({ moves: Array.from({ length: 40 }, () => Object.assign(new Error("No."), { errorKey: "cloudHome.connect" })) });
+  await other.home.kick();
+  for (let hour = 0; hour < 25; hour++) { other.advance(FROZEN_RETRY_MS); await other.tick(); }
+  assert.deepEqual(other.home.view().failing, { error: "No." }, "no key but a serverError one is kept");
+});
+
 test("an app killed at any phase goes on from the journal: nothing is switched on twice, and nothing is lifted after the switch", async () => {
   for (const at of ["copy", "wait", "freeze", "final", "check", "switch"]) {
     const w = world();

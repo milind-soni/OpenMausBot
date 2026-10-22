@@ -91,6 +91,9 @@ import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
 import { applyHoldDirective, classifyHoldDirective, heldMemberLine, rememberHeldMessage, stopWordPlacement } from "./room-holds.ts";
+import { refusalBody, userError, userErrorFields } from "./user-errors.ts";
+import { chatNotice, failedNoticeTool, noticeTool } from "./chat-notices.ts";
+import type { ServerErrorBody } from "../shared/server-text.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 import { pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts";
@@ -282,7 +285,7 @@ import { botBox, startBotBoxAtBoot } from "./bot-box/boot.ts";
 import { createCloudSignedHost } from "./host/cloud-signed-host.ts";
 import { createCloudPower, registerCloudPower, wokeFromSleep, type CloudPower } from "./cloud-power.ts"; import { createSharedComputerRoutes } from "./routes/shared-computers.ts";
 import { noteSyncBotTurn } from "./routes/cloud-sync.ts";
-import { CLOUD_PERSONAL_REFUSAL, type CloudOwnership } from "./cloud-owner.ts"; import { memberLoginRefusal, personalMoveRefusal } from "./cloud-team.ts"; import { createCloudTeamHost } from "./host/cloud-team-host.ts"; import { createMeRoutes } from "./routes/me.ts"; import { settleCloudHome } from "./cloud-home-settle.ts"; import { CLOUD_OUTSIDE_KEY, outsideDriven } from "./cloud-sharing.ts";
+import { type CloudOwnership } from "./cloud-owner.ts"; import { memberLoginRefusal, personalMoveRefusal } from "./cloud-team.ts"; import { createCloudTeamHost } from "./host/cloud-team-host.ts"; import { createMeRoutes } from "./routes/me.ts"; import { settleCloudHome } from "./cloud-home-settle.ts"; import { CLOUD_OUTSIDE_KEY, outsideDriven } from "./cloud-sharing.ts";
 import { createCloudMoveRoutes } from "./cloud-move-http.ts";
 import { RESTART_EXIT_CODE } from "./restart.ts";
 import { applyIncludedXMessage, holdIncludedServices, researchCredential, trialCreditCredential, xResearchStatus } from "./included-services.ts";
@@ -697,7 +700,7 @@ const CLOUD_ENV: NodeJS.ProcessEnv = { ...process.env, ...CLOUD_SECRETS };
 const CLOUD_HOME = cloudHomeConfiguration(CLOUD_ENV);
 const CLOUD_TEAM = CLOUD_HOME?.team ?? null, CLOUD_PERSONAL = CLOUD_HOME !== null && CLOUD_TEAM === null, TEAM_LABEL = CLOUD_TEAM ? { label: CLOUD_TEAM.name } : {};
 if (CLOUD_HOME) repairMovedWorkspacePaths(DATA_DIR);
-if (CLOUD_PERSONAL) sessions.requireAdmin(CLOUD_PERSONAL_REFUSAL);
+if (CLOUD_PERSONAL) sessions.requireAdmin(userError("serverError.cloud.personal"));
 const lendingEnabled = () => sharedComputersEnabled(cfg) || CLOUD_HOME !== null;
 const CLOUD_HOME_LENDER = "cloud-home";
 /** Owner-written routines and owner-started runs: the only routine turns that may use a lent Mac. */
@@ -2875,7 +2878,7 @@ function checkedModelSelection(
   raw: unknown,
   current?: { selection: ModelSelection; busy: boolean },
   requireAvailableModel = false,
-): { ok: true; selection: ModelSelection } | { ok: false; status: number; error: string } {
+): { ok: true; selection: ModelSelection } | ({ ok: false; status: number } & ServerErrorBody) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return { ok: false, status: 400, error: "modelSelection must be an object" };
   }
@@ -2913,11 +2916,11 @@ function checkedModelSelection(
     selection.variant !== current.selection.variant
   );
   if (current?.busy && changed) {
-    return { ok: false, status: 409, error: "the bot is working — stop it before changing models" };
+    return { ok: false, status: 409, ...userError("serverError.model.botBusy") };
   }
   const target = registry.get(selection.instanceId);
   if (providerInstancesChanging.has(selection.instanceId)) {
-    return { ok: false, status: 409, error: "this provider account is being updated — try again shortly" };
+    return { ok: false, status: 409, ...userError("serverError.model.accountUpdating") };
   }
     // Free-form model ids: custom engines accept ids outside their catalog, and some drivers learn the catalog only at turn start.
   if (requireAvailableModel) {
@@ -4221,7 +4224,7 @@ function runRoomRootTurn(node: HandoffView, group: GroupRecord, bot: BotRecord, 
     return Promise.resolve({ ok: false, text: "The goal run this step belonged to ended with the restart." });
   }
   if (composed.turn === "rerun") {
-    store.appendMessage(node.threadId, { role: "bot", kind: "activity", from: { botId: bot.id, name: bot.name, color: bot.color }, tool: { name: "Resuming after a restart", ok: true } });
+    store.appendMessage(node.threadId, { role: "bot", kind: "activity", from: { botId: bot.id, name: bot.name, color: bot.color }, tool: noticeTool("chat.notice.resumingAfterRestart", undefined, { ok: true }) });
   }
   parkedSeats.delete(node.id);
   return runRoomNode(node, group, bot, signal, undefined, (operation, result, coordination) =>
@@ -4231,7 +4234,7 @@ function runRoomRootTurn(node: HandoffView, group: GroupRecord, bot: BotRecord, 
 }
 
 function runRootTurn(node: HandoffView, bot: BotRecord, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult> {
-  if (composed.turn === "rerun") store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "Resuming after a restart", ok: true } });
+  if (composed.turn === "rerun") store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: noticeTool("chat.notice.resumingAfterRestart", undefined, { ok: true }) });
   parkedSeats.delete(node.id);
   const owner = directRequestOwners.get(node.threadId);
   const ownRequest = owner && !owner.stopped && owner.generations.has(node.id) ? owner : undefined;
@@ -4402,11 +4405,11 @@ const coordinator: Coordinator = createCoordinator({
         }
       if (!node.parentId && !quiet) reviewAnswerThreads.add(node.threadId);
       } else if (node.restart === "rerun" && !group) {
-        store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: { name: "Resuming after a restart", ok: true } });
+        store.appendMessage(node.threadId, { role: "bot", kind: "activity", tool: noticeTool("chat.notice.resumingAfterRestart", undefined, { ok: true }) });
       }
       if (node.restart === "rerun" && !group && parent && !parent.groupId) store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: `${bot.name} was cut off by a restart; resuming`, ok: true },
+        tool: noticeTool("chat.notice.cutOffByRestart", { name: bot.name }, { ok: true }),
         threadRef: { botId: bot.id, threadId: node.threadId, title: store.taskByThread(bot.id, node.threadId)?.title ?? "Teammate work" } });
       if (sender && parent && isUnattended(sender.id, parent.threadId)) markUnattended(bot.id, node.threadId);
       if (!group) return new Promise<HostTurnResult>(resolve => {
@@ -4768,7 +4771,7 @@ function noteHeldSkip(groupId: string, threadId: string, bot: BotRecord, message
     role: "bot",
     kind: "activity",
     from: { botId: bot.id, name: bot.name, color: bot.color },
-    tool: { name: heldMemberLine(bot.name), ok: false },
+    tool: noticeTool("chat.notice.roomHeld", { name: bot.name }, { ok: false }),
   });
 }
 
@@ -5462,7 +5465,8 @@ const turnUsage = new Map<string, { input: number; output: number; cachedInput?:
 const turnContext = new Map<string, { tokens?: number; window?: number }>();
 
 const TURN_STALL_MS = Math.max(60_000, Number(process.env.OMB_TURN_STALL_MS) || 20 * 60_000);
-const STALL_CAUSE = `no activity for ${Math.round(TURN_STALL_MS / 60_000)} minutes — the turn was stopped`;
+const STALL_MINUTES = Math.round(TURN_STALL_MS / 60_000);
+const STALL_CAUSE = chatNotice("chat.notice.stalled", { minutes: STALL_MINUTES });
 const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
 const COMPUTER_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_COMPUTER_WAIT_MAX_MS) || 30 * 60_000);
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
@@ -5500,7 +5504,7 @@ const watchdog = new TurnWatchdog({
     store.appendMessage(turn.threadId, {
       role: "bot",
       kind: "activity",
-      tool: failedTurnTool(cause),
+      tool: cause === STALL_CAUSE ? failedNoticeTool("chat.notice.stalled", { minutes: STALL_MINUTES }) : failedTurnTool(cause),
     });
     if (bot && routineRun?.target !== "bot") {
       reportIncident({ kind: "stalled", bot, threadId: turn.threadId, detail: cause });
@@ -8274,7 +8278,7 @@ async function startTurn(
   const personLine = !opts?.coordination && !opts?.cardContinuation && !opts?.automationSource && !opts?.compactOnly
     && !opts?.computerSelectionContinuation && !opts?.editedMessageId && !commsDepth && !opts?.peerAsk && !userMessage.peerAsk;
   if (personLine && coordinator.answer(threadId, text)) {
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Answer passed to the waiting work", ok: true } });
+    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: noticeTool("chat.notice.answerPassed", undefined, { ok: true }) });
     opts?.onTurnSettled?.();
     queueMicrotask(drainQueuedSends);
     return userMessage;
@@ -13284,7 +13288,7 @@ ROUTES.push(createBotMemoryRoutes({
   },
 }));
 const teamMoveIn = CLOUD_TEAM ? createTeamMoveIn({ team: CLOUD_TEAM, dataDir: DATA_DIR, sessions, store, routines: () => routines, library: () => readSkillLibraryIndex(), starters: threadStarters }) : null; const cloudSendOwner = (auth: RequestAuth) => teamMoveIn ? teamMoveIn.owner(auth) : CLOUD_HOME && auth.kind === "session" && auth.scopes.includes("admin") ? { person: actorKey(auth), name: cfg.profile?.name?.trim() || "User" } : null; const botMoves = CLOUD_PERSONAL ? createBotMoves({ store, routines: () => routines, webhooks: () => webhooks, appEvents: () => appTriggers.manager, busy: (id) => botHasActiveTurn(id) || Boolean(routines?.activeRunForBot(id)) }) : null; ROUTES.push(createBotMoveRoutes({ moves: botMoves, enabled: CLOUD_PERSONAL })); if (teamMoveIn) { ROUTES.unshift(teamMoveIn.guard); ROUTES.push(teamMoveIn.routes); } ROUTES.push(createDeciderRoutes({ decider, config: () => cfg }), createNotificationRoutes(), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }), createTimeZoneRoutes({ adopts: Boolean(CLOUD_HOME), dataDir: DATA_DIR, changed: () => routines?.rescheduleLocalTimes() }), createCloudSendRoutes({ appVersion: serverVersion(), ...(CLOUD_TEAM ? { refusal: personalMoveRefusal(CLOUD_TEAM), scope: (auth) => teamMoveIn?.scope(auth) ?? null } : {}), bots: () => store.bots, messagesTail: (threadId, limit) => store.messagesTail(threadId, limit), skills: (bot) => listSkills(bot.id), logins, config: () => cfg, chats: { store, dataDir: DATA_DIR, owner: cloudSendOwner, ...(CLOUD_OWNER_KEY ? { ownerKey: CLOUD_OWNER_KEY } : {}), stamped: (threadId) => ownerOnlyCache.delete(threadId), instanceExists: (id) => Boolean(registry.get(id)), approvalSupported: (selection, mode) => supportsApprovalMode(selection, mode) }, cloudHome: Boolean(CLOUD_HOME), connections: () => cloudConnections.connections(), connectionFingerprints: (nonce) => cloudConnections.fingerprints(nonce), move: { dataDir: DATA_DIR, store, routines: () => routines, calls: () => calendarCalls, webhooks: () => webhooks, appEvents: () => appTriggers.manager, claudeCodeSkills: () => (claudeUserSkillsEnabled(cfg) ? claudeCodeSkillInputs() : []), instanceExists: (id) => Boolean(registry.get(id)), owner: cloudSendOwner, ownRoutine: (routine, person) => { cloudRoutineAuthors?.record(routine.id, routine); cloudRoutineAuthors?.wrote(routine.id, person); }, arrived: () => ownerOnlyCache.clear(), teamMemory, aboutMe: () => cfg.profile?.aboutMe ?? "", saveAboutMe: (text) => { saveConfig({ profile: { ...cfg.profile, aboutMe: text } }); Object.assign(cfg, loadConfig()); broadcast({ kind: "config", ...configStatus() }); } } }), cloudConnections.routes, createTodayRoutes({ visibleFor: (auth) => visibleTo(viewerFor(auth)), sources: () => ({ bots: store.bots, groups: store.groups, routines, parked: coordinator.active(), engines: registry.instances().map((instance) => ({ instanceId: instance.instanceId, snapshot: registry.lastSnapshot(instance.instanceId) })) }) }));
-ROUTES.push(createMeRoutes({ team: CLOUD_TEAM, people: teamHost.people, person: (auth) => (auth.kind === "session" ? actorKey(auth) : null) }), createSignInCardRoutes({ settle: settleSignIn, saveLogin: (botId, threadId, messageId, body, auth) => CLOUD_TEAM && !auth.scopes.includes("admin") ? Promise.resolve({ status: 403 as const, body: { error: memberLoginRefusal(CLOUD_TEAM) } }) : saveLoginFromCard(botId, threadId, messageId, body), saveTarget: signInSaveTarget, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId) }));
+ROUTES.push(createMeRoutes({ team: CLOUD_TEAM, people: teamHost.people, person: (auth) => (auth.kind === "session" ? actorKey(auth) : null) }), createSignInCardRoutes({ settle: settleSignIn, saveLogin: (botId, threadId, messageId, body, auth) => CLOUD_TEAM && !auth.scopes.includes("admin") ? Promise.resolve({ status: 403 as const, body: memberLoginRefusal(CLOUD_TEAM) }) : saveLoginFromCard(botId, threadId, messageId, body), saveTarget: signInSaveTarget, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId) }));
 ROUTES.push(createRoomHoldRoutes({
   group: (id) => store.group(id),
   setHold: (groupId, botId, held) => {
@@ -13686,23 +13690,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     // Never on a Cloud home: it is personal, and the owner's devices sign in through the Admin.
     if (CLOUD_HOME && method === "POST" && (path === "/api/auth/email/start" || path === "/api/auth/email/verify")) {
-      return json(res, 403, { error: CLOUD_PERSONAL_REFUSAL, code: "cloud_personal" });
+      return json(res, 403, { ...userError("serverError.cloud.personal"), code: "cloud_personal" });
     }
     if (method === "POST" && (path === "/api/auth/email/start" || path === "/api/auth/email/verify")) {
       if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
         return json(res, 415, { error: "send the sign-in request as JSON (content-type: application/json)" });
       }
-      if (!emailSignIn.enabled()) return json(res, 404, { error: "email sign-in is not set up on this server; use a pairing code" });
+      if (!emailSignIn.enabled()) return json(res, 404, userError("serverError.email.notSetUp"));
       const source = requestSource(req);
       const allowed = sessions.attemptAllowed(source);
-      if (!allowed.ok) return json(res, 429, { error: `too many failed sign-in attempts from your address; try again in ${Math.ceil(allowed.retryAfterMs / 1000)}s` });
+      if (!allowed.ok) return json(res, 429, userError("serverError.signIn.tooMany", { seconds: Math.ceil(allowed.retryAfterMs / 1000) }));
       const body = await readBody(req);
       const email = typeof body?.email === "string" ? body.email : "";
       if (path === "/api/auth/email/start") {
         const started = await emailSignIn.start(email);
         if (!started.ok) {
           if (started.status === 403) sessions.noteFailure(source);
-          return json(res, started.status, { error: started.error });
+          return json(res, started.status, refusalBody(started));
         }
         return json(res, 200, { ok: true });
       }
@@ -13712,7 +13716,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!verified.ok) {
         if (verified.status === 401 || verified.status === 403) sessions.noteFailure(source);
         console.warn(`email sign-in refused from ${source}: ${verified.error}`);
-        return json(res, verified.status, { error: verified.error });
+        return json(res, verified.status, refusalBody(verified));
       }
       sessions.clearFailures(source);
       const issued = sessions.issue({ label: label.trim() || labelFromUserAgent(req.headers["user-agent"]), scopes: verified.scopes, userId: verified.userId, email: verified.email });
@@ -13737,13 +13741,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (browser && body?.preview === true) {
         // Shown before the person continues; redeems nothing.
         const preview = sessions.previewBrowserSignIn(code);
-        return preview ? json(res, 200, preview) : json(res, 401, { error: "this sign-in link has expired or was already used" });
+        return preview ? json(res, 200, preview) : json(res, 401, userError("serverError.pair.linkExpired"));
       }
       if (browser && !wantsCookie) return json(res, 400, { error: "a browser sign-in sets this browser's cookie; send cookie: true" });
       const result = sessions.exchange({ code, label, attemptId, browser, source: requestSource(req), fallbackLabel: labelFromUserAgent(req.headers["user-agent"]) });
       if (!result.ok) {
         console.warn(`pairing refused from ${requestSource(req)}: ${result.error}`);
-        return json(res, result.status, { error: result.error });
+        return json(res, result.status, refusalBody(result));
       }
       const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: !CLOUD_HOME && emailSignIn.enabled(), sharedComputers: lendingEnabled(), cloudHome: Boolean(CLOUD_HOME) });
       if (wantsCookie) {
@@ -13767,7 +13771,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const paired = sessions.exchange({ code: credential, label, attemptId, source: requestSource(req), fallbackLabel: labelFromUserAgent(req.headers["user-agent"]) });
       if (!paired.ok) {
         console.warn(`pairing refused from ${requestSource(req)}: ${paired.error}`);
-        return json(res, paired.status, { error: paired.error });
+        return json(res, paired.status, refusalBody(paired));
       }
       // The shape the companion apps decode: token, device and serverName are required.
       return json(res, 200, {
@@ -13882,7 +13886,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       try {
         opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
       } catch (error) {
-        if ((error as { code?: unknown }).code === "cloud_personal") return json(res, 403, { error: (error as Error).message, code: "cloud_personal" });
+        if ((error as { code?: unknown }).code === "cloud_personal") return json(res, 403, { error: (error as Error).message, code: "cloud_personal", ...userErrorFields(error) });
         throw error;
       }
       const origin = requestOrigin(req);
@@ -15306,7 +15310,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           selection = await defaultSelection();
         } else {
           const checked = checkedModelSelection(body.modelSelection, undefined, true);
-          if (!checked.ok) return json(res, checked.status, { error: checked.error });
+          if (!checked.ok) return json(res, checked.status, refusalBody(checked));
           selection = checked.selection;
         }
         if (hostedModels && !hostedModels.allows(selection)) return json(res, 400, { error: hostedModels.error() });
@@ -16799,7 +16803,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     const candidateCode = (e as { code?: unknown })?.code;
     const code = typeof candidateCode === "string" && ["guarded_busy", "guarded_branch", "guarded_permissions", "guarded_request_changed", "guarded_request_untracked", "outside_workspace"].includes(candidateCode)
       ? candidateCode : undefined;
-    return json(res, status, { error: e instanceof Error ? e.message : String(e), ...(code ? { code } : {}) });
+    return json(res, status, { error: e instanceof Error ? e.message : String(e), ...(code ? { code } : {}), ...userErrorFields(e) });
   } finally {
     releaseWorkspaceRequest?.();
   }
@@ -16891,7 +16895,7 @@ for (const row of chatFollowups()) {
   if (!messages.some((message) => message.queueId === row.id && message.kind === "activity")) {
     store.appendMessage(row.threadId, {
       role: "bot", kind: "activity", queueId: row.id,
-      tool: { name: "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.", ok: false },
+      tool: noticeTool("chat.notice.followupInterrupted", undefined, { ok: false }),
     });
   }
   settleChatFollowups([row.id], null);
@@ -16949,7 +16953,7 @@ function noteTurnsCutByShutdown(): void {
   for (const bot of store.bots) {
     for (const task of store.tasks(bot.id)) {
       if (threadBusy(bot.id, task.threadId) && cut(task.threadId)) {
-        store.appendMessage(task.threadId, { role: "bot", kind: "activity", tool: failedTurnTool("turn interrupted — OpenMausBot restarted") });
+        store.appendMessage(task.threadId, { role: "bot", kind: "activity", tool: failedNoticeTool("chat.notice.restartInterrupted") });
       }
     }
   }
@@ -16957,7 +16961,7 @@ function noteTurnsCutByShutdown(): void {
     for (const threadId of group.dm ? [group.threadId] : store.groupTasks(group.id).map((task) => task.threadId)) {
       if (!groupThreadIsWorking(group.id, threadId) || !cut(threadId)) continue;
       const speaker = groupSpeakers.get(threadId);
-      store.appendMessage(threadId, { role: "bot", kind: "activity", ...(speaker ? { from: speaker } : {}), tool: failedTurnTool("turn interrupted — OpenMausBot restarted") });
+      store.appendMessage(threadId, { role: "bot", kind: "activity", ...(speaker ? { from: speaker } : {}), tool: failedNoticeTool("chat.notice.restartInterrupted") });
     }
   }
 }

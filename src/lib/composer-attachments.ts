@@ -106,6 +106,24 @@ export function fileAttachment(name: string, path: string, size: number): FileAt
 export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const FILE_MAX_BYTES = 25 * 1024 * 1024;
 
+export type AttachProblem =
+  | { kind: "too-large"; name: string; limitMb: number }
+  | { kind: "unsupported"; names: string[] }
+  | { kind: "upload-failed"; name: string; reason: string };
+
+type TooLarge = Extract<AttachProblem, { kind: "too-large" }>;
+
+export class AttachError extends Error {
+  readonly problem: TooLarge;
+  readonly status = 413;
+  constructor(name: string, limitBytes: number) {
+    const limitMb = limitBytes / (1024 * 1024);
+    super(`${name} exceeds ${limitMb} MB`);
+    this.name = "AttachError";
+    this.problem = { kind: "too-large", name, limitMb };
+  }
+}
+
 const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
   txt: "text/plain",
   md: "text/markdown",
@@ -262,7 +280,7 @@ function canonicalImageName(originalName: string, path: string, mime: string): s
 
 export function optimisticImageAttachment(file: File): ImageAttachment | null {
   if (!isImageFile(file)) return null;
-  if (file.size > IMAGE_MAX_BYTES) throw Object.assign(new Error(`${file.name} exceeds 10 MB`), { status: 413 });
+  if (file.size > IMAGE_MAX_BYTES) throw new AttachError(file.name, IMAGE_MAX_BYTES);
   const mime = file.type.split(";", 1)[0]!.trim().toLowerCase();
   const previewUrl = typeof URL.createObjectURL === "function" ? URL.createObjectURL(file) : undefined;
   return {
@@ -282,7 +300,7 @@ export async function imageAttachmentFromFile(
   optimistic?: Pick<ImageAttachment, "id" | "previewUrl">,
 ): Promise<ImageAttachment | null> {
   if (!isImageFile(file)) return null;
-  if (file.size > IMAGE_MAX_BYTES) throw Object.assign(new Error(`${file.name} exceeds 10 MB`), { status: 413 });
+  if (file.size > IMAGE_MAX_BYTES) throw new AttachError(file.name, IMAGE_MAX_BYTES);
   const bytes = new Uint8Array(await file.arrayBuffer());
   const uploadId = newUploadId();
   const saved = await uploadWithRetry<{ path: string; mime: string; bytes: number }>(
@@ -311,9 +329,7 @@ export async function fileAttachmentFromFile(file: File): Promise<FileAttachment
   const mime = documentMime(file) ??
     (ACCEPTED_AUDIO_MIMES.has(declared) ? declared : AUDIO_MIMES_BY_EXTENSION[extension]);
   if (!mime) return null;
-  if (file.size > FILE_MAX_BYTES) {
-    throw Object.assign(new Error(`${file.name} exceeds 25 MB`), { status: 413 });
-  }
+  if (file.size > FILE_MAX_BYTES) throw new AttachError(file.name, FILE_MAX_BYTES);
   const uploadId = newUploadId();
   const saved = await uploadWithRetry<{ path: string; name: string; bytes: number }>(
     `/api/files?name=${encodeURIComponent(file.name)}&uploadId=${encodeURIComponent(uploadId)}`,
@@ -379,16 +395,6 @@ function isInlineText(file: DroppedFile): boolean {
 
 export function byteLength(text: string): number {
   return new TextEncoder().encode(text).length;
-}
-
-export function pasteSummary(a: { lines: number; size: number }): string {
-  return `${a.lines} lines, ${formatSize(a.size)}`;
-}
-
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 export function composeMessage(text: string, attachments: Attachment[]): string {
@@ -708,28 +714,27 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     uploadImage: (file: T) => Promise<Attachment | null>;
     uploadFile?: (file: T) => Promise<FileAttachment | null>;
   },
-): Promise<{ attachments: Attachment[]; notice: string | null }> {
+): Promise<{ attachments: Attachment[]; problems: AttachProblem[] }> {
   const files = [..._files];
   const { allowImages, getPath, uploadImage } = _opts;
   const uploadFile = _opts.uploadFile ?? (async (file: T) => {
     if (!file.arrayBuffer) return null;
     return fileAttachmentFromFile(file as unknown as File);
   });
+  const failed = (file: T, err: unknown): AttachProblem =>
+    err instanceof AttachError ? err.problem
+      : { kind: "upload-failed", name: file.name, reason: err instanceof Error ? err.message : "upload failed" };
   const results = await Promise.all(files.map(async (file): Promise<{
     attachments: Attachment[];
     rejectedNames: string[];
-    uploadError?: string;
+    uploadError?: AttachProblem;
   }> => {
     if (allowImages && isImageFile(file)) {
       try {
         const attachment = await uploadImage(file);
         return { attachments: attachment ? [attachment] : [], rejectedNames: [] };
       } catch (err) {
-        return {
-          attachments: [],
-          rejectedNames: [],
-          uploadError: `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`,
-        };
+        return { attachments: [], rejectedNames: [], uploadError: failed(file, err) };
       }
     }
     try {
@@ -738,11 +743,7 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
         return { attachments: [attachment], rejectedNames: [] };
       }
     } catch (err) {
-      return {
-        attachments: [],
-        rejectedNames: [],
-        uploadError: `${file.name}: ${err instanceof Error ? err.message : "upload failed"}`,
-      };
+      return { attachments: [], rejectedNames: [], uploadError: failed(file, err) };
     }
     const result = await attachmentsFromDroppedFiles([file], getPath);
     return result;
@@ -750,13 +751,9 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
   const attachments = results.flatMap((result) => result.attachments);
   const rejectedNames = results.flatMap((result) => result.rejectedNames);
   const uploadErrors = results.flatMap((result) => result.uploadError ? [result.uploadError] : []);
-  const pathless = rejectedNames.length
-    ? `Unable to attach ${rejectedNames.join(", ")}. Choose a supported image, document, or audio file.`
-    : null;
-  const failed = uploadErrors.length ? uploadErrors.join("; ") : null;
   return {
     attachments,
-    notice: pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed),
+    problems: [...(rejectedNames.length ? [{ kind: "unsupported" as const, names: rejectedNames }] : []), ...uploadErrors],
   };
 }
 

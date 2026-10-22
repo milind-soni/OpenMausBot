@@ -3,6 +3,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
+import { chatNotice, failedNoticeTool } from "./chat-notices.ts";
 import { EngineMemory } from "./engine-memory.ts";
 import type { Message } from "./store.ts";
 import { TurnStops, stoppedTurnOutcome } from "./turn-outcome.ts";
@@ -148,7 +149,7 @@ describe("the stall handler", () => {
       cancelDirectTurnDispatch() {}, revokeInternalCapabilitiesForThread() {}, repeats: { settle() {} },
       botForThread: () => ({ id: "eli" }), activeRoutineRunForThread: () => undefined,
       runningTurnInstance: () => ({ adapter: { interruptTurn: async () => {} } }),
-      failedTurnTool: (name: string) => ({ name, ok: false }), reportIncident() {},
+      failedTurnTool: (name: string) => ({ name, ok: false }), chatNotice, failedNoticeTool, reportIncident() {},
       settleDirectFollowup: (generation: string | undefined, outcome: { text: string }) => settled.push({ generation, text: outcome.text }),
       finalizeDelegationWatch: (_threadId: string, _ok: boolean, _reply: string, why: string) => delegations.push(why),
       setTimeout: () => ({ unref() {} }),

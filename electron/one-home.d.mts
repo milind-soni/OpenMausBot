@@ -1,10 +1,12 @@
 /** The line either page shows for the one-time move to My Cloud (one-home.mjs). */
+/** Why the move fails: English, and the `serverError.*` key (with its values) My Cloud named it by, when it did. */
+export interface OneHomeFailing { error: string | null; errorKey?: string; errorParams?: Record<string, string | number> }
 export type OneHomeView =
   /** `chats`: conversations gone of those to go; `failing`: it has failed for a day, with why. */
-  | { phase: "copy"; chats?: { done: number; total: number }; failing?: { error: string | null } }
+  | { phase: "copy"; chats?: { done: number; total: number }; failing?: OneHomeFailing }
   /** `waitingFor`: the bot or room still working here ("" when it has no name). */
-  | { phase: "wait"; waitingFor?: string; failing?: { error: string | null } }
-  | { phase: "finishing"; failing?: { error: string | null } }
+  | { phase: "wait"; waitingFor?: string; failing?: OneHomeFailing }
+  | { phase: "finishing"; failing?: OneHomeFailing }
   /** What arrived, checked on both sides; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts. */
   | { phase: "done"; counts?: OneHomeCounts; phone: boolean; held: string[] }
   /** My Cloud ended: this computer is home again; `back`: My Cloud's own changes came back too, unless `lost`. */

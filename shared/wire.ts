@@ -16,6 +16,7 @@ import type { WebhookRequestCardData } from "./webhook-request.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
+import type { ServerTextParams } from "./server-text.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
@@ -473,6 +474,12 @@ export interface WireMessage {
     place?: PlaceRow;
     /** error rows: epoch ms when the usage limit that stopped the turn resets. */
     limitResetsAt?: number;
+    /** Catalog key (`chat.notice.*`) for the words of `name` after any
+     * `error:` marker, when they are one of the server's fixed notices.
+     * `name` keeps the English, which phones, exports and older clients show. */
+    nameCode?: string;
+    /** Values for the placeholders of `nameCode`. */
+    nameParams?: ServerTextParams;
     /** Provider item identity, scoped to the owning turn. */
     itemId?: string;
     /** Whether the harness captured the full redacted result. Private

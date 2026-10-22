@@ -5,6 +5,7 @@ import { engineReady } from "@/components/EngineLibrary";
 import { InstanceProviderMark } from "@/components/ProviderIcons";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { engineDisplayName } from "@/lib/engine-name";
 import { aiChoices, organisationSignIn, plainSignIn } from "@/lib/onboarding";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { OrganisationRow } from "./OrganisationRow";
@@ -15,7 +16,7 @@ import { PrimaryButton, staggerIndex, type BeatProps } from "./shared";
 function setupFor(instance: InstanceInfo) {
   if (instance.access === "custom") return { intent: "inject" as const };
   return plainSignIn(instance)
-    ? { intent: "cloud" as const, description: t("onboarding.engines.signInHint", { name: instance.displayName }) }
+    ? { intent: "cloud" as const, description: t("onboarding.engines.signInHint", { name: engineDisplayName(instance) }) }
     : { intent: "cloud" as const };
 }
 
@@ -31,7 +32,7 @@ function OtherWay({ instance, open, onToggle }: { instance: InstanceInfo; open: 
         <span className="flex size-[18px] shrink-0 items-center justify-center">
           <InstanceProviderMark instance={instance} size={18} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink">{instance.displayName}</span>
+        <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink">{engineDisplayName(instance)}</span>
         <ChevronDown size={14} className={cn("shrink-0 text-ink-secondary transition-transform duration-200", open && "rotate-180")} />
       </button>
       {open && <EngineSetup instance={instance} {...setupFor(instance)} className="mx-3.5 mb-3.5 border-0 bg-inset" />}
@@ -98,7 +99,7 @@ export function EnginesBeat({
       {connected ? (
         <p role="status" data-ai-connected className="animate-rise mt-4 flex items-center gap-2 text-[13px] text-success">
           <Check size={14} strokeWidth={2.5} aria-hidden="true" />
-          {t("onboarding.engines.connected", { name: connected.displayName })}
+          {t("onboarding.engines.connected", { name: engineDisplayName(connected) })}
         </p>
       ) : recommended ? (
         <div data-ai-recommended={recommended.instanceId} className="animate-rise mt-4 rounded-xl border border-hairline/40 bg-card" style={staggerIndex(1)}>
@@ -106,7 +107,7 @@ export function EnginesBeat({
             <span className="flex size-[18px] shrink-0 items-center justify-center">
               <InstanceProviderMark instance={recommended} size={18} />
             </span>
-            <span className="truncate text-[13.5px] font-medium text-ink">{recommended.displayName}</span>
+            <span className="truncate text-[13.5px] font-medium text-ink">{engineDisplayName(recommended)}</span>
           </div>
           <EngineSetup instance={recommended} {...setupFor(recommended)} className="mx-3.5 mb-3.5 border-0 bg-transparent" />
         </div>

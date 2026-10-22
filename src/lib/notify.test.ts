@@ -6,8 +6,10 @@ vi.mock("./notification-preferences", () => ({
   finishedNotificationsEnabled: () => sounds.finished,
 }));
 
+import { setLocale } from "./i18n";
 import {
   buildNotificationOptions,
+  notificationTitle,
   requestNotificationPermission,
   showNotification,
   type NotifyFrame,
@@ -181,5 +183,35 @@ describe("buildNotificationOptions", () => {
       tag: "openmausbot:bot-9",
       icon: undefined,
     });
+  });
+});
+
+describe("notification titles", () => {
+  const rooms = [{ id: "g1", name: "Launch" }];
+  const question = { kind: "question" as const, botName: "Scout", title: "Scout in Launch has a question", groupId: "g1" };
+  afterEach(() => setLocale("en"));
+
+  it("are worded in the person's language, the room's name included", () => {
+    setLocale("pt-br");
+    expect(notificationTitle(question, rooms)).toBe("Scout em Launch tem uma pergunta");
+    expect(notificationTitle({ ...question, groupId: undefined, title: "Scout has a question" }, rooms)).toBe("Scout tem uma pergunta");
+    setLocale("en");
+    expect(notificationTitle(question, rooms)).toBe(question.title);
+  });
+
+  it("show the title as sent for a room not loaded here, a sign-in, a spend warning or a kind this build does not know", () => {
+    setLocale("pt-br");
+    expect(notificationTitle(question, [])).toBe(question.title);
+    expect(notificationTitle({ kind: "sign-in", botName: "Scout", title: "Scout needs you to sign in to example.com" }, rooms))
+      .toBe("Scout needs you to sign in to example.com");
+    expect(notificationTitle({ kind: "spend", botName: "Scout", title: "Spend warning" }, rooms)).toBe("Spend warning");
+    expect(notificationTitle({ kind: "later" as never, botName: "Scout", title: "Scout did something new" }, rooms)).toBe("Scout did something new");
+  });
+
+  it("are what the desktop banner shows", () => {
+    const { notices } = installNotification("granted");
+    setLocale("pt-br");
+    showNotification({ ...frame, kind: "question", groupId: "g1", title: "Maus in Launch has a question" }, vi.fn(), null, null, rooms);
+    expect(notices[0]?.title).toBe("Maus em Launch tem uma pergunta");
   });
 });
