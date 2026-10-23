@@ -507,7 +507,7 @@ export function createHomeWindow(deps) {
      * home it opens as a saved server, and while the Admin sets it up the setup screen shows until it opens by itself. */
     async openCloud(open = null) {
       if ((await refresh()).kind !== "computer") return show({ place: "cloud", open });
-      if (!cloudSetupOf(state()) && !readyCloudOrigin(state())) throw new Error("My Cloud is not ready to connect yet.");
+      if (!cloudSetupOf(state()) && !readyCloudOrigin(state())) throw new Error(t("native.cloud.notReady"));
       asked = { open };
       return show({ place: "cloud", open });
     },

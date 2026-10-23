@@ -1,3 +1,4 @@
+import { redactParams } from "../shared/redact.ts";
 import { formatServerText, type ServerErrorBody, type ServerTextParams } from "../shared/server-text.ts";
 
 /** The client translates by key and falls back to this English, which the server keeps sending for older clients. */
@@ -32,14 +33,38 @@ export const USER_ERROR = {
   "serverError.routine.checksRepeat": "Checks need a bot routine that repeats",
   "serverError.routine.access": "Choose read-and-draft access or none",
   "serverError.routine.deliver": "Only a bot routine can deliver to the brief",
+  "serverError.team.noSuchPhone": "no such phone",
+  "serverError.team.sessionEnded": "Your session ended. Sign in again before creating a pairing code.",
+  "serverError.page.roomOrClosed": "Pages from a room or a closed conversation can't be published here.",
+  "serverError.page.notHere": "That page is not in this conversation.",
+  "serverError.page.fromMcp": "That app came from an MCP server; only a page a bot made can be published.",
+  "serverError.page.versionGone": "That version of the page is no longer kept.",
+  "serverError.page.notStored": "This app's page is not stored on this computer.",
+  "serverError.department.notFound": "No such department",
+  "serverError.department.missing": "no such department",
+  "serverError.department.nameLength": "Department name must be 1 to 60 characters",
+  "serverError.department.nameRule": "Department name must be 1 to 60 characters without control characters",
+  "serverError.department.unassignComputer": "Unassign this department's computer before deleting the department",
+  "serverError.department.oneChief": "A department can have only one Chief of Staff. Choose one Chief or use a department without one.",
+  "serverError.department.memoryChanged": "This department memory changed. Reload it before saving or approving.",
+  "serverError.department.shareTooLarge": "This department is too large to share (4 MB). Leave out pictures, starter notes or some skills and try again.",
+  "serverError.department.shareSkillClash": "Two bots in this department have different skills named \"{skill}\". Leave that skill out and try again.",
+  "serverError.department.shareNoBots": "Add a bot to this department before sharing it.",
+  "serverError.department.shareSkillLimit": "A department can share at most {count} skills. Choose fewer skills and try again.",
+  "serverError.department.createFirst": "Create the named department before giving a Chief access to it",
+  "serverError.department.chiefOnlyExtra": "Only a Chief may manage existing additional departments",
+  "serverError.department.confirmExtra": "Confirm additional department access (acknowledgePeerScope)",
+  "serverError.department.stopBots": "Stop running bots before granting access to another department, or use the desktop app or a paired Full-access session.",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;
 
 export type UserError = { error: string; errorKey: UserErrorKey; errorParams?: ServerTextParams };
 
+/** Security invariant: params are scrubbed like the English they fill, so a secret survives in neither. */
 export function userError(key: UserErrorKey, params?: ServerTextParams): UserError {
-  return { error: formatServerText(USER_ERROR[key], params), errorKey: key, ...(params ? { errorParams: params } : {}) };
+  const safe = params && redactParams(params);
+  return { error: formatServerText(USER_ERROR[key], safe), errorKey: key, ...(safe ? { errorParams: safe } : {}) };
 }
 
 export function userErrorThrown(key: UserErrorKey, params?: ServerTextParams): Error {
@@ -51,7 +76,7 @@ export function userErrorFields(value: unknown): Pick<ServerErrorBody, "errorKey
   const { errorKey, errorParams } = Object(value) as { errorKey?: unknown; errorParams?: unknown };
   if (typeof errorKey !== "string" || !Object.hasOwn(USER_ERROR, errorKey)) return {};
   const params = errorParams && typeof errorParams === "object" && !Array.isArray(errorParams)
-    ? errorParams as ServerTextParams : undefined;
+    ? redactParams(errorParams as ServerTextParams) : undefined;
   return { errorKey, ...(params ? { errorParams: params } : {}) };
 }
 

@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import nativeText from "./native-text.cjs";
 import { CHECKOUT_SOURCES, checkoutDestination, cloudMenuSublabel, createCloudAccountClient, createCloudAccountStore, cloudOrigin, cloudPlanSnapshot, CLOUD_ORIGIN } from "./cloud-account.mjs";
 
 const accessToken = `omc_${"T".repeat(43)}`;
@@ -784,4 +785,12 @@ test("this computer tells the Admin its move is done, and asks for an ended Clou
   assert.deepEqual(JSON.parse(f.requests.findLast(r => r.route === "/api/cloud/desktop/export").body), { installation: computer });
   await assert.rejects(f.client.exportHome());
   assert.deepEqual(JSON.parse(f.requests.findLast(r => r.route === "/api/cloud/desktop/export").body), {});
+});
+
+test("connecting before My Cloud is ready is refused in the app's language", async t => {
+  const english = await fixture(t);
+  await assert.rejects(english.client.pairHome(), { message: "My Cloud is not ready to connect yet." });
+  const { t: words } = nativeText.createNativeText({ saved: "pt-br" });
+  const translated = await fixture(t, { t: words });
+  await assert.rejects(translated.client.pairHome(), { message: "O Cloud ainda não está pronto para conectar." });
 });

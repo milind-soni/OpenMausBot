@@ -37,6 +37,19 @@ describe("a refusal the server names by key", () => {
       .rejects.toMatchObject({ message: ptBr["serverError.team.memberLogin"].replaceAll("{team}", "Acme") });
   });
 
+  it("says the department and page refusals in pt-BR, and their English exactly where there are no own words", () => {
+    const clash = { error: 'Two bots in this department have different skills named "pricing". Leave that skill out and try again.',
+      errorKey: "serverError.department.shareSkillClash", errorParams: { skill: "pricing" } };
+    const gone = { error: "That version of the page is no longer kept.", errorKey: "serverError.page.versionGone" };
+    setLocale("pt-br");
+    expect(serverErrorText(clash, clash.error)).toBe("Dois bots desta equipe têm habilidades diferentes chamadas “pricing”. Deixe essa habilidade de fora e tente de novo.");
+    expect(serverErrorText(gone, gone.error)).toBe(ptBr["serverError.page.versionGone"]);
+    expect(serverErrorText({ ...clash, errorParams: undefined }, clash.error)).toBe(clash.error);
+    setLocale("en");
+    expect(serverErrorText(clash, clash.error)).toBe(clash.error);
+    expect(serverErrorText(gone, gone.error)).toBe(gone.error);
+  });
+
   it("stays English without a key, with a key outside serverError., or with a param missing", () => {
     setLocale("pt-br");
     expect(serverErrorText({ error: "boom" }, "boom")).toBe("boom");

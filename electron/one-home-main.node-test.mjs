@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { installOneHome } from "./one-home-main.mjs";
+import nativeText from "./native-text.cjs";
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status });
 
@@ -69,7 +70,7 @@ test("the switch that keeps this computer's bots here: only on this app's pages,
     assert.deepEqual(ask("one-home:keep", "local"), hidden, "no Cloud");
     state = { status: "connected", account, entitlement: { plan: "pro", tier: "team", status: "active" }, teams: [{ id: "team-1", name: "Acme", role: "owner", machine }] };
     assert.deepEqual(ask("one-home:keep", "cloud"), hidden, "only a team's Cloud");
-    assert.throws(() => ask("one-home:keep-set", "local", true), /no My Cloud/u);
+    assert.throws(() => ask("one-home:keep-set", "local", true), { message: "This computer has no My Cloud to keep its bots from." });
     assert.equal(choice, null);
     state = { status: "connected", account, entitlement: { plan: "pro", tier: "personal", status: "active" }, machine: { ...machine, moves: false } };
     assert.deepEqual(ask("one-home:keep", "local"), hidden, "a Cloud the move doesn't apply to yet");
@@ -81,5 +82,20 @@ test("the switch that keeps this computer's bots here: only on this app's pages,
     assert.equal(kept, null, "and no move starts");
     state = { ...state, machine: { ...machine, moves: false } };
     assert.deepEqual(ask("one-home:keep", "local"), { shown: true, on: true, moved: false, coming: false }, "switched on, it stays shown, so it can be switched off");
+  } finally { main.close(); }
+});
+
+test("the switch's refusal follows the app's language", () => {
+  const handlers = new Map();
+  const { t } = nativeText.createNativeText({ saved: "pt-br" });
+  const main = installOneHome({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, cloudPage: (event) => event.page ?? null, server: () => null, home: () => null,
+    cookieFetch: async () => json({}, 401), reconnect: async () => false, power: { asleep: () => false }, file: () => "/nonexistent/cloud-send.json", window: () => null,
+    localOrigin: () => "http://127.0.0.1:4100", fetch: async () => json({}, 404), localRequest: async () => json({ frozen: false }), account: () => null,
+    journalFile: () => "/nonexistent/one-home.json", tempRoot: () => "/nonexistent", journal: { read: () => null, write: () => {} },
+    keep: { read: () => null, write: () => {} }, t,
+  });
+  try {
+    assert.throws(() => handlers.get("one-home:keep-set")({ page: "local" }, true), { message: "Este computador não tem um Cloud para onde os bots dele iriam." });
   } finally { main.close(); }
 });

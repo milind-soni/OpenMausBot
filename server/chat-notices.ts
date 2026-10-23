@@ -32,6 +32,12 @@ export const CHAT_NOTICE = {
   "chat.notice.part.switchAccount": "switch this bot to another AI or Claude account",
   "chat.notice.webhookHome":
     "I'm back on this computer, so my webhook \"{name}\" has an address here again. Open Automations, choose Copy address on \"{name}\", and paste it into the app that sends to it.",
+  "chat.notice.resumedQuestion": "Resumed with a question from {names}, reviewing",
+  "chat.notice.resumedQuestionAfterRestart": "Resumed with a question from {names} after a restart, reviewing",
+  "chat.notice.resumedResults": "Resumed with {names} results, reviewing",
+  "chat.notice.resumedResultsAfterRestart": "Resumed with {names} results after a restart, reviewing",
+  "chat.notice.resumedWork": "Resumed with delegated work results, reviewing",
+  "chat.notice.resumedWorkAfterRestart": "Resumed with delegated work results after a restart, reviewing",
 } as const;
 
 export type ChatNoticeKey = keyof typeof CHAT_NOTICE;
@@ -46,6 +52,17 @@ export function noticeTool<T extends object>(
   extra: T,
 ): T & { name: string; nameCode: ChatNoticeKey; nameParams?: ServerTextParams } {
   return { ...extra, name: chatNotice(key, params), nameCode: key, ...(params ? { nameParams: params } : {}) };
+}
+
+const RESUMED = {
+  question: ["chat.notice.resumedQuestion", "chat.notice.resumedQuestionAfterRestart"],
+  results: ["chat.notice.resumedResults", "chat.notice.resumedResultsAfterRestart"],
+  work: ["chat.notice.resumedWork", "chat.notice.resumedWorkAfterRestart"],
+} as const satisfies Record<string, readonly [ChatNoticeKey, ChatNoticeKey]>;
+
+export function resumedTool(question: boolean, from: readonly string[], restart: boolean) {
+  const keys = !from.length ? RESUMED.work : question ? RESUMED.question : RESUMED.results;
+  return noticeTool(keys[restart ? 1 : 0], from.length ? { names: from.join(", ") } : undefined, { ok: true });
 }
 
 export function failedNoticeTool(key: ChatNoticeKey, params?: ServerTextParams): FailedTurnTool {

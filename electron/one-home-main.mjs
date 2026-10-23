@@ -14,6 +14,7 @@ import { createHomeAgain } from "./one-home-again.mjs";
 import { awayIn, createOneHome, parseJournal, underWay } from "./one-home.mjs";
 import { teamPlan } from "./cloud-team-plan.mjs";
 import { installTeamMove } from "./team-move-main.mjs";
+import nativeText from "./native-text.cjs";
 
 const MOVE_LABEL = "Move to My Cloud";
 const HOME_LABEL = "Bring My Cloud home";
@@ -88,7 +89,7 @@ async function answer(response) {
  * shows a team's page, where a bot moved into it from My Cloud now lives (team-move-main.mjs, whose journal is
  * `teamJournal`, team-moves.json beside this one by default). The rest are installCloudSend's.
  */
-export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, offer, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal, ...sendDeps }) {
+export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, offer, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal, t = nativeText.englishText.t, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   let home = null;
   let lastInput = 0;
@@ -170,6 +171,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
 
   home = createOneHome({
     journal,
+    t,
     // Every run starts here: the key watch is set up before any wait asks, so a key pressed since then counts.
     cloud: () => { typed(); return oneHomeCloud(account()?.state()); },
     send,
@@ -223,7 +225,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
   };
   sendDeps.ipcMain.handle("one-home:keep", onPage("one-home:keep", keepState));
   sendDeps.ipcMain.handle("one-home:keep-set", onPage("one-home:keep-set", (on) => {
-    if (on === true && !keepState().shown) throw new Error("This computer has no My Cloud to keep its bots from.");
+    if (on === true && !keepState().shown) throw new Error(t("native.cloud.keepNoCloud"));
     void home.keep(on === true).catch((error) => log(`one home: ${error?.message ?? error}`));
     return keepState();
   }));

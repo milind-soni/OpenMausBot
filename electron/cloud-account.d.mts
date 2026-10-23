@@ -216,6 +216,7 @@ export declare function createCloudAccountClient(options: {
   warn?: (message: string) => void;
   /** Files or lending waits for a sleeping Cloud to wake: the session is read every 15 s. */
   awaitingWake?: () => boolean;
+  t?: (key: string, params?: Record<string, string | number>) => string;
 }): CloudAccountClient;
 export declare function cloudPlanSnapshot(state: CloudAccountState | null | undefined, extra?: { notice?: import("./cloud-home.mjs").CloudTrialState | null }): CloudPlanSnapshot;
 /** My Cloud's line under its name in the server menus, or null for none. */

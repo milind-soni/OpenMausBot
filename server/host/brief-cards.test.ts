@@ -53,6 +53,14 @@ describe("the brief's cards", () => {
     }
   });
 
+  it("name a routine's Open page button", () => {
+    const card = briefCard({ ...facts, routines: [{ text: "Digest", note: "Done", page: "https://pages.example.com/p/1" }] }).card;
+    const json = JSON.stringify(card);
+    expect(json).toContain('"label":"Open page"');
+    expect(texts(card)).toContainEqual({ key: "brief.card.openPage" });
+    expect(english["brief.card.openPage"]).toBe("Open page");
+  });
+
   it("word a watch's failure as the catalog does", () => {
     for (const [key, words] of Object.entries(WATCH_FAILURE)) expect(english[key]).toBe(words);
   });

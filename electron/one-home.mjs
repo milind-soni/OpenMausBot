@@ -22,6 +22,7 @@
 // computer brought stop there, this computer opens with every automation off and restores the backup, and once the app
 // opens again what was on of them at My Cloud is switched on here (`back` with `kept`). The Admin is then told this
 // computer no longer counts as moved. Choosing otherwise again moves it again, as anyone's first move.
+import nativeText from "./native-text.cjs";
 
 const record = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const sentence = (value) => (typeof value === "string" && value.trim() ? value.trim().replace(/\s+/gu, " ").slice(0, 300) : null);
@@ -161,12 +162,14 @@ export function arrivedCounts(here, there) {
  *   now?(): number,
  *   timers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void },
  *   log?(line: string): void,
+ *   t?(key: string, params?: Record<string, string | number>): string,
  * }} deps
  */
 export function createOneHome(deps) {
   const now = deps.now ?? Date.now;
   const timers = deps.timers ?? { set: (work, ms) => { const timer = setTimeout(work, ms); timer.unref?.(); return timer; }, clear: (timer) => clearTimeout(timer) };
   const log = deps.log ?? (() => {});
+  const t = deps.t ?? nativeText.englishText.t;
   let running = null, again = false, timer = null, closed = false, waitingFor = null, wasReady = null, reportFailedAt = -Infinity, keptFailedAt = -Infinity;
 
   const read = () => parseJournal(deps.journal.read());
@@ -596,7 +599,7 @@ export function createOneHome(deps) {
     /** Keeps this computer's bots here (`on`), or lets them move with everything else again, at the next quiet moment as
      * anyone's first move; refused once their way home is under way (underWay). */
     keep(on) {
-      if (!on && underWay(read())) throw new Error("This computer's bots are on their way back. Try again once they're here.");
+      if (!on && underWay(read())) throw new Error(t("native.cloud.keepUnderWay"));
       deps.keep?.write(on ? { v: 1, on: true, at: now() } : { v: 1, on: false });
       publish();
       return kick();

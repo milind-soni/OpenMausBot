@@ -87,6 +87,7 @@ export function createOneHome(deps: {
   now?(): number;
   timers?: { set(work: () => void, ms: number): unknown; clear(timer: unknown): void };
   log?(line: string): void;
+  t?(key: string, params?: Record<string, string | number>): string;
 }): {
   kick(): Promise<void>;
   view(): OneHomeView | null;

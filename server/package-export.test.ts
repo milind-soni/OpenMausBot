@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { redactSecretsInText } from "./redact.ts";
 import { createBotPackageExport, createTeamPackageExport, shareableAddress, TEAM_TOO_LARGE_MESSAGE, TeamExportError } from "./package-export.ts";
 import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import type { Routine } from "./routines.ts";
@@ -402,6 +403,10 @@ describe("whole-team export (package v2)", () => {
       ...skill(`big-${index}`), instructions: `---\nname: big-${index}\ndescription: big-${index} description\n---\n${"a".repeat(250_000)}`,
     }))]]);
     expect(() => createTeamPackageExport(huge)).toThrow(TEAM_TOO_LARGE_MESSAGE);
+    expect(TEAM_TOO_LARGE_MESSAGE).toBe("This department is too large to share (4 MB). Leave out pictures, starter notes or some skills and try again.");
+    const caught = (run: () => unknown) => { try { run(); } catch (error) { return error; } throw new Error("expected a refusal"); };
+    expect(caught(() => createTeamPackageExport({ ...fixture(), team: "Empty" }))).toMatchObject({ errorKey: "serverError.department.shareNoBots" });
+    expect(caught(() => createTeamPackageExport(huge))).toMatchObject({ errorKey: "serverError.department.shareTooLarge" });
   });
 
   describe("skills that do not all fit", () => {
@@ -489,6 +494,14 @@ describe("whole-team export (package v2)", () => {
       const conflict = refusal(new Map([["lead", [skill("pricing")]], ["scout", [conflicting]]]));
       expect(conflict).toBeInstanceOf(TeamExportError);
       expect((conflict as Error).message).toBe('Two bots in this department have different skills named "pricing". Leave that skill out and try again.');
+      expect(conflict).toMatchObject({ errorKey: "serverError.department.shareSkillClash", errorParams: { skill: "pricing" } });
+      expect(crowded).not.toHaveProperty("errorKey");
+      const secret = `sk-${"a1B2c3D4".repeat(3)}`;
+      const leaked = refusal(new Map([["lead", [skill(secret)]], ["scout", [{ ...conflicting, name: secret }]]]));
+      expect(leaked).toBeInstanceOf(TeamExportError);
+      expect(JSON.stringify({ message: (leaked as Error).message, ...(leaked as object) })).not.toContain(secret);
+      expect((leaked as { errorParams?: { skill?: string } }).errorParams?.skill).toBe(redactSecretsInText(secret));
+      expect((leaked as Error).message).toBe(`Two bots in this department have different skills named "${redactSecretsInText(secret)}". Leave that skill out and try again.`);
     });
   });
 

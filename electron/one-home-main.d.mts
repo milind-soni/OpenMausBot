@@ -33,6 +33,7 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
   openTeam?(team: { id: string; name: string }): void;
   /** The team moves' journal, team-moves.json beside journalFile by default. */
   teamJournal?: { read(): unknown; write(value: unknown): void };
+  t?(key: string, params?: Record<string, string | number>): string;
 }): ReturnType<typeof installCloudSend> & {
   keep: { state(): KeepHereState; set(on: boolean): Promise<void> };
   kick(): Promise<void>;

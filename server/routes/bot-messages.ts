@@ -26,7 +26,7 @@ import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
-import { userError } from "../user-errors.ts";
+import { refusalBody, userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 type RunningInstance = ReturnType<ProviderRegistry["get"]>;
@@ -213,7 +213,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const appSent = fromAnApp ? prepareAppMessage(store, threadId, body.appMessage) : null;
       if (appSent && !appSent.ok) return json(res, appSent.status, { error: appSent.error });
       const pointed = pointing ? preparePointed(store, threadId, body.pointed) : null;
-      if (pointed && !pointed.ok) return json(res, pointed.status, { error: pointed.error });
+      if (pointed && !pointed.ok) return json(res, pointed.status, refusalBody(pointed));
       const text = press ? press.text : appSent ? appSent.text : typed;
       const target = resolveReplyTarget(threadId, press ? press.messageId : appSent ? appSent.messageId : body.replyToId);
       if (relayed && target?.role !== "bot") return json(res, 400, { error: "a relayed reaction answers a bot's message" });

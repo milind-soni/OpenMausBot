@@ -1,7 +1,7 @@
 import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { failedNoticeTool, noticeTool } from "./chat-notices.ts";
+import { failedNoticeTool, noticeTool, resumedTool } from "./chat-notices.ts";
 import { DATA_DIR } from "./config.ts";
 import { claudeLimitError } from "./drivers/claude-limits.ts";
 import { closeMessageDb } from "./message-db.ts";
@@ -23,6 +23,8 @@ describe("a notice's params are scrubbed like its English", () => {
     const failed = store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: { ...failedNoticeTool("chat.notice.stalled", { minutes: 20 }), name: `error: ${limit.message}`, nameCode: limit.text!.key, nameParams: limit.text!.params } });
     const webhook = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: `my webhook "${SECRET}"`, textCode: "chat.notice.webhookHome", textParams: { name: SECRET } });
     const held = store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: noticeTool("chat.notice.roomHeld", { name: SECRET }, { ok: false }) });
-    for (const kept of [...store.messagesFor(bot.threadId), failed, webhook, held]) expect(JSON.stringify(kept)).not.toContain(SECRET);
+    const resumed = store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: resumedTool(true, ["Scout", SECRET], true) });
+    expect(resumed.tool?.nameCode).toBe("chat.notice.resumedQuestionAfterRestart");
+    for (const kept of [...store.messagesFor(bot.threadId), failed, webhook, held, resumed]) expect(JSON.stringify(kept)).not.toContain(SECRET);
   });
 });

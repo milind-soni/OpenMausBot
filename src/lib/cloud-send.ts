@@ -10,9 +10,17 @@ const counted = (count: number, one: LocaleKey, many: LocaleKey) => t(count === 
 
 export const listOf = (parts: string[]) => new Intl.ListFormat(activeLocale(), { type: "conjunction" }).format(parts);
 
+/** Refusals the preload sends before main is asked: it has no catalog, so they come in English. */
+const BRIDGE_REFUSALS: Readonly<Record<string, LocaleKey>> = {
+  "Turn the switch to keep this computer's bots here.": "cloudAccount.keepHere.unclicked",
+  "Choose Try again to move.": "cloudSend.move.unclicked",
+  "Choose Move to move the bot.": "teamMove.unclicked",
+};
+
 /** The words main threw, without Electron's "Error invoking remote method" wrapper; null when there are none. */
 export function ipcErrorText(cause: unknown): string | null {
-  return cause instanceof Error && cause.message ? cause.message.replace(/^Error invoking remote method '[^']*':\s*(?:\w*Error:\s*)?/u, "") : null;
+  const text = cause instanceof Error && cause.message ? cause.message.replace(/^Error invoking remote method '[^']*':\s*(?:\w*Error:\s*)?/u, "") : null;
+  return text !== null && Object.hasOwn(BRIDGE_REFUSALS, text) ? t(BRIDGE_REFUSALS[text]!) : text;
 }
 
 /** "12 bots, 3 skills, 2 logins, 1Password and 48 chats", from counts only. */

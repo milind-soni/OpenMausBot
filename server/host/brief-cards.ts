@@ -173,7 +173,7 @@ function capped(rows: Node[], total: number): Node[] {
 const section = (title: [string, string], rows: Node[], total: number, empty?: [string, string]): Node[] =>
   [{ type: "Title", value: title[0], size: "sm", ...i18n({ value: words(title[1]) }) }, ...(rows.length ? capped(rows, total) : empty ? [text(empty[0], words(empty[1]))] : [])];
 const openButton = (target: OpenTarget | undefined): Node[] => (target ? [button("Open", { type: "open_thread", payload: target }, false, words("brief.card.open"))] : []);
-const pageButton = (url: string | undefined): Node[] => { const link = httpsLink(url), open = link ? openUrl(link) : undefined; return open ? [button("Open page", open)] : []; };
+const pageButton = (url: string | undefined): Node[] => { const link = httpsLink(url), open = link ? openUrl(link) : undefined; return open ? [button("Open page", open, false, words("brief.card.openPage"))] : []; };
 
 function emailRow(email: BriefEmail): Node {
   const who = sender(email, BRIEF_TEXT.label);

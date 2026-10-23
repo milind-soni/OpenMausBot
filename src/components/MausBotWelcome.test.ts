@@ -2,10 +2,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { t } from "@/lib/i18n";
+import { setLocale, t } from "@/lib/i18n";
+import ptBr from "@/locales/pt-br.json";
 import { StoreProvider, type Bot, type Message } from "@/state/store";
 import { HelperIntro } from "./HelperIntro";
 import { setupAction } from "./HelperSetup";
+import { MausBotCustomize } from "./MausBotCustomize";
 import { draftOf, MausBotWelcomeCard, mausBotWelcomeDue, welcomeName, welcomePatch } from "./MausBotWelcome";
 
 const maus = { id: "maus", threadId: "t1", name: "MausBot", title: "", description: "", notifications: true, color: "chrome", mascotBody: null,
@@ -92,5 +94,21 @@ describe("MausBot's intro in the chat", () => {
     expect(setupAction("apps")).toEqual({ type: "togglePlugins", open: true, surface: "apps" });
     expect(setupAction("phone")).toMatchObject({ type: "toggleAppSettings", section: "companion", phonePairing: true });
     expect(setupAction("cloud")).toEqual({ type: "openCloudAdd", source: "app_onboarding" });
+  });
+});
+
+describe("MausBot's look picker", () => {
+  const image = { fileRef: { current: null }, busy: false, uploading: false, generating: false, error: null, upload: () => {}, removeImage: () => {}, generate: () => {}, setSavingConnection: () => {} } as never;
+  const render = () => renderToStaticMarkup(createElement(StoreProvider, null,
+    createElement(MausBotCustomize, { preview: maus, name: "MausBot", nameRef: { current: null }, image, onName: () => {}, onPatch: () => {} })));
+
+  it("names each body in the app's language", () => {
+    expect(render()).toContain('aria-label="Blob" title="Blob"');
+    setLocale("pt-br");
+    try {
+      expect(render()).toContain(`aria-label="${ptBr["mascot.body.blob"]}" title="${ptBr["mascot.body.blob"]}"`);
+    } finally {
+      setLocale("en");
+    }
   });
 });

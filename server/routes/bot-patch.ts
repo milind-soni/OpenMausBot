@@ -29,7 +29,7 @@ import { parseConnectorTools } from "../connector-tools.ts";
 import { sectionKey, type BotRecord, type GroupRecord, type Store } from "../store.ts";
 import * as vps from "../vps-computer.ts";
 import { vpsSshAliasForBot } from "../vps-hosts.ts";
-import { refusalBody } from "../user-errors.ts";
+import { refusalBody, userError } from "../user-errors.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import type { ModelSelectionCheck } from "./bots-create.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -547,7 +547,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         const sections = [...new Set(parsed.data)];
         const newSections = sections.filter(section => !(existingBot?.managedSections ?? []).includes(section));
         if (newSections.some(section => section !== "" && !store.sections.includes(section))) {
-          return json(res, 400, { error: "Create the named department before giving a Chief access to it" });
+          return json(res, 400, userError("serverError.department.createFirst"));
         }
         if (sections.length && !(body.chiefOfStaff === true || (existingBot?.chiefOfStaff && body.chiefOfStaff !== false))) {
           return json(res, 400, { error: "Only a Chief of Staff can be given access to additional teams" });
@@ -587,7 +587,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       // A shell can forge an Origin header: new cross-team authority from local scripts only while every bot is idle.
       if (loosened.includes("managedSections") && auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
-        return json(res, 409, { error: "Stop running bots before granting access to another department, or use the desktop app or a paired Full-access session." });
+        return json(res, 409, userError("serverError.department.stopBots"));
       }
       if (body.peers !== undefined && Array.isArray(existingBot?.peers)) {
         const nextPeers = patch.peers;

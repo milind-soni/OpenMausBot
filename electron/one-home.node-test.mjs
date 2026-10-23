@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { arrivedCounts, CHECK_PASSES, COPY_RETRY_MS, createOneHome, FAILING_LINE_MS, FROZEN_RETRY_MS, KEPT_MS, missingOf, QUIET_MS, switchOn } from "./one-home.mjs";
 import { oneHomeCloud } from "./one-home-main.mjs";
+import nativeText from "./native-text.cjs";
 
 const CLOUD = "https://omb-t-1.fly.dev";
 const reply = (status, body = {}) => ({ ok: status < 400, status, body });
@@ -432,4 +433,12 @@ test("a move left off while My Cloud was away goes on as soon as it is back; a s
   await s.tick();
   assert.equal(s.journal.phase, "done");
   assert.equal(s.server.unfreezes, 0, "never lifted after the switch");
+});
+
+test("turning the switch back while the bots are on their way home is refused in the app's language", () => {
+  const journal = { v: 1, phase: "keeping", offThere: true, cloud: { origin: "https://omb-u-1.fly.dev", account: "acct-1" } };
+  const home = (t) => createOneHome({ journal: { read: () => journal, write: () => {} }, cloud: () => null, send: {}, local: {}, session: async () => ({}), keep: { read: () => null, write: () => {} }, ...(t ? { t } : {}) });
+  assert.throws(() => home().keep(false), { message: "This computer's bots are on their way back. Try again once they're here." });
+  const { t } = nativeText.createNativeText({ saved: "pt-br" });
+  assert.throws(() => home(t).keep(false), { message: "Os bots deste computador estão voltando. Tente de novo quando eles chegarem." });
 });

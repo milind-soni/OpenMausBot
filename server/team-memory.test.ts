@@ -252,6 +252,8 @@ it("rejects stale edits, deletion and pending replacements while retaining the o
   expect(() => memory.remove("", old.id, old.revision)).toThrow(TeamMemoryConflict);
   expect(() => memory.resolve("", next.entry.id, "accept")).toThrow(TeamMemoryConflict);
   expect(memory.list("")[0].history?.[0].detail).toBe("Blue");
+  expect(new TeamMemoryConflict()).toMatchObject({ message: "This department memory changed. Reload it before saving or approving.", errorKey: "serverError.department.memoryChanged" });
+  expect(new TeamMemoryConflict("Another wording")).not.toHaveProperty("errorKey");
 });
 
 it("replaces a keyed decision even when its name changes and preserves its history", () => {

@@ -15,7 +15,7 @@ import type { RoutineManager } from "../routines.ts";
 import { installOrgSkill, installSkill, parseSkillMd, setSkillEnabled } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
 import { writeMemoryFile, writeMemoryTopic } from "../workspace.ts";
-import { refusalBody } from "../user-errors.ts";
+import { refusalBody, userError } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -112,9 +112,9 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       }
       if (settings.managedSections?.length) {
         if (!settings.chiefOfStaff || settings.managedSections.some(name => name !== "" && !store.sections.includes(name))) {
-          return json(res, 400, { error: "Only a Chief may manage existing additional departments" });
+          return json(res, 400, userError("serverError.department.chiefOnlyExtra"));
         }
-        if (body.acknowledgePeerScope !== true) return json(res, 400, { error: "Confirm additional department access (acknowledgePeerScope)" });
+        if (body.acknowledgePeerScope !== true) return json(res, 400, userError("serverError.department.confirmExtra"));
         if (auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
           return json(res, 409, { error: "Stop running bots before granting access to another department" });
         }

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createLendingDialogs, useMyComputerText } from "./lending-dialogs.mjs";
+import nativeText from "./native-text.cjs";
 import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
 import { QUIET_MS, createUseMyComputer, fullyLent, installUseMyComputer, missingPermissions, quietWindow } from "./use-my-computer.mjs";
 
@@ -204,6 +205,21 @@ test("the popup: one question, one plain line, Use my Mac and a quiet Not now, b
   assert.equal(shown[0][0], win, "main's own dialog, on the app's window");
   assert.equal(shown[0][1].defaultId, 0);
   assert.equal(shown[0][1].cancelId, 1);
+});
+
+test("the popup speaks the app's language, in main's own dialog", async () => {
+  const { t } = nativeText.createNativeText({ saved: "pt-br" });
+  assert.deepEqual(useMyComputerText("darwin", { screen: true }, t), {
+    message: "Deixar seus bots usarem este Mac?",
+    detail: "Como antes, eles podem usar a conexão de internet dele, ler suas pastas Mesa (Área de Trabalho no Windows), Documentos e Downloads, e usar seus apps e sua tela.",
+    buttons: ["Usar meu Mac", "Agora não"],
+  });
+  assert.deepEqual(useMyComputerText("win32", { screen: false }, t).buttons, ["Usar meu PC", "Agora não"]);
+  assert.deepEqual(useMyComputerText("linux", { screen: false }, t).buttons, ["Usar este computador", "Agora não"]);
+  const shown = [];
+  const dialogs = createLendingDialogs({ dialog: { showMessageBox: async (...args) => { shown.push(args); return { response: 1 }; } }, window: () => null, validate: async () => [], platform: "win32", t });
+  assert.equal(await dialogs.useMyComputer({ isDestroyed: () => false }, { screen: false }), "later");
+  assert.equal(shown[0][1].message, "Deixar seus bots usarem este PC?");
 });
 
 test("the popup waits for a shown, loaded window and a few quiet seconds, so a key meant for the page never answers it", async () => {

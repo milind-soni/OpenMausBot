@@ -11,6 +11,19 @@ import { setLocale } from "./i18n";
 
 afterEach(() => setLocale("en"));
 
+describe("a delegating bot's resumed line", () => {
+  it("names the teammates in pt-BR and keeps the English exactly in English", () => {
+    const english = "Resumed with a question from Scout, Ada after a restart, reviewing";
+    const tool = { nameCode: "chat.notice.resumedQuestionAfterRestart", nameParams: { names: "Scout, Ada" } };
+    expect(activityText(tool, english)).toBe(english);
+    setLocale("pt-br");
+    expect(activityText(tool, english)).toBe("Retomando após uma reinicialização com uma pergunta de Scout, Ada para revisar");
+    expect(activityText({ nameCode: "chat.notice.resumedWork" }, "Resumed with delegated work results, reviewing"))
+      .toBe("Retomando com os resultados do trabalho delegado para revisar");
+    expect(activityText({ nameCode: "chat.notice.resumedResults" }, "Resumed with Scout results, reviewing")).toBe("Resumed with Scout results, reviewing");
+  });
+});
+
 describe("server notices", () => {
   const resets = {
     name: "error: This Claude account has reached its weekly limit, which resets Oct 22, 3:00 PM (UTC). Until then, switch this bot to another AI or Claude account.",

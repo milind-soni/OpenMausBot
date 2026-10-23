@@ -92,7 +92,7 @@ import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinute
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
 import { applyHoldDirective, classifyHoldDirective, heldMemberLine, rememberHeldMessage, stopWordPlacement } from "./room-holds.ts";
 import { refusalBody, userError, userErrorFields } from "./user-errors.ts";
-import { chatNotice, failedNoticeTool, noticeTool } from "./chat-notices.ts";
+import { chatNotice, failedNoticeTool, noticeTool, resumedTool } from "./chat-notices.ts";
 import type { ServerErrorBody } from "../shared/server-text.ts";
 import { emailSignInRoute } from "./routes/email-sign-in.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
@@ -4272,7 +4272,7 @@ const coordinator: Coordinator = createCoordinator({
         const who = settledFrom.length ? settledFrom.join(", ") : "delegated work";
         store.appendMessage(node.threadId, {
           role: "bot", kind: "activity",
-          tool: { name: `${asking.length ? `Resumed with a question from ${who}` : `Resumed with ${who} results`}${node.restart ? " after a restart" : ""}, reviewing`, ok: true },
+          tool: resumedTool(asking.length > 0, settledFrom, Boolean(node.restart)),
         });
         const quiet = turnAnswers(node.threadId, { cardContinuation: true, coordination: node }).quiet;
         const routineRoot = !node.parentId && activeRoutineRunForThread(node.threadId) !== null;

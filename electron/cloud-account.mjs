@@ -67,7 +67,7 @@ const sameHint = (left, right) => (left?.tier ?? null) === (right?.tier ?? null)
 
 export function createCloudAccountClient({ store, openBrowser, platform, deviceName, appVersion,
   origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false }) {
+  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false, t = englishText.t }) {
   origin = cloudOrigin(origin, fixture);
   const staging = origin === STAGING_CLOUD_ORIGIN;
   let grant = null, issued = null, cleanup = null, pending = null, cleanupNeeded = false;
@@ -486,7 +486,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     /** The code goes to main only, for one navigation, and is not kept. */
     async pairHome() {
       const target = homeTarget(), current = grant;
-      if (!target || !current) throw new Error("My Cloud is not ready to connect yet.");
+      if (!target || !current) throw new Error(t("native.cloud.notReady"));
       let result;
       try { result = await request("pairing", { method: "POST", body: {}, token: current.token }); } catch (error) {
         const why = cloudUnreachableText(await refresh().catch(() => state()), target.origin);

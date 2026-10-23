@@ -86,7 +86,7 @@ describe("GET /api/threads/:threadId/messages/:messageId/app", () => {
     expect((await get(`/api/threads/${other.threadId}/messages/${id}/app`)).body).toEqual({ error: "no app on that message" });
     expect((await get(`/api/threads/${bot.threadId}/messages/${text}/app`)).status).toBe(404);
     const gone = store.appendMessage(bot.threadId, { role: "bot", kind: "app", text: "x", app: { v: 1, source: "html", title: "x", doc: "", rev: 0, bytes: 1, border: true, network: { connect: [], resources: [] }, blocked: "too-large" } }).id;
-    expect(await get(`/api/threads/${bot.threadId}/messages/${gone}/app`)).toMatchObject({ status: 404, body: { error: "This app's page is not stored on this computer." } });
+    expect(await get(`/api/threads/${bot.threadId}/messages/${gone}/app`)).toMatchObject({ status: 404, body: { error: "This app's page is not stored on this computer.", errorKey: "serverError.page.notStored" } });
   });
 });
 

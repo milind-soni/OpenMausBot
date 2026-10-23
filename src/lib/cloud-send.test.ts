@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { moveLine } from "./cloud-send";
+import { readFileSync } from "node:fs";
+import en from "@/locales/en.json";
+import ptBr from "@/locales/pt-br.json";
+import { ipcErrorText, moveLine } from "./cloud-send";
 
 beforeEach(() => { setLocale("en"); });
 afterEach(() => { setLocale("en"); });
@@ -66,5 +69,29 @@ describe("the line on a computer whose bots come home because the person keeps t
     expect(moveLine({ phase: "back", kept: true }, "local"))
       .toEqual({ kind: "done", text: "This computer's bots are back here, and their automations run on this computer. My Cloud keeps a copy of them with their automations off.", extra: [] });
     expect(moveLine({ phase: "back", kept: true }, "cloud")).toBeNull();
+  });
+});
+
+describe("a refusal the preload words before main is asked", () => {
+  const unclicked = en["cloudAccount.keepHere.unclicked"];
+  const keys = ["cloudAccount.keepHere.unclicked", "cloudSend.move.unclicked", "teamMove.unclicked"] as const;
+
+  it("is the preload's own sentence", () => {
+    const preload = readFileSync(new URL("../../electron/preload.cjs", import.meta.url), "utf8");
+    for (const key of keys) expect(preload, key).toContain(`new Error(${JSON.stringify(en[key])})`);
+  });
+
+  it("each one shown on a page reads in pt-BR", () => {
+    setLocale("pt-br");
+    for (const key of keys) expect(ipcErrorText(new Error(en[key])), key).toBe(ptBr[key]);
+  });
+
+  it("shows in the app's language, and main's own words stay as main wrote them", () => {
+    expect(ipcErrorText(new Error(unclicked))).toBe(unclicked);
+    setLocale("pt-br");
+    expect(ipcErrorText(new Error(unclicked))).toBe(ptBr["cloudAccount.keepHere.unclicked"]);
+    expect(ipcErrorText(new Error("Error invoking remote method 'one-home:keep-set': Error: Os bots deste computador estão voltando.")))
+      .toBe("Os bots deste computador estão voltando.");
+    expect(ipcErrorText("not an error")).toBeNull();
   });
 });

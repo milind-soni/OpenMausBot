@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import englishCatalog from "../src/locales/en.json" with { type: "json" };
 import { failedTurnCause } from "../shared/failed-turn.ts";
-import { CHAT_NOTICE, failedNoticeTool, noticeTool } from "./chat-notices.ts";
+import { CHAT_NOTICE, failedNoticeTool, noticeTool, resumedTool } from "./chat-notices.ts";
 import { heldMemberLine, isHeldMemberLine } from "./room-holds.ts";
 
 describe("chat notices", () => {
@@ -32,6 +32,21 @@ describe("chat notices", () => {
       nameParams: { minutes: 20 },
     });
     expect(failedTurnCause(tool.name)).toBe("no activity for 20 minutes — the turn was stopped");
+  });
+
+  it("words a resumed turn as the English line it replaces, in all its forms", () => {
+    const upstream = (asking: boolean, who: string, restart: boolean) =>
+      `${asking ? `Resumed with a question from ${who}` : `Resumed with ${who} results`}${restart ? " after a restart" : ""}, reviewing`;
+    for (const restart of [false, true]) {
+      expect(resumedTool(true, ["Scout", "Ada"], restart).name).toBe(upstream(true, "Scout, Ada", restart));
+      expect(resumedTool(false, ["Scout"], restart).name).toBe(upstream(false, "Scout", restart));
+      expect(resumedTool(false, [], restart).name).toBe(upstream(false, "delegated work", restart));
+    }
+    expect(resumedTool(true, ["Scout", "Ada"], true)).toEqual({
+      ok: true, name: "Resumed with a question from Scout, Ada after a restart, reviewing",
+      nameCode: "chat.notice.resumedQuestionAfterRestart", nameParams: { names: "Scout, Ada" },
+    });
+    expect(resumedTool(false, [], false)).toEqual({ ok: true, name: "Resumed with delegated work results, reviewing", nameCode: "chat.notice.resumedWork" });
   });
 
   it("words the held line the sentinel still recognises", () => {

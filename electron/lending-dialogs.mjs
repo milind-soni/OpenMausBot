@@ -4,22 +4,20 @@
 import { randomUUID } from "node:crypto";
 import nativeText from "./native-text.cjs";
 
-/** The word the person knows this computer by, and the popup's button. */
+/** The popup's question and button, by the word the person knows this computer by. */
 const USE_WORDS = Object.freeze({
-  darwin: { computer: "this Mac", use: "Use my Mac" },
-  win32: { computer: "this PC", use: "Use my PC" },
-  other: { computer: "this computer", use: "Use this computer" },
+  darwin: { message: "native.lend.offer.titleMac", use: "native.lend.offer.useMac" },
+  win32: { message: "native.lend.offer.titlePc", use: "native.lend.offer.usePc" },
+  other: { message: "native.lend.offer.titleComputer", use: "native.dialog.org.useHere" },
 });
 
 /** "Use my Mac": the popup's question, its one line and its buttons. `screen`: apps and screen can be lent here. */
-export function useMyComputerText(platform, { screen }) {
+export function useMyComputerText(platform, { screen }, t = nativeText.englishText.t) {
   const words = USE_WORDS[platform] ?? USE_WORDS.other;
   return {
-    message: `Let your bots use ${words.computer}?`,
-    detail: screen
-      ? "Like before, they can use its internet connection, read your Desktop, Documents and Downloads, and use your apps and screen."
-      : "Like before, they can use its internet connection and read your Desktop, Documents and Downloads.",
-    buttons: [words.use, "Not now"],
+    message: t(words.message),
+    detail: t(screen ? "native.lend.offer.detailScreen" : "native.lend.offer.detail"),
+    buttons: [t(words.use), t("native.dialog.share.notNow")],
   };
 }
 
@@ -46,7 +44,7 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
   return {
     /** Use my Mac, asked in `parent`: "use" or "later". */
     async useMyComputer(parent, { screen }) {
-      const { message, detail, buttons } = useMyComputerText(platform, { screen });
+      const { message, detail, buttons } = useMyComputerText(platform, { screen }, t);
       const { response } = await dialog.showMessageBox(parent, { type: "question", message, detail, buttons, defaultId: 0, cancelId: 1, noLink: true });
       return response === 0 ? "use" : "later";
     },
