@@ -1,5 +1,4 @@
-// The store is the only state: tick() is the only place work is admitted or dispatched, and no timer lives here.
-import { randomUUID } from "node:crypto";
+          import { randomUUID } from "node:crypto";
 
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
@@ -19,7 +18,6 @@ export interface RuntimeOptions {
 }
 
 export interface BeginRequest {
-  /** The host's own id for the requesting turn (its generation); default a fresh uuid. */
   id?: string;
   origin: Origin;
   /** person | routine_run | external_runtime */
@@ -74,12 +72,11 @@ export class Runtime {
     this.bootAt = this.clock.now();
   }
 
-  /** Restart reconciliation and re-park of needs_input, from stored data only. Idempotent; runs before the first tick. */
+
   open(): void {
     if (this.opened) return;
     this.opened = true;
     const now = this.clock.now();
-    // Deepest first: a child's fate marks its parent before the parent's own turn is judged.
     const live = this.store.all({ nonTerminal: true }).sort((a, b) => b.depth - a.depth);
     this.withBatch(() => {
       for (const snapshot of live) {
@@ -121,7 +118,6 @@ export class Runtime {
     });
   }
 
-  /** A requesting turn starts: the root, already running. The host runs that turn and ends it with end(). */
   begin(req: BeginRequest): Assignment {
     const now = this.clock.now();
     const id = req.id ?? randomUUID();
@@ -140,7 +136,6 @@ export class Runtime {
     return root;
   }
 
-  /** Never throws: an unknown id, a child or a root that is not running is logged and left alone. */
   end(rootId: string, result: EndResult): void {
     const n = this.store.get(rootId);
     if (!n || n.parentId !== undefined || n.status !== "running") { this.log(`end(${rootId}): not a running root`); return; }
@@ -226,7 +221,6 @@ export class Runtime {
     return { ok: true, assignment: node, duplicate: false };
   }
 
-  /** Never overlaps itself; does nothing after close(). */
   tick(): void {
     if (!this.opened) this.open();
     if (this.closing || this.ticking) return;
@@ -242,7 +236,6 @@ export class Runtime {
     const now = this.clock.now();
     const mono = this.clock.monotonic();
     const live = this.store.all({ nonTerminal: true });
-    // Deepest first, so each node fails with its own reason.
     for (const snapshot of [...live].sort((a, b) => b.depth - a.depth)) {
       const n = this.store.get(snapshot.id);
       if (!n || isTerminal(n)) continue;
@@ -257,7 +250,6 @@ export class Runtime {
         }
       }
     }
-    // Access is rechecked every tick, not only at dispatch, so no result crosses a boundary that closed under it.
     for (const snapshot of [...live].sort((a, b) => b.depth - a.depth)) {
       const n = this.store.get(snapshot.id);
       if (!n || isTerminal(n)) continue;
@@ -347,12 +339,18 @@ export class Runtime {
     if (!root) { this.log(`dispatch(${n.id}): root ${n.rootId} is missing`); return false; }
     let input: RunInput;
     let delivered: string[];
+    let levelChanged = false;
     let carrying: string[];
     let carried: Set<string>;
     let interruption: boolean;
     try {
+      if (this.runner.approvalLevel) {
+        const refreshed = this.safe("approvalLevel", () => this.runner.approvalLevel!(n));
+        if (!refreshed) return false; // A failed authority check starts nothing.
+        levelChanged = n.level !== refreshed.level || n.levelSource !== refreshed.source;
+        n.level = refreshed.level; n.levelSource = refreshed.source;
+      }
       const children = this.store.children(n.id);
-      // Every settled result, not only new ones: the host keeps reports out of the transcript it replays.
       const settled = awaited(children).filter(isTerminal);
       const ids = new Set(children.map(c => c.id));
       const inbox = this.store.inbox({ threadId: n.assignee.destination.threadId }, true).filter(i => ids.has(i.assignmentId));
@@ -388,6 +386,7 @@ export class Runtime {
     if (root.budgets) root.budgets.executions += 1;
     try {
       this.store.transaction(() => {
+        if (levelChanged) this.store.update(n, { kind: "level_changed", at: now, detail: `dispatch level ${n.level} (${n.levelSource})` });
         this.store.update(n, { kind: "admitted", at: now, detail: "admitted" });
         this.store.update(n, { kind: "started", at: now, detail: `running: turn ${n.executions}${resumed ? " (resume)" : ""}, level ${n.level}` });
         if (root.id !== n.id) this.store.update(root);
@@ -419,7 +418,6 @@ export class Runtime {
     return true;
   }
 
-  /** Only the live handle's result settles the node: an ended, cancelled or stalled turn has no handle. */
   private turnEnded(id: string, live: LiveTurn, result: RunResult): void {
     try {
       if (this.turns.get(id) !== live) return;
@@ -444,7 +442,6 @@ export class Runtime {
     if (result.evidence) n.evidence = result.evidence;
     const root = n.parentId ? this.store.get(n.rootId) : n;
     if (result.kind === "continue") {
-      // The count comes from events because dispatch deletes n.continuation.
       n.result = clip(result.text, RESULT_MAX);
       n.guard = nextGuard(n.guard, result.evidence);
       const stop = loopStop(n.guard, result.text);
@@ -494,7 +491,6 @@ export class Runtime {
     else this.settle(n, "failed", result.outcome, undefined, ownTurn);
   }
 
-  /** The host saw activity on this running turn: its stall window restarts. */
   progress(id: string): void {
     const turn = this.turns.get(id);
     if (turn) {
@@ -528,8 +524,6 @@ export class Runtime {
     this.withBatch(() => outcome === "failed" ? this.cancelTree(n, reason, "failed", "interrupted") : this.cancelTree(n, reason, "cancelled", "stopped"));
   }
 
-  /** The person stopped the requester's conversation: work that never started is dropped, a teammate
-   * mid-turn still reports, and nothing resumes the stopped conversation. */
   stopRequester(owner: Owner, reason = "Stopped by user"): Assignment[] {
     const left: Assignment[] = [];
     this.withBatch(() => {
@@ -598,6 +592,7 @@ export class Runtime {
   close(): void {
     this.closing = true;
   }
+
 
   private cancelTree(n: Assignment, reason: string, status: "failed" | "cancelled", outcome: Outcome): void {
     for (const child of this.store.children(n.id)) {
@@ -669,6 +664,7 @@ export class Runtime {
     this.touch(n, ...root && root.id !== n.id ? [root] : []);
     return over;
   }
+
 
   private renew(root: Assignment, now: number): void {
     root.lastActivityAt = now;

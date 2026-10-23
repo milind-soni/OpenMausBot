@@ -10,13 +10,17 @@ import { removeTempDir } from "../../testing/cleanup.ts";
 import * as procs from "../../procs.ts";
 import { BACKGROUND_TEXT_TIMEOUT_MS } from "./background-text.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./core.ts";
+import { createOpenCodeDriver } from "./opencode-go.ts";
+import { PERMISSION_REVIEW_SYSTEM_PROMPT } from "../../contracts.ts";
+import { reviewApproval } from "../../approval-review.ts";
 import { CursorAgentDriver } from "./cursor.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { GrokAgentDriver } from "./grok.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
-const ENV_KEYS = ["FAKE_ACP_MODE", "FAKE_ACP_DUMP", "FAKE_ACP_TEXT_REPLY"];
+const ENV_KEYS = ["FAKE_ACP_MODE", "FAKE_ACP_DUMP", "FAKE_ACP_TEXT_REPLY", "FAKE_ACP_MODELS", "FAKE_ACP_VARIANTS",
+  "FAKE_ACP_MODEL_STICKS", "FAKE_ACP_VARIANT_STICKS", "FAKE_ACP_DUMP_PROMPT"];
 
 describe("ACP memory one-shot (generateMemoryText)", () => {
   let instance: ProviderInstance | undefined;
@@ -133,5 +137,54 @@ describe("ACP memory one-shot (generateMemoryText)", () => {
       pickAuthMethod: () => null, authFailure: "continue", isAuthenticated: () => true, backgroundText: false,
     };
     expect((await create(createAcpDriver(support))).generateMemoryText).toBeUndefined();
+  });
+
+  it("reviews through OpenCode's exact model and variant in a tool-free session", async () => {
+    process.env.FAKE_ACP_MODELS = "working-model,review-model";
+    process.env.FAKE_ACP_VARIANTS = JSON.stringify({
+      "review-model": { id: "effort", currentValue: "medium", options: [{ value: "medium" }, { value: "off" }] },
+    });
+    process.env.FAKE_ACP_TEXT_REPLY = '{"decision":"allow","reason":"The requested read is in scope."}';
+    process.env.FAKE_ACP_DUMP = join(scratch, "review.json");
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    const driver = createOpenCodeDriver(async () => ({ default: "working-model", options: [
+      { id: "working-model", label: "Working" }, { id: "review-model", label: "Review" },
+    ] }));
+    const engine = await create(driver);
+    const usage: TextGenerationUsage[] = [];
+    const result = await reviewApproval({
+      action: { tool: "fixture_read", arguments: { path: "fixture.txt" } },
+      session: { instanceId: engine.instanceId, model: "review-model", variant: "off" },
+      settings: {},
+      messages: [{ id: "request", role: "user", kind: "text", text: "Read the fixture file.", at: 1 }],
+      getProvider: () => engine,
+      isCurrent: () => true,
+      onUsage: (_provider, row) => usage.push(row),
+    });
+    expect(result).toMatchObject({ decision: "allow", reviewer: { model: "review-model", variant: "off" } });
+    const session = JSON.parse(readFileSync(`${process.env.FAKE_ACP_DUMP}.session.json`, "utf8"));
+    const launch = JSON.parse(readFileSync(process.env.FAKE_ACP_DUMP, "utf8"));
+    const selection = JSON.parse(readFileSync(`${process.env.FAKE_ACP_DUMP}.selection.json`, "utf8"));
+    const prompt = JSON.parse(readFileSync(`${process.env.FAKE_ACP_DUMP}.prompt.json`, "utf8"));
+    expect(session.mcpServers).toEqual([]);
+    expect(existsSync(session.cwd)).toBe(false);
+    expect(JSON.parse(launch.env.OPENCODE_PERMISSION)).toMatchObject({ "*": "deny", read: "deny", bash: "deny" });
+    expect(launch.env.OPENCODE_DISABLE_PROJECT_CONFIG).toBe("1");
+    expect(selection).toMatchObject({ model: "review-model", variant: "off" });
+    expect(prompt[0].text).toContain(PERMISSION_REVIEW_SYSTEM_PROMPT);
+    expect(usage).toEqual([expect.objectContaining({ model: "review-model" })]);
+  });
+
+  it("refuses review if OpenCode does not apply the exact model or tries to use a tool", async () => {
+    process.env.FAKE_ACP_MODELS = "working-model,review-model";
+    const driver = createOpenCodeDriver(async () => ({ default: "working-model", options: [
+      { id: "working-model", label: "Working" }, { id: "review-model", label: "Review" },
+    ] }));
+    const engine = await create(driver);
+    process.env.FAKE_ACP_MODEL_STICKS = "1";
+    await expect(engine.reviewPermission!("Review input", { model: "review-model" })).rejects.toThrow(/did not select the review model/);
+    delete process.env.FAKE_ACP_MODEL_STICKS;
+    process.env.FAKE_ACP_MODE = "permission";
+    await expect(engine.reviewPermission!("Review input", { model: "review-model" })).rejects.toThrow(/may not use|tried to use a tool/);
   });
 });

@@ -1,4 +1,4 @@
-// One tool-free ACP exchange for memory upkeep: a fresh process and session, no MCP servers, an empty
+// One tool-free ACP exchange for memory upkeep or approval review: a fresh process and session, no MCP servers, an empty
 // folder. It fails closed: any agent request, or any tool call it reports, ends the call.
 import type { TextGenerationOptions, TextGenerationUsage } from "../../contracts.ts";
 import type { killCliTree, spawnCli } from "../../procs.ts";
@@ -22,9 +22,10 @@ export interface AcpOneShotInput {
   authRequired: boolean | "if-requested";
   loginNote: string;
   clientCapabilitiesMeta?: Record<string, unknown>;
-  configure?: (ctx: { request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>; sessionId: string; session: any }) => Promise<void>;
+  configure?: (ctx: { request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>; sessionId: string; session: any }) => Promise<{ model?: string } | void>;
   options?: TextGenerationOptions;
   timeoutMs?: number;
+  maxOutputChars?: number;
 }
 
 const REFUSAL = "OpenMausBot background text allows no tools, files, terminals or approvals.";
@@ -110,7 +111,7 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
         const text = update?.content?.text;
         if (typeof text !== "string") return;
         output += text;
-        if (output.length > BACKGROUND_TEXT_MAX_CHARS) finish(new Error(`${name} background answer exceeded its limit`));
+        if (output.length > (input.maxOutputChars ?? BACKGROUND_TEXT_MAX_CHARS)) finish(new Error(`${name} background answer exceeded its limit`));
       }
     };
 
@@ -166,7 +167,8 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
       sessionId = session.sessionId;
       model = typeof session?.models?.currentModelId === "string" ? session.models.currentModelId
         : typeof init?._meta?.modelState?.currentModelId === "string" ? init._meta.modelState.currentModelId : undefined;
-      await input.configure?.({ request: (method, params) => request(method, params), sessionId: session.sessionId, session });
+      const configured = await input.configure?.({ request: (method, params) => request(method, params), sessionId: session.sessionId, session });
+      if (configured?.model) model = configured.model;
       const result = await request("session/prompt", { sessionId, prompt: [{ type: "text", text: input.prompt }] });
       const reported = result?.usage ?? result?._meta ?? {};
       const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined);

@@ -10,7 +10,7 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import { waitForExit } from "./testing/cleanup.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 
-it("applies requested Full Access workflows through MCP without duplicate approvals, and the same changes apply in an Ask task with Undo", async () => {
+it.each(["ask", "full"] as const)("applies Full workflows while outside API delegation preserves teammate %s", async (teammateMode) => {
   const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true });
   const { url, dataDir, logPath } = fixture.info;
   const planPath = join(dataDir, "room-plan.json");
@@ -101,7 +101,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvePeerComms: true });
     const ask = (await api("POST", `/api/bots/${chief.id}/tasks`, { title: "Ask sibling" }, 201)).task;
     const peer = (await cli("new-bot", "--name", "Ada", "--section", "Operations")).bot;
-    // Ada's own level is an explicit Ask, so the Chief's Full has something to raise.
+    // The fixture exercises explicit Ask and Full independently of Chief authority.
     await api("PATCH", `/api/bots/${peer.id}`, { approvalMode: "ask" });
     const inverse = (await cli("new-bot", "--name", "Thread Full", "--section", "Private")).bot;
     const modelSelection = chief.modelSelection;
@@ -120,6 +120,9 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     const savedInverse = savedBots.find((bot: any) => bot.id === inverse.id);
     savedInverse.approvalMode = "ask"; savedInverse.autoApprove = false;
     savedInverse.tasks.find((task: any) => task.threadId === inverse.activeTaskId).approvalMode = "full";
+    const savedPeer = savedBots.find((bot: any) => bot.id === peer.id);
+    savedPeer.approvalMode = teammateMode; savedPeer.autoApprove = false;
+    for (const task of savedPeer.tasks) { task.approvalMode = teammateMode; task.autoApprove = false; }
     writeFileSync(join(dataDir, "bots.json"), JSON.stringify(savedBots, null, 2));
     await restart();
     expect((await api("GET", "/api/health")).capabilities).toMatchObject({ guardedFullAccess: 1 });
@@ -201,10 +204,12 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect(handoffs.every((node: any) => node.status === "completed")).toBe(true);
     expect(providerTurns().filter(turn => turn.botId === peer.id)).toHaveLength(1);
     const peerTurn = providerTurns().find(turn => turn.botId === peer.id)!;
-    expect(peerTurn.permissionMode).toBe("bypassPermissions");
-    expect((await bots()).find(bot => bot.id === peer.id).approvalMode ?? "ask").toBe("ask");
+    const expectedPermissionMode = teammateMode === "full" ? "bypassPermissions" : "default";
+    expect(peerTurn.permissionMode).toBe(expectedPermissionMode);
+    expect(handoffs.find(node => node.botId === peer.id)).toMatchObject({ origin: { kind: "outside" } });
+    expect((await bots()).find(bot => bot.id === peer.id).approvalMode ?? "ask").toBe(teammateMode);
     expect(await unanswered(peerTurn.threadId)).toHaveLength(0);
-    expect((await messages(peerTurn.threadId)).some(message => message.kind === "activity" && /^Full access — delegated by Clive, a Chief of Staff on Full access$/.test(message.tool?.name ?? ""))).toBe(true);
+    expect((await messages(peerTurn.threadId)).some(message => message.kind === "activity" && /^Full access — delegated by Clive, a Chief of Staff on Full access$/.test(message.tool?.name ?? ""))).toBe(false);
     evidence.push({ delegatedFullAccess: { peerThreadId: peerTurn.threadId, permissionMode: peerTurn.permissionMode } });
 
     const askTurn = await run(chief, ask.threadId, "Change my own profile, routine and named skill, and add a specialist in this Ask task.", [
@@ -244,8 +249,8 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect(persisted.find((bot: any) => bot.id === chief.id).tasks.find((task: any) => task.threadId === ask.threadId).approvalMode).toBe("ask");
     expect(persisted.find((bot: any) => bot.id === inverse.id)).toMatchObject({ title: "Applied from Full task", approvalMode: "ask" });
     expect(persisted.find((bot: any) => bot.id === inverse.id).tasks.find((task: any) => task.threadId === inverse.activeTaskId).approvalMode).toBe("full");
-    expect(persisted.find((bot: any) => bot.id === peer.id).approvalMode).not.toBe("full");
-    expect(persisted.find((bot: any) => bot.id === peer.id).tasks.find((task: any) => task.threadId === peerTurn.threadId)).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: [] });
+    expect(persisted.find((bot: any) => bot.id === peer.id).approvalMode).toBe(teammateMode);
+    expect(persisted.find((bot: any) => bot.id === peer.id).tasks.find((task: any) => task.threadId === peerTurn.threadId)).toMatchObject({ approvalMode: teammateMode, autoApprove: false, alwaysAllow: [] });
     expect(JSON.parse(readFileSync(join(dataDir, "routines.json"), "utf8")).routines[0]).toMatchObject({ enabled: false, schedule });
     evidence.push({ persistedBots: persisted, routines: await api("GET", "/api/routines"), handoffs,
       fullMessages: await messages(chief.activeTaskId), askMessages: await messages(ask.threadId), inverseMessages: await messages(inverse.activeTaskId) });
@@ -278,7 +283,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     await expect.poll(async () => (await messages(interrupted.threadId)).some(message => message.text === "Reviewed the resumed check"), { timeout: 25_000 }).toBe(true);
     const [rerun, review] = providerTurns().slice(beforeRestart);
     expect(providerTurns()).toHaveLength(beforeRestart + 2);
-    expect(rerun).toMatchObject({ botId: peer.id, resumed: false, permissionMode: "bypassPermissions" });
+    expect(rerun).toMatchObject({ botId: peer.id, resumed: false, permissionMode: expectedPermissionMode });
     expect(JSON.stringify(rerun.prompt)).toContain("this turn continues it");
     expect(review).toMatchObject({ botId: chief.id, threadId: interrupted.threadId, resumed: true });
     expect(JSON.stringify(review.prompt)).toContain("A restart cut these teammates' turns: Ada (resumed once in place");

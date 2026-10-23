@@ -533,7 +533,6 @@
   "approval.action.allowOnce": "Permitir uma vez",
   "approval.held.native": "O provedor exige a sua aprovação para esta ação.",
   "approval.held.sandbox": "Isto afrouxa os próprios limites de segurança da IA, então só Acesso total pode aprovar automaticamente.",
-  "approval.opaqueCode": "Isto executa código que pode enviar ou alterar coisas nos seus apps, então sempre pede antes.",
   "approval.held.undeliveredFull": "Acesso total não conseguiu entregar esta aprovação.",
   "approval.held.undelivered": "Aprovar por mim não conseguiu responder a esta.",
   "settings.title": "Configurações",

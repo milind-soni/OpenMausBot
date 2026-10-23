@@ -1,6 +1,4 @@
-// Loaded with --import in isolated fixtures when OMB_TEST_APPROVAL_CLOCK=1: while <data dir>/expire-approvals
-// exists, every pending ask hits the broker's fifteen-minute deadline. No authorization or dispatch decision changes.
-import { registerHooks } from 'node:module';
+      import { registerHooks } from 'node:module';
 import { join } from 'node:path';
 const dataDir = process.env.OMB_DATA_DIR;
 if (!dataDir || dataDir !== process.env.HOME || process.env.OMB_TEST_APPROVAL_CLOCK !== '1') {
@@ -13,7 +11,7 @@ registerHooks({
     if (!url.endsWith('/server/drivers/claude.ts')) return result;
     const source = String(result.source);
     // The broker's one timer is the only setTimeout in its scope.
-    const anchor = 'const timeoutMs = opts.timeoutMs ?? 15 * 60_000;';
+    const anchor = 'const timeoutMs = opts.timeoutMs ?? PERMISSION_BROKER_TIMEOUT_MS;';
     if (source.split(anchor).length !== 2) throw new Error('Claude permission broker timer seam changed');
     return { ...result, source: `
       import { existsSync as approvalMarkerExists } from 'node:fs';

@@ -54,6 +54,7 @@ Use only mapped, tested commands:
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
 - [MausBot, everyone's helper](mausbot.md)
 - [Profile proposal and credential-card lifecycle](proposal-cards.md)
+- [Approve for me: isolated model review and settings](approval-review.md)
 - [Full Access without duplicate approvals](full-access.md)
 - [Exact command allowlist UI and saved rules](command-allowlist.md)
 - [The safety floor: a never-list no grant can allow](safety-floor.md)

@@ -353,7 +353,6 @@
   "approval.action.allowOnce": "Bir defalık izin ver",
   "approval.held.native": "Sağlayıcı bu eylem için onayınızı istiyor.",
   "approval.held.sandbox": "Bu işlem AI'ın kendi güvenlik sınırlarını gevşetir, bu nedenle bunu yalnızca Tam erişim otomatik olarak onaylayabilir.",
-  "approval.opaqueCode": "Bu işlem, uygulamalarınızda bir şey gönderebilecek veya değiştirebilecek kod çalıştırır, bu nedenle her zaman önce sorar.",
   "approval.held.undeliveredFull": "Tam erişim bu onayı teslim edemedi.",
   "approval.held.undelivered": "Benim için onayla buna yanıt veremedi.",
   "settings.title": "Ayarlar",

@@ -1,4 +1,4 @@
-import { RuntimeCoordinator } from "./runtime-coordinator.ts";
+      import { RuntimeCoordinator } from "./runtime-coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
 import type { LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import type { Assignment, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
@@ -23,7 +23,7 @@ export type { LegacyThreadResolver };
 
 export type HandoffStatus = "source" | "queued" | "running" | "waiting" | "resume" | "completed" | "failed" | "cancelled";
 
-export interface HandoffView {
+ export interface HandoffView {
   id: string;
   rootId: string;
   parentId?: string;
@@ -41,7 +41,11 @@ export interface HandoffView {
   startedAt?: number;
   lastProgressAt?: number;
   approvalGranted: boolean;
+  /** Recorded grant ceiling, refreshed before dispatch. */
+  level: Level;
   kind: "work" | "assignment";
+  /** Immutable runtime lineage, distinct from evidence of a user request. */
+  originKind?: Origin["kind"];
   origin?: WorkOrigin;
   restarts: number;
   restart?: "rerun" | "cut" | "teammates";
@@ -57,7 +61,7 @@ export interface HandoffView {
   goalRunId?: string;
 }
 
-export interface BeginTurnRequest {
+ export interface BeginTurnRequest {
   id: string;
   address: RoomAddress;
   brief: string;
@@ -67,8 +71,7 @@ export interface BeginTurnRequest {
   goalRunId?: string;
 }
 
-/** `cap` continues the same node in place (a step cap, a seat it could not get); `cards` parks it on the person. */
-export interface HostTurnResult {
+ export interface HostTurnResult {
   ok: boolean;
   text: string;
   evidence?: TurnEvidence;
@@ -79,7 +82,7 @@ export interface HostTurnResult {
   stalled?: boolean;
 }
 
-export interface HandoffOpener {
+ export interface HandoffOpener {
   requester: Requester;
   origin: Origin;
 }
@@ -96,8 +99,7 @@ export interface HandoffOptions {
 
 export type RoomAddress = Pick<HandoffView, "groupId" | "threadId" | "botId">;
 
-/** `note` is `text` without the brief, for a room whose transcript already has the words; `restartNote` already leads `text`. */
-export interface ComposedTurn {
+ export interface ComposedTurn {
   text: string;
   note: string;
   restartNote: string;
@@ -112,23 +114,17 @@ export interface LiveHandoffEdge {
   groupId?: string;
 }
 
-/** Every method may throw; the runtime logs a throw and reads it as "not now". */
-export interface CoordinatorHost {
+ export interface CoordinatorHost {
   /** Recheck addresses and route permission immediately before every dispatch. */
   validate(node: HandoffView, parent?: HandoffView): string | undefined;
   busy(node: HandoffView): boolean;
-  /** For a root this is the person's own conversation continuing: person-visible, never internal. */
   run(node: HandoffView, resumed: boolean, signal: AbortSignal, composed: ComposedTurn): Promise<HostTurnResult>;
   report(child: HandoffView, parent?: HandoffView): void;
   changed(groupIds: ReadonlySet<string>, directThreadIds: ReadonlySet<string>): void;
   names(node: HandoffView, parent?: HandoffView): EnvelopeNames;
-  /** `restored` shows the question again only if the first showing never happened; a root parked on its own cards shows nothing more. */
   park(node: HandoffView, question: string, restored?: boolean): void;
-  /** The level the target thread will really run with, so the envelope states the truth. A Chief's level flows into a room
-   * with the hand-off, never onto the shared thread, so it resolves from `source`. */
-  levelOf(target: RoomAddress, source?: RoomAddress): { level: Level; driverKind?: string };
+  levelOf(target: RoomAddress, source?: RoomAddress, origin?: Origin["kind"], mode?: Mode): { level: Level; driverKind?: string };
   chiefOf(address: RoomAddress): boolean;
-  /** What the cut turn already did outward (sent, posted, paid): a turn that acted outward is not run again. */
   outward?(node: HandoffView): string[];
 }
 
@@ -138,11 +134,9 @@ export interface Coordinator {
   all(): HandoffView[];
   active(): HandoffView[];
   children(id: string): HandoffView[];
-  /** A generation with no root is refused; throws an Error whose message is the typed refusal shown to the model. */
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined, target: RoomAddress, text: string,
     options?: HandoffOptions): { node: HandoffView; duplicate: boolean };
   status(id: string): StatusView | undefined;
-  /** Every assignment this conversation was given that was open at `since` or began after, with all handed out under it; rows oldest first. */
   job(threadId: string, since: number, botId?: string): { scopes: string[]; rows: Assignment[] };
   /** Undelivered inbox items for a polling requester, marked delivered. */
   poll(owner: Owner): { items: StatusView["inbox"]; assignments: HandoffView[] };
@@ -164,13 +158,11 @@ export interface Coordinator {
   awaitingTeammateThreads(): Set<string>;
   liveEdges(): LiveHandoffEdge[];
   stopAwaitingDirect(threadId: string, reason?: string): HandoffView[];
-  /** The next start goes on with this thread's turn, so a shutdown's "cut" line would be false. */
   continuesAfterRestart(threadId: string): boolean;
   note(id: string): string | undefined;
   tick(): void;
   close(): void;
   progress(threadId: string): void;
-  /** True when a parked assignment took the text as its answer: the host must not start an ordinary turn. */
   answer(threadId: string, text: string): boolean;
   awaitingAnswer(threadId: string): boolean;
 }

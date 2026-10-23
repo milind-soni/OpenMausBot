@@ -1,5 +1,4 @@
-// Provider instance registry — port of upstream's ProviderInstanceRegistryLive behavior, minus Effect.
-import { findCliCandidates } from "../env-path.ts";
+      import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 export { engineMemory } from "../engine-memory.ts";
@@ -27,14 +26,14 @@ export type RegistryEntry =
   | { instanceId: InstanceId; live: ProviderInstance; shadow?: undefined }
   | { instanceId: InstanceId; live?: undefined; shadow: ShadowInstance };
 
-function withServerInstall(install: AnyProviderDriver["install"], npmPresent: boolean): AnyProviderDriver["install"] {
+ function withServerInstall(install: AnyProviderDriver["install"], npmPresent: boolean): AnyProviderDriver["install"] {
   if (!install) return undefined;
   const server = serverInstallFor(install, npmPresent);
   const platform = process.platform === "darwin" || process.platform === "linux" || process.platform === "win32" ? process.platform : undefined;
   return { ...install, platform, ...(server ? { server } : {}) };
 }
 
-function cliDefaultOf(driver: AnyProviderDriver | undefined): string | undefined {
+ function cliDefaultOf(driver: AnyProviderDriver | undefined): string | undefined {
   if (!driver) return undefined;
   try {
     const cfg = driver.defaultConfig() as { cli?: unknown };
@@ -44,7 +43,7 @@ function cliDefaultOf(driver: AnyProviderDriver | undefined): string | undefined
   }
 }
 
-function cliOfRaw(raw: unknown): string | undefined {
+ function cliOfRaw(raw: unknown): string | undefined {
   const cli = (raw as { cli?: unknown } | undefined)?.cli;
   return typeof cli === "string" && cli ? cli : undefined;
 }
@@ -91,7 +90,6 @@ export class ProviderRegistry {
         return ready;
       }),
     );
-    // Config order, not completion order; an entry a dispose replaced meanwhile is not this load's to place.
     const placed = new Set(loaded.filter((entry) => this.byId.get(entry.instanceId) === entry).map((entry) => entry.instanceId));
     const entries = new Map(this.byId);
     this.byId.clear();
@@ -123,7 +121,6 @@ export class ProviderRegistry {
     }
     try {
       const config = entry.config === undefined ? driver.defaultConfig() : driver.decodeConfig(entry.config);
-      // The RAW config: decodeConfig fills in the driver default, which would flag every instance as overridden.
       const rawCli = cliOfRaw(entry.config);
       if (rawCli) this.cliByInstance.set(instanceId, rawCli);
       const live = withEngineMemory(await driver.create({
@@ -187,7 +184,6 @@ export class ProviderRegistry {
     return entry ? this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind)?.metadata.access ?? "subscription" : undefined;
   }
 
-  /** From the registry's config, never an HTTP body. */
   cliTarget(instanceId: InstanceId): { driverKind: string; cli: string | null } | null {
     const entry = this.byId.get(instanceId);
     if (!entry) return null;
@@ -299,7 +295,6 @@ export class ProviderRegistry {
         } catch (e) {
           snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e) };
         }
-        // Only while this is still the live instance: a reload may have replaced it during the read.
         if (this.byId.get(inst.instanceId)?.live === inst) this.lastSnapshots.set(inst.instanceId, snapshot);
         return {
           instanceId: inst.instanceId,
@@ -315,10 +310,12 @@ export class ProviderRegistry {
             browserMcp: inst.adapter.capabilities.browserMcp === true,
             images: inst.adapter.capabilities.images === true,
             effortLevels: inst.adapter.capabilities.effortLevels,
+            approvalReviewEffortLevels: inst.adapter.capabilities.approvalReviewEffortLevels,
             modelVariants: inst.adapter.capabilities.modelVariants === true,
             queueing: inst.adapter.capabilities.queueing === true,
             localComputerMcp: inst.adapter.capabilities.localComputerMcp === true,
-            approvalReview: inst.reviewPermission !== undefined,
+            approvalReview: typeof inst.reviewPermission === "function",
+            // Background maintenance can use either supported text call.
             backgroundText: inst.generateText !== undefined || inst.generateMemoryText !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",

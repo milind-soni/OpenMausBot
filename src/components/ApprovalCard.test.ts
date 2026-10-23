@@ -776,7 +776,6 @@ describe("one approval, one card", () => {
     expect(row).not.toContain("code_to_execute");
     expect(row).toContain('aria-label="Details"');
     expect(row).toContain(">May send</span>");
-    expect(row).toContain('title="This runs code that could send or change things in your apps, so it always asks first."');
     expect(panel).not.toContain("This sends something");
     expect(panel.slice(panel.indexOf('id="approval-details-'))).toContain("code_to_execute");
   });

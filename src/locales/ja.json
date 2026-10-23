@@ -533,7 +533,6 @@
   "approval.action.allowOnce": "今回だけ許可",
   "approval.held.native": "このアクションにはプロバイダーがあなたの承認を求めています。",
   "approval.held.sandbox": "これは AI 自身の安全上の制限をゆるめるため、自動で承認できるのはフルアクセスだけです。",
-  "approval.opaqueCode": "このコードはアプリ内のデータを送信または変更する可能性があるため、常に事前に確認します。",
   "approval.held.undeliveredFull": "フルアクセスはこの承認を届けられませんでした。",
   "approval.held.undelivered": "自動で承認はこれに答えられませんでした。",
   "settings.title": "設定",

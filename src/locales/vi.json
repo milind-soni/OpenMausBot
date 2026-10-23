@@ -353,7 +353,6 @@
   "approval.action.allowOnce": "Cho phép một lần",
   "approval.held.native": "Nhà cung cấp yêu cầu bạn phê duyệt thao tác này.",
   "approval.held.sandbox": "Thao tác này nới lỏng giới hạn an toàn của chính AI, vì vậy chỉ có Toàn quyền truy cập mới có thể tự động phê duyệt.",
-  "approval.opaqueCode": "Thao tác này chạy mã có thể gửi hoặc thay đổi nội dung trong các ứng dụng của bạn, vì vậy luôn hỏi trước.",
   "approval.held.undeliveredFull": "Toàn quyền truy cập không thể gửi phê duyệt này.",
   "approval.held.undelivered": "Tính năng \"Tự động duyệt cho bạn\" không thể xử lý yêu cầu này.",
   "settings.title": "Cài đặt",

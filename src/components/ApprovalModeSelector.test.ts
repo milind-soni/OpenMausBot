@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -92,7 +93,7 @@ describe("approval mode selector", () => {
 
   it("explains Auto fallbacks and offers Full, the default level, on every provider", () => {
     expect(approvalModeOptionsFor("grokAgent").find((option) => option.mode === "auto")?.description).toContain("automatic review to approve routine actions");
-    expect(approvalModeOptionsFor("customAgent").find((option) => option.mode === "auto")?.description).toContain("behaves like Ask");
+    expect(approvalModeOptionsFor("customAgent").find((option) => option.mode === "auto")?.description).toBe(t("approvalMode.fallbackReview"));
     expect(approvalModeOptionsFor("customAgent").map((option) => option.mode)).toEqual(["ask", "auto", "full"]);
   });
 

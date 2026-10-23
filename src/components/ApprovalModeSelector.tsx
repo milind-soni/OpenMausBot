@@ -20,7 +20,7 @@ export {
   type ApprovalModeOption,
 } from "@/lib/approval-mode-options";
 
-export function ApprovalModeSelector({
+ export function ApprovalModeSelector({
   approvalMode,
   autoApprove,
   providerName,

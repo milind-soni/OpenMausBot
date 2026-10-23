@@ -21,17 +21,25 @@ export function supportsApprovalMode(driverKind: string | undefined, mode: Appro
   return true;
 }
 
-/** Whether switching engines must first drop this level to Ask. A Custom
- * grant's rules belong to one provider's tool semantics, so it never crosses
- * engines; Full carries silently to any engine; Auto-accept edits stops at an
- * engine without it.
- * Adapted from tahodev's provider-switch guard. */
-export function modelSwitchNeedsAsk(
+ export function modelSwitchNeedsAsk(
   mode: ApprovalMode,
   fromDriver: string | undefined,
   toDriver: string | undefined,
 ): boolean {
   return !supportsApprovalMode(toDriver, mode) || (mode === "custom" && fromDriver !== toDriver);
+}
+
+/** Native modes can become stricter during a turn; app gates may switch live. */
+export function runningApprovalMode(dispatched: ApprovalMode, selected: ApprovalMode, live: boolean): ApprovalMode {
+  if (live) return selected;
+  const rank = { ask: 0, edits: 1, auto: 2, custom: 2, full: 3 };
+  return rank[selected] < rank[dispatched] ? selected : dispatched;
+}
+
+/** Chat providers review their own tool gate in an isolated app helper.
+ * A missing or uncertain verdict still requires a person's approval. */
+export function hasAppAutoReview(driverKind: string | undefined): boolean {
+  return ["openai-compat", "grok", "minimax", "mistral", "cerebras", "groq", "meta"].includes(driverKind ?? "");
 }
 
 export function hasNativeAutoReview(driverKind: string | undefined): boolean {
@@ -78,9 +86,7 @@ export function setDefaultApprovalMode(mode: ApprovalMode): void {
   defaultApprovalMode = mode;
 }
 
-/** An unset level runs at the default, the pre-approvalMode Auto bit reads as
- * safe Auto, and an unknown persisted value fails closed to Ask. */
-export function approvalModeFor(bot: {
+ export function approvalModeFor(bot: {
   approvalMode?: unknown;
   autoApprove?: unknown;
   /** Server-only two-phase grant marker. Until Electron confirms it, the

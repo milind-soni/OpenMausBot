@@ -1,5 +1,4 @@
-// A config written by a newer or differently built app must load as an unavailable shadow, never crash the fleet.
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+   import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -115,7 +114,6 @@ describe("ProviderRegistry", () => {
     const first = makeFakeDriver({ kind: "first" });
     const second = makeFakeDriver({ kind: "second" });
     const broken = makeFakeDriver({ kind: "broken", failCreate: "boom at create" });
-    // "second" is released before "first", so completion order is the reverse of config order.
     const started: string[] = [];
     const release = [first, second, broken].map((handle) => {
       let open!: () => void;
@@ -252,6 +250,8 @@ describe("ProviderRegistry", () => {
     const registry = new ProviderRegistry([fake.driver]);
     await registry.load({ a: { driver: "fake" } });
 
+    expect((await registry.describe())[0].capabilities.approvalReview).toBe(false);
+    Object.assign(registry.get("a")!, { generateText: async () => "generic text", reviewPermission: null });
     expect((await registry.describe())[0].capabilities.approvalReview).toBe(false);
     Object.assign(registry.get("a")!, { reviewPermission: async () => "ok" });
     expect((await registry.describe())[0].capabilities.approvalReview).toBe(true);
@@ -441,7 +441,6 @@ describe("ProviderRegistry", () => {
 });
 
 describe.skipIf(process.platform === "win32")("installing an npm engine from Settings", () => {
-  // A stand-in npm on PATH: records its arguments and drops the expected executable into its prefix.
   const FAKE_NPM = `#!/usr/bin/env node
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -500,7 +499,6 @@ process.exit(0);
     withFakeNpm(true);
     const fake = makeFakeDriver();
     Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine" } } });
-    // The PATH scan also looks in standard install locations, so "no npm" is injected rather than simulated.
     const without = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data"), npmAvailable: () => false });
     await without.load({ a: { driver: "fake" } });
     expect((await without.describe())[0].install?.server).toBeUndefined();

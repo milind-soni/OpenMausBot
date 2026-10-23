@@ -56,7 +56,7 @@ export function approvalModeOptionsFor(driverKind: string, trustedModesAvailable
         };
       }
       return option.mode === "auto" && !hasNativeAutoReview(driverKind)
-        ? { ...option, description: t("approvalMode.noNativeReview") }
+        ? { ...option, description: t("approvalMode.fallbackReview") }
         : option;
     });
 }

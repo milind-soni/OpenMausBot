@@ -1,7 +1,7 @@
-import { createElement, type ComponentProps } from "react";
+  import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setLocale } from "@/lib/i18n";
+import { setLocale, t } from "@/lib/i18n";
 import type { AppSettingsSection } from "@/state/store";
 import type { Switch } from "./SettingsPrimitives";
 import { SECTIONS, SIMPLE_HIDDEN_SECTIONS, SIMPLE_PAGES, SettingsModal, revealSettingsBlock } from "./SettingsModal";
@@ -43,11 +43,13 @@ const { marker } = vi.hoisted(() => ({
   marker: (name: string) => () => `MARKER:${name};`,
 }));
 vi.mock("./EnginesSettings", () => ({ EnginesSettings: marker("engines") }));
+vi.mock("./ApprovalReviewSettings", () => ({ ApprovalReviewSettings: marker("approvalReview") }));
 vi.mock("./DecisionModelSettings", () => ({ DecisionModelSettings: marker("decisionModel") }));
 vi.mock("./ApiKeys", () => ({
   ApiKeyRow: marker("apiKey"),
   AnthropicEveryClaudeBot: marker("anthropicEvery"),
   OpenAiCompatUrl: marker("compatUrl"),
+  OpenAiCompatContextWindow: marker("compatContextWindow"),
   OpenCodeProviderKeys: marker("opencodeProviderKeys"),
   VpsConnection: marker("vps"),
 }));
@@ -125,9 +127,9 @@ describe("Settings in Simple mode", () => {
     fixture.section = "engines";
     const html = render();
     expect(currentPage(html)).toBe("ai");
-    expect(blocks(html)).toEqual(["engines", "connections", "decisionModel"]);
+    expect(blocks(html)).toEqual(["engines", "connections", "decisionModel", "approvalReview"]);
     const headings = [...html.matchAll(/<h3[^>]*>([^<]+)<\/h3>/g)].map((match) => match[1]);
-    expect(headings).toEqual(["Model providers", "API keys", "Decision model"]);
+    expect(headings).toEqual(["Model providers", "API keys", "Decision model", t("settings.section.approvalReview")]);
     expect(markers(html).filter((name) => name === "engines" || name === "decisionModel")).toEqual(["engines", "decisionModel"]);
     expect(html).toContain("More providers for OpenCode bots");
   });

@@ -748,6 +748,14 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
     return preferredOpenCodeModel(offered, catalogFromOpenCodeSession(sessionConfig)?.current) || null;
   },
   modelVariants: true,
+  approvalReview: true,
+  configureApprovalReviewEnv: (env) => {
+    env.OPENCODE_DISABLE_PROJECT_CONFIG = "1";
+    env.OPENCODE_PERMISSION = JSON.stringify(Object.fromEntries([
+      "*", "external_directory", "read", "edit", "bash", "glob", "grep", "list", "task", "lsp", "skill",
+      "webfetch", "websearch", "codesearch", "todoread", "todowrite", "doom_loop",
+    ].map((permission) => [permission, "deny"])));
+  },
   ownMcpOverHttp: true,
   resolveTurnModel: (model, env) => model ? ensureOpenCodeInjectModel(model, env) : model,
   transformEnv: withholdProviderKeysWhenManaged,
