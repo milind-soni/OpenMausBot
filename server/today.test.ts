@@ -195,9 +195,6 @@ describe("needs you", () => {
     w.say(w.pepper.threadId, { role: "bot", kind: "options", at: at(12, 5), card: { title: "Switch to Claude?", subtitle: "Codex reached its limit", options: ["Switch", "Wait"], quotaSwitch: { engines: [{ instanceId: "claude", name: "Claude" }] } } });
     const drafts = w.store.createTask(rex.id, "Drafts", false)!;
     w.say(drafts.threadId, { role: "bot", kind: "options", at: at(12, 6), card: { title: "Which draft should go out?", subtitle: "Two drafts are ready", options: ["Short", "Long"] } });
-    const mia = w.store.createBot({ name: "Mia" });
-    w.say(mia.threadId, { role: "bot", kind: "options", at: at(12, 3), card: { title: "Which price?", subtitle: "", options: ["$10", "$20"], requestType: "question", requestId: "q3" } });
-    w.digest(mia.threadId, mia.id, at(12, 4), "rt", "Went with $20.", true);
     const parkedTask = w.store.createTask(w.pepper.id, "Outreach", false)!;
     w.parked.push({ id: "a1", botId: w.pepper.id, threadId: parkedTask.threadId, question: "Should I email the whole list or only last month's buyers?", createdAt: at(13) });
     w.engines.push({ instanceId: "grok", snapshot: { state: "available", authenticated: false } }, { instanceId: "claude", snapshot: { state: "available" } });
@@ -234,6 +231,36 @@ describe("needs you", () => {
       ["question", "Should I email the whole list or only last month's buyers?"],
       ["question", "Which draft should go out?"],
       ["question", "Which list should I send the newsletter to?"],
+    ]);
+  });
+
+  it("keeps a question nobody answered after its turn ends, until the person answers it, within the week", () => {
+    const w = world();
+    const mia = w.store.createBot({ name: "Mia" });
+    const card = { title: "Which price?", subtitle: "", options: ["$10", "$20"], requestType: "question" as const, requestId: "q3" };
+    const asked = w.say(mia.threadId, { role: "bot", kind: "options", at: at(12, 3), card });
+    w.digest(mia.threadId, mia.id, at(12, 18), "rt", "Nobody answered, so I went with $20.", true);
+    w.digest(mia.threadId, mia.id, at(13), "next", "Done.", true);
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([
+      { kind: "question", id: asked.id, at: at(12, 3), botId: mia.id, threadId: mia.threadId, text: "Which price?" },
+    ]);
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW + 8 * 24 * HOUR).needsYou).toEqual([]);
+
+    w.store.patchMessage(mia.threadId, asked.id, { card: { ...card, answered: "answer", answeredText: "$10", dismissed: false } });
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([]);
+  });
+
+  it("drops a question the person closed, and lists a request asked again only where it was asked last", () => {
+    const w = world();
+    const mia = w.store.createBot({ name: "Mia" });
+    const card = { title: "Which price?", subtitle: "", options: ["$10", "$20"], requestType: "question" as const, requestId: "q3" };
+    w.say(mia.threadId, { role: "bot", kind: "options", at: at(12, 3), card: { ...card, dismissed: true } });
+    w.say(w.atlas.threadId, { role: "bot", kind: "options", at: at(12, 4), card: { ...card, requestId: "q4" } });
+    const task = w.store.createTask(w.atlas.id, "Pricing", false)!;
+    const again = w.say(task.threadId, { role: "bot", kind: "options", at: at(12, 5), card: { ...card, requestId: "q4" } });
+    w.digest(task.threadId, w.atlas.id, at(12, 20), "rt", "Went with $20.", true);
+    expect(todayReport(w.sources(), ADMIN, MIDNIGHT, NOW).needsYou).toEqual([
+      { kind: "question", id: again.id, at: at(12, 5), botId: w.atlas.id, threadId: task.threadId, text: "Which price?" },
     ]);
   });
 

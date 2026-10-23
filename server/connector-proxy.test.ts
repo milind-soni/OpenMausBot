@@ -6,6 +6,9 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { createPageSchema } from "./testing/oversized-tool-schema.ts";
+import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
+
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), "connector-proxy.ts");
 let child: ChildProcessWithoutNullStreams | null = null;
 let server: Server | null = null;
@@ -277,6 +280,21 @@ describe("connector MCP bridge", () => {
     });
     expect(upstreamAuthorization).toBe("Bearer upstream-secret");
     expect(JSON.stringify(reply)).not.toContain("upstream-secret");
+  });
+
+  it("fits a connected app's tools to the engine's provider profile", async () => {
+    const tools = [{ name: "COMPOSIO_SEARCH_TOOLS", inputSchema: { type: "object", properties: { q: { type: "string" } } } },
+      { name: "DOCS_CREATE_PAGE", description: "Create a page.", inputSchema: createPageSchema() }];
+    const upstream = await listen((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: 4, result: { tools } }));
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, [TOOL_SCHEMA_PROFILE_ENV]: "moonshot" });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/list", params: {} })}\n`);
+    const [search, page] = (await nextJson(lines)).result.tools;
+    expect(search).toEqual(tools[0]);
+    expect(schemaBytes(page.inputSchema)).toBeLessThanOrEqual(12_000);
+    expect(page.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
   });
 
   it("tells the bot to reconnect an app whose sign-in ended, and leaves successful results alone", async () => {

@@ -24,7 +24,7 @@ afterEach(async () => {
 async function serve(store: Store): Promise<string> {
   const deps = {
     store,
-    cfg: { profile: { name: "Milind" } },
+    userName: () => "Milind",
     viewerFor: () => ({}),
     visibleTo: () => ({ bot: () => true, group: () => true }),
     workspaceAccess: () => null,

@@ -17,6 +17,14 @@ export function parsedBodyOf(req: IncomingMessage): unknown {
   return parsedBodies.get(req);
 }
 
+const bodyChecks = new WeakMap<IncomingMessage, (body: unknown) => { status: number; error: string } | null>();
+
+/** Every JSON body read from this request passes `check` first: a refusal fails the read with its status, so the route
+ * answers it as it answers a body it cannot read. */
+export function onParsedBody(req: IncomingMessage, check: (body: unknown) => { status: number; error: string } | null): void {
+  bodyChecks.set(req, check);
+}
+
 export function json(res: ServerResponse, status: number, body: unknown) {
   const hook = jsonHooks.get(res);
   const data = JSON.stringify(hook ? hook(body) : body);
@@ -56,6 +64,8 @@ export function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> 
       } catch {
         return fail(400, "invalid JSON body");
       }
+      const refused = bodyChecks.get(req)?.(body);
+      if (refused) return fail(refused.status, refused.error);
       done = true;
       parsedBodies.set(req, body);
       resolve(body);

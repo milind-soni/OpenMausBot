@@ -18,10 +18,10 @@ const {
   CREDENTIAL_ENV_NAMES,
 } = require("./diagnostics.mjs");
 
-// The desktop credential list is a hand copy of server/config.ts WORKSPACE_CREDENTIAL_ENV; this test is the drift alarm.
-describe("credential env parity with server/config.ts", () => {
+// The desktop credential list is a hand copy of server/credential-env.ts WORKSPACE_CREDENTIAL_ENV; this test is the drift alarm.
+describe("credential env parity with server/credential-env.ts", () => {
   it("matches WORKSPACE_CREDENTIAL_ENV exactly", () => {
-    const config = readFileSync(new URL("../server/config.ts", import.meta.url), "utf8");
+    const config = readFileSync(new URL("../server/credential-env.ts", import.meta.url), "utf8");
     const match = config.match(/WORKSPACE_CREDENTIAL_ENV = \[([\s\S]*?)\] as const/);
     expect(match).not.toBeNull();
     const names = [...match[1].matchAll(/"([A-Z0-9_]+)"/g)].map((m) => m[1]);

@@ -228,6 +228,7 @@ the whole catalog in the same change.
 | connect, disconnect | conectar, desconectar | For apps, servers and devices. Signing in to an account is `entrar`. |
 | conversation | conversa | Same word as thread. |
 | delete | excluir | Destroys something. Different from remove. Never `deletar`. |
+| department | equipe | Same word as team. The sidebar's groups of bots: “New department…” → “Nova equipe…”. |
 | desktop (a bot's desktop) | desktop | Masculine. “Bot desktops” → “Desktops dos bots”. |
 | desktop app | app para computador | Avoids a clash with the bot's desktop. The OS Desktop folder keeps the platform name: “Mesa” on macOS, “Área de Trabalho” on Windows. |
 | device | dispositivo | “paired device” → “dispositivo pareado”. |

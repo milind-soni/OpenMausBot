@@ -77,7 +77,7 @@ function press(target: unknown) {
 }
 
 const menus = [
-  { name: "New or share", label: "New or share", item: "Create team" },
+  { name: "New or share", label: "New or share", item: "Create department" },
   { name: "Active Threads", label: "Active Threads", item: "No active threads" },
 ];
 const text = (tree: ReactElement<Props>[]) => tree.map((node) => Children.toArray(node.props.children).filter((child) => typeof child === "string").join(" ")).join(" ");
@@ -146,6 +146,6 @@ describe("sidebar header menu: New chat", () => {
     vi.stubGlobal("document", { body: {} });
     const tree = render();
     expect(tree.some((node) => node.type === SidebarNewChatPanel)).toBe(true);
-    expect(text(tree)).not.toContain("Create team");
+    expect(text(tree)).not.toContain("Create department");
   });
 });

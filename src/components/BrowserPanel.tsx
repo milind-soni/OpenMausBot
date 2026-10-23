@@ -21,6 +21,8 @@ const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-in
 const NO_NAV: BrowserNav = { url: "", loading: false, canGoBack: false, canGoForward: false };
 
 export type BrowserSignIn = { url: string; site: string; nonce: number };
+/** A page to open in a new tab once the view is connected and awake: a published page's Open (usePageOpener). */
+export type BrowserPage = { url: string; nonce: number };
 
 function tabsOf(value: unknown): BrowserTab[] {
   if (!Array.isArray(value)) return [];
@@ -34,7 +36,7 @@ function tabsOf(value: unknown): BrowserTab[] {
  * v1 live view. Security: a new connection never silently restores permission to type and never replays old input.
  * Only the server returns a hold, and only to this panel's reconnect after its own v1 stream dropped.
  */
-export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn }) {
+export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserSignIn; page?: BrowserPage }) {
   const { state } = useStore();
   const [fallback, setFallback] = useState(false);
   const stream = state.config?.browserEngine?.engine === "chrome" && !fallback;
@@ -70,6 +72,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
   const resume = useRef<LiveResume & { key: string }>({ key: "", viewer: "" });
   const keepNow = useRef(false);
   const signInHandled = useRef(0);
+  const pageHandled = useRef(0);
   const signInPage = useRef<string | null>(null);
   const pageNow = useRef<string | null>(null);
   const latest = useRef({ openSignInPage: () => {}, takeControl: () => {} });
@@ -196,6 +199,17 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
     latest.current.openSignInPage();
   }, [signIn, connected]);
 
+  // A new tab, so whatever the bot has open stays as it was; a sleeping browser is woken first.
+  useEffect(() => {
+    if (!page || !connected || pageHandled.current === page.nonce) return;
+    if (asleep) {
+      if (asleep === "asleep" && clientRef.current?.send({ type: "wake" })) setAsleep("waking");
+      return;
+    }
+    pageHandled.current = page.nonce;
+    interact({ type: "tabNew", url: page.url });
+  }, [page, connected, asleep, interact]);
+
   // On macOS a full-screen element takes the window into native full screen, where minimize is disabled.
   useEffect(() => {
     const update = () => setFullscreen(Boolean(panel.current) && document.fullscreenElement === panel.current);
@@ -314,7 +328,7 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
   </div>;
 }
 
-export function BrowserPanel({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn }) {
+export function BrowserPanel({ bot, signIn, page }: { bot: Bot; signIn?: BrowserSignIn; page?: BrowserPage }) {
   const { state } = useStore();
   const engine = state.config?.browserEngine;
   const [requested, setRequested] = useState(false);
@@ -329,7 +343,7 @@ export function BrowserPanel({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn
     finally { setRequested(false); }
   };
   if (bot.browser === false) return <div className="p-5 text-[13px] text-ink-secondary">{t("browser.panel.enableBot")}</div>;
-  if (engine?.kind === "engine" && !installing && !engine.installError) return <LiveBrowser key={bot.id} bot={bot} signIn={signIn} />;
+  if (engine?.kind === "engine" && !installing && !engine.installError) return <LiveBrowser key={bot.id} bot={bot} signIn={signIn} page={page} />;
   return <div className="flex min-h-0 flex-1 flex-col items-start justify-center gap-3 rounded-xl bg-card p-5">
     <div className="text-[15px] font-medium text-ink">{engine?.kind === "engine" ? t("browser.panel.installIncomplete") : t("browser.panel.engineNotInstalled")}</div>
     <p className="text-[13px] leading-relaxed text-ink-secondary">{engine?.kind === "engine" ? t("browser.panel.installIncompleteHelp") : browserUnavailableReason(state.config)}</p>

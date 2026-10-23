@@ -24,6 +24,7 @@ vi.mock("./ModelPicker", () => ({ ModelPicker: () => createElement("span") }));
 vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: () => createElement("span") }));
 
 const { ChatView } = await import("./ChatView");
+const { noteTurnEvent, resetTurnLive } = await import("@/state/turn-status");
 afterAll(() => vi.unstubAllGlobals());
 
 const message = (id: string, text: string, extra: Partial<Message> = {}): Message =>
@@ -91,12 +92,13 @@ describe("a call's record at the end of a chat that is still working", () => {
     expect(markup).toContain("Running the tests");
   });
 
-  it("shows no working line for a reply that settled just before the call ended", () => {
-    const markup = drawWorking([
-      spoken,
-      message("b1", "All tests pass.", { role: "bot", requestMessageId: "m1" }),
-      record,
-    ]);
+  it("shows no working line for a reply that settled just before the call ended, once the turn has ended", () => {
+    const settled = [spoken, message("b1", "All tests pass.", { role: "bot", requestMessageId: "m1" }), record];
+    resetTurnLive();
+    expect(drawWorking(settled), "the turn has not ended yet: the reply may be words mid-turn").toContain("thinking-shimmer");
+    noteTurnEvent({ eventId: "end", provider: "claudeAgent", threadId: "t1", createdAt: "2026-10-23T12:00:00.000Z", turnId: "u1", type: "turn.completed", ok: true });
+    const markup = drawWorking(settled);
+    resetTurnLive();
     expect(markup).toContain("All tests pass.");
     expect(markup).not.toContain("thinking-shimmer");
   });

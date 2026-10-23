@@ -530,6 +530,19 @@ describe("pressing", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("opens a published page's open_url in the bot's browser panel in the desktop app, and posts nothing", async () => {
+    const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+    const dispatch = vi.fn();
+    const withBrowser = { ...store, dispatch, state: { selectedId: "scout", bots: [{ id: "scout" }], groups: [], config: { features: { browser: true }, browserEngine: { kind: "engine" } } } } as unknown as ReturnType<typeof useStore>;
+    const parsed = parseWidgetInput({ type: "Card", children: [{ type: "Button", label: "Open page", onClickAction: { type: "open_url", payload: { url: PAGE } } }] });
+    if (!parsed.ok) throw new Error(parsed.error);
+    act(() => root.render(createElement(BotEditorStore, { value: withBrowser, children: createElement(WidgetMessage, { botId: "scout", threadId: "t1", message: row(parsed.value) }) })));
+    await press(button("Open page")!);
+    expect(dispatch.mock.calls).toEqual([[{ type: "toggleComputer", open: true }]]);
+    expect(openExternal).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("shows the server's sentence in the card when a press is refused, and stays live", async () => {
     fetchMock.mockImplementation(async () => reply(409, { error: "This was already answered." }));
     mount(row(sample("routineForm")));

@@ -109,7 +109,7 @@ test("in Brazilian Portuguese every consent dialog still defaults to Cancel and 
   const boxes = calls.filter(([kind]) => kind === "message").map(([, , options]) => options);
   assert.deepEqual(boxes.map((options) => [options.message, options.buttons, options.defaultId, options.cancelId]), [
     ["Permitir acesso ao computador para Team server?", ["Permitir acesso", "Cancelar"], 1, 1],
-    ["Deixar seus bots do My Cloud usarem seus apps e sua tela?", ["Compartilhar apps e tela", "Cancelar"], 1, 1],
+    ["Deixar seus bots do Cloud usarem seus apps e sua tela?", ["Compartilhar apps e tela", "Cancelar"], 1, 1],
     ["Compartilhar sua pasta pessoal inteira?", ["Compartilhar pasta pessoal", "Cancelar"], 1, 1],
   ]);
   const detail = boxes[0].detail.split("\n\n");
@@ -137,7 +137,7 @@ function mainLending({ response }) {
   const context = vm.createContext({
     createLendingDialogs, installCloudLending, usualFolders, usualFolderPaths, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: passThrough, cloudPageAsking: () => "cloud",
-    requireSharedComputers: async () => {}, savedWorkspace: () => team, lendingTarget: { environment: () => cloud }, cuaReady: Promise.resolve({ mcpCommand: "cua" }),
+    requireSharedComputers: async () => {}, savedWorkspace: () => team, lendingTarget: { environment: () => cloud }, cuaReady: Promise.resolve({ mcpCommand: "cua" }), localComputerReady: () => false, process: { platform: "darwin" },
     stopLending: () => {}, app: { getPath: (name) => `/Users/me/${name}` }, os: { homedir: () => "/Users/me" }, nativeT: nativeText.englishText.t,
     sharingController: () => ({
       identity: async () => ({ id: "info" }),

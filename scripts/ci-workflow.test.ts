@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { vitestMatrix } from "./ci-scope.mjs";
 
 const workflow = parse(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
 const requiredRuntimeJobs = ["vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes"];
@@ -68,10 +69,27 @@ describe("CI concurrency", () => {
     expect(workflow.jobs.gate.name).toBe("CI");
     expect(workflow.jobs.gate.strategy).toBeUndefined();
     expect(workflow.permissions).toEqual({ contents: "read" });
-    expect(workflow.jobs.vitest.strategy.matrix).toEqual({
-      os: "${{ fromJSON(needs.static.outputs.vitest_os) }}", shard: [1, 2, 3, 4],
-    });
-    expect(workflow.jobs.vitest["timeout-minutes"]).toBe("${{ matrix.os == 'ubuntu-latest' && 30 || 45 }}");
+    expect(workflow.jobs.vitest.strategy.matrix).toBe("${{ fromJSON(needs.static.outputs.vitest_matrix) }}");
+    expect(workflow.jobs.vitest["timeout-minutes"]).toBe("${{ matrix.os == 'ubuntu-latest' && 20 || 30 }}");
+  });
+
+  it("runs each selected platform's own shards, and its e2e files, from ci-scope's matrix", () => {
+    expect(workflow.jobs.static.outputs.vitest_matrix).toBe("${{ steps.scope.outputs.vitest_matrix }}");
+    expect(workflow.jobs.vitest.name).toBe("vitest (${{ matrix.os }}, shard ${{ matrix.shard }}/${{ matrix.shards }})");
+    const run = (workflow.jobs.vitest.steps as { name?: string; run?: string; env?: Record<string, string> }[])
+      .find((step) => step.name === "Run tests")!;
+    expect(run.run).toContain("--shard=${{ matrix.shard }}/${{ matrix.shards }} ");
+    expect(run.env?.OMB_VITEST_E2E).toBe("${{ matrix.e2e }}");
+    const { include } = vitestMatrix(["macos-latest", "ubuntu-latest", "windows-latest"]);
+    for (const os of ["macos-latest", "ubuntu-latest", "windows-latest"]) {
+      const shards = include.filter((entry) => entry.os === os);
+      expect(shards.map((entry) => entry.shard)).toEqual(Array.from({ length: shards[0]!.shards }, (_, i) => i + 1));
+      expect(new Set(shards.map((entry) => entry.e2e))).toEqual(new Set([os === "ubuntu-latest" ? "all" : "host"]));
+    }
+    const units = (workflow.jobs.vitest.steps as { name?: string; "timeout-minutes"?: number }[]).find((step) => step.name === "Broker and Electron unit tests")!;
+    expect(units["timeout-minutes"]).toBe(5);
+    // Browser jobs keep one job per platform.
+    expect(workflow.jobs["browser-identity"].strategy.matrix.os).toBe("${{ fromJSON(needs.static.outputs.vitest_os) }}");
   });
 
   it("keeps each PR to one macOS job", () => {
@@ -144,7 +162,7 @@ describe("CI concurrency", () => {
     // The runner context exists only at step level, never in a job's env.
     expect(workflow.jobs.vitest.env).toBeUndefined();
     for (const step of [steps[tests]!, steps[report]!]) {
-      expect(step.env).toEqual({ OMB_VITEST_RETRY_LOG: "${{ runner.temp }}/vitest-retries.jsonl" });
+      expect(step.env?.OMB_VITEST_RETRY_LOG).toBe("${{ runner.temp }}/vitest-retries.jsonl");
     }
     expect(readFileSync(new URL("../vite.config.ts", import.meta.url), "utf8")).toContain('runner: "./scripts/testing/ci-retry-runner.ts"');
   });
@@ -179,6 +197,7 @@ describe("CI concurrency", () => {
     expect(workflow.jobs.static.outputs).toEqual({
       runtime: "${{ steps.scope.outputs.runtime }}",
       vitest_os: "${{ steps.scope.outputs.vitest_os }}",
+      vitest_matrix: "${{ steps.scope.outputs.vitest_matrix }}",
     });
     expect(workflow.jobs.static.steps.some((step: { run?: string }) =>
       step.run === "pnpm exec vitest run scripts/ci-scope.test.ts scripts/ci-workflow.test.ts scripts/testing/verification-docs.test.ts",

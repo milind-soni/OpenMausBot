@@ -6,12 +6,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CdpBrowser } from "../cdp/browser.ts";
-import { DriverError } from "../cdp/errors.ts";
+import { DriverError, isUnanswered } from "../cdp/errors.ts";
 import { IDENTITY_PROBE, type Identity, type IdentityProbe } from "../cdp/identity.ts";
 import type { CdpPage } from "../cdp/page.ts";
 import type { HostKind } from "./flags.ts";
 import { headedIdentity, isChromeIdentity } from "./identity.ts";
-import { launchChrome } from "./launch.ts";
+import { FIRST_START_MS, launchChrome } from "./launch.ts";
 import { browserRoot } from "./profile.ts";
 
 export interface CalibratedIdentity extends Identity {
@@ -45,19 +45,25 @@ export async function loopbackPage(): Promise<{ url: string; close: () => void }
 }
 
 /**
- * Chrome for Testing 155 on Windows now and then cancels the first network navigation of a profile that never navigated:
- * net::ERR_ABORTED a moment after the request starts, with nothing else navigating. On GitHub's Windows runner that was
- * 35 of 150 fresh starts, none of 90 second starts, none for its Google Chrome or the same build on macOS, and a data:
- * page first did not prevent it. A second request went through every time, so a page of our own, which has no side
- * effects, is opened once more.
+ * Chrome on Windows now and then loses the first network navigation of a tab on a profile that never navigated. Chrome
+ * for Testing 155 cancels it, net::ERR_ABORTED a moment after the request starts with nothing else navigating: on
+ * GitHub's Windows runner 35 of 150 fresh starts, none of 90 second starts, none on macOS, and a data: page first did not
+ * prevent it. The runner's Google Chrome 156 sometimes never answers Page.navigate instead, and the tab stays on
+ * about:blank; that tab's next navigation went through. A second request went through every time, so a page of our own,
+ * which has no side effects, is opened once more.
  */
 export async function openOwnPage(tab: CdpPage, url: string, timeoutMs: number): Promise<void> {
   try {
     await tab.navigate(url, { timeoutMs });
   } catch (error) {
-    if (!(error instanceof DriverError) || error.detail?.netError !== "ERR_ABORTED") throw error;
+    if (!lostFirstNavigation(error)) throw error;
     await tab.navigate(url, { timeoutMs });
   }
+}
+
+function lostFirstNavigation(error: unknown): boolean {
+  if (!(error instanceof DriverError)) return false;
+  return error.detail?.netError === "ERR_ABORTED" || (isUnanswered(error) && error.detail?.method === "Page.navigate");
 }
 
 export interface CalibrateOptions {
@@ -89,7 +95,7 @@ export async function calibrateIdentity(options: CalibrateOptions): Promise<Cali
     host: options.host,
     ...(options.env ? { env: options.env } : {}),
     ...(options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
-    ...(options.handshakeTimeoutMs === undefined ? {} : { handshakeTimeoutMs: options.handshakeTimeoutMs }),
+    handshakeTimeoutMs: options.handshakeTimeoutMs ?? FIRST_START_MS,
   }).catch((error: unknown) => {
     page.close();
     rmSync(userDataDir, { recursive: true, force: true });

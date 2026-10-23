@@ -143,6 +143,8 @@ export interface SendTurnInput {
   integrations?: {
     /** A harness-owned stdio bridge to Composio, so connection requests become trusted chat cards. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
+    /** The same bridge to a Team Cloud member's own apps, only in that member's own turns. */
+    composioOwn?: { command: string; args: string[]; env: Record<string, string> };
     /** Stdio connection to a computer MCP server. `scope` is set only for the host desktop, so host-only approval rules never apply elsewhere. */
     localComputer?: {
       command: string;

@@ -429,7 +429,7 @@
     },
     {
       "name": "show_html",
-      "description": "Show a small self-contained web page inline in this chat: an interactive mini app, a game, a chart or visualization, a calculator, a formatted report. For forms and choices use show_widget instead, and for plain data a markdown table. `html` is one HTML document (a fragment is wrapped) with inline style and script. It runs in a locked sandbox: no network requests (fetch, XHR and WebSockets fail), no cookies or storage, no popups, no form posts. Scripts, styles and fonts load only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com and Google Fonts; images must be inline data: URLs or come from those CDNs. Embed the data you need. The page sizes itself to its content, up to about 640px tall. Use the CSS variables --color-text-primary, --color-background-primary, --color-border-primary and --font-sans so it matches the person's theme. In the page, mausbot.send(text) sends text as the person's next message (only after they click in the page), mausbot.open(url) opens a link, and mausbot.setContext(text) tells you what the person is looking at, with their next message. At most 256 KB. Never put secrets in it. Not available in rooms. For a data dashboard, follow the data-dashboards skill.",
+      "description": "Show a small self-contained web page in this chat, where the person watches it appear and can point at a part to change: a mini app, a game, a chart, a calculator, a report. For forms and choices use show_widget instead, and for plain data a markdown table. Send `html`, one HTML document (a fragment is wrapped) with inline style and script, or `jsx`, one React component file with a default export: it can import react, lucide-react icons, echarts, and Chart and useTheme from \"mausbot\", and style with Tailwind classes. Or send `path`, a folder in your working folder with index.html and its files (scripts, data, csv or parquet, images; up to 5 MB). It runs in a locked sandbox: no network requests, cookies, storage, popups or form posts. Scripts, styles and fonts load only from cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com and Google Fonts; images must be data: URLs or come from those CDNs. Embed the data you need. Use the CSS variables --color-text-primary, --color-background-primary, --color-border-primary and --font-sans to match the person's theme. In the page, mausbot.send(text) sends text as the person's next message (only after they click in it), mausbot.open(url) opens a link, and mausbot.setContext(text) tells you what they see, with their next message. At most 256 KB. Never put secrets in it. Not available in rooms. For a data dashboard, follow the data-dashboards skill.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -437,6 +437,14 @@
           "html": {
             "type": "string",
             "description": "One HTML document, or a fragment to wrap."
+          },
+          "jsx": {
+            "type": "string",
+            "description": "Instead of html: a React component file with a default export."
+          },
+          "path": {
+            "type": "string",
+            "description": "Instead of html: a folder with index.html, or an .html file."
           },
           "title": {
             "type": "string",
@@ -452,14 +460,13 @@
           }
         },
         "required": [
-          "html",
           "title"
         ]
       }
     },
     {
       "name": "update_html",
-      "description": "Replace a page you showed with show_html, in place. `app_id` is the id show_html returned. The page reloads, so anything the person did in it is lost.",
+      "description": "Replace a page you showed with show_html, in place, with new `html`, `jsx` or `path`. `app_id` is the id show_html returned. The page reloads, so anything the person did in it is lost.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -470,13 +477,18 @@
           "html": {
             "type": "string"
           },
+          "jsx": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
           "title": {
             "type": "string"
           }
         },
         "required": [
-          "app_id",
-          "html"
+          "app_id"
         ]
       }
     },
@@ -923,7 +935,7 @@
     },
     {
       "name": "send_voice_note",
-      "description": "Send the user a voice note: a short spoken message synthesized with your configured voice, stored as audio, and attached to your reply when the turn ends. Write the note as speakable words, exactly as it should be said — no lists, links or markdown meant for screens. The same text becomes the note's visible caption and transcript, so the person can read or listen. Use it for warmth, tone or emphasis a written line cannot carry; use ordinary text otherwise.",
+      "description": "Send the user a voice note: a short spoken message synthesized with your configured voice, stored as audio, and attached to your reply when the turn ends. Write the note as speakable words, exactly as it should be said — no lists, links or markdown meant for screens. The words are kept as the note's transcript, which the person can open to read instead of listening; they are not repeated in your reply, so do not write them out again. Use it for warmth, tone or emphasis a written line cannot carry; use ordinary text otherwise.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

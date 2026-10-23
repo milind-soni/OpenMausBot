@@ -403,7 +403,7 @@ it("tells the Chief a teammate's turn stalled, in the watchdog's words", () => c
   await f.final(job, "STALL-FINAL");
 
   const stalled = f.child(job, f.mira.id, "LONG-SUITE");
-  expect(stalled.status).toBe("failed");
+  expect(stalled).toMatchObject({ status: "failed", outcome: "stalled" });
   expect(stalled.result).toBe('No activity for 20 minutes — the turn was stopped. No tool calls were seen before it stopped.\nIts last message, quoted: "SUITE-STARTED"');
   const review = f.prompt(f.turn("D1"));
   expect(review).toContain("No activity for 20 minutes — the turn was stopped.");

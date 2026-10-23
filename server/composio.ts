@@ -33,6 +33,8 @@ import {
 } from "./connector-advertisement.ts";
 import { serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
 import { parseMcpResponse, withToolsListFallback } from "./connector-tools-list.ts";
+import { brokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
+export { applyManagedBrokerMessage, brokerAccess, setManagedBrokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
 
 function toolkitBase() {
   return (process.env.OMB_COMPOSIO_TOOLKITS_API ?? `${DEFAULT_BACKEND_ORIGIN}/api/v3`).replace(/\/$/, "");
@@ -144,60 +146,13 @@ interface IntegrationContext {
   botId: string;
   threadId: string;
   connectorTools?: Record<string, ConnectorToolGrant>;
-}
-
-let managedBrokerAccess: { url: string; token: string } | null | undefined;
-
-const managedBrokerMessageSchema = z.record(z.string(), z.unknown());
-const managedBrokerToken = /^[0-9a-f]{64}$/;
-
-function normalizeManagedBrokerUrl(value: string): string {
-  const url = new URL(value);
-  if (url.username || url.password || url.search || url.hash) {
-    throw new Error("The connected-apps service URL must not include credentials, a query, or a fragment");
-  }
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
-    throw new Error("The connected-apps service must use HTTPS");
-  }
-  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
-}
-
-export function applyManagedBrokerMessage(message: unknown): boolean {
-  const parsed = managedBrokerMessageSchema.safeParse(message);
-  if (
-    !parsed.success ||
-    parsed.data.type !== "openmausbot:managed-composio" ||
-    !Object.hasOwn(parsed.data, "access")
-  ) {
-    return false;
-  }
-  setManagedBrokerAccess(parsed.data.access);
-  return true;
-}
-
-export function setManagedBrokerAccess(access: unknown): void {
-  if (access === null) {
-    managedBrokerAccess = null;
-    return;
-  }
-  const parsed = z.object({ url: z.string().url(), token: z.string().regex(managedBrokerToken) }).strict().parse(access);
-  managedBrokerAccess = { url: normalizeManagedBrokerUrl(parsed.url), token: parsed.token };
-}
-
-export function brokerAccess(): { url: string; token: string } | null {
-  if (managedBrokerAccess !== undefined) return managedBrokerAccess;
-  const url = process.env.OMB_COMPOSIO_BROKER_URL?.trim();
-  const token = process.env.OMB_COMPOSIO_BROKER_TOKEN?.trim();
-  if (!url || !token) return null;
-  if (!managedBrokerToken.test(token)) throw new Error("The connected-apps service token is invalid");
-  return { url: normalizeManagedBrokerUrl(url), token };
+  /** A Team Cloud member's own installation, instead of this server's. */
+  as?: BrokerAccess;
 }
 
 /** A user's own project key wins over the managed broker; "" means cleared, so the broker takes over again. */
 function projectApiKey(cfg: AppConfig): string | null {
-  const apiKey = cfg.composio?.apiKey?.trim();
-  return apiKey || null;
+  return cfg.composio?.apiKey?.trim() || null;
 }
 
 /** Separates caches and transports per credential without keeping another plaintext copy of it. */
@@ -272,8 +227,7 @@ export function connectorSetup(
   return managedHost ? "service-unavailable" : "needs-setup";
 }
 
-async function brokerRequest(path: string, init?: RequestInit): Promise<Response> {
-  const broker = brokerAccess();
+async function brokerRequest(path: string, init?: RequestInit, broker = brokerAccess()): Promise<Response> {
   if (!broker) throw new Error("The connected-apps service is unavailable");
   const headers = new Headers(init?.headers);
   headers.set("authorization", `Bearer ${broker.token}`);
@@ -506,7 +460,7 @@ export async function mcpIntegration(
   }
   const serviceSlugs = context.connectorTools === undefined
     ? undefined
-    : serializeConnectorServiceSlugs(await connectedServiceSlugs(cfg));
+    : serializeConnectorServiceSlugs(await connectedServiceSlugs(cfg, context.as));
   if (serviceSlugs?.oversized) {
     console.warn(
       `[composio] connector service slugs for bot ${context.botId} exceed ${CONNECTOR_SERVICE_SLUGS_MAX_BYTES} bytes;`
@@ -536,9 +490,9 @@ export async function relayMcp(
   cfg: AppConfig,
   payload: JsonValue,
   transportSessionId?: string,
-  beforeSend?: () => void, signal?: AbortSignal,
+  beforeSend?: () => void, signal?: AbortSignal, as?: BrokerAccess,
 ): Promise<{ status: number; bytes: Uint8Array; contentType: string; transportSessionId?: string }> {
-  const apiKey = projectApiKey(cfg);
+  const apiKey = as ? null : projectApiKey(cfg);
   let url: string;
   let identity: string;
   const headers = new Headers({
@@ -551,7 +505,7 @@ export async function relayMcp(
     headers.set("x-api-key", apiKey);
     identity = backendFingerprint("project-mcp", url, apiKey);
   } else {
-    const broker = brokerAccess();
+    const broker = as ?? brokerAccess();
     if (!broker) throw new Error("Connected apps are unavailable");
     url = `${broker.url}/v1/mcp`;
     headers.set("authorization", `Bearer ${broker.token}`);
@@ -720,31 +674,47 @@ function allServiceStates(
   return Object.fromEntries(services);
 }
 
-export async function connectedServices(cfg: AppConfig): Promise<Record<string, ConnectorServiceState>> {
-  const apiKey = projectApiKey(cfg);
+export interface ConnectedServicesInventory {
+  services: Record<string, ConnectorServiceState>;
+  complete: boolean;
+}
+
+export async function connectedServicesInventory(cfg: AppConfig, as?: BrokerAccess): Promise<ConnectedServicesInventory> {
+  const apiKey = as ? null : projectApiKey(cfg);
   if (!apiKey) {
-    const response = await brokerRequest("/v1/connectors/connected");
+    const response = await brokerRequest("/v1/connectors/connected", undefined, as);
     if (!response.ok) await throwBrokerError(response, `Connected apps: HTTP ${response.status}`);
     const body = connectorServicesResponseSchema.parse(await response.json());
     const services = canonicalServiceRecord(body.services ?? {});
-    return Object.fromEntries(
-      Object.entries(services).map(([slug, state]) => [slug, {
-        connected: state.connected,
-        pending: state.pending ?? false,
-        status: state.status ?? (state.connected ? "ACTIVE" : "not_connected"),
-        accounts: state.accounts ?? [],
-      }]),
-    );
+    return {
+      services: Object.fromEntries(
+        Object.entries(services).map(([slug, state]) => [slug, {
+          connected: state.connected,
+          pending: state.pending ?? false,
+          status: state.status ?? (state.connected ? "ACTIVE" : "not_connected"),
+          accounts: state.accounts ?? [],
+        }]),
+      ),
+      complete: true,
+    };
   }
   const session = await ensureProjectSession(cfg);
   const userId = session.config?.user_id ?? cfg.composio?.userId;
   if (!userId) throw new Error("Composio Session returned no user ID");
-  const [toolkits, accounts] = await Promise.all([
+  const [toolkits, accountResult] = await Promise.all([
     listSessionToolkits(apiKey, session.session_id),
     // Scoped project keys can grant Session reads without the raw connected-account list.
-    listConnectedAccounts(apiKey, userId, []).catch(() => []),
+    listConnectedAccounts(apiKey, userId, []).then((accounts) => ({ accounts, complete: true as const }))
+      .catch(() => ({ accounts: [] as ConnectedAccountResponse[], complete: false as const })),
   ]);
-  return allServiceStates(summarizeAccounts(accounts, []), toolkits);
+  return {
+    services: allServiceStates(summarizeAccounts(accountResult.accounts, []), toolkits),
+    complete: accountResult.complete,
+  };
+}
+
+export async function connectedServices(cfg: AppConfig, as?: BrokerAccess): Promise<Record<string, ConnectorServiceState>> {
+  return (await connectedServicesInventory(cfg, as)).services;
 }
 
 /** Rejects a connectorTools patch naming an unconnected service or a tool without its service prefix. Checks that need the
@@ -810,24 +780,24 @@ export async function listConnectorTools(
 const CONNECTOR_TOOLS_CACHE_MS = 60_000;
 let connectorToolsCache: { at: number; identity: string; services: Record<string, ConnectorToolListing[]> } | null = null;
 /** Cache key per backend, so a config switch never serves the previous backend's tools. */
-function connectorToolsIdentity(cfg: AppConfig): string {
-  const apiKey = projectApiKey(cfg);
+function connectorToolsIdentity(cfg: AppConfig, as?: BrokerAccess): string {
+  const apiKey = as ? null : projectApiKey(cfg);
   if (apiKey) return backendFingerprint("project-tools", apiBase(), apiKey);
-  const broker = brokerAccess();
+  const broker = as ?? brokerAccess();
   return broker ? backendFingerprint("managed-tools", broker.url, broker.token) : "none";
 }
 
 let connectorToolsRequest: { identity: string; services: Promise<Record<string, ConnectorToolListing[]>> } | null = null;
 
 /** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland). */
-export async function connectedServiceSlugs(cfg: AppConfig): Promise<readonly string[]> {
-  const identity = connectorToolsIdentity(cfg);
+export async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
+  const identity = connectorToolsIdentity(cfg, as);
   if (connectorServiceSlugsCache?.identity === identity
     && Date.now() - connectorServiceSlugsCache.at < CONNECTOR_SERVICE_SLUGS_CACHE_MS) {
     return connectorServiceSlugsCache.slugs;
   }
   if (connectorServiceSlugsRequest?.identity === identity) return connectorServiceSlugsRequest.slugs;
-  const walk = connectedServices(cfg).then(
+  const walk = connectedServices(cfg, as).then(
     (services) => {
       const slugs = Object.keys(services);
       connectorServiceSlugsCache = { at: Date.now(), identity, slugs };
@@ -992,11 +962,11 @@ export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
   );
 }
 
-export async function removeService(cfg: AppConfig, slug: string) {
+export async function removeService(cfg: AppConfig, slug: string, as?: BrokerAccess) {
   const toolkit = canonicalToolkitSlug(slug);
-  const apiKey = projectApiKey(cfg);
+  const apiKey = as ? null : projectApiKey(cfg);
   if (!apiKey) {
-    const response = await brokerRequest(`/v1/connectors/${encodeURIComponent(toolkit)}`, { method: "DELETE" });
+    const response = await brokerRequest(`/v1/connectors/${encodeURIComponent(toolkit)}`, { method: "DELETE" }, as);
     if (!response.ok) await throwBrokerError(response, `Connected apps: HTTP ${response.status}`);
     return removalResponseSchema.parse(await response.json());
   }
@@ -1060,17 +1030,16 @@ export async function useRequestedAuthConfigs(cfg: AppConfig, items: ReadonlyArr
   }
 }
 
-export async function authorizeService(cfg: AppConfig, slug: string, requestedAlias?: string | null) {
+export async function authorizeService(cfg: AppConfig, slug: string, requestedAlias?: string | null, as?: BrokerAccess) {
   const alias = normalizeAccountAlias(requestedAlias);
   const toolkit = canonicalToolkitSlug(slug);
-  const mode = connectionMode(cfg);
-  const unavailable = managedConnectorUnavailableReason(mode, toolkit);
+  const unavailable = managedConnectorUnavailableReason(as ? "managed" : connectionMode(cfg), toolkit);
   if (unavailable) throw inputError(unavailable, 409);
-  const apiKey = projectApiKey(cfg);
+  const apiKey = as ? null : projectApiKey(cfg);
   if (!apiKey) {
     const request: RequestInit = { method: "POST" };
     if (alias) request.body = JSON.stringify({ alias });
-    const response = await brokerRequest(`/v1/connectors/${encodeURIComponent(toolkit)}/authorize`, request);
+    const response = await brokerRequest(`/v1/connectors/${encodeURIComponent(toolkit)}/authorize`, request, as);
     if (!response.ok && noManagedAuthToolkit(await response.clone().text().catch(() => ""))) {
       throw inputError(managedCustomAuthReason(toolkit), 409);
     }

@@ -422,6 +422,10 @@ describe("isContextMessage", () => {
   it("is what a provider reads: text, compaction records and room results, never a Live call's row", () => {
     expect(isContextMessage({ kind: "text", text: "what is six times seven" })).toBe(true);
     expect(isContextMessage({ kind: "text", text: "" })).toBe(false);
+    // A voice-only reply: its words sit on the audio attachment, and the provider still reads them.
+    expect(isContextMessage({ kind: "text", text: "", attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg", text: "Spoken words" }] })).toBe(true);
+    expect(isContextMessage({ kind: "text", text: "", attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg" }] })).toBe(false);
+    expect(isContextMessage({ kind: "text", text: "", webhookPost: true, attachments: [{ kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg", text: "Spoken words" }] })).toBe(false);
     expect(isContextMessage({ kind: "compaction" })).toBe(true);
     expect(isContextMessage({ kind: "text", roomRequest: { id: "r1", phase: "result" } })).toBe(true);
     expect(isContextMessage({ kind: "activity", text: "Bash" })).toBe(false);

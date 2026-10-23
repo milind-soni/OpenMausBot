@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Lock } from "lucide-react";
+import { Lock, Users } from "lucide-react";
 import { t } from "@/lib/i18n";
 
 const SEEN_KEY = (teamId: string) => `omb.team-private-chats.${teamId}`;
@@ -20,6 +20,13 @@ export function teamPrivateChatsLineDue(teamId: string, storage: Pick<Storage, "
 export function TeamPrivateHeader() {
   return <span data-chathead-private className="flex shrink-0 items-center gap-1 truncate text-[12px] text-ink-secondary">
     <Lock size={12} aria-hidden="true" />{t("team.privateHeader")}
+  </span>;
+}
+
+/** In a team bot's shared chats (its main chat, a routine's report): everyone in the team can read them. */
+export function TeamSharedHeader({ team }: { team: { name: string } }) {
+  return <span data-chathead-shared className="flex shrink-0 items-center gap-1 truncate text-[12px] text-ink-secondary">
+    <Users size={12} aria-hidden="true" />{t("team.sharedHeader", { team: team.name })}
   </span>;
 }
 

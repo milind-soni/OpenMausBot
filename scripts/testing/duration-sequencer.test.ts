@@ -1,4 +1,4 @@
-// CI runs the suite as four shards per platform, one file at a time, so the
+// CI runs the suite in shards per platform, one file at a time, so the
 // slowest shard sets how long every PR waits. These pin that the configured
 // sequencer splits by recorded seconds, still runs every file exactly once,
 // and that its weights stay keyed to files that exist.
@@ -8,8 +8,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BaseSequencer, type TestSequencerConstructor, type TestSpecification, type Vitest } from "vitest/node";
 import viteConfig from "../../vite.config.ts";
-import { DurationSequencer, SHARD_WEIGHTS_FILE, loadShardWeights, planShards, weightKey } from "./duration-sequencer.ts";
-import { buildWeights, parseVitestLog } from "./update-shard-weights.mjs";
+import { VITEST_SHARDS } from "../ci-scope.mjs";
+import { DurationSequencer, SHARD_WEIGHTS_FILE, loadPlatformShardWeights, loadShardWeights, planShards, weightKey } from "./duration-sequencer.ts";
+import { isPortableE2e } from "./host-e2e.ts";
+import { buildWeights, mergePlatformWeights, parseVitestLog, RUNNER_PLATFORMS } from "./update-shard-weights.mjs";
 
 const ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const WEIGHTS = loadShardWeights(ROOT);
@@ -18,12 +20,16 @@ const FILES = globSync(viteConfig.test?.include ?? [], { cwd: ROOT, exclude: (fi
   .sort();
 const specs = (files: readonly string[]) => files.map((file) => ({ moduleId: path.join(ROOT, file) }) as TestSpecification);
 const keyOf = (spec: TestSpecification) => weightKey(ROOT, spec.moduleId);
-// charged exactly as the sequencer charges it, unlisted e2e files included
-const seconds = (file: string) => planShards([file], WEIGHTS, 1).loads[0];
 
 function context(index: number, count: number, log: (line: string) => void = () => {}) {
   return { config: { root: ROOT, shard: { index, count } }, logger: { log } } as unknown as Vitest;
 }
+
+/** Each CI platform's files, weights and shard count, as ci-scope.mjs and ci.yml run them. */
+const CI_PLATFORMS = Object.entries(VITEST_SHARDS).map(([os, count]) => {
+  const platform = RUNNER_PLATFORMS[os as keyof typeof RUNNER_PLATFORMS] as NodeJS.Platform;
+  return { os, platform, count, files: os === "ubuntu-latest" ? FILES : FILES.filter((file) => !isPortableE2e(file)) };
+});
 
 async function split(Sequencer: TestSequencerConstructor, files: readonly string[], count: number) {
   const shards: string[][] = [];
@@ -38,16 +44,19 @@ afterEach(() => {
 });
 
 describe("vitest shard balance", () => {
-  it("gives no CI shard much more recorded time than the others", async () => {
-    const Sequencer = viteConfig.test?.sequence?.sequencer ?? BaseSequencer;
-    const loads = (await split(Sequencer, FILES, 4)).map((shard) => shard.reduce((sum, file) => sum + seconds(file), 0));
+  it("is the sequencer the suite runs with", () => {
+    expect(viteConfig.test?.sequence?.sequencer ?? BaseSequencer).toBe(DurationSequencer);
+  });
+
+  it.each(CI_PLATFORMS)("gives no $os shard much more recorded time than the others", ({ platform, count, files }) => {
+    const { loads } = planShards(files, loadShardWeights(ROOT, platform), count);
     const mean = loads.reduce((sum, load) => sum + load, 0) / loads.length;
     // equal file counts put three of the four slowest e2e files in one shard: ~1.4x the mean
     expect(Math.max(...loads) / mean, `recorded seconds per shard: ${loads.join(", ")}`).toBeLessThan(1.05);
   });
 
-  it("runs every test file in exactly one shard for one to six shards", async () => {
-    for (let count = 1; count <= 6; count++) {
+  it("runs every test file in exactly one shard for one to eight shards", async () => {
+    for (let count = 1; count <= 8; count++) {
       const shards = await split(DurationSequencer, FILES, count);
       expect(shards.flat().sort(), `${count} shards`).toEqual(FILES);
     }
@@ -55,7 +64,7 @@ describe("vitest shard balance", () => {
 
   it("never puts two of the slowest files in one shard while a shard is free", async () => {
     const slowest = Object.entries(WEIGHTS).sort(([, a], [, b]) => b - a).map(([file]) => file);
-    for (let count = 2; count <= 6; count++) {
+    for (let count = 2; count <= 8; count++) {
       const shards = await split(DurationSequencer, FILES, count);
       const owners = slowest.slice(0, count).map((file) => shards.findIndex((shard) => shard.includes(file)));
       expect(new Set(owners).size, `${count} shards: ${slowest.slice(0, count).join(", ")}`).toBe(count);
@@ -83,16 +92,34 @@ describe("vitest shard balance", () => {
     expect(loads).toEqual([10 + 20 + 90 + 50 + 20 + 1]);
   });
 
-  it("weighs only test files that exist", () => {
-    const stale = Object.keys(WEIGHTS).filter((file) => !FILES.includes(file));
-    expect(stale, `remove these from ${SHARD_WEIGHTS_FILE} or rerun scripts/testing/update-shard-weights.mjs`).toEqual([]);
+  it("weighs only test files that exist, for each CI platform", () => {
+    const weights = loadPlatformShardWeights(ROOT);
+    expect(Object.keys(weights).sort()).toEqual(["darwin", "linux", "win32"]);
+    for (const [platform, table] of Object.entries(weights)) {
+      const stale = Object.keys(table ?? {}).filter((file) => !FILES.includes(file));
+      expect(stale, `${platform}: remove these from ${SHARD_WEIGHTS_FILE} or rerun scripts/testing/update-shard-weights.mjs`).toEqual([]);
+    }
+  });
+
+  it("weighs a platform without seconds of its own by Linux's", () => {
+    expect(loadShardWeights(ROOT, "freebsd")).toEqual(loadShardWeights(ROOT, "linux"));
   });
 
   it("logs its split, and annotates a CI run whose weights match no files", async () => {
     vi.stubEnv("GITHUB_ACTIONS", "true");
+    // The Windows and macOS CI shards run this file with OMB_VITEST_E2E=host.
+    vi.stubEnv("OMB_VITEST_E2E", "");
     const lines: string[] = [];
     await new DurationSequencer(context(2, 4, (line) => lines.push(line))).shard(specs(FILES));
     expect(lines).toEqual([expect.stringMatching(new RegExp(`^duration-sequencer: shard 2/4 runs \\d+ of ${FILES.length} files, ~\\d+s recorded; ${Object.keys(WEIGHTS).length} of ${Object.keys(WEIGHTS).length} weighted files found$`))]);
+
+    lines.length = 0;
+    vi.stubEnv("OMB_VITEST_E2E", "host");
+    const hostFiles = FILES.filter((file) => !isPortableE2e(file));
+    const hostWeighted = Object.keys(WEIGHTS).filter((file) => !isPortableE2e(file)).length;
+    await new DurationSequencer(context(1, 4, (line) => lines.push(line))).shard(specs(hostFiles));
+    expect(lines).toEqual([expect.stringMatching(new RegExp(`; ${hostWeighted} of ${hostWeighted} weighted files found$`))]);
+    vi.stubEnv("OMB_VITEST_E2E", "");
 
     lines.length = 0;
     const elsewhere = FILES.map((file) => ({ moduleId: path.join(ROOT, "..", "elsewhere", file) }) as TestSpecification);
@@ -115,6 +142,16 @@ describe("update-shard-weights", () => {
       "server/a.e2e.test.ts": 316.8,
       "scripts/testing/cloud-preview.e2e.test.ts": 0,
       "server/c.test.ts": 9,
+    });
+  });
+
+  it("rebuilds the platforms a run sampled and keeps the others", () => {
+    const sample = [new Map([["server/slow.test.ts", 9]])];
+    const existing = { linux: { "server/old.test.ts": 7 }, darwin: { "server/mac.test.ts": 8 }, "server/flat.test.ts": 5 };
+    expect(mergePlatformWeights(existing, { linux: sample, win32: sample, darwin: [] }, () => true)).toEqual({
+      darwin: { "server/mac.test.ts": 8 },
+      linux: { "server/slow.test.ts": 9 },
+      win32: { "server/slow.test.ts": 9 },
     });
   });
 

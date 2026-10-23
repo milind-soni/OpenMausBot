@@ -142,12 +142,12 @@ describe("the row before its frame runs", () => {
 
 describe("a bot's page", () => {
   beforeEach(() => {
-    fetchMock.mockImplementation(async (path) => path.endsWith("/app") ? json(200, htmlDoc()) : json(202, { ok: true }));
+    fetchMock.mockImplementation(async (path) => /\/app(\?|$)/.test(path) ? json(200, htmlDoc()) : json(202, { ok: true }));
   });
 
   it("mounts the document it fetched, verbatim, in the sandboxed frame", async () => {
     await mount(row(htmlPayload()));
-    expect(fetchMock.mock.calls[0]![0]).toBe("/api/threads/t1/messages/a1/app");
+    expect(fetchMock.mock.calls[0]![0]).toBe(`/api/threads/t1/messages/a1/app?origin=${encodeURIComponent(window.location.origin)}`);
     expect(find("[data-app]")!.getAttribute("data-app-state")).toBe("live");
     expect(frame().getAttribute("sandbox")).toBe("allow-scripts allow-forms");
     expect(frame().hasAttribute("allow")).toBe(false);
@@ -205,7 +205,7 @@ describe("a bot's page", () => {
     await fromView({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { height: 260 } });
     const old = frame();
     const oldView = toView;
-    fetchMock.mockImplementation(async (path) => path.endsWith("/app") ? json(200, htmlDoc(1, counter.html.replace("Cups of coffee today", "Cups today"))) : json(202, {}));
+    fetchMock.mockImplementation(async (path) => /\/app(\?|$)/.test(path) ? json(200, htmlDoc(1, counter.html.replace("Cups of coffee today", "Cups today"))) : json(202, {}));
     await act(async () => { root.render(view(row(htmlPayload({ doc: "d1", rev: 1 })))); });
     await settle();
     // the old View was asked to tear down; answer it
@@ -246,7 +246,7 @@ describe("a bot's page", () => {
     fetchMock.mockImplementation(async () => { throw new TypeError("Failed to fetch"); });
     await mount(row(htmlPayload()));
     expect(find("[data-app-strip]")!.textContent).toContain("Reconnect to use this app");
-    fetchMock.mockImplementation(async (path) => path.endsWith("/app") ? json(200, htmlDoc()) : json(202, {}));
+    fetchMock.mockImplementation(async (path) => /\/app(\?|$)/.test(path) ? json(200, htmlDoc()) : json(202, {}));
     await act(async () => button("Try again")!.click());
     await settle();
     expect(find("[data-app]")!.getAttribute("data-app-state")).toBe("live");
@@ -256,7 +256,7 @@ describe("a bot's page", () => {
 
 describe("an MCP app", () => {
   it("hands a write the bot's level declines straight back to the View, with no card of its own", async () => {
-    fetchMock.mockImplementation(async (path) => path.endsWith("/app") ? json(200, mcpDoc())
+    fetchMock.mockImplementation(async (path) => /\/app(\?|$)/.test(path) ? json(200, mcpDoc())
       : json(403, { error: { code: -32000, message: "This bot asks before it changes anything, so its apps can only look." } }));
     await mount(row(mcpPayload()));
     await handshake();
@@ -274,7 +274,7 @@ describe("an MCP app", () => {
   });
 
   it("says sign in again when its server signed the person out", async () => {
-    fetchMock.mockImplementation(async (path) => path.endsWith("/app") ? json(200, mcpDoc())
+    fetchMock.mockImplementation(async (path) => /\/app(\?|$)/.test(path) ? json(200, mcpDoc())
       : json(401, { error: { code: -32000, message: "Sign in to Excalidraw again" }, signIn: { server: "excalidraw" } }));
     await mount(row(mcpPayload()));
     await handshake();

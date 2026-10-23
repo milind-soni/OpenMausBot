@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,6 +8,8 @@ import { applyIncludedPagesMessage, pagesHomeSignature } from "./access.ts";
 import { PageBundleError, readPageBundle } from "./bundle.ts";
 import { PublishedPagesStore } from "./store.ts";
 import { createPublishedPages } from "./service.ts";
+import { createPublishedPageRoutes, type AppPages } from "../routes/published-pages.ts";
+import { PASS } from "../routes/table.ts";
 
 const SITE = { "index.html": "<!doctype html><h1>Bake sale</h1>", "style.css": "h1{color:red}" };
 let dir: string;
@@ -228,6 +230,73 @@ describe("unpublishing a page", () => {
     f.service.pages.delete(page!);
     expect(await f.pages.publisher.unpublish({ pageId: page })).toMatchObject({ status: 200, text: "That page was already taken down.", card: { state: "unpublished" } });
     expect(f.pages.store.get(page!)).toBeNull();
+  });
+});
+
+describe("sharing a chat page from its card", () => {
+  function route(f: ReturnType<typeof setup>, page: AppPages["page"] = () => ({ ok: true, title: "Pricing", files: [{ path: "index.html", data: Buffer.from("<!DOCTYPE html><h1>Pricing</h1>") }], rev: 2 })) {
+    const shown: Array<{ threadId: string; messageId: string; card: PublishedPageCard }> = [];
+    const handler = createPublishedPageRoutes(f.pages.publisher, {
+      botOf: (threadId) => (threadId === "room-1" ? null : { id: "bot-1" }),
+      page,
+      published: (threadId, messageId) => {
+        const last = shown.filter((each) => each.threadId === threadId && each.messageId === messageId).at(-1)?.card;
+        return last?.state === "live" ? last.pageId ?? null : null;
+      },
+      show: (threadId, messageId, card) => { shown.push({ threadId, messageId, card }); return messageId; },
+    });
+    const call = async (method: string, path: string, body?: unknown) => {
+      let answer: { status: number; body: any } | null = null;
+      const out = await handler({
+        req: {} as never, res: {} as never, url: new URL(`http://x${path}`), path, method, auth: {} as never,
+        json: ((_res: unknown, status: number, value: unknown) => { answer = { status, body: value }; }) as never,
+        readBody: (async () => body) as never,
+      });
+      return out === PASS ? PASS : answer!;
+    };
+    return { call, shown };
+  }
+
+  it("publishes the page's files, gives its own card the link, and keeps that link on the next share", async () => {
+    const f = setup();
+    signIn();
+    const { call, shown } = route(f);
+    const path = "/api/threads/thread-1/messages/m7/app/publish";
+    const first = await call("POST", path, { rev: 2 }) as { status: number; body: any };
+    expect(first).toMatchObject({ status: 200, body: { ok: true, card: { state: "live", title: "Pricing" } } });
+    const [pageId] = [...f.service.pages.keys()];
+    expect(f.service.pages.get(pageId!)!.files.get("index.html")).toBe("<!DOCTYPE html><h1>Pricing</h1>");
+    expect(shown).toEqual([{ threadId: "thread-1", messageId: "m7", card: first.body.card }]);
+    expect(f.cards).toEqual([]);
+    expect(await call("POST", path, {})).toMatchObject({ status: 200, body: { card: { pageId } } });
+    expect(f.service.pages.size).toBe(1);
+    expect(f.service.minted.map((each) => each.action)).toEqual(["create", "update"]);
+  });
+
+  it("publishes a folder page's files beside index.html under the folder's own link", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "dash"), { "index.html": "<h1>Dash</h1>", "data.csv": "a\n1" });
+    await f.publish({ path: "dash", title: "Dash" });
+    const [pageId] = [...f.service.pages.keys()];
+    const { call } = route(f, () => ({ ok: true, title: "Dash", rev: 0, folder: join(realpathSync.native(f.work), "dash"),
+      files: [{ path: "index.html", data: Buffer.from("<h1>Dash, again</h1>") }, { path: "data.csv", data: Buffer.from("a\n2") }] }));
+    expect(await call("POST", "/api/threads/thread-1/messages/m9/app/publish", {})).toMatchObject({ status: 200, body: { card: { pageId } } });
+    expect(Object.fromEntries(f.service.pages.get(pageId!)!.files)).toEqual({ "index.html": "<h1>Dash, again</h1>", "data.csv": "a\n2" });
+  });
+
+  it("refuses a room, a bad body and a page that can't be built, and shows no card for the plan's limit", async () => {
+    const f = setup({ quota: 0 });
+    signIn();
+    const { call, shown } = route(f);
+    expect(await call("POST", "/api/threads/thread-1/messages/m7/app/publish", {})).toMatchObject({ status: 402, body: { card: { state: "limit", upgrade: true } } });
+    expect(shown).toEqual([]);
+    expect(await call("POST", "/api/threads/room-1/messages/m7/app/publish", {})).toMatchObject({ status: 404 });
+    expect(await call("POST", "/api/threads/thread-1/messages/m7/app/publish", { rev: "2" })).toMatchObject({ status: 400 });
+    const broken = route(f, () => ({ ok: false, status: 422, error: "jsx: line 2: Unexpected token." }));
+    expect(await broken.call("POST", "/api/threads/thread-1/messages/m7/app/publish", {})).toEqual({ status: 422, body: { error: "jsx: line 2: Unexpected token." } });
+    expect(await call("GET", "/api/threads/thread-1/messages/m7/app/publish")).toBe(PASS);
+    expect(await call("POST", "/api/threads/thread-1/messages/m7/app")).toBe(PASS);
   });
 });
 

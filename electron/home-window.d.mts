@@ -4,6 +4,8 @@
  * (absent for My Cloud). */
 export type HomeView = { name?: string } & (
   | { screen: "opening" | "waking" | "moving" }
+  /** The Admin is setting it up (or a brand-new one's name isn't found yet, at `checking`): the step it reports. */
+  | { screen: "setup"; step?: import("./cloud-home.mjs").CloudSetupStep; slow?: true }
   | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" }
   | { screen: "signin"; other?: true }
   | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed" });
@@ -41,6 +43,11 @@ export declare const SPLASH_TEXT: Readonly<{ opening: string; waking: string }>;
 export declare const TEAM_RENEW_MS: number;
 export declare const TEAM_RENEW_EARLY_MS: number;
 export declare const TEAM_RENEW_RETRY_MS: number;
+export declare const FRESH_MS: number;
+export declare const NAME_WAIT_MS: number;
+export declare const NAME_RETRY_MS: readonly number[];
+export function nameNotFound(code: number): boolean;
+export function createReadyClock(input?: { store?: { read(): unknown; write(value: unknown): void } | null; now?(): number }): { seen(state: unknown): void; fresh(origin: string | null): boolean };
 export function splashText(status: "opening" | "waking", name?: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string;
 export function placeOf(input: { ask?: HomeAsk; remembered?: RememberedPlace; state?: any }): { kind: "cloud"; left?: string | null } | { kind: "team"; id: string; name: string; role: string | null; origin: string | null; machine: any };
 
@@ -52,6 +59,8 @@ type Timers = { set(work: () => void, ms: number): unknown; clear(timer: unknown
 
 export interface HomeWindow {
   show(options?: { open?: "phone" | null; place?: HomeAsk }): Promise<unknown>;
+  openCloud(open?: "phone" | null): Promise<unknown>;
+  asking(): boolean;
   refresh(): Promise<Home>;
   view(): HomeView;
   cloudOrigin(): string | null;
@@ -65,7 +74,7 @@ export interface HomeWindow {
   changed(): Promise<void>;
   responded(details: { url: string; statusCode: number; webContentsId?: number }): void;
   navigated(url: string): void;
-  failed(url: string): void;
+  failed(url: string, code?: number): boolean;
   homePage(event: unknown): boolean;
   /** Asked once by the home page as it loads: the window reloaded it just now for its newer version. */
   updating(event: unknown): boolean;
@@ -99,6 +108,8 @@ export function createHomeWindow(deps: {
   quietMs?: number;
   now?(): number;
   timers?: Timers;
+  hosts?(): { clearHostResolverCache(): Promise<void>; resolveHost(host: string, options?: { cacheUsage?: "allowed" | "staleAllowed" | "disallowed" }): Promise<{ endpoints: unknown[] }> } | null;
+  readyStore?: { read(): unknown; write(value: unknown): void } | null;
   log?(line: string): void;
   t?(key: string, params?: Record<string, string | number>): string;
 }): HomeWindow;

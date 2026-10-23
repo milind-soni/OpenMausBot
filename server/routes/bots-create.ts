@@ -112,11 +112,11 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       }
       if (settings.managedSections?.length) {
         if (!settings.chiefOfStaff || settings.managedSections.some(name => name !== "" && !store.sections.includes(name))) {
-          return json(res, 400, { error: "Only a Chief may manage existing additional teams" });
+          return json(res, 400, { error: "Only a Chief may manage existing additional departments" });
         }
-        if (body.acknowledgePeerScope !== true) return json(res, 400, { error: "Confirm additional team access (acknowledgePeerScope)" });
+        if (body.acknowledgePeerScope !== true) return json(res, 400, { error: "Confirm additional department access (acknowledgePeerScope)" });
         if (auth.kind === "loopback" && !DESKTOP_MANAGED && store.bots.some(bot => bot.busy)) {
-          return json(res, 409, { error: "Stop running bots before granting access to another team" });
+          return json(res, 409, { error: "Stop running bots before granting access to another department" });
         }
       }
       const checkedCwd = validateBotCwd(settings.cwd ?? null);

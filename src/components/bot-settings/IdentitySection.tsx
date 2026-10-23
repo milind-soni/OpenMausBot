@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { DefaultBotHideRow } from "../DefaultBotControls";
 import { BookOpen } from "lucide-react";
 
 import { useStore, type Bot } from "@/state/store";
@@ -107,6 +108,7 @@ export function IdentitySection({
         </div>
       </div>}
 
+      <DefaultBotHideRow bot={bot} />
       {instructionsOpen && <BotInstructionsDialog bot={bot} inline={draft} onClose={() => setInstructionsOpen(false)} />}
     </div>
   );

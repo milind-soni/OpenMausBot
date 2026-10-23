@@ -76,7 +76,7 @@ export function createInternalThreadRoutes(deps: {
     const threadId = closeMatch[1]!;
     const owner = [from, ...reachablePeers(store.bots, from)].find((bot) => store.taskByThread(bot.id, threadId));
     const task = owner ? store.taskByThread(owner.id, threadId) : undefined;
-    if (!owner || !task) return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });
+    if (!owner || !task || !deps.shown(threadId)) return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });
     if (owner.id !== from.id && task.openedBy?.botId !== from.id && !chiefTidies(from, task, task.openedBy ? store.bot(task.openedBy.botId) : undefined)) {
       return json(res, 403, { error: "that thread is not yours to close — only the bot that opened it, its own bot, or (for a thread a bot opened) a Chief of Staff can" });
     }

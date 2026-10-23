@@ -2,21 +2,30 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { BaseSequencer, type TestSpecification } from "vitest/node";
 
+import { E2E, hostE2eOnly, isPortableE2e } from "./host-e2e.ts";
+
 // Vitest's --shard cuts equal-count slices; this balances them by recorded
 // seconds instead (slowest first, each to the shard with the least time so
-// far), and `--shard=n/4` locally picks the same files as CI shard n.
-// update-shard-weights.mjs refreshes the seconds from CI.
+// far), and `--shard=n/8` on the same OS with the same OMB_VITEST_E2E picks
+// the same files as that CI shard.
 export const SHARD_WEIGHTS_FILE = "scripts/testing/vitest-shard-weights.json";
 
 // A file absent from the weights is light (the file lists every file over
 // five seconds and every e2e file); a second covers its setup and import.
 const UNLISTED_SECONDS = 1;
-const E2E = /\.e2e\.test\.[cm]?[jt]s$/;
 
 export type ShardWeights = Readonly<Record<string, number>>;
+/** Each CI platform's own seconds: a file's share of a Windows run is not its share of a Linux run. */
+export type PlatformShardWeights = Readonly<Partial<Record<"linux" | "win32" | "darwin", ShardWeights>>>;
 
-export function loadShardWeights(root: string): ShardWeights {
-  return JSON.parse(readFileSync(path.join(root, SHARD_WEIGHTS_FILE), "utf8")) as ShardWeights;
+export function loadPlatformShardWeights(root: string): PlatformShardWeights {
+  return JSON.parse(readFileSync(path.join(root, SHARD_WEIGHTS_FILE), "utf8")) as PlatformShardWeights;
+}
+
+/** A platform without seconds of its own is weighed by Linux's. */
+export function loadShardWeights(root: string, platform: NodeJS.Platform = process.platform): ShardWeights {
+  const weights = loadPlatformShardWeights(root);
+  return (platform === "linux" || platform === "win32" || platform === "darwin" ? weights[platform] : undefined) ?? weights.linux ?? {};
 }
 
 // Weights are keyed by POSIX path from the repo root. On Windows vitest hands
@@ -68,7 +77,8 @@ export class DurationSequencer extends BaseSequencer {
     // One line per run, so a CI log shows the weights were applied. If most
     // weighted files go unmatched (a path-key mismatch on some platform), the
     // shards fall back toward equal file counts: annotate, but run the tests.
-    const listed = Object.keys(weights).length;
+    const hostOnly = hostE2eOnly();
+    const listed = Object.keys(weights).filter((key) => !(hostOnly && isPortableE2e(key))).length;
     const found = keys.filter((key) => Object.hasOwn(weights, key)).length;
     this.ctx.logger.log(
       `duration-sequencer: shard ${shard.index}/${shard.count} runs ${mine.length} of ${files.length} files, ` +

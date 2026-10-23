@@ -26,10 +26,11 @@ export const CHATS_BODY_MAX = 64 * 1024 * 1024;
 /** A check of a move's chats asks about at most this many row ids of a conversation, and of its path, at a time. */
 export const VERIFY_IDS = 5_000;
 const PREFIX = "/api/cloud-send/chats";
+const ROOM_NAME_MAX = 100, ROOM_MEMBERS_MAX = 200, ROOM_BULLETIN_MAX = 12_000;
 
 /** A bot's conversation (`bot`) or a room's (`room`). */
 export type ChatHead = ({ bot: string; room?: never } | { room: string; bot?: never }) & { threadId: string; last: number; lastId: string; busy: boolean };
-type Room = Pick<GroupRecord, "id" | "threadId" | "tasks" | "dm" | "busyBotId">;
+type Room = Pick<GroupRecord, "id" | "threadId" | "tasks" | "dm" | "busyBotId" | "memberIds">;
 
 /** A room's conversations: its threads, or its one conversation when it has none. Bot-to-bot channels are not rooms. */
 const roomThreads = (room: Room): string[] => room.dm ? [] : room.tasks?.length ? room.tasks.map((task) => task.threadId) : [room.threadId];
@@ -50,6 +51,15 @@ export function chatHeads(bots: readonly BotRecord[], rooms: readonly Room[] = [
   }
   for (const room of rooms) for (const threadId of roomThreads(room)) add({ room: room.id }, threadId, Boolean(room.busyBotId));
   return out;
+}
+
+/** The rooms none of whose conversations has a stored row yet (a team setup's or a package's, say), with their members:
+ * chatHeads lists none of them, and My Cloud makes a room only from a conversation of it, so each goes as its active
+ * thread with no rows. */
+export function emptyRooms(rooms: readonly Room[], heads: readonly ChatHead[]): Array<{ room: string; threadId: string; members: string[] }> {
+  const listed = new Set(heads.map((head) => head.threadId));
+  return rooms.filter((room) => !room.dm && roomThreads(room).every((threadId) => !listed.has(threadId)))
+    .map((room) => ({ room: room.id, threadId: room.threadId, members: [...room.memberIds] }));
 }
 
 /**
@@ -115,7 +125,10 @@ const pick = <T extends object>(source: T, keys: readonly string[]) => Object.fr
   .map((key) => [key, (source as Record<string, unknown>)[key]]));
 /** What a room's thread carries to My Cloud: never this computer's folders. */
 const sentRoomTask = (task: GroupTaskRecord) => pick(task, ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId", "turnTimeoutMinutes"]) as unknown as GroupTaskRecord;
-const sentRoom = (room: GroupRecord) => pick(room, ["name", "memberIds", "defaultResponder", "bulletin", "section", "setupCompletedAt", "setupSkippedAt", "audienceFloor"]) as unknown as SentRoom;
+/** As My Cloud takes a room (sentSchema): a calendar call's room keeps the call's name, which may be longer, and one room it
+ * refuses refuses every conversation sent beside it. */
+const sentRoom = (room: GroupRecord) => ({ ...pick(room, ["defaultResponder", "section", "setupCompletedAt", "setupSkippedAt", "audienceFloor"]),
+  name: room.name.slice(0, ROOM_NAME_MAX) || "Room", memberIds: room.memberIds.slice(0, ROOM_MEMBERS_MAX), bulletin: (room.bulletin ?? "").slice(0, ROOM_BULLETIN_MAX) }) as unknown as SentRoom;
 
 /** A conversation's own settings a move carries: its model, approval, snooze and project; a room conversation's time
  * limit and its room's audience floor. Custom approval never leaves the computer that granted it. */
@@ -200,7 +213,7 @@ const sentSchema = z.object({
   conversations: z.array(z.object({
     bot: z.string().regex(/^[\w-]{1,128}$/u).optional(),
     room: z.string().regex(/^[\w-]{1,128}$/u).optional(),
-    roomInfo: z.object({ name: z.string().min(1).max(100), memberIds: z.array(z.string().max(128)).max(200), bulletin: z.string().max(12_000) }).passthrough().optional(),
+    roomInfo: z.object({ name: z.string().min(1).max(ROOM_NAME_MAX), memberIds: z.array(z.string().max(128)).max(ROOM_MEMBERS_MAX), bulletin: z.string().max(ROOM_BULLETIN_MAX) }).passthrough().optional(),
     threadId: z.string().regex(/^[\w-]{1,200}$/u),
     task: z.object({ threadId: z.string(), createdAt: z.number().finite() }).passthrough().nullable(),
     rows: z.array(messageSchema).max(CHAT_ROWS_PAGE * 4),
@@ -328,6 +341,7 @@ export async function cloudSendChatsRoute(deps: CloudSendChatsDeps, { req, res, 
   if (path === PREFIX && method === "GET") {
     const heads = deps.bot ? chatHeads(store.bots.filter((bot) => bot.id === deps.bot), []) : chatHeads(store.bots, store.groups);
     json(res, 200, { v: 1, dataDir: deps.dataDir, ...(deps.bot && deps.ownerKey ? { owner: deps.ownerKey } : {}), conversations: heads.map((head) => ({ ...head, settings: conversationSettings(store, head) })),
+      rooms: deps.bot ? [] : emptyRooms(store.groups, heads),
       ...(url.searchParams.get("attachments") === "1" ? { attachments: await attachmentSizes(store, deps.dataDir, heads) } : {}) });
     return true;
   }

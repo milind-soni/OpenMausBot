@@ -109,11 +109,13 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
                 <ul aria-label={t("automations.title")} className="divide-y divide-hairline/30 overflow-hidden rounded-2xl border border-hairline/40 bg-card">
                   {listed.map((automation) => {
                     const status = automationStatus(automation);
+                    const name = automation.name.trim();
                     return (
                       <li key={automation.id} data-automation={automation.id} data-automation-status={status.state} className={cn("flex items-start gap-3 px-4 py-3.5", openId === automation.id && "bg-raised/60")}>
                         <StatusMark status={status} className="mt-[5px]" />
                         <div className="min-w-0 flex-1">
-                          <button type="button" onClick={() => setOpenId(automation.id)} className="block text-left text-[14.5px] font-medium leading-snug text-ink hover:text-accent-text">{sentenceOf(automation)}</button>
+                          <button type="button" onClick={() => setOpenId(automation.id)} className="block text-left text-[14.5px] font-medium leading-snug text-ink hover:text-accent-text">{name || sentenceOf(automation)}</button>
+                          {name && <div className="mt-0.5 text-[12.5px] text-ink">{sentenceOf(automation)}</div>}
                           {status.state === "needs-you"
                             ? <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[12.5px] text-warning">{t("automations.needsYou", { reason: status.reason ?? "" })}<FixButton automation={automation} status={status} actions={actions} onEdit={() => setEditing({ kind: automation.kind, id: automation.id })} /></div>
                             : <div className="mt-0.5 text-[12.5px] text-ink-secondary">{statusLine(automation)}</div>}

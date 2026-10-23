@@ -113,6 +113,23 @@ describe("the brief", () => {
     expect(JSON.stringify(today.widget!.root)).not.toContain(BRIEF_INTRO);
   });
 
+  it("a routine run that published a page offers Open page, which opens the page itself, beside Open for its chat", async () => {
+    const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
+    const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+    const run = (id: string, name: string, card?: "live" | "unpublished"): RoutineRun => {
+      const threadId = s.store.createTask(s.chief.id, name, false)!.threadId, startedAt = Date.now();
+      if (card) s.store.appendMessage(threadId, { role: "bot", kind: "text", text: `Published “Sales”: ${PAGE}`, publishedPage: { state: card, title: "Sales", pageId: "abcdefghijklmnopqrstuvwxyz", url: PAGE } });
+      s.store.appendMessage(threadId, { role: "bot", kind: "text", text: "Updated the dashboard." });
+      return { id, routineId: id, routineName: name, target: "bot", botId: s.chief.id, runOn: "maus", scheduledFor: s.now(), status: "completed", manual: false,
+        threadId, createdAt: startedAt, startedAt, finishedAt: Date.now(), output: "Updated the dashboard." };
+    };
+    s.runs.push(run("dash", "Refresh the sales dashboard", "live"), run("gone", "Old dashboard", "unpublished"), run("plain", "Tidy my inbox"));
+    await s.brief.active("desktop", "UTC");
+    const actions = widgetActions(s.card()!.widget!.root as WidgetRoot).map((entry) => [entry.label, entry.action.type, entry.action.payload]);
+    expect(actions.filter(([, type]) => type === "open_url")).toEqual([["Open page", "open_url", { url: PAGE }]]);
+    expect(actions.filter(([, type]) => type === "open_thread")).toHaveLength(3);
+  });
+
   it("a watch run's answer becomes rows and a prep card, and tells the person once", async () => {
     const s = setup();
     await s.brief.active("desktop", "UTC");

@@ -300,13 +300,14 @@ describe("Runtime: one tree, one lane", () => {
     expect(w.store.inbox({ threadId: "chief-chat" }).map(i => i.kind)).toEqual(["stalled"]);
     await w.runner.release(a.id, { kind: "completed", text: "too late" });
     expect(w.store.get(a.id)?.result).not.toBe("too late");
-    w.runner.script = () => ({ kind: "needs_input", question: "?" });
+    w.runner.script = n => n.assignee.botId === "b" ? { kind: "needs_input", question: "?" } : undefined;
     const b = ok(w.runtime.enqueue(toBot("b", root.id)));
     w.runtime.tick(); await flush();
     w.runtime.end(root.id, { ok: true, text: "" });
     w.clock.advance(10_001);
-    w.runtime.tick();
+    w.runtime.tick(); await flush();
     expect(w.store.get(root.id)?.status).toBe("waiting");
+    expect(w.runner.runs.filter(r => r.a.id === root.id).map(r => r.input.asked?.map(c => c.id))).toEqual([[b.id]]);
     w.runtime.answer(b.id, "yes");
     w.runner.canStartAnswer = false;
     w.clock.advance(10_001);
@@ -360,10 +361,13 @@ describe("Runtime: one tree, one lane", () => {
     second.runtime.answer(asker.id, "eu");
     second.runtime.tick(); await flush();
     second.runtime.tick();
-    const rootResume = second.runner.runs.find(r => r.a.id === root.id)!;
-    expect(rootResume.input.resumed).toBe(true);
-    expect(rootResume.input.settled?.map(s => s.id)).toEqual([solo.id, lead.id, asker.id]);
-    expect(rootResume.input.restartNote).toMatch(/restarted before your previous turn here finished.*A restart cut these teammates' turns: solo \(resumed once in place/);
+    const [rootAsked, rootResume] = second.runner.runs.filter(r => r.a.id === root.id);
+    expect(rootAsked!.input.asked?.map(s => s.id)).toEqual([asker.id]);
+    expect(rootAsked!.input.restartNote).toBe("");
+    expect(rootResume!.input.resumed).toBe(true);
+    expect(rootResume!.input.asked).toBeUndefined();
+    expect(rootResume!.input.settled?.map(s => s.id)).toEqual([solo.id, lead.id, asker.id]);
+    expect(rootResume!.input.restartNote).toMatch(/restarted before your previous turn here finished.*A restart cut these teammates' turns: solo \(resumed once in place/);
     await flush();
     expect(store.get(root.id)?.status).toBe("completed");
     invariants(second);
@@ -538,6 +542,17 @@ describe("Runtime: host-named roots and request marks", () => {
     expect("approved" in w.store.get(plain.id)!).toBe(false);
     w.runtime.tick(); await flush();
     expect(w.store.get(marked.id)).toMatchObject({ status: "completed", approved: true, batchKey: "batch-1" });
+    invariants(w);
+  });
+
+  it("ends a root the host's watchdog stopped as stalled, any other failed root as a provider error", () => {
+    const w = world();
+    w.runtime.begin(beginReq({ id: "gen-3" }));
+    w.runtime.end("gen-3", { ok: false, text: "No activity for 20 minutes — the turn was stopped.", stalled: true });
+    expect(w.store.get("gen-3")).toMatchObject({ status: "failed", outcome: "stalled" });
+    w.runtime.begin(beginReq({ id: "gen-4" }));
+    w.runtime.end("gen-4", { ok: false, text: "The engine exited" });
+    expect(w.store.get("gen-4")).toMatchObject({ status: "failed", outcome: "provider_error" });
     invariants(w);
   });
 });
@@ -807,7 +822,7 @@ describe("Runtime: a root's later executions (every turn a root)", () => {
     v.runtime.tick(); await flush();
     v.runtime.end(root2.id, { ok: true, text: "" });
     v.clock.advance(400 * 24 * 60 * 60_000);
-    v.runtime.tick();
+    v.runtime.tick(); await flush();
     expect(v.store.get(child2.id)?.status).toBe("needs_input");
     expect(v.store.get(root2.id)?.status).toBe("waiting");
     invariants(v);
@@ -948,5 +963,226 @@ describe("tree.ts: the outward wording and the loop guard", () => {
     expect(loopStop({ stale: 3, errors: [] }, "x")?.detail).toBe("Stopped after 3 continuations without progress: x");
     expect(loopStop({ stale: 0, errors: ["E", "E", "E"] }, "x")).toEqual({ reason: "the same error 3 times", detail: "Stopped after 3 identical errors: E" });
     expect(loopStop({ stale: 2, errors: ["E", "E", "E"] }, "x")?.reason).toBe("2 continuations without a successful tool call");
+  });
+});
+
+describe("Runtime: a teammate's question reaches the requester waiting on it", () => {
+  const asks: Script = (a, input) => a.assignee.botId === "builder" && input.answer === undefined ? { kind: "needs_input", question: "Which region?" }
+    : a.assignee.botId === "tester" ? "hold" : undefined;
+  const runsOf = (w: World, id: string) => w.runner.runs.filter(r => r.a.id === id);
+
+  it("resumes the requester once with the question, keeps the sibling awaited, and resumes it again only when everything settled", async () => {
+    const w = world(asks);
+    const root = w.runtime.begin(beginReq());
+    const builder = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    const tester = ok(w.runtime.enqueue(toBot("tester", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Handed out" });
+    w.runtime.tick(); await flush();
+    expect(w.store.get(builder.id)).toMatchObject({ status: "needs_input", question: "Which region?" });
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+
+    w.runtime.tick();
+    expect(runsOf(w, root.id)).toHaveLength(1);
+    const resume = runsOf(w, root.id)[0]!.input;
+    expect(resume).toMatchObject({ turn: "resume", resumed: true });
+    expect(resume.asked?.map(a => [a.id, a.question])).toEqual([[builder.id, "Which region?"]]);
+    expect(resume.settled).toBeUndefined();
+    expect(w.store.inbox({ threadId: "chief-chat" }, true)).toEqual([]);
+    await flush();
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+    expect(w.store.get(tester.id)?.status).toBe("running");
+    w.runtime.tick(); await flush(); w.runtime.tick(); await flush();
+    expect(runsOf(w, root.id)).toHaveLength(1);
+
+    expect(w.runtime.answer(builder.id, "eu-west")).toBe(true);
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, builder.id).at(-1)?.input).toMatchObject({ turn: "answered", answer: "eu-west" });
+    expect(w.store.get(builder.id)?.status).toBe("completed");
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, root.id)).toHaveLength(1);
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+
+    await w.runner.release(tester.id, { kind: "completed", text: "tested" });
+    w.runtime.tick();
+    const final = runsOf(w, root.id)[1]!.input;
+    expect(final.settled?.map(a => a.id)).toEqual([builder.id, tester.id]);
+    expect(final.asked).toBeUndefined();
+    await flush();
+    expect(w.store.get(root.id)?.status).toBe("completed");
+    expect(w.store.events(root.id).filter(e => e.kind === "resume_due").map(e => e.detail)).toEqual(["resume: a teammate asks", "resume"]);
+    invariants(w);
+  });
+
+  it("a question parked before a restart resumes the requester once after it, and not again after the next restart", async () => {
+    const store = openRuntimeStore(":memory:");
+    const first = world(asks, {}, store);
+    const root = first.runtime.begin(beginReq());
+    const builder = ok(first.runtime.enqueue(toBot("builder", root.id)));
+    ok(first.runtime.enqueue(toBot("tester", root.id)));
+    first.runtime.end(root.id, { ok: true, text: "Handed out" });
+    first.runtime.tick(); await flush();
+    expect(store.get(builder.id)?.status).toBe("needs_input");
+    first.runtime.close();
+
+    const second = world(asks, {}, store);
+    second.runtime.tick();
+    expect(runsOf(second, root.id).map(r => r.input.asked?.map(a => a.id))).toEqual([[builder.id]]);
+    await flush();
+    expect(store.get(root.id)?.status).toBe("waiting");
+    second.runtime.close();
+
+    const third = world(asks, {}, store);
+    third.runtime.tick(); await flush(); third.runtime.tick(); await flush();
+    expect(runsOf(third, root.id)).toEqual([]);
+    expect(store.get(root.id)?.status).toBe("waiting");
+    expect(store.get(builder.id)?.status).toBe("needs_input");
+    expect(third.runner.parks.map(p => p.a.id)).toEqual([builder.id]);
+    invariants(third);
+  });
+
+  it("an unanswered question still expires after 30 minutes, and the expiry resumes the requester with the results", async () => {
+    const w = world((a, input) => a.assignee.botId === "builder" && input.answer === undefined ? { kind: "needs_input", question: "Which region?" } : undefined);
+    const root = w.runtime.begin(beginReq());
+    const builder = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    const tester = ok(w.runtime.enqueue(toBot("tester", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Handed out" });
+    w.runtime.tick(); await flush();
+    w.runtime.tick();
+    expect(runsOf(w, root.id).map(r => [r.input.asked?.map(a => a.id), r.input.settled?.map(a => a.id)])).toEqual([[[builder.id], [tester.id]]]);
+    await flush();
+    w.clock.advance(30 * 60_000);
+    w.runtime.tick();
+    expect(w.store.get(builder.id)?.status).toBe("needs_input");
+    w.clock.advance(1);
+    w.runtime.tick();
+    expect(w.store.get(builder.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "the person did not answer" });
+    expect(runsOf(w, root.id)).toHaveLength(2);
+    expect(runsOf(w, root.id)[1]!.input.settled?.map(a => a.id)).toEqual([builder.id, tester.id]);
+    await flush();
+    expect(w.store.get(root.id)?.status).toBe("completed");
+    invariants(w);
+  });
+
+  it("a teammate parked on cards neither resumes the requester nor expires", async () => {
+    const w = world(a => a.assignee.botId === "builder" ? { kind: "needs_input", question: "Connect GitHub", cards: ["msg-1"] } : undefined);
+    const root = w.runtime.begin(beginReq());
+    const builder = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Handed out" });
+    w.runtime.tick(); await flush();
+    w.clock.advance(400 * 24 * 60 * 60_000);
+    w.runtime.tick(); await flush(); w.runtime.tick();
+    expect(runsOf(w, root.id)).toEqual([]);
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+    expect(w.store.get(builder.id)).toMatchObject({ status: "needs_input", cards: ["msg-1"] });
+    expect(w.store.inbox({ threadId: "chief-chat" }, true).map(i => [i.assignmentId, i.kind])).toEqual([[builder.id, "needs_input"]]);
+    invariants(w);
+  });
+
+  it("a question answered while the requester's thread was busy does not resume it with nothing to review", async () => {
+    const w = world(asks);
+    const root = w.runtime.begin(beginReq());
+    const builder = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    ok(w.runtime.enqueue(toBot("tester", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Handed out" });
+    w.runtime.tick(); await flush();
+    w.runner.canStartAnswer = false;
+    w.runtime.tick();
+    expect(w.store.get(root.id)?.status).toBe("resume");
+    w.runtime.answer(builder.id, "eu-west");
+    w.runtime.tick();
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+    expect(w.store.events(root.id).at(-1)).toMatchObject({ kind: "waiting", detail: "waiting: nothing left to resume for" });
+    w.runner.canStartAnswer = true;
+    w.runtime.tick(); await flush(); w.runtime.tick(); await flush();
+    expect(w.store.get(builder.id)?.status).toBe("completed");
+    expect(runsOf(w, root.id)).toEqual([]);
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+    invariants(w);
+  });
+
+  it("results that settle while the requester's question turn runs reach it in one final resume", async () => {
+    const w = world((a, input) => a.assignee.botId === "chief" && input.asked ? "hold" : asks(a, input));
+    const root = w.runtime.begin(beginReq());
+    const builder = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    const tester = ok(w.runtime.enqueue(toBot("tester", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Handed out" });
+    w.runtime.tick(); await flush();
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, root.id).map(r => r.input.asked?.map(a => a.id))).toEqual([[builder.id]]);
+    expect(w.store.get(root.id)?.status).toBe("running");
+
+    w.runtime.answer(builder.id, "eu-west");
+    w.runtime.tick(); await flush();
+    expect(w.store.get(builder.id)?.status).toBe("completed");
+    await w.runner.release(tester.id, { kind: "completed", text: "tested" });
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, root.id)).toHaveLength(1);
+    await w.runner.release(root.id, { kind: "completed", text: "Passed the question on" });
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+
+    w.runtime.tick();
+    const final = runsOf(w, root.id)[1]?.input;
+    expect(final).toMatchObject({ turn: "resume", resumed: true });
+    expect(final?.settled?.map(a => a.id)).toEqual([builder.id, tester.id]);
+    expect(final?.asked).toBeUndefined();
+    expect(w.store.inbox({ threadId: "chief-chat" }, true)).toEqual([]);
+    await flush();
+    expect(w.store.get(root.id)?.status).toBe("completed");
+    expect(runsOf(w, root.id)).toHaveLength(2);
+    invariants(w);
+  });
+
+  it("a restart during the question turn reruns it once with the question, and no later turn carries it again", async () => {
+    const store = openRuntimeStore(":memory:");
+    const first = world((a, input) => a.assignee.botId === "chief" && input.asked ? "hold" : asks(a, input), {}, store);
+    const root = first.runtime.begin(beginReq());
+    const builder = ok(first.runtime.enqueue(toBot("builder", root.id)));
+    const tester = ok(first.runtime.enqueue(toBot("tester", root.id)));
+    first.runtime.end(root.id, { ok: true, text: "Handed out" });
+    first.runtime.tick(); await flush();
+    first.runtime.tick(); await flush();
+    expect(runsOf(first, root.id).map(r => r.input.asked?.map(a => a.id))).toEqual([[builder.id]]);
+    first.runtime.close();
+
+    const second = world(asks, {}, store);
+    second.runtime.tick(); await flush();
+    second.runtime.tick(); await flush(); second.runtime.tick(); await flush();
+    const reruns = runsOf(second, root.id);
+    expect(reruns.map(r => [r.input.turn, r.input.asked?.map(a => a.id)])).toEqual([["resume", [builder.id]]]);
+    expect(reruns[0]!.input.restartNote).toMatch(/restarted while your previous turn here was running and cut it off; this turn continues it/);
+    expect(store.get(root.id)).toMatchObject({ status: "waiting", restarts: 1 });
+    expect(store.get(root.id)?.carrying).toBeUndefined();
+
+    second.runtime.answer(builder.id, "eu-west");
+    second.runtime.tick(); await flush();
+    await second.runner.release(tester.id, { kind: "completed", text: "tested" });
+    second.runtime.tick(); await flush();
+    const after = runsOf(second, root.id).slice(1);
+    expect(after.map(r => [r.input.turn, r.input.asked, r.input.settled?.map(a => a.id)])).toEqual([["resume", undefined, [builder.id, tester.id]]]);
+    expect(store.get(root.id)?.status).toBe("completed");
+    invariants(second);
+  });
+
+  it("the requester's own later turns do not carry a question its question turn already passed on", async () => {
+    const w = world((a, input) => a.assignee.botId === "chief" && input.asked ? { kind: "needs_input", question: "Which region for builder?" } : asks(a, input));
+    const root = w.runtime.begin(beginReq());
+    const builder = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    ok(w.runtime.enqueue(toBot("tester", root.id)));
+    w.runtime.end(root.id, { ok: true, text: "Handed out" });
+    w.runtime.tick(); await flush();
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, root.id).map(r => r.input.asked?.map(a => a.id))).toEqual([[builder.id]]);
+    expect(w.store.get(root.id)?.status).toBe("needs_input");
+
+    expect(w.runtime.answer(root.id, "eu-west")).toBe(true);
+    w.runtime.tick(); await flush();
+    const answered = runsOf(w, root.id)[1]?.input;
+    expect(answered).toMatchObject({ turn: "answered", answer: "eu-west" });
+    expect(answered?.asked).toBeUndefined();
+    expect(w.store.get(builder.id)?.status).toBe("needs_input");
+    expect(w.store.get(root.id)?.status).toBe("waiting");
+    w.runtime.tick(); await flush();
+    expect(runsOf(w, root.id)).toHaveLength(2);
+    invariants(w);
   });
 });

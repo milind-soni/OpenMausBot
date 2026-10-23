@@ -12,6 +12,11 @@ import { helperMissing } from "./lent-screen-failures.mjs";
 const READ_LIMIT = 2 * 1024 * 1024;
 const WRITE_LIMIT = 256 * 1024;
 const OUTPUT_LIMIT = 256 * 1024;
+// A process the command left running in the background can hold its output pipes open long after the command ended,
+// and on Windows a grandchild whose parent has exited is outside the tree taskkill /T ends. A command's result is
+// therefore what it wrote by shortly after it exited, and a stopped command ends shortly after the stop.
+const PIPE_GRACE_MS = 1000;
+const STOP_GRACE_MS = 5000;
 /** The server reads a result body of at most 4,000,000 bytes. */
 const RESULT_LIMIT = 3_900_000;
 const PROTECTED = "Desktop credentials and sharing settings cannot be accessed through a shared folder";
@@ -140,8 +145,24 @@ export function sharedCommand(command, cwd, signal) {
       // Without PATHEXT, PowerShell treats even .exe files as documents.
       env: hostEnvironment(),
     });
-    const chunks = []; let bytes = 0; let reason;
-    const stop = message => { reason = message; killTree(child); };
+    const chunks = []; let bytes = 0; let reason; let settled = false;
+    const graces = [];
+    const settle = (code, error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer); for (const grace of graces) clearTimeout(grace);
+      signal.removeEventListener("abort", abort);
+      child.stdout.destroy(); child.stderr.destroy();
+      if (error) reject(error);
+      else if (reason) reject(new Error(reason));
+      else resolve(text({ exitCode: code, output: Buffer.concat(chunks).toString("utf8") }));
+    };
+    const stop = message => {
+      if (settled || reason) return;
+      reason = message;
+      killTree(child);
+      graces.push(setTimeout(() => settle(null), STOP_GRACE_MS));
+    };
     const abort = () => stop("Computer access was revoked or the requesting turn ended. Inspect the result before retrying.");
     signal.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => stop("Command timed out after 30 seconds; inspect before retrying."), 30_000);
@@ -149,9 +170,9 @@ export function sharedCommand(command, cwd, signal) {
       bytes += chunk.length;
       if (bytes <= OUTPUT_LIMIT) chunks.push(chunk); else stop("Command output exceeded the limit");
     });
-    const cleanup = () => { clearTimeout(timer); signal.removeEventListener("abort", abort); };
-    child.once("error", error => { cleanup(); reject(error); });
-    child.once("close", code => { cleanup(); if (reason) reject(new Error(reason)); else resolve(text({ exitCode: code, output: Buffer.concat(chunks).toString("utf8") })); });
+    child.once("error", error => settle(null, error));
+    child.once("close", code => settle(code));
+    child.once("exit", code => { graces.push(setTimeout(() => settle(code), PIPE_GRACE_MS)); });
   });
 }
 

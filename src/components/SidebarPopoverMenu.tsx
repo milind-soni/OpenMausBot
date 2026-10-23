@@ -223,15 +223,15 @@ export function SidebarPopoverMenu({
     contains: (target: unknown) =>
       [rootRef.current, menuRef.current, subRef.current].some((node) => node?.contains(target as Node)),
   });
-  usePopoverDismiss(open, anchored ? insideRef : rootRef, () => close(anchored));
+  usePopoverDismiss(open, insideRef, () => close(anchored));
 
   useLayoutEffect(() => {
-    if (!anchored || !motion.shown) return;
+    if (!motion.shown) return;
     const place = () => {
       const trigger = triggerRef.current, menu = menuRef.current;
       if (!trigger || !menu) return;
       const viewport = { width: window.innerWidth, height: window.innerHeight };
-      setPosition(anchoredMenuPosition(trigger.getBoundingClientRect(), { width: menu.offsetWidth, height: menu.offsetHeight }, viewport, isRtl(trigger)));
+      if (anchored) setPosition(anchoredMenuPosition(trigger.getBoundingClientRect(), { width: menu.offsetWidth, height: menu.offsetHeight }, viewport, isRtl(trigger)));
       const sub = subRef.current, row = subRowRef.current;
       if (sub && row) {
         setSubPosition(submenuPosition(menu.getBoundingClientRect(), row.getBoundingClientRect(), { width: sub.offsetWidth, height: sub.offsetHeight }, viewport, isRtl(trigger)));
@@ -366,8 +366,8 @@ export function SidebarPopoverMenu({
       data-sidebar-popover-submenu
       onKeyDown={(event) => onMenuKey(event, true)}
       onPointerEnter={() => subTimer.current && clearTimeout(subTimer.current)}
-      style={{ position: "fixed", left: subPosition?.left ?? 0, top: subPosition?.top ?? 0, minWidth: 220, width: "max-content", maxWidth: `min(${ANCHORED_MENU_WIDTH + 40}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, visibility: subPosition ? undefined : "hidden" }}
-      className={cn(sheetClass, "z-[61] animate-pop-in")}
+      style={{ position: "fixed", left: subPosition?.left ?? 0, top: subPosition?.top ?? 0, minWidth: 220, width: "max-content", maxWidth: `min(${ANCHORED_MENU_WIDTH + 40}px, calc(100vw - ${EDGE_MARGIN * 2}px))`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: subPosition ? undefined : "hidden" }}
+      className={cn(sheetClass, "z-[61] animate-pop-in overflow-y-auto")}
     >
       <MenuRows
         items={openItem.submenu}
@@ -389,7 +389,7 @@ export function SidebarPopoverMenu({
       onFocus={() => openOnHover && setOpen(true)}
       onBlur={(event) => {
         if (pinned) return;
-        if (!event.relatedTarget || !rootRef.current?.contains(event.relatedTarget as Node)) setOpen(false);
+        if (!event.relatedTarget || !insideRef.current.contains(event.relatedTarget)) setOpen(false);
       }}
     >
       <button
@@ -431,7 +431,7 @@ export function SidebarPopoverMenu({
 
       {anchored
         ? typeof document !== "undefined" && sheet ? createPortal(<>{sheet}{subSheet}</>, document.body) : null
-        : sheet}
+        : <>{sheet}{typeof document !== "undefined" && subSheet ? createPortal(subSheet, document.body) : null}</>}
     </div>
   );
 }

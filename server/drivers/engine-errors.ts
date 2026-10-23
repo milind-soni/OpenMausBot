@@ -6,10 +6,18 @@ import { chatNotice } from "../chat-notices.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { USAGE_LIMIT } from "./retry.ts";
 
-export type EngineFailureKind = "credits" | "usage_limit" | "rate_limit" | "overloaded" | "server" | "refused";
+export type EngineFailureKind = "credits" | "usage_limit" | "rate_limit" | "overloaded" | "server" | "tool_schema" | "refused";
 
 /** A provider refusing for want of credit or payment, in its own words (402 is read from the status). */
 const OUT_OF_CREDITS = /\bpayment required\b|\binsufficient (?:account )?(?:funds|balance|credits?)\b|\b(?:credit|account) balance is too low\b|\bout of credits?\b|\bno credits? (?:left|remaining)\b|\bused all (?:available |of (?:your|its) )?credits\b/i;
+
+/** A provider refusing a tool's parameters schema: Moonshot's "tools.function.parameters is not a valid moonshot flavored
+ * json schema, details: <At path 'root': schema exceeds maximum allowed size>", OpenAI's "Invalid schema for function
+ * 'x'", Anthropic's "tools.3.custom.input_schema: …", Gemini's "function_declarations[3].parameters", Bedrock's
+ * "toolSpec.inputSchema". */
+const TOOL_SCHEMA = /moonshot flavou?red json schema|schema exceeds maximum allowed size|invalid schema for function\b|\btools\.\d+\.custom\.input_schema\b|function_declarations\[\d+\]\.parameters|\btoolSpec\.inputSchema\b/i;
+const SCHEMA_TOOL_NAME = /\b(?:function|tool) ['"`]([\w.:-]{1,128})['"`]/i;
+const SCHEMA_TOO_LARGE = /exceeds maximum allowed size|\btoo (?:large|long|big)\b/i;
 
 /** Grok Build's "API error (status 402 Payment Required): …" (inside ACP's "Internal error: …"), the chat-completions
  * drivers' "xAI HTTP 402: …", and Claude Code's "API Error: 529 …". */
@@ -66,6 +74,7 @@ export function engineFailureKind(text: string, status = httpStatusOf(text)): En
   if (USAGE_LIMIT.test(text)) return "usage_limit";
   if (status === 529 || /\boverloaded\b/i.test(text)) return "overloaded";
   if (status === 429) return "rate_limit";
+  if (TOOL_SCHEMA.test(text)) return "tool_schema";
   if (status !== null) return status >= 500 ? "server" : "refused";
   return null;
 }
@@ -100,13 +109,20 @@ export function engineFailure(
     case "rate_limit": return { message: `${provider} hit a rate limit${detail(code, says)}. Wait a minute, then run it again.` };
     case "overloaded": return { message: `${provider} is overloaded right now${detail(code, says)}. This is usually temporary, so try again in a few minutes.` };
     case "server": return { message: `${provider} had a temporary server problem${detail(code, says)}. Try again in a few minutes.` };
+    case "tool_schema": {
+      const tool = SCHEMA_TOOL_NAME.exec(text)?.[1];
+      const problem = SCHEMA_TOO_LARGE.test(text) ? "is too large" : `uses a form ${provider} does not accept`;
+      return { message: `${provider} refused this turn as an invalid request because the input schema of ${tool ? `the "${tool}" tool` : "one of this bot's tools"} `
+        + `${problem}, so nothing ran. Turn off the MCP server or app that tool comes from for this bot, or switch the bot to another AI.` };
+    }
     case "refused": return { message: `${provider} stopped with an error${detail(code, says)}.` };
   }
 }
 
-/** Only an out-of-credits failure in plain words; any other text stays as it is. */
-export function outOfCreditsMessage(provider: string, text: string): string {
-  return engineFailureKind(text) === "credits" ? engineFailureMessage(provider, text, { kind: "credits" })! : text;
+/** Only an out-of-credits failure or a refused tool schema in plain words; any other text stays as it is. */
+export function plainFailureMessage(provider: string, text: string): string {
+  const kind = engineFailureKind(text);
+  return kind === "credits" || kind === "tool_schema" ? engineFailureMessage(provider, text, { kind })! : text;
 }
 
 /** A failed turn's stop reason as its cause: a bare provider token ("stop_sequence", "rpc_error") is never the whole

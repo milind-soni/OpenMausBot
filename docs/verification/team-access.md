@@ -1,7 +1,7 @@
-# Chief access to additional teams
+# Chief access to additional departments
 
-A Chief's own team is always in scope. In its profile, open **Permissions →
-Additional teams**, select named teams and choose **Save team access**. Selection
+A Chief's own department is always in scope. In its profile, open **Permissions →
+Additional departments**, select named departments and choose **Save department access**. Selection
 alone does not change access. Individual peer restrictions still narrow the
 roster; specialists do not inherit their Chief's additional access or permissions.
 Persisted empty teams are selectable too, as is General. A new grant must name

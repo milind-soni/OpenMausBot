@@ -31,15 +31,9 @@ concurrency:
 
 jobs:
   # ── The test leg, in pieces ──────────────────────────────────────────────
-  # One `typecheck + test (<os>)` job used to run everything in sequence:
-  # typecheck, lint, the whole vitest suite, then three smokes that only ran
-  # when everything before them passed. The suite runs its files serially
-  # (vite.config.ts, fileParallelism:false) and takes 17–19 minutes on one
-  # runner, so slow runners hit the job cap and read as red PRs, and a broken
-  # smoke stayed hidden behind any vitest failure for a day. Each piece is now
-  # its own job: platform-independent checks run once, the suite runs in four
-  # shards per platform, and every smoke reports on its own. One final `CI`
-  # check aggregates the required jobs (see docs/ci.md for ruleset migration).
+  # Platform-independent checks run once, the suite runs in shards per
+  # platform, and every smoke reports on its own. One final `CI` check
+  # aggregates the required jobs (see docs/ci.md for ruleset migration).
   static:
     name: typecheck + lint
     runs-on: ubuntu-latest
@@ -51,6 +45,7 @@ jobs:
     outputs:
       runtime: ${{ steps.scope.outputs.runtime }}
       vitest_os: ${{ steps.scope.outputs.vitest_os }}
+      vitest_matrix: ${{ steps.scope.outputs.vitest_matrix }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -84,28 +79,23 @@ jobs:
     # A failing preflight still fails the required gates; nothing is waived.
     needs: static
     if: needs.static.outputs.runtime == 'true'
-    # vitest splits the file list deterministically across shards, so a
-    # failure names the same shard on every run and one shard is reproducible
-    # locally with the same --shard flag.
-    name: vitest (${{ matrix.os }}, shard ${{ matrix.shard }}/4)
+    # scripts/ci-scope.mjs picks the platforms and their shards: PRs run Linux
+    # and Windows (the account runs only five macOS jobs at a time); main
+    # pushes, merge groups and manual runs add macOS. Linux runs every file;
+    # Windows and macOS run every file but the e2e files that test only OMB's
+    # own logic (OMB_VITEST_E2E=host, scripts/testing/host-e2e.ts). The split
+    # is deterministic, so a failure names the same shard on every run, and
+    # the same --shard and OMB_VITEST_E2E reproduce it locally.
+    name: vitest (${{ matrix.os }}, shard ${{ matrix.shard }}/${{ matrix.shards }})
     strategy:
       fail-fast: false
-      matrix:
-        # The harness and pure desktop capabilities stay portable across all
-        # supported host platforms. POSIX-only process tests self-skip.
-        # scripts/ci-scope.mjs picks the platforms: PRs run Linux and Windows
-        # (the account runs only five macOS jobs at a time, and a PR used to
-        # queue seven), main pushes, merge groups and manual runs add macOS.
-        os: ${{ fromJSON(needs.static.outputs.vitest_os) }}
-        shard: [1, 2, 3, 4]
+      matrix: ${{ fromJSON(needs.static.outputs.vitest_matrix) }}
     runs-on: ${{ matrix.os }}
-    # scripts/testing/duration-sequencer.ts splits the files by their recorded
-    # CI seconds, not by count, so the heavy e2e files no longer share one
-    # shard. The cap catches a hang, not normal suite growth: Linux shards
-    # took 15-20 minutes by Oct 13 (the runtime and room suites), so Linux
-    # gets 30. Windows shards took 30-35 minutes by Oct 15, so the slower
-    # platforms get 45.
-    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 30 || 45 }}
+    # scripts/testing/duration-sequencer.ts splits each platform's files by
+    # their recorded seconds on that platform, about 13 minutes a shard. The
+    # cap catches a hang, not normal suite growth; Windows runners are about
+    # 1.45x slower and vary more.
+    timeout-minutes: ${{ matrix.os == 'ubuntu-latest' && 20 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
@@ -127,7 +117,8 @@ jobs:
           # scripts/testing/ci-retry-runner.ts records each listed flaky test
           # that needed a retry here (the runner context is step-level only).
           OMB_VITEST_RETRY_LOG: ${{ runner.temp }}/vitest-retries.jsonl
-        run: pnpm exec vitest run --shard=${{ matrix.shard }}/4 --reporter=default --reporter=github-actions
+          OMB_VITEST_E2E: ${{ matrix.e2e }}
+        run: pnpm exec vitest run --shard=${{ matrix.shard }}/${{ matrix.shards }} --reporter=default --reporter=github-actions
       - name: Report flaky tests that needed a retry
         # Known flakes (scripts/testing/ci-retry-list.json) get two retries in
         # CI. A pass after a retry is still listed in the job summary, so the
@@ -138,6 +129,9 @@ jobs:
         run: node scripts/testing/ci-retry-summary.mjs
       - name: Broker and Electron unit tests
         if: matrix.shard == 1
+        # About half a minute; node --test has no overall deadline, so a file
+        # that never exits would otherwise hold the job to its cap.
+        timeout-minutes: 5
         run: pnpm broker:test && pnpm test:electron
 
   behavior-evals:

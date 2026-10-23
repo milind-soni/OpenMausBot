@@ -11,6 +11,8 @@ export const TEAM_ROLES: readonly TeamRole[] = ["owner", "admin", "member"];
 export interface CloudTeam {
   id: string;
   name: string;
+  /** The team's default language from the Admin (OMB_CLOUD_TEAM_LANGUAGE), used while this server sets none. */
+  language?: string;
 }
 
 export interface TeamMember {
@@ -39,6 +41,11 @@ export function teamSessionExpiresAt(createdAt: number, proposed: number): numbe
  * must name this team. */
 const MEMBER_EMAIL = /^[!-;=?A-~]{1,64}@[!-;=?A-~]{1,189}$/;
 export type MemberClaimRefusal = "member_required" | "invalid_member" | "team_mismatch";
+
+/** A member's address as a claim carries it (printable ASCII), lowercased; null for anything else. */
+export function teamMemberEmail(value: unknown): string | null {
+  return typeof value === "string" && value.length <= 254 && MEMBER_EMAIL.test(value) ? value.trim().toLowerCase() : null;
+}
 
 export function parseMemberClaim(body: Record<string, unknown>, team: CloudTeam): { ok: true; member: TeamMember } | { ok: false; error: MemberClaimRefusal } {
   const claimedTeam = body.team;

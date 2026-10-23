@@ -2,7 +2,7 @@ import type { WebhookTrigger } from "../../shared/webhooks.ts";
 
 export type RoomPostAttachment =
   | { kind: "image"; path: string; mime: string }
-  | { kind: "audio"; path: string; mime: string };
+  | { kind: "audio"; path: string; mime: string; text?: string };
 
 export interface RoomPostContent {
   text: string;
@@ -137,7 +137,7 @@ export async function postWebhookToRoom(
   try {
     if (payload.voiceNoteText) {
       const audio = await stageVoiceNote(deps, trigger.botId, payload.voiceNoteText);
-      attachments.push({ kind: "audio", path: audio.path, mime: audio.mime });
+      attachments.push({ kind: "audio", path: audio.path, mime: audio.mime, text: payload.voiceNoteText });
     }
     for (let index = 0; index < payload.imageBytes.length; index += 1) {
       const saved = deps.saveImage(payload.imageBytes[index]!, payload.imageMimes[index]!);

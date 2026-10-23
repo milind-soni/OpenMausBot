@@ -41,7 +41,7 @@ export interface CloudSendSources {
 }
 
 /** What a bot's move into a team never carries: being someone's Chief of Staff (the team has its own). */
-const TEAM_HELD_PARTS = ["chief"];
+const TEAM_HELD_PARTS = ["chief", "helper"];
 
 function empty(value: unknown): boolean {
   if (value === undefined || value === null || value === "") return true;
@@ -86,7 +86,7 @@ export function botParts(bot: BotRecord, picture: (avatarUrl: string) => Uint8Ar
 /** A bot nobody has touched since it was made (a fresh install's starter): left out, so it never lands beside My Cloud's
  * own starter. A bot sent from another computer arrives without a greeting, so it never reads as unused. */
 export function unused(bot: BotRecord, skills: number, greetingOnly: (threadId: string, name: string) => boolean, inRoom: (botId: string) => boolean = () => false): boolean {
-  return !bot.soul?.trim() && !bot.title && !bot.description && !bot.avatarUrl && skills === 0 && (bot.tasks?.length ?? 1) <= 1 && greetingOnly(bot.threadId, bot.name)
+  return !bot.soul?.trim() && !bot.title && !bot.description && !bot.avatarUrl && !bot.sidebarHidden && !bot.welcomed && skills === 0 && (bot.tasks?.length ?? 1) <= 1 && greetingOnly(bot.threadId, bot.name)
     && !inRoom(bot.id);
 }
 

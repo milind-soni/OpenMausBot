@@ -1,11 +1,11 @@
-// On a team's Cloud a bot's main chat is the team's; a conversation a person opens with the bot is theirs (private to
-// them and the team's admins, `private: true` on the wire). Clicking a team bot in the sidebar opens that conversation,
+// On a team's Cloud a bot's main chat is the team's; a conversation a person opens with the bot is theirs alone (no other
+// member and no admin sees it, `private: true` on the wire). Clicking a team bot in the sidebar opens that conversation,
 // and makes it the first time through the server's own new-conversation route (POST /api/bots/<id>/tasks), which records
 // the person who opened it. Group chats and every other place open as before.
 //
-// A Member only ever sees their own private chats, but an Admin sees every member's too. So the server tells each person
-// which conversations they opened (`openedThreads` on /api/auth/session), and an Admin's own is one of those, on any
-// device, never one merely marked private.
+// The server sends each person only their own private chats, an Admin's included. It also says which conversations they
+// opened (`openedThreads` on /api/auth/session), and an Admin's own chat is still picked from those: a server from before
+// private chats were theirs alone sent an Admin every member's.
 import { useEffect } from "react";
 import { api } from "./api";
 import type { Action, Bot } from "./store";

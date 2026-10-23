@@ -23,6 +23,8 @@ export interface ChiefNoticeDeps {
   /** Security invariant: a read-and-draft run's prompt and reply carry mail and invite text, so its failures and
    * questions never reach a Chief as a notice. */
   quietThread?(botId: string, threadId: string): boolean;
+  /** A person's private chat on a Team Cloud: its notices go to that person, never into a Chief's thread the team reads. */
+  privateThread?(threadId: string): boolean;
 }
 
 export function createChiefNotices(deps: ChiefNoticeDeps) {
@@ -63,7 +65,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       }
       return "person" as const;
     };
-    if (!chief) return tellThePerson();
+    if (!chief || deps.privateThread?.(threadId)) return tellThePerson();
     const notices = store.tasks(chief.id).find((candidate) => candidate.title === input.title && !candidate.archivedAt)
       ?? store.createTask(chief.id, input.title, false, undefined, { botId: chief.id, name: chief.name, at: Date.now() });
     if (!notices || notices.threadId === threadId) return tellThePerson();

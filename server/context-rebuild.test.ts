@@ -9,6 +9,8 @@ import {
   type ReplayEntry,
   type ReplayToolCall,
 } from "./context-rebuild.ts";
+import { isContextMessage } from "./delta-context.ts";
+import { transcriptText } from "./replies.ts";
 import type { Message } from "./store.ts";
 import { toolDetailPreview } from "./tool-summary.ts";
 
@@ -556,5 +558,28 @@ describe("tool history in a rebuilt session", () => {
       expect(result.inline[0]!.text).toContain("old summary");
       expect(result.inline.slice(1).map(entry => entry.text)).toEqual(["retained", line("2", "kept").text, "reply"]);
     });
+  });
+});
+
+describe("a voice note in a rebuilt session", () => {
+  it("replays the reply with the note's words folded in, byte for byte what the old text fold stored", () => {
+    const messages: Message[] = [
+      { id: "u1", at: 1, role: "user", kind: "text", text: "How did the deploy go?" },
+      { id: "b1", at: 2, role: "bot", kind: "text", text: "All green.", attachments: [
+        { kind: "audio", path: "/attachments/n.mp3", mime: "audio/mpeg", text: "Deploy is green, every check passed." },
+      ] },
+      { id: "b2", at: 3, role: "bot", kind: "text", text: "", attachments: [
+        { kind: "audio", path: "/attachments/o.mp3", mime: "audio/mpeg", text: "Voice only." },
+      ] },
+    ];
+    const byId = new Map(messages.map(message => [message.id, message]));
+    const context: ReplayEntry[] = messages.filter(isContextMessage)
+      .map(message => ({ id: message.id, role: message.role === "user" ? "user" : "assistant", text: transcriptText(message, byId) }));
+    const result = selectReplay(context);
+    expect(result.transcript.map(entry => [entry.id, entry.text])).toEqual([
+      ["u1", "How did the deploy go?"],
+      ["b1", "All green.\n\nDeploy is green, every check passed."],
+      ["b2", "Voice only."],
+    ]);
   });
 });

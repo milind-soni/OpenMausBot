@@ -1,9 +1,10 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { DurationSequencer } from "./scripts/testing/duration-sequencer.ts";
+import { hostE2eOnly, portableE2eFiles } from "./scripts/testing/host-e2e.ts";
 import { hostTimeout } from "./server/testing/host-timeout.ts";
 
 // The About dialog's version, inlined at build time: the preload bridge is
@@ -12,6 +13,19 @@ const { version } = JSON.parse(
   readFileSync(fileURLToPath(new URL("./package.json", import.meta.url)), "utf8"),
 ) as { version: string };
 
+const root = fileURLToPath(new URL(".", import.meta.url));
+const include = [
+  "evals/**/*.test.ts",
+  "server/**/*.test.ts",
+  "electron/**/*.test.mjs",
+  "src/**/*.test.ts",
+  "shared/**/*.test.ts",
+  "companion/**/*.test.ts",
+  "enterprise/**/*.test.ts",
+  "scripts/**/*.test.mjs",
+  "scripts/**/*.test.ts",
+];
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   define: {
@@ -19,17 +33,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: [
-      "evals/**/*.test.ts",
-      "server/**/*.test.ts",
-      "electron/**/*.test.mjs",
-      "src/**/*.test.ts",
-      "shared/**/*.test.ts",
-      "companion/**/*.test.ts",
-      "enterprise/**/*.test.ts",
-      "scripts/**/*.test.mjs",
-      "scripts/**/*.test.ts",
-    ],
+    include,
+    // OMB_VITEST_E2E=host (CI's Windows and macOS shards) leaves the e2e files that run on Linux only.
+    exclude: [...configDefaults.exclude, ...(hostE2eOnly() ? portableE2eFiles(root, include) : [])],
     setupFiles: ["server/testing/setup.ts"],
     // the suite spawns fake provider CLIs and a real harness server;
     // parallel files introduce load-sensitive flakes for no win

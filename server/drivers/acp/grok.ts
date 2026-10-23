@@ -12,6 +12,7 @@ import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../loca
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import type { AcpQuestionRequest } from "./question-requests.ts";
 import { allowsTool, canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
+import { OWN_APPS_SERVER } from "../../../shared/own-apps.ts";
 import { MAX_QUESTIONS, parseProtocolAskQuestions, pickedOptionLabels, questionAnswersById, repeatsQuestionText } from "../../../shared/ask-question.ts";
 
 export const STATIC_GROK_MODELS: ModelCatalog = {
@@ -424,7 +425,7 @@ const support: AcpSupport = {
   async configureSession({ request, sessionId, turn, currentModelId }) {
     if (turn.toolScope !== undefined) {
       const available = new Set([
-        ...(turn.integrations?.agents ? ["agents"] : []), ...(turn.integrations?.composio ? ["composio"] : []),
+        ...(turn.integrations?.agents ? ["agents"] : []), ...(turn.integrations?.composio ? ["composio"] : []), ...(turn.integrations?.composioOwn ? [OWN_APPS_SERVER] : []),
         ...(turn.integrations?.browser ? ["browser"] : []), ...(turn.integrations?.localComputer ? ["computer"] : []),
         ...(turn.integrations?.data ? ["data"] : []), ...(turn.integrations?.highlevel ? ["highlevel"] : []),
         ...Object.keys(turn.integrations?.custom ?? {}),

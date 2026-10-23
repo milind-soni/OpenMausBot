@@ -1,7 +1,8 @@
 // Main's side of the one-time move to My Cloud (one-home.mjs) and of the send it runs (cloud-send-main.mjs): its
 // journal, this computer's server's freeze, My Cloud's owner sessions, the person's typing, and coming home when My
 // Cloud ends (one-home-again.mjs). The Admin's word decides: a move starts only for an account it lets move, to a Cloud
-// that is ready, and a Cloud it holds after it ended is the one signal that brings everything home.
+// that is ready, and a Cloud it holds after it ended is the one signal that brings everything home. The person's own
+// choice to keep this computer's bots here (Settings → MausBot Cloud, Advanced) is kept beside the journal.
 import { createHash } from "node:crypto";
 import { createReadStream, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -10,11 +11,13 @@ import { Readable } from "node:stream";
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
 import { createMoveSession } from "./move-session.mjs";
 import { createHomeAgain } from "./one-home-again.mjs";
-import { createOneHome } from "./one-home.mjs";
+import { awayIn, createOneHome, parseJournal, underWay } from "./one-home.mjs";
+import { teamPlan } from "./cloud-team-plan.mjs";
 import { installTeamMove } from "./team-move-main.mjs";
 
 const MOVE_LABEL = "Move to My Cloud";
 const HOME_LABEL = "Bring My Cloud home";
+const KEEP_LABEL = "Bring this computer's bots home";
 
 /** This computer as the Admin knows it, the same across sign-outs and sign-ins: a hash of its own server's identity, so
  * the identity itself never leaves it. */
@@ -37,7 +40,7 @@ export function oneHomeCloud(state) {
     ready: connected && machine?.status === "ready" && Boolean(machine.origin),
     moves: connected && machine?.moves === true,
     ended: connected && Boolean(machine?.hold),
-    paid: connected && state.entitlement?.status === "active" && !trialOn,
+    paid: connected && state.entitlement?.status === "active" && !trialOn && !teamPlan(state),
     ...(homecoming ? { homecoming: { installationId: homecoming.installationId, name: homecoming.name } } : {}),
     ...(connected && typeof state.deviceId === "string" && state.deviceId ? { signIn: state.deviceId } : {}),
   };
@@ -68,6 +71,7 @@ async function answer(response) {
  *   journalFile(): string,
  *   tempRoot(): string,
  *   lend?(projects: string[]): Promise<unknown>,
+ *   offer?(): unknown,
  *   phone?: { paired(): boolean, stop(): Promise<void>, start(): Promise<void> },
  *   openHome?(): void,
  *   openLocal?(): void,
@@ -77,12 +81,14 @@ async function answer(response) {
  *   journal?: { read(): unknown, write(value: unknown): void },
  *   openTeam?(team: { id: string, name: string }): void,
  *   teamJournal?: { read(): unknown, write(value: unknown): void },
+ *   keep?: { read(): unknown, write(value: unknown): void },
  * }} deps `localRequest`: this computer's server, as its owner (main adds the owner's header). `account`: the MausBot
- * Cloud sign-in (cloud-account.mjs). `journal`: where the move's journal is kept, journalFile by default. `openTeam`:
+ * Cloud sign-in (cloud-account.mjs). `journal`: where the move's journal is kept, journalFile by default; `keep`: the
+ * person's choice to keep this computer's bots here, one-home-keep.json beside it by default. `openTeam`:
  * shows a team's page, where a bot moved into it from My Cloud now lives (team-move-main.mjs, whose journal is
  * `teamJournal`, team-moves.json beside this one by default). The rest are installCloudSend's.
  */
-export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, openTeam, teamJournal, ...sendDeps }) {
+export function installOneHome({ localRequest, account, journalFile, tempRoot, lend, offer, phone, openHome, openLocal, restart, version, log = () => {}, journal: kept, keep: keptChoice, openTeam, teamJournal, ...sendDeps }) {
   const fetchImpl = sendDeps.fetch ?? globalThis.fetch;
   let home = null;
   let lastInput = 0;
@@ -96,6 +102,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     file: () => join(dirname(journalFile()), "team-move-send.json"), journalFile: () => join(dirname(journalFile()), "team-moves.json"), ...(teamJournal ? { journal: teamJournal } : {}),
     onChange: () => send.publish(), log });
   const journal = kept ?? jsonFile(journalFile);
+  const keep = keptChoice ?? jsonFile(() => join(dirname(journalFile()), "one-home-keep.json"));
   /** When the person last typed or clicked in the window. */
   const typed = () => {
     const win = sendDeps.window?.();
@@ -132,6 +139,11 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     return { origin, grant: () => client.pairHome() };
   };
 
+  const backupLocal = {
+    json: local.call,
+    upload: async (file, bytes) => answer(await localRequest("/api/workspace-backup/upload", { method: "POST", duplex: "half", signal: AbortSignal.timeout(60 * 60_000),
+      headers: { "content-type": "application/octet-stream", "content-length": String(bytes) }, body: Readable.toWeb(createReadStream(file)) })),
+  };
   const again = createHomeAgain({
     async exportGrant() {
       const asked = await account()?.exportHome({ installation: (await installation()) ?? undefined });
@@ -141,11 +153,18 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
       return asked;
     },
     open: (grant) => openOwnerSession({ origin: grant.origin, grant: async () => grant }, fetchImpl, { label: HOME_LABEL, background: false }),
-    local: {
-      json: local.call,
-      upload: async (file, bytes) => answer(await localRequest("/api/workspace-backup/upload", { method: "POST", duplex: "half", signal: AbortSignal.timeout(60 * 60_000),
-        headers: { "content-type": "application/octet-stream", "content-length": String(bytes) }, body: Readable.toWeb(createReadStream(file)) })),
+    local: backupLocal,
+    tempRoot: tempRoot(),
+  });
+  const keepHome = createHomeAgain({
+    async exportGrant() {
+      // My Cloud goes on: its owner's own code, for the Cloud this computer moved to only.
+      const grant = await target().grant();
+      if (grant?.origin !== cloudOrigin()) throw new Error("This is not the Cloud this computer moved to.");
+      return { grant };
     },
+    open: (grant) => openOwnerSession({ origin: grant.origin, grant: async () => grant }, fetchImpl, { label: KEEP_LABEL, background: false }),
+    local: backupLocal,
     tempRoot: tempRoot(),
   });
 
@@ -174,19 +193,45 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     },
     session: () => moveSession.open(target()),
     release: () => moveSession.end(),
-    lend, phone, openHome, openLocal, restart, version, log,
+    lend, offer, phone, openHome, openLocal, restart, version, log,
     again,
+    keep,
+    keepHome,
     installation,
     async reportMove() {
       const client = account(), mine = await installation();
       return Boolean(client?.reportMove && mine && await client.reportMove({ installation: mine }));
     },
+    async reportKept() {
+      const client = account(), mine = await installation();
+      return Boolean(client?.reportKept && mine && await client.reportKept({ installation: mine }));
+    },
     lastInput: typed,
     onChange: () => send.publish(),
   });
 
+  /** The switch "Keep this computer's bots on this computer": `shown` only to someone with a Cloud of their own the move
+   * applies to; `moved`, turning it on brings this computer's bots home; `coming`, they are on their way past turning back. */
+  const keepState = () => {
+    const cloud = oneHomeCloud(account()?.state()), moving = parseJournal(journal.read());
+    return { shown: Boolean(cloud?.origin) && (cloud.moves || Boolean(moving) || home.keeps()), on: home.keeps(), moved: awayIn(moving) && moving.phase !== "keeping",
+      coming: underWay(moving) };
+  };
+  const onPage = (channel, handler) => (event, ...args) => {
+    if (!sendDeps.cloudPage(event)) throw new Error(`${channel} is only available in this app's window`);
+    return handler(...args);
+  };
+  sendDeps.ipcMain.handle("one-home:keep", onPage("one-home:keep", keepState));
+  sendDeps.ipcMain.handle("one-home:keep-set", onPage("one-home:keep-set", (on) => {
+    if (on === true && !keepState().shown) throw new Error("This computer has no My Cloud to keep its bots from.");
+    void home.keep(on === true).catch((error) => log(`one home: ${error?.message ?? error}`));
+    return keepState();
+  }));
+
   return {
     ...send,
+    /** The switch "Keep this computer's bots on this computer", as Settings shows it, and the person turning it. */
+    keep: { state: keepState, set: (on) => home.keep(on === true) },
     /** Goes on with the move, and with any bot moving into a team: at launch, and whenever the MausBot Cloud sign-in changes. */
     kick: () => { void teamMove.kick(); return home.kick(); },
     /** Home is My Cloud: this computer's own server is frozen for good, and its phone link stays off. */

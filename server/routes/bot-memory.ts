@@ -27,8 +27,9 @@ export interface BotMemoryRouteDeps {
   bot(id: string): { id: string; memoryUpkeep?: boolean } | null | undefined;
   taskByThread(botId: string, threadId: string): { title?: string } | undefined;
   upkeep: Pick<MemoryUpkeep, "status" | "tidy">;
-  aboutMe(): string;
-  saveAboutMe(text: string): void;
+  /** The caller's About me: the server's profile's, or on a Team Cloud the signed-in person's own. */
+  aboutMe(auth: RequestAuth): string;
+  saveAboutMe(text: string, auth: RequestAuth): void;
   /** Cloud home only. A review may come only from one of the owner's own devices (`owner`). */
   lendingReview?: {
     needed(botId: string): { token: string; changed: string[] } | null;
@@ -161,9 +162,9 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
     }
     m = path.match(/^\/api\/profile\/learned\/([\w-]+)\/remove$/);
     if (m && method === "POST") {
-      const removed = removeLearned(m[1], deps.aboutMe(), deps.saveAboutMe);
+      const removed = removeLearned(m[1], deps.aboutMe(auth), (text) => deps.saveAboutMe(text, auth));
       if (!removed) return json(res, 404, { error: "That fact was already removed." });
-      return json(res, 200, { ok: true, aboutMe: deps.aboutMe(), learned: listLearnedFacts() });
+      return json(res, 200, { ok: true, aboutMe: deps.aboutMe(auth), learned: listLearnedFacts() });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/upkeep$/);
     if (m && method === "GET") {

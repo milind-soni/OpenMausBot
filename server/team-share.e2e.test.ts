@@ -155,7 +155,7 @@ it("never leaves Share team stuck on skills, and keeps keys out of connection ad
     expect(crowded).toEqual({ status: 400, body: { error: "Morgan has more than 30 skills. Choose fewer skills and try again.", choices: { skills: all.choices.skills } } });
     const conflict = await call("POST", "/api/teams/export", { ...body, skills: ["pricing"] });
     expect(conflict).toEqual({ status: 400, body: {
-      error: 'Two bots in this team have different skills named "pricing". Leave that skill out and try again.', choices: { skills: all.choices.skills } } });
+      error: 'Two bots in this department have different skills named "pricing". Leave that skill out and try again.', choices: { skills: all.choices.skills } } });
     const unknown = await call("POST", "/api/teams/export", { ...body, skills: ["gone"] });
     expect(unknown.status).toBe(400);
     expect(unknown.body.choices.skills).toEqual(all.choices.skills);

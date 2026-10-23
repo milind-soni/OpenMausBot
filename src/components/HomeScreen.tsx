@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import type { HomeView, HomeBridge } from "../../electron/home-window.mjs";
+import { CloudSetupSteps } from "./CloudSetupSteps";
 
 const MACHINE: Record<string, LocaleKey> = {
   stopped: "cloudHome.stopped",
@@ -15,6 +16,7 @@ export function homeScreenText(view: HomeView | null): { title: string; body: st
   // A team's Cloud is named; My Cloud keeps its own words.
   const name = view?.name ?? null;
   const named = (plain: LocaleKey, withName: LocaleKey) => (name ? t(withName, { name }) : t(plain));
+  if (view?.screen === "setup") return { title: named("homeScreen.setup", "homeScreen.setupNamed"), body: t(view.slow ? "cloudHome.slow" : "homeScreen.setupBody"), reason: null, action: null, busy: true };
   if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), reason: view.cause && Object.hasOwn(UNREACHABLE, view.cause) ? t(UNREACHABLE[view.cause]!) : view.reason ?? null, action: null, busy: true };
   if (view?.screen === "signin") return { title: named("homeScreen.signIn", "homeScreen.signInNamed"), body: t(view.other ? "homeScreen.signInOther" : "homeScreen.signInEnded"), reason: null, action: "sign-in", busy: false };
   if (view?.screen === "plan") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t(MACHINE[view.machine] ?? "cloudHome.failed"), reason: null, action: view.machine === "failed" ? null : "manage", busy: false };
@@ -24,9 +26,9 @@ export function homeScreenText(view: HomeView | null): { title: string; body: st
 }
 
 /**
- * This computer's own screen in the desktop window once the person's bots live on My Cloud: why My Cloud isn't open
- * yet, and nothing to do but wait, except Sign in when this device's sign-in has ended. It looks again by itself (main's
- * timer), when the network comes back and when the window comes to the front.
+ * This computer's own screen in the desktop window while My Cloud can't be shown yet (it is home, or it was asked for
+ * while the Admin sets it up): why, and nothing to do but wait, except Sign in when this device's sign-in has ended. It
+ * looks again by itself (main's timer), when the network comes back and when the window comes to the front.
  */
 export function HomeScreen({ bridge, manage }: { bridge: HomeBridge; manage?: () => Promise<void> }) {
   const [view, setView] = useState<HomeView | null>(null);
@@ -51,6 +53,7 @@ export function HomeScreen({ bridge, manage }: { bridge: HomeBridge; manage?: ()
           {text.title}
         </p>
         {text.body && <p className="text-[14px] leading-relaxed text-ink-secondary">{text.body}</p>}
+        {view?.screen === "setup" && <CloudSetupSteps step={view.step ?? "reserving"} />}
         {text.reason && <p data-home-reason className="text-[13px] leading-relaxed text-ink-secondary">{text.reason}</p>}
         {text.action === "sign-in" && <button type="button" className="ui-button ui-button-primary mt-2" onClick={() => act(() => bridge.signIn())}>{t("homeScreen.signInButton")}</button>}
         {text.action === "manage" && manage && <button type="button" className="ui-button mt-2" onClick={() => act(manage)}>{t("cloudAccount.manageInBrowser")}</button>}

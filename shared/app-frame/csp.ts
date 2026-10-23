@@ -29,6 +29,37 @@ export const BOT_HTML_NETWORK: { connect: string[]; resources: string[] } = {
   resources: [...BOT_HTML_CDNS, FONT_STYLES, FONT_FILES],
 };
 
+/** DuckDB-WASM fetches its readers, Parquet's among them, from here when a query first needs one. */
+const DUCKDB_EXTENSIONS = "https://extensions.duckdb.org";
+
+/** A web origin, scheme and host (and port) only, or null. */
+export function webOrigin(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 300) return null;
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password && url.origin === value ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A folder page: the bot-page policy, plus its own files under `files` (the token route's folder URL, ending in "/",
+ * which is also its base) and DuckDB's readers. Security: the path keeps the page off the rest of the app's own
+ * origin, its API included. */
+export function folderPageCsp(files: string): string {
+  const add = (directive: string, extra: string) => directive.replace(/^([a-z-]+) (.*)$/, `$1 $2 ${extra}`);
+  return BOT_HTML_CSP.split("; ").map((directive) => {
+    if (/^(script|style|font|img|media)-src /.test(directive)) return add(directive, files);
+    if (directive.startsWith("connect-src ")) return add(directive, `${files} ${DUCKDB_EXTENSIONS}`);
+    if (directive === "base-uri 'none'") return `base-uri ${files}`;
+    return directive;
+  }).join("; ");
+}
+
+export function folderPageNetwork(files: string): { connect: string[]; resources: string[] } {
+  return { connect: [...BOT_HTML_NETWORK.connect, files, DUCKDB_EXTENSIONS], resources: [...BOT_HTML_NETWORK.resources, files] };
+}
+
 export const APP_DOMAIN_LIMIT = 16;
 const REFUSED_SHOWN_CHARS = 120;
 

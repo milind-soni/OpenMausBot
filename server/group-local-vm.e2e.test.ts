@@ -10,6 +10,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { cloudHomePrompt } from "./system-prompt.ts";
 import { CONTROL_BUSY, CONTROL_REFUSAL_PLAIN, controlRefusal, createControlClient } from "./control-client.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { readHandoffs } from "./testing/handoff-rows.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -50,10 +51,18 @@ const dump = () => until(() => {
   if (!existsSync(dumpFile)) return null;
   try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
 }, Boolean);
+// The seeded Chief answers a failed run with a Team incidents turn on this same engine, and that turn writes the dump.
+async function stepDownSeededChief() {
+  const seeded = (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.chiefOfStaff);
+  if (seeded) await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false });
+}
 const idle = (botId: string) => until(() => api("GET", "/api/bots?messages=0"), s => !s.bots.find((b: any) => b.id === botId)?.busy);
 const computer = (d: any) => d.mcpConfig.mcpServers.computer;
 const gate = (c: any) => fetch(c.env.OMB_CONTROL_URL, { headers: { authorization: `Bearer ${c.env.OMB_CONTROL_TOKEN}` } });
 const check = (c: any) => createControlClient({ url: c.env.OMB_CONTROL_URL, token: c.env.OMB_CONTROL_TOKEN }).state(true);
+// The runtime outcome of the room's latest coordinated turn, once it has one.
+const roomOutcome = (groupId: string) => until(() => readHandoffs(join(fixtureHome, "data")).findLast(node => node.groupId === groupId)?.outcome,
+  Boolean);
 
 beforeAll(async () => {
   fixtureHome = mkdtempSync(join(tmpdir(), "omb-group-vm-"));
@@ -123,6 +132,7 @@ beforeAll(async () => {
       if (child.exitCode !== null) throw new Error(stderr);
       try { return (await fetch(base + "/api/health")).ok; } catch { return false; }
     }, Boolean);
+    await stepDownSeededChief();
   };
   await startServer();
 });
@@ -856,6 +866,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
     vmState();
     await idle(bots[0].id);
     expect(existsSync(dumpFile)).toBe(false);
+    // The watchdog stopped the turn before dispatch: a stall, not a provider error.
+    expect(await roomOutcome(group.id)).toBe("stalled");
     // Wait out the stall's VM-lease grace so a later turn can take the VM.
     await new Promise(r => setTimeout(r, 6_500));
     await send(group.id);
@@ -863,6 +875,20 @@ describe("Group Local VM ownership on the real isolated server", () => {
     writeFileSync(finishFile, "finish");
     await idle(bots[0].id);
     await stop(group.id); await idle(bots[0].id);
+  });
+  it("records a stall during VM readiness as stalled, though setup ends before the turn has an outcome", async () => {
+    const { bots, group } = await room();
+    // Park setup in Local VM readiness, before dispatch: the stall revokes the turn's generation, so readiness returns
+    // to a setup that is no longer current and ends it without any room outcome.
+    vmState({ blocked: true }); rmSync(stateFile + ".entered", { force: true });
+    await send(group.id);
+    await until(() => existsSync(stateFile + ".entered"), Boolean);
+    vmState({ blocked: true, stall: true });
+    await until(() => api("GET", "/api/bots?messages=30"), r => JSON.stringify(r).includes("the turn was stopped"));
+    vmState();
+    await idle(bots[0].id);
+    expect(existsSync(dumpFile)).toBe(false);
+    expect(await roomOutcome(group.id)).toBe("stalled");
   });
   it("revokes the previous member and rejects cross-bot control after a shared desktop handoff", async () => {
     const { bots, group } = await room();
@@ -1119,6 +1145,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
     if (failure === "stall") vmState({ stall: true });
     await idle(bots[0].id);
     expect((await gate(c)).status).toBe(401);
+    if (failure === "stall") expect(await roomOutcome(group.id)).toBe("stalled");
     await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 2 } });
     vmState({ noContainers: true });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createXClient, createXRelayClient, errorFor, tregErrorFor, X_CLIENT_TIMEOUT_MS, normalizeHandle, parsePostRef, toPost, X_MESSAGES, XResearchError } from "./x-research.ts";
+import { createXClient, createXRelayClient, errorFor, readIncludedXUsage, tregErrorFor, X_CLIENT_TIMEOUT_MS, normalizeHandle, parsePostRef, toPost, X_MESSAGES, XResearchError } from "./x-research.ts";
 
 /** 2026-10-08T00:12:34Z */
 const CREATED = 1791418354;
@@ -444,12 +444,50 @@ describe("errors", () => {
     expect(X_CLIENT_TIMEOUT_MS).toBeGreaterThan(30_000);
   });
 
-  it("passes on the relay's own sentence when this month's allowance is used up", async () => {
+  it("passes on the relay's own sentence when this month's allowance is used up, and says how to keep going", async () => {
     const sentence = "Your Pro plan's 5,000 X research calls for October are used up. They reset on 1 November.";
     const { fetcher, calls } = fakeFetch({ status: 429, body: { error: "quota_exceeded", message: sentence } });
     const error = await failure(clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 20 }));
-    expect(error).toMatchObject({ code: "rate_limited", message: sentence });
+    expect(error).toMatchObject({ code: "rate_limited", message: `${sentence} Add your own treg key to keep going.` });
     expect(calls).toHaveLength(1);
+    expect(errorFor(429, { error: "rate_limited", message: "Slow down." }).message).toBe(X_MESSAGES.rateLimited);
+  });
+});
+
+describe("the plan's included X calls this month", () => {
+  const plan = { token: "omb_xd_plan", api: `${RELAY}/`, included: true };
+  const usage = { calls: 312, max: 5_000, resetsAt: "2026-11-01T00:00:00.000Z" };
+
+  it("asks the relay's /usage with the plan's bearer, by GET, and reads its answer", async () => {
+    const { fetcher, calls } = fakeFetch({ body: usage });
+    expect(await readIncludedXUsage(plan, { fetcher })).toEqual(usage);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url.href).toBe(`${RELAY}/usage`);
+    expect(calls[0]!.method).toBe("GET");
+    expect(calls[0]!.headers.get("authorization")).toBe("Bearer omb_xd_plan");
+    expect(calls[0]!.headers.get("x-treg-token")).toBeNull();
+  });
+
+  it("keeps a used-up month and a trial's end, and never counts past the allowance", async () => {
+    const trial = { calls: 9, max: 3, usedUp: true, resetsAt: usage.resetsAt, trialEndsAt: "2026-10-25T09:00:00.000Z" };
+    expect(await readIncludedXUsage(plan, { fetcher: fakeFetch({ body: trial }).fetcher })).toEqual({ ...trial, calls: 3 });
+    expect(await readIncludedXUsage(plan, { fetcher: fakeFetch({ body: { ...usage, calls: 5_000 } }).fetcher })).toEqual({ ...usage, calls: 5_000, usedUp: true });
+  });
+
+  it("says nothing for an own key, a refusal, an older relay without /usage, a malformed answer or no answer", async () => {
+    const own = fakeFetch();
+    expect(await readIncludedXUsage({ token: "treg_own", api: "https://treg.to", included: false }, { fetcher: own.fetcher })).toBeNull();
+    expect(own.calls).toEqual([]);
+    for (const reply of [
+      { status: 401, body: { error: "invalid_api_key", message: "This X research token is not valid." } },
+      { status: 404, body: { error: "not_found", message: "Not found." } },
+      { status: 402, body: { error: "subscription_inactive" } },
+      { status: 503, body: usage },
+      { body: { calls: "312", max: 5_000, resetsAt: usage.resetsAt } },
+      { body: { calls: 1, max: 5_000, resetsAt: "next month" } },
+      { body: "not json" },
+      new TypeError("fetch failed"),
+    ]) expect(await readIncludedXUsage(plan, { fetcher: fakeFetch(reply).fetcher })).toBeNull();
   });
 });
 

@@ -718,7 +718,7 @@ alone.
   its bots allow** (`PATCH /api/groups/:id` with `{"resetAudience": true}`),
   which resets the floor to what the room's current bots allow and is
   recorded in the admin activity log.
-- **Teams.** A team (sidebar section) is listed to a user only when it
+- **Departments.** A department (sidebar section) is listed to a user only when it
   holds a bot or room they can see.
 - **Bots working together.** A bot reaches a teammate (`coordinate_bots`,
   its roster and `list_bots`, @mentions, a Chief's team) only when exactly

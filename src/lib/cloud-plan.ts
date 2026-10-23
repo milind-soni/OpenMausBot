@@ -1,5 +1,6 @@
 import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudPlanAllowances, CloudSetupStep, CloudTrial, CloudTrialState } from "../../electron/cloud-home.mjs";
+import { planTeam, teamPlan } from "../../electron/cloud-team-plan.mjs";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
@@ -296,7 +297,18 @@ export type CloudAddView =
   | ({ kind: "starting"; step: CloudSetupStep | null; slow: boolean; received: boolean } & CloudStarted)
   | ({ kind: "ready" } & CloudStarted)
   | { kind: "has-cloud" }
+  /** A Team or Business plan: its Cloud is the team's (`team` null while the session lists none yet), never a My Cloud. */
+  | { kind: "team-starting"; team: string | null; step: CloudSetupStep | null; slow: boolean }
+  | { kind: "team-ready"; team: { id: string; name: string } }
   | { kind: "settings" };
+
+function teamCloudView(team: ReturnType<typeof planTeam>): CloudAddView {
+  const machine = team?.machine ?? null;
+  if (!team || !machine || machine.status === "provisioning") {
+    return { kind: "team-starting", team: team?.name ?? null, step: machine?.setup?.step ?? null, slow: machine?.setup?.slow === true };
+  }
+  return machine.status === "ready" ? { kind: "team-ready", team: { id: team.id, name: team.name } } : { kind: "settings" };
+}
 
 /** The one state → view function of the buying sheet: every Cloud state is one message and one next step. */
 export function cloudAddView(account: CloudAccountState | null | undefined, offer: CloudOffer | null | undefined,
@@ -319,6 +331,7 @@ export function cloudAddView(account: CloudAccountState | null | undefined, offe
     case "connecting": return { kind: "signing-in", code: account?.enrollment?.userCode ?? null, checkout: Boolean(account?.checkout) };
     case "purchase": return { kind: "starting", ...started(), step: null, slow: false, received: true };
     case "paid": {
+      if (teamPlan(account)) return teamCloudView(planTeam(account));
       const machine = account?.machine;
       if (!machine || machine.status === "provisioning") return { kind: "starting", ...started(), step: machine?.setup?.step ?? null, slow: machine?.setup?.slow === true, received: false };
       if (machine.status !== "ready") return { kind: "settings" };

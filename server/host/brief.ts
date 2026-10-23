@@ -178,6 +178,13 @@ export function createBrief(deps: BriefDeps) {
     return state.important.filter((row) => !dismissed.has(row.messageId) && at - row.judgedAt <= IMPORTANT_DAYS_MS);
   }
 
+  /** The page a run published, from its live card in the run's chat: the brief opens the page itself, not a prompt. */
+  function publishedPage(run: RoutineRun): string | undefined {
+    if (!run.threadId) return undefined;
+    const from = run.startedAt ?? run.createdAt, to = run.finishedAt ?? Number.POSITIVE_INFINITY;
+    return deps.store.messagesFor(run.threadId).findLast((row) => row.publishedPage?.state === "live" && row.at >= from && row.at <= to)?.publishedPage?.url;
+  }
+
   function routineRows(since: number): { needs: BriefRow[]; done: BriefRow[] } {
     const needs: BriefRow[] = [], done: BriefRow[] = [];
     const latest = new Map<string, RoutineRun>();
@@ -193,7 +200,8 @@ export function createBrief(deps: BriefDeps) {
       if (!bot || bot.hidden) continue;
       const open = run.threadId && deps.store.taskByThread(run.botId, run.threadId) ? { botId: run.botId, threadId: run.threadId } : undefined;
       const name = oneLine(run.routineName, 80), note = run.status === "completed" ? firstSentence(run.output ?? "") : oneLine(run.error ?? "", 140);
-      if (run.status === "completed") done.push({ text: name, note: clip(note || "Finished", 140), ...(open ? { open } : {}), ...(note ? {} : { said: { note: words("brief.row.finished") } }) });
+      const page = run.status === "completed" && open ? publishedPage(run) : undefined;
+      if (run.status === "completed") done.push({ text: name, note: clip(note || "Finished", 140), ...(open ? { open } : {}), ...(page ? { page } : {}), ...(note ? {} : { said: { note: words("brief.row.finished") } }) });
       else needs.push({ text: `${name} ${run.status === "missed" ? "was missed" : "failed"}`, note: clip(note || "It did not finish", 140), ...(open ? { open } : {}),
         said: { text: words(run.status === "missed" ? "brief.row.missed" : "brief.row.failed", { name }), ...(note ? watchFailureWords(note) : { note: words("brief.row.didNotFinish") }) } });
     }

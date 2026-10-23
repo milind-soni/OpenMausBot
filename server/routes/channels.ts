@@ -15,7 +15,7 @@ import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ProviderInstance, SteerOutcome } from "../contracts.ts";
 import { cancelledChatFollowup } from "../message-db.ts";
 import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
-import { promptWithReply } from "../replies.ts";
+import { promptWithReply, type PersonName } from "../replies.ts";
 import { clientGroupPatchViolation, requestSource, type RequestAuth } from "../request-auth.ts";
 import type { RoomContextTracker } from "../room-context.ts";
 import { parseConversationTurnTimeout } from "../room-turn-timeout.ts";
@@ -30,6 +30,7 @@ import type { UsageTrigger } from "../usage-ledger.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
+import { readThreadNotifications } from "./notifications.ts";
 
 export type MessagePage = { messages: Array<Message | Record<string, unknown>>; hasMore?: boolean; activeLeafId: string | null };
 
@@ -37,7 +38,9 @@ export interface ChannelRouteDeps {
   store: Pick<Store,
     | "group" | "groupTaskByThread" | "bot" | "switchGroupTask" | "patchGroupTask" | "patchGroup" | "messagesFor" | "groupTasks" | "deleteGroupTasks" | "deleteGroup"
     | "createGroupTask" | "appendMessage">;
-  cfg: Pick<AppConfig, "profile" | "budgets">;
+  cfg: Pick<AppConfig, "budgets">;
+  /** What people's lines are called in this conversation (replies.ts PersonName). */
+  userName(threadId: string): PersonName;
   /** The desktop app owns this server, so a loopback caller is its owner. */
   desktopManaged: boolean;
   routines(): Pick<RoutineManager, "disableForGroup"> | null;
@@ -176,6 +179,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (switchLimit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       const switched = store.switchGroupTask(group.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such channel task" });
+      readThreadNotifications(switched.threadId, broadcast);
       const switchedSettings = publicGroupState(switched);
       // "0": settings only (no `messages` key); a positive page: that tail; omitted: the whole transcript.
       const responseGroup = requestedMessages === "0"
@@ -252,6 +256,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (!room) return json(res, 404, { error: "no such room" });
       sawThread(room.threadId);
       const group = store.patchGroup(room.id, { unread: false, ...readCursor(room.threadId) })!;
+      readThreadNotifications(room.threadId, broadcast);
       broadcast({ kind: "group", group: publicGroupState(group) });
       return json(res, 200, { group: publicGroupState(group) });
     }
@@ -439,7 +444,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
         });
       }
       const replyTo = resolveHeldReplyTarget(held, resolveReplyTarget);
-      const speakerName = cfg.profile?.name?.trim() || "User";
+      const speakerName = deps.userName(targetThreadId);
       let foldedPrompt: string;
       try {
         foldedPrompt = headGroup

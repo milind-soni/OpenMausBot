@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { APP_LIMITS } from "../shared/app.ts";
+import { JSX_PAGE_LIBRARIES, JSX_PAGE_MODULES } from "../shared/app-frame/jsx-page.ts";
 import { BOT_HTML_CDNS } from "../shared/app-frame/csp.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, parseSkillManifest, renderSkillInstructions, selectBundledSkills, type BundledSkill } from "./skill-library.ts";
 
@@ -121,6 +122,17 @@ describe("bundled data-dashboards skill", () => {
     for (const text of ["Write a paragraph about photography", "fix the typo in my biography", "summarize this email", "book a call for Friday"]) {
       expect(ids(text), text).not.toContain("data-dashboards");
     }
+  });
+
+  it("mounts for a page to look at, and its page guide names the shell's own building blocks and versions", () => {
+    for (const text of ["Make me a pricing page", "build a landing page for the bake sale", "Can you mock-up a signup form as a page?", "a quick prototype of the settings screen"]) {
+      expect(ids(text), text).toContain("data-dashboards");
+    }
+    for (const module of JSX_PAGE_MODULES.filter((name) => !name.includes("/"))) expect(guide, module).toContain(`\`${module}\``);
+    const minor = (version: string) => version.split(".").slice(0, 2).join(".");
+    expect(guide).toContain(`\`react\` (${minor(JSX_PAGE_LIBRARIES.react)})`);
+    expect(guide).toContain(`\`echarts\` (${minor(JSX_PAGE_LIBRARIES.echarts)})`);
+    expect(guide).toContain(`Tailwind classes (${minor(JSX_PAGE_LIBRARIES["@tailwindcss/browser"])})`);
   });
 
   it("keeps the guide short, in plain words, and pointing at its template", () => {

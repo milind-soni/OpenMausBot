@@ -149,9 +149,8 @@ describe("Automations page", () => {
     expect(html).toContain("Sign in</button>");
   });
 
-  it("opens one simple panel from a sentence", () => {
-    const sentence = [...buttons(page()).keys()].find((label) => label.startsWith("Every day at 6:30"))!;
-    click(buttons(page()).get(sentence));
+  it("opens one simple panel from its name", () => {
+    click(buttons(page()).get("Morning brief"));
     expect(page().find(named("AutomationPanel"))!.props.automation).toMatchObject({ id: routine.id, kind: "schedule" });
   });
 

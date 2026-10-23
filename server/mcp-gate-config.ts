@@ -5,9 +5,10 @@ import { DATA_DIR } from "./config.ts";
 import type { SendTurnInput } from "./contracts.ts";
 import { unbridgedServer } from "./drivers/agents-bridge.ts";
 import { GATE_APPS_ENV, REMOTE_MCP_APPS_ENV, type AppMount } from "./mcp-app-observer.ts";
-import { DEFAULT_RESULT_BUDGET } from "./mcp-trim.ts";
+import { DEFAULT_RESULT_BUDGET, QUERY_TOOL_NAME } from "./mcp-trim.ts";
 import { REMOTE_MCP_CONFIG_ENV, remoteMcpSpec } from "./mcp-http.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { TOOL_SCHEMA_PROFILE_ENV, type ToolSchemaProfileId } from "./tool-schema-profile.ts";
 
 export type { AppMount } from "./mcp-app-observer.ts";
 
@@ -145,13 +146,15 @@ export function gateServer(input: {
   sourceEnv?: NodeJS.ProcessEnv | Record<string, string | undefined>;
   gateRemote?: boolean;
   apps?: AppMount;
+  /** The engine's provider limits each listed tool schema, so the gate fits them to its profile. */
+  schemaProfile?: ToolSchemaProfileId;
 }): { command: string; args: string[]; env: Record<string, string> } | null {
-  const { name, server, budget, apps } = input;
+  const { name, server, budget, apps, schemaProfile } = input;
   const parsed = parseToolScope(input.toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scoped = parsed.scope !== undefined;
   const remote = remoteMcpSpec(server) !== undefined;
-  if (budget <= 0 && !scoped && !apps) return null;
+  if (budget <= 0 && !scoped && !apps && !schemaProfile) return null;
   const directory = input.directory === true && remote;
   const proxyOptions = {
     nodeEnv: input.nodeEnv,
@@ -190,7 +193,21 @@ export function gateServer(input: {
     args: [SPAWNED_PROXIES.mcpGate, ...(input.configEnvName ? ["--config-env", input.configEnvName] : [])],
     env: {
       ...input.nodeEnv,
+      ...(schemaProfile ? { [TOOL_SCHEMA_PROFILE_ENV]: schemaProfile } : {}),
       ...(input.configEnvName ? { [input.configEnvName]: JSON.stringify(env) } : env),
     },
   };
+}
+
+/** `mcp__<server>__query_result` for each mount that is a trimming gate, which lists its own read-only query over held
+ * results (mcp-shape.ts). It reads nothing the server has not already returned, so an engine may pre-allow it while the
+ * server's own tools still ask. A mount that replaced a gate (a harness server shadowing a project one) has none. */
+export function gateQueryTools(servers: Readonly<Record<string, unknown>>): string[] {
+  return Object.entries(servers).flatMap(([name, spec]) => {
+    const { args, env } = (spec ?? {}) as { args?: unknown; env?: Record<string, string> };
+    if (!Array.isArray(args) || args[0] !== SPAWNED_PROXIES.mcpGate) return [];
+    let config: Record<string, unknown> | undefined = env;
+    if (args[1] === "--config-env") try { config = JSON.parse(env?.[String(args[2])] ?? "{}"); } catch { return []; }
+    return Number(config?.OMB_GATE_BUDGET) > 0 ? [`mcp__${name}__${QUERY_TOOL_NAME}`] : [];
+  });
 }

@@ -118,7 +118,7 @@ export const PLACE_EN = {
   "place.view.auto.lineDesktop": "Uses the built-in browser, a private desktop on this computer, or this computer's screen, whichever the task needs.",
   "place.view.auto.lineLinux": "Uses the built-in browser, or a running private desktop when a task needs one.",
   "place.view.autoTeam.short": "Shared",
-  "place.view.autoTeam.line": "Uses {computer}, the cloud desktop this team shares.",
+  "place.view.autoTeam.line": "Uses {computer}, the cloud desktop this department shares.",
   "place.view.ccCannot.short": "Not with this model",
   "place.view.ccCannot.line": "{model} can't use a desktop. Choose a model that can, such as Claude or ChatGPT.",
   "place.view.ccToolsOff.short": "Not allowed",

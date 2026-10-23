@@ -46,7 +46,7 @@ import {
 import { appendNative } from "./native.ts";
 import { allowsTool, canUseMcpServer, parseToolScope } from "../../shared/tool-scope.ts";
 import { appMountFor, customServerGate, gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
-import { remoteMcpSpec } from "../mcp-http.ts";
+import { remoteMcpSpec } from "../mcp-http.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
@@ -99,7 +99,7 @@ export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | 
   const parsed = parseToolScope(turn.toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const servers: Record<string, unknown> = {};
-  if (turn.integrations?.composio) servers.composio = { ...turn.integrations.composio };
+  if (turn.integrations?.composio) servers.composio = { ...turn.integrations.composio }; if (turn.integrations?.composioOwn) servers[OWN_APPS_SERVER] = { ...turn.integrations.composioOwn };
   if (turn.integrations?.localComputer) {
     const local = turn.integrations.localComputer;
     servers.computer = {

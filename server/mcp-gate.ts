@@ -9,8 +9,11 @@ import { bridgedCallTarget } from "./drivers/agents-bridge.ts";
 import { resolveCliSpawn } from "./env-path.ts";
 import { APP_ONLY_REFUSAL, AppObserver, GATE_APPS_ENV, modelVisible, parseAppMount, withUiExtension } from "./mcp-app-observer.ts";
 import { directoryCallTarget, isDirectoryTool } from "./mcp-directory.ts";
-import { DEFAULT_RESULT_BUDGET, trimResultText, trimStructured } from "./mcp-trim.ts";
+import { QUERY_TOOL, QUERY_TOOL_NAME, ResultStore, answerQuery, describeShape, exampleQuery } from "./mcp-shape.ts";
+import { fitToolList } from "./mcp-tool-schema.ts";
+import { DEFAULT_RESULT_BUDGET, type HeldResult, trimResultText, trimStructured } from "./mcp-trim.ts";
 import { killCliTree } from "./procs.ts";
+import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 
 type Json = Record<string, unknown>;
 
@@ -40,6 +43,7 @@ const BUDGET = Number.isFinite(rawBudget) && rawBudget >= 0 ? rawBudget : DEFAUL
 const SPILL_MAX_AGE_MS = 24 * 60 * 60_000;
 const SPILL_HINT = gateEnv.OMB_GATE_SPILL_HINT === "1";
 const DIRECTORY = gateEnv.OMB_GATE_DIRECTORY === "1";
+const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
 
 function fail(message: string): never {
   process.stderr.write(`mcp-gate(${NAME}): ${message}\n`);
@@ -108,6 +112,21 @@ function sweepSpill(dir: string): void {
 }
 
 let spilled = 0;
+/** Whole results the model can query instead of re-reading: one gate, one MCP connection, one session. */
+const store = new ResultStore();
+
+/** Keep the parsed payload for query_result; only a JSON result can be queried, text is cut as before. */
+function hold(tool: string, text: string): HeldResult | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (value === null || typeof value !== "object") return undefined;
+  const handle = store.put(tool, value, text.length);
+  return { handle, shape: describeShape(value), example: exampleQuery(value) };
+}
 
 function spill(tool: string, text: string): string | undefined {
   if (!SPILL_DIR) return undefined;
@@ -159,12 +178,13 @@ function trimCallResult(result: Json, tool: string): boolean {
 
   const share = Math.floor(BUDGET / textBlocks.length);
   const path = spill(tool, textBlocks.map((block) => block.text).join("\n"));
+  const held = textBlocks.length === 1 ? hold(tool, textBlocks[0]!.text) : undefined;
   const structuredIsText = textBlocks.length === 1 && Boolean(result.structuredContent) && typeof result.structuredContent === "object"
     && sameJson(textBlocks[0]!.text, result.structuredContent);
   let trimmed = false;
   let keptValue: unknown;
   for (const block of textBlocks) {
-    const outcome = trimResultText({ text: block.text, budget: share, spillPath: path, spillHint: SPILL_HINT, toolName: tool });
+    const outcome = trimResultText({ text: block.text, budget: share, spillPath: path, spillHint: SPILL_HINT, toolName: tool, held });
     if (!outcome.trimmed) continue;
     block.text = outcome.text;
     keptValue = outcome.value;
@@ -255,6 +275,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   }
   const id = requestKey(message?.id);
   const params = isRecord(message?.params) ? message.params : undefined;
+  // The gate's own read-only tool: it reads a held result and never reaches upstream, so no selection or app rule applies.
+  if (BUDGET > 0 && message?.method === "tools/call" && params?.name === QUERY_TOOL_NAME) {
+    if (!id) return;
+    process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: message.id, result: answerQuery(store, params.arguments, BUDGET) })}\n`);
+    return;
+  }
   if (scope && message?.method === "tools/call") {
     if (!id || typeof params?.name !== "string"
       || (params.arguments !== undefined && !isRecord(params.arguments))) {
@@ -337,6 +363,12 @@ createInterface({ input: child.stdout }).on("line", (line) => {
     }
     result.tools = result.tools.filter((tool: Json) => (DIRECTORY && isDirectoryTool(tool.name))
       || allowsTool(scope, { kind: "mcp", server: NAME, name: tool.name as string }));
+  }
+  if (SCHEMA_PROFILE && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools)) {
+    result.tools = fitToolList(result.tools, SCHEMA_PROFILE, (note) => process.stderr.write(`mcp-gate(${NAME}): ${note}\n`));
+  }
+  if (BUDGET > 0 && request?.kind === "list" && message.error === undefined && isRecord(result) && Array.isArray(result.tools) && result.nextCursor === undefined) {
+    result.tools = [...result.tools.filter((tool: unknown) => !isRecord(tool) || tool.name !== QUERY_TOOL_NAME), QUERY_TOOL];
   }
   if (request?.kind === "call" && observer && message.error === undefined) observer.returned(request.params, result);
   if (request?.kind === "call" && request.trim && isRecord(result)) {

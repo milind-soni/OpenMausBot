@@ -678,10 +678,30 @@ connection and may turn your bots away.**
 **The default grant at the move.** The move to My Cloud turns lending on by
 itself (`installCloudLending(...).lendByDefault({ projects })`): the internet
 connection, Desktop, Documents and Downloads read only, each moved bot's own
-project folder with editing, and the screen only when it was lent before (and
-this app's computer control is ready). It adds to what is lent already, never
-takes away, and never undoes the person's own Off: lending they turned off
-(`stopped.reason "you"`) stays off, across restarts too.
+project folder with editing, and apps and screen when they were lent before or
+computer control already works here for this computer's own bots (on macOS:
+Accessibility and Screen Recording already granted, read from computer
+control's running state, never by asking macOS). It adds to what is lent
+already, never takes away, and never undoes the person's own Off: lending they
+turned off (`stopped.reason "you"`) stays off, across restarts too.
+
+**Use my Mac** (`electron/use-my-computer.mjs`). When the move leaves this
+computer not fully lent (apps and screen still off because macOS hasn't granted
+them yet), main shows one popup of its own, once: **Let your bots use this
+Mac?** (this PC, this computer), one plain line, **Use my Mac** and **Not now**.
+It waits for a shown window and a few seconds with no typing, so a key meant for
+the page never answers it. **Use my Mac** lends every part at once (undoing even
+the person's own earlier Off); where apps and screen still need macOS, the same
+press starts computer control again, which asks macOS, then opens each
+permission still missing in System Settings, Accessibility then Screen
+Recording, and starts computer control again whenever the person comes back.
+Screen Recording often works only after OpenMausBot restarts: the choice is kept
+(`use-my-computer.json`), and apps and screen go on once computer control works.
+**Not now** is never asked again on its own. A computer that moved before this
+version gets the same popup once, on its first launch after it. When a bot
+needs the computer, it gives the person `[Use my Mac](openmausbot://use-my-computer)`;
+in the desktop app that opens the same popup (on My Cloud's page only from a
+click), and anywhere else it is plain text.
 
 While lending is on, a menu-bar item shows it (**In use** while bots use this
 Mac: running something on it or browsing through it) with **Stop sharing**, and the
@@ -1153,7 +1173,7 @@ For each service the Admin has configured, it also sets:
 | `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
 | `OMB_CLOUD_DECIDER_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/decider`, the Admin's Jev relay. It is a Jev base URL, used as it is: the decider adds `/v1/systemone`, the relay's only route, so every included decision goes to exactly `<OMB_CLOUD_DECIDER_URL>/v1/systemone`. |
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
-| `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, and `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
+| `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
 | `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
 
 A service is included only when both its URL and its token are set

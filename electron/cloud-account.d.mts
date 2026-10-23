@@ -93,6 +93,8 @@ export interface CloudAccountBridge {
   connectHome(): Promise<CloudAccountState>;
   /** The same, opening the Cloud's Settings on its phone pairing. */
   connectHomeForPhone(): Promise<CloudAccountState>;
+  /** Opens a team's Cloud in this window, as the switcher does: one the verified session lists, by its id. Absent on an older app. */
+  openTeam?(teamId: string): Promise<void>;
   onState(callback: (state: CloudAccountState) => void): () => void;
   /** "Let my bots use this Mac" (docs/cloud-pro.md). */
   lending?: import("./computer-sharing.mjs").CloudLendingBridge;
@@ -184,10 +186,18 @@ export interface CloudAccountClient {
   exportHome(options?: { installation?: string }): Promise<{ starting: true } | { notHeld: true } | { deleted: true } | { grant: import("./cloud-home.mjs").CloudHomeGrant }>;
   /** Tells the Admin that this computer's move to My Cloud is done (POST /api/cloud/desktop/moved); false when it can't take it yet. */
   reportMove(options: { installation: string }): Promise<boolean>;
+  /** This computer keeps its bots on itself again: it no longer counts as moved. False when the Admin can't take it yet. */
+  reportKept(options: { installation: string }): Promise<boolean>;
   growDisk(sizeGb: number): Promise<{ supported: false } | { supported: true; refused: true } | { supported: true; disk: { gb: number; maxGb: number } }>;
   /** This sign-in's own X research relay access while its plan is paid; null without one. */
   xResearchAccess(): Promise<{ url: string; token: string } | null>;
   pagesAccess(): Promise<{ url: string; token: string } | null>;
+  /** GET /api/cloud/desktop/updates-consent, as the Admin answers it (updates-consent.mjs parseAccountConsent reads it). */
+  updatesConsent(): Promise<unknown>;
+  recordUpdatesConsent(status: import("./updates-consent.mjs").UpdatesConsentStatus, textVersion: string): Promise<void>;
+  /** No sign-in needed: returns the Admin's receipt for this email-only answer. */
+  updatesConsentByEmail(input: { email: string; installId: string; textVersion: string }): Promise<string>;
+  withdrawUpdatesConsent(input: { status: "declined" | "withdrawn"; receipt: string }): Promise<void>;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {

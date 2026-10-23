@@ -1,8 +1,8 @@
 // A Team Cloud's side of a person moving one of their own bots in from My Cloud (electron/team-move.mjs runs it with
 // the send a one-time move uses). Anyone in the team may move a bot of their own in. The move gets one sign-in of its
 // own, which reaches only that bot's move routes and records and ends when the bot has arrived; from then on the bot
-// is the team's and only its admins change it. Its chats arrive as the mover's own conversations (private to them and
-// the admins, never the bot's main chat), its routines arrive switched off and are switched on at the end, and nothing
+// is the team's and only its admins change it. Its chats arrive as the mover's own conversations (private to them alone,
+// never the bot's main chat), its routines arrive switched off and are switched on at the end, and nothing
 // personal comes with it: no notes about the person, no logins, apps or keys.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

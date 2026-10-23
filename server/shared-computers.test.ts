@@ -253,12 +253,14 @@ describe("server-side scope check (audit M1)", () => {
     expect(sharedComputerScopeRefusal(lent, { action: "write_file", folder_id: writable.id })).toBeNull();
   });
   it("says where the person lends apps and screen, in the refusal and in the list a bot reads", () => {
-    const steps = 'ticks Apps and screen under "Let my bots use this Mac" on My Cloud\'s page in OpenMausBot on that Mac, or in its Settings → MausBot Cloud → Choose what\'s lent.';
-    expect(sharedComputerScopeRefusal({ ...lent, platform: "darwin" }, { action: "computer_call" })).toBe(`Apps and screen are not lent to this server. To lend them, the person ${steps}`);
+    const steps = "give the person [Use my Mac](openmausbot://use-my-computer) to press in OpenMausBot on that Mac: it asks them once and turns on its apps and screen.";
+    expect(sharedComputerScopeRefusal({ ...lent, platform: "darwin" }, { action: "computer_call" })).toBe(`Apps and screen are not lent to this server. To lend them, ${steps}`);
+    expect(sharedComputerScopeRefusal({ ...lent, platform: "win32" }, { action: "computer_call" })).toContain("[Use my PC](openmausbot://use-my-computer)");
+    expect(sharedComputerScopeRefusal(lent, { action: "computer_call" })).not.toMatch(/Settings/u);
     const broker = new SharedComputers(() => true);
     const mac = { ...registration(), platform: "darwin" as const };
     broker.register(mac, alice, secret);
-    expect(broker.screenNotLent(alice.person)).toEqual({ screen: `Desktop does not lend its apps and screen. To lend them, the person ${steps}` });
+    expect(broker.screenNotLent(alice.person)).toEqual({ screen: `Desktop does not lend its apps and screen. To lend them, ${steps}` });
     expect(broker.screenNotLent(bob.person)).toEqual({});
     expect(broker.screenNotLent(null)).toEqual({});
     const lending = new SharedComputers(() => true);

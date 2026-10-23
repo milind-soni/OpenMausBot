@@ -21,6 +21,7 @@ export const MOVE_BOT_PARTS = Object.freeze({
   archived: ["hidden"],
   pinned: ["pinned"],
   chief: ["chiefOfStaff", "managedSections"],
+  helper: ["defaultBot", "sidebarHidden", "welcomed"],
   fallback: ["fallback"],
   projects: ["projects"],
   playbooks: ["playbooks"],

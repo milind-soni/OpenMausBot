@@ -157,7 +157,7 @@ describe("the observer in a process", () => {
     expect(sent.params).toEqual(withUiExtension(cli));
 
     const listed = (await ask(2, "tools/list")).result.tools.map((tool: { name: string }) => tool.name);
-    expect(listed).toEqual(["show_board", "paint_board", "peek_board", "plain_echo"]);
+    expect(listed).toEqual(["show_board", "paint_board", "peek_board", "plain_echo", "query_result"]);
     expect((await ask(3, "tools/call", { name: "save_board", arguments: {} })).error).toEqual({ code: -32602, message: APP_ONLY_REFUSAL });
 
     const call = await ask(4, "tools/call", { name: "show_board", arguments: { text: 20_000 }, _meta: { "claudecode/toolUseId": "toolu_123" } });
@@ -204,7 +204,7 @@ describe("the observer in a process", () => {
     const cli = { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "codex-mcp-client", version: "1" } };
     await ask(1, "initialize", cli);
     expect(logged(log)[0]!.params).toEqual(cli);
-    expect((await ask(2, "tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["show_board", "paint_board", "peek_board", "plain_echo"]);
+    expect((await ask(2, "tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["show_board", "paint_board", "peek_board", "plain_echo", "query_result"]);
     expect((await ask(3, "tools/call", { name: "wipe_board", arguments: {} })).error?.message).toBe(APP_ONLY_REFUSAL);
   }, 30_000);
 

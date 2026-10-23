@@ -20,6 +20,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
 import { refusalBody } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
+import { readThreadNotifications } from "./notifications.ts";
 
 type HostedModels = NonNullable<ReturnType<typeof hostedModelPolicy>>;
 
@@ -50,6 +51,7 @@ export interface TaskRouteDeps {
   sharedWorkspaceFullAccessEnabled(): boolean;
   supportsApprovalMode(selection: ModelSelection, mode: ApprovalMode): boolean;
   threadBusy(botId: string, threadId: string): boolean;
+  broadcast(payload: Record<string, unknown>): void;
   publicBot(bot: BotRecord): WireBot;
   wireBot(bot: BotRecord): WireBot;
   wireTask(task: TaskRecord, botModel: ModelSelection): WireTask;
@@ -70,11 +72,12 @@ export interface TaskRouteDeps {
   rejectDeletedThreadSkillStages(cleanups: Array<{ botId: string; stagedId: string }>): void;
 }
 
-export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
+/** `deleteTasks`: the same deletion for the server's own use (a person leaving a Team Cloud, host/team-member-left.ts). */
+export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTasks(botId: string, threadIds: string[]): ReturnType<TaskRouteDeps["store"]["deleteTasks"]> } {
   const {
     store, hostedModels, coordinator, handoffs, skillReview, threadStarters, phoneSecretSubmissions, titleRegenerations,
     directTurnGenerationByThread, actorKey, cloudOwnerSession, cloudThreadRefusal, sharedWorkspaceFullAccessEnabled,
-    supportsApprovalMode, threadBusy, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
+    supportsApprovalMode, threadBusy, broadcast, publicBot, wireBot, wireTask, pageSize, messagePage, checkedModelSelection,
     checkedTaskModelSwitch, threadTitleGate, generateThreadTitle, settleDirectFollowup, clearTurnDigestState,
     revokeInternalCapabilitiesForThread, stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages,
   } = deps;
@@ -108,7 +111,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
     }
     return result;
   };
-  return async ({ req, res, url, path, method, auth, json, readBody }) => {
+  return Object.assign(async ({ req, res, url, path, method, auth, json, readBody }: Parameters<RouteHandler>[0]) => {
     let m: RegExpMatchArray | null = null;
 
     // Folders never own settings, transcripts or working directories; the "project" wire names stay.
@@ -226,6 +229,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
       const switched = store.switchTask(bot.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such task" });
       sawThread(m[2]);
+      readThreadNotifications(m[2], broadcast);
       const wiredSwitch = wireBot(switched);
       const switchedSettings = { ...wiredSwitch, tasks: wiredSwitch.tasks ?? [] };
       // "0": settings only; a positive page: that tail; omitted: the whole thread (search hits can be older than a page).
@@ -415,5 +419,5 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
       }
     }
     return PASS;
-  };
+  }, { deleteTasks });
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { APP_DOMAIN_LIMIT, BOT_HTML_CSP, BOT_HTML_NETWORK, filterAppDomains, mcpAppCsp, mcpAppNetwork, normalizeAppDomain } from "./csp.ts";
+import { APP_DOMAIN_LIMIT, BOT_HTML_CSP, BOT_HTML_NETWORK, filterAppDomains, folderPageCsp, mcpAppCsp, mcpAppNetwork, normalizeAppDomain, webOrigin } from "./csp.ts";
 
 const strict = { websockets: false, loopback: false };
 const connect = { websockets: true, loopback: false };
@@ -128,3 +128,24 @@ describe("the domain filter", () => {
     });
   });
 });
+
+describe("folderPageCsp", () => {
+  const files = "http://127.0.0.1:5174/api/page-files/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_ABCDE/";
+
+  it("adds the page's own files by their folder, never the app's whole origin, and DuckDB's readers only to connect", () => {
+    const policy = folderPageCsp(files);
+    const directives = Object.fromEntries(policy.split("; ").map((directive) => [directive.split(" ")[0], directive.split(" ").slice(1)]));
+    for (const name of ["script-src", "style-src", "font-src", "img-src", "media-src", "connect-src"]) expect(directives[name], name).toContain(files);
+    expect(directives["base-uri"]).toEqual([files]);
+    expect(policy.split(/[ ;]+/).filter((token) => token.startsWith("http://127.0.0.1"))).toEqual(Array(7).fill(files));
+    expect(directives["connect-src"]).toContain("https://extensions.duckdb.org");
+    expect(policy.match(/extensions\.duckdb\.org/g)).toHaveLength(1);
+    for (const kept of ["default-src 'none'", "frame-src 'none'", "object-src 'none'", "form-action 'none'", "worker-src blob:"]) expect(policy).toContain(kept);
+  });
+
+  it("takes only a bare web origin from a client", () => {
+    expect([webOrigin("http://127.0.0.1:5174"), webOrigin("https://home.example.com"), webOrigin("http://127.0.0.1:5174/"), webOrigin("javascript:alert(1)"),
+      webOrigin("http://user:pw@host"), webOrigin(7)]).toEqual(["http://127.0.0.1:5174", "https://home.example.com", null, null, null, null]);
+  });
+});
+

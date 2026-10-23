@@ -62,6 +62,21 @@ describe("sidebar virtual sections", () => {
     expect(bot.section).toBe("Work");
   });
 
+  it("lists every bucket in the order the bots arrive, never by name", () => {
+    // The server owns this order (PUT /api/bots/order); a reorder made on a phone must show up here unchanged.
+    const parts = partitionSidebarBots([
+      { id: "zed", name: "Zed", pinned: true },
+      { id: "yak", name: "Yak", section: "Work" },
+      { id: "xon", name: "Xon" },
+      { id: "amy", name: "Amy", pinned: true },
+      { id: "bob", name: "Bob", section: "Work" },
+      { id: "cat", name: "Cat" },
+    ]);
+    expect(parts.pinnedBots.map((bot) => bot.id)).toEqual(["zed", "amy"]);
+    expect(parts.sectionedBots.map((bot) => bot.id)).toEqual(["yak", "bob"]);
+    expect(parts.unsectionedBots.map((bot) => bot.id)).toEqual(["xon", "cat"]);
+  });
+
   it("shows DMs in Bot Chats without rewriting their comms context", () => {
     const dm = { id: "dm", dm: true, section: "Work" };
     const namedBotChats = { id: "named", section: "Bot Chats" };

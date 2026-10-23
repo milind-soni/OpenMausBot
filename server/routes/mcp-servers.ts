@@ -23,6 +23,8 @@ export interface McpServerRouteDeps {
   persistMcpServers(next: Record<string, unknown>): void;
   savedCustomDomain(): string | null;
   appCatalog?: Pick<ChatAppsMcp, "probeOptions" | "serverChanged" | "forgetServer"> & Partial<Pick<ChatAppsMcp, "hasApps">>;
+  /** A Team Cloud: each member's own key and sign-in for a removed server go with it. */
+  forgetPeople?(name: string): void;
 }
 
 /** A server of another computer's: its program, files or address are there, so it is never started or signed in to here. */
@@ -43,7 +45,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
   };
   const {
     cfg, sessions, mcpOAuth, cloudHome: CLOUD_HOME, fallbackPublicUrl: FALLBACK_PUBLIC_URL, mcpConfigBusy,
-    mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog,
+    mcpServerResponse, mcpPolicyRefusal, persistMcpServers, savedCustomDomain, appCatalog, forgetPeople,
   } = deps;
   const MAX_CONCURRENT_MCP_PROBES = 2;
   let mcpProbesInFlight = 0;
@@ -215,6 +217,7 @@ export function createMcpServerRoutes(deps: McpServerRouteDeps): RouteHandler {
           delete next[name];
           persistMcpServers(next);
           mcpOAuth.forget(name);
+          forgetPeople?.(name);
           appCatalog?.forgetServer(name);
           return json(res, 200, withHasApps(mcpServerResponse()));
         }

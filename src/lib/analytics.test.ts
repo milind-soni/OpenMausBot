@@ -11,6 +11,7 @@ const ph = vi.hoisted(() => {
     initThrows: false,
     storedOptOut: false,
     calls: [] as string[],
+    captured: [] as Array<{ event: string; props: unknown }>,
     options: [] as Record<string, unknown>[],
     registered: [] as Record<string, unknown>[],
     unregistered: [] as string[],
@@ -38,7 +39,10 @@ const ph = vi.hoisted(() => {
           },
           register: (properties: Record<string, unknown>) => { ph.calls.push("register"); ph.registered.push(properties); },
           unregister: (key: string) => void ph.unregistered.push(key),
-          capture: (event: string) => void ph.calls.push(`capture ${event}`),
+          capture: (event: string, props?: unknown) => {
+            ph.calls.push(`capture ${event}`);
+            ph.captured.push({ event, props });
+          },
           identify: (id: string) => void ph.calls.push(`identify ${id}`),
         },
       };
@@ -64,6 +68,7 @@ beforeEach(() => {
   ph.initThrows = false;
   ph.storedOptOut = false;
   ph.calls = [];
+  ph.captured = [];
   ph.options = [];
   ph.registered = [];
   ph.unregistered = [];
@@ -335,5 +340,156 @@ describe("loading the client", () => {
     ph.initThrows = false;
     await fresh.initAnalytics();
     expect(ph.calls).toEqual(OPENED);
+  });
+});
+
+describe("app_active", () => {
+  const DAY = "omb-analytics-active-day";
+  const HOUR = 60 * 60_000;
+
+  // A window showing the app: each load drops the last load's listeners and timers, as a reload does.
+  function openPage() {
+    const listeners = new Map<string, Array<() => void>>();
+    const listen = (type: string, listener: () => void) => void listeners.set(type, [...listeners.get(type) ?? [], listener]);
+    const page = {
+      visibilityState: "visible" as "visible" | "hidden",
+      focused: true,
+      fire(type: "focus" | "visibilitychange") {
+        for (const listener of listeners.get(type) ?? []) listener();
+      },
+      async load() {
+        listeners.clear();
+        // vitest 4.1's clearAllTimers() also puts the faked clock back to the real time.
+        const now = Date.now();
+        vi.clearAllTimers();
+        vi.setSystemTime(now);
+        const analytics = await freshAnalytics();
+        await analytics.initAnalytics();
+        return analytics;
+      },
+    };
+    vi.stubGlobal("document", { get visibilityState() { return page.visibilityState; }, hasFocus: () => page.focused, addEventListener: listen });
+    vi.stubGlobal("window", { addEventListener: listen });
+    return page;
+  }
+
+  let page: ReturnType<typeof openPage>;
+  const active = () => ph.captured.filter(({ event }) => event === "app_active");
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    vi.setSystemTime(new Date(2026, 9, 23, 9, 0));
+    page = openPage();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    vi.stubGlobal("localStorage", baseStorage);
+  });
+
+  it("is sent once a day, however often the app loads or comes back into view", async () => {
+    await page.load();
+    expect(ph.calls).toEqual([...OPENED, "capture app_active"]);
+    expect(active()).toEqual([{ event: "app_active", props: { platform: "browser" } }]);
+    expect(ph.registered).toEqual([{ app_version: appVersion(), surface: "server" }]);
+    expect(store.get(DAY)).toBe("2026-10-23");
+
+    page.fire("focus");
+    page.fire("visibilitychange");
+    await vi.advanceTimersByTimeAsync(3 * HOUR);
+    await page.load();
+    await page.load();
+    page.fire("focus");
+    vi.setSystemTime(new Date(2026, 9, 23, 23, 59));
+    page.fire("visibilitychange");
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(active()).toHaveLength(1);
+    expect(ph.calls.filter((call) => call === "capture app_opened")).toHaveLength(3);
+  });
+
+  it("is sent again after midnight by the ten-minute check, then not again that day", async () => {
+    vi.setSystemTime(new Date(2026, 9, 23, 23, 55));
+    await page.load();
+    expect(active()).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(active()).toHaveLength(2);
+    expect(store.get(DAY)).toBe("2026-10-24");
+
+    await vi.advanceTimersByTimeAsync(5 * HOUR);
+    page.fire("focus");
+    await page.load();
+    expect(active()).toHaveLength(2);
+  });
+
+  it("waits for focus on a new day while the window is shown but not in use", async () => {
+    await page.load();
+    page.focused = false;
+    await vi.advanceTimersByTimeAsync(24 * HOUR);
+    expect(active()).toHaveLength(1);
+
+    page.focused = true;
+    page.fire("focus");
+    expect(active()).toHaveLength(2);
+    expect(store.get(DAY)).toBe("2026-10-24");
+  });
+
+  it("sends nothing while the page is hidden, and counts the day once it is shown", async () => {
+    page.visibilityState = "hidden";
+    await page.load();
+    page.fire("focus");
+    await vi.advanceTimersByTimeAsync(30 * HOUR);
+    expect(ph.calls).toEqual(OPENED);
+    expect(store.has(DAY)).toBe(false);
+
+    page.visibilityState = "visible";
+    page.fire("visibilitychange");
+    expect(active()).toHaveLength(1);
+    expect(store.get(DAY)).toBe("2026-10-24");
+  });
+
+  it("sends nothing, loads nothing and stores no day while analytics is off", async () => {
+    store.set("omb-analytics-opt-out", "1");
+    await page.load();
+    page.fire("focus");
+    page.fire("visibilitychange");
+    await vi.advanceTimersByTimeAsync(48 * HOUR);
+    page.fire("focus");
+
+    expect(ph.loads).toBe(0);
+    expect(ph.calls).toEqual([]);
+    expect(store.has(DAY)).toBe(false);
+  });
+
+  it("stops once switched off mid-session", async () => {
+    const analytics = await page.load();
+    analytics.setAnalyticsEnabled(false);
+    await vi.advanceTimersByTimeAsync(24 * HOUR);
+    page.fire("focus");
+    page.fire("visibilitychange");
+
+    expect(active()).toHaveLength(1);
+    expect(store.get(DAY)).toBe("2026-10-23");
+  });
+
+  it("keeps to one a day for the session when the day cannot be stored", async () => {
+    const refuse = (key: string) => {
+      if (key === DAY) throw new Error("denied");
+    };
+    vi.stubGlobal("localStorage", {
+      ...baseStorage,
+      getItem: (key: string) => (refuse(key), baseStorage.getItem(key)),
+      setItem: (key: string, value: string) => (refuse(key), baseStorage.setItem(key, value)),
+    });
+    await page.load();
+    page.fire("focus");
+    page.fire("visibilitychange");
+    await vi.advanceTimersByTimeAsync(HOUR);
+    expect(active()).toHaveLength(1);
+
+    vi.setSystemTime(new Date(2026, 9, 24, 8, 0));
+    page.fire("focus");
+    expect(active()).toHaveLength(2);
   });
 });

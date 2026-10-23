@@ -201,9 +201,9 @@ conversations, permissions, memory, or computer access. Browse the
 [open-source playbook repository](https://github.com/milind-soni/openmausbot-teams) or read its
 [portable format](https://github.com/milind-soni/openmausbot-teams/blob/main/FORMAT.md).
 
-### 🤝 Share a whole team
+### 🤝 Share a whole department
 
-Right-click a team and choose **Share team…** (or use **Templates → Share**) to save the whole team as one
+Right-click a department and choose **Share department…** (or use **Templates → Share**) to save the whole department as one
 file: its bots with their instructions, pictures and skills, group chats, routines, shared instructions,
 Chief of Staff, connection slots and each bot's starter notes (untick them to leave them out). The dialog
 shows exactly what the file holds before you save it. Chat history, keys and passwords, model choices and

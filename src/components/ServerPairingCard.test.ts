@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { canPairDevices, lastSeen, minutesLeft, pairingBlockedReason, ServerPairingCard, shownDevices } from "./ServerPairingCard";
+import { lastSeen, minutesLeft } from "../lib/pairing-time";
+import { canPairDevices, pairingBlockedReason, ServerPairingCard, shownDevices } from "./ServerPairingCard";
 
 describe("pairing devices from a hosted server's settings", () => {
   it("is offered to the owner on the box and to admin sessions, never to chat-only sessions", () => {

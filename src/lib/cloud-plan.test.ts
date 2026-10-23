@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import { CHECKOUT_SOURCES } from "../../electron/cloud-account.mjs";
-import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudTrial } from "../../electron/cloud-home.mjs";
+import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudTeam, CloudTrial } from "../../electron/cloud-home.mjs";
 import { buyOfferAllowed, CLOUD_SOURCES, cloudAddView, cloudCreditLine, cloudIntroView, cloudNoticeKind, cloudPlanLine, cloudPlanView, cloudTrialNotice, cloudTrialView,
   cloudBeatTerms, dueToday, moneyBackLine, moneyBackShort, offerPlan, offerTrialDays, planCardRows, planCards, sameTerms, sharedTrialDays, trialTimeline, usd,
   type CloudSignInPhase } from "./cloud-plan";
@@ -324,6 +324,27 @@ describe("the buying sheet, one view per state", () => {
       "unless this sheet followed it").toBe("ready");
     expect(cloudAddView(paid({ machine: ready }), undefined, { ...at, arrived: true }), "signed in here just now: theirs to open").toMatchObject({ kind: "ready" });
     expect(cloudAddView(paid({ machine: { status: "provisioning" } }), undefined, at).kind, "Add a Cloud… during setup shows the setup").toBe("starting");
+  });
+
+  it("a Team or Business plan has no Cloud of its own: the team's Cloud to open, or its setup, never a setup of a Cloud that never comes", () => {
+    const team = (machine: CloudTeam["machine"], extra: Partial<CloudTeam> = {}): CloudTeam => ({ id: "team-acme", name: "Acme", role: "owner", machine, ...extra });
+    const onTeam = (tier: string, teams?: CloudTeam[], extra: Partial<CloudAccountState> = {}) =>
+      paid({ entitlement: { plan: "pro", tier, status: "active", expiresAt: NOW + 30 * DAY, version: 2 }, ...(teams ? { teams } : {}), ...extra });
+    const up = { status: "ready" as const, origin: "https://omb-t-2.fly.dev" };
+    for (const tier of ["team", "business"]) {
+      expect(cloudAddView(onTeam(tier, [team(up)]), undefined, at), tier).toEqual({ kind: "team-ready", team: { id: "team-acme", name: "Acme" } });
+      expect(cloudAddView(onTeam(tier, [team(up)]), undefined, { ...at, arrived: true }), `${tier}, signed in here just now`).toEqual({ kind: "team-ready", team: { id: "team-acme", name: "Acme" } });
+    }
+    expect(cloudAddView(onTeam("team", [team(up, { id: "team-other", name: "Other", role: "member" }), team(up)]), undefined, at), "the team the plan runs: the one this account owns")
+      .toEqual({ kind: "team-ready", team: { id: "team-acme", name: "Acme" } });
+    expect(cloudAddView(onTeam("team", [team({ status: "provisioning", setup: { step: "storage", slow: true } })]), undefined, at), "the team's Cloud being set up: its own steps")
+      .toEqual({ kind: "team-starting", team: "Acme", step: "storage", slow: true });
+    expect(cloudAddView(onTeam("business", [team(null)]), undefined, at), "the team has no machine yet").toEqual({ kind: "team-starting", team: "Acme", step: null, slow: false });
+    expect(cloudAddView(onTeam("team"), undefined, at), "no team listed yet").toEqual({ kind: "team-starting", team: null, step: null, slow: false });
+    expect(cloudAddView(onTeam("team", [team({ status: "failed" })]), undefined, at), "a problem is Settings' to say").toEqual({ kind: "settings" });
+    expect(cloudAddView(paid(), undefined, at).kind, "a personal plan with no Cloud yet: its setup").toBe("starting");
+    expect(cloudAddView(paid({ teams: [team(up, { role: "member" })] }), undefined, at).kind, "a Pro plan's own Cloud, even for someone in a team").toBe("starting");
+    expect(cloudAddView(onTeam("team", [team(up)], { machine: { status: "provisioning" } }), undefined, at).kind, "a My Cloud the Admin lists is set up as one").toBe("starting");
   });
 
   it("asked to sign in, the sheet signs in: with no offer to be had, and for a saved sign-in that was removed (else Settings' to say)", () => {

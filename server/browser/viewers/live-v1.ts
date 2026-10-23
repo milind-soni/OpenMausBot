@@ -4,7 +4,7 @@
 import type { ServerResponse } from "node:http";
 
 import { BROWSER_HELD_ELSEWHERE } from "../../../shared/browser-held.ts";
-import { BROWSER_ASLEEP_ERROR, BrowserLiveError, parseBrowserLiveAction } from "../../browser-live.ts";
+import { BROWSER_ASLEEP_ERROR, BROWSER_WAITING, BrowserLiveError, parseBrowserLiveAction } from "../../browser-live.ts";
 import type { BrowserService, BrowserTarget } from "../service.ts";
 import type { Viewer, ViewerOutput } from "./core.ts";
 
@@ -188,7 +188,7 @@ export class LiveV1 {
     const waiting = setTimeout(() => {
       if (viewer.ready || viewer.closed) return;
       this.#startEvents(viewer);
-      this.#send(viewer, { type: "waiting", reason: "busy" });
+      this.#send(viewer, BROWSER_WAITING);
     }, WAITING_AFTER_MS);
     waiting.unref?.();
     try {

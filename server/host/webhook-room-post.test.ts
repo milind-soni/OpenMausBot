@@ -135,7 +135,7 @@ describe("postWebhookToRoom", () => {
     expect(h.calls.synthesized).toEqual([{ botId: "maus-1", text: "hello there" }]);
     expect(result).toEqual({ posted: true, attachments: 2, threadId: "room-1-thread" });
     expect(h.calls.appended[0]!.content.attachments).toEqual([
-      { kind: "audio", path: "/audio/0.mp3", mime: "audio/mpeg" },
+      { kind: "audio", path: "/audio/0.mp3", mime: "audio/mpeg", text: "hello there" },
       { kind: "image", path: "/image/0.png", mime: "image/png" },
     ]);
   });

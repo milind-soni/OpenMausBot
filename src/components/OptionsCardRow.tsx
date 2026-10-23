@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { Message } from "@/state/store";
 import { ApprovalCard } from "./ApprovalCard";
+import { HelperIntro } from "./HelperIntro";
 import { MessageBoundary } from "./MessageBoundary";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { QuestionCard } from "./QuestionCard";
@@ -16,7 +17,9 @@ export function optionsCardRow({ message: m, transcript, botId, botName, threadI
   botName: string;
   threadId: string;
 }): ReactNode {
-  const card = m.card?.requestId && m.card.questionRequest ? (
+  const card = m.helperIntro ? (
+    <HelperIntro botId={botId} threadId={threadId} message={m} asksDone={shouldHideOnboardingCard(m, transcript)} />
+  ) : m.card?.requestId && m.card.questionRequest ? (
     <QuestionCard threadId={threadId} bot={{ name: botName }} message={m} />
   ) : m.card?.requestId && m.card.tool ? (
     <ApprovalCard bot={{ name: botName }} message={m} threadId={threadId} />

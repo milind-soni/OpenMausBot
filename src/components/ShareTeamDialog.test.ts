@@ -27,7 +27,7 @@ afterEach(() => {
 describe("Share team", () => {
   it("is in every named team's menu", () => {
     const markup = renderToStaticMarkup(createElement(TeamMenuItems, { onAddBots: vi.fn(), onRename: vi.fn(), onShare: vi.fn(), onDelete: vi.fn() }));
-    expect(text(markup)).toMatch(/Add bots .*Rename team .*Share team… .*Delete team/);
+    expect(text(markup)).toMatch(/Add bots .*Rename department .*Share department… .*Delete department/);
     expect(markup.match(/role="menuitem"/g)).toHaveLength(4);
   });
 
@@ -76,7 +76,7 @@ describe("Share team", () => {
     expect(markup).toMatch(/<input type="checkbox"[^>]*\/>step-31/);
     expect(markup).not.toMatch(/checked=""[^>]*\/>step-31/);
     expect(text(renderToStaticMarkup(createElement(ShareSkillChoices, { available: [], ticked: new Set<string>(), counted: true, onToggle: vi.fn() }))))
-      .toContain("This team's bots have no skills.");
+      .toContain("This department's bots have no skills.");
   });
 
   it("saves the document as the file other apps and Admin read", async () => {

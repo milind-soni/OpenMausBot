@@ -56,3 +56,15 @@ describe("the line on a computer whose bots came home to another one", () => {
       .toBe("Deine Bots sind zurück auf MacBook Air. Dieser Computer behält seine Kopie vom 21. Oktober 2026, mit ausgeschalteten Automatisierungen.");
   });
 });
+
+describe("the line on a computer whose bots come home because the person keeps them here", () => {
+  it("says they are on their way on either page (or wait for My Cloud's update), and once home, on this computer only, that they run here", () => {
+    for (const page of ["local", "cloud"] as const) {
+      expect(moveLine({ phase: "keeping" }, page)).toEqual({ kind: "sending", text: "Bringing this computer's bots back from My Cloud…", extra: [] });
+      expect(moveLine({ phase: "keeping", updating: true }, page)?.text).toBe("My Cloud is updating. This computer's bots come back once it's done.");
+    }
+    expect(moveLine({ phase: "back", kept: true }, "local"))
+      .toEqual({ kind: "done", text: "This computer's bots are back here, and their automations run on this computer. My Cloud keeps a copy of them with their automations off.", extra: [] });
+    expect(moveLine({ phase: "back", kept: true }, "cloud")).toBeNull();
+  });
+});

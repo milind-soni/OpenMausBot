@@ -587,6 +587,22 @@ export class SessionRegistry {
     return this.sessions.map(publicSession);
   }
 
+  /** The live sessions a Team Cloud member's own codes opened: their phones. Never an Admin-signed pairing (an app). */
+  memberPhones(): PublicSession[] {
+    this.prune();
+    return this.sessions.filter((s) => s.membershipAuthority === "team" && s.memberCheckedAt !== undefined).map(publicSession);
+  }
+
+  /** A person who left a Team Cloud: every session of theirs (app windows, phones) ends now, and no open code of theirs
+   * can open another. Returns how many sessions ended. */
+  revokeMember(email: string): number {
+    const address = email.trim().toLowerCase();
+    this.pairings = this.pairings.filter((pairing) => pairing.member?.email.toLowerCase() !== address);
+    const ended = this.sessions.filter((session) => session.membershipAuthority === "team" && session.email?.toLowerCase() === address);
+    for (const session of ended) this.revoke(session.id);
+    return ended.length;
+  }
+
   revoke(id: string): boolean {
     const before = this.sessions.length;
     this.sessions = this.sessions.filter((s) => s.id !== id);

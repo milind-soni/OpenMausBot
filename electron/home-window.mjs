@@ -8,15 +8,25 @@
 // signed-out app (its automations would run twice). The page that counts as home is the main window's main frame at the
 // shown place's verified origin, nothing else. A team is only ever one the Admin's session lists, paired through the
 // Admin's team pairing (its claims are the Admin's), never an address a page supplied.
-import { cloudHomeConnectUrl, cloudUnreachableCause, cloudUnreachableText } from "./cloud-home.mjs";
+import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableCause, cloudUnreachableText, machineSetup, readyCloudOrigin } from "./cloud-home.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
 import nativeText from "./native-text.cjs";
-import { parseJournal } from "./one-home.mjs";
+import { awayIn, parseJournal } from "./one-home.mjs";
 
 export const HOME_SCREEN_PATH = "/home";
 /** The look at an awake My Cloud before the window moves there: under 3 s, so the offline screen shows within 3 s. */
 export const LOOK_MS = 2_500;
 export const RETRY_MS = Object.freeze([2_000, 4_000, 8_000, 15_000, 30_000]);
+/** A brand-new Cloud's name can be missing for minutes after the Admin says it is ready: a resolver that was asked while
+ * it was set up keeps that "no such name" (RFC 2308 negative caching; Chromium's own host cache does too). For a Cloud
+ * ready within FRESH_MS, a name not found keeps the setup screen up and the window tries again on NAME_RETRY_MS, with
+ * Chromium's host cache cleared each time, for NAME_WAIT_MS; after that it is the offline screen. */
+export const FRESH_MS = 15 * 60_000;
+export const NAME_WAIT_MS = 10 * 60_000;
+export const NAME_RETRY_MS = Object.freeze([5_000, 10_000, 20_000, 40_000, 60_000]);
+/** Chromium's net errors for a name it could not find (net/base/net_error_list.h): NAME_NOT_RESOLVED,
+ * NAME_RESOLUTION_FAILED and the DNS range. */
+export const nameNotFound = (code) => code === -105 || code === -137 || (code <= -800 && code > -900);
 /** A new version of My Cloud's page waits for this long without typing before the window reloads it. */
 export const QUIET_MS = 30_000;
 export const VERSION_EVERY_MS = 60_000;
@@ -55,7 +65,7 @@ const originOf = (url) => { try { return new URL(url).origin; } catch { return n
  * @returns {{ kind: "computer" } | { kind: "cloud", origin: string } | { kind: "signin", other?: true }}
  */
 export function homeOf({ journal = null, frozenCloud = null, state = null }) {
-  const moved = journal ? (["switch", "done"].includes(journal.phase) ? journal.cloud : null)
+  const moved = journal ? (awayIn(journal) ? journal.cloud : null)
     : frozenCloud ? { origin: typeof frozenCloud === "string" ? frozenCloud : null, account: null } : null;
   if (!moved) return { kind: "computer" };
   const connected = state?.status === "connected";
@@ -86,6 +96,31 @@ export function placeOf({ ask = null, remembered = null, state = null }) {
   if (state?.status === "connected") return { kind: "cloud", left: asked.name ?? (remembered?.team === id ? remembered.name : null) ?? null };
   const kept = remembered?.team === id ? remembered : asked;
   return kept?.origin ? { kind: "team", id, name: kept.name ?? "the team", role: null, origin: kept.origin, machine: null } : { kind: "cloud" };
+}
+
+/** When this app saw My Cloud become ready after seeing it set up, kept in `store` so a launch soon after knows too. */
+export function createReadyClock({ store = null, now = Date.now } = {}) {
+  let settingUp = false, kept;
+  const read = () => {
+    if (kept !== undefined) return kept;
+    try { const value = store?.read(); kept = typeof value?.origin === "string" && Number.isSafeInteger(value.readyAt) ? { origin: value.origin, readyAt: value.readyAt } : null; }
+    catch { kept = null; }
+    return kept;
+  };
+  return {
+    seen(state) {
+      if (cloudSetupOf(state)) { settingUp = true; return; }
+      const origin = readyCloudOrigin(state);
+      if (!origin || !settingUp) return;
+      settingUp = false;
+      kept = { origin, readyAt: now() };
+      try { store?.write(kept); } catch {}
+    },
+    fresh(origin) {
+      const at = read();
+      return Boolean(origin) && at?.origin === origin && now() - at.readyAt < FRESH_MS;
+    },
+  };
 }
 
 /** Only a same-origin path survives a sign-in: never another site, never a code. */
@@ -123,9 +158,12 @@ export function routeOf(url, origin) {
  *   quietMs?: number,
  *   now?(): number,
  *   timers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void, every(work: () => void, ms: number): unknown },
+ *   hosts?(): { clearHostResolverCache(): Promise<void>, resolveHost(host: string, options?: { cacheUsage?: "allowed" | "staleAllowed" | "disallowed" }): Promise<{ endpoints: unknown[] }> } | null,
+ *   readyStore?: { read(): unknown, write(value: unknown): void },
  *   log?(line: string): void,
  *   t?(key: string, params?: Record<string, string | number>): string,
- * }} deps `go(url, origin, place)`: main's one way to move the window, to My Cloud or a team's Cloud (`origin`, with the
+ * }} deps `hosts`: the window's Electron session, for its own resolver and host cache. `readyStore`: when My Cloud
+ * became ready (createReadyClock). `go(url, origin, place)`: main's one way to move the window, to My Cloud or a team's Cloud (`origin`, with the
  * `place` it is) or this computer's screen (null). `showLocal(leaving)`: the window as it was before the move (this computer's page, or a saved server it
  * shows); `leaving`: it showed a place or this computer's screen until now, so it goes back to this computer's page.
  * `frozen()`: this computer's server's freeze marker. `splash()`: the startup screen while it is up. `remembered()`: the
@@ -137,8 +175,12 @@ export function createHomeWindow(deps) {
   const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal,
     remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { left(place.name); remember(null); },
     splash = () => null, lastInput = () => 0, publish = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
-    now = Date.now, timers = DEFAULT_TIMERS, log = () => {}, t = nativeText.englishText.t } = deps;
+    now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, log = () => {}, t = nativeText.englishText.t } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
+  /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
+   * `naming`: since when, and how often, a brand-new My Cloud's name was not found. */
+  let asked = null, naming = null;
+  const clock = createReadyClock({ store: readyStore, now });
   /** The place the window was last sent to (My Cloud, or a team's Cloud), and the one being opened now. */
   let shown = null, opening = null, renewal = null, updatingAt = null;
   /** The window shows a place or this computer's screen, which this computer's page replaces once home is here again. */
@@ -155,13 +197,14 @@ export function createHomeWindow(deps) {
   const clearRenewal = () => { if (renewal) timers.clear(renewal); renewal = null; };
 
   async function refresh() {
+    clock.seen(state());
     const kept = parseJournal(journal());
     let frozenCloud = null;
     if (!kept) {
       const marker = await frozen().catch(() => null);
       if (marker?.frozen) frozenCloud = typeof marker.cloud === "string" ? marker.cloud : true;
     }
-    if (frozenCloud || (kept && ["switch", "done"].includes(kept.phase))) await restored();
+    if (frozenCloud || awayIn(kept)) await restored();
     home = homeOf({ journal: kept, frozenCloud, state: state() });
     return home;
   }
@@ -219,11 +262,35 @@ export function createHomeWindow(deps) {
     toScreen({ screen: "offline", ...(cause ? { reason: cloudUnreachableText(state(), cloudOrigin()), cause } : {}) });
     later();
   }
-  function later() {
+  function later(delays = RETRY_MS, count = () => tries++) {
     clearRetry();
-    const ms = RETRY_MS[Math.min(tries, RETRY_MS.length - 1)];
-    tries += 1;
+    const ms = delays[Math.min(count(), delays.length - 1)];
     retry = timers.set(() => { retry = null; if (screen) void show(); }, ms);
+  }
+  /** Whether the window's own resolver finds `origin`'s name now, its host cache bypassed. */
+  async function found(origin) {
+    const resolver = hosts();
+    if (!resolver) return true;
+    const slow = new Promise((done) => { const timer = setTimeout(() => done(null), 2 * LOOK_MS); timer.unref?.(); });
+    try { return (await Promise.race([resolver.resolveHost(new URL(origin).hostname, { cacheUsage: "disallowed" }), slow]))?.endpoints?.length > 0; }
+    catch { return false; }
+  }
+  const forgetNames = () => Promise.resolve().then(() => hosts()?.clearHostResolverCache()).catch(() => {});
+  /** My Cloud didn't answer: a brand-new one whose name isn't found yet is still settling in (the setup screen, tried
+   * again sooner, for NAME_WAIT_MS); anything else is the offline screen. */
+  async function unreachable(place, token, missing = null) {
+    if (place.kind !== "cloud" || !(naming || clock.fresh(place.origin)) || (missing ?? !(await found(place.origin))) === false) return offline(token);
+    if (!wanted(token)) return;
+    naming ??= { since: now(), tries: 0 };
+    if (now() - naming.since >= NAME_WAIT_MS) return offline(token);
+    log(`home: My Cloud's name isn't found yet; trying again (${naming.tries + 1})`);
+    toScreen({ screen: "setup", step: "checking" });
+    later(NAME_RETRY_MS, () => naming.tries++);
+  }
+  /** The person went somewhere else while My Cloud was asked for: nothing pulls the window back. */
+  function letAskGo() {
+    asked = null; naming = null; screen = null; status = null; away = false;
+    clearRetry();
   }
   const signInNeeded = () => ["reauth-required", "signed-out"].includes(state()?.status);
   /** This device has no MausBot Cloud sign-in to pair a team with (homeOf's rule for My Cloud). */
@@ -299,6 +366,9 @@ export function createHomeWindow(deps) {
     if (machine && (PLAN_PROBLEMS.has(machine.status) || (place.kind === "team" && machine.hold))) {
       toScreen({ screen: "plan", machine: PLAN_PROBLEMS.has(machine.status) ? machine.status : "stopped" }); later(); return;
     }
+    // Its address is never looked up while it is set up: the session's next word (changed()) opens it.
+    const setup = machineSetup(machine);
+    if (setup) return toScreen({ screen: "setup", ...setup });
     const win = window();
     const blank = !win || win.isDestroyed() || !originOf(win.webContents.getURL());
     // A team's Cloud never sleeps, and the Admin wakes only My Cloud: a team that answers asleep is simply not reachable yet.
@@ -307,8 +377,10 @@ export function createHomeWindow(deps) {
     const handoff = blank ? timers.set(() => { if (wanted(token) && status) goScreen(); }, SPLASH_HANDOFF_MS) : null;
     try {
       if (!asleep) {
+        if (naming) await forgetNames();
         const look = await answers(origin);
-        if (look === "no" || (look === "asleep" && place.kind === "team")) return offline(token);
+        if (look === "no") return unreachable(place, token);
+        if (look === "asleep" && place.kind === "team") return offline(token);
         if (look === "asleep") { power.hold(); asleep = true; say("waking"); }
       }
       let session = null;
@@ -328,7 +400,9 @@ export function createHomeWindow(deps) {
           return offline(token);
         }
       }
-      screen = null; status = null; tries = 0; away = true; shown = place;
+      // My Cloud opened before the move made it home is a saved server the window shows, as the Server menu opens one.
+      const asHome = place.kind === "team" || home.kind !== "computer";
+      screen = null; status = null; tries = 0; away = asHome; shown = asHome ? place : null;
       await go(cloudHomeConnectUrl({ origin, grant }, now(), open === "phone" ? "phone" : null), origin, place);
       if (place.kind === "cloud") { clearRenewal(); power.woke(); }
       else renewLater(place, grant || !session?.expiresAt ? TEAM_RENEW_MS : session.expiresAt - now() - TEAM_RENEW_EARLY_MS);
@@ -352,12 +426,21 @@ export function createHomeWindow(deps) {
       // Chosen is remembered at once, so the screen's own retry (and the next launch) asks for the same team.
       remember({ team: target.id });
       if (signedOut()) { clearRetry(); return toScreen({ screen: "signin" }); }
+      const setup = machineSetup(target.machine);
+      if (setup) { clearRetry(); return toScreen({ screen: "setup", ...setup }); }
       if (!target.origin) { toScreen({ screen: "plan", machine: target.machine?.status ?? "stopped" }); later(); return; }
       return connect(target, token, open);
     }
     if (place === "cloud" || target.left) remember(null);
     opening = null;
     clearRenewal();
+    if (current.kind === "computer" && asked) {
+      const setup = cloudSetupOf(state()), mine = readyCloudOrigin(state());
+      if (setup || mine) ensureWindow();
+      if (setup) { clearRetry(); return toScreen({ screen: "setup", ...setup }); }
+      if (mine) return connect({ kind: "cloud", origin: mine }, token, open ?? asked.open);
+      asked = null; naming = null;
+    }
     if (current.kind === "computer") {
       clearRetry(); screen = null; status = null; shown = null;
       const win = window();
@@ -420,6 +503,16 @@ export function createHomeWindow(deps) {
 
   return {
     show,
+    /** The person asked for My Cloud (the Server menu, the welcome, Settings, the ready notice). Before the move made it
+     * home it opens as a saved server, and while the Admin sets it up the setup screen shows until it opens by itself. */
+    async openCloud(open = null) {
+      if ((await refresh()).kind !== "computer") return show({ place: "cloud", open });
+      if (!cloudSetupOf(state()) && !readyCloudOrigin(state())) throw new Error("My Cloud is not ready to connect yet.");
+      asked = { open };
+      return show({ place: "cloud", open });
+    },
+    /** My Cloud is asked for and not open yet: the window shows this computer's screen for it. */
+    asking: () => Boolean(asked),
     refresh,
     view,
     /** My Cloud's origin while it is home, else null. */
@@ -460,6 +553,12 @@ export function createHomeWindow(deps) {
     /** The main frame went somewhere: the place's own sign-in page means its session ended; any other page of it is
      * the version the window now shows. */
     navigated(url) {
+      // Only a page that loaded counts: an error page (chrome-error:) is the load that failed().
+      if (asked && /^https?:/.test(url)) {
+        const at = originOf(url);
+        if (at === readyCloudOrigin(state())) { asked = null; naming = null; }
+        else if (!(at === localOrigin() && new URL(url).pathname === HOME_SCREEN_PATH)) letAskGo();
+      }
       // The window went to another server (the Server menu): the team it showed is no longer the place on screen.
       if (shown?.kind === "team" && ![shown.origin, localOrigin()].includes(originOf(url))) { shown = null; clearRenewal(); }
       const origin = placeOrigin();
@@ -469,10 +568,15 @@ export function createHomeWindow(deps) {
       newer = false; loaded = null;
       void version(origin).then((current) => { if (current && placeOrigin() === origin) loaded = current; });
     },
-    /** The main frame could not load the place. */
-    failed(url) {
-      const origin = placeOrigin();
-      if (origin && originOf(url) === origin) offline(++opens);
+    /** The main frame could not load the place, or My Cloud before it is home (Chromium's net error `code`): this
+     * computer's screen says so and the window tries again by itself. False for any other server. */
+    failed(url, code = 0) {
+      const at = originOf(url), place = placeOrigin(), mine = readyCloudOrigin(state());
+      if (!at || (at !== place && (home.kind !== "computer" || at !== mine))) return false;
+      if (at !== place) asked ??= { open: null };
+      const token = ++opens;
+      void unreachable(shown?.kind === "team" && at === place ? shown : { kind: "cloud", origin: at }, token, nameNotFound(code));
+      return true;
     },
     /** `event` came from the shown place's own page in this window (My Cloud's while it is home, or a team's Cloud's). */
     homePage,

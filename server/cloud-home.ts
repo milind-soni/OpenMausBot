@@ -89,6 +89,7 @@ export function cloudHomeConfiguration(env: NodeJS.ProcessEnv = process.env): Cl
 const TEAM_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 // oxlint-disable-next-line no-control-regex
 const TEAM_NAME = /^[^\x00-\x1f\x7f]{1,80}$/;
+const TEAM_LANGUAGE = /^[a-z]{2,3}(?:-[a-z0-9]{2,8})?$/;
 
 /** A Team Cloud boots with the Admin's team id and the team's name, and answers by that name. */
 function cloudTeamConfiguration(env: NodeJS.ProcessEnv): CloudTeam {
@@ -96,7 +97,9 @@ function cloudTeamConfiguration(env: NodeJS.ProcessEnv): CloudTeam {
   if (!TEAM_ID.test(id)) invalid("OMB_CLOUD_TEAM_ID must be the Admin's team id (letters, digits, dashes)");
   const name = (env.OMB_CLOUD_TEAM_NAME ?? "").trim();
   if (!TEAM_NAME.test(name)) invalid("OMB_CLOUD_TEAM_NAME must be the team's name (1 to 80 characters)");
-  return { id, name };
+  // A language the app doesn't know is ignored rather than refused: the Team Cloud still boots, in its own default.
+  const language = (env.OMB_CLOUD_TEAM_LANGUAGE ?? "").trim().toLowerCase();
+  return { id, name, ...(TEAM_LANGUAGE.test(language) ? { language } : {}) };
 }
 
 export { CLOUD_HOME_SECRET_KEYS, CLOUD_SECRETS_FD_ENV, cloudHomeSecrets, takeCloudSecrets, withoutCloudSecrets } from "./cloud-secrets.ts";

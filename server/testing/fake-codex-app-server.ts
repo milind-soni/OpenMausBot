@@ -18,6 +18,8 @@
 //   FAKE_CODEX_ASYNC_QUESTIONS  async-question mode: JSON replacing the message's `questions`
 //   FAKE_CODEX_ASYNC_QUESTION_GATE  async-question mode: the turn keeps running until this file exists (default 300 ms)
 //   FAKE_CODEX_DUMP  path for {pid, argv, env, calls, decision}
+//   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
+//     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
 //   FAKE_CODEX_SHELL_ENVIRONMENT_POLICY  JSON config/read reports, every field present and null unless set (codex-cli 0.160)
 //   FAKE_CODEX_APPROVAL_REQUEST  JSON {method, params} override in approval mode
@@ -307,6 +309,14 @@ const dump = () => {
 };
 
 const finishTurn = () => {
+  const patchBytes = Number(process.env.FAKE_CODEX_PATCH_BYTES);
+  if (patchBytes > 0) {
+    const change = (bytes: number) => [{ path: `${process.cwd()}/web/index.html`, kind: { type: "add" }, diff: "+".repeat(bytes) }];
+    notify("item/started", { item: { id: "p1", type: "fileChange", status: "inProgress", changes: [] } });
+    notify("item/fileChange/patchUpdated", { itemId: "p1", changes: change(Math.floor(patchBytes / 2)) });
+    notify("item/fileChange/patchUpdated", { itemId: "p1", changes: change(patchBytes) });
+    notify("item/completed", { item: { id: "p1", type: "fileChange", status: "completed", changes: change(patchBytes) } });
+  }
   notify("item/completed", { item: { id: "i1", type: "commandExecution", status: "completed", aggregatedOutput: "README.md\nAPI_KEY=codex-output-secret", exitCode: 0 } });
   notify("item/completed", { item: { id: "w1", type: "webSearch", status: "completed" } });
   if (mode === "stream") {

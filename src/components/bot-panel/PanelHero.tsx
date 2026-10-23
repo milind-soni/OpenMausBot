@@ -7,6 +7,7 @@ import type { MausState } from "@/lib/mascot";
 import type { Bot } from "@/state/store";
 import { BOT_PROFILE_LIMITS } from "../../../shared/bot-profile";
 import { BotAvatar } from "../Avatar";
+import { CallButton } from "../CallView";
 import type { BotPatch } from "../bot-settings/useBotSettingsDerived";
 
 const inlineInputCls =
@@ -95,33 +96,36 @@ export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor 
         </span>
       </button>
 
-      <h2 id="bot-settings-title" className="mt-2.5 flex max-w-full justify-center">
-        {name.draft !== null ? (
-          <input
-            autoFocus
-            data-panel-rename-input
-            aria-label={t("botSettings.simple.name")}
-            maxLength={BOT_PROFILE_LIMITS.name}
-            value={name.draft}
-            onChange={(event) => name.setDraft(event.target.value)}
-            onKeyDown={name.onKeyDown}
-            onBlur={name.onBlur}
-            className={cn(inlineInputCls, "w-[220px] max-w-full text-[17px] font-semibold")}
-          />
-        ) : (
-          <button
-            ref={name.buttonRef}
-            type="button"
-            data-panel-rename
-            title={t("botPanel.rename")}
-            onClick={() => name.start(bot.name)}
-            className="group/name inline-flex max-w-full items-center gap-1.5 rounded-[7px] px-1.5 py-px text-[18px] font-semibold text-ink hover:bg-ink/[0.04]"
-          >
-            <span className="min-w-0 truncate">{bot.name}</span>
-            <Pencil size={13} aria-hidden="true" className="shrink-0 text-ink-tertiary opacity-0 transition-opacity group-hover/name:opacity-100 group-focus-visible/name:opacity-100 group-focus-within/name:opacity-100 touch:opacity-100" />
-          </button>
-        )}
-      </h2>
+      <div data-panel-name-row className="mt-2.5 flex max-w-full items-center justify-center gap-1.5">
+        <h2 id="bot-settings-title" className="flex min-w-0 justify-center">
+          {name.draft !== null ? (
+            <input
+              autoFocus
+              data-panel-rename-input
+              aria-label={t("botSettings.simple.name")}
+              maxLength={BOT_PROFILE_LIMITS.name}
+              value={name.draft}
+              onChange={(event) => name.setDraft(event.target.value)}
+              onKeyDown={name.onKeyDown}
+              onBlur={name.onBlur}
+              className={cn(inlineInputCls, "w-[220px] max-w-full text-[17px] font-semibold")}
+            />
+          ) : (
+            <button
+              ref={name.buttonRef}
+              type="button"
+              data-panel-rename
+              title={t("botPanel.rename")}
+              onClick={() => name.start(bot.name)}
+              className="group/name inline-flex max-w-full items-center gap-1.5 rounded-[7px] px-1.5 py-px text-[18px] font-semibold text-ink hover:bg-ink/[0.04]"
+            >
+              <span className="min-w-0 truncate">{bot.name}</span>
+              <Pencil size={13} aria-hidden="true" className="shrink-0 text-ink-tertiary opacity-0 transition-opacity group-hover/name:opacity-100 group-focus-visible/name:opacity-100 group-focus-within/name:opacity-100 touch:opacity-100" />
+            </button>
+          )}
+        </h2>
+        <CallButton bot={bot} placement="panel" />
+      </div>
 
       {label.draft !== null ? (
         <input

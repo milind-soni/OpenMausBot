@@ -32,7 +32,13 @@ You can also use your own Composio project in the packaged app or on a Cloud. Op
 
 ## Connect X (Twitter)
 
-To let bots **search and read** X, you do not need an X account or this connector. Add your own [treg](https://treg.to) key under **Settings → API keys**, or use a paid MausBot Cloud plan (My Cloud has it already). Every bot then gets **Research (treg)**: read-only tools to search posts, read an account's posts, read a post with its replies and look up a profile, plus research tools that find and call treg's catalog for companies, people, funding, news and more. Turn it off for a bot in its settings under **Access**. With your own key, calls are billed to your treg balance with no limits from MausBot, and your key wins when you also have a plan. On a plan, calls count against its monthly allowance (X research: 1,500 on Starter, 5,000 on Pro, 15,000 on Max). A routine on that bot can check X on a schedule and report only new posts.
+To let bots **search and read** X, you do not need an X account or a Composio connection. Open **Apps** and find the **X (Twitter)** card:
+
+- **On a paid MausBot Cloud plan** it says **Included with your plan**, with this month's use ("312 of 5,000 X calls this month"). There is nothing to set up. The allowance is 500 calls a month on Starter, 1,500 on Personal, 5,000 on Pro and 15,000 on Max, and it resets on the first of each month. Once it is used up, the card and your bots say so and when it resets.
+- **Everyone else** pastes their own [treg](https://treg.to) key on the card (it is the same key as under **Settings → API keys**). The card checks it with treg and shows your balance or the exact problem. **Test** checks it again, and **Remove key** takes it away. Calls are billed to your treg balance, with no limits from MausBot.
+- **With both**, your own key is used first and the card says so. Remove it and your bots go back to the plan's included calls.
+
+Every bot then gets **Research (treg)**: read-only tools to search posts, read an account's posts, read a post with its replies and look up a profile, plus research tools that find and call treg's catalog for companies, people, funding, news and more. With neither a key nor a plan, no bot is shown these tools. Turn them off for one bot in its settings under **Access**. A routine on that bot can check X on a schedule and report only new posts. On a Cloud, your key stays with the Cloud's own settings: bots call X through MausBot and never see the key.
 
 The steps below are only needed to **post** to X through Composio. Composio does not provide managed credentials for its `twitter` toolkit. To connect an X account:
 

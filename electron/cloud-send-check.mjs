@@ -16,14 +16,30 @@ const THREAD = /^[\w-]{1,200}$/u;
 /** My Cloud's journal shows at most this many of a bot's latest changes. */
 const JOURNAL_ROWS = 500;
 
+/** The rooms of `here` that a move carries: those with a bot that goes (`bots`). My Cloud makes a room only once one of
+ * its bots is there (server/cloud-chat-merge.ts), so one whose bots were all deleted here, or removed on My Cloud, stays. */
+export function roomsThatGo(here, bots) {
+  return new Set(list(here?.rooms).filter((room) => record(room) && list(room.members).some((id) => bots.has(id))).map((room) => room.id));
+}
+
+/** The rooms of `here` My Cloud had once and lacks now, as `room:<id>`: a conversation of the room went (`chats`, the
+ * cursors cloud-send.mjs keeps, "removed" included) and every one of its conversations with rows here did, so nothing
+ * here makes it again; My Cloud answers that each was removed there. */
+export function roomsRemovedThere(here, there, chats) {
+  const held = new Set(list(there?.rooms).map((room) => room.id));
+  const went = (threadId) => record(chats) && chats[threadId] !== undefined;
+  return list(here?.rooms).filter((room) => record(room) && !held.has(room.id) && list(room.threads).some(went)
+    && list(here?.conversations).filter((head) => head.room === room.id).every((head) => went(head.threadId))).map((room) => `room:${room.id}`);
+}
+
 /**
  * What of this computer's manifest My Cloud's lacks: items, memory, rooms, connections and conversations it does not
  * have, and parts of items it holds otherwise than it took them; the pieces of a memory note, a team's context or memory,
  * a learned fact, a journal row, a bot file, a routine's finished run or a conversation's own setting it lacks. A part
  * counts as carried when it is equal on both sides, or when, since it last went (`sent`: what each side held then, as
  * cloud-send.mjs keeps it), this computer did not change it or My Cloud did (then My Cloud's is kept).
- * Left out: what was removed on My Cloud (`removed`, by key or conversation id), and what this computer never sends
- * (`skip`).
+ * Left out: what was removed on My Cloud (`removed`, by key, `room:<id>` or conversation id), what this computer never
+ * sends (`skip`), and a room no bot of which goes, with its conversations (roomsThatGo).
  */
 export function manifestGaps(here, there, { sent = {}, removed = new Set(), skip = new Set() } = {}) {
   const gaps = { items: [], parts: [], memory: [], rooms: [], connections: [], conversations: [], files: [], runs: [], journal: [], learned: [], teams: [], settings: [] };
@@ -68,13 +84,14 @@ export function manifestGaps(here, there, { sent = {}, removed = new Set(), skip
     const context = new Set(list(held?.context)), memory = new Set(list(held?.memory));
     if (list(team.context).some((line) => !context.has(line)) || list(team.memory).some((key) => !memory.has(key))) gaps.teams.push(team.section);
   }
+  const going = roomsThatGo(here, bots);
   const rooms = new Set(list(there.rooms).map((room) => room.id));
-  for (const room of list(here.rooms)) if (!removed.has(`room:${room.id}`) && !rooms.has(room.id)) gaps.rooms.push({ id: room.id, name: room.name });
+  for (const room of list(here.rooms)) if (going.has(room.id) && !removed.has(`room:${room.id}`) && !rooms.has(room.id)) gaps.rooms.push({ id: room.id, name: room.name });
   const connections = new Set(list(there.connections));
   for (const id of list(here.connections)) if (!skip.has(id) && !connections.has(id)) gaps.connections.push(id);
   const conversations = new Map(list(there.conversations).map((head) => [head.threadId, head]));
   for (const head of list(here.conversations)) {
-    if (removed.has(head.threadId) || (head.bot && !bots.has(head.bot)) || (head.room && removed.has(`room:${head.room}`))) continue;
+    if (removed.has(head.threadId) || (head.bot && !bots.has(head.bot)) || (head.room && (!going.has(head.room) || removed.has(`room:${head.room}`)))) continue;
     const held = conversations.get(head.threadId);
     if (!held) { gaps.conversations.push(head.threadId); continue; }
     if (Object.keys(record(head.settings) ? head.settings : {}).some((key) => !record(held.settings) || held.settings[key] === undefined)) gaps.settings.push(head.threadId);

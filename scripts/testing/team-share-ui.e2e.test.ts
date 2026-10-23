@@ -68,12 +68,12 @@ describe("Share team in the real renderer", () => {
     await click("New or share");
     await click("Templates");
     await click("Share");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Share the Sales desk team");
-    await click("Share the Sales desk team");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Share the Sales desk department");
+    await click("Share the Sales desk department");
     // A refused first look is not a dead end: the sentence, no counts and no
     // Save, but every skill box is drawn from the refusal.
     const saveDisabled = () => evaluate(`[...document.querySelectorAll('[role=dialog] button')].find((button) => button.textContent === "Save file").disabled`);
-    await expect.poll(snapshot, { timeout: 20_000 }).toContain("This team is too large to share (4 MB).");
+    await expect.poll(snapshot, { timeout: 20_000 }).toContain("This department is too large to share (4 MB).");
     let dialog = await snapshot();
     for (const line of ["research-brief", "fill-01", "fill-30", "Starter notes are included", "Save file"]) expect(dialog).toContain(line);
     expect(dialog).not.toContain("What's in the file");
@@ -122,7 +122,7 @@ describe("Share team in the real renderer", () => {
     // Add the saved file back through Import: the preview names every part.
     await click("Import");
     await evaluate(`(() => { const input = document.querySelector('[role=dialog] input[type=file]'); const transfer = new DataTransfer(); transfer.items.add(new File([window.__shareText], 'sales-desk-1.0.0.openmaus.json', { type: 'application/json' })); input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("2 bots · shared team");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("2 bots · shared department");
     const preview = await snapshot();
     for (const line of ["Shared instructions", "Routines: 1 · paused", "Starter notes: 1", "Included skills — added switched off"]) {
       expect(preview).toContain(line);

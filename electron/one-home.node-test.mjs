@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { arrivedCounts, CHECK_PASSES, COPY_RETRY_MS, createOneHome, FAILING_LINE_MS, FROZEN_RETRY_MS, KEPT_MS, QUIET_MS, switchOn } from "./one-home.mjs";
+import { arrivedCounts, CHECK_PASSES, COPY_RETRY_MS, createOneHome, FAILING_LINE_MS, FROZEN_RETRY_MS, KEPT_MS, missingOf, QUIET_MS, switchOn } from "./one-home.mjs";
 import { oneHomeCloud } from "./one-home-main.mjs";
 
 const CLOUD = "https://omb-t-1.fly.dev";
@@ -13,13 +13,13 @@ const reply = (status, body = {}) => ({ ok: status < 400, status, body });
  * the clock and its timers. `relaunch()` makes a new one-home over the same journal and server, as the app does after a
  * crash.
  */
-function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": false, "webhook:w1": true, "call:c1": true }, checks = [], moves = [], busy = [] } = {}) {
+function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": false, "webhook:w1": true, "call:c1": true }, checks = [], moves = [], busy = [], offer } = {}) {
   let journal = null, clock = 1_000_000, typedAt = 0;
   const timers = [];
   const w = {
     cloud: { origin: CLOUD, account: "acct-1", machine: CLOUD, ready: true, moves: true, ended: false, paid: false, ...cloud },
     server: { frozen: false, freezes: 0, unfreezes: 0, forgot: 0 },
-    passes: [], checked: 0, cloudCalls: [], localCalls: [], lent: [], phone: { paired: true, stopped: 0, started: 0 }, opened: [], restarted: 0, brought: [],
+    passes: [], checked: 0, cloudCalls: [], localCalls: [], lent: [], offered: [], phone: { paired: true, stopped: 0, started: 0 }, opened: [], restarted: 0, brought: [],
     again: null, version: "0.1.121",
     get journal() { return journal; },
     set journal(value) { journal = value; },
@@ -76,6 +76,7 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
           };
         },
         lend: async (projects) => { w.lent.push(projects); },
+        offer: () => { w.offered.push(w.lent.length); return offer?.(); },
         phone: { paired: () => w.phone.paired, stop: async () => { w.phone.stopped++; }, start: async () => { w.phone.started++; } },
         openHome: () => w.opened.push("cloud"),
         openLocal: () => w.opened.push("local"),
@@ -115,6 +116,24 @@ test("a new buyer's move runs every phase and ends with home on My Cloud, this c
   assert.equal(w.lent.length, 1, "a relaunch lends nothing again");
   assert.equal(w.phone.stopped, 1);
   assert.equal(w.server.unfreezes, 0);
+});
+
+test("once this computer is lent, the move offers the rest of it, after the move and on every launch after it, without waiting for an answer", async () => {
+  const w = world();
+  await w.home.kick();
+  await Promise.resolve();
+  assert.deepEqual(w.offered, [1], "right after lending, at the switch");
+  // A computer that moved before this version: its journal is done and lent already.
+  await w.relaunch().kick();
+  await Promise.resolve();
+  assert.deepEqual(w.offered, [1, 1], "the first launch after it offers too; the offer itself asks at most once");
+  const open = world({ offer: () => new Promise(() => {}) });
+  let limit;
+  const ran = await Promise.race([open.home.kick().then(() => "done"), new Promise((resolve) => { limit = setTimeout(resolve, 2_000, "held up"); })]);
+  clearTimeout(limit);
+  assert.equal(ran, "done", "a popup left open never holds up the move");
+  assert.equal(open.journal.phase, "done");
+  assert.equal(open.phone.stopped, 1);
 });
 
 test("a Cloud too old to take a move says My Cloud is updating, never that the move fails, and the move starts once it has", async () => {
@@ -160,6 +179,16 @@ test("the freeze waits for a quiet moment: nobody typing for 30 s, and no bot st
   await w.tick();
   assert.equal(w.journal.phase, "done");
   assert.equal(w.server.freezes, 1);
+});
+
+test("a check's log line names the rooms and conversations it found missing by id, never by name, and counts the rest", () => {
+  const rooms = Array.from({ length: 12 }, (_, i) => ({ id: `room-${i}`, name: `Client ${i} pricing` }));
+  const said = missingOf({ gaps: { items: [{ key: "bot:ember", kind: "bot", label: "Ember" }], rooms: rooms.slice(0, 3), conversations: ["t-1"], memory: [] },
+    chats: [{ threadId: "t-2", missing: 1, unstamped: 0, path: "equal" }, { threadId: "t-3", missing: 0, unstamped: 0, path: "equal" }], attachments: [], secrets: { differs: [], missing: ["key:openrouter"] } });
+  assert.equal(said, "1 items, 3 rooms (room-0, room-1, room-2), 1 conversations (t-1), 1 chat paths (t-2), 1 credentials");
+  assert.doesNotMatch(said, /Client|Ember|openrouter/u);
+  assert.equal(missingOf({ gaps: { rooms } }), "12 rooms (room-0, room-1, room-2, room-3, room-4, room-5, room-6, room-7, room-8, room-9, 2 more)");
+  assert.equal(missingOf({}), "something");
 });
 
 test("a check that still fails after three passes lifts the freeze and tries again in an hour; a day of it shows Try again", async () => {
@@ -361,6 +390,9 @@ test("one home reads the Admin's word: a ready Cloud the account may move to, an
   assert.equal(oneHomeCloud(state({ status: "stopped" })).ended, false, "stopped alone is not ended");
   assert.equal(oneHomeCloud(state({ status: "ready", origin: CLOUD }, { trial: { state: "active" } })).paid, false);
   assert.equal(oneHomeCloud({ ...state({ status: "ready", origin: CLOUD, moves: true }), status: "unavailable" }).ready, false);
+  const team = [{ id: "team-acme", name: "Acme", role: "owner", machine: { status: "ready", origin: "https://omb-t-2.fly.dev", moves: true } }];
+  assert.deepEqual(oneHomeCloud(state(undefined, { entitlement: { plan: "pro", tier: "team", status: "active" }, teams: team })),
+    { origin: null, account: "acct-1", machine: null, ready: false, moves: false, ended: false, paid: false }, "a Team plan has no My Cloud: nothing moves, and nothing here counts as paid for");
 });
 
 test("automations switch on through their own routes, and the done line counts only what both sides hold", () => {

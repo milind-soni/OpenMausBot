@@ -10,7 +10,7 @@ import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, clou
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits } from "@/lib/corner-popup";
-import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, usedBefore } from "@/lib/notices";
+import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore } from "@/lib/notices";
 import { cloudSignInDue, onboardingCloudOffered, type WelcomeViewer } from "@/lib/onboarding";
 import { useUpdaterState } from "@/lib/updater";
 import { t } from "@/lib/i18n";
@@ -23,6 +23,7 @@ import { useMoveQuiet } from "./CloudSendStrip";
 import { CloudTrialNoticeCard, useCloudPlanSnapshot } from "./CloudTrialNotice";
 import { LinkButton, NoticeCard, NoticeToast, NotNowButton } from "./NoticeCard";
 import { localDesktopPage } from "./onboarding/WelcomeGate";
+import { UpdatesConsentDialog, updatesConsentBridge, useUpdatesConsent } from "./UpdatesConsent";
 
 function StarCard({ onDismiss }: { onDismiss: () => void }) {
   return <NoticeCard titleId="github-star-title" notice="github-star" icon={Star} title={t("star.title")} onDismiss={onDismiss}>
@@ -68,6 +69,9 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [popupShown, setPopupShown] = useState(false);
+  const consentHere = (local || viewer?.cloudHome === true) && brandStatus().source !== "file";
+  const consent = useUpdatesConsent(consentHere ? updatesConsentBridge() : undefined);
+  const [consentDone, setConsentDone] = useState(false);
   const updater = useUpdaterState();
   const intent = useCloudIntent();
   const moving = useMoveQuiet(now);
@@ -115,6 +119,9 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     : planBridge ? cloudProCloudPageView(plan) : "loading";
   const popupView = typeof popupState === "object" ? popupState : null;
   const popupBlocked = useOtherDialogOpen(popupPending) || Boolean(state.liveCall && state.liveCall.status !== "ended");
+  const consentDue = consent.state?.available === true && consent.state.due && !consentDone;
+  const consentBlocked = useOtherDialogOpen(consentDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
+  const consentFact = !consentHere || consentDone ? false : consent.state === undefined ? null : consentDue ? (consentBlocked ? null : true) : false;
 
   const trial = plan?.trial;
   const key = trial ? trialKey(trial) : null;
@@ -133,8 +140,10 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     return introOpen || stage === "due" ? true : null;
   };
   const cards = Boolean(bridge || planBridge);
-  const notice = !closed && !waits && (cards || popupHere) ? nextNotice({
+  // After a closed popup only the product-updates question may follow in this launch; nothing else does.
+  const notice = waits ? null : closed ? (consentFact === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere ? nextNotice({
     [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving ? false : popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
+    [UPDATES_CONSENT_NOTICE]: consentFact,
     [PRODUCT_HUNT_NOTICE]: !cards || moving || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
       : organization === null || moving === null ? null : !organization,
     [CLOUD_INTRO]: moving ? false : moving === null ? null : introDue(),
@@ -183,6 +192,12 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       onClose={() => { report("close"); end(); }} />;
   }
 
+  if (notice === UPDATES_CONSENT_NOTICE && consent.state) {
+    const done = () => { setConsentDone(true); close(); };
+    return <UpdatesConsentDialog signedIn={consent.state.signedIn}
+      onYes={async email => { await consent.choose("opted_in", email); done(); }}
+      onNo={() => { done(); void consent.choose("declined").catch(() => {}); }} />;
+  }
   if (notice === CLOUD_INTRO && offer) {
     const done = (action: string) => { track("cloud_card_action", { action }); close(); save(CLOUD_INTRO); };
     return <CloudTrialIntroCard offer={offer}

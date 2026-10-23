@@ -211,3 +211,14 @@ export function describeEdition(status: EditionStatus): string {
   }
   return `openmausbot open-source edition${status.notice ? ` (${status.notice})` : ""}`;
 }
+
+/** The edition as Settings shows it: a licence block only while an Enterprise licence is near or past expiry. */
+export function editionForSettings(status: EditionStatus) {
+  const expiring = status.edition === "enterprise" && status.expiresAt && status.expiresInDays !== undefined &&
+    (status.graceEndsAt !== undefined || status.expiresInDays <= LICENSE_WARN_DAYS);
+  return {
+    edition: status.edition,
+    features: status.features,
+    ...(expiring ? { license: { expiresAt: status.expiresAt!, expiresInDays: status.expiresInDays!, ...(status.graceEndsAt ? { graceEndsAt: status.graceEndsAt } : {}) } } : {}),
+  };
+}

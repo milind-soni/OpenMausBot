@@ -22,6 +22,11 @@ export function botPreview(bot: Bot, visible: Message[], instances: InstanceInfo
   if (bot.activity === "waiting-on-you") return t("sidebar.preview.waiting");
   if (bot.waitingForTeammates) return t("sidebar.preview.waitingOnTeammate");
   if (bot.busy) return t("sidebar.preview.working");
+  return lastLine(bot, visible, instances, advanced);
+}
+
+/** The conversation's newest line as a preview shows it, whatever the bot is doing now. */
+export function lastLine(bot: Bot, visible: Message[], instances: InstanceInfo[], advanced: boolean): string {
   const last = lastPreviewable(visible);
   if (!last) return "";
   if (last.kind === "options" && last.card) {

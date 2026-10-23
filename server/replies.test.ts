@@ -268,3 +268,41 @@ describe("a reply to an app", () => {
     expect(() => replyTargetIn(rows, 7)).toThrow("replyToId must be a message id");
   });
 });
+
+describe("a bot message with a voice note", () => {
+  const spoken = (text: string) => ({ kind: "audio" as const, path: "/attachments/note.mp3", mime: "audio/mpeg", text });
+
+  it("replays the reply with the note's words after it, the one string the old text fold stored", () => {
+    const reply = message({ text: "Here is the summary.  ", attachments: [spoken("And this is the spoken recap.")] });
+    expect(transcriptText(reply, new Map())).toBe("Here is the summary.\n\nAnd this is the spoken recap.");
+  });
+
+  it("replays a voice-only reply as the words alone, each note in order", () => {
+    expect(transcriptText(message({ text: "", attachments: [spoken("Only spoken.")] }), new Map())).toBe("Only spoken.");
+    expect(transcriptText(message({ text: "", attachments: [spoken(" One. "), spoken("Two.")] }), new Map())).toBe("One.\n\nTwo.");
+  });
+
+  it("leaves a message without note words exactly as stored", () => {
+    expect(transcriptText(message({ text: "  padded  " }), new Map())).toBe("  padded  ");
+    const oldNote = { kind: "audio" as const, path: "/attachments/old.mp3", mime: "audio/mpeg" };
+    expect(transcriptText(message({ text: "Caption\n\nAlready folded words", attachments: [oldNote] }), new Map())).toBe("Caption\n\nAlready folded words");
+  });
+
+  it("reads a room post or a webhook post as its post text alone, the note never folded in, as before", () => {
+    const from = { botId: "b1", name: "Herald", color: "blue" };
+    const roomPost = message({ id: "p1", text: "Deploy status: green.", from, peerPost: {}, attachments: [spoken("Deploy status: green.")] });
+    const unattended = message({ id: "p2", text: "Deploy status: green.", from, peerPost: { unattended: true }, attachments: [spoken("Deploy status: green.")] });
+    const webhookPost = message({ id: "w1", text: "**Good morning!** Clear skies.", from, webhookPost: true, attachments: [spoken("Good morning. It is clear.")] });
+    expect(transcriptText(roomPost, new Map())).toBe("Deploy status: green.");
+    expect(transcriptText(unattended, new Map())).toBe("Deploy status: green.");
+    expect(transcriptText(webhookPost, new Map())).toBe("**Good morning!** Clear skies.");
+    const reply = message({ id: "u1", role: "user", text: "Thanks", replyToId: "w1" });
+    expect(transcriptText(reply, new Map([["w1", webhookPost]]), "Milind")).toBe("[replying to Herald: “**Good morning!** Clear skies.”]\nThanks");
+  });
+
+  it("quotes the note's words when the person replies to a voice-only message", () => {
+    const voiceOnly = message({ id: "v1", text: "", attachments: [spoken("Call me back.")] });
+    const reply = message({ id: "u1", role: "user", text: "Will do", replyToId: "v1" });
+    expect(transcriptText(reply, new Map([["v1", voiceOnly]]), "Milind")).toBe("[replying to Assistant: “Call me back.”]\nWill do");
+  });
+});

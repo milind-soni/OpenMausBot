@@ -4,7 +4,7 @@ import { activityCsv, activityEntries, parseActivityWhat, readAdminActivityRange
 import { loadBrand } from "../brand.ts";
 import { browserEngineStatus, ensureChrome, installAgentBrowserBinary, resolveAgentBrowserBinary } from "../browser-engine.ts";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, instanceConfigs, type AppConfig } from "../config.ts";
-import { boundRetentionDays, decisionsCsv, readDecisionRange, readDecisions } from "../decision-log.ts";
+import { boundRetentionDays, decisionsCsv, readDecisionRange, readDecisions, type DecisionRow } from "../decision-log.ts";
 import { editionForMembers, editionStatus, entitled } from "../enterprise.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "../fleet-client.ts";
 import { noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
@@ -17,6 +17,7 @@ import type { Store } from "../store.ts";
 import { readThreadEvents } from "../thread-events.ts";
 import { parseUsageRange } from "../usage-ledger.ts";
 import type { ConfigStatus } from "./config.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface StatusRouteDeps {
@@ -30,6 +31,14 @@ export interface StatusRouteDeps {
   broadcast(payload: Record<string, unknown>): void;
   browserEngineInstall: { get(): Promise<void> | null; set(install: Promise<void> | null): void };
   browserEngineInstallError: { set(error: string | null): void };
+  /** On a Team Cloud: false for someone else's private chat, whose words never reach this session's lists. */
+  threadShown?(auth: RequestAuth): (threadId: string) => boolean;
+}
+
+/** A decision in a conversation the reader may not see keeps its when, which bot, which tool and what was decided (the
+ * activity a team's admin sees), never its words or where. */
+function readable(rows: DecisionRow[], shown: (threadId: string) => boolean): DecisionRow[] {
+  return rows.map((row) => shown(row.threadId) ? row : { ...row, threadId: "", summary: undefined, rule: undefined, requestId: undefined });
 }
 
 export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
@@ -39,6 +48,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
   } = deps;
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
+    const shown = deps.threadShown?.(auth) ?? (() => true);
     // The packaged app's port fallback: the forked child proves it is ours by echoing its pid.
     if (method === "GET" && path === "/api/health") {
       return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR), capabilities: {
@@ -168,7 +178,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       if (parsedLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit <= 0)) {
         return json(res, 400, { error: "limit must be a positive whole number" });
       }
-      return json(res, 200, { decisions: readDecisions(DATA_DIR, parsedLimit ?? 200) });
+      return json(res, 200, { decisions: readable(readDecisions(DATA_DIR, parsedLimit ?? 200), shown) });
     }
     if (method === "GET" && (path === "/api/admin-activity" || path === "/api/admin-activity.csv")) {
       const fromParam = url.searchParams.get("from") || new Date(Date.now() - 29 * 24 * 60 * 60_000).toISOString().slice(0, 10);
@@ -176,7 +186,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       if (!range) return json(res, 400, { error: "from and to must be dates (YYYY-MM-DD), from no later than to, at most a year apart" });
       const what = parseActivityWhat(url.searchParams.get("what"));
       if (!what) return json(res, 400, { error: "what must be all, approvals, decisions, config, people, session, webhook, mcp, engine, bot, budget or visibility" });
-      const entries = activityEntries(readDecisionRange(DATA_DIR, range), readAdminActivityRange(DATA_DIR, range), {
+      const entries = activityEntries(readable(readDecisionRange(DATA_DIR, range), shown), readAdminActivityRange(DATA_DIR, range), {
         what,
         who: (url.searchParams.get("who") ?? "").slice(0, 200),
       });
@@ -211,7 +221,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
         "content-disposition": `attachment; filename="decisions-${stamp(range.from)}-${stamp(range.to)}.csv"`,
         "cache-control": "no-store",
       });
-      res.end(decisionsCsv(readDecisionRange(DATA_DIR, range)));
+      res.end(decisionsCsv(readable(readDecisionRange(DATA_DIR, range), shown)));
       return;
     }
 
@@ -224,7 +234,7 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
       if (parsedLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit <= 0)) {
         return json(res, 400, { error: "limit must be a positive whole number" });
       }
-      const threadIds = [...new Set([bot.threadId, ...store.tasks(bot.id).map((task) => task.threadId)])];
+      const threadIds = [...new Set([bot.threadId, ...store.tasks(bot.id).map((task) => task.threadId)])].filter(shown);
       return json(res, 200, {
         rows: readBotActivity({ dataDir: DATA_DIR, eventsDir: EVENTS_DIR, botId: bot.id, threadIds, limit: parsedLimit ?? 300 }),
       });

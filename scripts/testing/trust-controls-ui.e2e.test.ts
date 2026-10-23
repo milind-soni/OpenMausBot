@@ -124,7 +124,7 @@ describe("trust controls in the real renderer", () => {
     await click("Team map");
     const openMemory = async () => {
       await evaluate(`(() => { const menu = document.querySelector('[data-team-key=""] details'); if (!menu) throw new Error('No General team menu'); if (!menu.open) menu.querySelector('summary').click(); return true; })()`);
-      await click("General team memory");
+      await click("General department memory");
     };
     await openMemory();
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Nothing shared yet.");
@@ -152,14 +152,14 @@ describe("trust controls in the real renderer", () => {
     expect(await evaluate("document.querySelector('[aria-label=\"Remove MCHQ\"]')?.disabled")).toBe(true);
     await evaluate("document.querySelector('[aria-label=\"Remove MCHQ\"]').click(); true");
     expect(await memory()).toHaveLength(1);
-    await click("Close team memory");
+    await click("Close department memory");
     await openMemory();
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("MCHQ detail");
     await evaluate("window.releaseMemoryEdit(); true");
     await expect.poll(memory, { timeout: 10_000 }).toMatchObject([{ name: "MCHQ", detail: "Reviewed HQ" }]);
     // An old dialog's completion must not write its response into the new
     // dialog; reopen reads the current persisted value.
-    await click("Close team memory");
+    await click("Close department memory");
     await openMemory();
     await expect.poll(() => evaluate("document.querySelector('[aria-label=\"MCHQ detail\"]')?.value"), { timeout: 10_000 }).toBe("Reviewed HQ");
     await ui("screenshot", "--out", `${info.logPath}.team-memory.png`);

@@ -9,7 +9,7 @@ const fresh = () => join(mkdtempSync(join(tmpdir(), "omb-app-docs-")), "app-docs
 const files = (dir: string, kind: string) => { try { return readdirSync(join(dir, kind)); } catch { return []; } };
 const age = (dir: string, ms: number) => {
   const then = new Date(Date.now() - ms);
-  for (const kind of ["html", "data", "doc"]) for (const name of files(dir, kind)) utimesSync(join(dir, kind, name), then, then);
+  for (const kind of ["html", "data", "doc", "file"]) for (const name of files(dir, kind)) utimesSync(join(dir, kind, name), then, then);
 };
 
 describe("AppDocs", () => {
@@ -78,5 +78,25 @@ describe("AppDocs", () => {
     if (!reput.ok) throw new Error("not stored");
     expect(docs.sweep([])).toBe(2); // only the other document's manifest and data are old now
     expect(docs.read(reput.doc)?.html).toBe("<p>shared</p>");
+  });
+
+  it("keeps a folder page's files once each, reads them by path, and sweeps them with the last document that names them", () => {
+    const dir = fresh();
+    const docs = new AppDocs(dir);
+    const shared = { path: "data.parquet", data: Buffer.from("PAR1") };
+    const first = docs.put({ source: "html", html: "<h1>v1</h1>", data: { folder: "/w/dash" }, files: [shared, { path: "app.js", data: Buffer.from("a()") }] });
+    const second = docs.put({ source: "html", html: "<h1>v2</h1>", data: { folder: "/w/dash" }, files: [shared, { path: "app.js", data: Buffer.from("b()") }] });
+    if (!first.ok || !second.ok) throw new Error("not stored");
+    expect(files(dir, "file")).toHaveLength(3);
+    expect(docs.readFile(first.doc, "app.js")?.toString()).toBe("a()");
+    expect(docs.readFile(second.doc, "data.parquet")?.toString()).toBe("PAR1");
+    expect(docs.readFile(second.doc, "../app.js")).toBeNull();
+    expect(docs.readFile(second.doc, "index.html")).toBeNull();
+    age(dir, APP_DOCS_SWEEP_GRACE_MS + 1_000);
+    docs.sweep([second.doc]);
+    expect(files(dir, "file")).toHaveLength(2);
+    expect(docs.readFile(second.doc, "app.js")?.toString()).toBe("b()");
+    docs.sweep([]);
+    expect(files(dir, "file")).toEqual([]);
   });
 });

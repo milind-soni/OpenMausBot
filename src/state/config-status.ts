@@ -9,6 +9,7 @@ export interface ConfigStatus {
   mistral?: { configured: boolean };
   cerebras?: { configured: boolean };
   groq?: { configured: boolean };
+  deepseek?: { configured: boolean };
   meta?: { configured: boolean };
   /** X research comes with MausBot Cloud plans: `included` while this server holds the plan's relay credential;
    * `unavailable` when the Admin said no to this desktop's paid sign-in. */
@@ -115,8 +116,9 @@ export interface ConfigStatus {
   /** This server is an OMB Cloud home: it offers no "this computer" and no
    * Local VM (server/cloud-home.ts). Absent everywhere else. */
   cloudHome?: boolean;
-  /** A Team Cloud: the team this server is the home of. Absent everywhere else. */
-  team?: { id: string; name: string };
+  /** A Team Cloud: the team this server is the home of, and the Plan page (MausBot Cloud) where its people and plan
+   * are managed. Absent everywhere else. */
+  team?: { id: string; name: string; cloudPage?: string };
 }
 
 export interface ManagedPolicySummary {

@@ -330,6 +330,12 @@ export function markNotificationLogRead(id: string): void {
   db().prepare("UPDATE notification_log SET read = 1 WHERE id = ?").run(id);
 }
 
+/** Opening a conversation reads its notifications, questions and approvals included. Returns the ids it flipped. */
+export function markThreadNotificationLogRead(threadId: string): string[] {
+  const rows = db().prepare("UPDATE notification_log SET read = 1 WHERE thread_id = ? AND read = 0 RETURNING id").all(threadId) as Array<{ id: string }>;
+  return rows.map((row) => row.id);
+}
+
 export function markAllNotificationLogRead(): void {
   db().prepare("UPDATE notification_log SET read = 1 WHERE read = 0").run();
 }
@@ -550,7 +556,7 @@ export function attentionRows(since: number): AttentionRow[] {
   return db().prepare(
     `${columns} FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'options' AND at >= ? ` +
     "AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0 " +
-    "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 " +
+    "AND coalesce(json_extract(json, '$.card.expired'), 0) = 0 AND json_extract(json, '$.helperIntro') IS NULL " +
     `UNION ALL ${columns} FROM messages INDEXED BY messages_failed_at WHERE ${FAILED_CALL} AND at >= ? AND json_extract(json, '$.tool.ok') = 0 ` +
     `UNION ALL ${columns} FROM messages INDEXED BY messages_work_at WHERE ${WORK_KINDS} AND kind = 'digest' AND at >= ? ` +
     "AND json_extract(json, '$.turnSucceeded') = 1 ORDER BY at",
@@ -673,7 +679,7 @@ export function optionCardsForTools(tools: readonly string[]): Array<{ threadId:
 }
 
 export function appDocRefs(): string[] {
-  const rows = db().prepare("SELECT DISTINCT json_extract(json, '$.app.doc') AS doc FROM messages WHERE kind = 'app'").all() as Array<{ doc: unknown }>;
+  const rows = db().prepare("SELECT json_extract(json, '$.app.doc') AS doc FROM messages WHERE kind = 'app' UNION SELECT h.value FROM messages m, json_each(m.json, '$.app.history') h WHERE m.kind = 'app'").all() as Array<{ doc: unknown }>;
   return rows.flatMap((row) => (typeof row.doc === "string" && row.doc ? [row.doc] : []));
 }
 

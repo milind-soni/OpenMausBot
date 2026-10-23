@@ -10,7 +10,7 @@ import type { BotAvatarCrop } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
-import type { TeamSetupRequest } from "./team-setup.ts";
+import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
 import type { WebhookRequestCardData } from "./webhook-request.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
@@ -22,13 +22,15 @@ import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { AutomationLine, RoutineRunCardData } from "./routine-run.ts";
 import type { WidgetPayload } from "./widget.ts";
-import type { AppFromRef, AppPayload } from "./app.ts";
+import type { AppFromRef, AppPayload, AppPointedRef } from "./app.ts";
 import type { GroupGoalRunCardData } from "./group-goal-run.ts";
 import type { RuntimeEvent } from "./runtime-events.ts";
 import type { NotificationLogEntry } from "./notification.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
+import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
+export type { LiveCallRecord, LiveCallState, LiveCallStatus, LiveClient, LiveEndReason, LiveKeySource, LiveSettings } from "./live-call-wire.ts";
 
 /** Reasoning-effort levels, ascending: a union of what any engine accepts;
  * each driver declares the subset its CLI will take. */
@@ -57,7 +59,7 @@ export type Surface = "cloud" | "vm" | "local" | "browser";
 
 export const MAUS_COLOR_NAMES = [
   "green", "blue", "red", "orange", "purple", "cyan", "pink",
-  "yellow", "teal", "coral",
+  "yellow", "teal", "coral", "silver", "chrome",
 ] as const;
 export type MausColor = (typeof MAUS_COLOR_NAMES)[number];
 
@@ -141,7 +143,7 @@ export interface WireTask {
   routineRunId?: string;
   /** Set when a bot, not a person, opened this thread. */
   openedBy?: TaskOpenedBy;
-  /** On a team's server: one person's conversation, seen by them and the team's admins only. */
+  /** On a team's server: one person's conversation, seen by them alone (never by another member or an admin). */
   private?: true;
   /** Set by close_thread; absent while the thread is open. */
   closedBy?: TaskClosedBy;
@@ -259,7 +261,7 @@ export const helperModelAllowed = (bot: { helperModel?: unknown }): boolean => b
 
 /** A bot as a client may see it. avatarUrl is always present (null when the
  * bot has none). */
-export interface WireBot {
+export interface WireBot extends DefaultBotFields {
   waitingForTeammates?: boolean;
   id: string;
   /** The task selected in the UI; running turns keep their own thread id. */
@@ -424,7 +426,7 @@ export type CardAnswerer = (
 };
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage extends ServerTextLine {
+export interface WireMessage extends ServerTextLine, HelperIntroField {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
@@ -443,7 +445,9 @@ export interface WireMessage extends ServerTextLine {
   attachments?: Array<
     | { kind: "image"; path: string; mime: string; name?: string }
     | { kind: "file"; path: string; mime: string; name: string }
-    | { kind: "audio"; path: string; mime: string; durationMs?: number }
+    /** `text` is the words the note speaks (secret-redacted when stored): clients show it behind a
+     * collapsed transcript, never as message body, and the model's replay folds it back after `text`. */
+    | { kind: "audio"; path: string; mime: string; durationMs?: number; text?: string }
   >;
   card?: OptionCardData;
   /** widget rows (kind "widget"): a bot-authored UI tree. `text` is its
@@ -457,6 +461,8 @@ export interface WireMessage extends ServerTextLine {
   app?: AppPayload;
   /** user rows sent by an app's ui/message: the app row that sent them. Every client draws "Sent from <title>". */
   fromApp?: AppFromRef;
+  /** user rows sent with parts of a bot's page the person pointed at in the preview: what each chip said. */
+  pointed?: AppPointedRef[];
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;
   /** signin rows: the bot asked the person to sign in to a site themselves. */
@@ -683,63 +689,6 @@ export interface QuotaSwitchCardData {
   rootId?: string;
 }
 
-/** Which app holds the microphone of a Live call: the desktop app (its own
- * page or a server's page in it), a web browser, or a phone. Self-declared;
- * for display and logs only. The phone apps show a value they do not know as
- * "another device". */
-export type LiveClient = "desktop" | "web" | "ios" | "android";
-export type LiveCallStatus = "connecting" | "live" | "ending" | "ended";
-/** Why a call ended. "signed-out": the sign-in or paired phone that started
- * it was signed out, revoked or unpaired. A client that does not know a
- * reason shows the call's `error` text, or plain "Call ended.". */
-export type LiveEndReason =
-  | "hung-up" | "idle" | "expired" | "content" | "remote-hangup" | "connection-lost"
-  | "sideband-lost" | "deleted" | "shutdown" | "signed-out" | "error";
-
-/** The one Live call a harness runs. Never carries the key or any speech. */
-export interface LiveCallState {
-  callId: string;
-  botId: string;
-  threadId: string;
-  client: LiveClient;
-  voice: string;
-  /** epoch ms when the session was created */
-  startedAt: number;
-  status: LiveCallStatus;
-  endReason?: LiveEndReason;
-  /** short, user-facing; present when the call ended on a problem */
-  error?: string;
-}
-
-/** One finished Live call, written once when a call that went live ends. Never carries speech. */
-export interface LiveCallRecord {
-  callId: string;
-  botId: string;
-  client: LiveClient;
-  /** epoch ms, = LiveCallState.startedAt */
-  startedAt: number;
-  /** epoch ms when the call ended */
-  endedAt: number;
-  /** whole seconds: OpenAI usage seconds when given, else wall clock */
-  seconds: number;
-  endReason: LiveEndReason;
-  /** only when LLM thread titles are on and the engine can generateText */
-  title?: string;
-}
-
-/** `live`: the key saved for Live calls only; `openai`: the OpenAI API key from Settings → API keys, used when there is no `live` key. */
-export type LiveKeySource = "live" | "openai";
-
-/** Non-secret Live settings, as GET /api/config and PATCH /api/live/settings report them. */
-export interface LiveSettings {
-  /** A Live call has a key to use (`keySource` says which); never the key itself. */
-  configured: boolean;
-  keySource?: LiveKeySource;
-  voice: string;
-  readTypedReplies: boolean;
-  idleMinutes: number;
-}
-
 export interface ConnectorCardData {
   /** Composio toolkit slug. It is validated server-side before every action. */
   slug: string;
@@ -870,6 +819,10 @@ export interface WireGroup {
   defaultResponder: GroupDefaultResponder;
   /** The room's shared instructions. */
   bulletin: string;
+  /** Short one-line description shown under the room name; distinct from
+   * the bulletin (long-form instructions) and any member bot's title.
+   * null = explicitly cleared, so a client's shallow merge drops a stale value. */
+  description?: string | null;
   unread: boolean;
   /** The newest message on screen the last time the person read this
    * conversation. The New divider goes after it. */
@@ -973,6 +926,7 @@ export type ServerFrame =
   | { kind: "bot"; bot: WireBot }
   | { kind: "group"; group: WireGroup }
   | { kind: "notify"; notification: NotificationLogEntry }
+  | { kind: "notifications.read"; threadId: string; ids: string[] }
   | { kind: "group.deleted"; groupId: string }
   | { kind: "routine"; routine: Routine }
   | { kind: "routine.deleted"; routineId: string }
@@ -995,6 +949,8 @@ export type ServerFrame =
   /** A bot's data sheet changed. Whole sheet each time. */
   | DataBroadcast
   | { kind: "bot.deleted"; botId: string }
+  /** The whole fleet in its new order (PUT /api/bots/order); a member is sent only the bots they see. */
+  | { kind: "bots.order"; botIds: string[] }
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

@@ -8,6 +8,8 @@ import { ChatToolSessionError, mountChatTools, type ChatToolSession } from "./ch
 import type { ToolScope } from "../../shared/tool-scope.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import { whopLikeCatalog } from "../testing/whop-like-catalog.ts";
+import { wideSchema } from "../testing/oversized-tool-schema.ts";
+import { schemaBytes, toolSchemaProfile } from "../tool-schema-profile.ts";
 
 const killProbe = vi.hoisted(() => ({ override: false, stopped: false, budgets: [] as number[] }));
 vi.mock("../procs.ts", async (importOriginal) => {
@@ -188,6 +190,24 @@ describe("Chat MCP session", () => {
     await session.execute(name, { url: "https://example.com" }, f.controller.signal);
     const calls = f.read().calls.filter((call) => call.method === "tools/call").map((call) => call.params?.arguments);
     expect(calls).toEqual([dropped ? {} : { url: " " }, { url: "https://example.com" }]);
+  });
+
+  it("shows a model behind Moonshot each schema fitted to its limit, and still checks calls against the full one", async () => {
+    const full = wideSchema(110);
+    const f = fixture("", full);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const plain = await f.mount();
+      expect(plain.definitions[0]!.function.parameters).toEqual(full);
+      const session = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, undefined, toolSchemaProfile("moonshot"));
+      sessions.push(session);
+      const [definition] = session.definitions;
+      expect(schemaBytes(definition!.function.parameters)).toBeLessThanOrEqual(12_000);
+      expect(definition!.function.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
+      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^chat-mcp: audit: kept only the top-level fields of tool "write"'s parameters/));
+      expect(() => session.validate("audit_write", { field_000: { label: 5 } })).toThrow("input schema");
+      expect(() => session.validate("audit_write", { field_000: { label: "five" } })).not.toThrow();
+    } finally { warn.mockRestore(); }
   });
 
   it("starts servers with the widened PATH rather than the bare one the desktop shell inherits", async () => {
@@ -713,6 +733,20 @@ describe("Chat MCP schema validation", () => {
     expect(() => session.validate("audit_write", { owner: 1, repo: "hello" })).toThrow("input schema");
   });
 
+  it("accepts Google MCP's x-google-enum-descriptions annotation and still enforces the enum", async () => {
+    const toolSchema = {
+      type: "object",
+      properties: {
+        value: { type: "string", enum: ["METRIC", "IMPERIAL"], "x-google-enum-descriptions": ["Metric units.", "Imperial units."] },
+      },
+      required: ["value"],
+    };
+    const f = fixture("", toolSchema);
+    const session = await f.mount();
+    expect(() => session.validate("audit_write", { value: "METRIC" })).not.toThrow();
+    expect(() => session.validate("audit_write", { value: "KELVIN" })).toThrow("input schema");
+  });
+
   it.each([
     ["email", "user@example.com", "invalid"],
     ["uri", "https://example.com/path", "not a uri"],
@@ -729,6 +763,7 @@ describe("Chat MCP schema validation", () => {
     { type: "object", properties: {value:{$ref:"https://example.invalid/private-schema"}} },
     { type: "object", properties: {value:{type:"string",unrecognizedAssertion: true}} },
     { type: "object", properties: {value:{type:"string","x-mcp-header": 5}} },
+    { type: "object", properties: {value:{type:"string","x-google-enum-descriptions": "not a list"}} },
   ])("refuses schemas it cannot validate instead of silently weakening them %#", async (toolSchema) => {
     const f = fixture("", toolSchema);
     await expectSkipped(f, /schema could not be validated/);

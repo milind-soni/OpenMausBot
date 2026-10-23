@@ -5,7 +5,9 @@ import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { harnessMcpTokenEnv } from "../harness-mcp-token.ts";
 import { appMountFor, gateServer, mcpStdioServer, type AppMount } from "../mcp-gate-config.ts";
 import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH } from "../routes/own-mcp-http-path.ts";
+import { TOOL_SCHEMA_PROFILE_ENV, toolSchemaProfileFor, type ToolSchemaProfileId } from "../tool-schema-profile.ts";
 import { AGENTS_MCP_ENV } from "./agents-mcp-env.ts";
+import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 
 export interface TurnStdioMcpServer {
   name: string;
@@ -15,8 +17,10 @@ export interface TurnStdioMcpServer {
 }
 
 /** URL servers always go through OpenMausBot's remote proxy: agents' own MCP clients add capability
- * fields strict servers refuse. */
-export function turnStdioMcpServers(turn: SendTurnInput): TurnStdioMcpServer[] {
+ * fields strict servers refuse. Under a schema profile OpenMausBot fits every tool list: its own proxies and gates read
+ * the profile, and the person's stdio servers go through a gate. */
+export function turnStdioMcpServers(turn: SendTurnInput, options: { schemaProfile?: ToolSchemaProfileId } = {}): TurnStdioMcpServer[] {
+  const { schemaProfile } = options;
   const servers: TurnStdioMcpServer[] = [];
   const observedCommands = new Map<string, AppMount>();
   const add = (name: string, server: { command: string; args: string[]; env?: Record<string, string> } | undefined) => {
@@ -24,6 +28,7 @@ export function turnStdioMcpServers(turn: SendTurnInput): TurnStdioMcpServer[] {
   };
   add("agents", turn.integrations?.agents);
   add("composio", turn.integrations?.composio);
+  add(OWN_APPS_SERVER, turn.integrations?.composioOwn);
   add("browser", turn.integrations?.browser);
   add("data", turn.integrations?.data);
   add("highlevel", turn.integrations?.highlevel);
@@ -35,18 +40,21 @@ export function turnStdioMcpServers(turn: SendTurnInput): TurnStdioMcpServer[] {
     const apps = appMountFor(name, turn);
     if (apps && !("url" in server)) observedCommands.set(name, apps);
     const stdio = "url" in server ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(apps ? { apps } : {}) })
-      : apps && turn.toolScope === undefined ? gateServer({ name, server, threadId: turn.threadId, budget: 0, apps, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } })
+      : (apps || schemaProfile) && turn.toolScope === undefined
+        ? gateServer({ name, server, threadId: turn.threadId, budget: 0, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(apps ? { apps } : {}), schemaProfile })
       : server;
     if (!stdio) continue;
     servers.push({ name, command: stdio.command, args: stdio.args ?? [], env: stdio.env ?? {} });
   }
-  if (turn.toolScope === undefined) return servers;
+  const profiled = (server: TurnStdioMcpServer) =>
+    schemaProfile ? { ...server, env: { ...server.env, [TOOL_SCHEMA_PROFILE_ENV]: schemaProfile } } : server;
+  if (turn.toolScope === undefined) return servers.map(profiled);
   return servers.filter((server) => canUseMcpServer(turn.toolScope, server.name)).map((server) => {
     const apps = observedCommands.get(server.name);
     const gated = gateServer({ name: server.name, server: { command: server.command, args: server.args, env: server.env },
-      threadId: turn.threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(apps ? { apps } : {}) });
+      threadId: turn.threadId, budget: 0, toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(apps ? { apps } : {}), schemaProfile });
     if (!gated) throw new Error("Tool selection requires an MCP gate.");
-    return { name: server.name, command: gated.command, args: gated.args, env: gated.env };
+    return profiled({ name: server.name, command: gated.command, args: gated.args, env: gated.env });
   });
 }
 
@@ -76,9 +84,11 @@ export function ownMcpOverHttp(server: TurnStdioMcpServer): { url: string; heade
 }
 
 /** The turn's MCP servers as ACP session/new takes them. stdio is the baseline every ACP agent supports; an agent that
- * reaches servers by URL (`http`) gets OpenMausBot's own as endpoints of this server instead of a proxy process each. */
-export function acpMcpServers(turn: SendTurnInput, options: { http?: boolean } = {}): AcpMcpServer[] {
-  return turnStdioMcpServers(turn).map((server) => {
+ * reaches servers by URL (`http`) gets OpenMausBot's own as endpoints of this server instead of a proxy process each.
+ * `engine` is the driver kind, whose provider may limit each tool's schema. */
+export function acpMcpServers(turn: SendTurnInput, options: { http?: boolean; engine?: string } = {}): AcpMcpServer[] {
+  const schemaProfile = toolSchemaProfileFor({ engine: options.engine })?.id;
+  return turnStdioMcpServers(turn, { schemaProfile }).map((server) => {
     const own = options.http ? ownMcpOverHttp(server) : null;
     const pairs = (record: Record<string, string>) => Object.entries(record).map(([name, value]) => ({ name, value: String(value) }));
     return own ? { type: "http", name: server.name, url: own.url, headers: pairs(own.headers) } : { ...server, env: pairs(server.env) };

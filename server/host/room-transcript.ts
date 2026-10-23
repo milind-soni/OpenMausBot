@@ -3,7 +3,7 @@ import { digestPromptLine } from "../digest.ts";
 import { escapeNotes, peerProvenanceNote, webhookPostNote } from "../peer-provenance.ts";
 import { peerName } from "../peer-roster.ts";
 import { roomReactionNote } from "../reactions.ts";
-import { transcriptText } from "../replies.ts";
+import { speakerOf, transcriptText, type PersonName } from "../replies.ts";
 import { roomTurnNarrationIds } from "../room-reply.ts";
 import type { Message, Store } from "../store.ts";
 
@@ -33,7 +33,7 @@ export interface RoomTranscriptDeps {
 export function createRoomTranscript({ store, teammateReportContext }: RoomTranscriptDeps) {
   function window(
     threadId: string,
-    userName: string,
+    userName: PersonName,
     textOverrides?: ReadonlyArray<{ messageId: string; text: string }>,
     readerBotId?: string,
   ): RoomWindow {
@@ -54,7 +54,7 @@ export function createRoomTranscript({ store, teammateReportContext }: RoomTrans
         }
         const overridden = overrides.get(m.id);
         const rendered = overridden !== undefined ? { ...m, text: overridden } : m;
-        const person = m.sender?.name ?? userName;
+        const person = speakerOf(userName, m);
         const speaker = m.role === "user"
           ? m.via === "api" ? `${person} (sent through the local API, not typed)` : person
           : m.from ? peerName(m.from.name) : "Bot";

@@ -1,6 +1,6 @@
 // The e2e half runs the fake ACP CLI in echo-gated mode: turns stay open until a gate file exists, and the echo carries the full prompt.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { saveChatFollowup } from "./message-db.ts";
+import { killCliTree } from "./procs.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -26,11 +27,11 @@ import {
   type SteerStore,
 } from "./steer-queue.ts";
 import type { BotRecord, Message } from "./store.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
+import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
-const BASE = `http://127.0.0.1:${PORT}`;
 
 function fakeBot(id: string, threadId: string, busy: boolean): BotRecord {
   return {
@@ -675,6 +676,7 @@ describe("steer-queue module", () => {
 describe("steer-queue e2e (fake ACP fleet)", () => {
   let child: ChildProcess;
   let home: string;
+  let base = "";
   let stderr = "";
   let drainGate: string;
   let stopGate: string;
@@ -696,7 +698,7 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
   >;
 
   const api = async (method: string, path: string, body?: ApiBody): Promise<{ status: number; body: any }> => {
-    const res = await fetch(`${BASE}${path}`, {
+    const res = await fetch(`${base}${path}`, {
       method,
       headers: body ? { "content-type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
@@ -823,10 +825,12 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
       }),
     );
 
+    const port = await freePortBlock([0, 1]);
+    base = `http://127.0.0.1:${port}`;
     const env: NodeJS.ProcessEnv = {
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(PORT),
+      OMB_PORT: String(port),
     };
     if (process.env.PATH) env.PATH = process.env.PATH;
     // Without SystemRoot, winsock fails to initialize in the child.
@@ -841,7 +845,7 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
     const deadline = Date.now() + 20_000;
     for (;;) {
       try {
-        const res = await fetch(`${BASE}/api/health`);
+        const res = await fetch(`${base}/api/health`);
         if (res.ok) break;
       } catch {
       }
@@ -852,15 +856,12 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
   }, 30_000);
 
   afterAll(async () => {
-    child?.kill("SIGTERM");
-    await new Promise<void>((resolve) => {
-      if (!child || child.exitCode !== null) return resolve();
-      child.on("close", () => resolve());
-      setTimeout(() => (child.kill("SIGKILL"), resolve()), 5_000).unref?.();
-    });
-    writeFileSync(evidencePath, JSON.stringify({ url: BASE, fixtureHome: home, requests: evidence, stderr }, null, 2));
+    // Windows' SIGTERM ends only the server, so its engines would keep their working folders in the home open:
+    // the whole tree goes, and is gone, before the home is deleted.
+    if (child) await killCliTree(child, 15_000);
+    writeFileSync(evidencePath, JSON.stringify({ url: base, fixtureHome: home, requests: evidence, stderr }, null, 2));
     console.info(JSON.stringify({ evidencePath }));
-    rmSync(home, { recursive: true, force: true });
+    if (home) await removeTempDir(home);
   });
 
   it("drains exactly once after completion precedes the dispatch acknowledgment", async () => {

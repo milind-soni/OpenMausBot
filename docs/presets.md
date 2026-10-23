@@ -62,9 +62,9 @@ bot** under the Starting role list (no confirmation step).
 
 Two ways, both saving the same file format ([team-sharing.md](team-sharing.md)):
 
-- **With a team.** In **Share team…**, tick **Include my New bot defaults as
+- **With a department.** In **Share department…**, tick **Include my New bot defaults as
   a preset**. It is off unless you tick it: your New bot defaults are yours
-  until you share them. The team's **Include starter notes** box also decides
+  until you share them. The department's **Include starter notes** box also decides
   whether the preset's notes go in.
 - **On their own.** **Settings → General → Defaults for new bots → Share as
   preset…** saves a preset file: the preset and its skills, no team, no bots.

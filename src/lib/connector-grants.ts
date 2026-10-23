@@ -78,12 +78,16 @@ export function withServiceGrant(
   current: unknown,
   slug: string,
   next: { tools: "*" | string[] } | null,
+  knownSlugs: readonly string[] = [],
 ): Record<string, ConnectorToolGrant> | undefined {
   if (current !== undefined && current !== null && !isConnectorToolsRecordShape(current)) return undefined;
   const record: Record<string, ConnectorToolGrant> =
     current && typeof current === "object" && !Array.isArray(current)
       ? { ...(current as Record<string, ConnectorToolGrant>) }
-      : {};
+      // No record means every connected app keeps every tool. Seed that "all"
+      // for the apps we know about, so restricting one app leaves the others
+      // alone instead of silently emptying them.
+      : Object.fromEntries(knownSlugs.map((known) => [known, { tools: "*" as const }]));
   if (next === null) delete record[slug];
   else record[slug] = { tools: next.tools };
   return record;

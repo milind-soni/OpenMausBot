@@ -307,7 +307,7 @@
     },
     {
       "name": "send_voice_note",
-      "description": "Send the user a voice note: a short spoken message synthesized with your configured voice, stored as audio, and attached to your reply when the turn ends. Write the note as speakable words, exactly as it should be said — no lists, links or markdown meant for screens. The same text becomes the note's visible caption and transcript, so the person can read or listen. Use it for warmth, tone or emphasis a written line cannot carry; use ordinary text otherwise.",
+      "description": "Send the user a voice note: a short spoken message synthesized with your configured voice, stored as audio, and attached to your reply when the turn ends. Write the note as speakable words, exactly as it should be said — no lists, links or markdown meant for screens. The words are kept as the note's transcript, which the person can open to read instead of listening; they are not repeated in your reply, so do not write them out again. Use it for warmth, tone or emphasis a written line cannot carry; use ordinary text otherwise.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

@@ -1,6 +1,6 @@
-# Teams and shared instructions
+# Departments and shared instructions
 
-A team is a named membership group. It can be empty. Group chats are
+A department (the sidebar's bot group; `section` in the data and API) is a named membership group. It can be empty. Group chats are
 conversations, and Templates is the catalog that creates new teams and bots.
 The sidebar and Team map use the same persisted team list. Existing bot and
 group-chat labels migrate automatically; clearing a team's shared instructions
@@ -32,7 +32,7 @@ conversations readable and persists their task migrations, logs a diagnostic,
 and leaves the malformed file byte-for-byte unchanged. Later team and shared
 instruction writes still fail closed until that file is repaired.
 
-The renderer test uses `control-omb ui launch`, opens **Create team**, and checks
+The renderer test uses `control-omb ui launch`, opens **Create department**, and checks
 that renaming preserves the sidebar's collapsed state and ordering. It moves
 two bots through Team map, edits membership, and creates a bot directly in the
 team. Dismissing that pending creation must retain unsaved membership edits and

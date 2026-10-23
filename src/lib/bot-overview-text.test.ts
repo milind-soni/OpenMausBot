@@ -28,8 +28,8 @@ describe("the server's other overview lines", () => {
   const lines = [
     "Can use 2 connected apps: gmail, googlecalendar.",
     "Can use 1 connected app: gmail.",
-    "Coordinates its section as Chief of Staff.",
-    "May also coordinate these teams: General, Research.",
+    "Coordinates its department as Chief of Staff.",
+    "May also coordinate these departments: General, Research.",
     "Connected apps could not be checked.",
     "Works in /Users/me/project.",
     "Command approvals follow the provider's custom configuration.",
@@ -45,12 +45,12 @@ describe("the server's other overview lines", () => {
     expect(recentChangeText("soul: 120 → 340 bytes")).toBe("soul: 120 → 340 bytes");
   });
 
-  it("are worded in pt-BR, the app names, folders, quotes and team names kept as data", () => {
+  it("are worded in pt-BR, the app names, folders, quotes and department names kept as data", () => {
     setLocale("pt-br");
     expect(lines.map((line) => overviewLineText(line))).toEqual([
       "Pode usar 2 apps conectados: gmail, googlecalendar.",
       "Pode usar 1 app conectado: gmail.",
-      "Coordena a seção como Chefe de gabinete.",
+      "Coordena a equipe como Chefe de gabinete.",
       "Também pode coordenar estas equipes: General, Research.",
       "Não foi possível verificar os apps conectados.",
       "Trabalha em /Users/me/project.",
@@ -68,13 +68,48 @@ describe("the server's other overview lines", () => {
   });
 });
 
-describe("team names in the overview", () => {
-  it("stay as data, and only the unnamed section the server marks is labelled", () => {
+describe("department names in the overview", () => {
+  it("stay as data, and only the unnamed department the server marks is labelled", () => {
     setLocale("pt-br");
-    expect(overviewLineText("May also coordinate these teams: General.", ["General"])).toBe("Também pode coordenar estas equipes: General.");
-    expect(overviewLineText("May also coordinate these teams: Research, General.", ["Research, General"])).toBe("Também pode coordenar estas equipes: Research, General.");
-    expect(overviewLineText("May also coordinate these teams: General, Research.", ["", "Research"])).toBe("Também pode coordenar estas equipes: Geral, Research.");
-    expect(overviewLineText("May also coordinate these teams: General, Research.")).toBe("Também pode coordenar estas equipes: General, Research.");
+    expect(overviewLineText("May also coordinate these departments: General.", ["General"])).toBe("Também pode coordenar estas equipes: General.");
+    expect(overviewLineText("May also coordinate these departments: Research, General.", ["Research, General"])).toBe("Também pode coordenar estas equipes: Research, General.");
+    expect(overviewLineText("May also coordinate these departments: General, Research.", ["", "Research"])).toBe("Também pode coordenar estas equipes: Geral, Research.");
+    expect(overviewLineText("May also coordinate these departments: General, Research.")).toBe("Também pode coordenar estas equipes: General, Research.");
+  });
+});
+
+describe("coordination lines from a server of any version", () => {
+  const LINES: Array<[older: string, newer: string, ptBr: string]> = [
+    ["Can talk to 1 other bot in its section.", "Can talk to 1 other bot in its department.", "Pode falar com 1 outro bot da equipe."],
+    ["Can talk to 4 other bots in its section.", "Can talk to 4 other bots in its department.", "Pode falar com 4 outros bots da equipe."],
+    ["Can talk to 1 other bot in its allowed teams.", "Can talk to 1 other bot in its allowed departments.", "Pode falar com 1 outro bot nas equipes permitidas."],
+    ["Can talk to 3 other bots in its allowed teams.", "Can talk to 3 other bots in its allowed departments.", "Pode falar com 3 outros bots nas equipes permitidas."],
+    ["Coordinates its section as Chief of Staff.", "Coordinates its department as Chief of Staff.", "Coordena a equipe como Chefe de gabinete."],
+    ["May also coordinate these teams: General, Research.", "May also coordinate these departments: General, Research.", "Também pode coordenar estas equipes: General, Research."],
+  ];
+
+  it("word an older server's line and a newer one's the same in pt-BR, singular and plural", () => {
+    setLocale("pt-br");
+    for (const [older, newer, ptBr] of LINES) {
+      expect(overviewLineText(older), older).toBe(ptBr);
+      expect(overviewLineText(newer), newer).toBe(ptBr);
+    }
+  });
+
+  it("label the unnamed department when the server sends managedSections, and keep its names as data when it does not", () => {
+    setLocale("pt-br");
+    for (const line of ["May also coordinate these teams: General, Research.", "May also coordinate these departments: General, Research."]) {
+      expect(overviewLineText(line, ["", "Research"]), line).toBe("Também pode coordenar estas equipes: Geral, Research.");
+      expect(overviewLineText(line), line).toBe("Também pode coordenar estas equipes: General, Research.");
+    }
+  });
+
+  it("read in English byte for byte as the server sent them, with or without managedSections", () => {
+    setLocale("en");
+    for (const line of LINES.flatMap(([older, newer]) => [older, newer])) {
+      expect(overviewLineText(line), line).toBe(line);
+      expect(overviewLineText(line, ["", "Research"]), line).toBe(line);
+    }
   });
 });
 

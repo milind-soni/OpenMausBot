@@ -1,5 +1,6 @@
 // Wire shapes of the usage trace view, shared by the server's builder and the renderer.
 import { TOOL_NAMESPACE, toolSurfaceKind } from "./tool-surface.ts";
+import { isConnectedAppsServer, OWN_APPS_SERVER } from "./own-apps.ts";
 
 /** Who or what started a root. */
 export type TraceSource = "person" | "owner" | "routine" | "bot" | "helper";
@@ -149,7 +150,7 @@ export function traceRootId(threadId: string, turnId: string): string {
 }
 
 const SERVER_ICONS: Readonly<Record<string, TraceToolIcon>> = { phone: "phone", data: "data", dweb: "web", browser: "browser", computer: "computer" };
-const OWN_SERVERS = new Set(["agents", "ogb", "composio", ...Object.keys(SERVER_ICONS)]);
+const OWN_SERVERS = new Set(["agents", "ogb", "composio", OWN_APPS_SERVER, ...Object.keys(SERVER_ICONS)]);
 const COMPOSIO_ACTION = /^([A-Z][A-Z0-9]+)_[A-Z0-9_]+$/;
 const BUILT_IN_ICONS: ReadonlyArray<[RegExp, TraceToolIcon]> = [
   [/^(?:websearch|web_search|search_web|google_search|x_search|research)$/, "search"],
@@ -173,7 +174,7 @@ export function traceToolLook(name: string): { icon: TraceToolIcon; app?: string
   const bare = name.replace(TOOL_NAMESPACE, "");
   const composio = COMPOSIO_ACTION.exec(bare);
   if (composio && composio[1] !== "COMPOSIO") return { icon: "app", app: composio[1]!.toLowerCase() };
-  if (server === "composio" || composio) return { icon: "app" };
+  if ((server && isConnectedAppsServer(server)) || composio) return { icon: "app" };
   const surface = toolSurfaceKind(name);
   if (surface) return { icon: surface };
   const lower = bare.toLowerCase();

@@ -184,8 +184,8 @@ function preload({ remote = false, activation = false } = {}) {
   return { bridge, invoked };
 }
 
-test("the bridge: either page gets only the move's line; its Try again, and moving a bot into a team, go only from the person's click on My Cloud's page", async () => {
-  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "moveToTeamCoded", "teamRetry", "openTeam", "onNotice"];
+test("the bridge: either page gets only the move's line and the switch that keeps this computer's bots here; its Try again, moving a bot into a team, and turning that switch go only from the person's click on My Cloud's page", async () => {
+  const keys = ["notice", "dismiss", "moveRetry", "teams", "moveToTeam", "moveToTeamCoded", "teamRetry", "openTeam", "keepHere", "setKeepHere", "onNotice"];
   const local = preload();
   assert.equal(local.bridge.cloudSend, undefined);
   assert.equal(local.bridge.cloudLogins, undefined);
@@ -198,7 +198,10 @@ test("the bridge: either page gets only the move's line; its Try again, and movi
   await assert.rejects(page.bridge.cloudSendPage.moveToTeam("scout", "team-acme", "Scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.moveToTeamCoded("scout", "team-acme", "Scout"), /Choose Move/);
   await assert.rejects(page.bridge.cloudSendPage.teamRetry(), /Try again/);
-  assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-send")), []);
+  await assert.rejects(page.bridge.cloudSendPage.setKeepHere(true), /Turn the switch/);
+  await page.bridge.cloudSendPage.keepHere();
+  assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-send") || channel === "one-home:keep-set"), []);
+  assert.deepEqual(page.invoked, [["one-home:keep"]], "reading the switch needs no click");
   const clicked = preload({ remote: true, activation: true });
   await clicked.bridge.cloudSendPage.moveRetry();
   await clicked.bridge.cloudSendPage.dismiss({ toString: () => "one-home" });
@@ -207,8 +210,11 @@ test("the bridge: either page gets only the move's line; its Try again, and movi
   await clicked.bridge.cloudSendPage.teamRetry();
   await clicked.bridge.cloudSendPage.teams();
   await clicked.bridge.cloudSendPage.openTeam("team-acme");
-  assert.deepEqual(JSON.parse(JSON.stringify(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-send")))), [["cloud-send:move-retry"], ["cloud-send:dismiss", "one-home"],
-    ["cloud-send:team-move", "scout", "team-acme", "Scout"], ["cloud-send:team-move-coded", "scout", "team-acme", "Scout"], ["cloud-send:team-retry"], ["cloud-send:teams"], ["cloud-send:team-open", "team-acme"]]);
+  await clicked.bridge.cloudSendPage.setKeepHere("yes");
+  assert.deepEqual(JSON.parse(JSON.stringify(clicked.invoked.filter(([channel]) => channel.startsWith("cloud-send") || channel.startsWith("one-home")))), [["cloud-send:move-retry"], ["cloud-send:dismiss", "one-home"],
+    ["cloud-send:team-move", "scout", "team-acme", "Scout"], ["cloud-send:team-move-coded", "scout", "team-acme", "Scout"], ["cloud-send:team-retry"], ["cloud-send:teams"], ["cloud-send:team-open", "team-acme"], ["one-home:keep-set", false]]);
+  await local.bridge.cloudSendPage.setKeepHere(true);
+  assert.deepEqual(local.invoked, [["one-home:keep-set", true]], "this computer's own page needs no click check: main checks the sender");
 });
 
 test("replacing a skill whose text changed here puts My Cloud's copy back when the new one is refused", async () => {
@@ -520,6 +526,37 @@ test("a room's chats go with the room, whatever bots My Cloud has, and never as 
   assert.deepEqual(posted.flat().map((entry) => entry.threadId), ["t-a", "t-room"]);
   const sent = bodies.flat().find((entry) => entry.threadId === "t-room");
   assert.deepEqual({ room: sent.room, roomInfo: sent.roomInfo, bot: sent.bot, task: sent.task.title }, { room: "r-launch", roomInfo: room, bot: undefined, task: "Plan" });
+});
+
+test("a room nobody wrote in yet goes once as its thread with no rows, so My Cloud makes it; one with no bot never goes", async () => {
+  let answer = "waiting";
+  const { sides, posted } = chatSides({ threads: { "t-a": 1 }, answer: (entry) => entry.threadId === "t-quiet" ? answer : "accepted" });
+  const local = sides.deps.local;
+  const room = { name: "Quiet", memberIds: ["ember"], bulletin: "" };
+  const asked = [];
+  sides.deps.local = async (route) => {
+    if (route === "/api/cloud-send/chats") return new Response(JSON.stringify({ v: 1, dataDir: "/desk/.openmausbot", conversations: [{ bot: "ember", threadId: "t-a", last: 1, lastId: "t-a-1", busy: false }],
+      rooms: [{ room: "r-quiet", threadId: "t-quiet", members: ["ember"] }, { room: "r-lonely", threadId: "t-lonely", members: [] }] }), { status: 200 });
+    if (route.startsWith("/api/cloud-send/chats/rows?thread=t-quiet&")) {
+      asked.push(route);
+      return new Response(JSON.stringify({ room: "r-quiet", roomInfo: room, task: { threadId: "t-quiet", title: "Untitled", createdAt: 1 }, rows: [], leaf: null, last: 0, lastId: null,
+        more: false, restarted: false, attachments: [] }), { status: 200 });
+    }
+    return local(route);
+  };
+  const store = stored();
+  const send = createCloudSend({ ...sides.deps, store });
+  await send.send();
+  assert.deepEqual(posted.flat().filter((entry) => entry.threadId !== "t-a"), [{ threadId: "t-quiet", rows: [], sent: false }], "the room with a bot goes; the other never does");
+  assert.equal(store.value.clouds[CLOUD].chats["t-quiet"], undefined, "My Cloud did not make it yet: it goes again");
+  answer = "accepted";
+  await send.send();
+  assert.deepEqual(posted.at(-1), [{ threadId: "t-quiet", rows: [], sent: false }]);
+  assert.deepEqual(store.value.clouds[CLOUD].chats["t-quiet"], { after: 0, id: "" });
+  const before = posted.length;
+  await send.send();
+  assert.equal(posted.length, before, "made there once: never sent again");
+  assert.equal(asked.length, 2);
 });
 
 test("nothing answering on the way to My Cloud is told from a refusal", () => {

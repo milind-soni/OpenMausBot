@@ -98,6 +98,8 @@ export interface CloudSendAccount {
   state: Record<string, any>;
   exportHome(options?: { installation?: string }): Promise<any>;
   reportMove?(options: { installation: string }): Promise<boolean>;
+  /** The Admin taking a computer's word that it keeps its bots on itself again, when a test sets it. */
+  reportKept?(options: { installation: string }): Promise<boolean>;
   pairTeam(teamId: string): Promise<{ origin: string; code: string; expiresAt: number }>;
 }
 
@@ -382,7 +384,8 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     engineWaitMs: 2_000,
     ...(space ? { space } : {}),
     account: () => ({ state: () => account.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: (options) => account.exportHome(options),
-      reportMove: async (options) => (account.reportMove ? account.reportMove(options) : false), pairTeam: (teamId: string) => account.pairTeam(teamId) }),
+      reportMove: async (options) => (account.reportMove ? account.reportMove(options) : false), reportKept: async (options) => (account.reportKept ? account.reportKept(options) : false),
+      pairTeam: (teamId: string) => account.pairTeam(teamId) }),
     teamJournal: {
       read: () => { try { return JSON.parse(readFileSync(teamJournalFile, "utf8")); } catch { return null; } },
       write: (value: unknown) => { fixture.beforeTeamJournalWrite?.(value); writeFileSync(`${teamJournalFile}.tmp`, JSON.stringify(value ?? null)); renameSync(`${teamJournalFile}.tmp`, teamJournalFile); },
@@ -436,7 +439,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     };
     const ready = async () => { for (let tries = 0; (await deskLocal("GET", "/api/bots")).status !== 200 && tries < 50; tries++) await new Promise((resolve) => setTimeout(resolve, 100)); };
     await ready();
-    const journalFile = join(root, `${name}-one-home.json`);
+    const journalFile = join(root, `${name}-one-home.json`), keepFile = join(root, `${name}-one-home-keep.json`);
     const deskAccount: CloudSendDesk["account"] = { state: structuredClone(account.state), exportHome: async () => ({ notHeld: true }),
       pairTeam: async () => { throw Object.assign(new Error("You're no longer in this team."), { gone: true }); } };
     const teamJournal = join(root, `${name}-team-moves.json`);
@@ -458,12 +461,17 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       fetch: throughEdge(null) as typeof fetch,
       engineWaitMs: 2_000,
       account: () => ({ state: () => deskAccount.state, pairHome: async () => ({ origin: cloudBase, code: await mintCode("OpenMausBot app (Cloud)"), expiresAt: Date.now() + 300_000 }), exportHome: (options) => deskAccount.exportHome(options),
-        reportMove: async (options) => (deskAccount.reportMove ? deskAccount.reportMove(options) : false), pairTeam: (teamId: string) => deskAccount.pairTeam(teamId) }),
+        reportMove: async (options) => (deskAccount.reportMove ? deskAccount.reportMove(options) : false), reportKept: async (options) => (deskAccount.reportKept ? deskAccount.reportKept(options) : false),
+        pairTeam: (teamId: string) => deskAccount.pairTeam(teamId) }),
       teamJournal: {
         read: () => { try { return JSON.parse(readFileSync(teamJournal, "utf8")); } catch { return null; } },
         write: (value: unknown) => { writeFileSync(`${teamJournal}.tmp`, JSON.stringify(value ?? null)); renameSync(`${teamJournal}.tmp`, teamJournal); },
       },
       journalFile: () => journalFile,
+      keep: {
+        read: () => { try { return JSON.parse(readFileSync(keepFile, "utf8")); } catch { return null; } },
+        write: (value: unknown) => { writeFileSync(`${keepFile}.tmp`, JSON.stringify(value ?? null)); renameSync(`${keepFile}.tmp`, keepFile); },
+      },
       tempRoot: () => join(root, `${name}-one-home-temp`),
       lend: async (projects) => { spies.lent.push(projects); },
       phone: { paired: () => true, stop: async () => { spies.phoneStops++; }, start: async () => { spies.phoneStarts++; } },

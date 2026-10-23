@@ -494,6 +494,14 @@ it("boots as a Team Cloud with the Admin's team id and name, and refuses a team 
   expect(() => cloudHomeConfiguration(contract({ OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: "t", OMB_CLOUD_TEAM_NAME: "x".repeat(81) }))).toThrow(/OMB_CLOUD_TEAM_NAME/);
 });
 
+it("a Team Cloud takes the team's default language from the Admin, and boots in its own default when it is missing or unknown", () => {
+  const team = (language?: string) => cloudHomeConfiguration(contract({ OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: "team-7f3a", OMB_CLOUD_TEAM_NAME: "Acme", ...(language === undefined ? {} : { OMB_CLOUD_TEAM_LANGUAGE: language }) }))!.team;
+  expect(team("de")).toEqual({ id: "team-7f3a", name: "Acme", language: "de" });
+  expect(team(" PT-BR ")).toMatchObject({ language: "pt-br" });
+  expect(team()).toEqual({ id: "team-7f3a", name: "Acme" });
+  for (const value of ["", "not a language", "../x", "e"]) expect(team(value)).toEqual({ id: "team-7f3a", name: "Acme" });
+});
+
 it("a Team Cloud's pairing binds the Admin's member claim to the session it opens: role to scopes, address to the person", () => {
   const root = directory();
   let now = 1_800_000_000_000;

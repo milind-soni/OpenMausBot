@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CircleAlert, X } from "lucide-react";
 import { useStore, type Message } from "@/state/store";
-import { openExternalLink } from "@/lib/app-links";
+import { usePageOpener } from "@/lib/page-open";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { resolvedThreadTarget } from "@/lib/thread-target";
 import { openThread } from "@/state/thread-navigation";
@@ -51,6 +51,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
   const root = payload.root;
   const { state, dispatch, flushBotPatches } = useStore();
   const showThreads = useShowThreads();
+  const openPage = usePageOpener();
   const [settledHere, setSettledHere] = useState<WidgetSettled>();
   /**
    * Once the row has spoken since this card's last press, only the row decides, whichever of the patch frame and the
@@ -116,7 +117,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
     if (!entry || sendingNow.current || pending !== undefined) return;
     if (entry.client) {
       const url = widgetActionUrl(entry);
-      if (url) void openExternalLink(url);
+      if (url) openPage(url);
       const target = resolvedThreadTarget(widgetThreadTarget(entry), state);
       if (target) openThread(dispatch, target, state, showThreads);
       return;

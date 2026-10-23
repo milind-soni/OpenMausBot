@@ -2,7 +2,7 @@ import { Children, createElement, isValidElement, type EffectCallback, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CloudAccountState, CloudCheckoutResult } from "../../electron/cloud-account.mjs";
-import type { CloudCredit, CloudOffer, CloudTrial } from "../../electron/cloud-home.mjs";
+import type { CloudCredit, CloudOffer, CloudTeam, CloudTrial } from "../../electron/cloud-home.mjs";
 import { parseCloudOffer } from "../../electron/cloud-home.mjs";
 import { setLocale } from "@/lib/i18n";
 
@@ -39,6 +39,8 @@ const paid = (extra: Partial<CloudAccountState> = {}): CloudAccountState => ({ .
 const trial = (extra: Partial<CloudTrial> = {}): CloudTrial => ({ state: "active", tier: "pro", endsAt: NOW + 7 * DAY, amount: 4900, chargeAt: NOW + 7 * DAY, holdUntil: null, deleteAt: null, keep: "none", ...extra });
 const credit: CloudCredit = { grantedUsd: 5, remainingUsd: 5, state: "active" };
 const ready = { status: "ready" as const, origin: "https://omb-u-1.fly.dev" };
+const acme = (machine: CloudTeam["machine"] = { status: "ready", origin: "https://omb-t-2.fly.dev" }): CloudTeam => ({ id: "team-acme", name: "Acme", role: "owner", machine });
+const onTeam = (machine?: CloudTeam["machine"]): CloudAccountState => paid({ entitlement: { plan: "pro", tier: "team", status: "active", expiresAt: NOW + 30 * DAY, version: 2 }, teams: [acme(machine)] });
 
 type Node = ReactElement<Record<string, any>>;
 const nodes = (value: ReactNode): Node[] => {
@@ -52,7 +54,7 @@ const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, 
 const label = (node: Node) => text(renderToStaticMarkup(node));
 const button = (tree: Node[], name: string) => tree.find(node => node.type === "button" && (label(node) === name || label(node).startsWith(name) || node.props["aria-label"] === name));
 const actions = (): CloudAddActions => Object.fromEntries(["start", "signIn", "back", "email", "sendCode", "changeEmail", "code", "resend", "browser", "reopenBrowser",
-  "cancelSignIn", "reopenCheckout", "copyLink", "changePlan", "retry", "name", "color", "openCloud", "notNow", "interest", "close"].map(name => [name, vi.fn()])) as unknown as CloudAddActions;
+  "cancelSignIn", "reopenCheckout", "copyLink", "changePlan", "retry", "name", "color", "openCloud", "openTeam", "notNow", "interest", "close"].map(name => [name, vi.fn()])) as unknown as CloudAddActions;
 const baseUi = (extra: Partial<CloudAddUi> = {}): CloudAddUi => ({ chosen: null, current: null, offerShown: TRIAL, now: NOW, busy: false, openFailed: false, email: EMAIL, code: "", profileEmail: EMAIL,
   look: { typed: "Studio", name: "Studio", color: "teal" }, counting: null, copied: false, payFailed: false, interest: null, ...extra });
 const panel = (view: CloudAddView, extra: Partial<CloudAddUi> = {}) => {
@@ -298,6 +300,21 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     for (const word of ["error", "Error", "already have"]) expect(text(html)).not.toContain(word);
   });
 
+  it("a Team plan's Cloud: the team's own setup steps, then ready to open under the team's name, with no name or colour to choose", () => {
+    const starting = text(panel({ kind: "team-starting", team: "Acme", step: "storage", slow: false }).html);
+    inOrder(starting, ["Setting up your team's Cloud", "About 2 minutes.", "Reserving your machine", "Preparing storage", "Starting Acme", "Checking it's ready"]);
+    expect(panel({ kind: "team-starting", team: "Acme", step: "storage", slow: false }).html).toContain('aria-valuenow="25"');
+    for (const word of ["Name it", "Pick a colour", "Open Acme", "My Cloud"]) expect(starting).not.toContain(word);
+    const unnamed = text(panel({ kind: "team-starting", team: null, step: null, slow: true }).html);
+    inOrder(unnamed, ["Reserving your machine", "Starting your team's Cloud", "This is taking longer than usual."]);
+    const { html, tree, handlers } = panel({ kind: "team-ready", team: { id: "team-acme", name: "Acme" } });
+    inOrder(text(html), ["Your team's Cloud is ready", "Acme keeps your team's bots running 24/7, even when this computer is off.", "Open Acme",
+      "Switch between This computer and Acme from the menu at the top of the sidebar."]);
+    button(tree, "Open Acme")!.props.onClick();
+    expect(handlers.openTeam).toHaveBeenCalledExactlyOnceWith("team-acme"); expect(handlers.openCloud).not.toHaveBeenCalled();
+    expect(text(panel({ kind: "team-ready", team: { id: "team-acme", name: "Acme" } }, { openFailed: true }).html)).toContain("Acme didn't open. Try again in a minute.");
+  });
+
   it("the sheet's frame: one width per screen, Close, and a Staging mark only on the staging Admin", () => {
     const sheet = (kind: CloudAddView["kind"], staging = false) => renderToStaticMarkup(createElement(CloudAddSheet, { kind, staging, onClose: vi.fn(), children: "x" }));
     expect(sheet("offer")).toContain("max-w-[900px]"); expect(sheet("starting")).toContain("max-w-[720px]"); expect(sheet("waiting")).toContain("max-w-[540px]");
@@ -315,8 +332,8 @@ describe("each screen of the sheet says one thing and offers one next step", () 
       (backdrop.props as { onMouseDown: (event: unknown) => void }).onMouseDown({ target: "sheet", currentTarget: "backdrop" });
       return onClose.mock.calls.length;
     };
-    for (const kind of ["offer", "has-cloud", "ready", "error", "unreachable", "checking"] as const) expect(outside(kind), kind).toBe(1);
-    for (const kind of ["sign-in", "signing-in", "waiting", "starting"] as const) expect(outside(kind), kind).toBe(0);
+    for (const kind of ["offer", "has-cloud", "ready", "team-ready", "error", "unreachable", "checking"] as const) expect(outside(kind), kind).toBe(1);
+    for (const kind of ["sign-in", "signing-in", "waiting", "starting", "team-starting"] as const) expect(outside(kind), kind).toBe(0);
   });
 });
 
@@ -350,7 +367,7 @@ describe("the sheet", () => {
       reopenCheckout: vi.fn(async () => ({ outcome: "opened", state: account })), copyCheckoutLink: vi.fn(async () => true), interest: vi.fn(async () => {}),
       look: vi.fn(async () => ({ name: "My Cloud", color: "blue" })), setLook: vi.fn(async (name: string, color: string) => ({ name, color })), sheet: vi.fn(async () => {}),
       readySeen: vi.fn(async () => {}),
-      connectHome: vi.fn(async () => account) };
+      connectHome: vi.fn(async () => account), openTeam: vi.fn(async () => {}) };
     vi.stubGlobal("window", { ogb: { cloudAccount: bridge }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
     vi.stubGlobal("document", { querySelector: () => null, activeElement: opener, body: {}, hasFocus: () => focused });
   });
@@ -574,6 +591,36 @@ describe("the sheet", () => {
     account = paid({ machine: ready }); focused = false;
     expect(await settle()).toContain("My Cloud is ready");
     expect(bridge.checkout).not.toHaveBeenCalled();
+  });
+
+  it("signed in here to a Team plan: the team's Cloud is ready to open, never a My Cloud being set up; Open opens the team and closes", async () => {
+    f.state = { cloudAdd: { source: "app_settings", signIn: true }, config: {} };
+    expect(await settle()).toContain("Sign in to MausBot Cloud");
+    bridge.signInVerify.mockResolvedValueOnce({ outcome: "signed-in", state: onTeam() });
+    tree().find(node => node.props.id === "cloud-add-email")!.props.onChange({ target: { value: "me@example.test" } });
+    await settle();
+    tree().find(node => node.type === "form")!.props.onSubmit({ preventDefault() {} }); await flush(); await settle();
+    tree().filter(node => node.type === "input")[0]!.props.onChange({ target: { value: "48201937" }, currentTarget: { parentElement: { querySelectorAll: () => [] } } });
+    await flush(); await flush();
+    account = onTeam();
+    const shown = await settle();
+    inOrder(shown, ["Your team's Cloud is ready", "Open Acme"]);
+    for (const word of ["Reserving your machine", "Setting up your new Cloud", "My Cloud"]) expect(shown).not.toContain(word);
+    expect(bridge.readySeen, "the purchase is over for main").toHaveBeenCalled();
+    await press("Open Acme");
+    expect(bridge.openTeam).toHaveBeenCalledExactlyOnceWith("team-acme");
+    expect(bridge.connectHome).not.toHaveBeenCalled(); expect(bridge.checkout).not.toHaveBeenCalled();
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "closeCloudAdd" });
+  });
+
+  it("a Team plan whose Cloud is still being set up shows the team's steps, then the team's Cloud once it is ready", async () => {
+    account = onTeam({ status: "provisioning", setup: { step: "starting" } });
+    inOrder(await settle(), ["Setting up your team's Cloud", "Reserving your machine", "Preparing storage", "Starting Acme"]);
+    push(onTeam());
+    expect(await settle()).toContain("Your team's Cloud is ready");
+    bridge.openTeam.mockRejectedValueOnce(new Error("Acme isn't running right now."));
+    expect(await press("Open Acme")).toContain("Acme didn't open. Try again in a minute.");
+    expect(f.dispatch).not.toHaveBeenCalledWith({ type: "closeCloudAdd" });
   });
 
   it("Settings' Sign in after a saved sign-in was removed signs in here, instead of handing back to Settings at once", async () => {

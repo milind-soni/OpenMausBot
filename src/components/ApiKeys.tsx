@@ -9,7 +9,7 @@ import type { LocaleKey } from "@/locales";
 import { SECTION_PROVIDER, type KeyResult, type KeyVia } from "@/lib/analytics-allowlist";
 import { keyRemoved, keySaved, keySaveFailure, keyTestResult, savedKeyResult } from "@/lib/product-events";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "treg";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "treg" | "deepseek";
 export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "meta" | "treg";
 
 const SECTIONS: Record<
@@ -43,6 +43,7 @@ const SECTIONS: Record<
   cerebras: { body: (v) => ({ cerebras: { key: v } }), flag: (c) => c.cerebras?.configured ?? false },
   groq: { body: (v) => ({ groq: { key: v } }), flag: (c) => c.groq?.configured ?? false },
   meta: { body: (v) => ({ meta: { key: v } }), flag: (c) => c.meta?.configured ?? false },
+  deepseek: { body: (v) => ({ deepseek: { key: v } }), flag: (c) => c.deepseek?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
   treg: { body: (v) => ({ treg: { key: v } }), flag: (c) => c.treg?.configured ?? false },
 };
@@ -59,6 +60,15 @@ const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "box
 /** The desktop shell's encrypted slot for a section, if it has one. */
 export function desktopCredentialSlot(section: ConfigSection) {
   return ELECTRON_CREDENTIAL[section];
+}
+
+/** Saves one credential where this app keeps it ("" removes it): the desktop's encrypted store when the section has a
+ * slot there, else the server's own config, which on a Cloud home stays outside every bot's box. */
+export function saveCredential(section: ConfigSection, value: string, firstKey: boolean): Promise<ConfigStatus> {
+  const electronSlot = desktopCredentialSlot(section);
+  return window.ogb?.setCredential && electronSlot
+    ? window.ogb.setCredential(electronSlot, value)
+    : api("/api/config", { method: "PUT", body: JSON.stringify(SECTIONS[section].body(value, firstKey)) });
 }
 
 const CREDENTIALS: Record<
@@ -165,6 +175,14 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.meta.desc",
     href: "https://dev.meta.ai/docs/authentication",
     linkLabelKey: "keys.meta.link",
+    optional: true,
+  },
+  deepseek: {
+    labelKey: "keys.deepseek.label",
+    placeholder: "sk-…",
+    descriptionKey: "keys.deepseek.desc",
+    href: "https://platform.deepseek.com/api_keys",
+    linkLabelKey: "keys.deepseek.link",
     optional: true,
   },
   xai: {
@@ -345,14 +363,7 @@ export function ApiKeyRow({
     setError(null);
     testGeneration.current++;
     setVerdict(null);
-    const electronSlot = desktopCredentialSlot(section);
-    const request = window.ogb?.setCredential && electronSlot
-      ? window.ogb.setCredential(electronSlot, next)
-      : api("/api/config", {
-          method: "PUT",
-          body: JSON.stringify(SECTIONS[section].body(next, !configured)),
-        });
-    request
+    saveCredential(section, next, !configured)
       .then((status: ConfigStatus) => {
         dispatch({ type: "configStatus", config: status });
         setValue("");

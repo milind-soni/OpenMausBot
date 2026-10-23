@@ -188,12 +188,15 @@ export function startCloudConnectedApps(options: CloudConnectedAppsOptions): Clo
 }
 
 let cloudHome: CloudConnectedApps | null = null;
-/** A Cloud home's plan includes the connected-apps service, so it registers itself. The built server uses OpenMausBot's
- * service; from source (development, tests) only an explicit OMB_COMPOSIO_BROKER_URL registers anywhere. */
+/** The connected-apps service a Cloud home and a Team Cloud's members register with: the built server uses OpenMausBot's;
+ * from source (development, tests) only an explicit OMB_COMPOSIO_BROKER_URL. "" for none. */
+export const cloudConnectedAppsBrokerUrl = (): string => managedComposioBrokerUrl(process.env.OMB_COMPOSIO_BROKER_URL, !import.meta.url.endsWith(".ts"));
+
+/** A Cloud home's plan includes the connected-apps service, so it registers itself. */
 export function startCloudHomeConnectedApps(input: { cloudHome: boolean; dataDir: string; apply: CloudConnectedAppsOptions["apply"]; cloudGrant?: string }): void {
   if (!input.cloudHome || cloudHome) return;
   const configured = process.env.OMB_COMPOSIO_BROKER_URL;
-  const brokerUrl = managedComposioBrokerUrl(configured, !import.meta.url.endsWith(".ts"));
+  const brokerUrl = cloudConnectedAppsBrokerUrl();
   if (!brokerUrl) {
     if (configured?.trim()) console.warn("cloud home: connected-apps service URL rejected: HTTPS or a loopback HTTP URL is required");
     return;

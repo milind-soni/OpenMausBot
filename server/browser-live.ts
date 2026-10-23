@@ -33,6 +33,8 @@ const ENDED_PROBE = { timeoutMs: 5_000, maxBytes: 65_536 };
 const RESUME_MS = 2 * 60_000;
 /** What a view hears when its browser closed unused: it stops, where reconnecting would start the browser again. */
 export const BROWSER_ASLEEP_ERROR = { type: "error", retryable: false, asleep: true, message: "This browser closed after it sat unused, to save memory. Reconnect to open it again." };
+/** What a view hears while its browser cannot show it yet; it keeps waiting. */
+export const BROWSER_WAITING = { type: "waiting", reason: "busy" };
 
 export class BrowserLiveError extends Error {
   readonly status: number;
@@ -564,7 +566,7 @@ export class BrowserLive {
       }
       viewer.waiting = true;
       this.startEvents(viewer);
-      this.send(viewer, { type: "waiting", reason: "busy" });
+      this.send(viewer, BROWSER_WAITING);
       await new Promise<void>((resolve) => {
         const done = () => { clearTimeout(timer); viewer.abort.signal.removeEventListener("abort", done); resolve(); };
         const timer = setTimeout(done, BUSY_RETRY_MS[Math.min(attempt, BUSY_RETRY_MS.length - 1)]);

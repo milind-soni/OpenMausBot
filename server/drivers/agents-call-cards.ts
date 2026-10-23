@@ -17,10 +17,11 @@ async function callAppTool(name: "show_html" | "update_html", args: Json, contex
   const updating = name === "update_html";
   const parsed = updating ? parseUpdateHtmlInput(args) : parseShowHtmlInput(args);
   if (!parsed.ok) return { text: parsed.error, isError: true };
+  const page = parsed.value.jsx !== undefined ? { jsx: args.jsx } : parsed.value.path !== undefined ? { path: args.path } : { html: args.html };
   const body = updating
-    ? { tool: name, app_id: args.app_id, html: args.html, ...(typeof args.title === "string" ? { title: args.title } : {}) }
+    ? { tool: name, app_id: args.app_id, ...page, ...(typeof args.title === "string" ? { title: args.title } : {}) }
     : {
-        tool: name, html: args.html, title: args.title,
+        tool: name, ...page, title: args.title,
         ...(typeof args.height === "number" ? { height: args.height } : {}),
         ...(typeof args.fallback_text === "string" ? { fallback_text: args.fallback_text } : {}),
       };

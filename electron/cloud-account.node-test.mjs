@@ -153,6 +153,19 @@ test("while the Cloud is set up, or a payment is being linked, progress is asked
   assert.deepEqual(state.purchase, { state: "confirming", tier: "personal", paidAt: f.now - 60_000 }); assert.equal(state.entitlement.plan, "free"); assert.equal(f.delay, 15_000);
 });
 
+test("a Team plan's Cloud is its team's: its setup is followed every 15 seconds, then the session every minute, never waiting on a My Cloud", async t => {
+  const f = await fixture(t); await f.connect();
+  f.entitlement = { plan: "pro", tier: "team", status: "active", expiresAt: f.now + 3 * 3600_000, version: 1 };
+  const team = machine => [{ id: "team-acme", name: "Acme", role: "owner", machine }];
+  f.teams = team({ state: "setting_up", origin: null, pairingAvailable: false, setup: { step: "storage" } });
+  let state = await f.client.refresh();
+  assert.deepEqual(state.teams[0].machine, { status: "provisioning", setup: { step: "storage" } }); assert.equal(f.delay, 15_000);
+  f.teams = team({ state: "ready", status: "ready", origin: "https://omb-t-2.fly.dev", pairingAvailable: true });
+  state = await f.client.refresh();
+  assert.equal(state.machine, undefined); assert.equal(f.delay, 60_000, "the team's Cloud is ready: nothing is being set up");
+  f.teams = undefined; await f.client.refresh(); assert.equal(f.delay, 15_000, "no team listed yet: its setup");
+});
+
 test("a connection that fails while the Admin says My Cloud can't be reached says why, from the Admin's latest word; otherwise the request's own error", async t => {
   const f = await fixture(t); await f.connect();
   const origin = "https://home-7f3k2.fly.dev", since = f.now - 6 * 60_000;

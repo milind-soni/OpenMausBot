@@ -6,7 +6,7 @@ import { liveCardKind } from "../shared/live-approval.ts";
 import { reactionAnswer, type Reaction, type ReactionDelivery } from "../shared/reactions.ts";
 import type { OptionCardData } from "../shared/wire.ts";
 import { peerName } from "./peer-roster.ts";
-import { replyExcerpt, type ReplyTarget } from "./replies.ts";
+import { personOf, replyExcerpt, type PersonName, type ReplyTarget } from "./replies.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { BotRecord, Message, Store } from "./store.ts";
 
@@ -48,12 +48,12 @@ export function cardReply(card: OptionCardData, answer: "yes" | "no"): CardReply
 }
 
 /** One line with no brackets or parentheses: a person's name cannot close the note or start a line of its own. */
-const reactorName = (reaction: Entry, userName: string) =>
-  peerName((reaction.by === "user" ? userName : reaction.name ?? "Someone").replace(/[()]/g, " "));
+const reactorName = (reaction: Entry, userName: PersonName) =>
+  peerName((reaction.by === "user" ? personOf(userName, {}) : reaction.name ?? "Someone").replace(/[()]/g, " "));
 const feelings = (message: Message) => (message.reactions ?? []).filter((reaction) => !reactionAnswer(reaction.emoji));
 
 /** `turnIds`: the lines this turn carries. */
-export function withReactionNotes(text: string, path: readonly Message[], turnIds: ReadonlySet<string>, userName: string): string {
+export function withReactionNotes(text: string, path: readonly Message[], turnIds: ReadonlySet<string>, userName: PersonName): string {
   const start = path.findIndex((message) => turnIds.has(message.id));
   if (start < 0) return text;
   const before = path.slice(0, start);
@@ -64,7 +64,7 @@ export function withReactionNotes(text: string, path: readonly Message[], turnId
   return notes.length ? `${notes.join("\n")}\n\n${text}` : text;
 }
 
-export function roomReactionNote(message: Message, userName: string): string {
+export function roomReactionNote(message: Message, userName: PersonName): string {
   const felt = message.role === "bot" ? feelings(message) : [];
   return felt.length ? `\n(${felt.map((reaction) => `${reactorName(reaction, userName)} reacted ${reaction.emoji}`).join(", ")})` : "";
 }

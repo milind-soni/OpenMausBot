@@ -7,13 +7,13 @@ import { profileSnapshot } from "./profile-revision.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capabilities.ts";
-import { redactSecretsInText } from "./redact.ts";
+import { redactSecretsInText } from "./redact.ts"; import { chiefLevel } from "./chief-level.ts"; import { defaultBotRefusal } from "./default-bot.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupResult, TeamSetupUndo } from "../shared/team-setup.ts";
 
 const section = (value?: string) => value?.trim() || "";
 const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials");
-const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Section", cwd: "Working folder" };
+const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Department", cwd: "Working folder" };
 const modelSelectionText = (selection: ModelSelection) =>
   `${selection.instanceId}/${selection.model}${selection.variant ? ` (variant ${selection.variant})` : " (no variant)"}${selection.effort ? ` (effort ${selection.effort})` : ""}`;
 const fieldsSchema = z.object({
@@ -100,7 +100,7 @@ export class TeamSetupRequestService {
 
   private chief(botId: string): BotRecord {
     const chief = this.options.store.bot(botId);
-    if (!chief || chief.hidden || !chief.chiefOfStaff) throw new TeamSetupError("Only an active Chief of Staff can propose team setup", 403);
+    if (!chief || chief.hidden || !chiefLevel(chief)) throw new TeamSetupError("Only an active Chief of Staff can propose team setup", 403);
     return chief;
   }
 
@@ -160,6 +160,7 @@ export class TeamSetupRequestService {
         if (this.options.targetBusy(target.id, sourceThreadId) && (confirming || target.id !== chief.id)) throw new TeamSetupError(`Stop @${target.name}'s work before changing its setup`, 409);
       }
       const fields = this.fields(operation.fields, target ?? undefined);
+      if (fields.chiefOfStaff !== undefined && !chief.chiefOfStaff) throw new TeamSetupError(`Only the Chief of Staff changes who the Chief is; ${chief.name} doesn't.`, 403);
       if (confirming && target) this.options.validateChange?.(target, fields);
       const destination = fields.section ?? target?.section ?? chief.section;
       if (!allowed(destination)) throw new TeamSetupError("The destination team is outside this Chief's authorized scope", 403);
@@ -178,6 +179,7 @@ export class TeamSetupRequestService {
     if (request.deletion) {
       const target = this.options.store.bot(request.deletion.botId);
       if (!target || target.hidden || target.id === chief.id || !this.options.canAccessTeam(chief, target.section) || (Array.isArray(chief.peers) && !chief.peers.includes(target.id))) throw new TeamSetupError("This deletion target is no longer an authorized teammate", 403);
+      if (target.defaultBot) throw new TeamSetupError(defaultBotRefusal(target.name), 409);
       if (teamSetupRevision(target) !== request.deletion.expectedRevision || this.options.targetBusy(target.id)) throw new TeamSetupError("The deletion target changed or is working. Review a new deletion proposal.", 409);
     }
   }
@@ -243,11 +245,11 @@ export class TeamSetupRequestService {
     if (!permission.ok) throw new TeamSetupError(permission.error, permission.status);
     const chief = this.chief(request.botId);
     const lines = [`Why: ${request.reason}`];
-    if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, skills, and any computer owned only by it. Generated project files and shared team computers remain. Active work or an unavailable provider can block deletion safely.");
+    if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, skills, and any computer owned only by it. Generated project files and shared department computers remain. Active work or an unavailable provider can block deletion safely.");
     if (request.newTeams.length) {
-      lines.push(`Create teams: ${request.newTeams.map((name) => JSON.stringify(name)).join(", ")}.`);
+      lines.push(`Create departments: ${request.newTeams.map((name) => JSON.stringify(name)).join(", ")}.`);
       if (!request.operations.some(op => op.botId === chief.id && op.fields.chiefOfStaff === false)) {
-        lines.push(`Authorize @${chief.name} to coordinate and propose setup changes in these new teams.`);
+        lines.push(`Authorize @${chief.name} to coordinate and propose setup changes in these new departments.`);
       }
     }
     for (const operation of request.operations) {
@@ -255,7 +257,7 @@ export class TeamSetupRequestService {
       lines.push(`\n${operation.action === "create" ? "Create" : "Update"} @${operation.fields.name ?? current?.name} (${operation.action === "create" ? "new bot" : operation.botId})`);
       for (const [key, value] of Object.entries(operation.fields)) {
         if (key === "chiefOfStaff") {
-          lines.push(`Chief of Staff: ${current?.chiefOfStaff ? "Yes" : "No"} → ${value ? "Yes" : "No"}.${value ? " May coordinate and configure bots in this team." : " Additional managed-team access is removed."}`);
+          lines.push(`Chief of Staff: ${current?.chiefOfStaff ? "Yes" : "No"} → ${value ? "Yes" : "No"}.${value ? " May coordinate and configure bots in this department." : " Access to additional departments is removed."}`);
           continue;
         }
         if (key === "soul") {

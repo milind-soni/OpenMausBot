@@ -31,7 +31,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/thread-preferences")>(),
-  useShowThreads: () => fixture.showThreads,
+  useShowThreads: () => fixture.advanced && fixture.showThreads,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 // The trigger still renders, so the markup assertions in this file see the same header.
@@ -127,6 +127,34 @@ describe("the header's right side", () => {
   });
 });
 
+describe("header conversation title", () => {
+  it("reads Bot / Conversation ▾ in Simple mode, in place of the other-activity picker and the way back, and only there", () => {
+    const busyElsewhere: Bot = { ...bot, mainThreadId: "other", tasks: [...bot.tasks!, { threadId: "other", title: "Other", createdAt: 0, busy: true, activity: "working" }] };
+    fixture.advanced = false;
+    const simple = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+    const identity = simple.slice(simple.indexOf("data-chathead-identity"), simple.indexOf("data-chathead-controls"));
+    expect(identity.indexOf("data-chathead-conversation")).toBeGreaterThan(identity.indexOf("data-chathead-pill"));
+    expect(identity).toMatch(/data-chathead-conversation[^>]*><span dir="auto" class="truncate">Selected<\/span>/);
+    expect(simple).not.toContain("data-background-activity");
+    expect(simple).not.toContain("data-chathead-back");
+    window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
+    try {
+      const remote = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+      expect(remote).not.toContain("data-chathead-conversation");
+      expect(remote).toContain("data-background-activity");
+    } finally {
+      delete window.ogb;
+    }
+    fixture.advanced = true;
+    fixture.showThreads = false;
+    const advanced = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+    expect(advanced).not.toContain("data-chathead-conversation");
+    expect(advanced).toContain("data-background-activity");
+    expect(advanced).toContain("data-chathead-back");
+    fixture.showThreads = true;
+  });
+});
+
 describe("header name", () => {
   it("renames only from the bot's settings in Simple mode: no pencil, and the whole pill opens them", () => {
     fixture.advanced = false;
@@ -147,6 +175,28 @@ describe("header name", () => {
     const pill = markup.slice(start, markup.indexOf("data-chathead-controls"));
     expect(pill).toContain('aria-label="Open Pepper&#x27;s profile"');
     expect(pill).toContain("Rename Pepper");
+  });
+
+  it("shows the bot's role beside the pill in both modes, taking only the room the name leaves", () => {
+    for (const advanced of [true, false]) {
+      fixture.advanced = advanced;
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, title: " Research " } }));
+      const identity = markup.slice(markup.indexOf("data-chathead-identity"), markup.indexOf("data-chathead-controls"));
+      const role = identity.match(/<span data-chathead-role="true" class="([^"]*)"><span title="Research" class="([^"]*)">Research<\/span><\/span>/);
+      expect(role, `advanced ${advanced}`).toBeTruthy();
+      expect(role![1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "max-w-fit", "grow", "basis-0"]));
+      expect(role![2].split(" ")).toEqual(expect.arrayContaining(["truncate", "text-[13px]", "text-ink-secondary"]));
+      expect(identity.indexOf("data-chathead-role")).toBeGreaterThan(identity.indexOf(advanced ? "Rename Pepper" : "</button>"));
+      expect(renderToStaticMarkup(createElement(ChatView, { bot }))).not.toContain("data-chathead-role");
+    }
+    fixture.advanced = true;
+  });
+
+  it("leaves a Chief's role out of the header when it only repeats the Chief of Staff badge", () => {
+    const header = (title: string) => renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, chiefOfStaff: true, title } }));
+    expect(header("chief of staff ")).not.toContain("data-chathead-role");
+    expect(header("Operations lead")).toContain('<span title="Operations lead"');
+    expect(renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, title: "Chief of Staff" } }))).toContain("data-chathead-role");
   });
 
   it("draws no working dots in the header pill, keeping one width, while a status still tells a screen reader", () => {

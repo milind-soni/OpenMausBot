@@ -10,6 +10,7 @@ import {
   type LiveEventsPlatform,
 } from "./live-events";
 import { cloudAsleep, markCloudAwake, resetCloudPowerForTests } from "./cloud-power";
+import { resetTurnLive, turnLive } from "@/state/turn-status";
 
 class FakeTarget {
   private readonly listeners = new Map<string, Set<() => void>>();
@@ -97,6 +98,24 @@ describe("live events URL", () => {
   it("builds cold and resumable stream URLs", () => {
     expect(liveEventsUrl()).toBe("/api/events");
     expect(liveEventsUrl({ since: "ab12cd34:9" })).toBe("/api/events?since=ab12cd34%3A9");
+  });
+});
+
+describe("the chat's status line", () => {
+  it("reads each live runtime frame before the app does", () => {
+    resetTurnLive();
+    const test = harness();
+    const onFrame = vi.fn();
+    const stop = openLiveEvents({ onFrame, onSnapshotRequired: async () => true }, test.platform);
+    test.sources[0].open();
+    const event = { eventId: "e1", provider: "claudeAgent", threadId: "t1", createdAt: "2026-10-23T12:00:00.000Z", turnId: "u1" };
+    test.sources[0].message({ kind: "runtime", event: { ...event, type: "turn.progress", activity: "write", itemId: "w", file: "index.html", bytes: 14_336 } }, "run00000:1");
+    expect(turnLive("t1").status).toEqual({ activity: "write", itemId: "w", file: "index.html", bytes: 14_336 });
+    test.sources[0].message({ kind: "runtime", event: { ...event, eventId: "e2", type: "turn.completed", ok: true } }, "run00000:2");
+    expect(turnLive("t1")).toMatchObject({ ended: true, status: null });
+    expect(onFrame).toHaveBeenCalledTimes(2);
+    stop();
+    resetTurnLive();
   });
 });
 

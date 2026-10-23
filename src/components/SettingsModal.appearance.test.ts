@@ -138,6 +138,19 @@ describe("Settings → Appearance", () => {
     expect(render()).not.toContain('aria-label="Advanced mode"');
   });
 
+  it.each([true, false])("keeps the app language reachable from a paired remote client (Advanced %s)", (advanced) => {
+    fixture.advancedMode = advanced;
+    vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
+    const html = render();
+    expect(html).not.toContain('<option value="general">');
+    expect(html).toContain('aria-label="App language"');
+    expect(html).toContain('<option value="en">English</option>');
+  });
+
+  it("does not repeat the app language in Appearance on this computer", () => {
+    expect(render()).not.toContain('aria-label="App language"');
+  });
+
 
   it("groups skins, thread visibility, and tool-call display with preservation copy", () => {
     const html = render();

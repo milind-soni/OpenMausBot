@@ -12,6 +12,7 @@ import { AppMessageRate, appContextBlock, prepareAppMessage } from "../chat-apps
 import { prepareWidgetPress, reopenCancelledPress } from "../chat-widgets.ts";
 import type { ModelSelection, RequestOutcome, SteerOutcome } from "../contracts.ts";
 import { parseDataContext, type DataContext } from "../data-context.ts";
+import { preparePointed } from "../pointed.ts";
 import type { Handoffs } from "../delta-context.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { spokenLineFields } from "../live-call-record.ts";
@@ -60,7 +61,7 @@ export interface BotMessageRouteDeps {
     input: {
       botId: string; threadId: string; text: string; sendId?: string; replyTo?: Message; sender?: ResolvedSender;
       trigger: UsageTrigger; dataContext?: DataContext; personPresent: boolean;
-      app?: { context?: string; fromApp?: Message["fromApp"] };
+      app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
     },
     guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
   ): Promise<DirectSendReceipt>;
@@ -169,6 +170,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const fromAnApp = body.appMessage !== undefined && body.appMessage !== null;
       if (guarded && fromAnApp) return json(res, 400, { error: "guarded sends cannot speak for an app" });
       if (pressed && fromAnApp) return json(res, 400, { error: "send widgetAction or appMessage, not both" });
+      const pointing = body.pointed !== undefined && body.pointed !== null;
+      if (pointing && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can carry what the person pointed at" });
       // A distinct route, so an older server answers 404 instead of ignoring the safety preconditions.
       const guardedBody = guarded ? guardedSendSchema.safeParse(body) : null;
       if (guardedBody && !guardedBody.success) {
@@ -209,6 +212,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (refused) return json(res, refused.status, refused.body);
       const appSent = fromAnApp ? prepareAppMessage(store, threadId, body.appMessage) : null;
       if (appSent && !appSent.ok) return json(res, appSent.status, { error: appSent.error });
+      const pointed = pointing ? preparePointed(store, threadId, body.pointed) : null;
+      if (pointed && !pointed.ok) return json(res, pointed.status, { error: pointed.error });
       const text = press ? press.text : appSent ? appSent.text : typed;
       const target = resolveReplyTarget(threadId, press ? press.messageId : appSent ? appSent.messageId : body.replyToId);
       if (relayed && target?.role !== "bot") return json(res, 400, { error: "a relayed reaction answers a bot's message" });
@@ -227,8 +232,13 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (appSent && !slot) return json(res, 429, { error: "This app has sent too many messages. Wait a while, or type your message." });
       // A relay is not the person at this screen: it never carries what their apps last showed.
       const appContext = guarded || retried ? null : appContextBlock(store, threadId);
-      const app = appContext || appSent
-        ? { ...(appContext ? { context: appContext.block } : {}), ...(appSent ? { fromApp: { messageId: appSent.messageId, title: appSent.title } } : {}) }
+      const context = `${appContext?.block ?? ""}${pointed?.block ?? ""}`;
+      const app = context || appSent || pointed
+        ? {
+            ...(context ? { context } : {}),
+            ...(appSent ? { fromApp: { messageId: appSent.messageId, title: appSent.title } } : {}),
+            ...(pointed ? { pointed: pointed.refs } : {}),
+          }
         : undefined;
       const sender = messageSender(auth);
       const guardedStart = guarded

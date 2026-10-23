@@ -41,6 +41,7 @@ import { cacheUntilConfigChanges,
   browserEngineAttachCdpUrl,
   withInstanceCli,
   WORKSPACE_CREDENTIAL_ENV,
+  PROVIDER_CREDENTIAL_ENV,
   mergeOpenCodeProviderKeys,
   openCodeProviderKeys,
   OPENCODE_PROVIDER_KEY_LIMIT,
@@ -807,6 +808,29 @@ describe("default fleet", () => {
     expect(map.metaOwn.environment).toEqual({ META_API_KEY: "meta-own" });
     expect(cfg.instances).not.toHaveProperty("meta");
     expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("meta");
+  });
+
+  it("adds DeepSeek Harness to product fleets and hands its key only to that engine", () => {
+    const cfg: AppConfig = { deepseek: { key: "ds-workspace" }, instances: {
+      codex: { driver: "codex" },
+      kimi: { driver: "kimiAgent" },
+      deepseekOwn: { driver: "deepseekAgent", environment: { DEEPSEEK_API_KEY: "ds-own" } },
+    } };
+    const map = instanceConfigs(cfg);
+    expect(map.deepseek).toEqual({ driver: "deepseekAgent", environment: { DEEPSEEK_API_KEY: "ds-workspace" } });
+    expect(map.codex.environment).toEqual({});
+    expect(map.kimi.environment).toEqual({});
+    expect(map.deepseekOwn.environment).toEqual({ DEEPSEEK_API_KEY: "ds-own" });
+    expect(cfg.instances).not.toHaveProperty("deepseek");
+    expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("deepseek");
+  });
+
+  it("accepts clearing a DeepSeek key and removes it from child environments", () => {
+    expect(parseConfigPatch({ deepseek: { key: "" } })).toEqual({ deepseek: { key: "" } });
+    const env = { OMB_DEEPSEEK_API_KEY: "ds-fixture", DEEPSEEK_API_KEY: "ds-ambient", KEEP: "yes" };
+    stripWorkspaceCredentialEnv(env);
+    expect(env).toEqual({ DEEPSEEK_API_KEY: "ds-ambient", KEEP: "yes" });
+    expect(PROVIDER_CREDENTIAL_ENV).toContain("DEEPSEEK_API_KEY");
   });
 
   it("accepts clearing a Meta key and removes it from child environments", () => {
@@ -1751,6 +1775,17 @@ describe("credential env preference", () => {
       syncCredentialEnv({ groq: { key: "" } });
       expect(loadConfig().groq?.key).toBeUndefined();
       expect(process.env.GROQ_API_KEY).toBe("groq-operator");
+    } finally { vi.unstubAllEnvs(); }
+  });
+
+  it("saves and clears the built-in DeepSeek key without changing an operator's DEEPSEEK_API_KEY", () => {
+    vi.stubEnv("DEEPSEEK_API_KEY", "ds-operator");
+    try {
+      syncCredentialEnv({ deepseek: { key: "ds-workspace" } });
+      expect(loadConfig().deepseek?.key).toBe("ds-workspace");
+      syncCredentialEnv({ deepseek: { key: "" } });
+      expect(loadConfig().deepseek?.key).toBeUndefined();
+      expect(process.env.DEEPSEEK_API_KEY).toBe("ds-operator");
     } finally { vi.unstubAllEnvs(); }
   });
 

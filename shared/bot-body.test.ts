@@ -24,9 +24,10 @@ describe("bot bodies", () => {
     expect(isHalloweenBody(null)).toBe(false);
   });
 
-  it("gives every bot colour its own costume", () => {
-    expect(Object.keys(COSTUME_FOR_COLOR).sort()).toEqual([...MAUS_COLOR_NAMES].sort());
-    expect(new Set(Object.values(COSTUME_FOR_COLOR)).size).toBe(MAUS_COLOR_NAMES.length);
+  it("gives every bot colour but silver and chrome its own costume", () => {
+    const dressed = MAUS_COLOR_NAMES.filter((color) => color !== "silver" && color !== "chrome");
+    expect(Object.keys(COSTUME_FOR_COLOR).sort()).toEqual([...dressed].sort());
+    expect(new Set(Object.values(COSTUME_FOR_COLOR)).size).toBe(dressed.length);
     for (const body of Object.values(COSTUME_FOR_COLOR)) expect(isHalloweenBody(body)).toBe(true);
   });
 });

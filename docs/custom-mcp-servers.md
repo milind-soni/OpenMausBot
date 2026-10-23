@@ -419,7 +419,16 @@ servers gets the enabled tools on its next task.
 - **Addresses are checked.** A URL server needs a full `http://` or
   `https://` address with no credentials in it; header names must be valid
   HTTP field names and values a single line.
-- **The result gate covers commands.** Oversized tool results from a stdio
-  server are trimmed before they reach the model (`OMB_MCP_RESULT_BUDGET`).
-  A URL server's results arrive untrimmed.
+- **The result gate covers commands.** An oversized tool result from a stdio
+  server never reaches the model whole (`OMB_MCP_RESULT_BUDGET`, 8,000
+  characters by default). A JSON result is *shaped*: the gate keeps the whole
+  payload on its side, shows the model its shape (keys, array sizes, item
+  keys) and the first records, and lists one read-only tool beside the
+  server's own, `query_result`, that runs a JMESPath query over the held
+  result and returns only what it selects. Answers go through the same
+  budget, so no path returns the whole payload, and the tool is pre-allowed
+  for Claude because it reads nothing the server has not already returned.
+  Held results live as long as the session's MCP connection (64 MB per
+  server, oldest first). A result that is not JSON is cut to the budget as
+  before. A URL server's results arrive untrimmed.
 - `"enabled": false` parks an entry without deleting it.

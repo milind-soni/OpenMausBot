@@ -342,6 +342,42 @@ describe("what the person does in the panel", () => {
   });
 });
 
+describe("a published page's Open", () => {
+  const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+  const show = (page: { url: string; nonce: number }) => act(async () => root.render(createElement(LiveBrowser, { bot, page })));
+
+  it("opens the page in a new tab, once, taking the browser first, so the bot's own tab stays as it was", async () => {
+    const socket = await streaming("agent");
+    await show({ url: PAGE, nonce: 1 });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "takeControl" }]);
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(socket.sent.at(-1)).toEqual({ type: "tabNew", url: PAGE });
+    await show({ url: PAGE, nonce: 1 });
+    await flush();
+    expect(socket.sent.filter((message) => message.type === "tabNew")).toHaveLength(1);
+    await show({ url: PAGE, nonce: 2 });
+    await flush();
+    expect(socket.sent.filter((message) => message.type === "tabNew")).toHaveLength(2);
+  });
+
+  it("waits for the view to connect, and wakes a browser that sat unused before opening the page", async () => {
+    await render({ page: { url: PAGE, nonce: 1 } });
+    const socket = FakeSocket.instances.at(-1)!;
+    expect(socket.sent).toEqual([]);
+    await act(async () => { socket.open(); socket.control("unclaimed"); socket.message({ type: "asleep" }); });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }]);
+    await act(async () => socket.message({ type: "awake" }));
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }, { type: "takeControl" }]);
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(socket.sent.at(-1)).toEqual({ type: "tabNew", url: PAGE });
+  });
+});
+
 describe("a sign-in that stops at a passkey", () => {
   const PASSKEY = "https://accounts.google.com/v3/signin/challenge/pk/presend?TL=fixture";
   const notice = () => host.querySelector("section[role=status]");

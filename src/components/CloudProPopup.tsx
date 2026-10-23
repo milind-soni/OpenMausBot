@@ -8,6 +8,7 @@ import { buyOfferAllowed, cloudIntroView, cloudPlanLabel, cloudPlanLine, cloudPl
 import { t } from "@/lib/i18n";
 import { cloudPlanFromAccount, cloudPlanFromSnapshot, type CloudPlanFacts } from "@/lib/usage-snapshot";
 import { NotNowButton } from "./NoticeCard";
+import { UPDATES_CONSENT_POPUP } from "./UpdatesConsent";
 
 export const CLOUD_PRO_POPUP_SOURCE = "update_popup" satisfies CloudSource;
 
@@ -110,9 +111,9 @@ const TITLE = "cloud-pro-popup-title";
 const POPUP = "[data-cloud-pro-popup]";
 const OTHER_DIALOGS = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], [data-tour-card], [data-cloud-setup-ready]';
 
-/** Any dialog on screen counts, modal or not, and the card that says a new Cloud is set up. */
+/** Any dialog on screen counts, modal or not, and the card that says a new Cloud is set up; never the queue's own popups. */
 export function otherDialogOpen(): boolean {
-  return [...document.querySelectorAll<HTMLElement>(OTHER_DIALOGS)].some(element => !element.closest(POPUP) && element.checkVisibility());
+  return [...document.querySelectorAll<HTMLElement>(OTHER_DIALOGS)].some(element => !element.closest(`${POPUP}, ${UPDATES_CONSENT_POPUP}`) && element.checkVisibility());
 }
 
 export function useOtherDialogOpen(watch: boolean): boolean {

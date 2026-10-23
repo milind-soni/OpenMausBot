@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.1.122",
+  "version": "0.1.125",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
@@ -109,6 +109,7 @@
     "clsx": "^2.1.1",
     "codemirror": "6.0.2",
     "croner": "10.0.1",
+    "jmespath": "0.16.0",
     "jose": "6.2.10",
     "katex": "^0.16.47",
     "lucide-react": "^0.539.0",
@@ -125,6 +126,7 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "shiki": "^4.4.3",
+    "sucrase": "3.35.1",
     "tailwind-merge": "^3.3.1",
     "tar": "7.5.22",
     "tldts": "7.4.18",
@@ -139,6 +141,7 @@
   "devDependencies": {
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@tailwindcss/vite": "^4.1.11",
+    "@types/jmespath": "0.15.2",
     "@types/node": "^26.2.0",
     "@types/novnc__novnc": "1.6.0",
     "@types/papaparse": "^5.5.2",

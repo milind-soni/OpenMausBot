@@ -8,6 +8,7 @@ const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   return {
     advanced: false,
+    threadsChosen: true,
     menus: [] as { ariaLabel: string; items: SidebarMenuItem[]; placement?: string; openOnHover?: boolean; trigger: string }[],
     dispatch: vi.fn(),
     inspectorOpen: false,
@@ -19,6 +20,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   return { ...original, useStore: () => ({ state: { ...original.initialState, inspectorOpen: fixture.inspectorOpen }, dispatch: fixture.dispatch }) };
 });
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
+vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced && fixture.threadsChosen }));
 vi.mock("@/lib/chat-find", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/chat-find")>(),
   requestChatFind: fixture.find,
@@ -60,6 +62,7 @@ const keys = (items: SidebarMenuItem[]) => items.map((item) => item.key);
 
 beforeEach(() => {
   fixture.advanced = false;
+  fixture.threadsChosen = true;
   fixture.inspectorOpen = false;
   fixture.dispatch.mockClear();
   fixture.find.mockClear();
@@ -101,6 +104,13 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     ]);
     threads.submenu![2].onSelect();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "pepper", threadId: "main" });
+  });
+
+  it("lists every thread, however many there are", () => {
+    const many = { ...bot, tasks: Array.from({ length: 20 }, (_, i) => task(`t${i}`, `Thread ${i}`, i)) };
+    const threads = menuOf(createElement(ChatMoreMenu, { bot: many })).items.find((item) => item.key === "threads")!;
+    expect(threads.value).toBe("20");
+    expect(threads.submenu!.map((item) => item.label)).toEqual(Array.from({ length: 20 }, (_, i) => `Thread ${19 - i}`));
   });
 
   it("leaves All threads out while the bot has one thread", () => {
@@ -146,5 +156,13 @@ describe("ChatHeaderMenu, Advanced mode's header ⋯", () => {
   it("has no thread items even if rendered by ChatMoreMenu in Advanced mode", () => {
     fixture.advanced = true;
     expect(keys(menuOf(createElement(ChatMoreMenu, { bot })).items)).not.toContain("threads");
+  });
+
+  it("lists the threads when the Threads setting hides them from the sidebar", () => {
+    fixture.advanced = true;
+    fixture.threadsChosen = false;
+    const items = menuOf(createElement(ChatHeaderMenu, { bot })).items;
+    expect(keys(items)).toEqual(expect.arrayContaining(["new-thread", "threads"]));
+    expect(items.find((item) => item.key === "threads")!.submenu).toHaveLength(3);
   });
 });

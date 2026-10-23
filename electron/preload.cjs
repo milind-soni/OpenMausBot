@@ -38,9 +38,9 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 // The full bridge goes only to the local server's UI; a remote page gets the safe subset, and main enforces the same rule.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudLending", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "windowControls"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudLending", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
-const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder", "desktopLanguage"];
+const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder"];
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
@@ -54,6 +54,16 @@ function savedAnalyticsChoice() {
   try { const saved = ipcRenderer.sendSync("desktop-analytics:read"); return typeof saved === "boolean" ? saved : null; } catch { return null; }
 }
 let analyticsChoice;
+function savedLanguageChoice() {
+  try { const saved = ipcRenderer.sendSync("desktop-language:read"); return typeof saved === "string" ? saved : null; } catch { return null; }
+}
+let languageChoice;
+const languageListeners = new Set();
+ipcRenderer.on("desktop-language:changed", (_event, language) => {
+  if (typeof language !== "string") return;
+  languageChoice = language;
+  for (const listener of languageListeners) listener(language);
+});
 const onHomePage = !isLocalPage && homePage();
 const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : []), ...(onHomePage ? HOME_PAGE : [])]);
 
@@ -304,6 +314,7 @@ const bridge = {
     readySeen: () => ipcRenderer.invoke("cloud-account:readySeen"),
     connectHome: () => ipcRenderer.invoke("cloud-account:connectHome"),
     connectHomeForPhone: () => ipcRenderer.invoke("cloud-account:connectHomeForPhone"),
+    openTeam: teamId => ipcRenderer.invoke("cloud-account:openTeam", String(teamId)),
     onState: cb => {
       const handler = (_event, state) => cb(state);
       ipcRenderer.on("cloud-account:state-changed", handler);
@@ -340,6 +351,9 @@ const bridge = {
       ? ipcRenderer.invoke("cloud-lending:set", on === true) : Promise.reject(new Error("Turn on the switch to lend this computer.")),
     screen: on => on !== true || isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-lending:screen", on === true) : Promise.reject(new Error("Tick Apps and screen to lend them.")),
+    // A bot's Use my Mac link: opens main's own popup, only from the person's click.
+    offer: () => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("cloud-lending:offer") : Promise.reject(new Error("Press Use my Mac to share this computer.")),
   } : undefined,
   // Either page: the one-time move's line.
   cloudSendPage: process.argv.includes("--omb-company-desktop=1") ? {
@@ -356,6 +370,10 @@ const bridge = {
     teamRetry: () => navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("cloud-send:team-retry") : Promise.reject(new Error("Choose Try again to move.")),
     openTeam: teamId => ipcRenderer.invoke("cloud-send:team-open", String(teamId)),
+    // Settings → MausBot Cloud, Advanced: "Keep this computer's bots on this computer".
+    keepHere: () => ipcRenderer.invoke("one-home:keep"),
+    setKeepHere: on => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("one-home:keep-set", on === true) : Promise.reject(new Error("Turn the switch to keep this computer's bots here.")),
     onNotice: cb => {
       const handler = (_event, notice) => cb(notice);
       ipcRenderer.on("cloud-send:notice-changed", handler);
@@ -422,6 +440,13 @@ const bridge = {
     repair: () => ipcRenderer.invoke("home:repair"),
     updating: onHomePage && reloadedForUpdate(),
   },
+  updatesConsent: {
+    state: () => ipcRenderer.invoke("updates-consent:state"),
+    choose: choice => ipcRenderer.invoke("updates-consent:choose", {
+      status: String(choice?.status),
+      ...(typeof choice?.email === "string" ? { email: choice.email } : {}),
+    }),
+  },
   desktopNotices: {
     state: () => ipcRenderer.invoke("desktop-notices:state"),
     seen: id => ipcRenderer.invoke("desktop-notices:seen", String(id)),
@@ -434,9 +459,19 @@ const bridge = {
     },
     ...(isLocalPage ? { set: enabled => { analyticsChoice = enabled === true; return ipcRenderer.invoke("desktop-analytics:set", analyticsChoice); } } : {}),
   },
-  /** The app's language for the menus, tray and dialogs main draws: a language pack's code, or "" for the system's. */
   desktopLanguage: {
-    set: code => ipcRenderer.invoke("desktop-language:set", typeof code === "string" ? code : ""),
+    choice: () => {
+      if (languageChoice === undefined) languageChoice = savedLanguageChoice();
+      return languageChoice;
+    },
+    set: language => {
+      languageChoice = String(language);
+      return ipcRenderer.invoke("desktop-language:set", languageChoice);
+    },
+    onChange: listener => {
+      languageListeners.add(listener);
+      return () => { languageListeners.delete(listener); };
+    },
   },
 };
 

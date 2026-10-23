@@ -115,14 +115,15 @@ async function editableFolders(paths, validate) {
 }
 
 /** The default grant, on top of what was lent before: the usual folders read only, each project folder with editing,
- * the screen only when it was lent before (and works here), and the internet connection. */
-export function defaultGrant({ kept, usual, projects, screenAvailable }) {
+ * the internet connection, and apps and screen when they were lent before or computer control already works here for
+ * this computer's own bots (`screenReady`: macOS granted Accessibility and Screen Recording). */
+export function defaultGrant({ kept, usual, projects, screenAvailable, screenReady }) {
   const byPath = new Map();
   for (const folder of [...(kept?.folders ?? []), ...usual, ...projects]) {
     const known = byPath.get(folder.path);
     byPath.set(folder.path, known ? { ...known, write: known.write || folder.write } : folder);
   }
-  return { folders: [...byPath.values()].slice(0, 20), screen: kept?.screen === true && screenAvailable === true, internet: true };
+  return { folders: [...byPath.values()].slice(0, 20), screen: screenAvailable === true && (kept?.screen === true || screenReady === true), internet: true };
 }
 
 /**
@@ -130,7 +131,7 @@ export function defaultGrant({ kept, usual, projects, screenAvailable }) {
  *   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void },
  *   localOnly: (channel: string, handler: (...args: any[]) => unknown) => (...args: any[]) => unknown,
  *   cloudPage: (channel: string, handler: (...args: any[]) => unknown) => (...args: any[]) => unknown,
- *   snapshot: () => Promise<{ available: boolean, screenAvailable?: boolean, state?: Record<string, any>, activity?: unknown[] }>,
+ *   snapshot: () => Promise<{ available: boolean, screenAvailable?: boolean, screenReady?: boolean, state?: Record<string, any>, activity?: unknown[] }>,
  *   environment: () => unknown,
  *   save: (env: unknown, choice: { folders: unknown, screen: boolean, internet?: boolean, terminal?: boolean }) => Promise<unknown>,
  *   stop: () => void,
@@ -141,6 +142,8 @@ export function defaultGrant({ kept, usual, projects, screenAvailable }) {
  * }} deps `cloudPage` lets only My Cloud's verified page through; turning lending or Apps and screen on from it still
  * takes a real click (the preload bridge's rule). Security: Apps and screen lets bots act as the person, and a page
  * served by the Cloud must never grant that alone, so main also asks in a dialog of its own (`confirmScreen`).
+ * `screenReady` in a snapshot: computer control works here for this computer's own bots, read from its running state,
+ * never by asking macOS.
  */
 export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate, confirmScreen }) {
   const env = () => {
@@ -183,16 +186,35 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
     await save(env(), await choice({ folders: kept.folders, screen: on === true, internet: kept.internet === true }));
     return pageLending(await snapshot());
   })));
+  const ownOff = (state) => !state?.enabled && state?.stopped?.reason === "you";
   return {
-    /** At the move to My Cloud: lends the default grant (defaultGrant) on top of what is lent. The person's own Off is
-     * never undone: lending they turned off stays off. Answers the page's view, or null when it stayed off. */
-    async lendByDefault({ projects = [] } = {}) {
+    /** What is lent, as My Cloud's page sees it, whether computer control works here, and whether the person turned
+     * lending off themselves. */
+    async state() {
+      const current = await snapshot();
+      return { ...pageLending(current), screenReady: current.screenReady === true, ownOff: ownOff(current.state) };
+    },
+    /** At the move to My Cloud, and when the person chooses Use my Mac (`asked`): lends the default grant (defaultGrant)
+     * on top of what is lent. Without `asked` the person's own Off is never undone: lending they turned off stays off.
+     * Answers the page's view, or null when it stayed off. */
+    async lendByDefault({ projects = [], asked = false } = {}) {
       const current = await snapshot();
       const kept = current.state;
-      if (!current.available || (!kept?.enabled && kept?.stopped?.reason === "you")) return null;
+      if (!current.available || (!asked && ownOff(kept))) return null;
       const lentBefore = kept?.folders?.length ? await existingFolders(kept.folders, validate) : [];
-      const grant = defaultGrant({ kept: { folders: lentBefore, screen: kept?.screen === true }, usual: await defaults(), projects: await editableFolders(projects, validate), screenAvailable: current.screenAvailable });
+      const grant = defaultGrant({ kept: { folders: lentBefore, screen: kept?.screen === true }, usual: await defaults(), projects: await editableFolders(projects, validate),
+        screenAvailable: current.screenAvailable, screenReady: current.screenReady });
       await save(env(), grant);
+      return pageLending(await snapshot());
+    },
+    /** Apps and screen on top of what is lent, once computer control works here; null while lending is off or computer
+     * control does not work yet. */
+    async lendScreen() {
+      const current = await snapshot();
+      const kept = current.state;
+      if (!current.available || !kept?.enabled || current.screenAvailable !== true) return null;
+      if (kept.screen === true) return pageLending(current);
+      await save(env(), await choice({ folders: kept.folders, screen: true, internet: kept.internet === true }));
       return pageLending(await snapshot());
     },
   };

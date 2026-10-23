@@ -253,6 +253,29 @@ it("the terminal is a choice of its own, off by default, that asks before it tur
   expect(bridge.save).toHaveBeenCalledExactlyOnceWith({ folders: [folder], screen: false, internet: false, terminal: true });
 });
 
+it("a Yes to the terminal question never starts lending again after it was stopped while the question was open", async () => {
+  await ready(lent);
+  more();
+  // Stop sharing (here, or from My Cloud's page) lands while the question is open.
+  const confirm = vi.fn(async () => { vi.mocked(bridge.state).mockResolvedValue(off); return true; });
+  vi.stubGlobal("window", { confirm: vi.fn(), ogb: { confirm } });
+  terminalBox().props.onChange!({ target: { checked: true } }); await flush();
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(bridge.save).not.toHaveBeenCalled();
+  expect(terminalBox().props.checked).toBe(false);
+});
+
+it("a Yes to the terminal question lends what is lent now, not what was lent when it was asked", async () => {
+  await ready(lent);
+  more();
+  const other = { ...folder, id: "f2", path: "/Users/me/Projects", name: "Projects" };
+  const now: CloudLendingSnapshot = { ...lent, state: { ...lent.state!, folders: [folder, other], screen: true } };
+  const confirm = vi.fn(async () => { vi.mocked(bridge.state).mockResolvedValue(now); return true; });
+  vi.stubGlobal("window", { confirm: vi.fn(), ogb: { confirm } });
+  terminalBox().props.onChange!({ target: { checked: true } }); await flush();
+  expect(bridge.save).toHaveBeenCalledExactlyOnceWith({ folders: [folder, other], screen: true, internet: false, terminal: true });
+});
+
 it("turning the terminal off needs no question, and it is not kept when lending is switched off and on again", async () => {
   const terminalLent: CloudLendingSnapshot = { ...lent, state: { ...lent.state!, terminal: true } };
   await ready(terminalLent);

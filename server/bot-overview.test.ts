@@ -42,10 +42,10 @@ const WONT_ORDER = [
 ];
 
 describe("buildBotOverview", () => {
-  it("describes additional teams only for an authorized Chief", () => {
+  it("describes additional departments only for an authorized Chief", () => {
     const facts = baseFacts({ bot: { ...baseFacts().bot, chiefOfStaff: true, managedSections: ["Engineering", "Research"], peers: undefined }, engine: { agentsMcp: true }, sectionPeers: 3 });
-    expect(buildBotOverview(facts).reaches).toContain("Can talk to 3 other bots in its allowed teams.");
-    expect(buildBotOverview(facts).reaches).toContain("May also coordinate these teams: Engineering, Research.");
+    expect(buildBotOverview(facts).reaches).toContain("Can talk to 3 other bots in its allowed departments.");
+    expect(buildBotOverview(facts).reaches).toContain("May also coordinate these departments: Engineering, Research.");
     expect(buildBotOverview(facts).managedSections).toEqual(facts.bot.managedSections);
     facts.bot.chiefOfStaff = false;
     expect(buildBotOverview(facts).reaches.join(" ")).not.toContain("Engineering");

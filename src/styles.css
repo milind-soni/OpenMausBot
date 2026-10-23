@@ -108,6 +108,7 @@
 
 @theme {
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-sheet-in: sheet-in 0.26s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-workspace-in: workspace-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-in: pop-in 0.2s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-pop-out: pop-out 0.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
@@ -273,6 +274,8 @@
   --identity-yellow: #D8A729;
   --identity-teal: #01A492;
   --identity-coral: #E5634E;
+  --identity-silver: #A8ADB4;
+  --identity-chrome: #B3BAC4;
 }
 
 /* ── Atelier ───────────────────────────────────────────────────────────────
@@ -336,6 +339,8 @@
   --identity-yellow: #896a19;
   --identity-teal: #017c6f;
   --identity-coral: #cd361e;
+  --identity-silver: #686f79;
+  --identity-chrome: #646f80;
 }
 
 /* ── Foundry ───────────────────────────────────────────────────────────────
@@ -404,6 +409,8 @@
   --identity-yellow: #D8A729;
   --identity-teal: #01A492;
   --identity-coral: #E5634E;
+  --identity-silver: #A8ADB4;
+  --identity-chrome: #B3BAC4;
 }
 
 /* ── Lagoon ────────────────────────────────────────────────────────────────
@@ -479,6 +486,8 @@
   --identity-yellow: #836518;
   --identity-teal: #01776a;
   --identity-coral: #c3341d;
+  --identity-silver: #646a73;
+  --identity-chrome: #5f6a7b;
 }
 
 /* ── Graphite ─────────────────────────────────────────────────────────────
@@ -534,6 +543,8 @@
   --identity-yellow: #D8A729;
   --identity-teal: #01A492;
   --identity-coral: #E5634E;
+  --identity-silver: #A8ADB4;
+  --identity-chrome: #B3BAC4;
 }
 
 /* ── Linen ────────────────────────────────────────────────────────────────
@@ -589,6 +600,8 @@
   --identity-yellow: #886819;
   --identity-teal: #017a6d;
   --identity-coral: #c9361e;
+  --identity-silver: #676d77;
+  --identity-chrome: #626d7e;
 }
 
 /* ── Dusk ─────────────────────────────────────────────────────────────────
@@ -643,6 +656,8 @@
   --identity-yellow: #D8A729;
   --identity-teal: #01A492;
   --identity-coral: #E5634E;
+  --identity-silver: #A8ADB4;
+  --identity-chrome: #B3BAC4;
 }
 
 /* ── Daylight ─────────────────────────────────────────────────────────────
@@ -713,6 +728,8 @@
   --identity-yellow: #91701b;
   --identity-teal: #018375;
   --identity-coral: #d83920;
+  --identity-silver: #6e7580;
+  --identity-chrome: #697688;
 }
 
 /* ── Meadow ───────────────────────────────────────────────────────────────
@@ -771,6 +788,8 @@
   --identity-yellow: #93721b;
   --identity-teal: #018577;
   --identity-coral: #db3a20;
+  --identity-silver: #707782;
+  --identity-chrome: #6b778a;
 }
 
 /* ── Pop ──────────────────────────────────────────────────────────────────
@@ -828,6 +847,8 @@
   --identity-yellow: #8d6c1a;
   --identity-teal: #017f72;
   --identity-coral: #d1381f;
+  --identity-silver: #6a727c;
+  --identity-chrome: #667284;
 }
 
 [data-skin="halloween"] {
@@ -878,6 +899,8 @@
   --identity-yellow: #D8A729;
   --identity-teal: #01A492;
   --identity-coral: #E5634E;
+  --identity-silver: #A8ADB4;
+  --identity-chrome: #B3BAC4;
 }
 
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
@@ -1361,6 +1384,10 @@ body {
 @keyframes panel-in {
   from { transform: translateX(28px); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
+}
+@keyframes sheet-in {
+  from { transform: translateY(32px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 @keyframes workspace-in {
   from { opacity: 0.92; }
@@ -2521,6 +2548,8 @@ button:disabled.bg-danger {
 .bot-identity[data-bot-color="yellow"] { color: var(--identity-yellow); }
 .bot-identity[data-bot-color="teal"] { color: var(--identity-teal); }
 .bot-identity[data-bot-color="coral"] { color: var(--identity-coral); }
+.bot-identity[data-bot-color="silver"] { color: var(--identity-silver); }
+.bot-identity[data-bot-color="chrome"] { color: var(--identity-chrome); }
 
 .user-bubble-colored {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);

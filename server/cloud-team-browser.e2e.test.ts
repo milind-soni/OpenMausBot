@@ -76,16 +76,19 @@ async function liveView(token: string, threadId?: string): Promise<{ status: num
   return { status: response.status, error: ((await response.json().catch(() => ({}))) as { error?: string }).error };
 }
 
-it("shows a member's live browser only from her own chat, to her and the admins, never to another member", async () => {
+it("shows a member's live browser only from her own chat, to her alone: never to another member or an admin", async () => {
   expect(await liveView(cleo, adaThread), "Cleo opening the browser of Ada's private chat").toEqual({ status: 404, error: "no such conversation" });
   expect(await liveView(ada, cleoThread), "Ada opening the browser of Cleo's private chat").toEqual({ status: 404, error: "no such conversation" });
+  expect(await liveView(admin, adaThread), "Ben (Admin) opening the browser of Ada's private chat").toEqual({ status: 404, error: "no such conversation" });
+  expect(await liveView(owner, adaThread), "the Owner opening the browser of Ada's private chat").toEqual({ status: 404, error: "no such conversation" });
   expect(await liveView(ada, "not-a-conversation")).toEqual({ status: 404, error: "no such conversation" });
-  for (const [who, token, threadId] of [["Ada, her own chat", ada, adaThread], ["Ben (Admin), Ada's chat", admin, adaThread], ["Cleo, the group chat", cleo, roomThread], ["Ada, no chat named", ada, undefined]] as const) {
+  for (const [who, token, threadId] of [["Ada, her own chat", ada, adaThread], ["Ben (Admin), the group chat", admin, roomThread], ["Cleo, the group chat", cleo, roomThread], ["Ada, no chat named", ada, undefined]] as const) {
     expect((await liveView(token, threadId)).error, who).not.toBe("no such conversation");
   }
-  // Signed-in sites are an admin's: Ada's own browser by her chat, never by a member.
+  // Signed-in sites are an admin's, of the team's browser and the group chats', never of a member's own.
   expect((await team.as(ada, "GET", `/api/browser-sites?bot=${bot.id}&threadId=${adaThread}`)).status).toBe(403);
-  expect((await team.as(admin, "GET", `/api/browser-sites?bot=${bot.id}&threadId=${adaThread}`)).status).not.toBe(403);
+  expect((await team.as(admin, "GET", `/api/browser-sites?bot=${bot.id}&threadId=${adaThread}`)).status).toBe(404);
+  expect((await team.as(admin, "GET", `/api/browser-sites?bot=${bot.id}&threadId=${roomThread}`)).status).not.toBe(404);
 }, hostTimeout(60_000));
 
 // The agent-browser stand-in is a POSIX shell script, which Windows cannot run as a program, so no command reaches its
@@ -104,9 +107,9 @@ it.skipIf(!stub || process.platform === "win32")("drives each member's private c
   expect(new Set(stub!.sessions().filter((name) => name.startsWith("bot-"))), "one browser per audience, the team's being the bot's own").toEqual(new Set([ADA, CLEO, ROOM, TEAM]));
   // A view opens the browser of the conversation it is opened from, for whoever may read it.
   const before = stub!.sessions().length;
-  for (const [token, threadId] of [[admin, cleoThread], [ada, undefined]] as const) await liveView(token, threadId);
+  for (const [token, threadId] of [[admin, cleoThread], [cleo, cleoThread], [ada, undefined]] as const) await liveView(token, threadId);
   const viewed = stub!.sessions().slice(before).filter((name) => name.startsWith("bot-"));
-  expect([...new Set(viewed)], "Ben's view of Cleo's chat reached Cleo's browser; Ada's own view, hers").toEqual([CLEO, ADA]);
+  expect([...new Set(viewed)], "Ben's view of Cleo's chat reached nothing; Cleo's reached her browser; Ada's own view, hers").toEqual([CLEO, ADA]);
   // A tool call from Ada's turn goes through the harness to her own browser, the one her turn was given.
   const mark = stub!.lines().length;
   const called = await browserTurn(ada, adaThread, "Which tabs are open?", [{ server: "browser", name: "agent_browser_tab_list", input: {} }]);
@@ -147,7 +150,7 @@ it("pairs a member's phone with a code she made: her address and role, her chats
   expect(bens.status).toBe(200);
   const benPhone = (await (await fetch(`${team.base}/api/auth/pair`, { method: "POST", headers: { ...fx.edge, "content-type": "application/json" }, body: JSON.stringify({ code: bens.body.code }) })).json() as { token: string }).token;
   expect((await team.as(benPhone, "GET", "/api/auth/session")).body).toMatchObject({ scopes: ["admin", "client"], email: ADMIN.email, team: { role: "admin" } });
-  expect((await messages(benPhone, cleoThread)).status, "an admin's phone reads private chats, as the admin does").toBe(200);
+  expect((await messages(benPhone, cleoThread)).status, "an admin's phone never reads a member's private chat, as the admin never does").toBe(404);
   // My Cloud is one person's: no member code there.
   expect((await fx.onCloud("POST", "/api/team/phone-pairing", {})).status).not.toBe(200);
 }, hostTimeout(60_000));

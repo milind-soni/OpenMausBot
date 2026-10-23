@@ -227,8 +227,13 @@ export interface HomeWorld {
   launch(): Promise<void>;
   /** The MausBot Cloud sign-in main reads: its state, and the power word of a Cloud that sleeps. */
   account: { state: Record<string, any>; power: { state: "awake" | "asleep" | "waking"; since: number; sleeps: true } | null; wakeMs: number; wakes: number; signIns: string[] };
-  /** Down: every request on the way to My Cloud fails, the window's and main's alike; `teamDown`: the team's Cloud only. */
-  network: { down: boolean; teamDown: boolean };
+  /** Down: every request on the way to My Cloud fails, the window's and main's alike; `teamDown`: the team's Cloud only;
+   * `nameMissing`: My Cloud's name isn't found (a resolver kept the answer it got while My Cloud was set up). */
+  network: { down: boolean; teamDown: boolean; nameMissing: boolean };
+  /** False: the move hasn't happened, so My Cloud is a saved server this window opens when asked (no journal, no freeze). */
+  moved: boolean;
+  /** How often the window's Electron session had its host cache cleared. */
+  hostCache: { cleared: number };
   /** The fake Admin: each team pairing it signed, by team id; `removed`: teams whose pairing it refuses (404), as for a
    * member removed while the session still lists the team. */
   admin: { teamPairings: string[]; removed: Set<string> };
@@ -278,7 +283,9 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   // Its own host, not another localhost port: a browser's cookies are per host, and the team's session must be its own.
   const teamOrigin = `http://[::1]:${teamPort}`;
   const otherOrigin = ipcBase;
-  const network = { down: false, teamDown: false };
+  const network = { down: false, teamDown: false, nameMissing: false };
+  const moves = { moved: true };
+  const hostCache = { cleared: 0 };
   const admin: HomeWorld["admin"] = { teamPairings: [], removed: new Set() };
   const cloudRequests: HomeWorld["cloudRequests"] = [];
   const notifications = new Map<string, boolean>();
@@ -293,7 +300,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   // My Cloud's edge: the renderer from source, and its API on the real Cloud-mode server with the edge's own headers.
   const cloudEdge = await vite(cloudPort, "localhost", (server) => {
     server.middlewares.use((req, res, next) => {
-      if (network.down) { req.socket.destroy(); return; }
+      if (network.down || network.nameMissing) { req.socket.destroy(); return; }
       if ((req.url ?? "").startsWith("/api/") || (req.url ?? "").startsWith("/.well-known/")) cloudRequests.push({ path: (req.url ?? "").split("?")[0]!, at: Date.now() });
       next();
     });
@@ -471,7 +478,7 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
   };
   // The window's session's fetch: its cookies go along, and a cookie the answer sets is the window's from then on.
   const cookieFetch = async (url: string, init: RequestInit = {}) => {
-    if (network.down || (network.teamDown && url.startsWith(teamOrigin))) throw new TypeError("fetch failed");
+    if (network.down || (network.teamDown && url.startsWith(teamOrigin)) || (network.nameMissing && url.startsWith(cloudOrigin))) throw new TypeError("fetch failed");
     const { cookies } = await cdp.request("Network.getCookies", { urls: [url] }, win.sessionId);
     const cookie = (cookies as Array<{ name: string; value: string }>).map((entry) => `${entry.name}=${entry.value}`).join("; ");
     const response = await fetch(url, { ...init, headers: { ...(init.headers as Record<string, string>), ...(cookie ? { cookie } : {}) } });
@@ -490,8 +497,16 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
     splash: null as TabWindow | null,
   };
   const home = createHomeWindow({
-    journal: () => ({ v: 1, phase: "done", cloud: { origin: cloudOrigin, account: ACCOUNT_ID, machine: cloudOrigin }, doneAt: Date.now() }),
-    frozen: async () => (await fetch(`${fx.desktopBase}/api/move/freeze`, { headers: { "x-openmausbot-desktop-owner": fx.ownerCapability } })).json(),
+    journal: () => (moves.moved ? { v: 1, phase: "done", cloud: { origin: cloudOrigin, account: ACCOUNT_ID, machine: cloudOrigin }, doneAt: Date.now() } : null),
+    frozen: async () => (moves.moved ? (await fetch(`${fx.desktopBase}/api/move/freeze`, { headers: { "x-openmausbot-desktop-owner": fx.ownerCapability } })).json() : { frozen: false }),
+    // The window's Electron session: its own resolver and host cache, for My Cloud's name.
+    hosts: () => ({
+      clearHostResolverCache: async () => { hostCache.cleared++; },
+      resolveHost: async (host: string) => {
+        if (network.nameMissing && host === new URL(cloudOrigin).hostname) throw new Error("net::ERR_NAME_NOT_RESOLVED");
+        return { endpoints: [{ address: "127.0.0.1", family: "ipv4" }] };
+      },
+    }),
     account: () => client as never,
     window: () => (win.destroyed ? null : win) as never,
     ensureWindow: () => {},
@@ -527,7 +542,9 @@ export async function launchHomeWorld(fx: CloudSendFixture, { chrome, ports, ver
 
   let startup: ReturnType<typeof createStartupScreen> | null = null;
   return {
-    cloudOrigin, localOrigin, teamOrigin, otherOrigin, window: win, home, account, network, admin, cloudRequests, notifications,
+    cloudOrigin, localOrigin, teamOrigin, otherOrigin, window: win, home, account, network, admin, cloudRequests, notifications, hostCache,
+    get moved() { return moves.moved; },
+    set moved(value: boolean) { moves.moved = value; },
     places: homePlaces, environments: () => envState,
     menu: () => environments.workspaceMenuTemplate(envState, { onSwitch() {}, onConnect() {}, onForget() {}, homeOrigin: home.cloudOrigin() }),
     async sync() { homePlaces.sync(account.state); await home.changed(); },

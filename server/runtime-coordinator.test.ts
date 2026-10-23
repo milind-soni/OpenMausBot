@@ -421,6 +421,27 @@ describe("RuntimeCoordinator: the run adapter", () => {
     expect(w.coordinator.node(node.id)).toMatchObject({ status: "completed", result: "builder done" });
   });
 
+  it("resumes the requester with a teammate's NEEDS INPUT question while its other teammate still works", async () => {
+    let asked = false;
+    const w = world((node) => {
+      if (node.botId === "tester") return "hold";
+      if (node.botId !== "builder" || asked) return undefined;
+      asked = true;
+      return { ok: true, text: "Did the first half.\nNEEDS INPUT: Which region should I deploy to?" };
+    });
+    const { node: built } = send(w, chief, "gen-1", undefined, builder, "Build it");
+    const { node: tested } = send(w, chief, "gen-1", undefined, tester, "Test it");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    w.coordinator.tick(); await flush();
+    const resumes = w.host.runs.filter(run => run.node.id === "gen-1");
+    expect(resumes.map(run => run.resumed)).toEqual([true]);
+    expect(resumes[0]!.text).toMatch(/^A teammate you are waiting on stopped on a question for Milind; the rest of your requests are still open/);
+    expect(resumes[0]!.text).toContain(`\n\n[OpenMausBot question from @builder on assignment ${built.id}: waiting on Milind]\nIt asks Milind: "Which region should I deploy to?".`);
+    expect(w.coordinator.node("gen-1")?.status).toBe("waiting");
+    expect(w.coordinator.node(tested.id)?.status).toBe("running");
+  });
+
   it("reads a provider failure as a failed turn, and a stop as stopped", async () => {
     const w = world((node) => node.botId === "builder" ? { ok: false, text: "Provider exited" } : "hold");
     const { node } = send(w, chief, "gen-1", undefined, builder, "Build it");

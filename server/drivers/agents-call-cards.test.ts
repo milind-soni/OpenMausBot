@@ -155,12 +155,17 @@ describe("the chat-app tools", () => {
       expect(names.slice(names.indexOf("show_widget"), names.indexOf("show_widget") + 4)).toEqual(["show_widget", "update_widget", "show_html", "update_html"]);
     }
     const tools = new Map(availableTools(PROFILE).map((tool) => [tool.name, tool as { description: string; inputSchema: { required: string[] }; annotations?: unknown }]));
-    expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page inline in this chat: /);
+    expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page in this chat, where the person watches it appear and can point at a part to change: /);
+    expect(tools.get("show_html")!.description).toContain("or `jsx`, one React component file with a default export");
     // Its last sentence points a dashboard at the bundled data-dashboards skill.
     expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. Never put secrets in it\. Not available in rooms\. For a data dashboard, follow the data-dashboards skill\.$/);
-    expect(tools.get("show_html")!.inputSchema.required).toEqual(["html", "title"]);
-    expect(tools.get("update_html")!.description).toBe("Replace a page you showed with show_html, in place. `app_id` is the id show_html returned. The page reloads, so anything the person did in it is lost.");
-    expect(tools.get("update_html")!.inputSchema.required).toEqual(["app_id", "html"]);
+    expect(tools.get("show_html")!.inputSchema.required).toEqual(["title"]);
+    expect(tools.get("update_html")!.description).toBe("Replace a page you showed with show_html, in place, with new `html`, `jsx` or `path`. `app_id` is the id show_html returned. The page reloads, so anything the person did in it is lost.");
+    expect(tools.get("update_html")!.inputSchema.required).toEqual(["app_id"]);
+    for (const name of ["show_html", "update_html"]) {
+      expect(Object.keys((tools.get(name)!.inputSchema as unknown as { properties: object }).properties), name).toEqual(expect.arrayContaining(["html", "jsx", "path", "title"]));
+      expect(Buffer.byteLength(JSON.stringify(tools.get(name))), name).toBeLessThan(12 * 1024);
+    }
     for (const name of ["show_html", "update_html"]) expect(tools.get(name), name).not.toHaveProperty("annotations");
   });
 
@@ -189,6 +194,22 @@ describe("the chat-app tools", () => {
     expect(await callTool("show_html", { html: "<p>x</p>", title: "x" }, room.context)).toEqual({ text: "Pages are not available in rooms yet. Answer in text.", isError: true });
     const silent = harness({ ok: false, status: 500, body: {} });
     expect(await callTool("update_html", { app_id: "m1", html: "<p>x</p>" }, silent.context)).toEqual({ text: "Could not update that page.", isError: true });
+  });
+
+  it("passes a jsx page on as jsx, never as html, and refuses both at once before any round trip", async () => {
+    const { apiResponse, context } = harness({ ok: true, status: 201, body: { messageId: "m9" } });
+    const jsx = "export default function Page() { return <p>hi</p>; }";
+    await callTool("show_html", { jsx, title: "Hi" }, context);
+    expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "show_html", jsx, title: "Hi" }) });
+    await callTool("update_html", { app_id: "m9", jsx }, context);
+    expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "update_html", app_id: "m9", jsx }) });
+    await callTool("show_html", { path: "site", title: "Site" }, context);
+    expect(apiResponse).toHaveBeenLastCalledWith("/api/internal/options-card", { method: "POST", body: JSON.stringify({ tool: "show_html", path: "site", title: "Site" }) });
+    expect(apiResponse).toHaveBeenCalledTimes(3);
+    expect(await callTool("show_html", { path: "site", html: "<p>x</p>", title: "Hi" }, context)).toEqual({ text: "Send one of html, jsx or path.", isError: true });
+    expect(await callTool("show_html", { jsx, html: "<p>x</p>", title: "Hi" }, context)).toEqual({ text: "Send one of html, jsx or path.", isError: true });
+    expect(await callTool("show_html", { jsx: "const x = 1;", title: "Hi" }, context)).toEqual({ text: "jsx: needs `export default` of the page's component.", isError: true });
+    expect(apiResponse).toHaveBeenCalledTimes(3);
   });
 
   it("update_html names the page it replaced", async () => {

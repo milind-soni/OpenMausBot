@@ -22,15 +22,20 @@ describe("the read rule", () => {
 });
 
 describe("who an audience includes", () => {
-  it("the team's: everyone; a room's: whoever sees the room; a member's: that member and the admins", () => {
+  it("the team's: everyone; a room's: whoever sees the room, and the admins; a member's: that member only", () => {
     expect(audienceIncludes("team", viewer(null))).toBe(true);
     expect(audienceIncludes(roomAudience("r1"), viewer(ADA, ["r1"]))).toBe(true);
     expect(audienceIncludes(roomAudience("r1"), viewer(ADA, []))).toBe(false);
     expect(audienceIncludes(memberAudience(ADA), viewer(ADA))).toBe(true);
     expect(audienceIncludes(memberAudience(ADA), viewer(BEN))).toBe(false);
     expect(audienceIncludes(memberAudience(ADA), viewer(null))).toBe(false);
-    expect(audienceIncludes(memberAudience(ADA), viewer(BEN, [], true))).toBe(true);
     expect(audienceIncludes(roomAudience("r1"), viewer(null, [], true))).toBe(true);
+  });
+  it("an Admin, the Owner included, never sees another person's private chat, only their own", () => {
+    expect(audienceIncludes(memberAudience(ADA), viewer(BEN, [], true))).toBe(false);
+    expect(audienceIncludes(memberAudience(ADA), viewer(null, [], true))).toBe(false);
+    expect(audienceIncludes(memberAudience(BEN), viewer(BEN, [], true))).toBe(true);
+    expect(audienceIncludes("team", viewer(BEN, [], true))).toBe(true);
   });
 });
 

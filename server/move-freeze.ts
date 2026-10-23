@@ -39,17 +39,22 @@ export interface MoveAutomations {
   appEvents(): Pick<AppTriggerManager, "list" | "update"> | null;
 }
 
-/** Switches off every automation that is on; the person can switch each on again by hand. Done while frozen, so none of
- * them runs once the freeze lifts. One that can't be switched off is logged, never a reason to stay frozen. */
-export async function switchAutomationsOff(automations: MoveAutomations): Promise<void> {
+/** Switches off every automation that is on, or only those named by key ("routine:<id>", "call:<id>", "webhook:<id>",
+ * "app-event:<id>"); the person can switch each on again by hand. Done while frozen, so none of them runs once the freeze
+ * lifts. One that can't be switched off is logged, never a reason to stay frozen. The keys of those switched off. */
+export async function switchAutomationsOff(automations: MoveAutomations, only?: ReadonlySet<string>): Promise<string[]> {
+  const done: string[] = [];
   const off = async (kind: string, id: string, work: () => unknown) => {
-    try { await work(); } catch (error) { console.warn(`move freeze: could not switch ${kind} ${id} off (${(error as Error).message})`); }
+    const key = `${kind}:${id}`;
+    if (only && !only.has(key)) return;
+    try { await work(); done.push(key); } catch (error) { console.warn(`move freeze: could not switch ${kind} ${id} off (${(error as Error).message})`); }
   };
   const routines = automations.routines(), calls = automations.calls(), webhooks = automations.webhooks(), appEvents = automations.appEvents();
   for (const routine of routines?.listRoutines() ?? []) if (routine.enabled) await off("routine", routine.id, () => routines!.update(routine.id, { enabled: false }));
   for (const call of calls?.list() ?? []) if (call.nextRunAt !== null) await off("call", call.id, () => calls!.switchOff(call.id));
   for (const webhook of webhooks?.list() ?? []) if (webhook.enabled) await off("webhook", webhook.id, () => webhooks!.update(webhook.id, { enabled: false }));
-  for (const trigger of appEvents?.list() ?? []) if (trigger.enabled) await off("app event", trigger.id, () => appEvents!.update(trigger.id, { enabled: false }));
+  for (const trigger of appEvents?.list() ?? []) if (trigger.enabled) await off("app-event", trigger.id, () => appEvents!.update(trigger.id, { enabled: false }));
+  return done;
 }
 
 export function createMoveFreeze({ dataDir, exportOnly = false }: { dataDir: string; exportOnly?: boolean }) {

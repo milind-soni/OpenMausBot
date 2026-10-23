@@ -57,8 +57,8 @@ import { codexVersionBehind, readLatestCodexRelease } from "./codex-release.ts";
 import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
-import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
-import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts";
+import { appMountFor, gateServer, mcpStdioServer } from "../mcp-gate-config.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
+import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../mcp-directory.ts"; import { codexPatchProgress } from "./tool-progress.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -772,9 +772,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             if (turn.toolScope !== undefined && approval === "prompt") appServerArgs.push("-c", `mcp_servers.${mountName}.default_tools_approval_mode="prompt"`);
           }
         };
-        if (turn.integrations?.composio) {
-          mountSelected("composio", "openmausbot_connectors", turn.integrations.composio);
-        }
+        if (turn.integrations?.composio) mountSelected("composio", "openmausbot_connectors", turn.integrations.composio);
+        if (turn.integrations?.composioOwn) mountSelected(OWN_APPS_SERVER, `openmausbot_${OWN_APPS_SERVER}`, turn.integrations.composioOwn);
         if (turn.integrations?.agents) {
           // OpenMausBot's own coordination tools never ask: "auto" quiets only read-only tools.
           mountSelected("agents", "agents", turn.integrations.agents, "approve");
@@ -1253,10 +1252,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           case "item/reasoning/textDelta":
           case "item/reasoning/summaryTextDelta": {
-            const delta = typeof p.delta === "string" ? p.delta : "";
-            if (delta) emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta });
+            if (typeof p.delta === "string" && p.delta) emit({ ...base(threadId, turnId), type: "content.delta", streamKind: "reasoning_text", delta: p.delta });
             break;
           }
+          case "item/fileChange/patchUpdated": { const draft = codexPatchProgress(p); if (draft) emit({ ...base(threadId, turnId), ...draft }); break; }
           case "item/started": {
             const item = p.item ?? {};
             const runs = item.type === "mcpToolCall" && item.tool === CALL_TOOL && typeof item.server === "string" && directoryMounts.has(item.server)

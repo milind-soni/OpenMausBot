@@ -45,6 +45,29 @@ test("production personal Cloud IPC guards exact local main frame and forwards n
   }
   assert.deepEqual(calls, bridgeMethods.map(method => method === "connectHomeForPhone" ? ["connectHome", "phone"] : [method]));
 });
+test("a team's Cloud opens from the page by its id alone: the team comes from the verified session, and opens as the switcher opens it", async () => {
+  const f = preload();
+  await f.bridge.cloudAccount.openTeam({ toString: () => "team-acme" }, { origin: "https://evil.example.test" });
+  assert.deepEqual(f.invoked, [["cloud-account:openTeam", "team-acme"]]);
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8"), start = source.indexOf("const workspaceOnly ="), end = source.indexOf('ipcMain.handle("organization:settings-opened"', start);
+  const handlers = new Map(), shown = [], frame = { url: `${origin}/` }, contents = { mainFrame: frame };
+  const acme = { id: "team-acme", name: "Acme", role: "member", machine: { status: "ready", origin: "https://omb-t-2.fly.dev" } };
+  let state = { status: "connected", teams: [acme] };
+  localOrigin.setLocalOrigin(origin);
+  const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
+    rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" }, ensureCloudAccount: () => ({ state: () => state }),
+    showHome: async options => { shown.push(JSON.parse(JSON.stringify(options))); } });
+  vm.runInContext(source.slice(start, end), context);
+  const open = handlers.get("cloud-account:openTeam"), page = { sender: contents, senderFrame: frame };
+  await open(page, "team-acme");
+  assert.deepEqual(shown, [{ place: { team: "team-acme", name: "Acme" } }]);
+  await assert.rejects(async () => open(page, "team-other"), /not in that team/);
+  state = { status: "unavailable", teams: [acme] };
+  await assert.rejects(async () => open(page, "team-acme"), /not in that team/, "only a connected session's teams");
+  assert.throws(() => open({ sender: contents, senderFrame: { url: "https://remote.example.test" } }, "team-acme"), /only available/);
+  assert.equal(shown.length, 1);
+});
 test("a checkout from the page carries only a plan and a source, as text; the server menu only 'howto'", async () => {
   const f = preload();
   await f.bridge.cloudAccount.checkout("pro", "app_card", { origin: "https://evil.example.test", paid: true });

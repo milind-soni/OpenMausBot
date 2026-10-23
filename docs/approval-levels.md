@@ -41,9 +41,9 @@ desktop app, where the choice crosses a private process channel rather than the
 bot-accessible HTTP API, because it holds restrictions you wrote yourself. It
 is hidden in development, standalone web, and remote pages.
 
-A team's sidebar menu has **Set for all bots in this team…**, for the owner
+A department's sidebar menu has **Set for all bots in this department…**, for the owner
 or an admin. It sets one approval level (Ask, Auto-accept edits, Approve for
-me or Full access), or one model and effort, on every bot in that team. It
+me or Full access), or one model and effort, on every bot in that department. It
 lists what each bot will get before anything changes, then saves the bots one
 at a time with the same request and checks as each bot's own settings. A bot
 that is working, or whose engine does not offer the level, model or effort,

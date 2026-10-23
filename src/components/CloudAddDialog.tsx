@@ -16,7 +16,7 @@ import { ChooseScreen } from "./cloud-buy/ChooseScreen";
 import { OneCloudScreen, StatusScreen } from "./cloud-buy/OneCloudScreen";
 import { PayScreen } from "./cloud-buy/PayScreen";
 import { StagingMark } from "./cloud-buy/parts";
-import { SetupScreen } from "./cloud-buy/SetupScreen";
+import { SetupScreen, TeamReadyScreen, TeamSetupScreen } from "./cloud-buy/SetupScreen";
 import { BrowserSignInScreen, codeDigits, SignInScreen } from "./cloud-buy/SignInScreen";
 
 export interface CloudAddActions {
@@ -40,6 +40,8 @@ export interface CloudAddActions {
   name(value: string): void;
   color(value: CloudColor): void;
   openCloud(): void;
+  /** A Team or Business plan's Cloud: the team's, opened as the switcher opens it. */
+  openTeam(teamId: string): void;
   notNow(): void;
   interest(): void;
   close(): void;
@@ -76,13 +78,15 @@ export function CloudAddPanel({ view, ui, actions }: { view: CloudAddView; ui: C
       counting={ui.counting} busy={ui.busy} openFailed={ui.openFailed} onName={actions.name} onColor={actions.color} onOpen={actions.openCloud} onNotNow={actions.notNow} />;
     case "has-cloud": return <OneCloudScreen name={ui.look.name} color={ui.look.color} busy={ui.busy} interest={ui.interest} openFailed={ui.openFailed}
       onInterest={actions.interest} onOpen={actions.openCloud} />;
+    case "team-starting": return <TeamSetupScreen team={view.team} step={view.step} slow={view.slow} />;
+    case "team-ready": return <TeamReadyScreen name={view.team.name} busy={ui.busy} openFailed={ui.openFailed} onOpen={() => actions.openTeam(view.team.id)} />;
     case "settings": return null;
   }
 }
 
 const WIDTH: Partial<Record<CloudAddView["kind"], string>> = { offer: "max-w-[900px]", starting: "max-w-[720px]", ready: "max-w-[720px]" };
 /** Mid sign-in, checkout or setup a stray click beside the sheet (say, back from paying in the browser) must not lose it: there only Close and Esc do. */
-const HELD: ReadonlySet<CloudAddView["kind"]> = new Set(["sign-in", "signing-in", "waiting", "starting"]);
+const HELD: ReadonlySet<CloudAddView["kind"]> = new Set(["sign-in", "signing-in", "waiting", "starting", "team-starting"]);
 
 /** The sheet over the app: one width per screen, the close button, and the staging mark when the app is on staging.
  * Above the z-50 layers (Settings, the welcome flow), which it may be opened over. */
@@ -188,7 +192,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   // Ready shown here ends the purchase for main, so a later Add a Cloud… is one Cloud for now.
   useEffect(() => {
     if ((kind === "waiting" || kind === "starting" || kind === "ready") && !arrived) setArrived(true);
-    if (kind === "ready") void bridge?.readySeen?.().catch(() => {});
+    if (kind === "ready" || kind === "team-ready") void bridge?.readySeen?.().catch(() => {});
   }, [kind]);
   useEffect(() => {
     if (!kind || !request) return;
@@ -239,6 +243,11 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
       if (look?.dirty && bridge.setLook) await bridge.setLook(shownLook.name, look.color).catch(() => {});
       await bridge.connectHome();
     })().then(() => close(), () => setOpenFailed(true)).finally(() => setBusy(false));
+  };
+  const openTeam = (teamId: string) => {
+    if (busy || !bridge?.openTeam) return;
+    setBusy(true); setOpenFailed(false);
+    void bridge.openTeam(teamId).then(() => close(), () => setOpenFailed(true)).finally(() => setBusy(false));
   };
   useEffect(() => {
     if (typeof auto !== "number") return;
@@ -350,6 +359,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     name: value => setLook({ typed: value, color: shownLook.color, dirty: true }),
     color: value => setLook({ typed: shownLook.typed, color: value, dirty: true }),
     openCloud,
+    openTeam,
     notNow: () => setAuto("off"),
     interest: () => {
       if (busy || !bridge.interest) return;

@@ -1,6 +1,7 @@
 import { deleteAttachment, IMAGE_MAX_BYTES, saveAudio, saveImage } from "../attachments.ts";
 import type { BotRecord, GroupRecord, Store } from "../store.ts";
 import type { AppConfig } from "../config.ts";
+import { redactSecretsInText } from "../redact.ts";
 import * as tts from "../tts/index.ts";
 import type { WebhookManagerOptions } from "../webhooks.ts";
 import type { RoomTalksVerdict } from "./room-access.ts";
@@ -78,7 +79,10 @@ export function createWebhookRoomPost(deps: WebhookRoomDeps): Pick<WebhookManage
           text: content.text,
           from: { botId: bot.id, name: bot.name, color: bot.color },
           webhookPost: true,
-          ...(content.attachments?.length ? { attachments: content.attachments } : {}),
+          ...(content.attachments?.length
+            ? { attachments: content.attachments.map((attachment) =>
+                attachment.kind === "audio" && attachment.text ? { ...attachment, text: redactSecretsInText(attachment.text) } : attachment) }
+            : {}),
         });
         store.patchGroup(group.id, { unread: true });
       },

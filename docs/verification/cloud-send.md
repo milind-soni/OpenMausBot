@@ -58,6 +58,14 @@ models reach the bot; a conversation's project, model, approval and snooze and a
 room conversation's time limit reach it too. A reply over 1 MB arrives whole,
 imported, Claude Code and library skills arrive, and a model on the home network
 stays here. `check()` is ok, and a move run again changes nothing.
+`server/cloud-send-rooms.e2e.test.ts` runs the move over every shape of room: one
+with history arrives; one nobody wrote in yet (as a team setup or a package
+makes it, with a bot that lives only there) arrives as its thread with no rows;
+one whose bots were all deleted here is never made there and the check leaves it
+out with its conversation; one an older send carried and the person then removed
+on My Cloud stays removed and the check leaves it out. `check()` is ok, and a
+move run again changes nothing. A check that finds something missing logs the
+rooms and conversations by id (`electron/one-home.mjs` `missingOf`).
 `server/cloud-send-store.e2e.test.ts` fills My Cloud's attachment store: the
 attachment is refused in plain words, its chat still goes, no partial file is
 left, and the check names the attachment.

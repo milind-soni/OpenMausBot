@@ -202,6 +202,14 @@ describe("the Automations list switch", () => {
     expect(toggle("Morning summary").getAttribute("aria-checked")).toBe("false");
   });
 
+  it("labels each automation by its name, with what it does beneath, and by what it does when it has no name", () => {
+    fixture.state.routines = [routine, { ...routine, id: "unnamed", name: " " }];
+    mountPage();
+    expect(row("routine-1").querySelector("button")!.textContent).toBe("Morning summary");
+    expect(row("routine-1").textContent).toContain("sends you a summary of your inbox");
+    expect(row("unnamed").querySelector("button")!.textContent).toContain("sends you a summary of your inbox");
+  });
+
   it("offers no switch for a one-time automation that already happened, and lists no automation whose bot is gone", () => {
     fixture.state.routines = [{ ...routine, enabled: false, nextRunAt: null, schedule: { type: "once", at: now - 60_000 } }, { ...routine, id: "orphan", name: "Orphan", botId: "deleted-bot" }];
     fixture.state.webhooks = [webhook, { ...webhook, id: "orphan-hook", name: "Orphan hook", botId: "deleted-bot" }];

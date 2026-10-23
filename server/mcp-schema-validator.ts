@@ -22,6 +22,8 @@ export function compileToolSchema(schema: Record<string, unknown>, options: { al
   formats.default(compiler);
   // GitHub's MCP server tags header-routed arguments with this annotation; it adds no constraint to check.
   compiler.addKeyword({ keyword: "x-mcp-header", schemaType: "string" });
+  // Google's remote MCP servers (Maps, Gmail, Drive) annotate enums with per-value descriptions; it adds no constraint to check.
+  compiler.addKeyword({ keyword: "x-google-enum-descriptions", schemaType: "array" });
   compiler.addFormat("uint32", { type: "number", validate: value => Number.isInteger(value) && value >= 0 && value <= 4294967295 });
   compiler.addFormat("uint64", { type: "number", validate: value => Number.isSafeInteger(value) && value >= 0 });
   try { return compiler.compile(schema); }

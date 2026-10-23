@@ -4,6 +4,9 @@
 // addresses, the order events arrived in, a step it failed) are not part of the contract.
 import { readFileSync } from "node:fs";
 
+import { BROWSER_WAITING } from "../../../browser-live.ts";
+import { shape as fieldShape } from "./v1-session.ts";
+
 interface Step {
   step: string;
   answer: unknown;
@@ -18,6 +21,10 @@ interface Step {
 
 export const V1_GOLDEN = JSON.parse(readFileSync(new URL("./v1-golden.json", import.meta.url), "utf8")) as Step[];
 
+/** Events of the contract the recorded session never met: the old engine says it waits while its browser is busy, the
+ * new one while its browser starts. */
+const UNRECORDED = new Map([BROWSER_WAITING].map(({ type, ...data }) => [type, JSON.stringify(fieldShape(data))]));
+
 export function v1Differences(actual: Array<Record<string, unknown>>): string[] {
   const problems: string[] = [];
   const expectedShapes = new Map<string, string>();
@@ -26,7 +33,7 @@ export function v1Differences(actual: Array<Record<string, unknown>>): string[] 
   for (const step of actual as unknown as Step[]) {
     for (const [type, shape] of Object.entries(step.shapes ?? {})) {
       seenTypes.add(type);
-      const expected = expectedShapes.get(type);
+      const expected = expectedShapes.get(type) ?? UNRECORDED.get(type);
       if (expected === undefined) problems.push(`${step.step}: an event the v1 contract does not have: ${type}`);
       else if (expected !== JSON.stringify(shape)) problems.push(`${step.step}: ${type} carries ${JSON.stringify(shape)}, the contract ${expected}`);
     }

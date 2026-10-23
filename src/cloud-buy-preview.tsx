@@ -1,5 +1,5 @@
 // Dev-only gallery of the Cloud buying sheet, served at /cloud-buy-preview.html; not in the packaged app.
-// ?state=choose|sign-in-email|sign-in-code|sign-in-sso|pay|pay-late|setup|ready|has-cloud|unreachable&skin=midnight&staging=1&reduced=1&plan=starter&lang=de
+// ?state=choose|sign-in-email|sign-in-code|sign-in-sso|pay|pay-late|setup|ready|has-cloud|team-setup|team-ready|unreachable&skin=midnight&staging=1&reduced=1&plan=starter&lang=de
 // &current=pro (a subscriber's own plan says Your plan; current=personal shows a Personal subscriber's own card)
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -35,6 +35,8 @@ const VIEWS: Record<string, CloudAddView> = {
   setup: { kind: "starting", ...started, step: "storage", slow: false, received: false },
   ready: { kind: "ready", ...started },
   "has-cloud": { kind: "has-cloud" },
+  "team-setup": { kind: "team-starting", team: "Acme", step: "storage", slow: false },
+  "team-ready": { kind: "team-ready", team: { id: "team-acme", name: "Acme" } },
   unreachable: { kind: "unreachable" },
 };
 const noop = () => {};

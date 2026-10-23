@@ -2,6 +2,7 @@
 import type { ServerFrame } from "../../shared/wire";
 import { cloudAsleep, markCloudAsleep, onCloudPower, sleepingFrame } from "./cloud-power";
 import { recordBotTextMessage, recordRuntimeEvent } from "./voice-latency-probe";
+import { noteTurnEvent } from "@/state/turn-status";
 
 export const LIVE_EVENTS_PATH = "/api/events";
 export const LIVE_EVENTS_STALE_MS = 40_000;
@@ -113,8 +114,10 @@ function parseLiveFrame(data: string): LiveFrame | null {
   return candidate as LiveFrame;
 }
 
-function tapVoiceProbe(frame: ServerFrame): void {
+function tapLiveFrame(frame: ServerFrame): void {
   if (frame.kind === "runtime") {
+    // The chat's status line reads every live runtime frame; none of them is stored.
+    noteTurnEvent(frame.event);
     recordRuntimeEvent(frame.event);
   } else if (frame.kind === "message" && frame.message?.role === "bot" && frame.message?.kind === "text") {
     recordBotTextMessage(frame.message, frame.threadId);
@@ -326,7 +329,7 @@ export function openLiveEvents(
       }
 
       if (frame.kind !== "hello") {
-        tapVoiceProbe(frame as ServerFrame);
+        tapLiveFrame(frame as ServerFrame);
         handlers.onFrame(frame);
       }
     };

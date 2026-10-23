@@ -4,6 +4,7 @@ import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/s
 import { useShowThreads } from "@/lib/thread-preferences";
 import { addBot } from "@/lib/add-bot";
 import { useWelcomeViewer, WelcomeGate } from "@/components/onboarding/WelcomeGate";
+import { MausBotWelcome } from "@/components/MausBotWelcome";
 import { CloudTimeZoneSync } from "@/components/CloudTimeZone";
 import { cloudSignInDue, spotlightsQuiet, type WelcomeViewer } from "@/lib/onboarding";
 import { FirstConversationTour } from "@/components/onboarding/FirstConversationTour";
@@ -45,7 +46,6 @@ import { cloudFirstRun, cloudWelcomeVisible, useCloudWelcome } from "@/lib/cloud
 import { engineReady } from "@/components/EngineLibrary";
 import { CommandPalette } from "@/components/CommandPalette";
 import { setLocale, t } from "@/lib/i18n";
-import { tellDesktopLanguage } from "@/lib/desktop-language";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import { effectiveLanguage, localeTag, useLanguageChoice } from "@/lib/language-preference";
 import { botShowsUnread } from "@/lib/bot-unread";
@@ -104,7 +104,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     const request = takeConnectRequest(window.location.href);
     if (!request) return;
     window.history.replaceState(null, "", request.rest);
-    dispatch({ type: "togglePlugins", open: true, surface: request.surface });
+    dispatch("section" in request ? { type: "toggleAppSettings", open: true, section: request.section } : { type: "togglePlugins", open: true, surface: request.surface });
   }, [dispatch]);
   useExternalChatLinks(state, dispatch);
   usePresence(state, dispatch);
@@ -115,8 +115,6 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     setLocale(localeTag(language));
     setLocaleEpoch((epoch) => epoch + 1);
   }, [language]);
-  const configLoaded = state.config !== null;
-  useEffect(() => { void tellDesktopLanguage(language, configLoaded); }, [language, configLoaded]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [localVmWorkspaceBotId, setLocalVmWorkspaceBotId] = useState<string | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
@@ -411,6 +409,7 @@ function Application() {
           <Shell viewer={viewer} />
         </ThreadRefsProvider>
         <WelcomeGate viewer={viewer} />
+        <MausBotWelcome viewer={viewer} />
         <CloudTimeZoneSync viewer={viewer} />
         <GuidedTour />
         <LiveCallHost />

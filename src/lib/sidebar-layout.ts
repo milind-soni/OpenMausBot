@@ -2,6 +2,8 @@ import type { GroupGoalRunCardData } from "../../shared/group-goal-run";
 import type { ConnectorCardData } from "../../shared/wire";
 import { t } from "./i18n";
 import type { LocaleKey } from "@/locales";
+import type { DefaultBotFields } from "../../shared/default-bot";
+import { hiddenFromSidebar } from "./default-bot";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
 export const CHANNELS_SECTION_ID = "builtin:channels";
@@ -28,7 +30,7 @@ const GOAL_RUN_PREVIEW_LABEL = {
   failed: "routines.goal.failed",
 } satisfies Record<GroupGoalRunCardData["status"], LocaleKey>;
 
-export type SidebarBot = {
+export type SidebarBot = DefaultBotFields & {
   id: string;
   chiefOfStaff?: boolean;
   section?: string;
@@ -107,10 +109,10 @@ export function pinnedCircleThreadListVisible(
 
 export function partitionSidebarBots<T extends SidebarBot>(
   bots: T[],
-  options?: { universalPins?: boolean },
+  options?: { universalPins?: boolean; viewerEmail?: string | null; welcoming?: string | null },
 ) {
   const universalPins = options?.universalPins === true;
-  const visible = bots.filter((bot) => !bot.hidden);
+  const visible = bots.filter((bot) => !bot.hidden && !hiddenFromSidebar(bot, options?.viewerEmail) && bot.id !== options?.welcoming);
   const pinnedBots = visible.filter((bot) => Boolean(bot.pinned) && (universalPins || !bot.chiefOfStaff));
   const pinnedIds = new Set(pinnedBots.map((bot) => bot.id));
   const unsectionedChief = visible.find((bot) => bot.chiefOfStaff && !bot.section && !pinnedIds.has(bot.id)) ?? null;

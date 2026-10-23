@@ -268,8 +268,8 @@ describe("Store", () => {
     store.setChiefOfStaff(general.id);
     expect(store.deleteSection("Studio")).toMatch(/Chief/);
     expect(store.bot(chief.id)).toMatchObject({ chiefOfStaff: true, section: "Studio" });
-    expect(store.deleteSection("missing")).toBe("No such team");
-    expect(store.deleteSection("")).toBe("No such team");
+    expect(store.deleteSection("missing")).toBe("No such department");
+    expect(store.deleteSection("")).toBe("No such department");
   });
 
   it("restores persisted membership if deleting the team cannot finish", () => {
@@ -330,7 +330,7 @@ describe("Store", () => {
       text: "Voice note attached",
       attachments: [
         { kind: "image", path: "/attachments/shot.png", mime: "image/png" },
-        { kind: "audio", path: "/attachments/note.mp3", mime: "audio/mpeg", durationMs: 4200 },
+        { kind: "audio", path: "/attachments/note.mp3", mime: "audio/mpeg", durationMs: 4200, text: "The spoken words" },
       ],
     });
     expect(reply.attachments?.[1]).toEqual({
@@ -338,6 +338,7 @@ describe("Store", () => {
       path: "/attachments/note.mp3",
       mime: "audio/mpeg",
       durationMs: 4200,
+      text: "The spoken words",
     });
     const reloaded = new Store(selection);
     const stored = reloaded.messagesFor(bot.threadId).find((message) => message.id === reply.id);
@@ -345,6 +346,7 @@ describe("Store", () => {
     const encoded = JSON.stringify(stored);
     expect(encoded).toContain('"kind":"audio"');
     expect(encoded).toContain('"durationMs":4200');
+    expect(encoded).toContain('"text":"The spoken words"');
   });
 
   it("keeps surface pin provenance server-private and round-trips it through bots.json", () => {
@@ -1541,6 +1543,21 @@ describe("Store", () => {
     expect(reloaded.bots[0]?.chiefOfStaff).toBe(true);
   });
 
+  it("seedIfEmpty makes the new install's Chief its MausBot in chrome, introduced, and no bot after it takes chrome or silver in turn", () => {
+    const store = new Store(selection);
+    store.seedIfEmpty();
+    const chief = store.bots[0]!;
+    expect(chief).toMatchObject({ name: "MausBot", color: "chrome", chiefOfStaff: true, defaultBot: {} });
+    expect(store.messagesFor(chief.threadId).map((message) => [message.kind, message.helperIntro, message.card?.options.length])).toEqual([["options", true, 4]]);
+    expect(store.messagesFor(chief.threadId)[0]!.text).toContain("Hi, I'm MausBot, your helper for everything here.");
+    const later = Array.from({ length: 25 }, () => store.createBot());
+    expect(later.map((bot) => bot.color)).not.toContain("silver");
+    expect(later.map((bot) => bot.color)).not.toContain("chrome");
+    expect(later[0]?.color).toBe("blue");
+    expect(later.map((bot) => bot.name)).not.toContain("MausBot");
+    expect(new Store(selection).bot(chief.id)).toMatchObject({ name: "MausBot", color: "chrome", defaultBot: {} });
+  });
+
   it("seedIfEmpty leaves an existing workspace without a Chief as it is", () => {
     const store = new Store(selection);
     const existing = store.createBot();
@@ -1696,6 +1713,61 @@ describe("Store", () => {
     expect(messages.map((m) => m.parentId)).toEqual([null, "m1"]);
     expect(reloaded.activeLeaf(bot.threadId)).toBe("m2");
     expect(reloaded.activePath(bot.threadId).map((m) => m.id)).toEqual(["m1", "m2"]);
+  });
+});
+
+describe("Store bot order", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  // createBot puts the newest bot first, so four creations read [d, c, b, a].
+  const fleet = (store: Store) => {
+    const a = store.createBot({ name: "A" }, { seedMessages: false });
+    const b = store.createBot({ name: "B" }, { seedMessages: false });
+    const c = store.createBot({ name: "C" }, { seedMessages: false });
+    const d = store.createBot({ name: "D" }, { seedMessages: false });
+    return { a, b, c, d };
+  };
+  const order = (store: Store) => store.bots.map((bot) => bot.id);
+
+  it("reorders the whole fleet, persists it, and emits one whole-list change", () => {
+    const store = new Store(selection);
+    const { a, b, c, d } = fleet(store);
+    expect(order(store)).toEqual([d.id, c.id, b.id, a.id]);
+    const changes: unknown[] = [];
+    store.onChange((change) => changes.push(change));
+    const before = store.bots;
+    expect(store.reorderBots([a.id, b.id, c.id, d.id])?.map((bot) => bot.id)).toEqual([a.id, b.id, c.id, d.id]);
+    expect(changes).toEqual([{ type: "bots.order" }]);
+    // Same array and same records: schedulers and other consumers hold these objects.
+    expect(store.bots).toBe(before);
+    expect(store.bot(a.id)).toBe(a);
+    expect(order(new Store(selection))).toEqual([a.id, b.id, c.id, d.id]);
+  });
+
+  it("is stable for the bots a partial list leaves out", () => {
+    const store = new Store(selection);
+    const { a, b, c, d } = fleet(store);
+    // a and c sit at positions 3 and 1: a takes 1 and c takes 3; d and b never move.
+    expect(store.reorderBots([a.id, c.id])?.map((bot) => bot.id)).toEqual([d.id, a.id, b.id, c.id]);
+    expect(order(new Store(selection))).toEqual([d.id, a.id, b.id, c.id]);
+    // Swapping two neighbours inside one bucket leaves the rest alone.
+    expect(store.reorderBots([b.id, a.id])?.map((bot) => bot.id)).toEqual([d.id, b.id, a.id, c.id]);
+  });
+
+  it("refuses an empty list, a repeated id or an unknown id without touching anything", () => {
+    const store = new Store(selection);
+    const { a, b } = fleet(store);
+    const saved = order(store);
+    const changes: unknown[] = [];
+    store.onChange((change) => changes.push(change));
+    for (const ids of [[], [a.id, a.id], [a.id, "missing"], ["missing"], [b.id, a.id, b.id]]) {
+      expect(store.reorderBots(ids), JSON.stringify(ids)).toBeNull();
+    }
+    expect(changes).toEqual([]);
+    expect(order(store)).toEqual(saved);
+    expect(order(new Store(selection))).toEqual(saved);
   });
 });
 

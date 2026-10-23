@@ -12,6 +12,8 @@ import { describe, expect, it } from "vitest";
 import { CONTROL_UNCONFIRMED } from "./control-client.ts";
 import { gatedLocalComputer } from "./local-computer.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
+import { wideSchema } from "./testing/oversized-tool-schema.ts";
+import { TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 
 // A disposable MCP child that never opens a computer or reads user data.
 const FAKE_DRIVER = `
@@ -175,6 +177,33 @@ readline.createInterface({input: process.stdin}).on("line", (line) => {
     } finally {
       child.kill("SIGKILL");
     }
+  });
+
+  it("fits the driver's tools to the engine's provider profile when the turn carries one", async () => {
+    const wide = wideSchema(110);
+    const driver = `
+const readline = require("node:readline");
+readline.createInterface({input: process.stdin}).on("line", (line) => {
+  const message = JSON.parse(line);
+  process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:message.id,result:{tools:[{name:"configure",inputSchema:${JSON.stringify(wide)}}]}}) + "\\n");
+});
+`;
+    const connection = gatedLocalComputer(
+      { command: process.execPath, args: ["-e", driver], env: {}, platform: "darwin", scope: "local-computer" },
+      { url: "http://127.0.0.1:1/control", token: "schema-fixture-token" },
+    );
+    const listed = async (env: Record<string, string>) => {
+      const child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+      try {
+        const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+        child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) + "\n");
+        return JSON.parse((await lines.next()).value as string).result.tools[0].inputSchema;
+      } finally {
+        child.kill("SIGKILL");
+      }
+    };
+    expect(JSON.stringify(await listed({ [TOOL_SCHEMA_PROFILE_ENV]: "moonshot" })).length).toBeLessThanOrEqual(12_000);
+    expect(await listed({})).toEqual(wide);
   });
 
   it("rejects malformed environment and missing authority without printing connection secrets", () => {

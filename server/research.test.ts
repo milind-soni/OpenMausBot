@@ -118,9 +118,9 @@ describe("research through the plan's relay", () => {
     expect(costLine(answer)).toBe("about $0.0045, settled when treg finishes");
   });
 
-  it("relays the Admin's own sentence, and says research isn't offered yet while its routes are off", async () => {
+  it("relays the Admin's own sentence, with what keeps research going once the month's is used up, and says research isn't offered yet while its routes are off", async () => {
     const used = fakeFetch({ status: 429, body: { error: "quota_exceeded", message: "This month's $15 of research is used up. It resets on 1 November." } });
-    expect((await failure(createResearchClient(PLAN, used).call({ id: "apollo.people.search" }))).message).toBe("This month's $15 of research is used up. It resets on 1 November.");
+    expect((await failure(createResearchClient(PLAN, used).call({ id: "apollo.people.search" }))).message).toBe("This month's $15 of research is used up. It resets on 1 November. Add your own treg key to keep going.");
     const off = fakeFetch({ status: 404, body: { error: "not_found", message: "Not found." } });
     expect((await failure(createResearchClient(PLAN, off).search({ job: "x", limit: 5 }))).message).toBe(RESEARCH_MESSAGES.notOffered);
   });

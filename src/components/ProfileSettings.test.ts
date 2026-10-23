@@ -77,6 +77,30 @@ describe("the profile photo", () => {
     }
   });
 
+  it("saves only the signed-in person's own profile on a team, never the server's, and keeps their sign-in address", async () => {
+    fixture.config = { team: { id: "team-acme-1", name: "Acme" }, profile: { name: "Bob", email: "bob@acme.test", avatarUrl: photo } };
+    fixture.api.mockResolvedValue({ name: "Bob Builder", email: "bob@acme.test", aboutMe: "" });
+    const fetched = vi.fn();
+    vi.stubGlobal("fetch", fetched);
+    try {
+      await act(async () => root.render(createElement(ProfileFields)));
+      const email = host.querySelector<HTMLInputElement>('input[type="email"]')!;
+      expect(email.readOnly).toBe(true);
+      expect(email.value).toBe("bob@acme.test");
+      const name = host.querySelector<HTMLInputElement>('input[aria-label="Your name"]')!;
+      await act(async () => name.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+      expect(fixture.api).toHaveBeenCalledWith("/api/me", { method: "PUT", body: JSON.stringify({ name: "Bob" }), timeoutMs: 10_000 });
+      expect(fixture.dispatch).toHaveBeenCalledWith({ type: "profileSaved", profile: { name: "Bob Builder", email: "bob@acme.test" } });
+      const remove = [...host.querySelectorAll("button")].find((button) => button.textContent === "Remove photo")!;
+      await act(async () => remove.click());
+      expect(fixture.api).toHaveBeenLastCalledWith("/api/me", { method: "PUT", body: JSON.stringify({ avatarUrl: "" }), timeoutMs: 10_000 });
+      expect(fetched).not.toHaveBeenCalled();
+      expect(fixture.api.mock.calls.map(([path]) => path)).not.toContain("/api/config");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("falls back to the initials in the sidebar when the stored picture is gone", async () => {
     await act(async () => root.render(createElement(InitialsAvatar, { initials: "AL", avatarUrl: photo })));
     const image = host.querySelector("img")!;

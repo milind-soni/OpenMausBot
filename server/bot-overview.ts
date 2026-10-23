@@ -8,7 +8,7 @@ export interface BotOverview {
   who: { name: string; title: string; blurb: string; soulLead: string };
   does: string[];
   doesRoutines?: OverviewRoutineLine[];
-  /** The teams a Chief of Staff may also coordinate, "" for the unnamed section the English line calls "General". */
+  /** The departments a Chief of Staff may also coordinate, "" for the unnamed department the English line calls "General". */
   managedSections?: string[];
   reaches: string[];
   wont: string[];
@@ -244,12 +244,12 @@ function reachesLines(facts: OverviewFacts): string[] {
   }
   if (facts.browserEnabled && facts.engine?.browserMcp && facts.bot.browser !== false && facts.bot.computer !== "off") lines.push("Has the built-in browser.");
   if (facts.engine?.agentsMcp && facts.sectionPeers > 0 && facts.bot.peers?.length !== 0) {
-    const scope = facts.bot.chiefOfStaff && facts.bot.managedSections?.length ? "its allowed teams" : "its section";
+    const scope = facts.bot.chiefOfStaff && facts.bot.managedSections?.length ? "its allowed departments" : "its department";
     lines.push(`Can talk to ${facts.sectionPeers} other bot${facts.sectionPeers === 1 ? "" : "s"} in ${scope}.`);
   }
-  if (facts.bot.chiefOfStaff) lines.push("Coordinates its section as Chief of Staff.");
+  if (facts.bot.chiefOfStaff) lines.push("Coordinates its department as Chief of Staff.");
   if (facts.bot.chiefOfStaff && facts.bot.managedSections?.length) {
-    lines.push(`May also coordinate these teams: ${facts.bot.managedSections.map(name => name || "General").join(", ")}.`);
+    lines.push(`May also coordinate these departments: ${facts.bot.managedSections.map(name => name || "General").join(", ")}.`);
   }
   return lines;
 }

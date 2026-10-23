@@ -579,6 +579,35 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect((settled[0] as any).text).toBe("hello from fake claude");
   });
 
+  it("passes on a running tool's heartbeat as tool activity, so a long tool is not taken for a stall", async () => {
+    await create("tool-heartbeat");
+    await instance.adapter.sendTurn({ threadId: "t-heartbeat", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const types = recorder.events.map((e) => e.type);
+    const beat = types.indexOf("item.updated");
+    expect(recorder.events[beat]).toMatchObject({ itemType: "tool" });
+    expect(beat).toBeGreaterThan(types.indexOf("item.started"));
+    expect(beat).toBeLessThan(types.lastIndexOf("item.completed"));
+  });
+
+  it("reports a long Write's input as it streams, after the bot's words and before its tool call", async () => {
+    await create("slow-write", { FAKE_CLAUDE_WRITE_BYTES: "6144", FAKE_CLAUDE_WRITE_STEP_MS: "5" });
+    await instance.adapter.sendTurn({ threadId: "t-slow-write", text: "build a dashboard" });
+    await recorder.until((e) => e.type === "turn.completed", 20_000);
+
+    const types = recorder.events.map((e) => e.type);
+    const started = recorder.events.find((e) => e.type === "item.started") as any;
+    const progress = recorder.events.filter((e) => e.type === "turn.progress") as any[];
+    expect(progress.length, "one report per streamed chunk, before the bus coalesces them").toBeGreaterThan(10);
+    expect(progress.every((e) => e.activity === "write" && e.itemId === started.itemId && e.turnId === started.turnId)).toBe(true);
+    expect(progress.at(-1)).toMatchObject({ file: "index.html" });
+    expect(progress.at(-1).bytes).toBeGreaterThanOrEqual(6144);
+    const intro = recorder.events.findIndex((e: any) => e.type === "item.completed" && e.itemType === "assistant_text");
+    expect(types.indexOf("turn.progress")).toBeGreaterThan(intro);
+    expect(types.lastIndexOf("turn.progress")).toBeLessThan(types.indexOf("item.started"));
+  });
+
   it("turns a signed-out CLI into a setup error, not a bot reply", async () => {
     const dump = join(scratch, "signed-out-session.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
@@ -1853,7 +1882,11 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     });
     expect(seen.mcpConfig.mcpServers.hosted).toMatchObject({ type: "http", url: "https://example.test/mcp" });
     expect(seen.mcpConfig.mcpServers.ogb.args).not.toContain("evil");
-    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).not.toContain("mcp__shop");
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1].split(",");
+    expect(allowed).not.toContain("mcp__shop");
+    expect(allowed).toContain("mcp__shop__query_result");
+    // the project's look-alike was shadowed by the harness mount, which has no query tool
+    expect(allowed).not.toContain("mcp__ogb__query_result");
   });
 
   it("mounts a bot's own MCP server behind the result gate", async () => {
@@ -1880,6 +1913,10 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(Number(shop.env.OMB_GATE_BUDGET)).toBeGreaterThan(0);
     expect(JSON.stringify(seen.argv)).not.toContain("secret");
     expect(seen.mcpConfig.mcpServers.ogb.args[0]).not.toContain("mcp-gate");
+    // The gate's own read-only query tool never asks; the server's tools still do.
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1].split(",");
+    expect(allowed).toContain("mcp__shop__query_result");
+    expect(allowed).not.toContain("mcp__shop");
   });
 
   it("mounts bot servers directly when the result budget is turned off", async () => {
@@ -1895,6 +1932,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.mcpConfig.mcpServers.shop).toMatchObject({ command: "npx", args: ["shop"] });
+    expect(seen.argv[seen.argv.indexOf("--allowedTools") + 1]).not.toContain("query_result");
   });
 
   it("gives each bot server its own result budget, over the app-wide one", async () => {
@@ -2046,10 +2084,12 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       env: { NOTES_TOKEN: "tok-notes" },
     });
     expect(JSON.parse(seen.mcpConfig.mcpServers.constructor.env.OMB_GATE_UPSTREAM)).toMatchObject({ command: "fixture-constructor" });
-    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
+    const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1].split(",");
     expect(allowed).toContain("mcp__agents");
     expect(allowed).not.toContain("mcp__notes");
     expect(allowed).not.toContain("mcp__constructor");
+    // only the gate's own query over held results is pre-allowed
+    expect(allowed.filter((name: string) => name.startsWith("mcp__notes"))).toEqual(["mcp__notes__query_result"]);
     expect(JSON.stringify(seen.argv)).not.toContain("tok-notes");
   });
 

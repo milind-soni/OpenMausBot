@@ -11,7 +11,7 @@ import { FixtureServer } from "../../server/browser/cdp/testing/fixtures.ts";
 import { ChromeLauncher } from "../../server/browser/chrome/launcher.ts";
 import { chromeHost, installedGoogleChrome, isHeadlessShell } from "../../server/browser/chrome/resolve.ts";
 import { removeTempDir } from "../../server/testing/cleanup.ts";
-import { withBotBrowser, type BotCall } from "../verify-browser-identity.ts";
+import { openOwnPageAsBot, withBotBrowser, type BotCall } from "../verify-browser-identity.ts";
 import { ensureUiBrowser, UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
@@ -65,7 +65,7 @@ describe.skipIf(!enabled)("a passkey step in a bot's headless browser on agent-b
     const chrome = picked || browser.chrome || installedGoogleChrome(chromeHost({ dataDir: out, env: machineEnv }));
     if (!chrome || isHeadlessShell(chrome)) throw new Error(`a full Chrome is needed, not ${chrome ?? "nothing"}: set OMB_CHROME_PATH`);
     await withBotBrowser({ engine: browser.binary, chrome, out, sessionPrefix: "omb-pk-e2e" }, async (call) => {
-      await call("agent_browser_open", { url: fx.crossSiteUrl("/v3/signin/challenge/pk/presend") });
+      expect(await openOwnPageAsBot(call, fx.crossSiteUrl("/v3/signin/challenge/pk/presend"), (line) => console.log(line))).toBeNull();
       expect(await pageSays(call, "document.getElementById('state').textContent", (state) => !state.includes("Waiting"))).toContain("Something went wrong: NotAllowedError");
       await call("agent_browser_click", { selector: "#other" });
       expect(await pageSays(call, "location.pathname", (path) => path.includes("selection"))).toContain("/v3/signin/challenge/selection");

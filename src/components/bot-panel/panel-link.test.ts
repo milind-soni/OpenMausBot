@@ -30,6 +30,12 @@ describe("named links into a bot's settings", () => {
     expect(linkTarget("access", link({ section: "access" }))).toEqual({ tab: "computer" });
   });
 
+  it("lands a link that names a card on that card, on its section's tab, and on no other section", () => {
+    expect(linkTarget("overview", link({ section: "overview", anchor: "conversations" }))).toEqual({ tab: "bot", anchor: "conversations" });
+    expect(linkTarget("access", link({ section: "access", anchor: "conversations" }))).toEqual({ tab: "computer", anchor: "conversations" });
+    expect(linkTarget("usage", link({ section: "overview", anchor: "conversations" }))).toEqual(sectionTarget("usage"));
+  });
+
   it("never applies a link's page to another section, and falls back to the section's own place", () => {
     for (const { id } of BOT_SECTIONS) {
       expect(linkTarget(id, null)).toEqual(sectionTarget(id));

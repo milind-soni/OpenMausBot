@@ -6,6 +6,7 @@
 // Each job calls the cheapest scraper treg lists for it, with its paging and sort options; when that one is down, it
 // falls back once to treg's routed endpoint, which works through the other scrapers in turn. Scrapers name the same
 // fields differently, so rows are read through short alias lists.
+import { parseXIncludedUsage, type XIncludedUsage } from "../shared/x-connector.ts";
 import type { ServiceCredential } from "./included-services.ts";
 
 /** Posts one call may return. Fifty compact posts stay under the agents
@@ -57,6 +58,8 @@ export const X_MESSAGES = {
   unavailable: "X research is temporarily unavailable. Try again shortly.",
   postNotFound: "That X post was not found. It may be deleted or private.",
   accountNotFound: (handle: string) => `No X account named @${handle}.`,
+  /** After the relay's sentence that the month's included calls are used up. */
+  addOwnKey: "Add your own treg key to keep going.",
 } as const;
 
 export class XResearchError extends Error {
@@ -294,7 +297,7 @@ export function errorFor(status: number, body: unknown): XResearchError {
   if (status === 429) {
     // The month's allowance: the relay's sentence names the plan, the number and the reset date.
     const said = at(body, "message");
-    return new XResearchError("rate_limited", at(body, "error") === "quota_exceeded" && typeof said === "string" && said.length <= 300 ? said : X_MESSAGES.rateLimited);
+    return new XResearchError("rate_limited", at(body, "error") === "quota_exceeded" && typeof said === "string" && said.length <= 300 ? `${said} ${X_MESSAGES.addOwnKey}` : X_MESSAGES.rateLimited);
   }
   // treg itself is rate-limiting (the relay keeps the call counted): another scraper through the same account would
   // only count against the plan again, so this is no outage to fall back from.
@@ -526,6 +529,24 @@ export function createXRelayClient(options: { url: string; token: string; own?: 
       };
     },
   };
+}
+
+/** This month's included X calls from the plan's relay (`GET <relay>/usage`, no treg call), or null when it can't say:
+ * an own key (treg counts nothing of ours), a relay that refused or doesn't serve it, or an answer of another shape.
+ * Security: the relay token goes only to the relay, as with every call. */
+export async function readIncludedXUsage(credential: ServiceCredential, options: { fetcher?: typeof fetch; timeoutMs?: number } = {}): Promise<XIncludedUsage | null> {
+  if (!credential.included) return null;
+  try {
+    const response = await (options.fetcher ?? fetch)(`${credential.api.replace(/\/+$/, "")}/usage`, {
+      headers: { ...tregAuthHeaders(credential), accept: "application/json" },
+      redirect: "error",
+      signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
+    });
+    const raw = await readCapped(response);
+    return response.ok ? parseXIncludedUsage(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The X client for a research credential: straight to treg with the person's own key, else through the plan's relay. */

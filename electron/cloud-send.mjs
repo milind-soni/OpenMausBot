@@ -19,7 +19,7 @@ import { AUTOMATION_KINDS, BOT_PARTS, EMPTY, MOVE_BOT_PARTS, MOVE_KINDS, PICTURE
 import { collectConnections, releaseConnections, sendConnections } from "./cloud-connections.mjs";
 import { createMoveKinds, mergeRoutines } from "./cloud-send-kinds.mjs";
 import { botsOnCloud } from "./cloud-logins.mjs";
-import { checkChats, checkPassed, checkSecrets, manifestGaps, missingAttachments, rowIdChunks } from "./cloud-send-check.mjs";
+import { checkChats, checkPassed, checkSecrets, manifestGaps, missingAttachments, roomsRemovedThere, roomsThatGo, rowIdChunks } from "./cloud-send-check.mjs";
 
 const LOCAL_ROUTE = /^\/api\/(?:cloud-send|cloud-send\?move=1|cloud-send\/manifest|cloud-send\/chats|cloud-send\/chats\?attachments=1|cloud-send\/kind\?key=[\w%.-]{1,300}|cloud-send\/memory|cloud-send\/memory\?bot=[\w-]{1,128}|cloud-send\/files|cloud-send\/files\?path=[\w%.()~!*'-]{1,12000}&offset=\d{1,16}&length=\d{1,9}|cloud-send\/chats\/rows\?thread=[\w-]{1,200}&after=\d{1,16}&id=[\w%.-]{0,600}|cloud-send\/chats\/ids\?thread=[\w-]{1,200}&from=\d{1,9}|cloud-send\/chats\/attachment\/[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}|cloud-connections|connectors\/connected|config|bots\?messages=0|bots\/[\w-]{1,128}\/(?:skills|skills\/[a-z0-9-]{1,64}|memory|memory\/file\?path=[\w%.-]{1,200})|attachments\/[A-Za-z0-9-]{1,80}\.(?:png|jpg|gif|webp))$/u;
 /** One request's chats: a few conversations' rows, well under My Cloud's body limit. */
@@ -484,15 +484,20 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
 
   /** The conversations whose newest row My Cloud has not taken, not answered in now: of bots My Cloud has and that are
    * not kept here (`everything`: whatever was kept here), and of rooms, which My Cloud makes once one of their bots is
-   * there. */
+   * there. A room nobody wrote in yet goes as its active thread with no rows (`empty`), once, so My Cloud makes it too. */
   async function chatsWaiting(origin, theirs, { everything = false } = {}) {
     const listed = await localJson(scoped("/api/cloud-send/chats"));
     const kept = entry(origin);
     const cloudBots = new Set(theirs.items.filter((item) => item.kind === "bot" && item.id).map((item) => item.id));
     const id = (value) => typeof value === "string" && /^[\w-]{1,128}$/u.test(value);
+    const thread = (value) => typeof value === "string" && /^[\w-]{1,200}$/u.test(value);
     const keptHere = (botId) => everything ? kept.off[itemKey.bot(botId)] === "removed" : Boolean(kept.off[itemKey.bot(botId)]);
-    const conversations = (Array.isArray(listed?.conversations) ? listed.conversations : []).filter((head) => record(head)
-      && (id(head.bot) !== id(head.room)) && typeof head.threadId === "string" && /^[\w-]{1,200}$/u.test(head.threadId) && Number.isSafeInteger(head.last) && typeof head.lastId === "string");
+    // My Cloud makes the room once one of its bots is there, as it does from a room's rows; one with no bot never goes.
+    const empty = (Array.isArray(listed?.rooms) ? listed.rooms : []).filter((room) => record(room) && id(room.room) && thread(room.threadId)
+      && Array.isArray(room.members) && room.members.length > 0)
+      .map((room) => ({ room: room.room, threadId: room.threadId, last: 0, lastId: "", busy: false, empty: true }));
+    const conversations = [...(Array.isArray(listed?.conversations) ? listed.conversations : []).filter((head) => record(head)
+      && (id(head.bot) !== id(head.room)) && thread(head.threadId) && Number.isSafeInteger(head.last) && typeof head.lastId === "string"), ...empty];
     const waiting = conversations.filter((head) => {
       const cursor = kept.chats[head.threadId];
       if (cursor === "removed" || (head.bot && (!cloudBots.has(head.bot) || keptHere(head.bot)))) return false;
@@ -542,7 +547,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const accepted = new Set(Array.isArray(answer.body?.accepted) ? answer.body.accepted : []);
       const removed = new Set(Array.isArray(answer.body?.removed) ? answer.body.removed : []);
       for (const page of batch) {
-        if (accepted.has(page.threadId) && page.lastId) kept.chats[page.threadId] = { after: page.last, id: page.lastId };
+        if (accepted.has(page.threadId) && typeof page.lastId === "string") kept.chats[page.threadId] = { after: page.last, id: page.lastId };
         else {
           if (!held.has(page.threadId) && !(removed.has(page.threadId) && page.sent)) result.chats.left++;
           held.add(page.threadId);
@@ -560,13 +565,15 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
         const page = await localJson(`/api/cloud-send/chats/rows?thread=${head.threadId}&after=${cursor?.after ?? 0}&id=${encodeURIComponent(cursor?.id ?? "")}`);
         if (!record(page) || !Array.isArray(page.rows)) break;
         if (page.restarted) delete kept.chats[head.threadId];
-        if (page.rows.length) {
+        // A room nobody wrote in yet: its thread goes with no rows, which My Cloud takes as the room to make.
+        const room = head.empty === true && !page.rows.length && !page.lastId && record(page.roomInfo);
+        if (page.rows.length || room) {
           const size = Buffer.byteLength(JSON.stringify(page.rows), "utf8");
           if (bytes + size > CHATS_BATCH_BYTES || batch.length >= CHATS_BATCH_PAGES) await flush();
           if (held.has(head.threadId)) break;
           const owner = head.room ? { room: head.room, ...(record(page.roomInfo) ? { roomInfo: page.roomInfo } : {}) } : { bot: head.bot };
           batch.push({ owner, threadId: head.threadId, task: record(page.task) ? page.task : null, rows: page.rows, leaf: typeof page.leaf === "string" ? page.leaf : null,
-            sent: record(kept.chats[head.threadId]), last: page.last, lastId: page.lastId,
+            sent: record(kept.chats[head.threadId]), last: room ? 0 : page.last, lastId: room ? "" : page.lastId,
             attachments: Array.isArray(page.attachments) ? page.attachments.filter((name) => typeof name === "string" && /^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/u.test(name)) : [] });
           bytes += size;
         } else if (page.lastId) kept.chats[head.threadId] = { after: page.last, id: page.lastId };
@@ -712,7 +719,7 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
     ctx.cloudNames ??= ctx.session.call("GET", "/api/bots?messages=0")
       .then((listed) => (Array.isArray(listed.body?.bots) ? listed.body.bots : []).filter(record), () => []);
     const same = (name) => typeof name === "string" && name.trim().toLocaleLowerCase() === bot.name.trim().toLocaleLowerCase();
-    const taken = (await ctx.cloudNames).some((theirs) => theirs.id !== bot.id && same(theirs.name));
+    const taken = (await ctx.cloudNames).some((theirs) => theirs.id !== bot.id && same(theirs.name) && !(bot.defaultBot && theirs.defaultBot));
     return taken ? `${bot.name} (${ctx.computer})`.slice(0, 80) : bot.name;
   }
 
@@ -891,12 +898,15 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
       const answer = await session.call("GET", scoped("/api/cloud-send/manifest"));
       if (!answer.ok) throw refusedError("unreachable", answer, "My Cloud did not answer. Try again.");
       const removed = new Set([...Object.entries(kept.off).filter(([, why]) => why === "removed").map(([key]) => key),
-        ...Object.entries(kept.chats).filter(([, cursor]) => cursor === "removed").map(([threadId]) => threadId)]);
+        ...Object.entries(kept.chats).filter(([, cursor]) => cursor === "removed").map(([threadId]) => threadId),
+        ...roomsRemovedThere(here, answer.body, kept.chats)]);
       const refused = new Set((kept.whole?.result.failed ?? []).filter((failure) => failure.final === true).map((failure) => failure.key));
       const gaps = manifestGaps(here, answer.body, { sent: kept.sent, removed, skip: refused });
       if (!gaps) throw new CloudSendError("unreachable", "My Cloud did not say what it has. Try again.");
-      const bots = new Set((here.items ?? []).filter((item) => item.kind === "bot" && !removed.has(item.key)).map((item) => item.id));
-      const threads = (here.conversations ?? []).filter((head) => !removed.has(head.threadId) && (head.room || bots.has(head.bot))).map((head) => head.threadId);
+      const bots = new Set((here.items ?? []).filter((item) => item.kind === "bot" && !removed.has(item.key) && !refused.has(item.key)).map((item) => item.id));
+      const going = roomsThatGo(here, bots);
+      const threads = (here.conversations ?? []).filter((head) => !removed.has(head.threadId)
+        && (head.room ? going.has(head.room) && !removed.has(`room:${head.room}`) : bots.has(head.bot))).map((head) => head.threadId);
       const chats = await checkChats({ localJson, session, threads });
       const attachments = await missingAttachments(session, Array.isArray(here.attachments) ? here.attachments : []);
       const secrets = team ? { equal: [], differs: [], missing: [] } : await checkSecrets({ handoff, session, skip: new Set([...removed, ...refused]) });

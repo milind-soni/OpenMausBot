@@ -11,6 +11,8 @@ import { isSimplePage, PAGES, sectionTarget, type PageId, type PanelTarget } fro
 export interface PanelLink {
   section: BotSettingsSection;
   page?: PageId;
+  /** A card on the section's tab to scroll to, such as "conversations". */
+  anchor?: string;
   nonce: number;
 }
 
@@ -19,14 +21,15 @@ const watchers = new Set<() => void>();
 
 /**
  * Opens the bot's settings at a section, exactly as `toggleSettings` does, and tells the bot panel where to land:
- * `page`, when given, is the panel page that holds what the caller is about (it must belong to the section).
+ * `page`, when given, is the panel page that holds what the caller is about (it must belong to the section); `anchor`
+ * is a card on the section's tab.
  */
 export function openBotSettings(
   dispatch: (action: Action) => void,
   section: BotSettingsSection,
-  options: { botId?: string; page?: PageId } = {},
+  options: { botId?: string; page?: PageId; anchor?: string } = {},
 ): void {
-  latest = { section, ...(options.page ? { page: options.page } : {}), nonce: (latest?.nonce ?? 0) + 1 };
+  latest = { section, ...(options.page ? { page: options.page } : {}), ...(options.anchor ? { anchor: options.anchor } : {}), nonce: (latest?.nonce ?? 0) + 1 };
   dispatch({ type: "toggleSettings", open: true, section, ...(options.botId !== undefined ? { botId: options.botId } : {}) });
   for (const watch of Array.from(watchers)) watch();
 }
@@ -46,8 +49,9 @@ export function usePanelLink(): PanelLink | null {
 }
 
 /** Where a named open of `section` lands: the link's page when it came with one for that section and Simple mode draws
- * that page, else the section's place. */
+ * that page, else the section's place, at the link's card when it named one. */
 export function linkTarget(section: BotSettingsSection, link: PanelLink | null): PanelTarget {
-  const page = link?.section === section ? link.page : undefined;
-  return page && isSimplePage(page) ? { tab: PAGES[page].home, page } : sectionTarget(section);
+  const ours = link?.section === section ? link : null;
+  if (ours?.page && isSimplePage(ours.page)) return { tab: PAGES[ours.page].home, page: ours.page };
+  return ours?.anchor ? { ...sectionTarget(section), anchor: ours.anchor } : sectionTarget(section);
 }

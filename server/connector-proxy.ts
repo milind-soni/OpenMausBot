@@ -12,6 +12,8 @@ import {
 } from "./connector-advertisement.ts";
 import { withSignedOutHint } from "./connector-signed-out-hint.ts";
 import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
+import { fitToolListResult } from "./mcp-tool-schema.ts";
+import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 
 type Json = Record<string, unknown>;
 
@@ -22,6 +24,7 @@ const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
 const TOKEN = process.env.OMB_CONNECTOR_TOKEN ?? process.env.OMB_COMMS_TOKEN ?? "";
 const ALLOWED_TOOLS = parseConnectorAllowedToolsEnv(process.env[CONNECTOR_ALLOWED_TOOLS_ENV]);
 const SERVICE_SLUGS = parseConnectorServiceSlugsEnv(process.env[CONNECTOR_SERVICE_SLUGS_ENV]);
+const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
@@ -202,6 +205,11 @@ async function showConnectorCards(items: ConnectorRequest[]): Promise<void> {
   }
 }
 
+function fittedList(frame: Json): Json {
+  if (!SCHEMA_PROFILE || !("result" in frame)) return frame;
+  return { ...frame, result: fitToolListResult(frame.result, SCHEMA_PROFILE, (line) => process.stderr.write(`connector-proxy: ${line}\n`)) };
+}
+
 async function handle(message: Json): Promise<void> {
   const id = message.id;
   const method = String(message.method ?? "");
@@ -254,8 +262,7 @@ async function handle(message: Json): Promise<void> {
       ? await relay(message).catch(() => delay(TOOLS_LIST_RETRY_MS).then(() => relay(message)))
       : await relay(message);
     if (response && id !== undefined) {
-      send(method === "tools/list" && ALLOWED_TOOLS
-        ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS)
+      send(method === "tools/list" ? fittedList(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response)
         : method === "tools/call" ? withSignedOutHint(message, response, SERVICE_SLUGS) : response);
     }
   } catch (error) {

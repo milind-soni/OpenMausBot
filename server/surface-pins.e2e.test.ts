@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { writeFileAtomic } from "./atomic.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { readCuaConnection } from "./local-computer.ts";
@@ -28,7 +29,7 @@ describe("surface pin provenance against the real server", () => {
   let boatApi = "";
   let boatDown = false;
 
-  const vmState = (state: Record<string, unknown> = {}) => writeFileSync(stateFile, JSON.stringify(state));
+  const vmState = (state: Record<string, unknown> = {}) => writeFileAtomic(stateFile, JSON.stringify(state));
   const resetTurn = () => { vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true }); };
   const api = async (method: string, path: string, body?: unknown) => {
     const response = await fetch(base + path, {

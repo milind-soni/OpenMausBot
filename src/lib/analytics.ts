@@ -118,13 +118,55 @@ function start(posthog: PostHog) {
   if (posthog.has_opted_out_capturing()) posthog.opt_in_capturing({ captureEventName: false });
   client = posthog;
   posthog.register({ app_version: appVersion(), surface: analyticsSurface() });
-  const platform = navigator.userAgent.includes("Electron") ? "desktop" : "browser";
+  const platform = pagePlatform();
   if (!localStorage.getItem("omb-installed")) {
     localStorage.setItem("omb-installed", new Date().toISOString());
     posthog.capture("app_first_open", { platform });
   }
   posthog.capture("app_opened", { platform });
+  watchActiveDays();
   for (const call of pending.splice(0)) call(posthog);
+}
+
+function pagePlatform() {
+  return navigator.userAgent.includes("Electron") ? "desktop" : "browser";
+}
+
+const ACTIVE_DAY_KEY = "omb-analytics-active-day";
+const ACTIVE_CHECK_MS = 10 * 60_000;
+
+function localDay(now = new Date()): string {
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+let activeDay: string | undefined;
+
+function claimActiveDay(day: string): boolean {
+  if (activeDay === day) return false;
+  try {
+    if (localStorage.getItem(ACTIVE_DAY_KEY) === day) return false;
+  } catch {}
+  activeDay = day;
+  try {
+    localStorage.setItem(ACTIVE_DAY_KEY, day);
+  } catch {}
+  return true;
+}
+
+function sendAppActive() {
+  if (!client || !analyticsEnabled() || globalThis.document?.visibilityState !== "visible") return;
+  if (claimActiveDay(localDay())) client.capture("app_active", { platform: pagePlatform() });
+}
+
+function watchActiveDays() {
+  if (!globalThis.document) return;
+  sendAppActive();
+  document.addEventListener("visibilitychange", sendAppActive);
+  window.addEventListener("focus", sendAppActive);
+  setInterval(() => {
+    if (document.hasFocus()) sendAppActive();
+  }, ACTIVE_CHECK_MS);
 }
 
 // Security: posthog-js 1.415 adds the page's address to every event and person update: URL, host, path, referrer and

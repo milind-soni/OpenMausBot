@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { writeFileAtomic, writeFileAtomicIfChanged } from "./atomic.ts";
 import { commitRegistryChange, keptRevocation, saveRegistryFor } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts";
+import { reorderStable } from "../shared/bot-order.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
 import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
@@ -17,13 +18,11 @@ import { workspaceDir } from "./workspace.ts";
 import type { Destination } from "./surface.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
-import { redactParams, redactSecretsInText } from "./redact.ts";
-import { scrubbedSkillRequest } from "./skill-request-card.ts";
+import { redactBotAuthored } from "./message-redaction.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
-import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
 import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
@@ -31,13 +30,13 @@ import type { HandedState } from "./delta-context.ts";
 import type { AgentPart, PartPair, RoomPart } from "./package-parts.ts";
 import type {
   BotActivity, GroupDefaultResponder, GroupTask as GroupTaskRecord, MausColor,
-  OptionCardData, TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
+  TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
 import { movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
 import { parseConnectorTools } from "./connector-tools.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
-import { initialGreetingMessage } from "./initial-greeting.ts";
+import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal } from "./default-bot.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
@@ -119,137 +118,6 @@ function persistedPin<T extends { pinned?: boolean }>(task: T): T {
   return rest as T;
 }
 
-/** Bot-authored text is scrubbed of secrets before it is stored (the transcript replays into every rebuild); what the user typed stays as typed. */
-function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number }>(message: T): T {
-  if (message.role !== "bot") return message;
-  const out = { ...message };
-  if (out.dataResult) out.dataResult = {
-    ...out.dataResult,
-    title: redactSecretsInText(out.dataResult.title),
-    ...(out.dataResult.sql === undefined ? {} : { sql: redactSecretsInText(out.dataResult.sql) }),
-  };
-  if (typeof out.text === "string") Object.assign(out, { text: redactSecretsInText(out.text) }, out.textParams ? { textParams: redactParams(out.textParams) } : {});
-  if (out.compaction) out.compaction = { ...out.compaction, summary: redactSecretsInText(out.compaction.summary) };
-  if (out.tool?.name) {
-    out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name), ...(out.tool.nameParams ? { nameParams: redactParams(out.tool.nameParams) } : {}) };
-    if (out.tool.summary) out.tool.summary = redactSecretsInText(out.tool.summary);
-  }
-  if (out.routineRun) {
-    const routineRun = { ...out.routineRun };
-    routineRun.routineName = redactSecretsInText(routineRun.routineName);
-    if (routineRun.summary) routineRun.summary = redactSecretsInText(routineRun.summary);
-    if (routineRun.error) routineRun.error = redactSecretsInText(routineRun.error);
-    out.routineRun = routineRun;
-  }
-  if (out.goalRun) {
-    out.goalRun = {
-      ...out.goalRun,
-      goal: redactSecretsInText(out.goalRun.goal),
-      coordinatorName: redactSecretsInText(out.goalRun.coordinatorName),
-      detail: out.goalRun.detail ? redactSecretsInText(out.goalRun.detail) : undefined,
-    };
-  }
-  if (out.call?.title) out.call = { ...out.call, title: redactSecretsInText(out.call.title) };
-  if (out.card) {
-    const card = { ...out.card } as OptionCardData & { summary?: string };
-    card.title = redactSecretsInText(card.title);
-    if (typeof card.subtitle === "string") card.subtitle = redactSecretsInText(card.subtitle);
-    if (typeof card.summary === "string") card.summary = redactSecretsInText(card.summary);
-    if (typeof card.held === "string") card.held = redactSecretsInText(card.held);
-    if (typeof card.answeredText === "string") card.answeredText = redactSecretsInText(card.answeredText);
-    if (card.commandAllowlist && (
-      redactSecretsInText(card.commandAllowlist.command) !== card.commandAllowlist.command ||
-      redactSecretsInText(card.commandAllowlist.cwd) !== card.commandAllowlist.cwd
-    )) delete card.commandAllowlist;
-    if (card.questionRequest) {
-      card.questionRequest = {
-        ...card.questionRequest,
-        questions: card.questionRequest.questions.map((question) => ({
-          ...question,
-          question: redactSecretsInText(question.question),
-          ...(question.header ? { header: redactSecretsInText(question.header) } : {}),
-          options: question.options.map((option) => ({
-            ...option,
-            label: redactSecretsInText(option.label),
-            ...(option.description ? { description: redactSecretsInText(option.description) } : {}),
-          })),
-        })),
-      };
-    }
-    if (card.routineRequest) {
-      const operation = card.routineRequest.operation;
-      card.routineRequest = {
-        ...card.routineRequest,
-        operation: operation.action === "create"
-          ? {
-              ...operation,
-              routine: {
-                ...operation.routine,
-                name: redactSecretsInText(operation.routine.name),
-                instructions: redactSecretsInText(operation.routine.instructions),
-              },
-            }
-          : operation.action === "update"
-            ? {
-                ...operation,
-                changes: {
-                  ...operation.changes,
-                  ...(typeof operation.changes.name === "string"
-                    ? { name: redactSecretsInText(operation.changes.name) }
-                    : {}),
-                  ...(typeof operation.changes.instructions === "string"
-                    ? { instructions: redactSecretsInText(operation.changes.instructions) }
-                    : {}),
-                },
-              }
-            : { ...operation },
-      };
-    }
-    if (card.skillRequest) card.skillRequest = scrubbedSkillRequest(card.skillRequest);
-    if (card.profileRequest) {
-      const scrubChanges = (changes: ProfileRequestChanges): ProfileRequestChanges => {
-        const out = { ...changes };
-        for (const [key, value] of Object.entries(changes)) {
-          if (typeof value === "string") (out as Record<string, string | boolean>)[key] = redactSecretsInText(value);
-        }
-        return out;
-      };
-      card.profileRequest = {
-        ...card.profileRequest,
-        targetName: redactSecretsInText(card.profileRequest.targetName),
-        reason: redactSecretsInText(card.profileRequest.reason),
-        before: scrubChanges(card.profileRequest.before),
-        changes: scrubChanges(card.profileRequest.changes),
-      };
-    }
-    out.card = card;
-  }
-  if (out.connector) {
-    out.connector = {
-      ...out.connector,
-      label: redactSecretsInText(out.connector.label),
-      description: redactSecretsInText(out.connector.description),
-      error: out.connector.error ? redactSecretsInText(out.connector.error) : undefined,
-    };
-  }
-  if (out.secret) {
-    out.secret = {
-      ...out.secret,
-      label: redactSecretsInText(out.secret.label),
-      description: redactSecretsInText(out.secret.description),
-      error: out.secret.error ? redactSecretsInText(out.secret.error) : undefined,
-    };
-  }
-  if (out.signIn) {
-    out.signIn = {
-      ...out.signIn,
-      reason: out.signIn.reason ? redactSecretsInText(out.signIn.reason) : undefined,
-      error: out.signIn.error ? redactSecretsInText(out.signIn.error) : undefined,
-    };
-  }
-  return out;
-}
-
 export const ACTIVITY_BUSY: ReadonlySet<BotActivity> = new Set(["working", "waiting-on-you", "no-signal"]);
 
 export type StoreChange =
@@ -260,6 +128,8 @@ export type StoreChange =
   | { type: "thread.deleted"; threadId: string }
   | { type: "bot"; botId: string }
   | { type: "bot.deleted"; botId: string }
+  /** The fleet was reordered as a whole; the broadcast carries every id in its new place. */
+  | { type: "bots.order" }
   | { type: "group"; groupId: string }
   | { type: "group.deleted"; groupId: string };
 
@@ -869,9 +739,9 @@ export class Store {
   }
 
   renameSection(name: string, nextName: string, computers?: TeamComputers): string | undefined {
-    if (!name || !this.sections.includes(name)) return "No such team";
+    if (!name || !this.sections.includes(name)) return "No such department";
     nextName = nextName.trim();
-    if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Team name must be 1 to 60 characters without control characters";
+    if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Department name must be 1 to 60 characters without control characters";
     if (name === nextName) return undefined;
     if (this.sections.includes(nextName) || computers?.forSection(nextName)) return "A team with that name already exists";
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
@@ -910,7 +780,7 @@ export class Store {
   }
 
   changeEmptySection(name: string, nextName: string | null): string | undefined {
-    if (!this.sections.includes(name)) return "No such team";
+    if (!this.sections.includes(name)) return "No such department";
     if ([...this.bots, ...this.groups].some((record) => sectionKey(record.section) === name)) {
       return "Move all bots (including archived bots) and group chats out of this team first";
     }
@@ -932,7 +802,7 @@ export class Store {
   }
 
   deleteSection(name: string): string | undefined {
-    if (!name || !this.sections.includes(name)) return "No such team";
+    if (!name || !this.sections.includes(name)) return "No such department";
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
     const rooms = this.groups.filter(group => sectionKey(group.section) === name);
     if (members.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
@@ -1034,7 +904,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "lastReadMessageId" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor" | "installedPackage" | "turnTimeoutMinutes" | "holds" | "heldMessages">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "description" | "unread" | "lastReadMessageId" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor" | "installedPackage" | "turnTimeoutMinutes" | "holds" | "heldMessages">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
@@ -1613,6 +1483,7 @@ export class Store {
   deleteBot(id: string, setupRequest?: TeamSetupRequest): boolean {
     const bot = this.bot(id);
     if (!bot) return false;
+    if (bot.defaultBot) throw Object.assign(new Error(defaultBotRefusal(bot.name)), { status: 409 });
     let nextBots = this.bots.filter((b) => b.id !== id);
     if (setupRequest) {
       const chief = this.bot(setupRequest.botId);
@@ -2141,6 +2012,20 @@ export class Store {
     return bot.projects;
   }
 
+  /** A stable partial reorder of the fleet (shared/bot-order.ts): the listed bots take, in the order given, the positions
+   * they already share; every other bot stays put. Empty, repeated or unknown ids change nothing and give null. */
+  reorderBots(botIds: string[]): BotRecord[] | null {
+    if (!botIds.length || new Set(botIds).size !== botIds.length) return null;
+    const byId = new Map(this.bots.map((bot) => [bot.id, bot]));
+    if (botIds.some((id) => !byId.has(id))) return null;
+    const next = reorderStable(this.bots, botIds);
+    // Mutate in place: schedulers and other consumers hold this array and its records.
+    this.bots.splice(0, this.bots.length, ...next);
+    this.saveBots();
+    this.emit({ type: "bots.order" });
+    return this.bots;
+  }
+
   deleteProject(botId: string, projectId: string): BotRecord | null {
     const bot = this.bot(botId);
     if (!bot || !this.project(botId, projectId)) return null;
@@ -2439,12 +2324,11 @@ export class Store {
     return { bot, deleted, missing };
   }
 
-  needsSeed() {
-    return this.bots.length === 0;
-  }
+  needsSeed() { return this.bots.length === 0; }
 
-  seedIfEmpty() {
+  /** A new place's first bot is its MausBot and its Chief; a Team Cloud's (`defaultBot: false`) is the team's Chief only. */
+  seedIfEmpty({ defaultBot = true }: { defaultBot?: boolean } = {}) {
     if (!this.needsSeed()) return;
-    this.setChiefOfStaff(this.createBot().id);
+    if (defaultBot) createDefaultBot(this, { chief: (id) => this.setChiefOfStaff(id) }); else this.setChiefOfStaff(this.createBot().id);
   }
 }

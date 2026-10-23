@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { checkChats, checkPassed, checkSecrets, manifestGaps, missingAttachments, noGaps } from "./cloud-send-check.mjs";
+import { checkChats, checkPassed, checkSecrets, manifestGaps, missingAttachments, noGaps, roomsRemovedThere, roomsThatGo } from "./cloud-send-check.mjs";
 
 const manifest = (extra = {}) => ({
   v: 1, appVersion: "0.1.120",
@@ -54,6 +54,39 @@ test("a move's check names what My Cloud lacks: items, parts, memory, rooms, con
   const gaps = manifestGaps(here, there, { removed, skip: new Set(["mcp:docs", "skill:ember:notes"]) });
   assert.deepEqual([gaps.items, gaps.rooms, gaps.connections, gaps.conversations], [[], [], [], ["t-ember"]], "a bot removed there takes its conversations with it");
   assert.equal(manifestGaps(null, there), null);
+});
+
+test("a room none of whose bots goes is left out of the check with its conversations, as My Cloud never makes it; one with a bot that goes is not", () => {
+  const here = manifest({ rooms: [
+    { id: "r1", name: "Launch", members: ["ember"], threads: ["t-room"] },
+    { id: "r-orphan", name: "Orphan", members: [], threads: ["t-orphan"] },
+    { id: "r-juno", name: "Juno's", members: ["juno"], threads: ["t-juno-room"] },
+  ], conversations: [...manifest().conversations, { threadId: "t-orphan", room: "r-orphan", rows: 1, newest: "o1" }, { threadId: "t-juno-room", room: "r-juno", rows: 1, newest: "j9" }] });
+  const there = manifest({ rooms: [], conversations: manifest().conversations.filter((head) => !head.room) });
+  const gaps = manifestGaps(here, there, { removed: new Set(["bot:juno"]) });
+  assert.deepEqual(gaps.rooms, [{ id: "r1", name: "Launch" }], "the bots of Orphan were deleted here, and Juno was removed on My Cloud");
+  assert.deepEqual(gaps.conversations, ["t-room"]);
+  assert.deepEqual([...roomsThatGo(here, new Set(["ember", "juno"]))], ["r1", "r-juno"]);
+});
+
+test("a room My Cloud had once and lacks now counts as removed there, once nothing here would make it again", () => {
+  const rooms = [
+    { id: "r-gone", name: "Gone", members: ["ember"], threads: ["t-gone", "t-gone-2"] },
+    { id: "r-quiet", name: "Quiet", members: ["ember"], threads: ["t-quiet"] },
+    { id: "r-new", name: "New", members: ["ember"], threads: ["t-new-1", "t-new-2"] },
+    { id: "r-held", name: "Held", members: ["ember"], threads: ["t-held"] },
+    { id: "r-never", name: "Never", members: ["ember"], threads: ["t-never"] },
+  ];
+  const conversations = [{ threadId: "t-gone", room: "r-gone", rows: 2, newest: "g2" }, { threadId: "t-new-1", room: "r-new", rows: 1, newest: "n1" },
+    { threadId: "t-new-2", room: "r-new", rows: 1, newest: "n2" }, { threadId: "t-held", room: "r-held", rows: 1, newest: "h1" }, { threadId: "t-never", room: "r-never", rows: 1, newest: "v1" }];
+  const here = manifest({ rooms, conversations });
+  const there = manifest({ rooms: [{ id: "r-held", name: "Held", members: ["ember"], threads: ["t-held"] }], conversations: [conversations[3]] });
+  const chats = { "t-gone": "removed", "t-quiet": { after: 0, id: "" }, "t-new-1": { after: 1, id: "n1" }, "t-held": { after: 1, id: "h1" } };
+  const removed = roomsRemovedThere(here, there, chats);
+  assert.deepEqual(removed, ["room:r-gone", "room:r-quiet"], "r-new has a conversation that never went, which makes it again; r-held is there; r-never never went");
+  const gaps = manifestGaps(here, there, { removed: new Set(removed) });
+  assert.deepEqual(gaps.rooms.map((room) => room.id), ["r-new", "r-never"]);
+  assert.deepEqual(gaps.conversations, ["t-new-1", "t-new-2", "t-never"], "a room removed there takes its conversations with it");
 });
 
 /** This computer's rows and path for `thread`, and a My Cloud that checks them against its own `cloudPath`/`cloudRows`;

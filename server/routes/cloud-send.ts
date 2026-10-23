@@ -9,7 +9,7 @@ import { z } from "zod";
 
 import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
 import { readAttachment } from "../attachments.ts";
-import { arrivedRoute, homeRoute } from "../cloud-send-arrived.ts";
+import { arrivedRoute, automationsOffRoute, homeRoute } from "../cloud-send-arrived.ts";
 import { moveFilesRoute } from "../cloud-send-files.ts";
 import { moveBotParts, moveItems, moveKindsRoute, type MoveKindsDeps } from "../cloud-send-kinds.ts";
 import { cloudSendManifest } from "../cloud-send-manifest.ts";
@@ -19,6 +19,7 @@ import { cloudSendChatsRoute, type CloudSendChatsDeps } from "../cloud-send-chat
 import { loginFingerprints, VERIFY_NONCE } from "../cloud-send-verify.ts";
 import type { AppConfig } from "../config.ts";
 import type { LoginStore } from "../login-store.ts";
+import type { MoveAutomations } from "../move-freeze.ts";
 import { threadHeads } from "../message-db.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
@@ -37,6 +38,8 @@ export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" 
   connectionFingerprints?(nonce: string): Record<string, string>;
   /** What only a move carries: automations, skill extras and bot fields, memory, and bot files. */
   move?: MoveKindsDeps & Omit<MoveMemoryDeps, "bot" | "owner">;
+  /** This server's automations, which a Cloud home stops for a computer whose bots go home to it. */
+  automations?: MoveAutomations;
   /** A team's server: nothing of one person's computer moves in, and every send or move route answers this but to a
    * sign-in that moves one bot in (`scope`). */
   refusal?: ServerErrorBody;
@@ -76,6 +79,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (move && await moveMemoryRoute({ ...move, bot: (id) => move.store.bot(id) ?? undefined }, ctx)) return;
     if (move && await moveFilesRoute({ dataDir: move.dataDir, bots: () => (bot ? move.store.bots.filter((entry) => entry.id === bot) : move.store.bots), owner: move.owner }, ctx)) return;
     if (move && deps.cloudHome && await arrivedRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks, owner: move.owner }, ctx)) return;
+    if (move && deps.cloudHome && deps.automations && await automationsOffRoute({ automations: deps.automations, owner: move.owner }, ctx)) return;
     if (move && !deps.cloudHome && await homeRoute({ dataDir: move.dataDir, store: move.store, webhooks: move.webhooks }, ctx)) return;
     if (path === "/api/cloud-send/manifest") {
       if (method !== "GET") return json(res, 405, { error: "method not allowed" });

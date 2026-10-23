@@ -10,13 +10,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "../../testing/cleanup.ts";
 import { hostTimeout, HOST_TIMEOUT_FACTOR } from "../../testing/host-timeout.ts";
-import { calibrateIdentity, loadOrCalibrateIdentity, type CalibratedIdentity } from "../chrome/calibrate.ts";
+import { calibrateIdentity, loadOrCalibrateIdentity, openOwnPage, type CalibratedIdentity } from "../chrome/calibrate.ts";
 import { sandboxDisabled } from "../chrome/host-setup.ts";
 import { launchChrome } from "../chrome/launch.ts";
 import { listProcesses, processAlive } from "../chrome/processes.ts";
 import { CdpBrowser } from "./browser.ts";
 import { valueInWorld } from "./evaluate.ts";
 import { IDENTITY_PROBE, identityDifferences, identityFromProbe, type IdentityProbe } from "./identity.ts";
+import { DEFAULT_NAVIGATION_TIMEOUT_MS } from "./page.ts";
 import { FixtureServer } from "./testing/fixtures.ts";
 import { bareChromeStart, CHROME, FIRST_LAUNCH_MS, forbiddenCommands, HOST, startChrome, testRoot, type RunningChrome } from "./testing/real-chrome.ts";
 
@@ -113,7 +114,7 @@ suite("S4 identity, quietness, exit and speed on real Chrome", () => {
     try {
       const browser = await CdpBrowser.connect(chrome.transport, { identity: null, headless: false, permissions: false });
       const tab = await browser.waitForPage();
-      await tab.navigate(fx.page("/blank", "<!doctype html><title>blank</title>"));
+      await openOwnPage(tab, fx.page("/blank", "<!doctype html><title>blank</title>"), DEFAULT_NAVIGATION_TIMEOUT_MS);
       const headed = identityFromProbe(await tab.evaluate(IDENTITY_PROBE) as IdentityProbe, chrome.version.product);
       expect(headed.userAgent).toBe(calibrated.userAgent);
       expect(identityDifferences(headed, calibrated)).toEqual([]);
@@ -234,9 +235,9 @@ suite("S4 identity, quietness, exit and speed on real Chrome", () => {
     for (let i = 0; i < 10; i++) {
       bareStarts.push(await bareChromeStart(coldPage));
       const started = Date.now();
-      const cold = await startChrome(`cold-${i}`);
+      const cold = await startChrome(`cold-${i}`, { takeFirstNavigation: false });
       const first = await cold.browser.waitForPage();
-      await first.navigate(coldPage);
+      await openOwnPage(first, coldPage, DEFAULT_NAVIGATION_TIMEOUT_MS);
       coldStarts.push(Date.now() - started);
       await cold.close();
     }

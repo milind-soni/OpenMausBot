@@ -46,6 +46,17 @@ describe("voice notes in the chat transcript", () => {
     expect(markup.indexOf("data-test-voice-note")).toBeLessThan(markup.indexOf("Standup summary inside"));
   });
 
+  it("keeps the note's words out of the message body, behind the bubble's collapsed Transcript", () => {
+    const message: Message = {
+      id: "m3", at: 1, role: "bot", kind: "text", text: "Standup summary inside",
+      attachments: [{ ...note, text: "Spoken recap of the standup" }],
+    };
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, messages: [message] } }));
+    expect(markup).toContain("Standup summary inside");
+    expect(markup).toMatch(/data-test-voice-note-transcript=""[^>]*aria-expanded="false"/);
+    expect(markup).not.toContain("Spoken recap of the standup");
+  });
+
   it("still renders the message body when an attachment kind is unknown", () => {
     const message: Message = {
       id: "m2", at: 1, role: "bot", kind: "text", text: "Future-proof body",

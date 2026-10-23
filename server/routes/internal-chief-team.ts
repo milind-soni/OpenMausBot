@@ -1,4 +1,4 @@
-import { canAccessTeam, peerAllowed } from "../peer-roster.ts";
+import { canAccessTeam, peerAllowed } from "../peer-roster.ts"; import { chiefLevel } from "../chief-level.ts";
 import type { BotRecord } from "../store.ts";
 import { libraryTeamRoles } from "../team-library.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -26,7 +26,7 @@ export function createInternalChiefTeamRoutes(deps: {
 }): RouteHandler {
   const chief = () => {
     const bot = deps.bot();
-    return bot?.chiefOfStaff && !bot.hidden ? bot : null;
+    return chiefLevel(bot) && !bot!.hidden ? bot : null;
   };
   return async ({ res, path, method, json }) => {
     if (method !== "GET" || (path !== "/api/internal/team-setup-catalog" && path !== "/api/internal/team-library")) return PASS;

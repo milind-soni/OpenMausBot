@@ -120,6 +120,9 @@ export declare function parseCloudOffer(input: unknown): CloudOffer | null;
 export declare function parsePublicOffer(config: unknown): CloudOffer | null;
 export declare function withoutTrial(offer: CloudOffer | null): CloudOffer | null;
 export declare function cloudPlanDisk(state: unknown): CloudPlanDisk | null;
+export declare function readyCloudOrigin(state: unknown): string | null;
+export declare function machineSetup(machine: CloudMachine | null | undefined): { step?: CloudSetupStep; slow?: true } | null;
+export declare function cloudSetupOf(state: unknown): { step?: CloudSetupStep; slow?: true } | null;
 export declare function rememberedCloudHome(previous: RememberedCloudHome | null, state: unknown): RememberedCloudHome | null;
 export declare function signInCloudSession(input: {
   origin: string | null; mine: string | null; pair: () => Promise<{ origin: string; code: string }>;

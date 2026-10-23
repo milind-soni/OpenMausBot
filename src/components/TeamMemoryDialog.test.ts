@@ -27,7 +27,7 @@ async function render() {
 it("keeps the user's unsaved text after a conflict and reloads the latest version", async () => {
   let reads = 0;
   request.mockImplementation(async (_path: string, init?: RequestInit) => {
-    if (init?.method === "PATCH") throw new Error("This team memory changed. Reload it before saving or approving.");
+    if (init?.method === "PATCH") throw new Error("This department memory changed. Reload it before saving or approving.");
     reads++;
     return { entries: [{ ...entry, ...(reads > 1 ? { detail: "Amber", revision: "revision-two" } : {}) }], loadedIds: [entry.id] };
   });

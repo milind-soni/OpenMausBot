@@ -3,6 +3,8 @@
 import { lstat, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { PAGE_FILE_EXTENSIONS, PAGE_MAX_BYTES, PAGE_MAX_FILES } from "../../shared/published-page.ts";
+import { guestWorkspaceToHost } from "../bot-attachment.ts";
+import { VM_WORKSPACE_GUEST } from "../container-computer.ts";
 
 export interface PageFile {
   path: string;
@@ -113,4 +115,14 @@ export async function readPageBundle(requested: string, roots: readonly string[]
     throw new PageBundleError(`${basename(target)} has no index.html at its top. Name the main page index.html, then publish again.`);
   }
   return { source: target, files, bytes, skipped };
+}
+
+/** The bot's own folders for a turn, and its Local VM's workspace on this computer when it has one. */
+export type BotFolders = () => Promise<{ roots: readonly string[]; vmWorkspace: string | null }>;
+
+/** readPageBundle within a bot's own folders; a path inside its Local VM's workspace means the same file here. */
+export async function readBotPageBundle(requested: string, folders: BotFolders): Promise<PageBundle> {
+  const { roots, vmWorkspace } = await folders();
+  const path = vmWorkspace ? guestWorkspaceToHost(requested, VM_WORKSPACE_GUEST, vmWorkspace) ?? requested : requested;
+  return readPageBundle(path, vmWorkspace ? [vmWorkspace, ...roots] : roots);
 }

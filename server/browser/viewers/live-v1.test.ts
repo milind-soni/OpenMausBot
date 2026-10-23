@@ -49,6 +49,16 @@ describe("the v1 live view on the new browser", () => {
     expect(backend.chrome.sent.some((sent) => sent.method === "Input.insertText" && sent.params.text === "hi")).toBe(true);
   });
 
+  it("holds a slow start's waiting event to the one the agent-browser engine sends while its browser is busy", () => {
+    const steps = structuredClone(V1_GOLDEN) as unknown as Array<Record<string, unknown>>;
+    const waiting = (shape: unknown) => steps.map((step) => step.step === "open" ? { ...step, shapes: { ...(step.shapes as object), waiting: shape } } : step);
+    expect(v1Differences(steps)).toEqual([]);
+    expect(v1Differences(waiting({ reason: "string" }))).toEqual([]);
+    expect(v1Differences(waiting({ reason: "number" }))).toEqual(['open: waiting carries {"reason":"number"}, the contract {"reason":"string"}']);
+    expect(v1Differences(waiting({}).map((step) => step.step === "open" ? { ...step, shapes: { ...(step.shapes as object), stalled: {} } } : step)))
+      .toContain("open: an event the v1 contract does not have: stalled");
+  });
+
   it("opens at most two views of one browser and eight in all", async () => {
     const { open } = setup();
     await open("a");

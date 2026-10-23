@@ -54,7 +54,7 @@ async function fixture(extra: Partial<ChatAppRouteDeps> = {}) {
   };
   const page = (threadId = bot.threadId) => {
     const result = chatApps.createAppCard({ bot, threadId, input: { tool: "show_html", html: "<p>Hello</p>", title: "Hello" } });
-    if (!result.ok) throw new Error(result.error);
+    if (result instanceof Promise || !result.ok) throw new Error("not shown");
     return result.messageId;
   };
   const mcpRow = (threadId = bot.threadId) => {

@@ -35,7 +35,7 @@ const ENTRIES = {
   dictation: { entry: "/scripts/testing/dictation-preview.tsx", route: "/__dictation.html", title: "Isolated dictation verification" },
   settings: { entry: "/src/testing/bot-settings.tsx", route: "/__bot-settings.html", title: "Isolated Bot Settings" },
 } as const satisfies Record<string, Parameters<typeof mountPreview>[1]>;
-const FAKE_MODES = ["happy", "exit-early", "hang", "malformed", "stream", "not-logged-in", "slow", "background-result"];
+const FAKE_MODES = ["happy", "exit-early", "hang", "malformed", "stream", "not-logged-in", "slow", "slow-write", "background-result"];
 const SEEDED_BOT = "Pepper";
 const PLATFORM_ENV = ["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"];
 // Where `agent-browser install` unpacks Chrome for Testing below `$HOME/.agent-browser/browsers/chrome-<version>/`.
@@ -463,6 +463,8 @@ export async function launchUi(
     checkpoint();
     const api = fixtureApi(fixture.info.url);
     await api("PATCH", "/api/config", { language: "en" });
+    const { bots } = await api("GET", "/api/bots") as { bots: Array<{ id: string; defaultBot?: object }> };
+    for (const bot of bots.filter((bot) => bot.defaultBot)) await api("PATCH", `/api/bots/${bot.id}`, { welcomed: true });
     const created = await runControlOmb(["new-bot", "--name", SEEDED_BOT, "--url", fixture.info.url]) as { bot: { id: string } };
     checkpoint();
     // stdout carries the handle and nothing else; Vite's port and dependency

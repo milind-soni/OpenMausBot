@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { writeFileAtomic } from "./atomic.ts";
 import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_REFUSAL_PLAIN, CONTROL_WAITED, controlRefusal, createControlClient } from "./control-client.ts";
 import { computerPersonAwayText } from "./computer-wait.ts";
 import { freePortBlock } from "./testing/ports.ts";
@@ -25,7 +26,7 @@ describe("lazy host claim and pin on use (issue #1650)", () => {
   let base = "";
 
   // No Local VM anywhere, so an Auto turn falls past attachLocalVm to the host fallback.
-  const vmState = () => writeFileSync(stateFile, JSON.stringify({ noContainers: true }));
+  const vmState = () => writeFileAtomic(stateFile, JSON.stringify({ noContainers: true }));
   const resetTurn = () => { vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true }); };
   const api = async (method: string, path: string, body?: unknown) => {
     const response = await fetch(base + path, {

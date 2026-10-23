@@ -1,4 +1,4 @@
-import type { LocaleKey } from "@/locales";
+import { locales, type LocaleKey } from "@/locales";
 import { activeLocale, t } from "@/lib/i18n";
 import { niceTime, scheduleLabel } from "@/lib/schedule-label";
 import type { OverviewRoutineLine } from "@/lib/bot-overview-types";
@@ -47,7 +47,7 @@ const PREFERENCE: Record<string, LocaleKey> = {
   "browser only": "botOverview.preference.browser",
 };
 
-/** Only the unnamed section, which the server marks with "" in `managedSections`, gets its label; every name is data. */
+/** Only the unnamed department, which the server marks with "" in `managedSections`, gets its label; every name is data. */
 function managedTeams(english: string, managedSections: readonly string[] | undefined): string {
   if (!managedSections || managedSections.map((name) => name || "General").join(", ") !== english) return english;
   return managedSections.map((name) => name || t("botAccess.teams.general")).join(", ");
@@ -55,18 +55,40 @@ function managedTeams(english: string, managedSections: readonly string[] | unde
 
 const preference = (words: string): string => (Object.hasOwn(PREFERENCE, words) ? t(PREFERENCE[words]!) : words);
 
+type Coordination = {
+  line: RegExp;
+  key(match: RegExpExecArray): LocaleKey;
+  params(match: RegExpExecArray, managedSections?: readonly string[]): Record<string, string | number>;
+};
+const byCount = (count: string | undefined, single: LocaleKey, plural: LocaleKey): LocaleKey => (Number(count) === 1 ? single : plural);
+
+/** Each meaning in both wordings a server of any version sends: section and teams, or department and departments. */
+const COORDINATION: readonly Coordination[] = [
+  { line: /^Can talk to (\d+) other bots? in its (?:section|department)\.$/, key: ([, count]) => byCount(count, "botOverview.line.peersSectionOne", "botOverview.line.peersSectionMany"), params: ([, count]) => ({ count: Number(count) }) },
+  { line: /^Can talk to (\d+) other bots? in its allowed (?:teams|departments)\.$/, key: ([, count]) => byCount(count, "botOverview.line.peersTeamsOne", "botOverview.line.peersTeamsMany"), params: ([, count]) => ({ count: Number(count) }) },
+  { line: /^Coordinates its (?:section|department) as Chief of Staff\.$/, key: () => "botOverview.line.chief", params: () => ({ role: t("sidebar.bot.chiefOfStaff") }) },
+  { line: /^May also coordinate these (?:teams|departments): (.+)\.$/, key: () => "botOverview.line.alsoTeams", params: ([, names], managedSections) => ({ teams: managedTeams(names!, managedSections) }) },
+];
+
+/** A language with its own words for `key`; in any other the server's line is shown exactly as it came, never re-worded. */
+const ownWords = (key: LocaleKey): boolean => activeLocale() !== "en" && Object.hasOwn(locales[activeLocale()] ?? {}, key);
+
+function coordinationText(line: string, managedSections: readonly string[] | undefined): string | null {
+  for (const coordination of COORDINATION) {
+    const match = coordination.line.exec(line);
+    if (!match) continue;
+    const key = coordination.key(match);
+    return ownWords(key) ? t(key, coordination.params(match, managedSections)) : line;
+  }
+  return null;
+}
+
 export function overviewLineText(line: string, managedSections?: readonly string[]): string {
   if (Object.hasOwn(EXACT, line)) return t(EXACT[line]!);
-  if (line === "Coordinates its section as Chief of Staff.") return t("botOverview.line.chief", { role: t("sidebar.bot.chiefOfStaff") });
-  const peers = /^Can talk to (\d+) other bots? in (its section|its allowed teams)\.$/.exec(line);
-  if (peers) {
-    const count = Number(peers[1]), teams = peers[2] === "its allowed teams";
-    return t(count === 1 ? (teams ? "botOverview.line.peersTeamsOne" : "botOverview.line.peersSectionOne") : (teams ? "botOverview.line.peersTeamsMany" : "botOverview.line.peersSectionMany"), { count });
-  }
+  const coordination = coordinationText(line, managedSections);
+  if (coordination !== null) return coordination;
   const apps = /^Can use (\d+) connected apps?: (.+)\.$/.exec(line);
   if (apps) return t(apps[1] === "1" ? "botOverview.line.appsOne" : "botOverview.line.appsMany", { count: Number(apps[1]), apps: apps[2]! });
-  const teams = /^May also coordinate these teams: (.+)\.$/.exec(line);
-  if (teams) return t("botOverview.line.alsoTeams", { teams: managedTeams(teams[1]!, managedSections) });
   const away = activeLocale() === "en" ? null : /^Computer preference: (.+), which isn't available on My Cloud\.$/.exec(line);
   if (away) return t("botOverview.line.computerNotOnCloud", { preference: preference(away[1]!) });
   const computer = /^Computer preference: (.+)\.$/.exec(line);

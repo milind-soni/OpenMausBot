@@ -107,7 +107,7 @@ export function ensureSections(names: (string | undefined)[]): boolean {
 export function changeEmptySection(name: string, nextName: string | null): void {
   const data = loadFile(true);
   const index = data.sections.indexOf(name);
-  if (index < 0) throw new Error("No such team");
+  if (index < 0) throw new Error("No such department");
   if (nextName !== null && nextName !== name && data.sections.includes(nextName)) {
     throw new Error("A team with that name already exists");
   }

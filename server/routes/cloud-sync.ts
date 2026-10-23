@@ -5,6 +5,7 @@ import { cloudHomeConfigured } from "../cloud-home.ts";
 import { DATA_DIR } from "../config.ts";
 import { SyncError, createCloudSync, type CloudSync } from "../cloud-sync.ts";
 import { answerAsleep, cloudPowerNow, type CloudPower } from "../cloud-power.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 const FOLDER = String.raw`([\w-]{1,200})`;
@@ -17,8 +18,9 @@ export function createCloudSyncRoutes(options: {
   statfs?: (path: string) => { totalBytes: number; freeBytes: number };
   /** A Cloud home that agreed to sleep answers the desktop's held changes poll "asleep" (server/cloud-power.ts). */
   power?: () => Pick<CloudPower, "sleeping" | "sleepSignal"> | null;
-}): RouteHandler & { close(): void; noteBotTurn(botId: string, threadId: string): void } {
+}): RouteHandler & { close(): void; noteBotTurn(botId: string, threadId: string): void; showFolders(shown: FolderFilter): void } {
   let sync: CloudSync | null = null;
+  let folderFilter: FolderFilter = () => () => true;
   const service = () => sync ??= createCloudSync({ dataDir: options.dataDir, root: options.root, statfs: options.statfs });
   const handler = async ({ req, res, url, path, method, auth, json, readBody }: RouteContext): Promise<typeof PASS | void> => {
     if (path !== "/api/sync" && !path.startsWith("/api/sync/")) return PASS;
@@ -26,10 +28,14 @@ export function createCloudSyncRoutes(options: {
     if (auth.kind !== "session" || !auth.scopes.includes("admin")) { json(res, 403, { error: "Only your own desktop can sync with My Cloud." }); return; }
     res.setHeader("cache-control", "no-store");
     const s = service();
+    const shown = folderFilter(auth);
     const match = (pattern: string) => new RegExp(`^${pattern}$`).exec(path);
     let m: RegExpExecArray | null;
+    // A bot's folder of someone else's private chat (a Team Cloud) answers as a folder that does not exist.
+    const folder = /^\/api\/sync\/folders\/([\w-]{1,200})(?:\/|$)/.exec(path)?.[1];
+    if (folder && !shown(folder)) { json(res, 404, { error: "no such synced folder" }); return; }
     try {
-      if (method === "GET" && path === "/api/sync") { json(res, 200, s.summary()); return; }
+      if (method === "GET" && path === "/api/sync") { const summary = s.summary(); json(res, 200, { ...summary, folders: summary.folders.filter((entry) => shown(entry.id)) }); return; }
       if (method === "GET" && path === "/api/sync/changes") {
         const power = options.power?.() ?? null;
         if (power?.sleeping()) { answerAsleep(res, json); return; }
@@ -38,10 +44,10 @@ export function createCloudSyncRoutes(options: {
         const changes = await s.changes(Number(url.searchParams.get("cursor") ?? 0), Number(url.searchParams.get("waitMs") ?? 60_000),
           power ? AbortSignal.any([abort.signal, power.sleepSignal()]) : abort.signal);
         if (power?.sleeping()) { answerAsleep(res, json); return; }
-        json(res, 200, changes);
+        json(res, 200, { ...changes, folderIds: changes.folderIds.filter(shown) });
         return;
       }
-      if (method === "GET" && path === "/api/sync/trash") { json(res, 200, s.trash()); return; }
+      if (method === "GET" && path === "/api/sync/trash") { json(res, 200, { entries: s.trash().entries.filter((entry) => shown(entry.folderId)) }); return; }
       if (method === "POST" && path === "/api/sync/trash/restore") { json(res, 200, await s.restore((await readBody(req, 10_000))?.entryId)); return; }
       if (method === "POST" && path === "/api/sync/folders") { json(res, 200, { folder: s.register(await readBody(req, 100_000)) }); return; }
       if (method === "DELETE" && (m = match(`/api/sync/folders/${FOLDER}`))) {
@@ -81,8 +87,12 @@ export function createCloudSyncRoutes(options: {
     }
   };
   // Before the desktop's first call there is nobody to tell: its first pass reads every folder.
-  return Object.assign(handler, { close: () => { sync?.close(); sync = null; }, noteBotTurn: (botId: string, threadId: string) => sync?.noteBotTurn(botId, threadId) });
+  return Object.assign(handler, { close: () => { sync?.close(); sync = null; }, noteBotTurn: (botId: string, threadId: string) => sync?.noteBotTurn(botId, threadId),
+    showFolders: (next: FolderFilter) => { folderFilter = next; } });
 }
+
+/** Which synced folders a session may reach (index.ts sets it on a Team Cloud: a bot's folder of someone else's chat never). */
+type FolderFilter = (auth: RequestAuth) => (folderId: string) => boolean;
 
 export const cloudSyncRoutes = createCloudSyncRoutes({ dataDir: DATA_DIR, cloudHome: () => cloudHomeConfigured(), power: cloudPowerNow });
 export const noteSyncBotTurn = (botId: string, threadId: string) => cloudSyncRoutes.noteBotTurn(botId, threadId);

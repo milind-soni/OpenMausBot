@@ -4,6 +4,7 @@
 // mcp__notion__notion-create-pages); built-in tools and the app's own
 // coordination tools are not outcomes and classify as nothing.
 import { connectorCallsIn, isOutboundTool } from "./outbound.ts";
+import { isConnectedAppsServer } from "./own-apps.ts";
 
 export const OUTCOME_CATEGORIES = ["emailRead", "draft", "emailSent", "message", "doc", "report", "lead", "other"] as const;
 export type OutcomeCategory = (typeof OUTCOME_CATEGORIES)[number];
@@ -67,7 +68,7 @@ export function appTool(name: string): AppTool | null {
   if (name.startsWith("mcp__")) {
     const [, server = "", ...rest] = name.split("__");
     const action = rest.join("__");
-    if (server === "composio" || server === "highlevel") return appTool(action);
+    if (isConnectedAppsServer(server) || server === "highlevel") return appTool(action);
     if (OWN_SERVERS.has(server) || !action) return null;
     const app = words(server.replace(/^claude_ai_/, "")).join("");
     const tokens = words(action);

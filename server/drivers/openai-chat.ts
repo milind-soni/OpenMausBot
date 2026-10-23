@@ -20,7 +20,8 @@ import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
-import { outOfCreditsMessage } from "./engine-errors.ts";
+import { plainFailureMessage } from "./engine-errors.ts";
+import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
 
@@ -600,7 +601,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
-        tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs);
+        tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse, scope, turn.mcpCallTimeoutMs,
+          toolSchemaProfileFor({ url: options.apiUrl, model }));
         for (const { server, reason } of tools.skipped) {
           emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: `MCP server "${server}" was skipped for this turn: ${safeText(reason)}` });
         }
@@ -836,7 +838,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (abort.signal.aborted) { ok = false; stopReason = "interrupted"; }
         if (failure && (!abort.signal.aborted || cleanupFailed)) {
           // "upstream" (an OpenAI-compatible URL) names no provider, and the Cloud trial credit reads its raw line.
-          const message = options.httpErrorLabel === "upstream" ? failure : outOfCreditsMessage(options.httpErrorLabel, failure);
+          const message = options.httpErrorLabel === "upstream" ? failure : plainFailureMessage(options.httpErrorLabel, failure);
           emit({ ...base(turn.threadId, turnId), type: "runtime.error", message, terminal: !abort.signal.aborted });
         }
         if (!ok && !abort.signal.aborted) {

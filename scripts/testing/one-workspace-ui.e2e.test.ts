@@ -56,6 +56,58 @@ const PAIR_FORM = "Boolean(document.querySelector('form input') && /pairing code
   }, hostTimeout(240_000));
   afterAll(async () => { await world?.close(); await fx?.close(); }, hostTimeout(60_000));
 
+  const step = () => page<string | null>("document.querySelector('[data-cloud-setup] [aria-current=step]')?.textContent ?? null");
+  const settingUp = (setup: Record<string, unknown>) => ({ ...world.account.state, machine: { status: "provisioning", origin: world.cloudOrigin, setup } });
+
+  it("before the move, My Cloud asked for while the Admin sets it up shows Setting up My Cloud… and is never looked up; it opens by itself once ready", async () => {
+    await blank();
+    const signedIn = world.account.state, before = world.cloudRequests.length;
+    world.moved = false;
+    try {
+      world.account.state = settingUp({ step: "storage" });
+      await world.home.openCloud();
+      await until(() => screen(), (value) => value === "setup", 30_000, "the setup screen");
+      const words = await page<string>("document.querySelector('main').innerText");
+      expect(words).toContain("Setting up My Cloud…");
+      expect(words).toContain("This takes about a minute. It opens by itself when it's ready.");
+      expect(words).not.toMatch(/Server menu|choose it again|not reachable/);
+      expect(await page<string[]>("[...document.querySelectorAll('main button')].map((button) => button.textContent)"), "nothing to press").toEqual([]);
+      expect(await step()).toBe("Preparing storage");
+      await world.window.screenshot(join(shots, "0-setting-up-my-cloud.png"));
+      world.account.state = settingUp({ step: "checking" });
+      await world.home.changed();
+      await until(() => step(), (value) => value === "Checking it's ready", 15_000, "the next step");
+      expect(new URL(world.window.url).origin).toBe(world.localOrigin);
+      expect(world.cloudRequests.length, "nothing asked My Cloud while it was set up").toBe(before);
+      world.account.state = signedIn;
+      await world.home.changed();
+      await onCloudPage();
+      expect(world.home.asking()).toBe(false);
+    } finally { world.account.state = signedIn; world.moved = true; }
+  }, hostTimeout(120_000));
+
+  it("before the move, a brand-new My Cloud whose name isn't found yet keeps Setting up My Cloud… and opens by itself once found, past the window's host cache", async () => {
+    await blank();
+    const signedIn = world.account.state;
+    world.moved = false;
+    try {
+      world.account.state = settingUp({ step: "checking" });
+      await world.home.changed();
+      world.account.state = signedIn;
+      await world.home.changed();
+      world.network.nameMissing = true;
+      const cleared = world.hostCache.cleared;
+      await world.home.openCloud();
+      await until(() => screen(), (value) => value === "setup", 30_000, "the setup screen");
+      expect(await step()).toBe("Checking it's ready");
+      expect(await page<string>("document.querySelector('main').innerText")).not.toMatch(/Can't reach|Server menu|choose it again/);
+      await world.window.screenshot(join(shots, "0-my-cloud-name-not-found-yet.png"));
+      world.network.nameMissing = false;
+      await onCloudPage();
+      expect(world.hostCache.cleared, "the host cache is cleared before the try that found it").toBeGreaterThan(cleared);
+    } finally { world.network.nameMissing = false; world.account.state = signedIn; world.moved = true; }
+  }, hostTimeout(120_000));
+
   it("someone with no Cloud move sees this computer's page as before, and the window never asks My Cloud", async () => {
     await blank();
     const before = world.cloudRequests.length;

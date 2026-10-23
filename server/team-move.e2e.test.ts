@@ -33,6 +33,7 @@ beforeAll(async () => {
   fx.account.state.teams = [{ ...ACME, role: "member", machine: { origin: team.base, status: "ready", state: "ready" } }];
   fx.account.pairTeam = async (id) => { if (id !== ACME.id) throw Object.assign(new Error("not in that team"), { gone: true }); return team.grant(ADA); };
   expect((await fx.onCloud("PATCH", "/api/config", { profile: { name: "Ada", aboutMe: ABOUT } })).status).toBe(200);
+  await nameSeededChiefs();
 }, hostTimeout(180_000));
 const watchers: Array<() => void> = [];
 afterAll(async () => { for (const stop of watchers) stop(); await fx?.close(); }, hostTimeout(60_000));
@@ -90,6 +91,13 @@ function watchRoutine(id: string) {
   return { seen, stop: async () => { stop = true; await done; } };
 }
 
+/** Each home seeds its Chief under a random bot name, Scout and Quill among them; these bots must be the only ones so named. */
+async function nameSeededChiefs() {
+  for (const [side, name] of [[fx.onCloud, "Ada's Chief"], [onTeam("olive"), "Acme's Chief"]] as const) {
+    for (const bot of (await side("GET", "/api/bots")).body.bots as Bot[]) expect((await side("PATCH", `/api/bots/${bot.id}`, { name })).status).toBe(200);
+  }
+}
+
 const move = async (bot: Bot) => { await fx.teamMove.start({ bot: { id: bot.id, name: bot.name }, team: { ...ACME, origin: team.base } }); };
 const phaseOf = (id: string) => (fx.teamMove.journal()?.moves as Array<{ bot: { id: string }; phase: string; failing?: true }> | undefined)?.find((entry) => entry.bot.id === id);
 
@@ -123,7 +131,8 @@ it("moves Scout with its two chats, its routine and its files; its notes about A
     const moved = await rows(onTeam("ada"), threadId);
     expect(moved.map((row) => row.id)).toEqual((await rows(fx.onCloud, threadId)).map((row) => row.id));
     expect(moved.filter((row) => row.role === "user").every((row) => row.sender?.id === adaKey)).toBe(true);
-    expect((await onTeam("ben")("GET", `/api/threads/${threadId}/messages`)).status, "an Admin sees it").toBe(200);
+    expect((await onTeam("ben")("GET", `/api/threads/${threadId}/messages`)).status, "an Admin never sees it").toBe(404);
+    expect((await onTeam("olive")("GET", `/api/threads/${threadId}/messages`)).status, "nor does the Owner").toBe(404);
     expect((await onTeam("cleo")("GET", `/api/threads/${threadId}/messages`)).status, "another Member never does").toBe(404);
   }
   expect((await teamBots("cleo")).find((bot) => bot.id === scout.bot.id)!.tasks?.some((task) => [scout.main, scout.budget].includes(task.threadId))).toBe(false);
@@ -137,12 +146,15 @@ it("moves Scout with its two chats, its routine and its files; its notes about A
   // It reports into Ada's own conversation there, never the team's main chat.
   const ran = await onTeam("olive")("POST", `/api/routines/${scout.routine}/run`);
   expect(ran.status, JSON.stringify(ran.body)).toBeLessThan(300);
-  await expect.poll(async () => ((await onTeam("olive")("GET", "/api/routines")).body.runs as Array<{ routineId: string; status: string }>)
+  // Its run is Ada's: she sees it, and the Owner who started it never reads what it said.
+  await expect.poll(async () => ((await onTeam("ada")("GET", "/api/routines")).body.runs as Array<{ routineId: string; status: string }>)
     .some((run) => run.routineId === scout.routine && run.status === "completed"), { timeout: 60_000, interval: 200 }).toBe(true);
-  const report = ((await onTeam("olive")("GET", "/api/routines")).body.runs as Array<{ routineId: string; threadId?: string; resultsThreadId?: string }>).find((run) => run.routineId === scout.routine)!;
+  const report = ((await onTeam("ada")("GET", "/api/routines")).body.runs as Array<{ routineId: string; threadId?: string; resultsThreadId?: string }>).find((run) => run.routineId === scout.routine)!;
+  expect(((await onTeam("olive")("GET", "/api/routines")).body.runs as Array<{ routineId: string }>).some((run) => run.routineId === scout.routine)).toBe(false);
   for (const threadId of new Set([report.threadId!, report.resultsThreadId ?? carried.resultsThreadId!])) {
     expect((await onTeam("ada")("GET", `/api/threads/${threadId}/messages`)).status, threadId).toBe(200);
     expect((await onTeam("cleo")("GET", `/api/threads/${threadId}/messages`)).status, threadId).toBe(404);
+    expect((await onTeam("olive")("GET", `/api/threads/${threadId}/messages`)).status, threadId).toBe(404);
   }
   expect(((await fx.onCloud("GET", "/api/routines")).body.routines as Array<{ id: string }>).some((routine) => routine.id === scout.routine)).toBe(false);
   expect(watch.seen.some((sample) => sample.mine && sample.theirs), JSON.stringify(watch.seen)).toBe(false);

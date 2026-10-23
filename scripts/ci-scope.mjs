@@ -53,6 +53,20 @@ export function selectPushScope(files, show) {
 // every PR still runs the macOS smokes.
 const ALL_OS = ["macos-latest", "ubuntu-latest", "windows-latest"];
 const PR_OS = ["ubuntu-latest", "windows-latest"];
+
+// A shard runs its files one at a time, so the slowest shard sets the run's length. Windows and macOS run only the e2e
+// files that depend on their OS, so their shards stay as short as Linux's, and macOS keeps four: the account runs five
+// macOS jobs at a time.
+export const VITEST_SHARDS = { "macos-latest": 4, "ubuntu-latest": 8, "windows-latest": 8 };
+
+/** ci.yml's vitest matrix: every shard of every selected platform, and which e2e files that platform runs. */
+export function vitestMatrix(oses) {
+  return {
+    include: oses.flatMap((os) => Array.from({ length: VITEST_SHARDS[os] }, (_, i) => ({
+      os, shard: i + 1, shards: VITEST_SHARDS[os], e2e: os === "ubuntu-latest" ? "all" : "host",
+    }))),
+  };
+}
 const SHA = /^[a-f\d]{40}(?:[a-f\d]{24})?$/i;
 
 const git = (args) => execFileSync("git", args, { encoding: "utf8", timeout: 30_000, stdio: ["ignore", "pipe", "pipe"] });
@@ -118,6 +132,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   }
   appendFileSync(
     process.env.GITHUB_OUTPUT,
-    `runtime=${scope.runtime}\nvitest_os=${JSON.stringify(vitestOs)}\n`,
+    `runtime=${scope.runtime}\nvitest_os=${JSON.stringify(vitestOs)}\nvitest_matrix=${JSON.stringify(vitestMatrix(vitestOs))}\n`,
   );
 }

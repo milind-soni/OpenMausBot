@@ -15,14 +15,14 @@ export function allow<const T extends string>(value: unknown, list: readonly T[]
 export const KEY_PROVIDER = [
   "anthropic", "openai", "openrouter", "openai_compat", "xai", "mistral", "cerebras", "groq", "meta", "boat", "composio",
   "opencode_go", "custom_endpoint", "elevenlabs", "fish_audio", "jev", "openrouter_decider", "openai_image", "custom_image",
-  "openai_live", "onepassword", "treg",
+  "openai_live", "onepassword", "treg", "deepseek",
 ] as const;
 export type KeyProvider = (typeof KEY_PROVIDER)[number];
 
 export const SECTION_PROVIDER = {
   composio: "composio", box: "boat", opencodeGo: "opencode_go", anthropic: "anthropic", openai: "openai",
   openrouter: "openrouter", openaiCompat: "openai_compat", xai: "xai", mistral: "mistral", cerebras: "cerebras",
-  groq: "groq", meta: "meta", treg: "treg",
+  groq: "groq", meta: "meta", treg: "treg", deepseek: "deepseek",
 } as const satisfies Record<string, KeyProvider>;
 
 const CREDENTIAL_PROVIDER = new Map<string, KeyProvider>(Object.entries({
@@ -36,7 +36,7 @@ export function credentialProvider(target: unknown): KeyProvider | "other" {
 
 export const ENGINE = [
   "claude", "codex", "gemini", "cursor", "opencode", "qwen", "hermes", "cline", "custom_acp", "pi", "openai_compat", "grok",
-  "grok_api", "kimi", "droid", "antigravity", "minimax", "mistral", "cerebras", "groq", "meta", "muse_code",
+  "grok_api", "kimi", "droid", "antigravity", "minimax", "mistral", "cerebras", "groq", "meta", "muse_code", "deepseek",
 ] as const;
 export type Engine = (typeof ENGINE)[number];
 
@@ -45,7 +45,7 @@ const ENGINE_BY_DRIVER = new Map<string, Engine>(Object.entries({
   qwenAgent: "qwen", hermesAgent: "hermes", clineAgent: "cline", customAcp: "custom_acp", piAgent: "pi",
   "openai-compat": "openai_compat", grokAgent: "grok", grok: "grok_api", kimiAgent: "kimi", droidAgent: "droid",
   antigravityAgent: "antigravity", minimax: "minimax", mistral: "mistral", cerebras: "cerebras", groq: "groq",
-  meta: "meta", museCode: "muse_code",
+  meta: "meta", museCode: "muse_code", deepseekAgent: "deepseek",
 } satisfies Record<string, Engine>));
 
 export function engineForDriver(driverKind: unknown): Engine | "other" {
@@ -68,7 +68,7 @@ export const APP: readonly string[] = CURATED_CONNECTOR_SLUGS;
 export const BOT_TEMPLATE: readonly string[] = BOT_ROLES.map((role) => role.id);
 export const CLOUD_TIER = ["starter", "personal", "pro", "max"] as const;
 
-export const KEY_VIA = ["settings", "computer_panel", "chat_request"] as const;
+export const KEY_VIA = ["settings", "computer_panel", "chat_request", "apps"] as const;
 export type KeyVia = (typeof KEY_VIA)[number];
 export const KEY_RESULT = ["ok", "rejected", "unverified", "error"] as const;
 export type KeyResult = (typeof KEY_RESULT)[number];

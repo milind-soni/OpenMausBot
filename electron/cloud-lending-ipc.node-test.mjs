@@ -8,14 +8,14 @@ import { createLendingTarget, defaultGrant, existingFolders, installCloudLending
 
 const usual = ["Desktop", "Documents", "Downloads"].map((name, i) => ({ id: `id-${i}`, path: `/Users/me/${name}`, name, write: false }));
 
-function setup({ enabled = false, kept = { folders: [], screen: false }, screenAvailable = true, stopped, confirm = true } = {}) {
+function setup({ enabled = false, kept = { folders: [], screen: false }, screenAvailable = true, screenReady = false, stopped, confirm = true } = {}) {
   const handlers = new Map(), calls = [];
   let state = { enabled, folders: kept.folders, screen: kept.screen, internet: kept.internet === true, busy: false, connected: enabled, ...(stopped ? { stopped } : {}) };
   const lending = installCloudLending({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     localOnly: (channel, handler) => (event, ...args) => { if (event.page !== "local") throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
     cloudPage: (channel, handler) => (event, ...args) => { if (!event.page) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
-    snapshot: async () => ({ available: true, screenAvailable, state }),
+    snapshot: async () => ({ available: true, screenAvailable, screenReady, state }),
     environment: () => ({ id: "cloud" }),
     save: async (_env, choice) => { calls.push(["save", choice]); state = { ...state, enabled: true, connected: true, folders: choice.folders, screen: choice.screen, internet: choice.internet, terminal: choice.terminal === true }; },
     stop: () => { calls.push(["stop"]); state = { ...state, enabled: false, connected: false, stopped: { reason: "you", at: 1 } }; },
@@ -111,7 +111,7 @@ test("Apps and screen is never lent from My Cloud's page while lending is off or
   assert.deepEqual([...off.calls, ...unavailable.calls], []);
 });
 
-test("the move's default grant: the usual folders read only, each project folder with editing, the internet connection, and the screen only when lent before", async () => {
+test("the move's default grant: the usual folders read only, each project folder with editing, the internet connection, and the screen when lent before or already working here", async () => {
   const fresh = setup();
   const lent = await fresh.lending.lendByDefault({ projects: ["/Users/me/code/site", "/Users/me", "relative/path", "/Users/me/Gone"] });
   assert.deepEqual(fresh.calls, [["save", { folders: [...usual, { id: fresh.calls[0][1].folders[3].id, path: "/Users/me/code/site", name: "site", write: true }], screen: false, internet: true }]],
@@ -123,9 +123,29 @@ test("the move's default grant: the usual folders read only, each project folder
   const notAvailable = setup({ kept: { folders: [], screen: true }, screenAvailable: false });
   await notAvailable.lending.lendByDefault();
   assert.equal(notAvailable.calls.at(-1)[1].screen, false, "not when this app's computer control is not ready");
+  const workingHere = setup({ screenReady: true });
+  assert.equal((await workingHere.lending.lendByDefault({ projects: [] })).screen, true, "apps and screen this computer's own bots could use are lent too, with no dialog");
+  assert.deepEqual(workingHere.calls.map(([kind]) => kind), ["save"]);
+  assert.equal(defaultGrant({ usual, projects: [], screenAvailable: false, screenReady: true }).screen, false, "never while computer control can't be reached");
   // A project inside a usual folder is its own entry; the same folder twice keeps editing.
   assert.deepEqual(defaultGrant({ kept: { folders: [{ ...usual[0], write: false }] }, usual, projects: [{ ...usual[0], write: true }] }).folders.map((folder) => [folder.name, folder.write]),
     [["Desktop", true], ["Documents", false], ["Downloads", false]]);
+});
+
+test("Use my Mac lends apps and screen on top of what is lent, once computer control works; never while lending is off", async () => {
+  const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: true }];
+  const lent = setup({ enabled: true, kept: { folders: plans, screen: false, internet: true } });
+  assert.equal((await lent.lending.lendScreen()).screen, true);
+  assert.deepEqual(lent.calls, [["save", { folders: plans, screen: true, internet: true }]], "no dialog: the person chose it in this app's own popup");
+  await lent.lending.lendScreen();
+  assert.equal(lent.calls.length, 1, "lent once");
+  const off = setup({ kept: { folders: plans, screen: false } });
+  assert.equal(await off.lending.lendScreen(), null);
+  const unavailable = setup({ enabled: true, screenAvailable: false });
+  assert.equal(await unavailable.lending.lendScreen(), null);
+  assert.deepEqual([...off.calls, ...unavailable.calls], []);
+  assert.deepEqual(await setup({ screenReady: true, stopped: { reason: "you", at: 1 } }).lending.state(),
+    { available: true, on: false, status: null, folders: [], screen: false, screenAvailable: true, internet: false, screenReady: true, ownOff: true });
 });
 
 test("the person's own Off is never undone: the move's default leaves lending off, while other stops are lent again", async () => {
@@ -137,7 +157,9 @@ test("the person's own Off is never undone: the move's default leaves lending of
   assert.equal(off.calls.length, calls, "nothing saved");
   const signedOut = setup({ stopped: { reason: "signed-out", at: 1 } });
   assert.equal((await signedOut.lending.lendByDefault()).on, true);
-  // The person turning it on again themselves still works.
+  // The person choosing Use my Mac, or turning it on again themselves, still works.
+  assert.equal((await off.lending.lendByDefault({ asked: true })).on, true);
+  await off.handlers.get("cloud-lending:set")({ page: "cloud" }, false);
   assert.equal((await off.handlers.get("cloud-lending:set")({ page: "cloud" }, true)).on, true);
 });
 
@@ -285,4 +307,8 @@ test("My Cloud's page asks main to lend Apps and screen only from the person's c
   const clicked = page(true);
   await clicked.bridge.cloudLending.screen(true);
   assert.deepEqual([...unclicked.invoked, ...clicked.invoked].filter(([channel]) => channel === "cloud-lending:screen"), [["cloud-lending:screen", false], ["cloud-lending:screen", true]]);
+  // A bot's Use my Mac link only opens main's own popup, and only from the person's click.
+  await assert.rejects(unclicked.bridge.cloudLending.offer(), /Press Use my Mac/);
+  await clicked.bridge.cloudLending.offer();
+  assert.deepEqual([...unclicked.invoked, ...clicked.invoked].filter(([channel]) => channel === "cloud-lending:offer"), [["cloud-lending:offer"]]);
 });

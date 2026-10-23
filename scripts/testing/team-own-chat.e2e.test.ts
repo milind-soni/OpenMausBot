@@ -59,15 +59,17 @@ if (!teamFixture) console.info("skipping the team own-chat e2e: the cloud fixtur
     expect((await scoutAs("ada")).tasks.find((task) => task.threadId === main)?.private, "the main chat is the team's").toBeUndefined();
   }, hostTimeout(60_000));
 
-  it("an Admin, who sees members' private chats, is never given one of them: a new conversation of their own instead", async () => {
+  it("an Admin never sees a member's private chat: a new conversation of their own instead, seen by no one else", async () => {
     const chats = await chatsOf("ben");
     expect(chats.member).toBe(false);
     const listed = await scoutAs("ben");
-    expect(listed.tasks.some((task) => task.private === true), "Ada's chat is listed for an Admin").toBe(true);
+    expect(listed.tasks.some((task) => task.private === true), "Ada's chat is not listed for an Admin").toBe(false);
     expect(ownChatOf(listed, chats)).toBeNull();
     const made = await make("ben", chats);
     expect(made.private).toBe(true);
     expect(ownChatOf(await scoutAs("ben"), await chatsOf("ben"))).toBe(made.threadId);
+    expect((await scoutAs("ben")).tasks.filter((task) => task.private === true).map((task) => task.threadId), "only his own").toEqual([made.threadId]);
+    expect((await scoutAs("ada")).tasks.some((task) => task.threadId === made.threadId), "Ada never sees Ben's").toBe(false);
     const cleo = await chatsOf("cleo");
     expect(ownChatOf(await scoutAs("cleo"), cleo), "another Member sees neither Ada's nor Ben's").toBeNull();
   }, hostTimeout(60_000));

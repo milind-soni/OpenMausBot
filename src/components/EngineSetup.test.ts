@@ -102,6 +102,31 @@ describe("engines set up with a key in Settings", () => {
     expect(markup).not.toContain("Open install in Terminal");
     expect(markup).not.toContain("config.json");
   });
+
+  it("still offers the install when a key engine's own CLI is missing, and the key once it is installed", () => {
+    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    const dsh = (snapshot: InstanceInfo["snapshot"]): InstanceInfo => ({
+      ...instance(snapshot),
+      instanceId: "deepseek",
+      driverKind: "deepseekAgent",
+      displayName: "DeepSeek Harness",
+      install: {
+        command: { linux: "npm install -g @deepseek-ai/dsh", darwin: "npm install -g @deepseek-ai/dsh", win32: "npm install -g @deepseek-ai/dsh" },
+        docsUrl: "https://github.com/deepseek-ai/deepseek-harness",
+        needsNode: true,
+        settings: "connections",
+      },
+    });
+    const missing = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: dsh({ state: "unavailable", reason: "dsh not found" }) })));
+    expect(missing).toContain("npm install -g @deepseek-ai/dsh");
+    expect(missing).not.toContain("needs an API key");
+    const keyless = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: dsh({ state: "available", authenticated: false, version: "0.2.1" }) })));
+    expect(keyless).toContain("DeepSeek Harness needs an API key");
+    expect(keyless).toContain("Open API keys");
+    expect(keyless).not.toContain("Terminal");
+    // No key is saved, so nothing was rejected.
+    expect(keyless).not.toContain("rejected the saved key");
+  });
 });
 
 describe("install from Settings on the server", () => {

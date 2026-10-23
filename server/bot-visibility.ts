@@ -1,5 +1,6 @@
 // Who may see a bot on a shared workspace: absent/"everyone", "admins", or { people: [...] } plus admins. Access control,
-// not an approval gate; the owner, a session-less local service and admin sessions see everything. A member sees a room
+// not an approval gate; the owner, a session-less local service and admin sessions see every bot (on a Team Cloud an
+// admin still sees only their own private chats, never another person's: audience.ts). A member sees a room
 // only when they can see every bot in it, and bots reach each other only with the same audience (sameAudience): a room
 // transcript or a delegation would otherwise carry a restricted bot's words to people who cannot see it.
 import { z } from "zod";
@@ -15,7 +16,9 @@ export interface ThreadAudiences {
   person: string | null;
 }
 
-export type Viewer = { kind: "all" } | { kind: "member"; email?: string };
+/** `all`: every bot and room. On a Team Cloud an admin session is `all` with its address, and still sees only the
+ * conversations its person may (audience.ts): its own private chats, never another person's. */
+export type Viewer = { kind: "all"; email?: string } | { kind: "member"; email?: string };
 
 export const SEES_EVERYTHING: Viewer = { kind: "all" };
 
@@ -154,10 +157,10 @@ export class VisibleSet {
     audiences?: ThreadAudiences,
   ) {
     this.viewer = viewer;
-    this.audiences = viewer.kind === "member" && audiences ? audiences : null;
-    // On a Team Cloud a member's view is never everything: each conversation has its own audience.
-    this.everything = viewer.kind === "all" ||
-      (this.audiences === null && !bots.some((bot) => isRestricted(bot.visibility)) && !groups.some((group) => isRestricted(group.audienceFloor)));
+    this.audiences = audiences ?? null;
+    // On a Team Cloud nobody's view is everything, an admin's included: each conversation has its own audience.
+    this.everything = this.audiences === null && (viewer.kind === "all" ||
+      (!bots.some((bot) => isRestricted(bot.visibility)) && !groups.some((group) => isRestricted(group.audienceFloor))));
     this.ownerOf = ownerOf ?? ((threadId) => this.indexedOwner(threadId));
     if (this.everything) return;
     for (const bot of bots) this.bots.set(bot.id, bot);
@@ -170,7 +173,7 @@ export class VisibleSet {
   }
 
   bot(id: string): boolean {
-    if (this.everything) return true;
+    if (this.everything || this.viewer.kind === "all") return true;
     let seen = this.botMemo.get(id);
     if (seen === undefined) {
       const bot = this.bots.get(id);
@@ -181,7 +184,7 @@ export class VisibleSet {
   }
 
   group(id: string): boolean {
-    if (this.everything) return true;
+    if (this.everything || this.viewer.kind === "all") return true;
     const group = this.groups.get(id);
     if (!group) return false;
     const members = group.memberIds.filter((member) => this.bots.has(member));
@@ -193,15 +196,26 @@ export class VisibleSet {
     return this.audiences !== null;
   }
 
-  /** An unknown thread is not visible; on a Team Cloud neither is another person's conversation. */
+  /** An unknown thread is not visible to a member; on a Team Cloud another person's conversation is visible to nobody,
+   * an admin included. */
   thread(threadId: string): boolean {
     if (this.everything) return true;
     const owner = this.ownerOf(threadId);
-    if (!owner) return false;
+    // An admin reads what no bot or room holds (a deleted conversation's records) unless it was someone else's.
+    if (!owner) return this.viewer.kind === "all" && this.audienceShows(threadId);
     const seen = owner.bot !== undefined ? this.bot(owner.bot) : this.group(owner.group);
-    if (!seen || !this.audiences) return seen;
-    const audience = this.audiences.of(threadId);
-    return audience === undefined || audienceIncludes(audience, { admin: false, person: this.audiences.person, seesRoom: (groupId) => this.group(groupId) });
+    return seen && this.audienceShows(threadId);
+  }
+
+  /** A conversation that is someone else's, there or deleted: what a request or a row naming it is refused for. */
+  hides(threadId: string): boolean {
+    if (this.everything) return false;
+    return this.ownerOf(threadId) !== undefined ? !this.thread(threadId) : !this.audienceShows(threadId);
+  }
+
+  private audienceShows(threadId: string): boolean {
+    const audience = this.audiences?.of(threadId);
+    return audience === undefined || audienceIncludes(audience, { admin: this.viewer.kind === "all", person: this.audiences!.person, seesRoom: (groupId) => this.group(groupId) });
   }
 
   private indexedOwner(threadId: string): ThreadOwner | undefined {
@@ -221,7 +235,7 @@ export class VisibleSet {
   }
 
   sections(all: readonly string[]): string[] {
-    if (this.everything) return [...all];
+    if (this.everything || this.viewer.kind === "all") return [...all];
     const key = (value?: string) => value?.trim() || "";
     const shown = new Set<string>();
     for (const bot of this.bots.values()) if (this.bot(bot.id)) shown.add(key(bot.section));
@@ -271,6 +285,28 @@ export function pathSubject(path: string): PathSubject | null {
   return null;
 }
 
+/** The conversations a request names outside `/api/threads/<id>` (pathSubject): a bot's or a room's task in the path,
+ * and `?threadId=`. */
+export function requestThreadIds(path: string, query: URLSearchParams): string[] {
+  const ids = query.getAll("threadId").filter(Boolean);
+  const task = /^\/api\/(?:bots|groups)\/[\w-]+\/tasks\/([\w-]+)(?:\/|$)/.exec(path);
+  return task ? [task[1]!, ...ids] : ids;
+}
+
+const THREAD_FIELD = /^(?:threadId|[A-Za-z]+ThreadId)$/;
+
+/** The conversations a JSON body names: `threadId`, any `…ThreadId` and `threadIds`, at its top and one level down. */
+export function bodyThreadIds(body: unknown, depth = 1): string[] {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return [];
+  const ids: string[] = [];
+  for (const [key, value] of Object.entries(body)) {
+    if (typeof value === "string" && THREAD_FIELD.test(key)) ids.push(value);
+    else if (key === "threadIds" && Array.isArray(value)) ids.push(...value.filter((id): id is string => typeof id === "string"));
+    else if (depth > 0 && value && typeof value === "object") ids.push(...bodyThreadIds(value, depth - 1));
+  }
+  return ids;
+}
+
 /** The same "not found" an unknown id gets, so a member cannot tell a restricted bot from a missing one. */
 export function notFoundFor(subject: PathSubject): string {
   switch (subject.kind) {
@@ -298,16 +334,42 @@ export interface FrameContext {
 }
 
 /** No audience list (who else may see a bot is an admin's business), no teammate ids the member cannot see, and no
- * server alias: a member learns the default VPS alias only as configured-or-not, and a bot's own alias the same way. */
+ * server alias: a member learns the default VPS alias only as configured-or-not, and a bot's own alias the same way.
+ * On a Team Cloud an admin gets the bot whole but, like a member, only the conversations they may read. */
 export function memberBot<T extends object>(bot: T, visible: VisibleSet): T {
   if (visible.everything) return visible.member ? withoutServerAlias(bot) : bot;
-  const { visibility: _visibility, vpsAlias: _vpsAlias, ...rest } = bot as T & { visibility?: unknown; peers?: unknown; vpsAlias?: unknown; tasks?: unknown };
+  const shown = visible.filtersThreads ? shownConversations(bot, visible) : bot;
+  if (!visible.member) return shown;
+  const { visibility: _visibility, vpsAlias: _vpsAlias, ...rest } = shown as T & { visibility?: unknown; peers?: unknown; vpsAlias?: unknown };
   const peers = Array.isArray(rest.peers) ? (rest.peers as unknown[]).filter((id): id is string => typeof id === "string" && visible.bot(id)) : undefined;
-  // On a Team Cloud a member is sent only their own conversations with the bot, and the team's.
-  const tasks = visible.filtersThreads && Array.isArray(rest.tasks)
-    ? (rest.tasks as unknown[]).filter((task) => !task || typeof task !== "object" || typeof (task as { threadId?: unknown }).threadId !== "string" || visible.thread((task as { threadId: string }).threadId))
-    : undefined;
-  return { ...rest, ...(peers ? { peers } : {}), ...(tasks ? { tasks } : {}) } as T;
+  return { ...rest, ...(peers ? { peers } : {}) } as T;
+}
+
+/** What only the bot's selected conversation carries, dropped when that conversation is someone else's. */
+const SELECTED_THREAD_FIELDS = ["messages", "hasMore", "activeLeafId", "pinnedMessageId", "rewound", "waitingForTeammates"] as const;
+
+/** On a Team Cloud a person is sent only their own conversations with a bot and the team's (an admin too). The bot's
+ * selected conversation is the server's one choice for everyone; when it is someone else's private chat they get the
+ * main chat named instead, without that conversation's messages, and its unread mark counts only what they see. */
+function shownConversations<T extends object>(bot: T, visible: VisibleSet): T {
+  const record = bot as T & Record<string, unknown>;
+  let out: Record<string, unknown> | null = null;
+  const tasks = record.tasks;
+  if (Array.isArray(tasks)) {
+    const kept = tasks.filter((task) => !task || typeof task !== "object" || typeof (task as { threadId?: unknown }).threadId !== "string" || visible.thread((task as { threadId: string }).threadId));
+    if (kept.length !== tasks.length) {
+      out = { ...record, tasks: kept };
+      if (typeof record.unread === "boolean") out.unread = kept.some((task) => (task as { unread?: unknown } | null)?.unread === true);
+    }
+  }
+  if (typeof record.threadId === "string" && !visible.thread(record.threadId)) {
+    const next: Record<string, unknown> = { ...(out ?? record) };
+    for (const field of SELECTED_THREAD_FIELDS) delete next[field];
+    if (typeof record.mainThreadId === "string" && visible.thread(record.mainThreadId)) next.threadId = record.mainThreadId;
+    else delete next.threadId;
+    out = next;
+  }
+  return (out ?? record) as T;
 }
 
 /** The SSH alias of the server a bot's VPS computer lives on: an admin's, like the default alias in config. */
@@ -337,8 +399,8 @@ export function memberBody(body: unknown, visible: VisibleSet): unknown {
     const record = value as Record<string, unknown>;
     let out: Record<string, unknown> | null = null;
     for (const [key, child] of Object.entries(record)) {
-      // A member who can see every bot and room is sent the rooms as they are; bots still lose their server alias.
-      if (visible.everything && (key === "group" || key === "groups")) continue;
+      // A member who can see every bot and room, and an admin, are sent the rooms as they are; bots still narrow.
+      if ((visible.everything || !visible.member) && (key === "group" || key === "groups")) continue;
       let next = child;
       if (key === "bot" && child && typeof child === "object" && !Array.isArray(child)) next = memberBot(child, visible);
       else if (key === "bots" && Array.isArray(child)) {
@@ -370,6 +432,10 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
       const queues = field("queues");
       return { ...payload, queues: Object.fromEntries(Object.entries(queues).filter(([threadId]) => visible.thread(threadId))) };
     }
+    case "bots.order": {
+      const botIds = Array.isArray(payload.botIds) ? payload.botIds.filter((id): id is string => typeof id === "string") : [];
+      return { ...payload, botIds: botIds.filter((id) => visible.bot(id)) };
+    }
     case "message":
     case "message.patch":
     case "thread":
@@ -397,12 +463,14 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
         if (!seen.groups.delete(id)) return undefined;
         return { kind: "group.deleted", groupId: id };
       }
+      // An admin's copy of a room keeps its audience floor.
+      const asSent = (record: Record<string, unknown>) => (visible.member ? memberGroup(record) : record);
       if (!seen.groups.has(id)) {
         seen.groups.add(id);
         const fresh = ctx.freshGroup(id);
-        if (fresh) return { ...payload, group: memberGroup({ ...fresh, ...group }) };
+        if (fresh) return { ...payload, group: asSent({ ...fresh, ...group }) };
       }
-      return "audienceFloor" in group ? { ...payload, group: memberGroup(group) } : payload;
+      return visible.member && "audienceFloor" in group ? { ...payload, group: memberGroup(group) } : payload;
     }
     case "group.deleted":
       return seen.groups.delete(str(payload.groupId)) ? payload : undefined;
@@ -416,7 +484,7 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
     }
     case "routine.run": {
       const run = field("run");
-      return routineVisible(run, visible) ? payload : undefined;
+      return routineRunVisible(run, visible) ? payload : undefined;
     }
     case "webhook":
       return webhookVisible(field("webhook"), visible) ? payload : undefined;
@@ -429,8 +497,15 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
     case "screen":
       return visible.bot(str(payload.botId)) && visible.thread(str(payload.threadId)) ? payload : undefined;
     case "computer":
-    case "computer-control":
       return visible.bot(str(payload.botId)) ? payload : undefined;
+    case "computer-control": {
+      if (!visible.bot(str(payload.botId))) return undefined;
+      // A plea for a hand from someone else's private chat names its site and reason: held is all that is shared.
+      const help = field("help");
+      if (typeof help.threadId !== "string" || !visible.hides(help.threadId)) return payload;
+      const { help: _help, ...rest } = payload;
+      return { ...rest, helpReason: null };
+    }
     case "config":
     case "routine.deleted":
     case "webhook.deleted":
@@ -466,4 +541,11 @@ export function routineVisible(value: { botId?: unknown; groupId?: unknown }, vi
   if (visible.everything) return true;
   if (typeof value.groupId === "string" && value.groupId) return visible.group(value.groupId);
   return typeof value.botId === "string" && visible.bot(value.botId);
+}
+
+/** A run's prompt and output are its conversation's words: on a Team Cloud a run that went into someone's private chat
+ * is theirs alone. */
+export function routineRunVisible(run: { botId?: unknown; groupId?: unknown; threadId?: unknown; resultsThreadId?: unknown; sourceThreadId?: unknown }, visible: VisibleSet): boolean {
+  if (!routineVisible(run, visible)) return false;
+  return [run.threadId, run.resultsThreadId, run.sourceThreadId].every((id) => typeof id !== "string" || !id || !visible.hides(id));
 }

@@ -129,8 +129,15 @@ export function CloudLending({ bridge, moving = false }: { bridge: CloudLendingB
   };
   /** The terminal runs any command as this person, so turning it on asks first, here and nowhere else. */
   const chooseTerminal = async (wanted: boolean) => {
-    if (wanted && !(await window.ogb?.confirm?.(t("lending.terminalConfirm")))) return;
-    if (mounted.current) lend(folders, screen, internet, wanted);
+    if (!wanted) { lend(folders, screen, internet, false); return; }
+    const wasOn = snapshot?.state?.enabled === true || draftOn;
+    if (!(await window.ogb?.confirm?.(t("lending.terminalConfirm")))) return;
+    // Lending may have been stopped while the question was open, here or on My Cloud's page: a Yes given to the question
+    // never starts it again. Read where it stands now and lend what is lent now, terminal added.
+    const now = await bridge.state().catch(() => null);
+    if (!mounted.current || !now?.state || (wasOn && now.state.enabled !== true)) return;
+    accept(now);
+    lend(now.state.enabled ? now.state.folders : folders, now.state.enabled ? now.state.screen : screen, now.state.enabled ? now.state.internet === true : internet, true);
   };
   const enabled = snapshot?.state?.enabled === true;
   const on = enabled || draftOn;

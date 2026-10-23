@@ -29,7 +29,10 @@ it("traces a person's message to the Chief through the teammate it delegated to 
       const root = list.roots.length === 1 && !list.roots[0]!.running ? list.roots[0]! : null;
       if (!root) return null;
       const detail: TraceDetail = await api(`/api/usage/traces/${encodeURIComponent(root.id)}?at=${root.startedAt}`, undefined, "GET");
-      return turnsOf(detail.turns[0]!).length === 3 ? { list, root, detail } : null;
+      const turns = turnsOf(detail.turns[0]!);
+      // Tool spans are written in batches, so the trace counts as settled once the teammate's last tool is in too.
+      const research = turns.find((turn) => turn.botId === researcher.id);
+      return turns.length === 3 && research && toolsOf(research).length === 3 ? { list, root, detail } : null;
     };
     await expect.poll(settled, { timeout: 20_000, interval: 250 }).toBeTruthy();
     const { list, root, detail } = (await settled())!;

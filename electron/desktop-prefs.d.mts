@@ -21,13 +21,14 @@ export interface DesktopAnalyticsBridge {
   /** This computer's page only. */
   set?(enabled: boolean): Promise<void>;
 }
-/**
- * The language main draws its menus, tray, dialogs and notifications in. This computer's page and My Cloud's own page
- * only; a server's page never has it.
- */
+/** The app's language on this computer, one pick for every page its window shows; main draws its menus, tray, dialogs and
+ * notifications in it too. */
 export interface DesktopLanguageBridge {
-  /** A language pack's code, such as "pt-br"; "" follows the system. A code with no pack changes nothing. */
-  set(code: string): Promise<void>;
+  /** A locale code, "" to follow the system, or null until one is picked on this computer. */
+  choice(): string | null;
+  set(language: string): Promise<boolean>;
+  /** A pick made on another page of this desktop. */
+  onChange(listener: (language: string) => void): () => void;
 }
 export interface DesktopPrefs {
   seen(): string[];
@@ -36,7 +37,13 @@ export interface DesktopPrefs {
   analytics(): boolean | null;
   setAnalytics(enabled: boolean): void;
   language(): string | null;
-  setLanguage(code: string): void;
+  /** False for anything that is not a locale code or "". */
+  setLanguage(language: unknown): boolean;
+  /** Random, made and saved on first use. */
+  installId(): string;
+  updatesConsent(): import("./updates-consent.mjs").UpdatesConsentRecord | null;
+  /** False, and nothing saved, for a record updates-consent.mjs would not read back. */
+  setUpdatesConsent(value: unknown): boolean;
 }
 type Files = Pick<typeof import("node:fs"), "readFileSync" | "writeFileSync" | "renameSync" | "rmSync">;
 export declare function jsonFile(file: string, files?: Files): { read(): unknown; write(value: unknown): void };
@@ -49,7 +56,10 @@ export declare function registerDesktopPrefs(options: {
   page(event: unknown): "local" | "cloud" | "server" | null;
   cloudOffered(): Promise<boolean>;
   localConfig?(): unknown;
-  /** A page set the app's language; "" for the system's. */
-  onLanguage?(code: string): void;
+  languageChanged?(language: string, sender: unknown): void;
+  /** The pick changed: main redraws its own words in it ("" for the system's). */
+  onLanguage?(language: string): void;
+  /** The MausBot Cloud sign-in client: with it, the product-updates question is asked and its answer kept here. */
+  cloudAccount?(): import("./updates-consent.mjs").UpdatesConsentClient | null;
   now?: () => number;
-}): void;
+}): import("./updates-consent.mjs").UpdatesConsent | null;

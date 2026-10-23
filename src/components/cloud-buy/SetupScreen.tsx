@@ -84,3 +84,29 @@ export function SetupScreen({ started, received, step, slow, ready, sleeps = fal
     {openFailed && <p role="alert" className="text-[12.5px] text-danger">{t("cloudBuy.openFailed", { name })}</p>}
   </div>;
 }
+
+/** A Team or Business plan's Cloud while it is set up: the Admin's steps for the team's own machine. It gets no name or
+ * colour here: the team's name is the Admin's. */
+export function TeamSetupScreen({ team, step, slow }: { team: string | null; step: CloudSetupStep | null; slow: boolean }) {
+  const at = Math.max(0, STEPS.findIndex(([key]) => key === step)), name = team ?? t("cloudBuy.team.unnamed");
+  return <div data-cloud-add="team-starting" data-cloud-setup={step ?? "reserving"} className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
+    <Heading title={t("cloudBuy.team.setupTitle")} sub={t("cloudBuy.team.setupSub")} />
+    <ProgressBar value={at / STEPS.length} label={t("cloudBuy.setup.progress")} />
+    <Checklist label={t("cloudBuy.setup.progress")} items={STEPS.map(([key, label], index) => ({
+      key, title: t(label, { name }), state: index < at ? "done" as const : index === at ? "now" as const : "next" as const,
+    }))} />
+    {slow && <p role="status" className="text-[12.5px] text-ink-secondary">{t("cloudHome.slow")}</p>}
+  </div>;
+}
+
+/** A Team or Business plan's Cloud, ready: the team's, opened as the switcher opens it. */
+export function TeamReadyScreen({ name, busy, openFailed, onOpen }: { name: string; busy: boolean; openFailed: boolean; onOpen: () => void }) {
+  return <div data-cloud-add="team-ready" className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
+    <Heading title={t("cloudBuy.team.readyTitle")} sub={t("cloudBuy.team.readySub", { name })} />
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <button type="button" data-autofocus className="ui-button ui-button-primary" disabled={busy} onClick={onOpen}>{t("cloudBuy.setup.open", { name })}</button>
+    </div>
+    <p className="text-[12px] text-ink-tertiary">{t("cloudBuy.ready.hint", { name })}</p>
+    {openFailed && <p role="alert" className="text-[12.5px] text-danger">{t("cloudBuy.openFailed", { name })}</p>}
+  </div>;
+}

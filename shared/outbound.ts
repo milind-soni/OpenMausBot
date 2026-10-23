@@ -3,6 +3,7 @@
 // allowance per bot; at Full access they run. A read-and-draft routine run never
 // reaches them: the relay refuses every send there. Shared by the harness (which
 // enforces it) and the app.
+import { isConnectedAppsServer } from "./own-apps.ts";
 
 export type OutboundPolicy = {
   /** ask: every outbound call waits for a tap. allow: up to dailyCap a day. */
@@ -63,7 +64,7 @@ function actionTokens(name: string): string[] {
   if (name.startsWith("mcp__")) {
     const [, server = "", ...rest] = name.split("__");
     action = rest.join("_");
-    if (server === "composio") return actionTokens(action);
+    if (isConnectedAppsServer(server)) return actionTokens(action);
   } else if (/^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(name)) {
     action = name.slice(name.indexOf("_") + 1);
   }
@@ -78,7 +79,7 @@ function actionTokens(name: string): string[] {
  * narrower than "not outbound": updates, deletes and other writes do not
  * become reads merely because they send nothing to another person. */
 export function isReadOnlyTool(name: string): boolean {
-  if (KNOWN_READ_SLUGS.has(name.replace(/^mcp__composio__/, ""))) return true;
+  if (KNOWN_READ_SLUGS.has(name.replace(/^mcp__(?:composio|own_apps)__/, ""))) return true;
   const tokens = actionTokens(name);
   return tokens.length > 0 && READ_VERBS.has(tokens[0]);
 }

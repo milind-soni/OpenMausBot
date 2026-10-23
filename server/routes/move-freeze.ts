@@ -15,7 +15,7 @@ export interface MoveFreezeRouteDeps {
   /** Starts this server again, as a restored workspace does. */
   restart(): void;
   /** Switches off every automation here (move-freeze.ts `switchAutomationsOff`). */
-  automationsOff?(): Promise<void>;
+  automationsOff?(): Promise<unknown>;
 }
 
 const freezeBody = z.object({ cloud: z.string().url().max(300).optional() });

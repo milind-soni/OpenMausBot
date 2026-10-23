@@ -88,7 +88,7 @@ it("pairs three people with the Admin's signed claims, each with their role, and
   expect((await team.pair(OWNER, { secret: "W".repeat(43) })).status).toBe(401);
   // The app says what the server is called, and the server is the team.
   expect((await team.pair(MEMBER_C)).body.environment.label).toBe("Acme");
-  expect((await team.as(ada, "GET", "/api/config")).body.team).toEqual({ id: "team-acme-1", name: "Acme" });
+  expect((await team.as(ada, "GET", "/api/config")).body.team).toEqual({ id: "team-acme-1", name: "Acme", cloudPage: "https://cloud.example.test/cloud" });
   // My Cloud, beside it, is one person's: it refuses a team claim (cloud-home.test.ts) and its owner paired as before.
   expect((await fx.onCloud("GET", "/api/auth/session")).body).toMatchObject({ kind: "session", scopes: ["admin", "client"], cloudHome: true });
   expect((await fx.onCloud("GET", "/api/auth/session")).body.team).toBeUndefined();
@@ -110,7 +110,7 @@ it("keeps every member's session across a restart, never sleeps, and exports for
 
 let adaThread = "", roomId = "", roomThread = "";
 
-it("a member's private chat with a team bot reads her notes and the team's, never another member's; admins see it, a member does not", async () => {
+it("a member's private chat with a team bot reads her notes and the team's, never another member's; she alone sees it", async () => {
   // The team's layer is the bot's own folder; Ben's private layer is a sibling folder of his own.
   mkdirSync(ws(bot.id, "memory"), { recursive: true });
   writeFileSync(ws(bot.id, "MEMORY.md"), "# Memory\n\n- The office plant is called Fernando (team)\n");
@@ -126,24 +126,24 @@ it("a member's private chat with a team bot reads her notes and the team's, neve
   // Her note landed in her own layer, not the team's.
   expect(readFileSync(ws(layerOf(`member-${adaKey}`), "MEMORY.md"), "utf8")).toContain("oolong");
   expect(readFileSync(ws(bot.id, "MEMORY.md"), "utf8")).not.toContain("oolong");
-  // Ben (Admin) reads along; Cleo (Member) sees neither the conversation nor its words.
-  expect((await messages(admin, adaThread)).status).toBe(200);
-  expect(JSON.stringify((await messages(admin, adaThread)).body)).toContain("Kumquat");
+  // Neither Ben (Admin), the Owner nor Cleo (Member) sees the conversation or its words.
+  expect((await messages(admin, adaThread)).status).toBe(404);
+  expect((await messages(owner, adaThread)).status).toBe(404);
   expect((await messages(cleo, adaThread)).status).toBe(404);
   const cleoBots = (await team.as(cleo, "GET", "/api/bots")).body.bots as Array<{ id: string; tasks: Array<{ threadId: string }> }>;
   expect(cleoBots.find((entry) => entry.id === bot.id)!.tasks.map((task) => task.threadId)).not.toContain(adaThread);
   const adaBots = (await team.as(ada, "GET", "/api/bots")).body.bots as Array<{ id: string; tasks: Array<{ threadId: string; private?: true }> }>;
   const adaTasks = adaBots.find((entry) => entry.id === bot.id)!.tasks;
   expect(adaTasks.map((task) => task.threadId)).toContain(adaThread);
-  // The app's "Private · admins can see" header reads this: her conversation is private, the bot's main chat is the team's.
+  // The app's "Private · only you" header reads this: her conversation is private, the bot's main chat is the team's.
   expect(adaTasks.find((task) => task.threadId === adaThread)!.private).toBe(true);
   expect(adaTasks.find((task) => task.threadId === bot.mainThreadId)?.private).toBeUndefined();
   expect(JSON.stringify((await team.as(cleo, "GET", "/api/search?q=Kumquat")).body)).not.toContain(adaThread);
   expect(JSON.stringify((await team.as(ada, "GET", "/api/search?q=Kumquat")).body)).toContain(adaThread);
-  // Only she and the admins change what she started.
+  // Only she changes what she started.
   expect((await team.as(cleo, "PATCH", `/api/bots/${bot.id}/tasks/${adaThread}`, { title: "x" })).status).not.toBe(200);
   expect((await team.as(ada, "PATCH", `/api/bots/${bot.id}/tasks/${adaThread}`, { title: "Ada and Scout" })).status).toBe(200);
-  expect((await team.as(admin, "PATCH", `/api/bots/${bot.id}/tasks/${adaThread}`, { title: "Ada and Scout" })).status).toBe(200);
+  expect((await team.as(admin, "PATCH", `/api/bots/${bot.id}/tasks/${adaThread}`, { title: "Ada and Scout" })).status).toBe(404);
 }, hostTimeout(120_000));
 
 it("a room's turn reads the room's layer and the team's, never a member's notes, and both members see its answer", async () => {
@@ -196,7 +196,7 @@ it("recall never crosses: a room's fact never surfaces in a private chat and a p
   expect((await search(roomThread, "Tuesday launch")).memoryHits.map((hit) => hit.snippet).join("\n")).toContain("Tuesday");
 }, hostTimeout(60_000));
 
-it("a member's upload is hers and the admins'; a team file is everyone's; About you is per person", async () => {
+it("a member's upload is hers alone; a team file is everyone's; About you is per person", async () => {
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
   const upload = async (token: string) => {
     const response = await fetch(`${team.base}/api/attachments`, { method: "POST", headers: { ...fx.edge, authorization: `Bearer ${token}`, "content-type": "image/png" }, body: png });
@@ -210,7 +210,8 @@ it("a member's upload is hers and the admins'; a team file is everyone's; About 
   await turn(owner, bot.mainThreadId, `For everyone: ![logo](${theirs})`);
   const fetchAs = async (token: string, path: string) => (await fetch(`${team.base}${path}`, { headers: { ...fx.edge, authorization: `Bearer ${token}` } })).status;
   expect(await fetchAs(ada, hers)).toBe(200);
-  expect(await fetchAs(admin, hers)).toBe(200);
+  expect(await fetchAs(admin, hers)).toBe(404);
+  expect(await fetchAs(owner, hers)).toBe(404);
   expect(await fetchAs(cleo, hers)).toBe(404);
   for (const token of [ada, admin, cleo]) expect(await fetchAs(token, theirs)).toBe(200);
   // About you: hers in her turns, nobody's elsewhere.

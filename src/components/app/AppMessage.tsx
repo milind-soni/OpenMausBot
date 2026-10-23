@@ -9,6 +9,7 @@ import { AppDocumentError, fetchAppDocument, type AppFetchFailure } from "./app-
 import { APP_POOL_LIMITS, useAppPoolSlot, type AppPool } from "./app-pool";
 import { AppHeader, AppInfo, AppOpenButton, AppPlaceholder, AppStrip, APP_SURFACE } from "./AppChrome";
 import { AppFrame, type AppFrameHandle, type AppFrameProblem } from "./AppFrame";
+import { PAGE_HEIGHT, PageFullScreen, PageNotes, PageToolbar, usePagePoint, usePageShare, usePageVersion } from "./PageTools";
 
 const WIDTH = "max-w-[760px]";
 const DOC_REUSE_MS = 60_000;
@@ -75,10 +76,13 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
 }) {
   const { dispatch } = useStore();
   const uid = useId();
-  const rev = payload.rev ?? 0;
+  const page = payload.source === "html";
+  const version = usePageVersion(payload);
+  const rev = page ? version.rev : payload.rev ?? 0;
   const bordered = payload.border !== false;
   const docKey = payload.doc ? `${message.id}:${payload.doc}:${rev}` : "";
-  const [height, setHeight] = useState(() => heights.get(`${message.id}:${rev}`) ?? heights.get(`${message.id}:${rev - 1}`) ?? payload.height ?? APP_FRAME_LIMITS.defaultHeight);
+  const [height, setHeight] = useState(() => heights.get(`${message.id}:${rev}`) ?? heights.get(`${message.id}:${rev - 1}`) ?? payload.height
+    ?? (page ? PAGE_HEIGHT.start : APP_FRAME_LIMITS.defaultHeight));
   const [infoOpen, setInfoOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [reload, setReload] = useState(0);
@@ -86,6 +90,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
   const [fetching, setFetching] = useState(false);
   const [problem, setProblem] = useState<AppFrameProblem | null>(null);
   const frame = useRef<AppFrameHandle | null>(null);
+  const wide = useRef<AppFrameHandle | null>(null);
+  const [fullScreen, setFullScreen] = useState(false);
   const row = useRef<HTMLDivElement | null>(null);
   const mounted = useRef(true);
   useEffect(() => {
@@ -108,7 +114,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
     const reuse = reload === 0 ? docs.get(docKey) : undefined;
     const fetched = reuse && Date.now() - reuse.at < DOC_REUSE_MS
       ? Promise.resolve(reuse.doc)
-      : fetchAppDocument(threadId, message.id, controller.signal).then((doc) => { rememberDoc(docKey, doc); return doc; });
+      : fetchAppDocument(threadId, message.id, controller.signal, page && !version.latest ? rev : undefined).then((doc) => { rememberDoc(docKey, doc); return doc; });
     void fetched.then(
       async (doc) => {
         if (frame.current) await evict();
@@ -128,7 +134,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
       controller.abort();
       setFetching(false);
     };
-  }, [wanted, docKey, reload, threadId, message.id, evict]);
+  }, [wanted, docKey, reload, threadId, message.id, evict, page, version.latest, rev]);
 
   useEffect(() => {
     if (!slot.live) setLoaded(null);
@@ -140,6 +146,12 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
   }, [message.id, rev]);
 
   const current = slot.live ? loaded?.doc : undefined;
+  const point = usePagePoint({
+    frame: () => (fullScreen ? wide.current : frame.current)?.iframe,
+    threadId, appId: message.id, rev, title: payload.title, picked: () => setFullScreen(false),
+  });
+  const share = usePageShare(threadId, message.id, message.publishedPage);
+  const tools = { version, point, share, ready: Boolean(current), fullScreen: { open: fullScreen, toggle: () => { point.stop(); setFullScreen((open) => !open); } } };
 
   const reloadNow = () => {
     setProblem(null);
@@ -185,10 +197,14 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
   const state = collapsed ? "collapsed" : current ? "live" : noPage ? "unavailable" : slot.live ? "loading" : "idle";
   const infoId = `${uid}-info`;
 
-  const body = collapsed ? null : noPage ? (
+  const body = collapsed ? null : fullScreen && current ? (
+    <div data-app-box className={cn("relative w-full", bordered && "border-t border-ink/[0.08]")} style={{ height }}>
+      <AppPlaceholder height={height} open={() => setFullScreen(false)} label={t("chat.preview.exitFullScreen")} />
+    </div>
+  ) : noPage ? (
     message.text ? <div dir="auto" className={cn("line-clamp-6 whitespace-pre-wrap text-[13px] leading-[18px] text-ink-secondary", bordered ? "px-4 pb-3" : "pb-2")}>{message.text}</div> : null
   ) : (
-    <div data-app-box className={cn("relative w-full", bordered && "border-t border-ink/[0.08]")} style={{ height }}>
+    <div data-app-box className={cn("relative w-full", bordered && "border-t border-ink/[0.08]", point.pointing && "ring-2 ring-inset ring-accent/60")} style={{ height }}>
       {current ? (
         <AppFrame
           key={loaded!.key}
@@ -201,6 +217,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
           onHeight={onHeight}
           onProblem={setProblem}
           onTeardownRequested={onTeardownRequested}
+          {...(page ? { maxHeight: PAGE_HEIGHT.cap } : {})}
         />
       ) : (
         <AppPlaceholder height={height} loading={slot.live} open={slot.live ? undefined : reloadNow} />
@@ -216,6 +233,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
       data-app={message.id}
       data-app-state={state}
       data-app-source={payload.source}
+      {...(page ? { "data-app-rev": rev } : {})}
       className={cn("w-full text-start", WIDTH)}
     >
       <div className={cn(bordered ? APP_SURFACE : "w-full")}>
@@ -229,6 +247,8 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
           reloading={fetching && Boolean(current)}
           bordered={bordered}
         />
+        {page && <PageToolbar {...tools} className={bordered ? "px-4 pb-3" : "pb-2"} />}
+        {page && <PageNotes version={version} point={point} share={share} className={bordered ? "px-4 pb-3" : "pb-2"} />}
         {infoOpen && <AppInfo id={infoId} network={payload.network ?? { connect: [], resources: [] }} bytes={payload.bytes ?? 0} bordered={bordered} />}
         {collapsed && (
           <div className={cn("flex", bordered ? "px-4 pb-3.5" : "pb-2")}>
@@ -238,6 +258,9 @@ function AppRow({ botId, botName, threadId, message, payload, pool }: {
         {body}
         {strip && <AppStrip text={strip.text} action={strip.action} bordered={bordered} />}
       </div>
+      {page && fullScreen && current && (
+        <PageFullScreen {...tools} title={payload.title} doc={current} botId={botId} threadId={threadId} handle={wide} close={() => setFullScreen(false)} />
+      )}
     </div>
   );
 }

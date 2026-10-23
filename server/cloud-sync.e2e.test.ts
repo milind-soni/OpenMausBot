@@ -22,11 +22,17 @@ let child: ChildProcess;
 let log = "";
 let ownerToken = "";
 
+// Node 24-26's fetch (undici 7-8) does not resend a request whose kept-alive socket the server closed after 5 s idle,
+// as the app's Chromium fetch does, and a Windows runner can stall this server past that: no request here reuses one.
+const FRESH_CONNECTION = { connection: "close" } as const;
+const ownerEdge = () => ({ host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", authorization: `Bearer ${ownerToken}`, ...FRESH_CONNECTION });
+
 async function api(method: string, path: string, options: { body?: unknown; remote?: boolean; headers?: Record<string, string> } = {}) {
   const asOwner = !options.remote && ownerToken !== "";
   const response = await fetch(`${base}${path}`, {
     method,
     headers: {
+      ...FRESH_CONNECTION,
       ...(options.remote || asOwner ? { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" } : {}),
       ...(asOwner ? { authorization: `Bearer ${ownerToken}` } : {}),
       ...(options.body === undefined ? {} : { "content-type": "application/json" }),
@@ -101,7 +107,7 @@ afterAll(async () => {
 
 // The desktop's fetch, but over the test's loopback edge: the owner's pairing token stands in for the window's cookie.
 const desktopFetch = (url: string, init: RequestInit & { headers?: Record<string, string> } = {}) =>
-  fetch(url.replace(PC_ORIGIN, base), { ...init, headers: { ...init.headers, host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", authorization: `Bearer ${ownerToken}` } });
+  fetch(url.replace(PC_ORIGIN, base), { ...init, headers: { ...init.headers, ...ownerEdge() } });
 
 function desktop(pcHome: string) {
   return createCloudFilesService({
@@ -169,7 +175,7 @@ it("a bot's turn wakes the desktop, and its new work comes down to Documents/Mau
     const later = new Date(Date.now() + 120_000);
     utimesSync(join(output, "report.md"), later, later);
     // A turn ending on My Cloud is what tells the desktop's long poll.
-    const headers = { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", authorization: `Bearer ${ownerToken}` };
+    const headers = ownerEdge();
     const { cursor } = await (await fetch(`${base}/api/sync/changes?cursor=0&waitMs=0`, { headers })).json() as { cursor: number };
     const woken = fetch(`${base}/api/sync/changes?cursor=${cursor}&waitMs=20000`, { headers }).then((response) => response.json() as Promise<{ folderIds: string[] }>);
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { body: { text: "write the report" } })).status).toBe(202);
@@ -185,7 +191,7 @@ it("a bot's turn wakes the desktop, and its new work comes down to Documents/Mau
 }, 60_000);
 
 it("a desktop's open long poll does not block a backup or a restore on My Cloud", async () => {
-  const headers = { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", authorization: `Bearer ${ownerToken}` };
+  const headers = ownerEdge();
   const { cursor } = await (await fetch(`${base}/api/sync/changes?cursor=0&waitMs=0`, { headers })).json() as { cursor: number };
   const poll = fetch(`${base}/api/sync/changes?cursor=${cursor}&waitMs=5000`, { headers }).then((response) => response.json());
   await new Promise((resolve) => setTimeout(resolve, 200));

@@ -1,7 +1,7 @@
 // The audience rule of a Team Cloud (docs/team-cloud.md). Everything stored carries an audience: `team` (everyone),
-// `room:<id>` (whoever sees the room) or `member:<person>` (that person, and the Admins). A turn reads only inputs whose
-// audience includes everyone who will see its answer, and writes only into its own audience. On a My Cloud one person
-// uses everything, so every audience there is the team's and nothing here changes what that Cloud does.
+// `room:<id>` (whoever sees the room) or `member:<person>` (that person only: an Admin is no exception). A turn reads
+// only inputs whose audience includes everyone who will see its answer, and writes only into its own audience. On a My
+// Cloud one person uses everything, so every audience there is the team's and nothing here changes what that Cloud does.
 export type Audience = "team" | `room:${string}` | `member:${string}`;
 
 export const TEAM_AUDIENCE: Audience = "team";
@@ -48,13 +48,12 @@ export interface AudienceViewer {
   seesRoom(groupId: string): boolean;
 }
 
-/** Whether one person may see something of this audience: an Admin everything, a person the team's, their own, and the
- * rooms they see. */
+/** Whether one person may see something of this audience: the team's, the rooms they see (an Admin every room), and
+ * their own. A person's private chat is theirs alone: no role, an Admin's or the Owner's, sees another person's. */
 export function audienceIncludes(audience: Audience, viewer: AudienceViewer): boolean {
-  if (viewer.admin) return true;
   if (audience === "team") return true;
   const room = audienceRoom(audience);
-  if (room !== null) return viewer.seesRoom(room);
+  if (room !== null) return viewer.admin || viewer.seesRoom(room);
   const person = audienceMember(audience);
   return person !== null && viewer.person !== null && person === viewer.person;
 }

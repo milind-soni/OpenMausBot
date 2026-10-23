@@ -15,6 +15,8 @@ const RESEARCH_TOOLS = ["x_search", "x_user_posts", "x_post", "x_profile", "rese
 const POSTS = { output: { data: { items: [
   { id: "2107987482155561188", authorUsername: "maus", authorName: "Maus", createdUtc: 1791418354, text: "MausBot searched X", likeCount: 4, viewCount: 120 },
 ], nextCursor: "" } } };
+const USAGE = { calls: 312, max: 5_000, resetsAt: "2026-11-01T00:00:00.000Z" };
+const USED_UP = "Your Pro plan's 5,000 X research calls for October are used up. They reset on 1 November.";
 const PEOPLE_ROW = { id: "apollo.people.search", name: "Find people", method: "GET", platform: "people", cost: { usd: 0.002, type: "per_call" }, input: { type: "object" } };
 
 /** treg at the root (own key, X-Treg-Token) and the relay under RELAY_PATH (plan token, bearer). Anything else is a 404. */
@@ -36,6 +38,8 @@ async function serveStub(seen: Seen[]): Promise<{ server: Server; url: string }>
       if (own && path === "/call/anyapi.x.search.posts") return send(200, POSTS, { "x-treg-cost-micro": "750" });
       if (own && path === "/catalog/endpoints/apollo.people.search") return send(200, { endpoint: PEOPLE_ROW });
       if (own && path === "/call/apollo.people.search?q_organization_domains=openmausbot.com") return send(200, { people: [{ name: "Maus" }] }, { "x-treg-cost-micro": "2000", "x-treg-call-id": "call-e2e" });
+      if (plan && req.method === "GET" && path === `${RELAY_PATH}/usage`) return send(200, USAGE);
+      if (plan && path === `${RELAY_PATH}/call/anyapi.x.search.posts` && raw.includes("used up")) return send(429, { error: "quota_exceeded", message: USED_UP });
       if (plan && path === `${RELAY_PATH}/call/anyapi.x.search.posts`) return send(200, POSTS);
       if (plan && path === `${RELAY_PATH}/research/call/apollo.people.search`) return send(200, { people: [{ name: "Maus" }] }, { "x-omb-research-charged-usd": "0.002" });
       send(404, { error: "not_found" });
@@ -65,16 +69,22 @@ async function withFixture(test: (f: any) => Promise<void>, options: { plan: boo
     await test({
       api,
       seen,
+      status: () => api("/api/x/status?refresh=1", undefined, "GET"),
+      /** Everything the bot's engine was started with in its latest turn: argv, environment, prompt, system prompt, tool servers. */
+      engineLaunch: () => readFileSync(session.fixtureDumpPath, "utf8"),
       newBot: async (name: string) => (await cli("new-bot", "--name", name)).bot,
       /** Runs one turn of `bot` with these tool steps; answers its listed tools and each step's tool result. */
-      turn: async (bot: any, steps: Array<{ tool: string; arguments: unknown }>) => {
+      turn: async (bot: any, steps: Array<{ tool: string; arguments: unknown }>, options: { failing?: boolean } = {}) => {
         writeFileSync(planPath, JSON.stringify({ [bot.id]: { steps, reply: "Done." } }));
         await cli("send", "--bot", bot.id, "--task", bot.activeTaskId, "--text", "Research this.");
-        expect((await cli("wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30")).status).toBe("settled");
+        const settled = (await cli("wait", "--bot", bot.id, "--task", bot.activeTaskId, "--timeout", "30")).status;
+        if (!options.failing) expect(settled).toBe("settled");
         const evidence = turnFor(bot.id).evidence;
         return {
+          evidence: JSON.stringify(evidence),
           tools: evidence[0].result.tools.map((tool: any) => tool.name) as string[],
           results: evidence.filter((entry: any) => entry.step).map((entry: any) => {
+            if (options.failing) return entry.response.result.content[0].text;
             expect(entry.response.result.isError, entry.response.result.content?.[0]?.text).toBeFalsy();
             return JSON.parse(entry.response.result.content[0].text);
           }),
@@ -92,6 +102,7 @@ const PEOPLE = { tool: "research_call", arguments: { id: "apollo.people.search",
 
 it("shows no research tools without a treg key or a Cloud plan, even to a bot switched on", async () => withFixture(async (f) => {
   const config = await f.api("/api/config", undefined, "GET");
+  expect(await f.status()).toEqual({ using: null, ownKey: false, included: false });
   expect(config.xResearch).toEqual({ included: false });
   expect(config.treg).toEqual({ configured: false });
   const bot = await f.newBot("No research");
@@ -103,6 +114,7 @@ it("shows no research tools without a treg key or a Cloud plan, even to a bot sw
 
 it("with the person's own treg key, every bot has the tools by default and calls go straight to treg, never the relay", async () => withFixture(async (f) => {
   expect((await f.api("/api/config", undefined, "GET")).treg).toEqual({ configured: true });
+  expect(await f.status()).toEqual({ using: "own", ownKey: true, included: false });
   expect(await f.api("/api/keys/test", { provider: "treg" })).toEqual({ ok: true, check: "treg", balanceUsd: 4.25 });
   const bot = await f.newBot("Own key");
   expect(bot.xResearch).toBeUndefined();
@@ -137,10 +149,27 @@ it("with only a Cloud plan, calls go through the relay with the plan's token, an
   ]);
   expect(f.seen[1].body).toEqual({ params: { q_organization_domains: "openmausbot.com" } });
   expect(f.seen[1].idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+  expect(await f.status()).toEqual({ using: "included", ownKey: false, included: true, usage: USAGE });
+  expect(f.seen.at(-1)).toMatchObject({ method: "GET", path: `${RELAY_PATH}/usage`, authorization: `Bearer ${PLAN_TOKEN}`, tregToken: undefined });
+  const usedUp = await f.turn(on, [{ tool: "x_search", arguments: { query: "used up" } }], { failing: true });
+  expect(usedUp.results).toEqual([`${USED_UP} Add your own treg key to keep going.`]);
 }, { plan: true, ownKey: false }), 90_000);
 
-it("with both a treg key and a Cloud plan, the person's own key wins", async () => withFixture(async (f) => {
+it("with both a treg key and a Cloud plan, the person's own key wins and the card says so; removing it falls back to the plan", async () => withFixture(async (f) => {
   const bot = await f.newBot("Both");
-  await f.turn(bot, [SEARCH]);
+  const { tools, evidence } = await f.turn(bot, [SEARCH]);
+  expect(tools).toEqual(expect.arrayContaining(RESEARCH_TOOLS));
   expect(f.seen.map((seen: Seen) => [seen.path, seen.tregToken, seen.authorization])).toEqual([["/call/anyapi.x.search.posts", OWN_KEY, undefined]]);
+  expect(await f.status()).toEqual({ using: "own", ownKey: true, included: true, usage: USAGE });
+  // Security: neither the person's key nor the plan's token reaches the bot: not its engine's arguments, environment,
+  // prompt or tool servers, and not its tool list or results.
+  for (const secret of [OWN_KEY, PLAN_TOKEN]) {
+    expect(f.engineLaunch()).not.toContain(secret);
+    expect(evidence).not.toContain(secret);
+  }
+  await f.api("/api/config", { treg: { key: "" } }, "PUT");
+  expect(await f.status()).toEqual({ using: "included", ownKey: false, included: true, usage: USAGE });
+  const after = f.seen.length;
+  expect((await f.turn(bot, [SEARCH])).tools).toEqual(expect.arrayContaining(RESEARCH_TOOLS));
+  expect(f.seen.slice(after).map((seen: Seen) => [seen.path, seen.tregToken, seen.authorization])).toEqual([[`${RELAY_PATH}/call/anyapi.x.search.posts`, undefined, `Bearer ${PLAN_TOKEN}`]]);
 }, { plan: true, ownKey: true }), 90_000);

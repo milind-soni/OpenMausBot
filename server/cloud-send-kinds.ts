@@ -19,6 +19,7 @@ import type { AppTriggerManager } from "./app-triggers.ts";
 import type { CalendarCall, CalendarCallManager } from "./calendar-calls.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
 import type { CloudSendItem } from "./cloud-send.ts";
+import { retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.ts";
 import { IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills, type ImportedSkillInput } from "./imported-skills.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { withCheckFields } from "./routine-load.ts";
@@ -44,7 +45,7 @@ export const MOVE_BOT_FIELDS: readonly string[] = Object.values(MOVE_BOT_PARTS).
 
 export interface MoveKindsDeps {
   dataDir: string;
-  store: Pick<Store, "bots" | "bot" | "group" | "patchBot" | "setChiefOfStaff" | "appendMessage">;
+  store: Pick<Store, "bots" | "bot" | "group" | "patchBot" | "setChiefOfStaff" | "appendMessage" | "messagesFor">;
   routines(): Pick<RoutineManager, "listRoutines" | "listRuns" | "adopt"> | null;
   calls(): Pick<CalendarCallManager, "list" | "adopt"> | null;
   webhooks(): Pick<WebhookManager, "list" | "adopt"> | null;
@@ -241,6 +242,9 @@ const botFieldsSchema = z.object({
   playbooks: z.array(playbookSchema).max(50).nullable().optional(),
   installedPackage: z.record(z.string(), z.unknown()).nullable().optional(),
   assignedSkills: z.array(z.string().max(64)).max(200).nullable().optional(),
+  defaultBot: z.object({ person: z.string().max(320).optional() }).strict().nullable().optional(),
+  sidebarHidden: z.boolean().nullable().optional(),
+  welcomed: z.boolean().nullable().optional(),
 }).strict();
 const skillFileSchema = z.object({ path: z.string().max(400).refine(validRelative), content: z.string().max(512 * 1024), executable: z.boolean() });
 const importedSkillSchema = z.object({ name: z.string().refine(isSkillName), skillMd: z.string().max(512 * 1024), files: z.array(skillFileSchema).max(200),
@@ -262,6 +266,8 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
   const set = <K extends keyof BotRecord>(key: K, value: BotRecord[K] | undefined) => { if (Object.hasOwn(fields, key)) patch[key] = value as BotRecord[K]; };
   set("hidden", fields.hidden ?? undefined);
   set("pinned", fields.pinned ?? undefined);
+  set("sidebarHidden", fields.sidebarHidden ?? undefined);
+  set("welcomed", fields.welcomed ?? undefined);
   set("managedSections", fields.managedSections ? [...new Set(fields.managedSections.filter(Boolean))] : undefined);
   set("fallback", fields.fallback ? fields.fallback.filter((entry) => deps.instanceExists(entry.instanceId)) : undefined);
   if (fields.projects) {
@@ -282,6 +288,8 @@ function applyBotFields(deps: MoveKindsDeps, id: string, raw: unknown): void {
     deps.store.setChiefOfStaff(id);
     if (patch.managedSections) deps.store.patchBot(id, { managedSections: patch.managedSections });
   }
+  if (fields.defaultBot) takeArrivingDefaultBot(deps.store, id);
+  retireUnusedStarter(deps.store, deps.dataDir);
 }
 
 /** A routine as it arrives: off unless My Cloud switched it on, with its finished runs My Cloud lacks. */

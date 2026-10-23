@@ -1,7 +1,7 @@
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type Dispatch, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, BellOff, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
-import type { AppState, BotProject, Task } from "@/state/store";
+import type { Action, AppState, BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { intlLocale, t } from "@/lib/i18n";
@@ -13,11 +13,12 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { threadLinkLabel } from "../../shared/thread-link";
 import { isSnoozed, orderedThreadList } from "../../shared/wire";
 import { Select } from "./Select";
+import { WorkingTimer } from "./WorkingIndicator";
 import { localizedTaskTitle } from "@/lib/task-title";
 
 export { isSnoozed, orderedThreadList };
 
-type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link"> & {
+type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link" | "turnStartedAt"> & {
   queued?: boolean;
   pinned?: boolean;
   createdAt?: number;
@@ -192,6 +193,20 @@ export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
     .map((entry) => entry.task);
 }
 
+/** The store actions behind a bot's thread-row menu, for every list that draws that bot's threads. */
+export function threadRowActions(botId: string, dispatch: Dispatch<Action>, generatedTitles: boolean) {
+  return {
+    onRename: (task: { threadId: string }, title: string) => dispatch({ type: "renameTask", botId, threadId: task.threadId, title }),
+    onRegenerateTitle: generatedTitles ? (task: { threadId: string }, onSettled: (ok: boolean) => void) => dispatch({ type: "regenerateTaskTitle", botId, threadId: task.threadId, onSettled }) : undefined,
+    onDelete: (task: { threadId: string }) => dispatch({ type: "deleteTask", botId, threadId: task.threadId }),
+    onMove: (task: { threadId: string }, projectId: string | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { projectId } }),
+    onArchive: (task: { threadId: string }, archivedAt: number | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { archivedAt } }),
+    onPin: (task: { threadId: string }, pinned: boolean) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { pinned } }),
+    onSnooze: (task: { threadId: string }, snoozedUntil: number | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { snoozedUntil } }),
+    onLink: (task: { threadId: string }, link: string | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { link } }),
+  };
+}
+
 type ThreadRowProps = {
   task: ThreadRowTask;
   ownerId: string;
@@ -214,6 +229,10 @@ type ThreadRowProps = {
   selectMode?: boolean;
   checked?: boolean;
   onToggleSelect?: (task: ThreadRowTask, shiftKey: boolean) => void;
+  /** The bot panel's taller row: `preview` (the conversation's last line) under the title, and how long a running turn
+   * has worked. */
+  panel?: boolean;
+  preview?: string;
 };
 
 const sameFields = <T extends object>(a: T, b: T): boolean => {
@@ -224,7 +243,7 @@ const sameFields = <T extends object>(a: T, b: T): boolean => {
 const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { task, ...next }: ThreadRowProps): boolean =>
   sameFields(previousTask, task) && sameFields(previous, next);
 
-export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, activityLabel, now, selectMode = false, checked = false, onToggleSelect }: ThreadRowProps) {
+export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, activityLabel, now, selectMode = false, checked = false, onToggleSelect, panel = false, preview }: ThreadRowProps) {
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
   const menuMotion = useHeldMenuMotion(menu);
   const [renaming, setRenaming] = useState(false);
@@ -287,8 +306,14 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
     window.addEventListener("resize", keepOnScreen);
     return () => { observer?.disconnect(); window.removeEventListener("resize", keepOnScreen); };
   }, [menu]);
+  const heading = <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+    <span dir="auto" className={cn("min-w-0 flex-1 max-w-max truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{displayTitle}</span>
+    {byline && (
+      <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-tertiary">{byline}</span>
+    )}
+  </span>;
   return <>
-    <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", selectMode && checked ? "bg-accent/10" : current ? "bg-raised" : "hover:bg-raised/50")}>
+    <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", selectMode && checked ? "bg-accent/10" : current ? "bg-raised" : "hover:bg-raised/50", panel && cn("items-start rounded-[10px]", current ? "bg-ink/[0.07]" : "hover:bg-ink/[0.04]"))}>
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
         onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
@@ -298,29 +323,30 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         {...(selectMode ? { role: "checkbox", "aria-checked": checked, "aria-disabled": !tickable, "aria-label": t("task.bulk.rowCheck", { title: displayTitle }) } : {})}
         onClick={choose} onDoubleClick={selectMode ? undefined : startRename} onContextMenu={contextMenu}
         onKeyDown={(event) => { if (opensRowMenuFromKey(event.key, event.shiftKey, selectMode)) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
-        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink", selectMode && "pl-1.5", selectMode && !tickable && "cursor-not-allowed opacity-60")}>
+        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-6 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink", panel && "rounded-[10px] py-2 pl-3 text-[13.5px]", selectMode && "pl-1.5", selectMode && !tickable && "cursor-not-allowed opacity-60")}>
         {selectMode && <span aria-hidden="true" title={tickable ? undefined : t("task.bulk.running")}
           className={cn("flex size-3.5 shrink-0 items-center justify-center rounded-[3px] border", checked ? "border-accent bg-accent text-white" : "border-ink-tertiary", !tickable && "opacity-50")}>
           {checked && <Check size={10} strokeWidth={3} />}
         </span>}
-        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
-          <span dir="auto" className={cn("min-w-0 flex-1 max-w-max truncate", task.unread && "font-semibold text-ink", (closed || archived || snoozed) && !current && "text-ink-tertiary")}>{displayTitle}</span>
-          {byline && (
-            <span className="min-w-0 max-w-[45%] shrink truncate font-normal text-ink-tertiary">{byline}</span>
-          )}
-        </span>
+        {panel ? <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          {heading}
+          {preview && <span dir="auto" className="truncate text-[12.5px] font-normal text-ink-secondary">{preview}</span>}
+          {isWorking(task) && <span data-thread-working="" className="flex items-center gap-1 text-[11.5px] font-normal text-success">
+            {t("chat.activity.working")}{task.turnStartedAt ? <><span aria-hidden="true">·</span><WorkingTimer since={task.turnStartedAt} /></> : null}
+          </span>}
+        </span> : heading}
       </button>}
       {task.link && <a href={task.link} target="_blank" rel="noreferrer" dir="ltr" title={task.link} aria-label={t("task.openLink", { link: threadLinkLabel(task.link) ?? task.link })}
         className="shrink-0 rounded px-1 font-mono text-[11px] text-ink-secondary hover:bg-raised hover:text-ink outline-none focus-visible:ring-1 focus-visible:ring-accent/60 [unicode-bidi:isolate]">{threadLinkLabel(task.link) ?? t("task.link")}</a>}
-      {!renaming && <span className="flex shrink-0 items-center gap-2 px-1" onClick={choose} onContextMenu={contextMenu}>
+      {!renaming && <span className={cn("flex shrink-0 items-center gap-2 px-1", panel && "pt-2.5")} onClick={choose} onContextMenu={contextMenu}>
         {updatedLabel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}
         {task.pinned === true && <Pin size={11} className="shrink-0 text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
-        {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWaitingOnTeammate(task) ? <Clock3 size={11} className="shrink-0 text-ink-secondary" aria-label={t("task.waitingOnTeammate")} /> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={activityLabel ?? t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
+        {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWaitingOnTeammate(task) ? <Clock3 size={11} className="shrink-0 text-ink-secondary" aria-label={t("task.waitingOnTeammate")} /> : isWorking(task) && !panel ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={activityLabel ?? t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
         {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
       </span>}
       {!selectMode && <button ref={actionRef} type="button" aria-label={t("task.actions", { title: displayTitle })} aria-expanded={Boolean(menu)}
         onClick={(event) => { if (menu) { setMenu(null); return; } const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); }}
-        className="mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/thread:opacity-100 max-md:opacity-70 touch:opacity-70">
+        className={cn("mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/thread:opacity-100 max-md:opacity-70 touch:opacity-70", panel && "mt-1.5")}>
         <MoreHorizontal size={13} />
       </button>}
     </div>

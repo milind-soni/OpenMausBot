@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { MAUS_COLOR_NAMES, MAUS_COLORS, type MausColor } from "@/lib/mascot";
+import { colorSwatch, MAUS_COLOR_LABEL, MAUS_COLOR_NAMES, type MausColor } from "@/lib/mascot";
 import { api, type Bot } from "@/state/store";
 import { inputClass, PrimaryButton, QuietButton, staggerIndex, type BeatProps } from "./shared";
 
@@ -100,7 +100,7 @@ export function MeetYourBotBeat({
               type="button"
               role="radio"
               aria-checked={c === color}
-              aria-label={t("onboarding.bot.colorAria", { color: c })}
+              aria-label={t("onboarding.bot.colorAria", { color: t(MAUS_COLOR_LABEL[c]) })}
               onClick={() => {
                 setColor(c);
                 bump("customize");
@@ -109,7 +109,7 @@ export function MeetYourBotBeat({
                 "size-7 rounded-full border-2 transition-transform duration-150 hover:scale-110 active:scale-95",
                 c === color ? "border-ink" : "border-transparent",
               )}
-              style={{ backgroundColor: MAUS_COLORS[c] }}
+              style={{ background: colorSwatch(c) }}
             />
           ))}
         </div>

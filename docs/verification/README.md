@@ -52,6 +52,7 @@ Use only mapped, tested commands:
 - [OpenCode model variants through ACP](opencode-variants.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
+- [MausBot, everyone's helper](mausbot.md)
 - [Profile proposal and credential-card lifecycle](proposal-cards.md)
 - [Full Access without duplicate approvals](full-access.md)
 - [Exact command allowlist UI and saved rules](command-allowlist.md)
@@ -70,7 +71,7 @@ Use only mapped, tested commands:
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [In-chat team coordination](room-coordination.md)
-- [Chief access to additional teams](team-access.md)
+- [Chief access to additional departments](team-access.md)
 - [Engines and Doctor](engines.md)
 - [Cline engine and native loopback qualification](cline.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
@@ -121,6 +122,11 @@ and a synthetic OAuth provider in a disposable workspace.
 The [Whop fixture](whop.md) checks its one-click setup, cancellation, denied
 consent, discovery failures, reconnect and disconnect using that same registry
 and a synthetic provider, without accessing a real Whop account.
+
+The [X card fixture](x-connector.md) checks the Apps page's X card: a plan's
+included calls with the month's use, the person's own treg key (saved, tested,
+removed, used first) and a used-up month, against loopback stand-ins for treg
+and the relay.
 
 The [Connected Apps OAuth fixture](connected-apps-oauth.md) checks blocked-popup
 recovery, safe authorization links and abandoned-account retries through real

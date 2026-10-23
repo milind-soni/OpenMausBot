@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EMPTY_ONBOARDING, type OnboardingStatus } from "@/lib/onboarding";
 import { withTourReset } from "@/lib/guided-tour";
 import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, localDay, nextNotice, noticeSeen, NOTICES,
-  OLD_PRO_DISMISSALS, PRODUCT_HUNT_NOTICE, STAR_NOTICE, usedBefore, type NoticeFacts } from "./notices";
+  OLD_PRO_DISMISSALS, PRODUCT_HUNT_NOTICE, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, type NoticeFacts } from "./notices";
 
 let storage: Map<string, string>;
 beforeEach(() => {
@@ -12,13 +12,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 const record = (hintsSeen: string[] = []): OnboardingStatus => ({ ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen });
-const facts = (intro: boolean | null, trial: boolean | null, cloud: boolean | null, star: boolean | null, launch: boolean | null = false, popup: boolean | null = false): NoticeFacts =>
-  ({ [CLOUD_PRO_UPDATE_NOTICE]: popup, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud, [STAR_NOTICE]: star });
+const facts = (intro: boolean | null, trial: boolean | null, cloud: boolean | null, star: boolean | null, launch: boolean | null = false, popup: boolean | null = false,
+  consent: boolean | null = false): NoticeFacts =>
+  ({ [CLOUD_PRO_UPDATE_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud, [STAR_NOTICE]: star });
 const none = () => false;
 const DAY = 86_400_000, NOON = new Date(2026, 9, 9, 12).getTime();
 
-it("is one queue: the Cloud Pro popup first, then the launch card, the card after the update, the trial's notice, the My Cloud card, the star", () => {
-  expect(NOTICES).toEqual([CLOUD_PRO_UPDATE_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, STAR_NOTICE]);
+it("is one queue: the Cloud Pro popup first, then the product-updates question, the launch card, the card after the update, the trial's notice, the My Cloud card, the star", () => {
+  expect(NOTICES).toEqual([CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, STAR_NOTICE]);
+  expect(nextNotice(facts(true, true, true, true, true, true, true), none)).toBe(CLOUD_PRO_UPDATE_NOTICE);
+  expect(nextNotice(facts(true, true, true, true, true, true, true), id => id === CLOUD_PRO_UPDATE_NOTICE)).toBe(UPDATES_CONSENT_NOTICE);
+  expect(nextNotice(facts(true, true, true, true, true, null, true), none)).toBeNull();
+  expect(nextNotice(facts(true, true, true, true, true, false, null), none)).toBeNull();
   expect(CLOUD_PRO_UPDATE_NOTICE).toBe("cloud-pro-update-2026-10");
   expect(nextNotice(facts(true, true, true, true, true, true), none)).toBe(CLOUD_PRO_UPDATE_NOTICE);
   expect(nextNotice(facts(true, true, true, true, true, null), none)).toBeNull();

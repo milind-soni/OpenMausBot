@@ -110,7 +110,16 @@ export interface CloudSendPageBridge {
   teamRetry?(): Promise<import("./team-move.mjs").TeamMoveView | null>;
   /** Shows that team's page, where the bot now lives. */
   openTeam?(teamId: string): Promise<void>;
+  /** The switch "Keep this computer's bots on this computer"; absent from an older desktop. */
+  keepHere?(): Promise<KeepHereState>;
+  /** Turns it (a real click on My Cloud's page). */
+  setKeepHere?(on: boolean): Promise<KeepHereState>;
 }
+
+/** The switch "Keep this computer's bots on this computer" (one-home-main.mjs). `shown`: this person has a Cloud of their
+ * own the move applies to; `moved`: this computer's bots live on My Cloud, so turning it on brings them home; `coming`:
+ * they are on their way, past turning back. */
+export interface KeepHereState { shown: boolean; on: boolean; moved: boolean; coming: boolean }
 
 export interface CloudSendSession {
   call(method: string, route: string, body?: unknown): Promise<{ status: number; ok: boolean; body: any }>;

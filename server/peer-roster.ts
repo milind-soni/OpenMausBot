@@ -1,7 +1,7 @@
-import { sameAudience } from "./bot-visibility.ts";
+import { sameAudience } from "./bot-visibility.ts"; import type { DefaultBotFields } from "../shared/default-bot.ts";
 import type { BotActivity } from "./store.ts";
 
-export interface RosterMember {
+export interface RosterMember extends Pick<DefaultBotFields, "defaultBot"> {
   id: string;
   name: string;
   title?: string;

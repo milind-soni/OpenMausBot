@@ -46,12 +46,13 @@ function messageText(message: Message): string {
   return parts.filter(Boolean).join("\n");
 }
 
-export function createTeamBackup(store: Store, routines: Routine[], name: string): TeamBackup {
+/** `shown`: on a Team Cloud someone else's private chat is never in the exporting person's backup. */
+export function createTeamBackup(store: Store, routines: Routine[], name: string, shown: (threadId: string) => boolean = () => true): TeamBackup {
   const botIds = new Set(store.bots.map((bot) => bot.id));
   const warnings: string[] = [];
   const history = (record: BotRecord | GroupRecord): BackupTask[] => {
     const tasks = record.tasks?.length ? record.tasks : [{ threadId: record.threadId, title: "Conversation", createdAt: record.createdAt }];
-    return tasks.map((task) => ({
+    return tasks.filter((task) => shown(task.threadId)).map((task) => ({
       key: task.threadId, title: task.title, createdAt: task.createdAt,
       titleFromFirstMessage: "titleFromFirstMessage" in task && task.titleFromFirstMessage || undefined,
       openedBy: "openedBy" in task && task.openedBy
@@ -111,7 +112,8 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       // A bot kept off the helper model stays off it wherever its notes and chats land.
       ...(helperModelAllowed(bot) ? {} : { helperModel: false }),
       memory: memoryFor(bot.id),
-      activeTask: bot.threadId, tasks: history(bot),
+      // Someone else's private chat selected: the backup opens on the first conversation it carries instead.
+      ...((tasks) => ({ activeTask: tasks.some((task) => task.key === bot.threadId) ? bot.threadId : tasks[0]?.key ?? bot.threadId, tasks }))(history(bot)),
     })),
     groups,
     routines: validRoutines.map((routine) => ({

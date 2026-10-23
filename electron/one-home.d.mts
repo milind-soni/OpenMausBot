@@ -10,9 +10,13 @@ export type OneHomeView =
   | { phase: "finishing"; failing?: OneHomeFailing }
   /** What arrived, checked on both sides; `at`: when the move was done; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts. */
   | { phase: "done"; at?: number; counts?: OneHomeCounts; phone: boolean; held: string[] }
+  /** This computer's bots are on their way home from a My Cloud that goes on, because the person keeps them here;
+   * `updating`: My Cloud is too old to stop their automations and updates first. */
+  | { phase: "keeping"; updating?: true }
   /** My Cloud ended: this computer is home again; `back`: My Cloud's own changes came back too, unless `lost`; or, with
-   * `elsewhere`, they came back to that other computer and this one keeps its own copy from `since`, with automations off. */
-  | { phase: "home-again" | "back"; lost?: true; elsewhere?: { name: string; since?: number } };
+   * `elsewhere`, they came back to that other computer and this one keeps its own copy from `since`, with automations off.
+   * `kept`: My Cloud goes on, and this computer's bots came home because the person keeps them here. */
+  | { phase: "home-again" | "back"; lost?: true; elsewhere?: { name: string; since?: number }; kept?: true };
 export interface OneHomeCounts { bots: number; skills: number; logins: number; onePassword: boolean; chats: number; routines: number }
 
 export interface OneHomeCloud {
@@ -31,6 +35,13 @@ export declare const COPY_RETRY_MS: number[];
 export declare const FAILING_LINE_MS: number;
 export declare const KEPT_MS: number;
 export function parseJournal(value: unknown): Record<string, any> | null;
+/** Home is My Cloud by this journal. */
+export function awayIn(journal: Record<string, any> | null | undefined): boolean;
+export function parseKeep(value: unknown): { on: boolean };
+/** This computer's bots are on their way home and past turning back. */
+export function underWay(journal: Record<string, any> | null | undefined): boolean;
+export function automationsOn(manifest: unknown): Record<string, boolean>;
+export function keptSwitches(brought: Record<string, boolean>, there: Record<string, boolean> | null | undefined): Record<string, boolean>;
 export function switchOn(key: string): { method: string; route: string; body: unknown } | null;
 export function arrivedCounts(here: unknown, there: unknown): OneHomeCounts;
 
@@ -50,15 +61,26 @@ export function createOneHome(deps: {
   /** My Cloud's session is no longer needed: the move is done, paused, or not this account's. */
   release?(): Promise<void>;
   lend?(projects: string[]): Promise<unknown>;
+  /** Once this computer is lent: asks the person, at most once, to lend the rest of it too, without being waited for. */
+  offer?(): unknown;
   phone?: { paired(): boolean; stop(): Promise<void>; start(): Promise<void> };
   openHome?(): void;
   openLocal?(): void;
   lastInput?(): number;
   again?: { bring(): Promise<{ restored: string; switches: Record<string, boolean> } | { deleted: true } | { later: number }> };
+  /** The person's choice to keep this computer's bots here. */
+  keep?: { read(): unknown; write(value: unknown): void };
+  /** My Cloud's backup while it goes on, staged here first, then restored. */
+  keepHome?: {
+    stage(): Promise<{ staged: true; switches: Record<string, boolean> } | { deleted: true } | { later: number }>;
+    bring(): Promise<{ restored: string; switches: Record<string, boolean> } | { deleted: true } | { later: number }>;
+  };
   /** This computer's installation id; null while it can't be known. */
   installation?(): Promise<string | null>;
   /** Tells the Admin this computer's move is done; false when it can't take it yet. */
   reportMove?(): Promise<boolean>;
+  /** Tells the Admin this computer keeps its bots here again; false when it can't take it yet. */
+  reportKept?(): Promise<boolean>;
   restart?(): void;
   version?: string;
   onChange?(view: OneHomeView | null): void;
@@ -69,6 +91,9 @@ export function createOneHome(deps: {
   kick(): Promise<void>;
   view(): OneHomeView | null;
   away(): boolean;
+  keeps(): boolean;
+  /** Throws once this computer's bots are on their way home past turning back and `on` is false. */
+  keep(on: boolean): Promise<void>;
   retry(): Promise<void>;
   seen(): OneHomeView | null;
   changed(): void;

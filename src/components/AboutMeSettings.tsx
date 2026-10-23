@@ -2,23 +2,28 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { CircleHelp } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { saveTeamProfile } from "@/lib/own-profile";
 import { createAboutMeDraft } from "./about-me-draft";
 
-const drafts = new WeakMap<object, ReturnType<typeof createAboutMeDraft>>();
+const drafts = new WeakMap<object, { controller: ReturnType<typeof createAboutMeDraft>; team: { current: boolean } }>();
 
 export function AboutMeSettings() {
   const { state, dispatch } = useStore();
   const confirmed = state.config?.profile?.aboutMe ?? "";
-  let controller = drafts.get(dispatch);
-  if (!controller) {
-    controller = createAboutMeDraft(confirmed, async (sent) => {
-      const config = await api<ConfigStatus>("/api/config", {
-        method: "PUT", body: JSON.stringify({ profile: { aboutMe: sent } }), timeoutMs: 10_000,
-      });
-      dispatch({ type: "profileSaved", profile: { aboutMe: config.profile?.aboutMe ?? sent } });
-    });
-    drafts.set(dispatch, controller);
+  const team = Boolean(state.config?.team);
+  let draft = drafts.get(dispatch);
+  if (!draft) {
+    const savesToTeam = { current: team };
+    draft = { team: savesToTeam, controller: createAboutMeDraft(confirmed, async (sent) => {
+      const profile = savesToTeam.current
+        ? await saveTeamProfile({ aboutMe: sent })
+        : (await api<ConfigStatus>("/api/config", { method: "PUT", body: JSON.stringify({ profile: { aboutMe: sent } }), timeoutMs: 10_000 })).profile;
+      dispatch({ type: "profileSaved", profile: { aboutMe: profile?.aboutMe ?? sent } });
+    }) };
+    drafts.set(dispatch, draft);
   }
+  draft.team.current = team;
+  const controller = draft.controller;
   const { value, status } = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
   const { flush } = controller;
   useEffect(() => { controller.confirm(confirmed); }, [controller, confirmed]);
@@ -38,7 +43,7 @@ export function AboutMeSettings() {
           </p>
         </details>
       </div>
-      <textarea id="profile-about-me" value={value} rows={5} maxLength={24_000}
+      <textarea id="profile-about-me" value={value} rows={5} maxLength={team ? 4_000 : 24_000}
         onChange={(event) => controller.edit(event.target.value)}
         onBlur={() => void flush()}
         className="min-h-[120px] w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink focus:outline-none"

@@ -29,6 +29,7 @@
 //   FAKE_CLAUDE_REPLIES  JSON array of replies (string, or string[] for several items) used in order
 //   FAKE_CLAUDE_REPLY_STATE  counter file keeping FAKE_CLAUDE_REPLIES in order across processes
 //   FAKE_CLAUDE_TOOL_CALLS  JSON [{name, input?, ok?}] each turn calls before its reply (unset: one Bash call)
+//   FAKE_CLAUDE_TOOL_CALLS_FILE  path of the same JSON, read again each turn (a warm process's turns differ); missing: none
 //   FAKE_CLAUDE_STREAM_CADENCE  "chars:ms" (happy mode): stream each scripted reply as
 //     text_delta chunks of `chars` chars every `ms` ms before its assistant message
 //   FAKE_CLAUDE_USES_CLOUD_COMPUTER  1: first take one screenshot through the `computer` MCP server
@@ -56,6 +57,10 @@
 //   FAKE_CLAUDE_EXIT_DELAY_MS  ms to keep running after SIGTERM, like a slow taskkill on Windows
 //   FAKE_CLAUDE_PROBE_LOG  path: each snapshot probe appends `<version|help|auth> <pid>`
 //   FAKE_CLAUDE_HOLD_VERSION / _HELP / _AUTH  path: that snapshot probe answers only once it exists
+//   FAKE_CLAUDE_MODE=slow-write: says it will build the page, then streams a Write of index.html as partial
+//     input_json_delta frames (2.1.306 with --include-partial-messages) before its tool_use, runs it and replies.
+//     FAKE_CLAUDE_WRITE_BYTES (default 16384) is the file's size, sent 512 bytes every FAKE_CLAUDE_WRITE_STEP_MS
+//     (default 100); FAKE_CLAUDE_WRITE_HOLD  path: the call's input stays open once written until it exists
 // total_cost_usd and modelUsage are running totals (0.01 per result), as the real CLI reports them.
 import { splitLaunchNote } from "./launch-note.ts";
 import { spawnSync } from "node:child_process";
@@ -124,8 +129,7 @@ const scriptedReplies = (() => {
   }
 })();
 type ScriptedToolCall = { name: string; id?: string; input: Record<string, unknown>; ok: boolean; output?: unknown; server?: string };
-const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
-  const raw = process.env.FAKE_CLAUDE_TOOL_CALLS;
+const parseToolCalls = (raw: string | undefined): ScriptedToolCall[] | null => {
   if (raw === undefined) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -143,7 +147,13 @@ const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
   } catch {
     return null;
   }
-})();
+};
+const scriptedToolCallsAtStart = parseToolCalls(process.env.FAKE_CLAUDE_TOOL_CALLS);
+const turnToolCalls = (): ScriptedToolCall[] | null => {
+  const file = process.env.FAKE_CLAUDE_TOOL_CALLS_FILE;
+  if (!file) return scriptedToolCallsAtStart;
+  try { return parseToolCalls(readFileSync(file, "utf8")) ?? []; } catch { return []; }
+};
 let toolUseCount = 0;
 let scriptedReplyIndex = 0;
 const nextScriptedReply = (): string[] => {
@@ -839,6 +849,48 @@ const playTurn = (prompt: JsonValue, late = false) => {
     finishIfDone();
   };
 
+  if (mode === "slow-write") {
+    const total = Number(process.env.FAKE_CLAUDE_WRITE_BYTES) || 16_384;
+    const stepMs = Number(process.env.FAKE_CLAUDE_WRITE_STEP_MS) || 100;
+    const id = `toolu-write-${process.pid}-${++toolUseCount}`;
+    const filePath = join(process.cwd(), "index.html");
+    const content = `<!doctype html>\n<title>Dashboard</title>\n${"<div class=\"card\">sales</div>\n".repeat(Math.ceil(total / 32))}`.slice(0, total);
+    const event = (e: unknown) => out({ type: "stream_event", event: e, parent_tool_use_id: null, session_id: "fake-session" });
+    out({ type: "assistant", message: { id: "msg-intro", content: [{ type: "text", text: "I'll build the dashboard now." }], usage } });
+    event({ type: "message_start", message: { id: "msg-write", usage } });
+    event({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id, name: "Write", input: {} } });
+    const head = `{"file_path": ${JSON.stringify(filePath)}, "content": "`;
+    const body = JSON.stringify(content).slice(1, -1);
+    event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: head } });
+    let at = 0;
+    const closeCall = () => {
+      event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: "\"}" } });
+      event({ type: "content_block_stop", index: 0 });
+      out({ type: "assistant", message: { id: "msg-write", content: [{ type: "tool_use", id, name: "Write", input: { file_path: filePath, content } }], usage } });
+      event({ type: "message_stop" });
+      out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: false, content: `File created successfully at: ${filePath}` }] } });
+      out({ type: "assistant", message: { content: [{ type: "text", text: "Done: index.html is ready." }], usage } });
+      finish();
+    };
+    const step = () => {
+      if (at < body.length) {
+        event({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: body.slice(at, at + 512) } });
+        at += 512;
+        setTimeout(step, stepMs);
+        return;
+      }
+      const hold = process.env.FAKE_CLAUDE_WRITE_HOLD;
+      if (!hold) return closeCall();
+      const poll = setInterval(() => {
+        if (!existsSync(hold)) return;
+        clearInterval(poll);
+        closeCall();
+      }, 50);
+    };
+    setTimeout(step, stepMs);
+    return;
+  }
+
   if (streamCadence && mode === "happy") {
     // Deterministic delta replay for the voice-latency harness: stream each
     // scripted reply part as fixed-size text_delta chunks at a fixed interval,
@@ -863,6 +915,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
     emitPart(0);
     return;
   }
+  const scriptedToolCalls = turnToolCalls();
   if (scriptedToolCalls) {
     const failureContext: string[] = [];
     for (const call of scriptedToolCalls) {
@@ -892,6 +945,11 @@ const playTurn = (prompt: JsonValue, late = false) => {
       if (index === replyParts.length - 1) content.push({ type: "tool_use", id: defaultToolId, name: "Bash", input: { command: "echo hi" } });
       out({ type: "assistant", message: { content, usage } });
     });
+    if (mode === "tool-heartbeat") {
+      // Claude Code 2.1.306 sends this every 30 s while a tool runs.
+      out({ type: "tool_progress", tool_use_id: `${defaultToolId}-heartbeat-0`, tool_name: "Bash",
+        parent_tool_use_id: defaultToolId, elapsed_time_seconds: 30, heartbeat: true });
+    }
     out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: defaultToolId, is_error: false, content: [{ type: "text", text: "hi" }] }] } });
     runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
   }

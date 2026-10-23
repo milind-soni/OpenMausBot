@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createToolListNormalizer, providerSafeInputSchema } from "./mcp-tool-schema.ts";
+import { createToolListNormalizer, fitToolList, fitToolListResult, providerSafeInputSchema, shortenedToolNote } from "./mcp-tool-schema.ts";
+import { createPageSchema, wideSchema } from "./testing/oversized-tool-schema.ts";
+import { schemaBytes, toolSchemaProfile } from "./tool-schema-profile.ts";
+
+const MOONSHOT = toolSchemaProfile("moonshot")!;
 
 // Verbatim from `cua-driver describe browser_prepare`, cua-driver 0.22.1: strict providers reject its root anyOf.
 const BROWSER_PREPARE_0_22_1 = {
@@ -161,5 +165,57 @@ describe("createToolListNormalizer", () => {
     normalizer.observeRequest(JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/list" }));
     const safe = list(3, [{ name: "click", inputSchema: { type: "object", properties: {} } }]);
     expect(normalizer.rewriteResponse(safe)).toBe(safe);
+  });
+});
+
+describe("a tool list under a provider's schema profile", () => {
+  const small = { name: "search", description: "Find pages.", inputSchema: { type: "object", properties: { query: { type: "string" } } } };
+
+  it("keeps a tool within the limit as the same object, shortens one over it with a note, and leaves out one that cannot fit", () => {
+    const lines: string[] = [];
+    const tools = [small, { name: "create_page", description: "Create a page.", inputSchema: createPageSchema() },
+      { name: "configure_everything", inputSchema: wideSchema(400) }, { name: "rooted", inputSchema: BROWSER_PREPARE_0_22_1 }];
+    const fitted = fitToolList(tools, MOONSHOT, (line) => lines.push(line)) as Array<Record<string, any>>;
+
+    expect(fitted.map((tool) => tool.name)).toEqual(["search", "create_page", "rooted"]);
+    expect(fitted[0]).toBe(small);
+    expect(schemaBytes(fitted[1]!.inputSchema)).toBeLessThanOrEqual(12_000);
+    expect(fitted[1]!.description).toBe(`Create a page.\n\n${shortenedToolNote("Kimi")}`);
+    expect(fitted[2]!.inputSchema).not.toHaveProperty("anyOf");
+    expect(lines).toEqual([
+      expect.stringMatching(/^left nested fields out of tool "create_page"'s parameters \(\d+ to \d+ bytes\) to fit Kimi's 12000-byte limit for one tool$/),
+      expect.stringMatching(/^left out tool "configure_everything": its parameters are \d+ bytes and still \d+ at their shortest, over Kimi's 12000-byte limit for one tool$/),
+    ]);
+  });
+
+  it("adds no note when only words were dropped", () => {
+    const wordy = { type: "object", properties: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`f${index}`,
+      { type: "object", properties: { v: { type: "string", description: "Words. ".repeat(120) } } }])) };
+    const [tool] = fitToolList([{ name: "wordy", description: "Wordy.", inputSchema: wordy }], MOONSHOT) as Array<Record<string, unknown>>;
+    expect(tool!.description).toBe("Wordy.");
+    expect(schemaBytes(tool!.inputSchema)).toBeLessThanOrEqual(12_000);
+  });
+
+  it("leaves a result without a profile, or without a tools array, as it came", () => {
+    const result = { tools: [{ name: "create_page", inputSchema: createPageSchema() }] };
+    expect(fitToolListResult(result, undefined)).toBe(result);
+    expect(fitToolListResult({ content: [] }, MOONSHOT)).toEqual({ content: [] });
+  });
+
+  it("fits the response a bridge relays under a profile, and only roots it without one", () => {
+    const list = JSON.stringify({ jsonrpc: "2.0", id: 4, result: { tools: [small, { name: "create_page", inputSchema: createPageSchema() }] } });
+    const request = JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/list" });
+
+    const plain = createToolListNormalizer();
+    plain.observeRequest(request);
+    expect(plain.rewriteResponse(list)).toBe(list);
+
+    const lines: string[] = [];
+    const profiled = createToolListNormalizer(MOONSHOT, (line) => lines.push(line));
+    profiled.observeRequest(request);
+    const tools = JSON.parse(profiled.rewriteResponse(list)).result.tools;
+    expect(tools[0]).toEqual(small);
+    expect(schemaBytes(tools[1].inputSchema)).toBeLessThanOrEqual(12_000);
+    expect(lines).toHaveLength(1);
   });
 });

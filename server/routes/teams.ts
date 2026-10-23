@@ -33,11 +33,14 @@ import { createTeamBackup, importTeamBackup } from "../team-backup.ts";
 import { fetchGithubTeam, fetchGrokTemplateCard, fetchLibraryTeam, fetchTeamCatalog } from "../team-library.ts";
 import { createTeamManifest, parseTeamManifest } from "../team-manifest.ts";
 import { CursorFallback, defaultCursorSession, type CursorSession } from "../cursor-session.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface TeamRouteDeps {
   store: Store;
-  cfg: Pick<AppConfig, "profile" | "mcpServers">;
+  cfg: Pick<AppConfig, "mcpServers">;
+  /** The exporting person's name, as a package's author: the server's profile's, or on a Team Cloud the person's own. */
+  authorName(auth: RequestAuth): string | undefined;
   routines(): RoutineManager | null;
   orgLibrary(): Pick<OrgLibrary, "list" | "preview" | "add" | "offeredSkills" | "addOfferedSkill"> | null;
   broadcast(payload: Record<string, unknown>): void;
@@ -55,6 +58,8 @@ export interface TeamRouteDeps {
     | { ok: false; error: string; available: string[] };
   /** The optional Cursor sign-in behind the one-click Grok Bot import; the app's own by default. */
   cursor?: () => CursorSession;
+  /** On a Team Cloud: false for someone else's private chat, which a team backup never carries. */
+  threadShown?(auth: RequestAuth): (threadId: string) => boolean;
 }
 
 export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
@@ -63,13 +68,13 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
     packageImportDeps, starterNotes, checkedExportSkillNames, collectExportSkills, collectTeamSkills,
   } = deps;
   const cursorSession = deps.cursor ?? defaultCursorSession;
-  return async ({ req, res, url, path, method, json, readBody }) => {
+  return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const routines = deps.routines();
     const orgLibrary = deps.orgLibrary();
     if (method === "POST" && path === "/api/teams/export") {
       const body = await readBody(req, 8 * 1024 * 1024);
-      const profileName = cfg.profile?.name?.trim();
+      const profileName = deps.authorName(auth);
       if (body.format === "package" && body.version === 2 && body.kind === "library") {
         const optional = (value: unknown) => (typeof value === "string" ? value : undefined);
         const built = defaultsPresetFor(body, body.includeMemory === true);
@@ -158,7 +163,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       if ((body.format === "backup" ? store.bots.length : memberIds.length) === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
       try {
         if (body.format === "backup") {
-          return json(res, 200, createTeamBackup(store, routines!.listRoutines(), name));
+          return json(res, 200, createTeamBackup(store, routines!.listRoutines(), name, deps.threadShown?.(auth)));
         }
         if (body.format === "package") {
           const selectedBots = store.bots.filter((bot) => !bot.hidden);

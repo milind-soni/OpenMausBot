@@ -9,6 +9,8 @@ import { appHostContext, appMaxHeight, appThemeContext } from "./app-host-contex
 
 export interface AppFrameHandle {
   teardown(): Promise<void>;
+  /** The frame's element, for a host that speaks to the page beside the bridge (the preview's point mode). */
+  iframe?: HTMLIFrameElement;
 }
 
 export type AppFrameProblem =
@@ -27,6 +29,10 @@ export interface AppFrameProps {
   onProblem(problem: AppFrameProblem | null): void;
   /** ui/notifications/request-teardown */
   onTeardownRequested(): void;
+  /** Fill the container instead of sizing to the page (a page in full screen). */
+  fill?: boolean;
+  /** The tallest the frame grows to its content, under the window's own limit. */
+  maxHeight?: number;
 }
 
 const refusal = (message: string): JsonRpcError => ({ code: RPC_HOST_REFUSED, message });
@@ -37,13 +43,14 @@ export function AppFrame(props: AppFrameProps) {
   // Callbacks change every render; the frame lives across renders.
   const latest = useRef({ ...props, flushBotPatches });
   latest.current = { ...props, flushBotPatches };
-  const { doc, botId, threadId } = props;
+  const { doc, botId, threadId, fill } = props;
 
   useLayoutEffect(() => {
     const container = box.current;
     if (!container) return;
     const messageId = doc.messageId;
-    let maxHeight = appMaxHeight();
+    const cap = () => Math.min(appMaxHeight(), latest.current.maxHeight ?? Infinity);
+    let maxHeight = cap();
     const host = mountAppFrame({
       container,
       doc,
@@ -52,6 +59,7 @@ export function AppFrame(props: AppFrameProps) {
       hostContext: appHostContext({ width: container.clientWidth || 600, maxHeight }),
       hostVersion: appVersion(),
       ...(import.meta.env?.DEV ? { log: (params: unknown) => console.info("[app]", params) } : {}),
+      ...(fill ? { fill: true } : {}),
       adapter: {
         async callRpc(method, params) {
           const outcome = await callAppRpc({ botId, threadId, messageId, method, params });
@@ -75,7 +83,7 @@ export function AppFrame(props: AppFrameProps) {
         teardownRequested: () => latest.current.onTeardownRequested(),
       },
     });
-    latest.current.handle.current = { teardown: () => host.teardown() };
+    latest.current.handle.current = { teardown: () => host.teardown(), iframe: host.iframe };
 
     const skin = typeof MutationObserver === "undefined" ? null : new MutationObserver(() => host.contextChanged(appThemeContext()));
     skin?.observe(document.documentElement, { attributes: true, attributeFilter: ["data-skin"] });
@@ -84,7 +92,7 @@ export function AppFrame(props: AppFrameProps) {
     const measure = () => {
       timer = undefined;
       const nextWidth = Math.round(container.clientWidth);
-      const nextMax = appMaxHeight();
+      const nextMax = cap();
       if (nextWidth <= 0 || (nextWidth === width && nextMax === maxHeight)) return;
       width = nextWidth;
       maxHeight = nextMax;
@@ -105,7 +113,7 @@ export function AppFrame(props: AppFrameProps) {
       host.retire();
     };
     // A new document is a new frame; nothing else remounts it.
-  }, [doc, botId, threadId]);
+  }, [doc, botId, threadId, fill]);
 
-  return <div ref={box} data-app-frame-box className="w-full" />;
+  return <div ref={box} data-app-frame-box className={fill ? "h-full w-full" : "w-full"} />;
 }

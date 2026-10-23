@@ -22,6 +22,7 @@ import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
 import { repairMarkdownTables } from "../lib/markdown-tables";
 import { TRANSCRIPT_WINDOW_SIZE } from "../lib/transcript-window";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
+import { GITHUB_REF_CLASS, isUseMyComputerUrl, LINK_CLASS, UseMyComputerLink, usePageOpener, withPageOpen } from "./ChatLinks";
 import { githubRefFromProps, remarkGithubRefs } from "@/lib/github-refs";
 import { GITHUB_REF_ICONS, LinkHoverCard } from "@/components/LinkHoverCard";
 import { useThreadLinkMenu } from "@/components/ThreadLinkMenu";
@@ -216,7 +217,7 @@ export const localFilePath = (href?: string): string | null => {
 };
 
 export function chatUrlTransform(value: string): string {
-  if (looksLikeThreadRefUrl(value)) return value;
+  if (looksLikeThreadRefUrl(value) || isUseMyComputerUrl(value)) return value;
   // Markdown-to-HTML percent-encodes a destination's backslashes (C:%5CUsers…); restore them and leave other escapes
   // for the server's single decode.
   const url = /^[a-zA-Z]:%5C/i.test(value) ? value.replace(/%5C/gi, "\\") : value;
@@ -862,7 +863,8 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   // SAFETY: react-markdown hands hast data-* attributes through as string props
   const props = rest as Record<string, unknown>;
   const { threads, currentBotId, message, delivered } = useContext(MessageScopeContext);
-  const linkMenu = useThreadLinkMenu(href);
+  const linkMenu = useThreadLinkMenu(href), openPage = usePageOpener();
+  if (href && isUseMyComputerUrl(href)) return <UseMyComputerLink>{children}</UseMyComputerLink>;
   const address = href ? parseThreadRefUrl(href) : null;
   const ref = address ? resolveThreadRefAddress(threads, address, currentBotId) : null;
   if (ref) return <ThreadLink target={ref} ambiguous={ref.ambiguous}>{children}</ThreadLink>;
@@ -883,7 +885,7 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   const Icon = github ? GITHUB_REF_ICONS[github.kind] : null;
   return (
     <LinkHoverCard href={href} github={github}>
-      {(hoverAnchor) => { const anchor = linkMenu.onContextMenu ? { ...hoverAnchor, onContextMenu: linkMenu.onContextMenu } : hoverAnchor; return <>{linkMenu.menu}{Icon ? (
+      {(hoverAnchor) => { const anchor = withPageOpen(href, openPage, linkMenu.onContextMenu ? { ...hoverAnchor, onContextMenu: linkMenu.onContextMenu } : hoverAnchor); return <>{linkMenu.menu}{Icon ? (
         <a {...anchor} href={href} target="_blank" rel="noreferrer" dir="ltr" title={href} data-github-ref={github!.kind} className={GITHUB_REF_CLASS}>
           <Icon size={13} aria-hidden="true" className="shrink-0 self-center text-ink-tertiary" />
           <span>{children}</span>
@@ -896,10 +898,6 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
     </LinkHoverCard>
   );
 }
-
-const LINK_CLASS = "break-words text-accent underline decoration-accent/40 hover:decoration-accent [unicode-bidi:isolate]";
-const GITHUB_REF_CLASS =
-  "inline-flex items-baseline gap-1 whitespace-nowrap rounded-full bg-inset px-1.5 align-baseline font-mono text-[0.88em] text-ink underline decoration-ink/30 underline-offset-2 hover:decoration-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [unicode-bidi:isolate]";
 
 const MARKDOWN_COMPONENTS: Components = {
   pre: MarkdownCode,

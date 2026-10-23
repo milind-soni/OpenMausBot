@@ -8,6 +8,7 @@ import {
   authorizeService,
   connectedServiceSlugs,
   connectedServices,
+  connectedServicesInventory,
   connectionMode,
   connectionStatus,
   listConnectorTools,
@@ -1127,7 +1128,9 @@ describe.sequential("Composio Sessions", () => {
     };
     connectedAccountsUnavailable = true;
     try {
-      await expect(connectedServices(cfg)).resolves.toMatchObject({
+      const inventory = await connectedServicesInventory(cfg);
+      expect(inventory.complete).toBe(false);
+      expect(inventory.services).toMatchObject({
         github: {
           connected: true,
           status: "ACTIVE",

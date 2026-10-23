@@ -217,11 +217,11 @@ type BotRecord = {
     await click("Cleo", "checkbox");
     await click("Dana", "checkbox");
     await click("Save");
-    await expect.poll(snapshot).toContain("A team can have only one Chief of Staff");
+    await expect.poll(snapshot).toContain("A department can have only one Chief of Staff");
     expect((await savedBot(cleo.id)).section).toBe("Research");
     expect((await savedBot(dana.id)).section).toBe("Delivery");
-    await click("Close team dialog");
-    await expect.poll(focused).toBe("Manage Engineering team");
+    await click("Close department dialog");
+    await expect.poll(focused).toBe("Manage Engineering department");
     await evaluate("document.querySelectorAll('[data-team-key] details').forEach(details => { details.open = false; }); true");
 
     // General has an empty persisted section key. Its menu, picker and Save
@@ -236,7 +236,7 @@ type BotRecord = {
     await tabTo("Move 1 bot");
     await ui("press", "--keys", "Enter");
     await expect.poll(async () => (await savedBot(dana.id)).section ?? "").toBe("");
-    await expect.poll(focused).toBe("Manage General team");
+    await expect.poll(focused).toBe("Manage General department");
     receipts.keyboardGeneralMove = { botId: dana.id, section: (await savedBot(dana.id)).section ?? "", restoredFocus: await focused() };
     expect(await evaluate("(() => { const canvas = document.querySelector('[data-team-canvas]'); return { x: canvas.scrollLeft, y: canvas.scrollTop }; })()"))
       .toEqual({ x: 0, y: 0 });
@@ -247,7 +247,7 @@ type BotRecord = {
     await expect.poll(async () => (await savedBot(dana.id)).section).toBe("Delivery");
     expect(identity(await savedBot(dana.id))).toEqual(identity(beforeBots.find(bot => bot.id === dana.id)!));
 
-    await click("Fit teams to view");
+    await click("Fit departments to view");
     const cardSelector = `[data-bot-id=${JSON.stringify(ben.id)}]`;
     receipts.cancelledDrop = await drag(cardSelector, { x: 0, y: 0 }, teamSelector("Research"));
     await expect.poll(snapshot).toContain('alertdialog "Move Ben to Research?"');
@@ -263,7 +263,7 @@ type BotRecord = {
     await click("Move bot");
     await expect.poll(async () => (await savedBot(ben.id)).section).toBe("Research");
     await expect.poll(() => evaluate(`Boolean(document.querySelector(${JSON.stringify(`${teamSelector("Research")} ${cardSelector}`)}))`)).toBe(true);
-    await click("Fit teams to view");
+    await click("Fit departments to view");
     receipts.dropIntoDelivery = await drag(cardSelector, { x: 0, y: 0 }, teamSelector("Delivery"));
     await expect.poll(snapshot).toContain('alertdialog "Move Ben to Delivery?"');
     expect((await savedBot(ben.id)).section).toBe("Research");
@@ -271,7 +271,7 @@ type BotRecord = {
     await expect.poll(async () => (await savedBot(ben.id)).section).toBe("Delivery");
     expect(identity(await savedBot(ben.id))).toEqual(identity(beforeBots.find(bot => bot.id === ben.id)!));
     expect(await messages(ben.id)).toEqual(transcript);
-    await click("Fit teams to view");
+    await click("Fit departments to view");
 
     // Same-team ordering is personal presentation, not a membership write.
     // Verify both pointer placement and the keyboard alternative, then retain
@@ -320,7 +320,7 @@ type BotRecord = {
     const beforeWheelPan = await view();
     await wheel(45, false);
     await expect.poll(async () => (await view()).y).toBeCloseTo(beforeWheelPan.y - 45, 4);
-    await click("Fit teams to view");
+    await click("Fit departments to view");
     expect(await evaluate(`(() => {
       const viewport = document.querySelector('[data-team-canvas]').getBoundingClientRect();
       return [...document.querySelectorAll('[data-team-key]')].every(team => {
@@ -345,7 +345,7 @@ type BotRecord = {
     for (const [section, text] of [["Engineering", "Keep the original engineering brief."], ["Research", "Keep the original research brief."], ["Delivery", "Review before shipping."]]) {
       expect((await api("GET", `/api/section-context?section=${section}`)).text).toBe(text);
     }
-    await click("Fit teams to view");
+    await click("Fit departments to view");
     const screenshots: string[] = [];
     for (const skin of ["midnight", "daylight"]) {
       await evaluate(`import('/src/lib/skins.ts').then(({ applySkin }) => { applySkin(${JSON.stringify(skin)}); return document.documentElement.dataset.skin; })`);

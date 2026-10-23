@@ -3,6 +3,7 @@ import type { PriceList } from "../prices.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SpendState } from "../spend.ts";
 import {
+  flushUsageLedger,
   parseUsageRange,
   readUsage,
   summarizeUsage,
@@ -43,6 +44,7 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
       const offset = whole(url.searchParams.get("offset"), 0, 10_000_000);
       const limit = whole(url.searchParams.get("limit"), 50, PAGE_MAX);
       if (offset === null || !limit) return json(res, 400, { error: `offset must be a whole number and limit 1 to ${PAGE_MAX}` });
+      await flushUsageLedger(deps.dataDir);
       res.setHeader("cache-control", "no-store");
       return json(res, 200, await traces.list(range, { offset, limit }, deps.canSee(auth)));
     }
@@ -52,6 +54,7 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
       try { id = decodeURIComponent(trace[1]!); } catch { return json(res, 400, { error: "not a trace id" }); }
       const around = url.searchParams.get("at");
       if (around !== null && !/^\d{10,14}$/.test(around)) return json(res, 400, { error: "at must be a time in milliseconds" });
+      await flushUsageLedger(deps.dataDir);
       const found = await traces.detail(id, around === null ? null : Number(around), deps.canSee(auth));
       res.setHeader("cache-control", "no-store");
       return found ? json(res, 200, found) : json(res, 404, { error: "no such trace" });
@@ -59,6 +62,7 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
     if (!(method === "GET" && (path === "/api/usage" || path === "/api/usage.csv"))) return PASS;
     const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
     if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
+    await flushUsageLedger(deps.dataDir);
     const rows = readUsage(deps.dataDir, range);
     const prices = deps.prices();
     if (path === "/api/usage.csv") {

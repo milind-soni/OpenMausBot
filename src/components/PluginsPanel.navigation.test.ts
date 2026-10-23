@@ -51,6 +51,10 @@ vi.mock("./Avatar", () => ({ BotAvatar: ({ bot }: { bot: Bot }) => createElement
 vi.mock("./HighLevelCard", () => ({
   HighLevelCard: () => createElement("div", { "data-highlevel-card": true }, "Connect HighLevel"),
 }));
+vi.mock("./XCard", () => ({
+  X_CARD_SEARCH: "x twitter treg tweets posts",
+  XCard: () => createElement("div", { "data-x-card": true }, "X (Twitter)"),
+}));
 import { APPS_PREVIEW_COUNT, PluginsPanel, USED_BY_AVATAR_SIZE, botsUsingService } from "./PluginsPanel";
 import { FACE_BOX } from "./cursor-face-data";
 import { MASCOT_BODIES } from "../../shared/mascot-bodies";
@@ -60,6 +64,10 @@ const CONFIGURED = 3;
 const STATUS = 6;
 const PHASE = 13;
 const HIGHLEVEL_CONNECTED = 21;
+const X_CONNECTED = 22;
+const MODE = 4;
+const SEARCH = 15;
+const TAB = 16;
 
 type Node = ReactElement<{ children?: ReactNode; "aria-pressed"?: boolean; "data-apps-filter"?: string; onClick?: () => void; [key: string]: unknown }>;
 function nodes(value: ReactNode): Node[] {
@@ -138,6 +146,35 @@ describe("Apps pop-up", () => {
     expect(wrapper(render().nodes).props.className).toBe("contents");
     fixture.overrides.set(15, "zendesk");
     expect(wrapper(render().nodes).props.className).toBe("hidden");
+  });
+  it("shows the X card in the grid for every install and counts it once bots have X", () => {
+    const wrapper = (tree: Node[]) => tree.find((node) => node.props["data-native-card"] === "x")!;
+    const { html, nodes: tree } = render();
+    expect(nodes(wrapper(tree)).some((node) => node.props.onConnection !== undefined && node.props.refreshKey !== undefined)).toBe(true);
+    expect(wrapper(tree).props.className).toBe("contents");
+    expect(html).toContain("1 connected");
+    fixture.overrides.set(X_CONNECTED, true);
+    expect(render().html).toContain("2 connected");
+    fixture.overrides.set(TAB, "connected");
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    fixture.overrides.set(X_CONNECTED, false);
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+    fixture.overrides.set(TAB, "marketplace");
+    fixture.overrides.set(SEARCH, "twitter");
+    expect(wrapper(render().nodes).props.className).toBe("contents");
+    fixture.overrides.set(SEARCH, "gmail");
+    expect(wrapper(render().nodes).props.className).toBe("hidden");
+  });
+  it("leaves out the managed install's dead Twitter tile, which the X card replaces, unless it is already connected", () => {
+    const tile = (tree: Node[]) => tree.find((node) => node.props["data-app-tile"] === "twitter");
+    fixture.overrides.set(CARDS, [card("gmail"), card("twitter")]);
+    fixture.overrides.set(MODE, "managed");
+    expect(tile(render().nodes)).toBeUndefined();
+    fixture.overrides.set(STATUS, { twitter: { connected: true, accounts: [{ id: "ca_x", status: "ACTIVE" }] } });
+    expect(tile(render().nodes)).toBeDefined();
+    fixture.overrides.set(STATUS, {});
+    fixture.overrides.set(MODE, "self-hosted");
+    expect(tile(render().nodes)).toBeDefined();
   });
   it("keeps a safe explicit authorization link and reopens without creating another account", async () => {
     const url = "https://auth.example.test/flow";

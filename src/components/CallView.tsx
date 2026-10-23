@@ -32,7 +32,9 @@ import { openBotSettings } from "./bot-panel/panel-link";
 type Phase = "listening" | "sending" | "working" | "speaking";
 const CALL_ENDPOINT_MS = 850;
 
-export type CallButtonPlacement = "header" | "composer";
+/** `panel`: the small round button beside the bot in its panel, with no chevron. It leaves the composer's + menu to the
+ * composer's own button: two buttons answering it would start two calls. */
+export type CallButtonPlacement = "header" | "composer" | "panel";
 
 /** `fill` (Simple composer): a round button in that colour, with no chevron; the + menu picks the call mode. */
 export function CallButton({ bot, placement = "header", fill }: { bot: Bot; placement?: CallButtonPlacement; fill?: string }) {
@@ -125,6 +127,7 @@ export function CallTargetButton({
   const keyId = useId();
   const elsewhereName = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId)?.name : undefined;
   const composer = placement === "composer";
+  const round = Boolean(fill) || placement === "panel";
   const label = active
     ? t("call.hangUpOn", { name: targetName })
     : liveElsewhere
@@ -186,7 +189,8 @@ export function CallTargetButton({
     setCallMode(next);
     start(next);
   };
-  useEffect(() => onCallStartRequest(targetId, (next) => requestedStart.current(next)), [targetId]);
+  const answersPlusMenu = placement !== "panel";
+  useEffect(() => answersPlusMenu ? onCallStartRequest(targetId, (next) => requestedStart.current(next)) : undefined, [targetId, answersPlusMenu]);
 
   const popoverOpen = helpOpen || menuOpen || startPrompt;
   useEffect(() => {
@@ -245,12 +249,14 @@ export function CallTargetButton({
         style={fill && !active ? { backgroundColor: fill } : undefined}
         className={cn(
           "relative flex shrink-0 items-center justify-center disabled:opacity-60",
-          fill ? "rounded-full transition-[color,background,filter]" : "rounded-l-3xl rounded-r-lg active:rounded-3xl transition-[color,background,border-radius]",
-          composer ? "size-8" : "size-9",
+          round ? "rounded-full transition-[color,background,filter]" : "rounded-l-3xl rounded-r-lg active:rounded-3xl transition-[color,background,border-radius]",
+          composer || placement === "panel" ? "size-8" : "size-9",
           active
             ? "bg-danger text-white hover:brightness-110"
             : fill
               ? "text-white hover:brightness-110"
+            : placement === "panel"
+              ? unavailable ? "bg-ink/[0.06] text-ink-tertiary hover:text-ink-secondary" : "bg-ink/[0.06] text-ink hover:bg-ink/[0.11]"
             : composer
               ? unavailable
                 ? "bg-control text-ink-tertiary hover:text-ink-secondary"
@@ -261,13 +267,13 @@ export function CallTargetButton({
         )}
       >
         {active
-          ? <PhoneOff size={composer ? 15 : 17} />
-          : composer ? <AudioLines size={16} aria-hidden="true" /> : <Phone size={17} />}
+          ? <PhoneOff size={composer || round ? 15 : 17} />
+          : composer ? <AudioLines size={16} aria-hidden="true" /> : <Phone size={round ? 15 : 17} />}
         {unavailable && (
           <span className="absolute right-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-app" aria-hidden="true" />
         )}
       </button>
-      {canLive && !fill && (
+      {canLive && !round && (
         <button
           ref={chevronRef}
           type="button"

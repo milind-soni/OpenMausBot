@@ -1,6 +1,8 @@
 import type { Message } from "@/state/store";
-import { t } from "./i18n";
+import type { LiveStatus } from "@/state/turn-status";
+import { activeLocale, t } from "./i18n";
 import type { LocaleKey } from "@/locales";
+import { progressSize } from "../../shared/turn-progress";
 
 // Keys, not labels: this array is built at import time, and t() reads the active pack when called.
 const FALLBACK_LABELS: Array<[RegExp, LocaleKey]> = [
@@ -63,6 +65,8 @@ const ALTERNATES: Partial<Record<LocaleKey, LocaleKey[]>> = {
 export type LiveActivityPhrases = {
   phase: string;
   phrases: string[];
+  /** How much of the file the call has written so far ("14 KB"), shown apart so a growing size never re-fades the phrase. */
+  size?: string;
 };
 
 function phaseOf(key: LocaleKey): LiveActivityPhrases {
@@ -83,6 +87,55 @@ export function liveActivityPhrases(message?: Message): LiveActivityPhrases {
 
 export function activityStepLabel(tool: { name: string; spoken?: string }): string {
   return toolActivityPhrases(tool).phrases[0];
+}
+
+/** The status line's "now": the engine's own report when it made one, else the tool call still running in the chat,
+ * else nothing, and the line shows its timer alone. */
+export function turnNowPhrases(status: LiveStatus | null, message?: Message): LiveActivityPhrases | null {
+  if (status) return liveStatusPhrases(status);
+  if (message?.kind !== "activity" || !message.tool || message.tool.ok !== undefined || message.comm) return null;
+  const phrases = toolActivityPhrases(message.tool);
+  return phrases.phase === "chat.activity.working" ? null : phrases;
+}
+
+export function formatProgressSize(bytes: number | undefined): string | undefined {
+  const size = progressSize(bytes);
+  if (!size) return undefined;
+  const count = new Intl.NumberFormat(activeLocale(), { maximumFractionDigits: 1 }).format(size.count);
+  return t(size.unit === "kb" ? "chat.activity.sizeKb" : "chat.activity.sizeMb", { count });
+}
+
+function liveStatusPhrases(status: LiveStatus): LiveActivityPhrases | null {
+  switch (status.activity) {
+    case "thinking":
+      return phaseOf("chat.activity.thinking");
+    case "reply":
+      return phaseOf("chat.activity.reply");
+    case "write":
+    case "edit": {
+      const named = status.file
+        ? t(status.activity === "write" ? "chat.activity.writingNamed" : "chat.activity.editingNamed", { file: status.file })
+        : t(status.activity === "write" ? "chat.activity.writeFile" : "chat.activity.editFile");
+      const size = formatProgressSize(status.bytes);
+      return { phase: `live:${status.itemId ?? ""}:${named}`, phrases: [named], ...(size ? { size } : {}) };
+    }
+    case "read":
+      return status.file
+        ? { phase: `live:read:${status.file}`, phrases: [t("chat.activity.readingNamed", { file: status.file })] }
+        : phaseOf("chat.activity.readFile");
+    case "command":
+      return phaseOf("chat.activity.runCommand");
+    case "web":
+      return phaseOf("chat.activity.searchWeb");
+    case "fetch":
+      return phaseOf("chat.activity.readPage");
+    case "search":
+      return phaseOf("chat.activity.searching");
+    default: {
+      const phrases = status.tool ? toolActivityPhrases({ name: status.tool }) : null;
+      return phrases && phrases.phase !== "chat.activity.working" ? phrases : null;
+    }
+  }
 }
 
 function toolActivityPhrases(tool: { name: string; spoken?: string }): LiveActivityPhrases {

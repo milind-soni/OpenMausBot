@@ -8,6 +8,8 @@ import { once } from "node:events";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "./testing/cleanup.ts";
+import { createPageSchema } from "./testing/oversized-tool-schema.ts";
+import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GATE = join(HERE, "mcp-gate.ts");
@@ -53,6 +55,17 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     return;
   }
   send(msg.id, { scope: process.env.OMB_GATE_TOOL_SCOPE ?? null, upstreamOnly: process.env.UPSTREAM_ONLY });
+});
+`;
+
+/** Answers tools/list with its script as the catalog. */
+const LISTING_UPSTREAM = `
+const { createInterface } = require("node:readline");
+const { readFileSync } = require("node:fs");
+const catalog = JSON.parse(readFileSync(process.env.SCRIPT, "utf8"));
+createInterface({ input: process.stdin }).on("line", (line) => {
+  const msg = JSON.parse(line);
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: msg.method === "tools/list" ? catalog : {} }) + "\\n");
 });
 `;
 
@@ -158,7 +171,7 @@ describe("mcp-gate", () => {
     const answer = await call("search_products");
     const text = answer.result.content[0].text;
     expect(text.length).toBeLessThan(full.length / 10);
-    expect(text.startsWith("⚠️ TRUNCATED by OpenMausBot:")).toBe(true);
+    expect(text.startsWith("⚠️ SHAPED by OpenMausBot:")).toBe(true);
 
     const spillDir = join(scratch, "spill");
     const [file] = readdirSync(spillDir);
@@ -166,7 +179,7 @@ describe("mcp-gate", () => {
     expect(readFileSync(join(spillDir, file), "utf8")).toBe(full);
     expect(text).not.toContain(join(spillDir, file));
 
-    const kept = JSON.parse(text.slice(text.indexOf("\n\n") + 2, text.lastIndexOf("\n\n⚠️ TRUNCATED")));
+    const kept = JSON.parse(text.slice(text.indexOf("\n\n") + 2, text.lastIndexOf("\n\n⚠️")));
     expect(kept.products[0]).toEqual(products[0]);
     expect(kept.nextOffset).toBe("1");
   });
@@ -183,7 +196,7 @@ describe("mcp-gate", () => {
     expect(answer.result.structuredContent.products[0]).toEqual(products[0]);
     // the same records as the text, so the two copies never disagree
     const text: string = answer.result.content[0].text;
-    const kept = JSON.parse(text.slice(text.indexOf("\n\n") + 2, text.lastIndexOf("\n\n⚠️ TRUNCATED")));
+    const kept = JSON.parse(text.slice(text.indexOf("\n\n") + 2, text.lastIndexOf("\n\n⚠️")));
     expect(answer.result.structuredContent).toEqual(kept);
   });
 
@@ -196,7 +209,7 @@ describe("mcp-gate", () => {
 
     const answer = await call("search_products");
     const text: string = answer.result.content[0].text;
-    const kept = JSON.parse(text.slice(text.indexOf("\n\n") + 2, text.lastIndexOf("\n\n⚠️ TRUNCATED")));
+    const kept = JSON.parse(text.slice(text.indexOf("\n\n") + 2, text.lastIndexOf("\n\n⚠️")));
     expect(answer.result.structuredContent).toEqual(kept);
   });
 
@@ -338,7 +351,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     const scope = { OMB_GATE_TOOL_SCOPE: JSON.stringify({ allow: ["mcp:shop:read"] }), OMB_GATE_BUDGET: "600" };
     start({}, { ...scope, OMB_GATE_DIRECTORY: "1" }, DIRECTORY_UPSTREAM);
     send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
-    expect(JSON.parse(await nextLine()).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["search_tools", "describe_tool", "call_tool", "read"]);
+    expect(JSON.parse(await nextLine()).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["search_tools", "describe_tool", "call_tool", "read", "query_result"]);
     expect((await callWith("call_tool", { name: "write", arguments: {} }, 2)).error).toMatchObject({ code: -32602 });
     expect(ran()).toEqual([]);
     expect((await callWith("describe_tool", { name: "read" }, 3)).result.content[0].text).toHaveLength(4_000);
@@ -350,10 +363,92 @@ createInterface({ input: process.stdin }).on("line", (line) => {
   it("treats those names as ordinary tools for any other upstream", async () => {
     start({}, { OMB_GATE_TOOL_SCOPE: JSON.stringify({ allow: ["mcp:shop:read"] }), OMB_GATE_BUDGET: "600" }, DIRECTORY_UPSTREAM);
     send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
-    expect(JSON.parse(await nextLine()).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["read"]);
+    expect(JSON.parse(await nextLine()).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["read", "query_result"]);
     expect((await callWith("call_tool", { name: "read", arguments: {} }, 2)).error).toMatchObject({ code: -32602 });
     expect((await callWith("describe_tool", { name: "read" }, 3)).error).toMatchObject({ code: -32602 });
     expect(ran()).toEqual([]);
+  });
+
+  it("fits each listed schema to the engine's provider profile, and lists tools as they came without one", async () => {
+    const catalog = { tools: [{ name: "small", inputSchema: { type: "object", properties: { q: { type: "string" } } } },
+      { name: "create_page", description: "Create a page.", inputSchema: createPageSchema() }] };
+    start(catalog, { OMB_GATE_BUDGET: "0", [TOOL_SCHEMA_PROFILE_ENV]: "moonshot" }, LISTING_UPSTREAM);
+    send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const [small, page] = JSON.parse(await nextLine()).result.tools;
+    expect(small).toEqual(catalog.tools[0]);
+    expect(schemaBytes(page.inputSchema)).toBeLessThanOrEqual(12_000);
+    expect(page.description).toMatch(/^Create a page\.\n\n\(OpenMausBot shortened this tool's parameters to fit Kimi's size limit/);
+    gate!.kill();
+    await once(gate!, "close");
+
+    start(catalog, { OMB_GATE_BUDGET: "0" }, LISTING_UPSTREAM);
+    send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+    expect(JSON.parse(await nextLine()).result).toEqual(catalog);
+  });
+
+  describe("shaping an oversized result", () => {
+    const products = Array.from({ length: 300 }, (_, i) => ({ id: `p${i}`, name: `Bar ${i}`, price: 100 + i, blurb: "x".repeat(300) }));
+    const full = JSON.stringify({ nextOffset: "1", products });
+    const query = async (args: unknown, id: number) => {
+      send({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "query_result", arguments: args } });
+      return JSON.parse(await nextLine());
+    };
+
+    it("lists query_result beside the server's tools only while it trims", async () => {
+      start({ text: full }, {}, SCOPED_UPSTREAM);
+      send({ jsonrpc: "2.0", id: 1, method: "tools/list" });
+      const first = JSON.parse(await nextLine()).result;
+      expect(first.tools.map((tool: { name: string }) => tool.name)).toEqual(["read", "write"]);
+      send({ jsonrpc: "2.0", id: 2, method: "tools/list", params: { cursor: "second" } });
+      const last = JSON.parse(await nextLine()).result;
+      expect(last.tools.map((tool: { name: string }) => tool.name)).toEqual(["write", "query_result"]);
+      expect(last.tools[1].annotations.readOnlyHint).toBe(true);
+    });
+
+    it("never lists it when the budget is zero", async () => {
+      start({ text: full }, { OMB_GATE_BUDGET: "0" }, SCOPED_UPSTREAM);
+      send({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { cursor: "second" } });
+      expect(JSON.parse(await nextLine()).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["write"]);
+    });
+
+    it("holds the whole result and answers a query locally with just the selection", async () => {
+      start({ text: full }, {}, SCOPED_UPSTREAM);
+      const shaped: string = (await call("read")).result.content[0].text;
+      expect(shaped.startsWith("⚠️ SHAPED by OpenMausBot:")).toBe(true);
+      expect(shaped).toContain('query_result {"result":"r1","query":');
+      expect(shaped).toContain("products: 300 items{id, name, price, blurb}");
+      expect(shaped.length).toBeLessThan(8_200);
+
+      const answer = await query({ result: "r1", query: "products[?price > `397`].{name: name, price: price}" }, 2);
+      expect(answer.result.isError).toBeUndefined();
+      expect(JSON.parse(answer.result.content[0].text)).toEqual([{ name: "Bar 298", price: 398 }, { name: "Bar 299", price: 399 }]);
+      // the upstream saw the original call and nothing else
+      expect(readFileSync(join(scratch, "reply.json.calls"), "utf8")).toBe("read\n");
+    });
+
+    it("cuts a query answer to the same budget, so the whole thing never comes back", async () => {
+      start({ text: full }, { OMB_GATE_BUDGET: "2000" }, SCOPED_UPSTREAM);
+      await call("read");
+      const answer = await query({ result: "r1", query: "@" }, 2);
+      expect(answer.result.content[0].text.length).toBeLessThan(2_400);
+      expect(answer.result.content[0].text).toContain("Narrow the query");
+    });
+
+    it("answers a bad handle or query as a tool error without touching upstream", async () => {
+      start({ text: full }, {}, SCOPED_UPSTREAM);
+      expect((await query({ result: "r9", query: "@" }, 1)).result).toMatchObject({ isError: true });
+      expect((await query({ query: "@" }, 2)).result).toMatchObject({ isError: true });
+      expect(existsSync(join(scratch, "reply.json.calls"))).toBe(false);
+    });
+
+    it("keeps query_result listed and callable under a tool selection that never names it", async () => {
+      start({ text: full }, { OMB_GATE_TOOL_SCOPE: JSON.stringify({ allow: ["mcp:shop:read"] }) }, SCOPED_UPSTREAM);
+      send({ jsonrpc: "2.0", id: 1, method: "tools/list", params: { cursor: "second" } });
+      expect(JSON.parse(await nextLine()).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["query_result"]);
+      await call("read", 2);
+      const answer = await query({ result: "r1", query: "length(products)" }, 3);
+      expect(answer.result.content[0].text).toBe("300");
+    });
   });
 
   it("strips policy from the upstream environment without losing its own configuration", async () => {

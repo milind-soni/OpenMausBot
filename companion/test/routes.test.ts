@@ -38,6 +38,7 @@ describe("what the app may do", () => {
     ["GET", "/api/bots"],
     ["POST", "/api/bots"],
     ["PATCH", "/api/bots/bot_123"],
+    ["PUT", "/api/bots/order"],
     ["POST", "/api/sidebar-sections"],
     ["POST", "/api/bots/bot_123/messages"],
     ["PATCH", "/api/bots/bot_123/cards/msg_2"],

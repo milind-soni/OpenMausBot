@@ -228,6 +228,9 @@ it.each(["rename", "delete"])("withholds an in-flight result after team %s and r
   const move = (section: string) => request(`/api/bots/${f.target.id}`, { method: "PATCH", headers: { Origin: f.session.info.url },
     body: JSON.stringify({ section }) }, f.session.info.url);
   await move("Parking");
+  // The move withholds the in-flight result and resumes the Director, and a team whose Chief is working cannot be renamed.
+  await expect.poll(async () => f.provider().some((turn: any) => turn.botId === f.sender.id && turn.resumed)
+    && !(await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.sender.id).busy, { timeout: 30_000 }).toBe(true);
   await f.api("/api/sidebar-sections?section=Engineering", mode === "rename" ? { name: "Renamed" } : {}, mode === "rename" ? "PATCH" : "DELETE");
   await f.api("/api/sidebar-sections", { name: "Engineering" });
   await move("Engineering");

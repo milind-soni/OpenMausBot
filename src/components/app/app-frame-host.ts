@@ -98,6 +98,8 @@ export interface AppFrameHostOptions {
   hostVersion: string;
   adapter: AppFrameAdapter;
   log?(params: unknown): void;
+  /** The frame fills its container and the page scrolls inside it: the size the View reports is ignored. */
+  fill?: boolean;
 }
 
 export interface AppFrameHost {
@@ -153,6 +155,7 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
   const ownerDocument = container.ownerDocument;
   const win = ownerDocument.defaultView;
   const iframe = createAppIframe(ownerDocument, options.title, options.height, options.hostContext.theme);
+  if (options.fill) iframe.style.height = "100%";
   const engagement = trackAppEngagement(iframe);
   let gone = false;
   let leaving = false;
@@ -167,6 +170,7 @@ export function mountAppFrame(options: AppFrameHostOptions): AppFrameHost {
       // An opaque origin cannot be named: "*" is the only target there is.
       post: (message) => iframe.contentWindow?.postMessage(message, "*"),
       resize: (height) => {
+        if (options.fill) return;
         iframe.style.height = `${height}px`;
         if (!leaving) options.adapter.resize(height);
       },

@@ -76,6 +76,11 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
   const rowStatus = (sentence: string) => evaluate(`${row(sentence)}?.dataset.automationStatus ?? "gone"`) as Promise<string>;
   const flip = (sentence: string) => evaluate(`(() => { const toggle = ${row(sentence)}?.querySelector("[role=switch]"); toggle?.click(); return toggle?.getAttribute("aria-checked") ?? null; })()`);
   const switchState = (sentence: string) => evaluate(`${row(sentence)}?.querySelector("[role=switch]")?.getAttribute("aria-checked") ?? null`) as Promise<string | null>;
+  /** Opens an automation from its row: the row's title is its name, with the sentence beneath. */
+  const openRow = async (sentence: string) => {
+    const found = await evaluate(`(() => { const button = ${row(sentence)}?.querySelector("button"); button?.click(); return Boolean(button); })()`);
+    expect(found, sentence).toBe(true);
+  };
   const panel = () => text('aside[aria-label="Automation"]');
   const card = (sentence: string) => `[...document.querySelectorAll("[data-trigger-card]")].find((item) => item.innerText.includes(${JSON.stringify(sentence)}))`;
   const cardText = (sentence: string) => evaluate(`${card(sentence)}?.innerText ?? ""`) as Promise<string>;
@@ -103,7 +108,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     await browser("close").catch(() => {});
     await preview.close();
   };
-  return { ui, evaluate, click, screenshot, text, clickIn, fill, select, rowText, rowStatus, flip, switchState, panel, card, cardText, clickCard, reload, openAutomations, openChat, say, noOverflow, browser, close };
+  return { ui, evaluate, click, screenshot, text, clickIn, fill, select, rowText, rowStatus, flip, switchState, openRow, panel, card, cardText, clickCard, reload, openAutomations, openChat, say, noOverflow, browser, close };
 }
 
 (enabled ? it : it.skip)("a person sets up, uses, pauses, edits, breaks, deletes and restarts automations in the real app", async () => {
@@ -126,7 +131,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     writeFileSync(live.planPath, JSON.stringify(plan([{ id: starter.id }, { id: scout }, { id: ledger }])));
 
     app = await openApp(live, { shots: SHOTS, bots: { Scout: scout, Ledger: ledger } });
-    const { ui, evaluate, click, screenshot, text, clickIn, fill, select, rowText, rowStatus, flip, switchState, panel, card, cardText, clickCard, reload, openAutomations, openChat, say, noOverflow, browser } = app;
+    const { ui, evaluate, click, screenshot, text, clickIn, fill, select, rowText, rowStatus, flip, switchState, openRow, panel, card, cardText, clickCard, reload, openAutomations, openChat, say, noOverflow, browser } = app;
     const MAIN = "every morning, summarize my inbox";
     const state = async () => ({ ...(await api("GET", "/api/routines")), ...(await api("GET", "/api/webhooks")) }) as { routines: any[]; runs: any[]; webhooks: any[]; attempts: any[] };
 
@@ -166,7 +171,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     expect(wrong.status).toBe(401);
     await openAutomations();
     await expect.poll(() => rowText(FORM)).toMatch(/Working · last ran today/);
-    await click(FORM);
+    await openRow(FORM);
     await expect.poll(panel).toMatch(/recent runs/i);
     await evaluate(`document.querySelector('aside[aria-label="Automation"] details summary').click(); true`);
     await expect.poll(() => text('aside[aria-label="Automation"] details')).toContain("Recent calls");
@@ -206,14 +211,14 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     expect((await state()).routines[0]).toMatchObject({ enabled: true });
     expect((await state()).webhooks[0]).toMatchObject({ enabled: true });
 
-    await click(SCHEDULE);
+    await openRow(SCHEDULE);
     await clickIn('aside[aria-label="Automation"]', "Pause");
     await expect.poll(panel).toMatch(/^.+\nPaused\n/);
     await expect.poll(() => rowText(SCHEDULE)).toMatch(/Paused · /);
     await screenshot("panel-paused");
     await reload();
     await openAutomations();
-    await click(SCHEDULE);
+    await openRow(SCHEDULE);
     expect(await panel()).toMatch(/^.+\nPaused\n/);
     await clickIn('aside[aria-label="Automation"]', "Resume");
     await expect.poll(panel).toMatch(/^.+\nWorking\n/);
@@ -236,7 +241,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
 
     // 4. Run now; Edit the time and the instructions; the sentence follows.
     await openAutomations();
-    await click(SCHEDULE);
+    await openRow(SCHEDULE);
     await clickIn('aside[aria-label="Automation"]', "Run now");
     await expect.poll(panel, { timeout: 30_000 }).toMatch(/Today [^\n]*\n✓\nInbox: 3 new emails, nothing urgent\./);
     await expect.poll(() => rowText(SCHEDULE)).toMatch(/Working · last ran today [^·]+ · next: /);
@@ -268,7 +273,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     await say("Scout", "every day at 5pm, check the sales inbox", MAIN);
     await expect.poll(() => cardText(FAILING), { timeout: 30_000 }).toContain("Next:");
     await openAutomations();
-    await click(FAILING);
+    await openRow(FAILING);
     await clickIn('aside[aria-label="Automation"]', "Run now");
     await expect.poll(panel, { timeout: 30_000 }).toContain("Needs you");
     expect(await panel()).toContain("It's signed out. Sign in again so it can run.");
@@ -286,7 +291,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     await click("List");
 
     // 7. Delete one from its panel; Undo one a bot just made from its card.
-    await click(FAILING);
+    await openRow(FAILING);
     await evaluate("window.confirm = () => true; true");
     await clickIn('aside[aria-label="Automation"]', "Delete");
     await expect.poll(() => rowStatus(FAILING)).toBe("gone");
@@ -347,7 +352,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     await openAutomations();
     await expect.poll(() => rowStatus(EDITED)).toBe("working");
     await screenshot("advanced-list");
-    await click(FORM);
+    await openRow(FORM);
     await expect.poll(panel).toContain("Copy address");
     await screenshot("advanced-panel");
     await click("Close");
@@ -357,7 +362,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     await noOverflow("the narrow list");
     expect(await evaluate(`(() => { const menu = document.querySelector('button[aria-label="Open bot list"]').getBoundingClientRect(); const back = document.querySelector('main header button[aria-label="Back"]').getBoundingClientRect(); return back.left >= menu.right; })()`), "the Back button sits clear of the menu button").toBe(true);
     await screenshot("narrow-list");
-    await click(EDITED);
+    await openRow(EDITED);
     await expect.poll(panel).toMatch(/recent runs/i);
     await noOverflow("the narrow panel");
     expect(await evaluate(`(() => { const box = document.querySelector('aside[aria-label="Automation"]').getBoundingClientRect(); return box.left >= 0 && box.right <= window.innerWidth + 1; })()`)).toBe(true);

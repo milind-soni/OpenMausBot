@@ -505,7 +505,8 @@ test("the Cloud's setup checklist can open the lending switch here, and nothing 
   await local.bridge.cloudLending.open({ origin: "https://evil.example.test", folders: ["/"] });
   assert.deepEqual(local.invoked, [["cloud-lending:open"]]);
   const page = preload(CLOUD);
-  assert.deepEqual(Object.keys(page.bridge.cloudLending), ["open", "state", "set", "screen"]);
+  assert.deepEqual(Object.keys(page.bridge.cloudLending), ["open", "state", "set", "screen", "offer"]);
+  await assert.rejects(page.bridge.cloudLending.offer(), /Press Use my Mac/, "a bot's link opens the popup only from the person's click");
   await assert.rejects(page.bridge.cloudLending.set(true), /Turn on the switch/);
   await page.bridge.cloudLending.set(false);
   assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-lending")), [["cloud-lending:set", false]]);

@@ -662,4 +662,20 @@ describe("a member's own phone on a Team Cloud", () => {
     fromAdmin();
     expect(registry.list().find((session) => session.id === desktop.id)?.expiresAt).toBe(desktop.createdAt + HOUR);
   });
+
+  it("counts as her phone only a session her own code opened, while it lives, and signs it out when removed", () => {
+    const desktop = fromAdmin();
+    const phone = phoneOf(desktop);
+    registry.issue({ label: "Laptop", scopes: ["admin", "client"] });
+    const { code } = registry.openPairing({ label: "Phone", scopes: ["client"] });
+    expect(registry.exchange({ code, label: "Someone's phone", source: "q" }).ok).toBe(true);
+    expect(registry.memberPhones()).toEqual([expect.objectContaining({ id: phone.session.id, label: "Ada's phone", email: ADA.email, teamRole: "member" })]);
+    expect(registry.memberPhones().map((session) => session.id), "the app's own sign-in is not a phone").not.toContain(desktop.id);
+    expect(registry.revoke(phone.session.id)).toBe(true);
+    expect(registry.authenticate(phone.token)).toBeNull();
+    expect(registry.memberPhones()).toEqual([]);
+    const later = phoneOf(fromAdmin());
+    clock = registry.authenticate(later.token)!.expiresAt;
+    expect(registry.memberPhones(), "an ended phone is not listed").toEqual([]);
+  });
 });

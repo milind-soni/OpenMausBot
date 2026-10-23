@@ -6,6 +6,7 @@ import { copyText, type CopyFeedback } from "@/lib/copy-text";
 import { api } from "@/state/store";
 import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/session";
 import { readMembership } from "../lib/membership";
+import { lastSeen, minutesLeft } from "../lib/pairing-time";
 import { revealPhonePairing } from "../lib/phone-pairing";
 import { Card } from "./SettingsPrimitives";
 import { TeamPhoneCard } from "./TeamPhoneCard";
@@ -41,18 +42,6 @@ export function pairingBlockedReason(state: SessionState | null): "chat-only" | 
 
 export function shownDevices(devices: PairedDevice[], cloudHome: boolean): PairedDevice[] {
   return cloudHome ? devices.filter((device) => device.scopes.includes("admin")) : devices;
-}
-
-export function minutesLeft(expiresAt: number, now = Date.now()): number {
-  return Math.max(0, Math.ceil((expiresAt - now) / 60_000));
-}
-
-export function lastSeen(lastSeenAt: number, now = Date.now()): string {
-  const minutes = Math.max(0, Math.floor((now - lastSeenAt) / 60_000));
-  if (minutes < 1) return t("remote.serverPairing.justNow");
-  if (minutes < 60) return t("remote.serverPairing.minutesAgo", { minutes });
-  if (minutes < 1440) return t("remote.serverPairing.hoursAgo", { hours: Math.round(minutes / 60) });
-  return t("remote.serverPairing.daysAgo", { days: Math.round(minutes / 1440) });
 }
 
 const button = "ui-button ui-button-primary";

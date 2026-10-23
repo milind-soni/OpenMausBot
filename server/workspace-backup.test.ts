@@ -55,6 +55,7 @@ function fixture(root: string): DatabaseSync {
   json(join(root, "webhooks.json"), { version: 1, webhooks: [{ id: "hook", endpointId: "endpoint", enabled: true, secretHash: "a".repeat(64), sealedSecret: "sealed-webhook-secret" }], deliveries: [{ id: "delivery" }],
     deleted: [{ at: 1, webhook: { id: "gone", endpointId: "gone-endpoint", secretHash: "c".repeat(64), sealedSecret: "sealed-deleted-secret" } }] });
   json(join(root, "calendar-calls.json"), { version: 1, calls: [{ id: "call", nextRunAt: 100 }] });
+  json(join(root, "app-triggers.json"), { version: 1, pollerId: "poller-source-0001", cursor: 4, triggers: [{ id: "trigger", botId: "bot", enabled: true }], attempts: [], deleted: [] });
   json(join(root, "delegations.json"), { thread: [{ id: "pending" }] });
   const runtime = openRuntimeStore(join(root, "runtime.db"));
   try {
@@ -215,6 +216,7 @@ describe("encrypted full workspace backups", () => {
       expect(readJson(join(target, "webhooks.json")).webhooks[0].secretHash).toMatch(/^[a-f0-9]{64}$/);
       expect(readJson(join(target, "webhooks.json")).webhooks[0].secretHash).not.toBe("a".repeat(64));
       expect(readJson(join(target, "calendar-calls.json")).calls[0].nextRunAt).toBeNull();
+      expect(readJson(join(target, "app-triggers.json")).triggers).toEqual([{ id: "trigger", botId: "bot", enabled: false }]);
       expect(readJson(join(target, "delegations.json"))).toEqual({});
       expect(existsSync(join(target, "runtime.db-wal"))).toBe(false);
       const restoredRuntime = new DatabaseSync(join(target, "runtime.db"), { readOnly: true });

@@ -52,6 +52,10 @@ export class ChromeLaunchError extends Error {
 }
 
 const OUTPUT_LIMIT = 64 * 1024;
+
+/** A binary's first start on a machine: Windows scans a newly downloaded Chrome before it runs, over 60 s for Chrome
+ * for Testing 156 on GitHub's Windows runner. */
+export const FIRST_START_MS = 120_000;
 const HANDSHAKE_ID = 0;
 
 function killTree(child: ChildProcess, signal: NodeJS.Signals): void {

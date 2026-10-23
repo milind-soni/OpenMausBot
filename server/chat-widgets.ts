@@ -5,6 +5,7 @@ import {
 } from "../shared/widget.ts";
 import type { MausColor } from "../shared/wire.ts";
 import type { ChatApps } from "./chat-apps.ts";
+import type { BotFolders } from "./pages/bundle.ts";
 import { createOptionsCard } from "./options-card.ts";
 import { isSecretName, mask, redactSecretsInText } from "./redact.ts";
 import type { Message } from "./store.ts";
@@ -105,11 +106,14 @@ export interface AgentCardArgs {
   /** The server built this card from records, not the bot. */
   serverCard?: true;
   apps?: Pick<ChatApps, "createAppCard" | "recordMcpAppCall">;
+  /** The bot's own folders, for a page shown from a folder. */
+  folders?: BotFolders;
 }
 
 export type McpAppCardInput = { tool: "mcp_app" } & Record<string, unknown>;
 
 export function createAgentCard(args: AgentCardArgs & { input: McpAppCardInput }): Promise<AgentCardResult>;
+export function createAgentCard(args: AgentCardArgs & { folders: BotFolders }): AgentCardResult | Promise<AgentCardResult>;
 export function createAgentCard(args: AgentCardArgs): AgentCardResult;
 export function createAgentCard(args: AgentCardArgs): AgentCardResult | Promise<AgentCardResult> {
   const { store, bot, threadId, input } = args;
@@ -120,7 +124,7 @@ export function createAgentCard(args: AgentCardArgs): AgentCardResult | Promise<
   }
   if (input.tool === "show_html" || input.tool === "update_html") {
     if (!args.apps) return { ok: false, status: 400, error: "Pages are not available on this computer." };
-    return args.apps.createAppCard({ bot, threadId, input, ...(args.authored ? { authored: args.authored } : {}) });
+    return args.apps.createAppCard({ bot, threadId, input, ...(args.authored ? { authored: args.authored } : {}), ...(args.folders ? { folders: args.folders } : {}) });
   }
   if (input.tool !== "show_widget" && input.tool !== "update_widget") {
     return { ok: false, status: 400, error: "tool: must be show_widget or update_widget." };

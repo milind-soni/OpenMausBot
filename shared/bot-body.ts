@@ -22,7 +22,7 @@ export function isHalloweenBody(value: unknown): value is HalloweenBodyId {
 }
 
 /** The costume each bot colour wears when "Dress my bots up" is on with the Halloween skin. */
-export const COSTUME_FOR_COLOR: Record<MausColor, HalloweenBodyId> = {
+export const COSTUME_FOR_COLOR: Record<Exclude<MausColor, "silver" | "chrome">, HalloweenBodyId> = {
   orange: "pumpkin",
   purple: "ghost",
   teal: "witch",

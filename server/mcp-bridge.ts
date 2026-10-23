@@ -5,6 +5,7 @@ import { CONTROL_ACT_WITHIN_MS, CONTROL_UNCONFIRMED, CONTROL_WAITED, controlRefu
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { textOnlyErrorResultLine } from "./mcp-error-result.ts";
 import { createToolListNormalizer } from "./mcp-tool-schema.ts";
+import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 
 export const BRIDGE_INACTIVITY_MS = 45_000;
 const PROBE_TIMEOUT_MS = 10_000;
@@ -217,7 +218,7 @@ export function runMcpBridge(options: BridgeOptions): void {
     forward,
     ...(client ? { gate: { check: () => client.state(true) } } : {}),
   });
-  const toolLists = createToolListNormalizer();
+  const toolLists = createToolListNormalizer(toolSchemaProfileFromEnv(), (line) => process.stderr.write(`${options.label}: ${line}\n`));
   let pendingInput = Promise.resolve();
   const inbound = createLineSplitter((line) => {
     toolLists.observeRequest(line);

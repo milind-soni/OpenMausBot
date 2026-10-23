@@ -13,7 +13,10 @@ import { AppObserver, modelVisible, withUiExtension } from "../mcp-app-observer.
 import { appMountFor, mcpStdioServer } from "../mcp-gate-config.ts";
 import { REMOTE_MCP_STARTUP_MS, remoteMcpSpec } from "../mcp-http.ts";
 import { compileToolSchema } from "../mcp-schema-validator.ts";
+import { fitToolList } from "../mcp-tool-schema.ts";
+import type { ToolSchemaProfile } from "../tool-schema-profile.ts";
 import { allowsTool, canUseMcpServer, parseToolScope, type ToolScope } from "../../shared/tool-scope.ts";
+import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 
 export interface ChatToolDefinition {
   type: "function";
@@ -249,7 +252,9 @@ function omitBlankDefaults(builtInBrowser: boolean, tool: string, args: unknown)
   }
 }
 
-export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope, callTimeoutMs: number = DEFAULT_CALL_MS): Promise<ChatToolSession> {
+/** Under `schemaProfile` the model reads each tool's schema fitted to its provider; calls are still checked against the full one. */
+export async function mountChatTools(integrations: SendTurnInput["integrations"], signal: AbortSignal, computerUse = false, toolScope?: ToolScope, callTimeoutMs: number = DEFAULT_CALL_MS,
+  schemaProfile?: ToolSchemaProfile): Promise<ChatToolSession> {
   const parsed = parseToolScope(toolScope);
   if (!parsed.ok) throw new Error(parsed.error);
   const scope = parsed.scope;
@@ -263,6 +268,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const agentsServer = integrations?.agents && scope !== undefined ? unbridgedServer(integrations.agents) : integrations?.agents;
   if (agentsServer && eligible("agents")) servers.push(["agents", agentsServer]);
   if (integrations?.composio && eligible("composio")) servers.push(["composio", integrations.composio]);
+  if (integrations?.composioOwn && eligible(OWN_APPS_SERVER)) servers.push([OWN_APPS_SERVER, integrations.composioOwn]);
   if (integrations?.data && eligible("data")) servers.push(["data", integrations.data]);
   if (integrations?.highlevel && eligible("highlevel")) servers.push(["highlevel", integrations.highlevel]);
   for (const [name, server] of Object.entries(integrations?.custom ?? {})) {
@@ -338,14 +344,16 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
           if (!object(tool.inputSchema) || tool.inputSchema.type !== "object") throw new Error("MCP tools require an object input schema");
           if (Buffer.byteLength(JSON.stringify(tool.inputSchema)) > SCHEMA_BYTES) throw new Error("MCP tool schema exceeds the 64KB limit");
           const schema = compileToolSchema(tool.inputSchema);
-          const parameters = { ...tool.inputSchema };
+          const [listed] = schemaProfile ? fitToolList([tool], schemaProfile, (line) => console.warn(`chat-mcp: ${server}: ${line}`)) : [tool];
+          if (!object(listed) || !object(listed.inputSchema)) continue;
+          const parameters = { ...listed.inputSchema };
           const constraints: Record<string, unknown> = {};
           if (computerUse) {
             for (const key of ["anyOf", "oneOf", "allOf", "not"]) {
               if (key in parameters) { constraints[key] = parameters[key]; delete parameters[key]; }
             }
           }
-          const description = (typeof tool.description === "string" ? tool.description : "Configured MCP tool") +
+          const description = (typeof listed.description === "string" ? listed.description : "Configured MCP tool") +
             (Object.keys(constraints).length ? " Additional argument constraints (validated before execution): " + JSON.stringify(constraints) : "");
           const base = chatToolName(server, tool.name);
           let name = base;

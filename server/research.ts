@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { ServiceCredential } from "./included-services.ts";
-import { dollarsText, readCapped, tregAuthHeaders, tregErrorFor, XResearchError } from "./x-research.ts";
+import { dollarsText, readCapped, tregAuthHeaders, tregErrorFor, X_MESSAGES, XResearchError } from "./x-research.ts";
 
 /** A catalog id, or a hub tool's versioned id; never a path or a URL (those would reach a team's own tools). */
 export const RESEARCH_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,159}(?:@[A-Za-z0-9._-]{1,40})?$/;
@@ -127,6 +127,7 @@ function relayError(status: number, body: unknown): XResearchError {
   if (!said) return new XResearchError("unavailable", RESEARCH_MESSAGES.unavailable);
   const kind = status === 400 || status === 422 ? "bad_input" : status === 404 ? "not_found" : status === 402 ? "no_credit" : status === 409 ? "in_progress" : status === 429 ? "rate_limited" : "unavailable";
   const near = isRow(body) && Array.isArray(body.didYouMean) ? (body.didYouMean as unknown[]).filter((id): id is string => typeof id === "string").slice(0, 5) : [];
+  if (status === 429 && code === "quota_exceeded") return new XResearchError(kind, `${said} ${X_MESSAGES.addOwnKey}`);
   return new XResearchError(kind, near.length ? `${said} Did you mean ${near.join(", ")}?` : said);
 }
 

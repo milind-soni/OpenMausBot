@@ -9,8 +9,10 @@ import { CARD, CARD_IDLE, CARD_PICKED, CardIcon, Footer, PRIMARY, QUIET, SECONDA
 
 export type BringOutcome = "team" | "here" | "skipped";
 
-export function WelcomeBring({ name, desktop, older = false, cloudHasWork, sent = null, headingRef, onTeam, onFinish }: {
+export function WelcomeBring({ name, desktop, older = false, cloudHasWork, sent = null, team = false, headingRef, onTeam, onFinish }: {
   name: string;
+  /** A Team Cloud: nothing comes here from a person's computer by itself; it starts with bots of its own. */
+  team?: boolean;
   /** The OpenMausBot app's own window, which brings this computer's bots here by itself. */
   desktop: boolean;
   /** An OpenMausBot app from before it brought bots by itself: it needs an update first. */
@@ -64,7 +66,7 @@ export function WelcomeBring({ name, desktop, older = false, cloudHasWork, sent 
       </>
       : <button type="button" className={PRIMARY} onClick={() => onFinish("skipped")}>{t("onboarding.continue")}</button>;
   return <section aria-labelledby="cloud-welcome-step" data-welcome-step="bring" className="flex flex-col gap-5">
-    <StepHeading headingRef={headingRef} title={t("cloudWelcome.bring.title", { name })} sub={t("cloudWelcome.bring.sub")} />
+    <StepHeading headingRef={headingRef} title={t("cloudWelcome.bring.title", { name })} sub={t(team ? "cloudWelcome.bring.subTeam" : "cloudWelcome.bring.sub", { name })} />
     {older && <p role="note" data-bring-update className="text-[13px] leading-relaxed text-ink">{t("cloudWelcome.bring.update")}</p>}
     {cloudHasWork
       ? <div data-bring-here className={cn(CARD, CARD_IDLE)}>

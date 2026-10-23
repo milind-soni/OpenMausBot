@@ -62,7 +62,7 @@ it("learns a server's apps, observes its tool call into an app row, and runs its
       return JSON.parse((await lines.next()).value as string);
     };
     await ask(1, "initialize", { protocolVersion: "2025-11-25", capabilities: { roots: {} }, clientInfo: { name: "claude-code", version: "2.1.270" } });
-    expect((await ask(2, "tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["show_board", "paint_board", "peek_board", "plain_echo"]);
+    expect((await ask(2, "tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["show_board", "paint_board", "peek_board", "plain_echo", "query_result"]);
     expect((await ask(3, "tools/call", { name: "save_board", arguments: {} })).error.message).toBe(APP_ONLY_REFUSAL);
     const called = await ask(4, "tools/call", { name: "show_board", arguments: { cards: 4 }, _meta: { "claudecode/toolUseId": "toolu_e2e" } });
     expect(called.result.content[0].text).toBe("Board with 4 cards");

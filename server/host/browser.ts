@@ -390,6 +390,18 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const results = await Promise.all([eraseChromeBrowser(request), ...session ? [erased(session)] : []]);
     return results.every(Boolean);
   }
+  /** A person who left a Team Cloud: their own browser of every bot and every shared profile, stopped and its saved
+   * sign-ins and profile folder erased. True once that is done. */
+  async function eraseAudienceBrowsers(audience: Audience): Promise<boolean> {
+    const suffix = audienceBrowserSuffix(audience);
+    if (!suffix || !audiences.variants().includes(suffix)) return true;
+    const requests: BrowserCleanupWireRequest[] = [
+      ...store.bots.map((bot) => ({ type: "openmausbot:browser-bot-deleted" as const, requestId: "team-member-left", botId: bot.id + suffix })),
+      ...(cfg.browserProfiles ?? []).filter((profile) => !usesMyChrome(profile.id)).map((profile) => ({
+        type: "openmausbot:browser-profile-deleted" as const, requestId: "team-member-left", partitionId: browserProfilePartitionId(profile) + suffix })),
+    ];
+    return (await Promise.all(requests.map((request) => eraseOneBrowser(request)))).every(Boolean);
+  }
   /** Where a page's file input finds the files a turn uploads: a boxed Chrome sees only its own profile's folder. */
   function uploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, session: string, spec: Spec): string[] {
     if (!boxed || chromeTarget(session, spec)) return namedUploadPaths(files, join(DATA_DIR, "browser-uploads"));
@@ -428,5 +440,6 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, usesMyChrome, browserSessionSpec, browserIntegration,
     browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, signedInSitesRefusal, closeBrowser, browserEngineSwitched,
     eraseDeletedBrowser, engineSummary, engineBrowsers, browserAudience, browserSessionsOf, signedInSitesTarget, uploadPaths,
+    eraseAudienceBrowsers,
   };
 }

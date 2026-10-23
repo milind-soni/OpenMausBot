@@ -47,7 +47,7 @@ afterAll(async () => {
   await fixture?.close();
 });
 
-it("publishes a bot's page to a link, keeps the link on a republish, and unpublishes it from the card", async () => {
+it("publishes a bot's page to a link shown inline, keeps the link and the card on a republish, and unpublishes it from the card", async () => {
   const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: fixture.info.url } }) as Promise<any>;
   const api = async (path: string, init: RequestInit = {}) => (await fetch(`${fixture.info.url}${path}`, { ...init, headers: { "content-type": "application/json" } })).json() as Promise<any>;
   const planPath = join(fixture.info.dataDir, "room-plan.json");
@@ -77,13 +77,17 @@ it("publishes a bot's page to a link, keeps the link on a republish, and unpubli
   expect(second.results[0]).toContain(`Updated “Bake sale” at the same link: ${url}`);
   expect(stub.service.pages.get(pageId!)!.files.get("index.html")).toBe("<!doctype html><h1>Bake sale, Saturday</h1>");
 
+  // The page shows in the chat as one inline card with its link; publishing the same folder again updates that card.
   const thread = await api(`/api/threads/${bot.activeTaskId}/messages?limit=50`);
   const cards = thread.messages.filter((message: any) => message.publishedPage);
-  expect(cards.map((message: any) => [message.kind, message.text, message.publishedPage.state, message.publishedPage.url])).toEqual([
-    ["text", `Published “Bake sale”: ${url} (1 of 5 pages)`, "live", url], ["text", `Published “Bake sale”: ${url} (1 of 5 pages)`, "live", url]]);
+  expect(cards.map((message: any) => [message.kind, message.text, message.publishedPage.state, message.publishedPage.url, message.app?.rev])).toEqual([
+    ["app", "[App] Bake sale\nBake sale, Saturday", "live", url, 1]]);
+  const doc = await api(`/api/threads/${bot.activeTaskId}/messages/${cards[0].id}/app`);
+  expect(doc.srcdoc).toContain("<h1>Bake sale, Saturday</h1>");
 
   expect(await api(`/api/published-pages/${pageId}/unpublish`, { method: "POST", body: "{}" })).toMatchObject({ ok: true, card: { state: "unpublished" } });
   expect(stub.service.pages.size).toBe(0);
   const after = await api(`/api/threads/${bot.activeTaskId}/messages?limit=50`);
-  expect(after.messages.filter((message: any) => message.publishedPage).map((message: any) => message.publishedPage.state)).toEqual(["unpublished", "unpublished"]);
+  expect(after.messages.filter((message: any) => message.publishedPage).map((message: any) => [message.kind, message.text, message.publishedPage.state]))
+    .toEqual([["app", "[App] Bake sale\nBake sale, Saturday", "unpublished"]]);
 }, 120_000);

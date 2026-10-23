@@ -24,6 +24,7 @@ const EXPECTED: Record<string, EngineCapabilities> = {
   opencodeGo: { resume: true, nativeReviewer: false, full: true, edits: false, subagents: false },
   qwenAgent: { resume: true, nativeReviewer: true, full: true, edits: true, subagents: false },
   hermesAgent: bare,
+  deepseekAgent: bare,
   clineAgent: { resume: true, nativeReviewer: false, full: true, edits: false, subagents: false },
   customAcp: bare,
   "openai-compat": chat,

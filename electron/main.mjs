@@ -4,8 +4,9 @@ import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { startCua, stopCua, registerCuaIpc, setCuaStateListener } from "./cua.mjs";
+import { fileURLToPath } from "node:url";
+import { buildErrorPage, desktopViewerErrorPage } from "./error-pages.mjs";
+import { startCua, stopCua, registerCuaIpc, requestComputerUse, setCuaStateListener } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
@@ -90,14 +91,17 @@ import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDes
 import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudPlanSnapshot, cloudTarget, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
 import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice, installCloudBuy, lookFile } from "./cloud-buy.mjs";
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
-import { createDesktopPrefs, createDesktopText, DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
+import { createDesktopText, DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
 import { createDesktopIncludedX } from "./included-x.mjs"; import { createDesktopIncludedPages } from "./included-pages.mjs";
-import { cloudHomeConnectUrl, cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
+import { cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { createLendingTarget, installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs"; import { createOpenAtLogin } from "./open-at-login.mjs";
 import { installOneHome } from "./one-home-main.mjs";
+import { installUseMyComputer } from "./use-my-computer.mjs";
+import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
 import { createHomeWindow, installHomeWindowIpc } from "./home-window.mjs";
+import { createTeamProfileSeeds } from "./team-profile-seed.mjs";
 import { createHomePlaces } from "./home-places.mjs";
 import { createEnvironmentsFile, ENVIRONMENTS_SAVE_FAILED } from "./environments-file.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
@@ -105,7 +109,7 @@ import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
 import { installServerSessions, reportOwnListeners } from "./server-session.mjs";
 
-const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
+const { desktopCapabilities, localComputerReady, nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
 const require = createRequire(import.meta.url);
 const { createDisplayMediaGuard, invokeDisplayMediaCallback, selectCaptureSource } = require(
@@ -313,7 +317,7 @@ let desktopDataDirLease = null;
 let runningDataDir = null;
 let localSwitchInFlight = false;
 let managedDesktop = null;
-let cloudAccount = null;
+let cloudAccount = null, updatesConsent = null;
 let cloudAccountStarted = Promise.resolve();
 let cloudAccountRestoring = false;
 let cloudSignInRestored = false;
@@ -404,8 +408,7 @@ let desktopCompanionRelay = null;
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
-const desktopPrefs = createDesktopPrefs(jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")));
-const nativeText = createDesktopText(desktopPrefs, app), nativeT = nativeText.t;
+const nativeText = createDesktopText(app), nativeT = nativeText.t;
 /** True when the store could not be read, which is not the same as nothing saved. */
 let credentialStoreUnavailable = false;
 
@@ -879,7 +882,7 @@ function ensureCloudAccount() {
       rememberedHome = rememberedCloudHome(rememberedHome, state);
       sendUpdaterState();
       cloudPower.changed(); computerSharing?.cloudChanged(); try { void oneHome.kick(); void homeWindow.changed(); } catch {}
-      void includedX.onState(state); void includedPages.onState(state);
+      void includedX.onState(state); void includedPages.onState(state); updatesConsent?.accountChanged(state);
       refreshCloudMenus();
       announceCloudReady(state);
       if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.mainFrame.url.startsWith(`${rendererOrigin()}/`) &&
@@ -1292,24 +1295,6 @@ function syncManagedComposioCredentials() {
   }
 }
 
-function escapeHtml(value) {
-  return value.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
-}
-
-function buildErrorPage({ allPortsOccupied }) {
-  const serverLogPath = path.join(LOG_DIR, "server.log");
-  const serverLogHref = pathToFileURL(serverLogPath).href;
-  const reason = allPortsOccupied
-    ? "Every OpenMausBot port answered health checks from another process — likely a second copy of the app, or another program on ports 8799–28799. Quit that program, then quit and reopen OpenMausBot."
-    : "The background server didn't come up in time — this is usually slow startup, not a port conflict. Quit and reopen OpenMausBot.";
-  return (
-    "data:text/html;charset=utf-8," +
-    encodeURIComponent(
-      `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#070707;color:#fcfcfc;font:15px -apple-system,system-ui"><div style="text-align:center;max-width:360px"><div style="font-size:40px">🐭</div><h2 style="font-weight:600;margin:12px 0 6px">Couldn't start the bot server</h2><p style="color:#fcfcfc99;line-height:1.5">${escapeHtml(reason)} If it keeps happening, check <a target="_blank" rel="noopener" href="${serverLogHref}" style="color:#fcfcfc">${escapeHtml(serverLogPath)}</a>.</p></div></body>`,
-    )
-  );
-}
-
 let cuaReady = Promise.resolve({ mode: "unavailable", reason: "not-started" });
 const androidDevice = createAndroidDeviceController({ resourcesPath: process.resourcesPath });
 const displayMediaGuard = createDisplayMediaGuard();
@@ -1333,24 +1318,6 @@ function notifyDesktopViewer(open) {
       contextId: desktopViewerContextId,
     });
   }
-}
-
-function desktopViewerErrorPage(message, retryUrl) {
-  const escape = (value) =>
-    String(value)
-      .replaceAll("&", "&amp;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;");
-  return (
-    "data:text/html;charset=utf-8," +
-    encodeURIComponent(`<!doctype html><html lang="${escape(nativeText.intlTag())}"><meta name="color-scheme" content="dark"><title>${escape(nativeT("native.viewer.title"))}</title>
-      <body style="margin:0;display:grid;place-items:center;height:100vh;background:#070707;color:#f5f5f5;font:14px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
-        <main style="max-width:420px;padding:32px;text-align:center"><h2 style="margin:0 0 10px;font-size:18px">${escape(nativeT("native.viewer.heading"))}</h2>
-        <p style="margin:0 0 20px;color:#a1a1aa;line-height:1.5">${escape(message)}</p>
-        <a href="${escape(retryUrl)}" target="_blank" rel="noreferrer" style="display:inline-block;border-radius:9px;background:#fff;color:#111;padding:9px 14px;text-decoration:none;font-weight:600">${escape(nativeT("native.viewer.open"))}</a></main>
-      </body></html>`)
-  );
 }
 
 function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
@@ -1442,13 +1409,13 @@ function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
   });
   viewer.webContents.on("did-fail-load", (_event, code, description, failedUrl, isMainFrame) => {
     if (!isMainFrame || code === -3 || viewer.isDestroyed() || failedUrl.startsWith("data:")) return;
-    void viewer.loadURL(desktopViewerErrorPage(description || nativeT("native.viewer.noResponse"), url.toString()));
+    void viewer.loadURL(desktopViewerErrorPage(description || nativeT("native.viewer.noResponse"), url.toString(), nativeText));
   });
 
   notifyDesktopViewer(true);
   void viewer.loadURL(url.toString()).catch((error) => {
     if (viewer.isDestroyed()) return;
-    void viewer.loadURL(desktopViewerErrorPage(error?.message ?? nativeT("native.viewer.noResponse"), url.toString()));
+    void viewer.loadURL(desktopViewerErrorPage(error?.message ?? nativeT("native.viewer.noResponse"), url.toString(), nativeText));
   });
   return true;
 }
@@ -1771,7 +1738,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
 }
 
 async function switchEnvironment(id) {
-  if (id === environmentsState.activeId || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
+  if ((id === environmentsState.activeId && !homeWindow.asking()) || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
   const entry = environmentsState.environments.find((candidate) => candidate.id === id);
   if (entry?.team) return void await showHome({ place: { team: entry.team.id, name: entry.name } });
   homePlaces.remember(null);
@@ -1780,7 +1747,7 @@ async function switchEnvironment(id) {
     return await switchLocalEnvironmentTo(desktopDataDir(), LOCAL_ID);
   }
   if (entry && entry.origin === homeWindow.cloudOrigin()) return void await showHome({ place: "cloud" });
-  if (entry && cloudAccount && isCloudHomeEntry(entry, { homeOrigin: cloudAccount.homeTarget()?.origin, remembered: rememberedHome })) {
+  if (entry && cloudAccount && isCloudHomeEntry(entry, { homeOrigin: cloudAccount.homeTarget()?.origin ?? cloudAccount.state().machine?.origin, remembered: rememberedHome })) {
     try { await connectCloudHome(); return; } catch (error) {
       slog(`cloud home: could not connect from the Server menu (${error?.message ?? error})`);
       if (!(await cloudHomeSignedIn(entry.origin))) { await openLendingSettings(); return; }
@@ -1948,23 +1915,19 @@ function rememberCloudHome(state) {
   }
 }
 
+/** My Cloud through the home window, which never looks it up before the Admin says it is ready. */
 async function connectCloudHome(open = null) {
   const client = ensureCloudAccount();
-  const target = client.homeTarget();
-  if (!target) throw new Error("My Cloud is not ready to connect yet.");
-  const signedIn = await openSleepingCloud({ power: client.power(), wake: client.wakeHome, waking: client.setWaking, signedIn: timeoutMs => cloudHomeSignedIn(target.origin, timeoutMs) });
-  const grant = signedIn ? null : await client.pairHome();
-  activateCloud(target.origin);
-  navigateMainWindow(cloudHomeConnectUrl({ origin: target.origin, grant }, Date.now(), open));
-  cloudPower.woke(); client.checkoutDone(); return client.state();
+  await homeWindow.openCloud(open);
+  return client.state();
 }
 
-/** My Cloud listed under Servers once, and the server this window shows. */
+/** My Cloud listed under Servers once, and the server this window shows: the purchase that made it is over. */
 function activateCloud(origin) {
   const next = withCloudHome(environmentsState, { status: "ready", origin }, () => randomUUID(), cloudLook.pending());
   const entry = next.environments.find((candidate) => candidate.origin === origin);
   if (!entry) throw new Error("My Cloud could not be added to Servers.");
-  persistEnvironments(withActive(next, entry.id));
+  persistEnvironments(withActive(next, entry.id)); cloudAccount?.checkoutDone();
 }
 /** A team's Cloud listed under Servers as the Admin names it (never a page), and the server this window shows. */
 function activateTeam(place) {
@@ -2197,7 +2160,7 @@ function createWindow({ deferNavigation = false } = {}) {
       origin = new URL(validatedURL).origin;
     } catch {}
     if (origin !== remote.origin) return;
-    if (origin === homeWindow.cloudOrigin()) return void homeWindow.failed(validatedURL);
+    if (homeWindow.failed(validatedURL, errorCode)) return;
     slog(`remote server unreachable (${errorDescription}); back to Local`);
     void dialog.showMessageBox({
       type: "warning",
@@ -2329,11 +2292,11 @@ function createWindow({ deferNavigation = false } = {}) {
   if (!serverReady && (desktopRemoteAccess || (app.isPackaged && !remote))) serverUnavailableWindows.add(win);
   if (deferNavigation) return win;
   if (desktopRemoteAccess) {
-    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly }));
+    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly, logDir: LOG_DIR }));
   } else if (remote) {
     void win.loadURL(remote.origin).catch(() => {});
   } else if (app.isPackaged) {
-    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly }));
+    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly, logDir: LOG_DIR }));
   } else {
     win.loadURL(DEV_URL);
   }
@@ -2502,28 +2465,9 @@ ipcMain.handle("perm:status", (event) => ({
       : "unsupported",
   pageMic: appPermissions?.pageMicrophone(event) ?? "refused",
 }));
-ipcMain.handle("perm:request-mic", localOnly("perm:request-mic", async () => {
-  if (!nativeActions.appleMediaPermissions) return false;
-  try {
-    return await systemPreferences.askForMediaAccess("microphone");
-  } catch {
-    return false;
-  }
-}));
-
-// macOS never re-prompts a denied permission; System Settings is the only path.
-ipcMain.handle("perm:open-settings", localOnly("perm:open-settings", (_event, pane) => {
-  if (!nativeActions.applePrivacySettings) return false;
-  const panes = {
-    mic: "Privacy_Microphone",
-    screen: "Privacy_ScreenCapture",
-    speech: "Privacy_SpeechRecognition",
-    accessibility: "Privacy_Accessibility",
-  };
-  // Own-property lookup: "__proto__" or "constructor" must not resolve up the prototype chain.
-  const anchor = Object.hasOwn(panes, pane) ? panes[pane] : "Privacy";
-  return shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${anchor}`);
-}));
+ipcMain.handle("perm:request-mic", localOnly("perm:request-mic", () => askForMicrophone({ available: nativeActions.appleMediaPermissions, systemPreferences })));
+const privacySettings = pane => openPrivacySettings(pane, { available: nativeActions.applePrivacySettings, openExternal: url => shell.openExternal(url) });
+ipcMain.handle("perm:open-settings", localOnly("perm:open-settings", (_event, pane) => privacySettings(pane)));
 
 ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
   requireMainWindowSender(event);
@@ -2666,6 +2610,13 @@ ipcMain.handle("cloud-account:checkout", localWorkspaceOnly("cloud-account:check
 // The machine and its code come from the verified session in main, never from the renderer.
 ipcMain.handle("cloud-account:connectHome", localWorkspaceOnly("cloud-account:connectHome", () => connectCloudHome()));
 ipcMain.handle("cloud-account:connectHomeForPhone", localWorkspaceOnly("cloud-account:connectHomeForPhone", () => connectCloudHome("phone")));
+// The page names a team only; the team and its Cloud come from the verified session, opened as the switcher opens it.
+ipcMain.handle("cloud-account:openTeam", localWorkspaceOnly("cloud-account:openTeam", async (_event, teamId) => {
+  const current = ensureCloudAccount().state();
+  const team = current.status === "connected" ? current.teams?.find(entry => entry.id === teamId) ?? null : null;
+  if (!team) throw new Error("You're not in that team.");
+  await showHome({ place: { team: team.id, name: team.name } });
+}));
 ipcMain.handle("organization:settings-opened", localWorkspaceOnly("organization:settings-opened", () => organizationEntry.settingsOpened()));
 ipcMain.handle("organization:state", localWorkspaceOnly("organization:state", () => ensureManagedDesktop().state()));
 ipcMain.handle("organization:begin", localWorkspaceOnly("organization:begin", (_event, input) => ensureManagedDesktop().begin(input)));
@@ -2761,15 +2712,18 @@ const savedWorkspace = id => {
 const cloudLook = createCloudLook({ store: lookFile(() => path.join(app.getPath("userData"), cloudTarget(process.env).look), fs), accountId: () => cloudAccount?.state().account?.id ?? null,
   homeEntry: cloudHomeEntry, saveEntry: (origin, look) => persistEnvironments(withEnvironmentLook(environmentsState, origin, look)) });
 const cloudBuy = installCloudBuy({ ipcMain, guard: localWorkspaceOnly, client: ensureCloudAccount, offersReady: cloudOffersReady, clipboard, look: cloudLook });
-const oneHome = installOneHome({ ipcMain, cloudPage: cloudPageAsking, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null), power: cloudPower, file: () => path.join(app.getPath("userData"), "cloud-send.json"), localRequest: (route, init = {}) => (serverProc && serverReady ? fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { ...init, redirect: "error", credentials: "omit", headers: { ...init.headers, [DESKTOP_MUTATION_HEADER]: desktopMutationToken } }) : Promise.reject(new Error("not running"))), space: { disk: () => cloudPlanDisk(ensureCloudAccount().state()), grow: sizeGb => ensureCloudAccount().growDisk(sizeGb) }, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }), window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, account: () => cloudAccount, journalFile: () => path.join(app.getPath("userData"), "one-home.json"), tempRoot: () => path.join(app.getPath("temp"), "openmaus-one-home"), lend: projects => useMyMac.lendByDefault({ projects }), phone: { paired: () => companionEnabledAtRest(), stop: () => stopDesktopCompanion({ remember: false }).then(() => {}), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }).then(() => {}) }, openHome: () => void showHome({ place: "cloud" }), openTeam: team => void showHome({ place: { team: team.id, name: team.name } }), openLocal: () => void showHome(), restart: () => relaunchAfterDesktopRemoteChange(), version: app.getVersion(), log: slog });
+const localServerRequest = (route, init = {}) => (serverProc && serverReady ? fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { ...init, redirect: "error", credentials: "omit", headers: { ...init.headers, [DESKTOP_MUTATION_HEADER]: desktopMutationToken } }) : Promise.reject(new Error("not running")));
+const teamProfileSeeds = createTeamProfileSeeds({ teamFetch: (...args) => session.defaultSession.fetch(...args), localRequest: localServerRequest, log: slog });
+const oneHome = installOneHome({ ipcMain, cloudPage: cloudPageAsking, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null), power: cloudPower, file: () => path.join(app.getPath("userData"), "cloud-send.json"), localRequest: localServerRequest, space: { disk: () => cloudPlanDisk(ensureCloudAccount().state()), grow: sizeGb => ensureCloudAccount().growDisk(sizeGb) }, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }), window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, account: () => cloudAccount, journalFile: () => path.join(app.getPath("userData"), "one-home.json"), tempRoot: () => path.join(app.getPath("temp"), "openmaus-one-home"), lend: projects => useMyMac.lendByDefault({ projects }), offer: () => useMyComputer.offer(), phone: { paired: () => companionEnabledAtRest(), stop: () => stopDesktopCompanion({ remember: false }).then(() => {}), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }).then(() => {}) }, openHome: () => void showHome({ place: "cloud" }), openTeam: team => void showHome({ place: { team: team.id, name: team.name } }), openLocal: () => void showHome(), restart: () => relaunchAfterDesktopRemoteChange(), version: app.getVersion(), log: slog });
 // Teams from the verified session as places this window shows (home-places.mjs): the one to open next time, and its lines.
 const homePlaces = createHomePlaces({ store: jsonFile(path.join(app.getPath("userData"), "home-place.json")), environments: () => environmentsState, persist: persistEnvironments, makeId: randomUUID, homeOrigin: myCloud, log: slog });
 const homeWindow = createHomeWindow({ journal: oneHome.journal, frozen: oneHome.marker, account: () => (app.isPackaged && !desktopRemoteAccess ? cloudAccount : null), restored: cloudAccountRestored,
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), ensureWindow: () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow({ deferNavigation: true }); },
   localOrigin: rendererOrigin, cookieFetch: (...args) => session.defaultSession.fetch(...args), power: cloudPower, splash: () => startupScreen, lastInput: oneHome.lastInput, log: slog, t: nativeT,
+  hosts: () => session.defaultSession, readyStore: jsonFile(path.join(app.getPath("userData"), "cloud-ready.json")),
   remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
   publish: view => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("home:state-changed", view); },
-  go: (url, origin, place) => { if (place?.kind === "team") activateTeam(place); else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url); },
+  go: (url, origin, place) => { if (place?.kind === "team") { activateTeam(place); teamProfileSeeds.opened(place.origin); } else if (origin) activateCloud(origin); else if (activeEnvironment(environmentsState)) persistEnvironments(withActive(environmentsState, LOCAL_ID)); return navigateMainWindow(url); },
   showLocal: leaving => {
     if (!mainWindow || mainWindow.isDestroyed()) return createWindow();
     if (!leaving) return;
@@ -2813,7 +2767,7 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
 async function lendingSnapshot() {
   const env = lendingTarget.environment();
   const connection = await cuaReady.catch(() => null);
-  return { available: Boolean(env), screenAvailable: Boolean(connection?.mcpCommand), ...(env ? { state: sharingController().cloudState(env), activity: sharingController().activity(env.id, 30) } : {}) };
+  return { available: Boolean(env), screenAvailable: Boolean(connection?.mcpCommand), screenReady: localComputerReady(process.platform, connection), ...(env ? { state: sharingController().cloudState(env), activity: sharingController().activity(env.id, 30) } : {}) };
 }
 const useMyMac = installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingTarget.environment, save: (env, choice) => sharingController().saveCloud(env, choice), stop: () => { sharingController(); stopLending(); },
   cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
@@ -2826,6 +2780,8 @@ const cloudSync = installCloudFiles({
   send: (channel, value) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value); },
   cloudOrigin: () => myCloud(), cloudAccount: () => ensureCloudAccount(), stateDir: cloudTarget(process.env).sync, power: cloudPower,
 });
+const useMyComputer = installUseMyComputer({ ipcMain, cloudPage: cloudPageAsking, lending: useMyMac, connection: () => cuaReady, request: requestComputerUse, openSettings: privacySettings,
+  window: () => mainWindow, remote: () => Boolean(desktopRemoteAccess), lastInput: oneHome.lastInput, dialogs: lendingDialogs, store: jsonFile(path.join(app.getPath("userData"), "use-my-computer.json")), log: slog });
 
 // window.confirm() has no parent window, so (tiling) window managers cannot center it over the app.
 ipcMain.handle("dialog:confirm", localWorkspaceOnly("dialog:confirm", async (_event, message) => {
@@ -2965,6 +2921,7 @@ async function broadcastDesktopCapabilities() {
 
 setCuaStateListener((connection) => {
   cuaReady = Promise.resolve(connection);
+  void useMyComputer.changed();
   void broadcastDesktopCapabilities().catch((error) => {
     console.error("[desktop] capability broadcast failed:", error);
   });
@@ -3109,7 +3066,11 @@ app.whenReady().then(async () => {
   registerCuaIpc();
   androidDevice.registerIpc(ipcMain);
   registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
-  registerDesktopPrefs({ ipcMain, prefs: desktopPrefs, localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady), onLanguage: code => { if (nativeText.set(code)) applyNativeLanguage(); },
+  updatesConsent = registerDesktopPrefs({ ipcMain, cloudAccount: () => cloudAccount, prefs: nativeText.prefs, localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
+    languageChanged: (language, sender) => {
+      for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed() && win.webContents !== sender) win.webContents.send("desktop-language:changed", language);
+    },
+    onLanguage: language => { if (nativeText.set(language)) applyNativeLanguage(); },
     page: event => senderIsLocal(event) ? "local" : cloudPageAsking(event) ?? (workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null) });
   // Before the window, so the harness has the CUA descriptor on first render.
   cuaReady =

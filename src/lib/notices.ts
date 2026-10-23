@@ -1,6 +1,7 @@
 import { hintSeen, hintSeenPatch, type OnboardingStatus } from "@/lib/onboarding";
 
 export const CLOUD_PRO_UPDATE_NOTICE = "cloud-pro-update-2026-10";
+export const UPDATES_CONSENT_NOTICE = "updates-consent";
 export const CLOUD_INTRO = "cloud-trial-intro-v1";
 export const CLOUD_TRIAL_NOTICE = "cloud-trial-notice";
 export const CLOUD_NOTICE = "cloud-notice";
@@ -9,9 +10,9 @@ export const PRODUCT_HUNT_NOTICE = "product-hunt-launch-2026-10";
 export const PRODUCT_HUNT_URL = "https://www.producthunt.com/products/mausbot";
 export const PRODUCT_HUNT_UNTIL = Date.UTC(2026, 10, 1);
 
-export type NoticeId = typeof CLOUD_PRO_UPDATE_NOTICE | typeof PRODUCT_HUNT_NOTICE | typeof CLOUD_INTRO | typeof CLOUD_TRIAL_NOTICE | typeof CLOUD_NOTICE | typeof STAR_NOTICE;
+export type NoticeId = typeof CLOUD_PRO_UPDATE_NOTICE | typeof UPDATES_CONSENT_NOTICE | typeof PRODUCT_HUNT_NOTICE | typeof CLOUD_INTRO | typeof CLOUD_TRIAL_NOTICE | typeof CLOUD_NOTICE | typeof STAR_NOTICE;
 
-export const NOTICES: readonly NoticeId[] = [CLOUD_PRO_UPDATE_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, STAR_NOTICE];
+export const NOTICES: readonly NoticeId[] = [CLOUD_PRO_UPDATE_NOTICE, UPDATES_CONSENT_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, STAR_NOTICE];
 
 export type NoticeFacts = Record<NoticeId, boolean | null>;
 

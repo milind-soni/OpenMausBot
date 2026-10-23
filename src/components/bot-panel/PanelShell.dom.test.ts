@@ -23,13 +23,15 @@ vi.mock("../Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
 vi.mock("../AvatarImageGenerator", () => ({ AvatarImageGenerator: () => null }));
 vi.mock("@/lib/use-organization-branding", () => ({ useOrganizationBranding: () => null }));
 const stub = (name: string) => (props: Record<string, unknown>) =>
-  createElement("div", { [`data-stub-${name}`]: true, "data-editing-instructions": props.editingInstructions === true ? "true" : undefined });
+  createElement("div", { [`data-stub-${name}`]: true, "data-editing-instructions": props.editingInstructions === true ? "true" : undefined },
+    name === "bot" ? createElement("section", { "data-panel-card": "conversations" }) : null);
 vi.mock("./BotTab", () => ({ BotTab: stub("bot") }));
 vi.mock("./ComputerTab", () => ({ ComputerTab: stub("computer") }));
 vi.mock("./pages", () => ({ PageBody: ({ page }: { page: string }) => createElement("div", { "data-stub-page": page }), pageSurfaceCls: "" }));
 
 const { BotPanel } = await import("./PanelShell");
 const { openBotSettings } = await import("./panel-link");
+const { ChatHeadConversation } = await import("../ChatHeadConversation");
 
 const bot: Bot = {
   id: "scout", threadId: "thread-scout", name: "Scout", title: "Researcher", description: "", soul: "",
@@ -142,6 +144,74 @@ describe("named links into the bot panel", () => {
       await settle();
       expect([tab(), page()], section).toEqual(["bot", null]);
     }
+  });
+});
+
+describe("the panel header's Call button", () => {
+  it("sits right after the bot's name, in the name's row, small and round, and not on the avatar", async () => {
+    render(null);
+    await settle();
+    const row = host.querySelector("[data-panel-name-row]")!;
+    const call = row.querySelector<HTMLButtonElement>('[data-call-button="panel"]')!;
+    const name = row.querySelector("[data-panel-rename]")!;
+    expect(name.textContent).toBe("Scout");
+    expect(name.compareDocumentPosition(call) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(call.className.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-8"]));
+    expect(call.getAttribute("aria-label")).toContain("Scout");
+    const avatar = host.querySelector("[data-panel-avatar]")!;
+    expect(avatar.contains(call)).toBe(false);
+    expect(avatar.nextElementSibling).toBe(row);
+    expect(host.querySelectorAll("[data-call-button]")).toHaveLength(1);
+  });
+});
+
+describe("the chat header's conversation title", () => {
+  const withTasks: Bot = { ...bot, tasks: [
+    { threadId: "thread-scout", title: "Plan the launch", createdAt: 1 },
+    { threadId: "other", title: "Older notes", createdAt: 0, unread: true },
+  ] };
+  const scrolledTo = () => vi.mocked(HTMLElement.prototype.scrollIntoView).mock.contexts
+    .map((element) => (element as HTMLElement).getAttribute("data-panel-card"));
+
+  it("reads Bot / Conversation ▾, marks other conversations that need a look, and opens the panel at Conversations", async () => {
+    const header = document.createElement("div");
+    document.body.append(header);
+    const headerRoot = createRoot(header);
+    try {
+      flushSync(() => headerRoot.render(createElement(ChatHeadConversation, { bot: withTasks })));
+      const title = header.querySelector("[data-chathead-conversation]")!;
+      expect(header.textContent).toBe("/Plan the launch");
+      expect(title.getAttribute("title")).toBe("Show Scout's conversations");
+      expect(title.querySelector('[role="img"]')!.getAttribute("aria-label")).toBe("Other activity (1)");
+      click(title);
+      expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleSettings", open: true, section: "overview" });
+
+      render("overview");
+      await settle();
+      expect(tab()).toBe("bot");
+      expect(scrolledTo()).toEqual(["conversations"]);
+
+      vi.mocked(HTMLElement.prototype.scrollIntoView).mockClear();
+      click(host.querySelector('[data-panel-tab="computer"]'));
+      click(title);
+      render("overview");
+      await settle();
+      expect(tab()).toBe("bot");
+      expect(scrolledTo()).toEqual(["conversations"]);
+    } finally {
+      flushSync(() => headerRoot.unmount());
+      header.remove();
+    }
+  });
+
+  it("draws nothing for a bot without a conversation list, and no dot when the others are quiet", () => {
+    const header = document.createElement("div");
+    const headerRoot = createRoot(header);
+    flushSync(() => headerRoot.render(createElement(ChatHeadConversation, { bot })));
+    expect(header.innerHTML).toBe("");
+    flushSync(() => headerRoot.render(createElement(ChatHeadConversation, { bot: { ...withTasks, tasks: withTasks.tasks!.map((task) => ({ ...task, unread: false })) } })));
+    expect(header.querySelector('[role="img"]')).toBeNull();
+    flushSync(() => headerRoot.unmount());
   });
 });
 

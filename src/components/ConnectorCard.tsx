@@ -4,11 +4,15 @@ import { Loader2, PlugZap, RefreshCw, X } from "lucide-react";
 import { api, type Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
+import { AUTHORIZATION_LINK_MS, reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
 import { accountAliasTaken, requiresAccountAlias } from "@/lib/connector-status";
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { cn } from "@/lib/cn";
 import { ASK_PRIMARY_BUTTON, ASK_QUIET_BUTTON, AskCard, AskSettledLine } from "./AskCard";
+
+const STATUS_CHECK_MS = 4_000;
+/** Composio marks an unfinished account EXPIRED shortly after its link lapses; the card keeps asking until it can say so. */
+const STATUS_WATCH_MS = AUTHORIZATION_LINK_MS + 2 * 60 * 1_000;
 
 export function ConnectorCard({ botId, threadId, message }: { botId: string; threadId: string; message: Message }) {
   const connector = message.connector!;
@@ -44,25 +48,29 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
   useEffect(() => {
     if (connector.status !== "authorizing" || connector.dismissed) return;
     polling.current = true;
-    let tries = 0;
-    const timer = setInterval(() => {
+    const startedAt = Date.now();
+    const check = () => {
       if (!polling.current) return;
       void checkStatus()
         .then((connected) => {
-          tries += 1;
-          if (connected || tries >= 75) {
-            polling.current = false;
-            clearInterval(timer);
-          }
+          if (connected) polling.current = false;
         })
-        .catch(() => {
-          tries += 1;
-          if (tries >= 75) clearInterval(timer);
-        });
-    }, 4_000);
+        .catch(() => {});
+    };
+    const timer = setInterval(() => {
+      if (Date.now() - startedAt >= STATUS_WATCH_MS) clearInterval(timer);
+      else check();
+    }, STATUS_CHECK_MS);
+    const onReturn = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
     return () => {
       polling.current = false;
       clearInterval(timer);
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
     };
   }, [checkStatus, connector.dismissed, connector.status]);
 
@@ -177,7 +185,7 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
             disabled={busy || (labelNeeded && !label.trim())}
             className={ASK_PRIMARY_BUTTON}
           >
-            {busy || authorizing ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />}
+            {busy ? <Loader2 size={14} className="animate-spin" /> : authorizing ? <RefreshCw size={14} /> : <PlugZap size={14} />}
             {authorizing
               ? t("connectors.card.openAgain")
               : connector.status === "failed"

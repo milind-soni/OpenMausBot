@@ -131,7 +131,8 @@ export const DRAFT_ACTION = "draft_reply";
 export const BRIEF_INTRO = "I keep an eye on your calendar and email and put what needs you here, once a day and when you come back. Tell me to stop, or what to watch for.";
 
 export interface BriefEmail { messageId: string; threadId: string; from: string; subject: string; why?: string; needsReply: boolean }
-export interface BriefRow { text: string; note: string; open?: OpenTarget; said?: { text?: WidgetText; note?: WidgetText } }
+/** `page`: the live page a routine's run published; its row's Open page opens it, while Open opens the run's chat. */
+export interface BriefRow { text: string; note: string; open?: OpenTarget; page?: string; said?: { text?: WidgetText; note?: WidgetText } }
 export interface BriefMeeting { title: string; start: number; joinUrl?: string }
 export interface BriefFacts {
   now: number;
@@ -172,6 +173,7 @@ function capped(rows: Node[], total: number): Node[] {
 const section = (title: [string, string], rows: Node[], total: number, empty?: [string, string]): Node[] =>
   [{ type: "Title", value: title[0], size: "sm", ...i18n({ value: words(title[1]) }) }, ...(rows.length ? capped(rows, total) : empty ? [text(empty[0], words(empty[1]))] : [])];
 const openButton = (target: OpenTarget | undefined): Node[] => (target ? [button("Open", { type: "open_thread", payload: target }, false, words("brief.card.open"))] : []);
+const pageButton = (url: string | undefined): Node[] => { const link = httpsLink(url), open = link ? openUrl(link) : undefined; return open ? [button("Open page", open)] : []; };
 
 function emailRow(email: BriefEmail): Node {
   const who = sender(email, BRIEF_TEXT.label);
@@ -204,7 +206,7 @@ export function briefCard(facts: BriefFacts): BuiltCard {
   const waitingWords = facts.waiting === true ? words("brief.card.waitingMany")
     : words(facts.waiting === 1 ? "brief.card.waitingOne" : "brief.card.waitingOther", { count: facts.waiting || 0 });
   const importantRows = [...important.map(emailRow), ...(waiting ? [caption(waiting, waitingWords)] : [])];
-  const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, openButton(row.open), row.said));
+  const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, [...pageButton(row.page), ...openButton(row.open)], row.said));
   const children: Node[] = [
     ...(facts.intro ? [caption(BRIEF_INTRO, words("brief.card.intro"))] : []),
     ...section([NEEDS_YOU, "brief.card.needsYou"], needRows, needRows.length, [NOTHING_NEEDS_YOU, "brief.card.nothingNeedsYou"]),

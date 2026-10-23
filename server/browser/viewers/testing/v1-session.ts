@@ -100,7 +100,8 @@ export async function runV1Session(driver: LiveDriver, origin: string, { settleM
   return records;
 }
 
-function shape(value: unknown): unknown {
+/** A value's field names and types, which is what the v1 contract holds an event to. */
+export function shape(value: unknown): unknown {
   if (Array.isArray(value)) return value.length ? [shape(value[0])] : [];
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, inner]) => [key, shape(inner)]));
   return typeof value;

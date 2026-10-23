@@ -20,6 +20,7 @@ import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
+import { wideSchema } from "../../testing/oversized-tool-schema.ts";
 import * as procs from "../../procs.ts";
 import * as quietStatus from "./quiet-status.ts";
 
@@ -61,6 +62,13 @@ const AsyncAuthDriver = createAcpDriver({
   driverKind: "asyncAuthTest",
   selectModel: undefined,
   isAuthenticated: async () => true,
+});
+
+const ReasoningReplayDriver = createAcpDriver({
+  ...SELECT_MODEL_SUPPORT,
+  driverKind: "reasoningReplayTest",
+  selectModel: undefined,
+  resendsReasoningReply: true,
 });
 
 const ClassifiedErrorDriver = createAcpDriver({
@@ -528,14 +536,14 @@ describe("ACP turns (fake CLI)", () => {
     expect(await send("turn 2")).toBe("turn 2");
   });
 
-  const reportingThread = async (name: string) => {
+  const reportingThread = async (name: string, driver?: typeof GrokAgentDriver) => {
     const dump = join(scratch, `acp-${name}.json`);
     const updatesFile = join(scratch, `acp-${name}-updates.json`);
     process.env.FAKE_ACP_DUMP = dump;
     process.env.FAKE_ACP_DUMP_PROMPT = "1";
     process.env.FAKE_ACP_UPDATES_FILE = updatesFile;
     writeFileSync(updatesFile, "[]");
-    await create();
+    await create(driver);
     const threadId = `t-acp-${name}-` + randomUUID();
     let lastTurnId = "";
     /** Whole session/update params, for a `_meta` beside the update. */
@@ -695,6 +703,41 @@ describe("ACP turns (fake CLI)", () => {
     expect(lastTurn().filter((event) => event.type === "runtime.error" || event.type === "runtime.notice")).toEqual([]);
     report();
     expect(await send("turn 3")).toBe("turn 3");
+  });
+
+  describe("a reply re-sent with its reasoning under the streamed messageId", () => {
+    const messageId = randomUUID();
+    const chunk = (sessionUpdate: string, text: string) => ({ sessionUpdate, messageId, content: { type: "text", text } });
+    const say = (...texts: string[]) => texts.map((text) => chunk("agent_message_chunk", text));
+    const reasoned = "💭 **Reasoning:**\n```\nSix times seven.\n```\n\nThe answer is 42.";
+    /** Each turn's replies after the fake's own "hello from fake acp". */
+    const replyingThread = async (name: string, driver?: typeof GrokAgentDriver) => {
+      const { report, send, lastTurn } = await reportingThread(name, driver);
+      return async (...updates: object[]) => {
+        report(...updates);
+        await send("turn");
+        return lastTurn().flatMap((event) =>
+          event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []).slice(1);
+      };
+    };
+
+    it("shows once from an engine that re-sends it", async () => {
+      const repliesTo = await replyingThread("reasoning-replay", ReasoningReplayDriver);
+      expect(await repliesTo(chunk("agent_thought_chunk", "Six times seven."), ...say("The answer", " is 42.", reasoned)))
+        .toEqual(["The answer is 42."]);
+      // hermes-agent 0.22.4 sends the re-sent reply after a blank line
+      expect(await repliesTo(...say("The answer", " is 42.", `\n\n${reasoned}`))).toEqual(["The answer is 42."]);
+      expect(await repliesTo(...say("    indented", "> 💭 **Reasoning:**\n> Six times seven.\n\n    indented")))
+        .toEqual(["indented"]);
+      // chunks that only end with the text so far are deltas
+      expect(await repliesTo(...say("a", "ba"))).toEqual(["aba"]);
+      expect(await repliesTo(...say("42.", "Explanation:\n\n42."))).toEqual(["42.Explanation:\n\n42."]);
+    });
+
+    it("is appended for any other engine", async () => {
+      const repliesTo = await replyingThread("reasoning-append");
+      expect(await repliesTo(...say("The answer is 42.", reasoned))).toEqual([`The answer is 42.${reasoned}`]);
+    });
   });
 
   const plan = (...entries: Array<[status: string, content: string]>) => ({
@@ -1250,6 +1293,51 @@ describe("ACP turns (fake CLI)", () => {
       delete process.env.FAKE_ACP_MCP_TRANSPORTS;
       await strict.close();
     }
+  });
+
+  it.each([
+    { engine: "Kimi", driver: KimiAgentDriver, outcome: "fitted to Moonshot's per-tool limit" },
+    { engine: "Grok", driver: GrokAgentDriver, outcome: "as the server sent them" },
+  ])("hands $engine a person's stdio MCP tools $outcome", async ({ driver }) => {
+    const script = join(scratch, "wide-mcp.mjs");
+    const tools = [{ name: "small", inputSchema: { type: "object", properties: { q: { type: "string" } } } }, { name: "configure", inputSchema: wideSchema(110) }];
+    writeFileSync(script, `
+      import { createInterface } from "node:readline";
+      createInterface({ input: process.stdin }).on("line", (line) => {
+        const frame = JSON.parse(line);
+        if (frame.id === undefined) return;
+        const result = frame.method === "tools/list" ? { tools: ${JSON.stringify(tools)} } : { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "wide", version: "1" } };
+        process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: frame.id, result }) + "\\n");
+      });`);
+    process.env.FAKE_ACP_MCP_SCHEMA_BYTES = "1";
+    try {
+      await create(driver, "mcp-tools");
+      await instance.adapter.sendTurn({ threadId: `t-wide-${driver.driverKind}`, text: "go", integrations: { custom: { wide: { command: process.execPath, args: [script], env: {} } } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const text = (recorder.events.find((event) => event.type === "item.completed" && (event as { itemType?: string }).itemType === "assistant_text") as { text?: string } | undefined)?.text;
+      const sizes = Object.fromEntries(text!.replace(/^wide: /, "").split(",").map((entry) => entry.split("=")).map(([name, bytes]) => [name, Number(bytes)]));
+      const raw = JSON.stringify(tools[1]!.inputSchema).length;
+      expect(raw).toBeGreaterThan(12_000);
+      expect(sizes.small).toBe(JSON.stringify(tools[0]!.inputSchema).length);
+      if (driver === KimiAgentDriver) expect(sizes.configure).toBeLessThanOrEqual(12_000);
+      else expect(sizes.configure).toBe(raw);
+    } finally {
+      delete process.env.FAKE_ACP_MCP_SCHEMA_BYTES;
+    }
+  });
+
+  it("tells the person in plain words when Kimi still refuses a tool's schema", async () => {
+    const failureFile = join(scratch, "schema-refusal.json");
+    process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;
+    writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error",
+      data: { details: "400 tools.function.parameters is not a valid moonshot flavored json schema, details: <At path 'root': schema exceeds maximum allowed size>" } }));
+    await create(KimiAgentDriver);
+    await instance.adapter.sendTurn({ threadId: "t-schema-refusal", text: "go" });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: false });
+    expect(recorder.events.find((event) => event.type === "runtime.error")).toMatchObject({
+      message: "Kimi refused this turn as an invalid request because the input schema of one of this bot's tools is too large, so nothing ran. "
+        + "Turn off the MCP server or app that tool comes from for this bot, or switch the bot to another AI.",
+    });
   });
 
   it("keeps a tool selection's gate in front of the connector", async () => {
@@ -1847,6 +1935,18 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.find(e => e.type === "item.completed" && e.itemType === "tool")).toMatchObject({ ok: true });
   });
 
+  it("reports a running tool's kind for the chat's status line while it runs silently", async () => {
+    process.env.FAKE_ACP_TOOL_MS = "300";
+    await create(QwenAgentDriver, "slow-tool");
+    await instance.adapter.sendTurn({ threadId: "t-slow-kind", text: "go" });
+    await recorder.until(e => e.type === "turn.completed");
+    const types = recorder.events.map(e => e.type);
+    const progress = recorder.events.filter(e => e.type === "turn.progress");
+    expect(progress[0]).toMatchObject({ activity: "command", itemId: "tc-slow" });
+    expect(types.indexOf("turn.progress")).toBeGreaterThan(types.indexOf("item.started"));
+    expect(types.lastIndexOf("turn.progress")).toBeLessThan(types.indexOf("item.completed"));
+  });
+
   it.each([GrokAgentDriver, QwenAgentDriver])("still fails $driverKind when it goes silent once its tool has finished", async (driver) => {
     process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
     await create(driver, "stall-after-tool");
@@ -1869,6 +1969,21 @@ describe("ACP turns (fake CLI)", () => {
     expect(notices.length).toBeGreaterThanOrEqual(1);
     expect(notices[0].message).toMatch(/^Grok (is waiting on its model|is busy|has sent nothing)/);
     expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
+  });
+
+  it("does not count idle time before a new prompt toward the quiet notice", async () => {
+    vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 1 });
+    process.env.OMB_ACP_QUIET_NOTICE_MS = "400";
+    process.env.OMB_ACP_QUIET_TICK_MS = "50";
+    process.env.FAKE_ACP_QUIET_MS = "200";
+    await create(GrokAgentDriver, "quiet-then-answer");
+    await instance.adapter.sendTurn({ threadId: "t-quiet-idle", text: "one" });
+    await recorder.until(e => e.type === "turn.completed");
+    await new Promise(r => setTimeout(r, 800));
+    const before = recorder.events.length;
+    await instance.adapter.sendTurn({ threadId: "t-quiet-idle", text: "two" });
+    await recorder.until(e => e.type === "turn.completed" && recorder.events.indexOf(e) >= before);
+    expect(recorder.events.filter(e => e.type === "runtime.notice")).toEqual([]);
   });
 
   it("reads Qwen's debug log: a logged rate-limit retry is reported and keeps the turn alive", async () => {

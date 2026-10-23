@@ -1707,6 +1707,24 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect((settled[0] as any).text).toBe("done from fake codex");
   });
 
+  it("reports an apply_patch as it streams, for the chat's status line", async () => {
+    process.env.FAKE_CODEX_PATCH_BYTES = "6144";
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-patch", text: "build the page" });
+      await recorder.until((e) => e.type === "turn.completed");
+    } finally {
+      delete process.env.FAKE_CODEX_PATCH_BYTES;
+    }
+    const progress = recorder.events.filter((e) => e.type === "turn.progress");
+    expect(progress).toEqual([
+      expect.objectContaining({ activity: "write", file: "index.html", bytes: 3072, itemId: "p1" }),
+      expect.objectContaining({ activity: "write", file: "index.html", bytes: 6144, itemId: "p1" }),
+    ]);
+    const types = recorder.events.map((e) => e.type);
+    expect(types.indexOf("turn.progress")).toBeGreaterThan(types.indexOf("item.started"));
+  });
+
   it("tries thread/resume with a cursor and reuses the thread id", async () => {
     await create({ mode: "resume" });
     const dump = join(scratch, "dump.json");

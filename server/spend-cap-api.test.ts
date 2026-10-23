@@ -183,8 +183,8 @@ describe("spend cap and prices through real turns", () => {
     expect((await put({ budgets: { monthlyUsd: 1 } })).status).toBe(200);
     expect((await send(botId, "fourth")).status).toBeLessThan(300);
     expect(JSON.stringify(await control(["wait", "--bot", botId, "--timeout", "30"]))).toContain("settled");
-    await expect.poll(async () => ((await (await api("/api/usage")).json()) as any).total.turns, { timeout: 10_000 }).toBe(3);
     const raised = (await (await api("/api/usage")).json()) as any;
+    expect(raised.total.turns).toBe(3);
     expect(raised.budget).toMatchObject({ monthlyUsd: 1, exceeded: false });
   }, 150_000);
 
@@ -224,9 +224,6 @@ describe("spend cap and prices through real turns", () => {
     expect(capErrors).toHaveLength(1);
     expect(JSON.stringify(page)).not.toContain("retrying once");
     expect(Number(readFileSync(replyState, "utf8"))).toBe(allowedTurns);
-    // The goal settles before the usage ledger's queued write is necessarily visible.
-    await expect.poll(async () => (await (await api("/api/usage")).json() as any).total.turns,
-      { timeout: 10_000 }).toBe(allowedTurns);
     const usage = await (await api("/api/usage")).json() as any;
     expect(usage.total.turns).toBe(allowedTurns);
     expect(usage.budget.exceeded).toBe(true);

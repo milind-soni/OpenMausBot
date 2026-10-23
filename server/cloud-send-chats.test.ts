@@ -358,6 +358,68 @@ describe("a room's chats", () => {
   });
 });
 
+describe("a room nobody wrote in yet", () => {
+  const listed = async (store: Store) => {
+    let answered: any;
+    await cloudSendChatsRoute({ store, dataDir: DATA_DIR }, {
+      req: {} as never, res: { setHeader() {} } as never, url: new URL("http://127.0.0.1/api/cloud-send/chats"), path: "/api/cloud-send/chats", method: "GET", auth: {} as never,
+      json: ((_res: unknown, _status: number, value: unknown) => { answered = value; }) as never, readBody: (async () => null) as never,
+    });
+    return answered;
+  };
+
+  it("is listed with its members beside the conversations, as no conversation of it is; a room with a row, and a bot-to-bot channel, are not", async () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const bo = store.createBot({ name: "Bo" }, { seedMessages: false });
+    const quiet = store.createGroup("Quiet", [ava.id, bo.id]);
+    const spoken = store.createGroup("Spoken", [ava.id]);
+    const later = store.createGroupTask(spoken.id, "Later", false)!;
+    say(store, later.threadId, "hello", 1);
+    const channel = store.createGroup("Ava and Bo", [ava.id, bo.id], true);
+    const answer = await listed(store);
+    const ours = new Set([quiet.id, spoken.id, channel.id]);
+    expect(answer.rooms.filter((room: { room: string }) => ours.has(room.room))).toEqual([{ room: quiet.id, threadId: quiet.threadId, members: [ava.id, bo.id] }]);
+    expect(answer.conversations.filter((head: { room?: string }) => head.room && ours.has(head.room)).map((head: { threadId: string }) => head.threadId)).toEqual([later.threadId]);
+  });
+
+  it("is made on My Cloud from its thread sent with no rows, under this computer's ids, and taken", () => {
+    const here = fresh();
+    const ava = here.createBot({ name: "Ava" }, { seedMessages: false });
+    const quiet = here.createGroup("Quiet", [ava.id], false, "Work", { bulletin: "Weekly.", defaultResponder: { kind: "mentions" }, completed: true });
+    const page = chatPage({ store: here, dataDir: DATA_DIR }, quiet.threadId, 0, null)!;
+    expect(page).toMatchObject({ rows: [], lastId: null, more: false });
+    const cloud = cloudOf([]);
+    cloud.deleteGroup(quiet.id);
+    const owner = "room" in page ? { room: page.room, roomInfo: page.roomInfo } : {};
+    expect(take(cloud, [{ ...owner, threadId: quiet.threadId, task: page.task, rows: [], leaf: null, sent: false }]).accepted).toEqual([quiet.threadId]);
+    expect(cloud.group(quiet.id)).toMatchObject({ name: "Quiet", threadId: quiet.threadId, memberIds: [ava.id], bulletin: "Weekly.", section: "Work" });
+  });
+});
+
+describe("a room My Cloud takes", () => {
+  it("goes as My Cloud takes a room, so one named after a long calendar call never refuses the conversations sent beside it", async () => {
+    const here = fresh();
+    const ava = here.createBot({ name: "Ava" }, { seedMessages: false });
+    const call = here.createGroup(`Weekly sync about ${"the launch, ".repeat(20)}`.trim(), [ava.id]);
+    say(here, call.threadId, "@everyone the agenda", 1);
+    say(here, ava.threadId, "hello", 2);
+    const roomPage = pagesOf(here, call.threadId).pages, botPage = pagesOf(here, ava.threadId).pages;
+    expect(call.name.length).toBeGreaterThan(100);
+    expect(roomPage[0]!.roomInfo!.name).toBe(call.name.slice(0, 100));
+    const cloud = cloudOf([call.threadId, ava.threadId]);
+    cloud.deleteGroup(call.id);
+    let answered: any;
+    await cloudSendChatsRoute({ store: cloud, dataDir: DATA_DIR }, {
+      req: {} as never, res: { setHeader() {} } as never, url: new URL("http://127.0.0.1/api/cloud-send/chats"), path: "/api/cloud-send/chats", method: "POST", auth: {} as never,
+      json: ((_res: unknown, status: number, value: unknown) => { answered = { status, body: value }; }) as never,
+      readBody: (async () => ({ v: 1, dataDir: "/elsewhere/.openmausbot", conversations: [...roomPage, ...botPage] })) as never,
+    });
+    expect(answered).toMatchObject({ status: 200, body: { accepted: [call.threadId, ava.threadId] } });
+    expect(cloud.group(call.id)!.name).toBe(call.name.slice(0, 100));
+  });
+});
+
 describe("over the owner's own session", () => {
   const OWNER = { person: "p_cloudowner00000000000", name: "Amit" };
   /** `ownerSession`: the request is My Cloud's owner's own session; the route asks its deps whose session it is. */

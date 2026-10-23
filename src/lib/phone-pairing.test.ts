@@ -195,6 +195,13 @@ describe("the person's Cloud as a destination on this computer", () => {
     expect(cloudPhoneDestination(paid({ machine: undefined }))).toBe("not-ready");
   });
 
+  it("a Team or Business plan has no Cloud of its own to pair here: nothing, never 'once it's ready'", () => {
+    const acme = [{ id: "team-acme", name: "Acme", role: "owner" as const, machine: { status: "ready" as const, origin: "https://omb-t-2.fly.dev" } }];
+    for (const tier of ["team", "business"]) {
+      expect(cloudPhoneDestination(paid({ entitlement: { plan: "pro", tier, status: "active", expiresAt: null, version: 1 }, machine: undefined, teams: acme })), tier).toBeNull();
+    }
+  });
+
   it("no paid plan, signed out or not known yet: nothing", () => {
     expect(cloudPhoneDestination(null)).toBeNull();
     expect(cloudPhoneDestination({ status: "signed-out" })).toBeNull();

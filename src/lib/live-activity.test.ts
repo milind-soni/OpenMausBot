@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activityStepLabel, liveActivityLabel, liveActivityPhrases, phraseAt, phraseHoldMs } from "./live-activity";
+import { activityStepLabel, formatProgressSize, liveActivityLabel, liveActivityPhrases, phraseAt, phraseHoldMs, turnNowPhrases } from "./live-activity";
 import type { Message } from "@/state/store";
 
 const activity = (name: string, extra: Partial<NonNullable<Message["tool"]>> = {}): Message => ({
@@ -123,5 +123,36 @@ describe("phraseAt", () => {
       expect(hold).toBeGreaterThanOrEqual(4000);
       expect(hold).toBeLessThanOrEqual(6000);
     }
+  });
+});
+
+describe("turnNowPhrases: what the status line says is happening now", () => {
+  it("names the file being written and how much, from the engine's own report", () => {
+    expect(turnNowPhrases({ activity: "write", itemId: "w", file: "index.html", bytes: 14 * 1024 + 9 })).toMatchObject({ phrases: ["Writing index.html"], size: "14 KB" });
+    expect(turnNowPhrases({ activity: "edit", file: "app.ts", bytes: 3 * 1024 * 1024 + 300_000 })).toMatchObject({ phrases: ["Editing app.ts"], size: "3.2 MB" });
+    expect(turnNowPhrases({ activity: "write", bytes: 200 })).toEqual({ phase: "live::Writing a file", phrases: ["Writing a file"] });
+  });
+
+  it("says commands, searches, reading, thinking and replying in plain words", () => {
+    expect(turnNowPhrases({ activity: "command" })?.phrases[0]).toBe("Running a command");
+    expect(turnNowPhrases({ activity: "web" })?.phrases[0]).toBe("Searching the web");
+    expect(turnNowPhrases({ activity: "read", file: "notes.md" })?.phrases[0]).toBe("Reading notes.md");
+    expect(turnNowPhrases({ activity: "thinking" })?.phrases[0]).toBe("Thinking");
+    expect(turnNowPhrases({ activity: "reply" })?.phrases[0]).toBe("Writing a reply");
+    expect(turnNowPhrases({ activity: "tool", tool: "mcp__agents__publish_page" })?.phrases[0]).toBe("Publishing a page");
+  });
+
+  it("falls back to the running chip, then to nothing, so the line is its timer alone", () => {
+    expect(turnNowPhrases(null, activity("Bash: pnpm test"))?.phrases[0]).toBe("Running a command");
+    expect(turnNowPhrases(null, activity("Bash", { ok: true }))).toBeNull();
+    expect(turnNowPhrases(null, activity("make_invoice"))).toBeNull();
+    expect(turnNowPhrases({ activity: "tool", tool: "make_invoice" })).toBeNull();
+    expect(turnNowPhrases(null)).toBeNull();
+  });
+
+  it("shows no size under a kilobyte", () => {
+    expect(formatProgressSize(1023)).toBeUndefined();
+    expect(formatProgressSize(1024)).toBe("1 KB");
+    expect(formatProgressSize(undefined)).toBeUndefined();
   });
 });

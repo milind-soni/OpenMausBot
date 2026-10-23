@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN } from "./wire.ts";
+import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, MAUS_COLOR_NAMES } from "./wire.ts";
 import { parseToolScope, type ToolScope } from "./tool-scope.ts";
 
 export const MAX_TEAM_BACKUP_BYTES = 50 * 1024 * 1024;
@@ -10,7 +10,7 @@ export const TEAM_BACKUP_EXCLUSIONS = "Files, images, custom avatars, account co
 const key = z.string().min(1).max(200);
 const name = z.string().trim().min(1).max(200);
 const timestamp = z.number().finite().nonnegative();
-const color = z.enum(["green", "blue", "red", "orange", "purple", "cyan", "pink", "yellow", "teal", "coral"]);
+const color = z.enum(MAUS_COLOR_NAMES);
 const message = z.object({
   id: key,
   role: z.enum(["bot", "user"]),

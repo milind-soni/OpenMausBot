@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BOT_HTML_CSP, mcpAppCsp } from "./csp.ts";
 import { botHtmlDocument, buildSrcdoc, CSP_META_PREFIX, mcpAppDocument, stripDocumentPreamble } from "./document.ts";
 import { APP_HELPER_SOURCE, APP_THEME_STYLE } from "./helper.ts";
+import { APP_POINT_SOURCE } from "./point.ts";
 
 const CSP = "default-src 'none'";
 const head = `${CSP_META_PREFIX}default-src 'none'">`;
@@ -38,12 +39,13 @@ describe("buildSrcdoc", () => {
 
   it("puts the theme style and the helper after the meta, before the content, only for bot HTML", () => {
     const bot = buildSrcdoc({ html: "<p>x</p>", csp: CSP, botHelper: true });
-    expect(bot).toBe(`${head}<style>${APP_THEME_STYLE}</style><script>${APP_HELPER_SOURCE}</script><p>x</p>`);
+    expect(bot).toBe(`${head}<style>${APP_THEME_STYLE}</style><script>${APP_HELPER_SOURCE}</script><script>${APP_POINT_SOURCE}</script><p>x</p>`);
     expect(buildSrcdoc({ html: "<p>x</p>", csp: CSP })).not.toContain("mausbot");
   });
 
   it("keeps the helper free of anything that would end its script element", () => {
     expect(APP_HELPER_SOURCE).not.toMatch(/<\/script/i);
+    expect(APP_POINT_SOURCE).not.toMatch(/<\/script|<!--/i);
     expect(APP_THEME_STYLE).not.toMatch(/<\/style/i);
   });
 

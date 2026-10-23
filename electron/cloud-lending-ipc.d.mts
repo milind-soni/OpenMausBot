@@ -15,7 +15,7 @@ export interface PageLending {
 }
 export function pageLending(snapshot: unknown): PageLending;
 export interface LentFolder { id: string; path: string; name: string; write: boolean }
-export function defaultGrant(input: { kept?: { folders?: LentFolder[]; screen?: boolean }; usual: LentFolder[]; projects: LentFolder[]; screenAvailable?: boolean }): { folders: LentFolder[]; screen: boolean; internet: true };
+export function defaultGrant(input: { kept?: { folders?: LentFolder[]; screen?: boolean }; usual: LentFolder[]; projects: LentFolder[]; screenAvailable?: boolean; screenReady?: boolean }): { folders: LentFolder[]; screen: boolean; internet: true };
 export function existingFolders<T>(folders: unknown[], validate: (folders: unknown[]) => Promise<T[]>): Promise<T[]>;
 /** A refusal the page says plainly, never with Try again: `lending-refused:<code>` in the IPC error's message. */
 export declare const LENDING_REFUSED: string;
@@ -25,7 +25,16 @@ export function createLendingTarget<E extends { origin: string }>(deps: {
   account: () => { state(): { status: string; message?: string; account?: { id: string } | null; machine?: { origin?: string } | null } } | null | undefined;
   environments: () => E[];
 }): { cloud(): { status: string; accountId: string | null; origin: string | null } | null; environment(): E | null };
+export interface LendingNow extends PageLending {
+  /** Computer control works here for this computer's own bots. */
+  screenReady: boolean;
+  /** The person turned lending off themselves. */
+  ownOff: boolean;
+}
 export function installCloudLending(deps: Record<string, unknown>): {
-  /** At the move to My Cloud: the default grant on top of what is lent; null when the person's own Off keeps it off. */
-  lendByDefault(input?: { projects?: string[] }): Promise<PageLending | null>;
+  state(): Promise<LendingNow>;
+  /** The default grant on top of what is lent; null when the person's own Off keeps it off (`asked` undoes it). */
+  lendByDefault(input?: { projects?: string[]; asked?: boolean }): Promise<PageLending | null>;
+  /** Apps and screen on top of what is lent; null while lending is off or computer control does not work yet. */
+  lendScreen(): Promise<PageLending | null>;
 };

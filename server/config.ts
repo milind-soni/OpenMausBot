@@ -338,6 +338,7 @@ const appConfigSchema = z.object({
   cerebras: z.object({ key: optionalText }).optional(), treg: z.object({ key: optionalText }).optional(),
   groq: z.object({ key: optionalText, url: optionalText }).optional(),
   meta: z.object({ key: optionalText, url: optionalText }).optional(),
+  deepseek: z.object({ key: optionalText }).optional(),
   xai: z.object({ key: optionalText, url: optionalText }).optional(),
   /** Anthropic API key for Claude Code billed per token; `url` is for a proxy or test double. Never a login OAuth token. */
   anthropic: z.object({ key: optionalText, url: optionalText, everyClaudeBot: z.boolean().optional() }).optional(),
@@ -486,6 +487,8 @@ export interface AppConfig extends HelperConfig {
   cerebras?: { key?: string }; treg?: { key?: string };
   groq?: { key?: string; url?: string };
   meta?: { key?: string; url?: string };
+  /** DeepSeek API key for the DeepSeek Harness engine (`dsh`). */
+  deepseek?: { key?: string };
   /** `everyClaudeBot`: the key runs every Claude bot instead of its login; unset means true. */
   anthropic?: { key?: string; url?: string; everyClaudeBot?: boolean };
   openai?: { key?: string };
@@ -788,6 +791,8 @@ export function loadConfig(): AppConfig {
   if (process.env.OMB_GROQ_API_KEY !== undefined) cfg.groq.key = process.env.OMB_GROQ_API_KEY;
   cfg.meta = { ...cfg.meta };
   if (process.env.OMB_META_API_KEY !== undefined) cfg.meta.key = process.env.OMB_META_API_KEY;
+  cfg.deepseek = { ...cfg.deepseek };
+  if (process.env.OMB_DEEPSEEK_API_KEY !== undefined) cfg.deepseek.key = process.env.OMB_DEEPSEEK_API_KEY;
   cfg.xai = { ...cfg.xai };
   if (process.env.XAI_API_KEY !== undefined) cfg.xai.key = process.env.XAI_API_KEY;
   // Never ANTHROPIC_API_KEY: an operator's stray variable must not move every Claude bot onto API billing.
@@ -856,6 +861,7 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.cerebras?.key, "CEREBRAS_API_KEY"], [patch.treg?.key, "OMB_TREG_KEY"],
     [patch.groq?.key, "OMB_GROQ_API_KEY"],
     [patch.meta?.key, "OMB_META_API_KEY"],
+    [patch.deepseek?.key, "OMB_DEEPSEEK_API_KEY"],
     [patch.anthropic?.key, "OMB_ANTHROPIC_API_KEY"],
     [patch.openaiCompat?.key, "OPENAI_COMPAT_API_KEY"],
     [patch.openai?.key, "OMB_OPENAI_API_KEY"],
@@ -889,90 +895,8 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
   }
 }
 
-/** Workspace credential env names; spawned engine CLIs must never inherit them. */
-export const WORKSPACE_CREDENTIAL_ENV = [
-  "XAI_API_KEY",
-  "MISTRAL_API_KEY",
-  "CEREBRAS_API_KEY",
-  "OMB_GROQ_API_KEY",
-  "OMB_META_API_KEY",
-  "OMB_ANTHROPIC_API_KEY",
-  "OMB_ANTHROPIC_API_URL",
-  "OMB_HOSTED_MODEL_TOKEN",
-  "OMB_HOSTED_MODELS",
-  "OPENAI_COMPAT_API_KEY",
-  "OPENAI_COMPAT_URL",
-  "OMB_OPENAI_API_KEY",
-  "OMB_OPENROUTER_API_KEY",
-  "BOX_TOKEN",
-  "OPENCODE_API_KEY",
-  "OMB_TTS_KEY",
-  "OMB_FISH_AUDIO_API_KEY",
-  "OMB_JEV_API_KEY",
-  "OMB_OPENROUTER_DECIDER_KEY",
-  "OMB_OPENAI_IMAGE_KEY",
-  "OMB_CUSTOM_IMAGE_KEY",
-  "OMB_OPENAI_LIVE_KEY", "OMB_TREG_KEY",
-  "COMPOSIO_API_KEY",
-  "OMB_COMPOSIO_BROKER_TOKEN",
-  "OMB_CLOUD_BOAT_TOKEN",
-  "OMB_CLOUD_VOICE_TOKEN",
-  "OMB_CLOUD_DECIDER_TOKEN",
-  "OMB_CLOUD_AI_TOKEN", "OMB_CLOUD_X_TOKEN", "OMB_CLOUD_CONNECTED_APPS_GRANT",
-  // Not credentials, but they point a shell-capable agent at app-owned state.
-  "OMB_BROWSER_CONNECTION", "OMB_USER_DATA", "OMB_BOAT_API",
-] as const;
-
-/** Operator secrets only this process reads, plus every `OMB_CLOUD_` var (the underscore leaves out OMB_CLOUDFLARED_PATH). */
-export const CONTROL_PLANE_ENV = ["OMB_LICENSE_KEY", "OMB_INSTALLATION_CREDENTIAL"] as const;
-export const CONTROL_PLANE_ENV_PREFIX = "OMB_CLOUD_";
-
-/** Names compare case-insensitively because Windows environments do. */
-export function stripControlPlaneEnv(env: Record<string, string | undefined>): void {
-  for (const key of Object.keys(env)) {
-    const name = key.toUpperCase();
-    if (name.startsWith(CONTROL_PLANE_ENV_PREFIX) || (CONTROL_PLANE_ENV as readonly string[]).includes(name)) delete env[key];
-  }
-}
-
-export function stripWorkspaceCredentialEnv(env: Record<string, string | undefined>): void {
-  for (const key of WORKSPACE_CREDENTIAL_ENV) delete env[key];
-  stripControlPlaneEnv(env);
-}
-
-/** Env a provider CLI may read as its billing identity; a foreign key must never move a subscription CLI onto API billing. */
-export const PROVIDER_CREDENTIAL_ENV = [
-  "CLINE_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "FACTORY_API_KEY",
-  "GEMINI_API_KEY",
-  "GOOGLE_API_KEY",
-  "KIMI_API_KEY",
-  "MOONSHOT_API_KEY",
-  "MINIMAX_API_KEY",
-  "OPENAI_API_KEY",
-  "OPENCODE_API_KEY",
-  "XAI_API_KEY",
-  "MISTRAL_API_KEY",
-  "CEREBRAS_API_KEY",
-  "GROQ_API_KEY",
-  "META_API_KEY",
-  "CURSOR_API_KEY",
-  "CURSOR_AUTH_TOKEN",
-] as const;
-
-/** Provider keys OpenCode reads from its environment (with ANTHROPIC_API_KEY set it lists Anthropic's models). */
-export const OPENCODE_PROVIDER_ENV = [
-  "CLINE_API_KEY",
-  "ANTHROPIC_API_KEY",
-  "OPENAI_API_KEY",
-  "GEMINI_API_KEY",
-  "GOOGLE_API_KEY",
-  "KIMI_API_KEY",
-  "MOONSHOT_API_KEY",
-  "MINIMAX_API_KEY",
-  "GROQ_API_KEY",
-] as const;
+import { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV } from "./credential-env.ts";
+export { WORKSPACE_CREDENTIAL_ENV, CONTROL_PLANE_ENV, CONTROL_PLANE_ENV_PREFIX, stripControlPlaneEnv, stripWorkspaceCredentialEnv, PROVIDER_CREDENTIAL_ENV, OPENCODE_PROVIDER_ENV };
 
 export const OPENCODE_PROVIDER_KEY_LIMIT = 20;
 const OPENCODE_PROVIDER_KEY_NAME = /^[A-Z][A-Z0-9_]{0,59}_(?:API_KEY|KEY|TOKEN)$/;
@@ -1047,7 +971,7 @@ export function saveConfig(
   const before = configSaveListeners.size ? structuredClone(disk) : disk;
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "groq", "meta", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "cerebras", "treg", "groq", "meta", "deepseek", "openai", "openrouter", "openaiCompat", "composio", "box", "opencodeGo", "tts", "decider", "imageGen", "live", "profile", "rooms", "mcp", "threads", "context", "memory", "localVm", "features", "budgets", "billing", "decisions", "loopGuard", "onboarding", "browserEngine", "newBots", "safetyFloor"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);
@@ -1244,6 +1168,9 @@ export function instanceOwnsRouting(
       return own(entry.environment?.GROQ_API_KEY) || ownUrl("https://api.groq.com/openai/v1", cfg.groq?.url);
     case "meta":
       return own(entry.environment?.META_API_KEY) || ownUrl("https://api.meta.ai/v1", cfg.meta?.url);
+    case "deepseekAgent":
+      // A second DeepSeek Harness account brings its own key; the workspace key fills only an instance without one.
+      return own(entry.environment?.DEEPSEEK_API_KEY);
     case "grok":
       return own(entry.environment?.XAI_API_KEY) || (own(config.apiKeyEnv) && config.apiKeyEnv !== "XAI_API_KEY")
         || ownUrl("https://api.x.ai/v1", cfg.xai?.url);
@@ -1259,6 +1186,7 @@ function injectedEnvironment(cfg: AppConfig, instanceId: string, driver: string)
   if (driver === "cerebras" && cfg.cerebras?.key) environment.set("CEREBRAS_API_KEY", cfg.cerebras.key);
   if (driver === "groq" && cfg.groq?.key) environment.set("GROQ_API_KEY", cfg.groq.key);
   if (driver === "meta" && cfg.meta?.key) environment.set("META_API_KEY", cfg.meta.key);
+  if (driver === "deepseekAgent" && cfg.deepseek?.key) environment.set("DEEPSEEK_API_KEY", cfg.deepseek.key);
   if (driver === "grok" && cfg.xai?.key) environment.set("XAI_API_KEY", cfg.xai.key);
   if (driver === "claudeAgent") for (const [name, value] of Object.entries(anthropicKeyEnv(cfg.anthropic, instanceId === CLAUDE_API_INSTANCE))) environment.set(name, value);
   if (driver === "openai-compat" && instanceId === OPENAI_API_INSTANCE) {
@@ -1316,6 +1244,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     cerebras: { driver: "cerebras" },
     groq: { driver: "groq" },
     meta: { driver: "meta" },
+    deepseek: { driver: "deepseekAgent" },
     museCode: { driver: "museCode" },
     ...API_KEY_FLEET,
     qwen: { driver: "qwenAgent" },
@@ -1337,6 +1266,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     cerebras: { driver: "cerebras" },
     groq: { driver: "groq" },
     meta: { driver: "meta" },
+    deepseek: { driver: "deepseekAgent" },
     museCode: { driver: "museCode" },
     ...API_KEY_FLEET,
     ...CUSTOM_ONLY,

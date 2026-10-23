@@ -78,6 +78,9 @@ describe("OpenMausBot's own MCP servers over HTTP", () => {
     const call = await (await post("agents", { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "list_bots", arguments: {} } },
       agentsHeaders({ OMB_BOT_ID: "chief", OMB_THREAD_ID: "t1", OMB_HARNESS_URL: "http://203.0.113.9:1" }))).json();
     expect(call).toMatchObject({ id: 2, result: { content: [{ type: "text", text: expect.stringContaining("W1") }] } });
-    expect(internalCalls).toEqual([expect.objectContaining({ path: "/api/internal/agents?self=chief", authorization: "Bearer turn-capability" })]);
+    expect(internalCalls).toEqual([
+      expect.objectContaining({ path: "/api/internal/agents?self=chief", authorization: "Bearer turn-capability" }),
+      expect.objectContaining({ path: "/api/internal/tool-timing", authorization: "Bearer turn-capability", body: expect.objectContaining({ name: "list_bots", ok: true }) }),
+    ]);
   });
 });

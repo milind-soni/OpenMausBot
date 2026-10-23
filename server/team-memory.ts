@@ -76,7 +76,7 @@ const emptyFile = (): TeamMemoryFile => ({ version: 2, sections: Object.create(n
 const clean = (value: unknown, max: number): string => (typeof value === "string" ? redactSecretsInText(value).replace(/\s+/g, " ").trim().slice(0, max + 1) : "");
 export class TeamMemoryConflict extends Error {
   readonly status = 409;
-  constructor(message = "This team memory changed. Reload it before saving or approving.") { super(message); }
+  constructor(message = "This department memory changed. Reload it before saving or approving.") { super(message); }
 }
 export function teamMemoryRevision(entry: TeamMemoryEntry): string {
   const { revision: _revision, ...stored } = entry;

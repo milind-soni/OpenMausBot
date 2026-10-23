@@ -15,7 +15,9 @@ import { SERVER_ROOT } from "./proxy-paths.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { makeTestTls, TEST_TLS_HOST } from "./testing/test-tls.ts";
+import { createPageSchema } from "./testing/oversized-tool-schema.ts";
 import { whopLikeCatalog } from "./testing/whop-like-catalog.ts";
+import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
 
 const TOKEN = "disposable-remote-fixture-token";
 type Frame = { id?: string | number; method?: string; params?: Record<string, unknown> };
@@ -328,6 +330,23 @@ describe("remote MCP tool directory", () => {
     expect(fake.calls).toEqual([{ name: "payments_list", arguments: { company_id: "biz_1", first: 10 } }, { name: "odd_schema", arguments: { id: 7 } }]);
   });
 
+  it("fits the tools it lists to the engine's provider profile, and lists them as they came without one", async () => {
+    const tools = [{ name: "small", description: "Small.", inputSchema: { type: "object", properties: { q: { type: "string" } } } },
+      { name: "create_page", description: "Create a page.", inputSchema: createPageSchema() }];
+    fake = await startFakeHttpMcp({ tools });
+    start(mcpStdioServer(spec(fake.url))!, { ...process.env, [TOOL_SCHEMA_PROFILE_ENV]: "moonshot" });
+    await initialize();
+    const [small, page] = (await request("tools/list")).result.tools;
+    expect(small).toEqual(tools[0]);
+    expect(schemaBytes(page.inputSchema)).toBeLessThanOrEqual(12_000);
+    expect(page.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
+    const closed = once(child!, "close"); child!.kill(); await closed;
+
+    start(mcpStdioServer(spec(fake.url))!);
+    await initialize();
+    expect((await request("tools/list")).result.tools).toEqual(tools);
+  });
+
   it("reads every page of a paginated catalog, once", async () => {
     fake = await startFakeHttpMcp({ tools: catalog, pageSize: 40 });
     start(mcpStdioServer(spec(fake.url), { directory: { name: "whop" } })!);
@@ -438,7 +457,7 @@ describe("remote MCP tool directory", () => {
     start(gated!);
     await initialize();
     const listed = (await request("tools/list")).result.tools;
-    expect(listed.map((tool: { name: string }) => tool.name)).toEqual([SEARCH_TOOL, DESCRIBE_TOOL, CALL_TOOL]);
+    expect(listed.map((tool: { name: string }) => tool.name)).toEqual([SEARCH_TOOL, DESCRIBE_TOOL, CALL_TOOL, "query_result"]);
     expect(listed[0].description).toContain(`${selected.length} tools`);
     const found = json(await call(SEARCH_TOOL, { query: "create payments", limit: 20 })).matches.map((match: { name: string }) => match.name);
     expect(found.every((name: string) => selected.includes(name))).toBe(true);

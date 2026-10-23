@@ -30,22 +30,45 @@ run in the Windows Vitest/Electron jobs.
 ## Vitest shards
 
 The suite runs one file at a time, so a shard takes as long as its files added
-up. Vitest's own `--shard` deals out equal numbers of files, and in October
-2026 that put three of the four slowest e2e files in one shard: about 24
-minutes of tests on Windows against 13 to 16 for the others, and every PR
-waited for it. `scripts/testing/duration-sequencer.ts` deals the files out by
-recorded time instead, slowest first, each to the shard with the least time so
-far. The times are `scripts/testing/vitest-shard-weights.json`: each file's
-median seconds on the Windows runners, for every file over five seconds and
-every e2e file. A file not in it counts one second, or the median e2e time if
-it is an e2e file. Every file still runs exactly once, and each shard job logs
-a `duration-sequencer:` line with its share.
+up, and the slowest shard sets how long a PR and a release wait. Linux and
+Windows run eight shards each, macOS four (main, merge groups and manual runs
+only); `scripts/ci-scope.mjs` builds the matrix.
 
-Refresh the times from a few recent green runs when shards drift apart:
+**Which files run where.** Linux runs every file. Most e2e files drive
+OMB's own logic through a real server and fake engines, which is the same on
+every OS, and they were 70% of a Windows shard's time, so only Linux runs
+them: the Windows and macOS shards set `OMB_VITEST_E2E=host`, and
+`vite.config.ts` then leaves out every e2e file not listed in
+`scripts/testing/host-e2e.ts`. The list keeps an e2e file on every host when
+it has a test that never runs on Linux (Auto on the person's own desktop, the
+built-in Mac voices) or depends on the OS (PowerShell and Windows process
+trees, junctions, a running process's folder, Windows paths, Chrome behind the
+egress gate). Every unit and API test file runs on every host. A new e2e file
+with a test Linux skips fails `scripts/testing/host-e2e.test.ts` until it is
+listed. The packaged-server, Windows CUA host, browser identity and browser
+driver jobs are separate and unchanged.
+
+**Balance.** Vitest's own `--shard` deals out equal numbers of files, and in
+October 2026 that put three of the four slowest e2e files in one shard.
+`scripts/testing/duration-sequencer.ts` deals the files out by recorded time
+instead, slowest first, each to the shard with the least time so far. The
+times are `scripts/testing/vitest-shard-weights.json`: for each platform
+(`linux`, `win32`, `darwin`), each file's median seconds on that platform's
+runners, for every file over five seconds and every e2e file. A file not in it
+counts one second, or the median e2e time if it is an e2e file. Every file
+still runs exactly once, and each shard job logs a `duration-sequencer:` line
+with its share.
+
+Refresh the times from a few recent main runs (they have all three platforms)
+when shards drift apart:
 
 ```sh
 node scripts/testing/update-shard-weights.mjs --run <run id> --run <run id> --run <run id>
 ```
+
+To run one CI shard locally, use the same OS, `--shard` and `OMB_VITEST_E2E`:
+`OMB_VITEST_E2E=host pnpm exec vitest run --shard=3/8` is Windows shard 3 on a
+Windows machine.
 
 Deleting or renaming a test file in the weights fails
 `scripts/testing/duration-sequencer.test.ts` until its entry is removed or
@@ -60,8 +83,8 @@ simulator suite). With 25 open PRs the macOS jobs waited a median of six and a
 half hours. Now:
 
 - A PR runs the Vitest shards on Ubuntu and Windows; main pushes, merge groups
-  and manual runs add the macOS shards. Only a couple of test blocks are
-  macOS-only.
+  and manual runs add four macOS shards, which run the host e2e files only.
+  Only a couple of test blocks are macOS-only.
 - Every PR's macOS checks are one job: the packaged-server smoke and the
   Electron smokes.
 - `ci-stop-closed.yml` cancels a PR's CI run when the PR is merged or closed. PR runs share a group named by the PR number (`ci-pr-<n>`), never by `github.ref`: a merged PR's closed event reports the base branch as `github.ref`, which made every merge cancel main's CI (fixed Oct 3 2026).

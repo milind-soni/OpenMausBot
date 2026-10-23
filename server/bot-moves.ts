@@ -56,6 +56,7 @@ export function createBotMoves(deps: BotMovesDeps) {
     async hold(botId: string, team: Team): Promise<{ movedTo: Held } | { busy: string } | { refused: string }> {
       const bot = deps.store.bot(botId);
       if (!bot) return { refused: "This bot is no longer here." };
+      if (bot.defaultBot) return { refused: `${bot.name} stays here: everyone on a team gets their own.` };
       const held = movedOf(bot);
       if (held?.state === "moved") return held.team.id === team.id ? { movedTo: held } : { refused: botMoveRefusal(bot)! };
       if (held && held.team.id !== team.id) return { refused: botMoveRefusal(bot)! };

@@ -520,6 +520,28 @@ it("R7 does not rerun a cut goal step after a restart: its run ended with the re
   expect(nothingLive(f)).toEqual([]);
 }), hostTimeout(90_000));
 
+it("R7 a goal step the watchdog stops after it posted a credential card fails as stalled and stops the card", () => scenario(async (f) => {
+  const mira = await f.bot("Mira", "Engineering");
+  const room = await f.room("Engineering", [f.clive.id, mira.id], { kind: "member", botId: f.clive.id });
+  f.script(f.clive.id, { key: "C-STEP", match: ["R7S-GOAL"], steps: [{ tool: "request_credential", arguments: { credential_id: "xaiApiKey", reason: "R7S fixture model" } }],
+    gateFile: f.gate("step"), reply: "R7S-LATE: never shown." });
+  await f.post(room, "R7S-GOAL: set up the Grok model; ask me for the key you need.", { mode: "goal" });
+  const messages = (): Promise<Array<{ id: string; kind: string; secret?: { stopped?: boolean }; goalRun?: { status: string } }>> => f.messages(room.threadId);
+  await expect.poll(async () => (await messages()).find((message) => message.kind === "secret")?.id, { timeout: 30_000 }).toBeTruthy();
+  const card = (await messages()).find((message) => message.kind === "secret")!;
+  const step = f.roomRoots(room.threadId)[0];
+  expect(step).toMatchObject({ status: "running", goalRunId: expect.any(String) });
+  writeFileSync(join(f.dataDir, "stall-turns"), "now");
+  try { await expect.poll(() => f.roomRoots(room.threadId)[0]?.status, { timeout: 20_000 }).toBe("failed"); } finally { rmSync(join(f.dataDir, "stall-turns"), { force: true }); }
+  expect(f.roomRoots(room.threadId)[0]).toMatchObject({ id: step.id, status: "failed", outcome: "stalled", executions: 1 });
+  expect(f.roomRoots(room.threadId)[0].cards).toBeUndefined();
+  expect((await messages()).find((message) => message.id === card.id)?.secret).toMatchObject({ stopped: true });
+  // The run retries a stalled step once: that attempt ends without a decision, and so does the run.
+  f.open("step");
+  await expect.poll(async () => (await messages()).find((message) => message.kind === "goal.run")?.goalRun?.status, { timeout: 30_000 }).not.toBe("working");
+  expect(nothingLive(f)).toEqual([]);
+}, { fake: { OMB_TEST_STALL_CLOCK: "1" } }), hostTimeout(60_000));
+
 it("R8 runs a chained @mention as a root of its own, with the hop recorded", () => scenario(async (f) => {
   const mira = await f.bot("Mira", "Engineering");
   const room = await f.room("Engineering", [f.clive.id, mira.id], { kind: "member", botId: f.clive.id });

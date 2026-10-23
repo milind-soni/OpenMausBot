@@ -7,7 +7,7 @@ export const APP_PROTOCOL_VERSION = "2026-01-26";
 export const APP_EXTENSION_KEY = "io.modelcontextprotocol/ui";
 
 export const APP_LIMITS = {
-  /** show_html / update_html `html`, UTF-8 bytes after trimming. */
+  /** show_html / update_html `html` or `jsx`, UTF-8 bytes after trimming. */
   htmlBytes: 256 * 1024,
   title: 80,
   fallback: 1_500,
@@ -29,6 +29,9 @@ export const APP_LIMITS = {
   /** rpc calls per app row per minute. */
   rpcPerMinute: 60,
 } as const;
+
+/** Versions of one bot page kept for stepping back, the current one included. */
+export const APP_PAGE_VERSIONS = 10;
 
 export type AppSource = "html" | "mcp";
 
@@ -71,6 +74,11 @@ export interface AppPayload {
   doc: string;
   /** 0, bumped by update_html. */
   rev: number;
+  /** Content ids of the versions before `doc`, oldest first, at most APP_PAGE_VERSIONS - 1: the last one is
+   * rev - 1. */
+  history?: string[];
+  /** Bot HTML whose document is a React component file (show_html `jsx`), wrapped in the page shell when served. */
+  format?: "jsx";
   /** UTF-8 bytes of the HTML, for the info popover. */
   bytes: number;
   /** Initial height in px before the frame reports its own (show_html
@@ -94,6 +102,13 @@ export interface AppPayload {
 export interface AppFromRef {
   messageId: string;
   title: string;
+}
+
+/** One part of a bot's page the person pointed at, as its chip on their message reads. `label` is the page's own
+ * words. */
+export interface AppPointedRef {
+  appId: string;
+  label: string;
 }
 
 /** Why an app's server calls are off, or why its document is missing. `unavailable`: the UI resource
@@ -146,9 +161,12 @@ export interface AppDocument {
   blocked?: { reason: AppBlockedReason; text: string };
 }
 
-/** `html` is wrapped when it was a fragment, and not yet scrubbed of secrets. */
+/** Exactly one of `html` (wrapped when it was a fragment), `jsx` and `path` (a folder with index.html, or an .html
+ * file, in the bot's own folders), none yet scrubbed of secrets. */
 export interface ShowHtmlInput {
-  html: string;
+  html?: string;
+  jsx?: string;
+  path?: string;
   title: string;
   height?: number;
   fallbackText?: string;
@@ -156,7 +174,9 @@ export interface ShowHtmlInput {
 
 export interface UpdateHtmlInput {
   appId: string;
-  html: string;
+  html?: string;
+  jsx?: string;
+  path?: string;
   title?: string;
 }
 
@@ -201,6 +221,32 @@ function checkHtml(value: unknown): AppInputResult<string> {
   return { ok: true, value: wrapHtmlFragment(html) };
 }
 
+function checkJsx(value: unknown): AppInputResult<string> {
+  if (typeof value !== "string") return { ok: false, error: "jsx: must be a string holding one React component file." };
+  const jsx = value.trim();
+  if (!jsx) return { ok: false, error: "jsx: is empty; send one React component file with a default export." };
+  const bytes = utf8Bytes(jsx);
+  if (bytes > APP_LIMITS.htmlBytes) return { ok: false, error: `jsx: is ${bytes} bytes, over the ${APP_LIMITS.htmlBytes}-byte limit; embed less data.` };
+  if (!/\bexport\s+default\b/.test(jsx)) return { ok: false, error: "jsx: needs `export default` of the page's component." };
+  return { ok: true, value: jsx };
+}
+
+function checkPage(input: Record<string, unknown>): AppInputResult<{ html: string } | { jsx: string } | { path: string }> {
+  const given = (value: unknown) => value !== undefined && value !== null;
+  if ([input.html, input.jsx, input.path].filter(given).length > 1) return { ok: false, error: "Send one of html, jsx or path." };
+  if (given(input.path)) {
+    const path = typeof input.path === "string" ? input.path.trim() : "";
+    if (!path || path.length > 4_096) return { ok: false, error: "path: the folder with index.html, or the .html file, in your working folder." };
+    return { ok: true, value: { path } };
+  }
+  if (given(input.jsx)) {
+    const jsx = checkJsx(input.jsx);
+    return jsx.ok ? { ok: true, value: { jsx: jsx.value } } : jsx;
+  }
+  const html = checkHtml(input.html);
+  return html.ok ? { ok: true, value: { html: html.value } } : html;
+}
+
 function checkTitle(value: unknown): AppInputResult<string> {
   if (typeof value !== "string") return { ok: false, error: "title: must be a string of 1 to 80 characters." };
   const title = oneLine(value);
@@ -209,12 +255,12 @@ function checkTitle(value: unknown): AppInputResult<string> {
 }
 
 export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput> {
-  if (!isRecord(input)) return { ok: false, error: "show_html needs {html, title, height?, fallback_text?}." };
-  const html = checkHtml(input.html);
-  if (!html.ok) return html;
+  if (!isRecord(input)) return { ok: false, error: "show_html needs {html, jsx or path, title, height?, fallback_text?}." };
+  const page = checkPage(input);
+  if (!page.ok) return page;
   const title = checkTitle(input.title);
   if (!title.ok) return title;
-  const out: ShowHtmlInput = { html: html.value, title: title.value };
+  const out: ShowHtmlInput = { ...page.value, title: title.value };
   if (input.height !== undefined && input.height !== null) {
     if (typeof input.height !== "number" || !Number.isFinite(input.height)) return { ok: false, error: "height: must be a number of pixels, 80 to 720." };
     out.height = Math.round(Math.min(APP_LIMITS.heightMax, Math.max(APP_LIMITS.heightMin, input.height)));
@@ -229,13 +275,13 @@ export function parseShowHtmlInput(input: unknown): AppInputResult<ShowHtmlInput
 }
 
 export function parseUpdateHtmlInput(input: unknown): AppInputResult<UpdateHtmlInput> {
-  if (!isRecord(input)) return { ok: false, error: "update_html needs {app_id, html, title?}." };
+  if (!isRecord(input)) return { ok: false, error: "update_html needs {app_id, html, jsx or path, title?}." };
   if (typeof input.app_id !== "string" || !/^[\w-]{1,128}$/.test(input.app_id.trim())) {
     return { ok: false, error: "app_id: is required, the id show_html returned." };
   }
-  const html = checkHtml(input.html);
-  if (!html.ok) return html;
-  const out: UpdateHtmlInput = { appId: input.app_id.trim(), html: html.value };
+  const page = checkPage(input);
+  if (!page.ok) return page;
+  const out: UpdateHtmlInput = { appId: input.app_id.trim(), ...page.value };
   if (input.title !== undefined && input.title !== null) {
     const title = checkTitle(input.title);
     if (!title.ok) return title;
