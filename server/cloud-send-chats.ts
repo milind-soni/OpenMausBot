@@ -130,9 +130,10 @@ const sentRoomTask = (task: GroupTaskRecord) => pick(task, ["threadId", "title",
 const sentRoom = (room: GroupRecord) => ({ ...pick(room, ["defaultResponder", "section", "setupCompletedAt", "setupSkippedAt", "audienceFloor"]),
   name: room.name.slice(0, ROOM_NAME_MAX) || "Room", memberIds: room.memberIds.slice(0, ROOM_MEMBERS_MAX), bulletin: (room.bulletin ?? "").slice(0, ROOM_BULLETIN_MAX) }) as unknown as SentRoom;
 
-/** A conversation's own settings a move carries: its model, approval, snooze and project; a room conversation's time
- * limit and its room's audience floor. Custom approval never leaves the computer that granted it. */
-const BOT_SETTINGS = ["modelSelection", "approvalMode", "autoApprove", "snoozedUntil", "projectId"] as const;
+/** A conversation's own settings a move carries: its model, approval, snooze, notification mute (and who chose it) and
+ * project; a room conversation's time limit and its room's audience floor. Custom approval never leaves the computer that
+ * granted it. */
+const BOT_SETTINGS = ["modelSelection", "approvalMode", "autoApprove", "snoozedUntil", "notificationsMuted", "notificationsMutedBy", "projectId"] as const;
 export function conversationSettings(store: Pick<ChatStore, "bot" | "group">, head: Pick<ChatHead, "bot" | "room" | "threadId">): Record<string, unknown> {
   if (head.bot) {
     const bot = store.bot(head.bot);
@@ -158,13 +159,15 @@ async function attachmentSizes(store: ChatStore, dataDir: string, heads: readonl
   return out;
 }
 
-const settingsSchema = z.object({
+export const settingsSchema = z.object({
   v: z.literal(1),
   conversations: z.array(z.object({ threadId: z.string().regex(/^[\w-]{1,200}$/u), settings: z.object({
     modelSelection: z.object({ instanceId: z.string().max(128), model: z.string().max(500) }).passthrough().optional(),
     approvalMode: z.enum(["ask", "edits", "auto", "full"]).optional(),
     autoApprove: z.boolean().optional(),
     snoozedUntil: z.number().finite().min(0).optional(),
+    notificationsMuted: z.boolean().optional(),
+    notificationsMutedBy: z.enum(["person", "chief"]).optional(),
     projectId: z.string().max(128).optional(),
     turnTimeoutMinutes: z.number().int().min(1).max(24 * 60).optional(),
     audienceFloor: z.unknown().optional(),
@@ -189,6 +192,10 @@ export function adoptConversationSettings(store: CloudSendChatsDeps["store"], co
         patch.autoApprove = settings.approvalMode === "auto";
       }
       if (task.snoozedUntil === undefined && settings.snoozedUntil !== undefined) patch.snoozedUntil = settings.snoozedUntil;
+      if (task.notificationsMuted === undefined && settings.notificationsMuted !== undefined) {
+        patch.notificationsMuted = settings.notificationsMuted;
+        if (settings.notificationsMutedBy) patch.notificationsMutedBy = settings.notificationsMutedBy;
+      }
       if (task.projectId === undefined && settings.projectId && bot.projects?.some((project) => project.id === settings.projectId)) patch.projectId = settings.projectId;
       if (Object.keys(patch).length && store.patchTask(bot.id, threadId, patch)) changed++;
       continue;

@@ -27,7 +27,7 @@ export interface ChatMergePlan extends ChatMergeResult { threads: ThreadMerge[] 
 export type ChatStore = Pick<Store, "bots" | "groups" | "bot" | "group" | "messagesFor" | "activeLeaf" | "importTranscript" | "patchBot" | "patchGroup" | "createGroup">;
 
 const BOT_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "openedBy", "closedBy", "archivedAt", "pinned", "link", "linkAuto",
-  "lastReadMessageId", "pinnedMessageId", "routineRunId", "askedAt", "snoozedUntil"] as const;
+  "lastReadMessageId", "pinnedMessageId", "routineRunId", "askedAt", "snoozedUntil", "notificationsMuted", "notificationsMutedBy"] as const;
 const GROUP_TASK_KEYS = ["threadId", "title", "createdAt", "titleFromFirstMessage", "pinned", "pinnedMessageId", "turnTimeoutMinutes"] as const;
 export const ATTACHMENT_NAME = /^[A-Za-z0-9-]{1,80}\.[A-Za-z0-9]{1,10}$/;
 

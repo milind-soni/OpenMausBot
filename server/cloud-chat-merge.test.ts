@@ -85,7 +85,7 @@ describe("planning across bots and rooms", () => {
   it("adds a conversation My Cloud never had with only what a conversation is, and skips chats of bots and rooms it lacks", () => {
     const carried = task("new", { title: "Plan", createdAt: 100, projectId: "p1", approvalMode: "full", autoApprove: true, alwaysAllow: ["Bash"], cwd: "/Users/me/work",
       modelSelection: { instanceId: "local-llm", model: "m" }, resumeCursors: { claude: "session" }, lastInstanceId: "claude", unread: true, pinned: true,
-      surface: { kind: "this-computer" } as never, handedMessages: {}, appliedCompactionId: "x" });
+      surface: { kind: "this-computer" } as never, handedMessages: {}, appliedCompactionId: "x", notificationsMuted: true, notificationsMutedBy: "person" });
     const desktop = side(
       [{ ...bots[0]!, tasks: [task("main"), carried, task("in-gone-project", { createdAt: 100, projectId: "gone" })] }, { id: "only-here", threadId: "solo", tasks: [task("solo")] }],
       [{ id: "room", threadId: "r1", tasks: [{ threadId: "r1", title: "Room", createdAt: 1 }, { threadId: "r2", title: "Second", createdAt: 100 }] },
@@ -95,7 +95,8 @@ describe("planning across bots and rooms", () => {
     const plan = planChatMerge(desktop, cloudSide({ main: chain(["m1", 1]), r1: chain(["x1", 1]) }));
     expect(plan).toMatchObject({ conversations: 3, messages: 4, intoExisting: 0, skippedBots: 1, skippedRooms: 1, deleted: 0 });
     const added = plan.threads.find((entry) => entry.threadId === "new")!;
-    expect(added.task).toEqual({ threadId: "new", title: "Plan", createdAt: 100, projectId: "p1", pinned: true, updatedAt: 101, lastThreadOrderAt: 101, resumeCursors: {}, unread: false });
+    expect(added.task).toEqual({ threadId: "new", title: "Plan", createdAt: 100, projectId: "p1", pinned: true, notificationsMuted: true, notificationsMutedBy: "person",
+      updatedAt: 101, lastThreadOrderAt: 101, resumeCursors: {}, unread: false });
     expect(plan.threads.find((entry) => entry.threadId === "in-gone-project")!.task).not.toHaveProperty("projectId");
     expect(plan.threads.find((entry) => entry.threadId === "r2")).toMatchObject({ owner: { kind: "group", id: "room" }, task: { threadId: "r2", title: "Second", updatedAt: 100 } });
     expect(plan.threads.map((entry) => entry.threadId).sort()).toEqual(["in-gone-project", "new", "r2"]);

@@ -2,6 +2,7 @@ import { chiefTidies } from "../chief-of-staff.ts";
 import type { Coordinator } from "../coordinator.ts";
 import { reachablePeers } from "../peer-roster.ts";
 import type { BotRecord, Store, TaskRecord } from "../store.ts";
+import { threadNotificationsMuted, type ThreadMuteDefault } from "../thread-mute.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 type ThreadState = "running" | "waiting-on-you" | "queued" | "idle" | "closed";
@@ -9,7 +10,7 @@ type ThreadState = "running" | "waiting-on-you" | "queued" | "idle" | "closed";
 interface ThreadRow {
   threadId: string; botId: string; botName: string; title: string;
   state: ThreadState;
-  unread: boolean; openedAt: number; delegationId?: string; own: boolean;
+  unread: boolean; muted: boolean; openedAt: number; delegationId?: string; own: boolean;
   openedBy?: string;
 }
 
@@ -24,6 +25,9 @@ export function createInternalThreadRoutes(deps: {
   shown(threadId: string): boolean;
   threadBusy(botId: string, threadId: string): boolean;
   queuedThreadPosition(botId: string, threadId: string): number | null;
+  muteDefault(botId: string): ThreadMuteDefault;
+  readBody(): Promise<unknown>;
+  requireActive(): void;
 }): RouteHandler {
   const { store, coordinator, from, fromThreadId } = deps;
   return async ({ res, path, method, json }) => {
@@ -42,15 +46,17 @@ export function createInternalThreadRoutes(deps: {
         if (task.closedBy) return "closed" as const;
         return "idle" as const;
       };
+      const ownDefault = deps.muteDefault(from.id);
       for (const task of store.tasks(from.id)) {
         if (!deps.shown(task.threadId)) continue;
         rows.push({
           threadId: task.threadId, botId: from.id, botName: from.name, title: task.title,
-          state: stateOf(from, task), unread: task.unread === true, openedAt: task.openedBy?.at ?? task.createdAt,
-          delegationId: task.openedBy?.delegationId, own: true,
+          state: stateOf(from, task), unread: task.unread === true, muted: threadNotificationsMuted(task, ownDefault),
+          openedAt: task.openedBy?.at ?? task.createdAt, delegationId: task.openedBy?.delegationId, own: true,
         });
       }
       for (const peer of reachablePeers(store.bots, from)) {
+        const peerDefault = deps.muteDefault(peer.id);
         for (const task of store.tasks(peer.id)) {
           const opener = task.openedBy;
           if (!opener || !deps.shown(task.threadId)) continue;
@@ -58,7 +64,7 @@ export function createInternalThreadRoutes(deps: {
           if (!mine && !chiefTidies(from, task, store.bot(opener.botId))) continue;
           rows.push({
             threadId: task.threadId, botId: peer.id, botName: peer.name, title: task.title,
-            state: stateOf(peer, task), unread: task.unread === true, openedAt: opener.at,
+            state: stateOf(peer, task), unread: task.unread === true, muted: threadNotificationsMuted(task, peerDefault), openedAt: opener.at,
             delegationId: opener.delegationId, own: false,
             ...(mine ? {} : { openedBy: opener.name }),
           });
@@ -66,6 +72,38 @@ export function createInternalThreadRoutes(deps: {
       }
       rows.sort((a, b) => b.openedAt - a.openedAt);
       return json(res, 200, { threads: rows.slice(0, 100) });
+    }
+    // mute_thread: a Chief of Staff quiets a thread a bot opened; a person's own threads, each bot's main conversation, and any
+    // mute or unmute the person chose stay theirs.
+    const muteMatch = method === "POST" ? path.match(/^\/api\/internal\/threads\/([\w-]+)\/mute$/) : null;
+    if (muteMatch) {
+      if (!deps.ownsThread(from.id, fromThreadId)) {
+        return json(res, 403, { error: "source conversation does not belong to sender" });
+      }
+      if (!from.chiefOfStaff || from.hidden) return json(res, 403, { error: "only a Chief of Staff can mute a thread" });
+      const body = await deps.readBody();
+      const muted = body && typeof body === "object" && "muted" in body ? body.muted : undefined;
+      if (typeof muted !== "boolean") return json(res, 400, { error: "mute_thread needs muted: true to mute the thread, false to let it notify again" });
+      const threadId = muteMatch[1]!;
+      const owner = [from, ...reachablePeers(store.bots, from)].find((bot) => store.taskByThread(bot.id, threadId));
+      const task = owner ? store.taskByThread(owner.id, threadId) : undefined;
+      // A thread list_threads would not show is answered as one that does not exist: no title, no write.
+      if (!owner || !task || !deps.shown(threadId)) return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });
+      const opener = task.openedBy;
+      if (!opener || threadId === deps.muteDefault(owner.id).mainThreadId) {
+        return json(res, 403, { error: "the person started that conversation, or it is the bot's main chat: only the person can mute it" });
+      }
+      if (owner.id !== from.id && opener.botId !== from.id && !chiefTidies(from, task, store.bot(opener.botId))) {
+        return json(res, 403, { error: "that thread is not yours to mute — a Chief of Staff mutes its own threads and threads opened in its reachable team" });
+      }
+      deps.requireActive();
+      if (task.notificationsMuted !== undefined && task.notificationsMutedBy !== "chief") {
+        // Agreeing with the person writes nothing, so the choice stays theirs.
+        if (task.notificationsMuted === muted) return json(res, 200, { threadId, title: task.title, botName: owner.name, muted });
+        return json(res, 403, { error: `the person ${task.notificationsMuted ? "muted" : "unmuted"} #${task.title} themselves: only they can change it` });
+      }
+      store.patchTask(owner.id, threadId, { notificationsMuted: muted, notificationsMutedBy: "chief" });
+      return json(res, 200, { threadId, title: task.title, botName: owner.name, muted });
     }
     // close_thread folds a thread, never deletes it (a person's confirmed action), and never while it runs.
     const closeMatch = method === "POST" ? path.match(/^\/api\/internal\/threads\/([\w-]+)\/close$/) : null;

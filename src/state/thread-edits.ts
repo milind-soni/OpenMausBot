@@ -9,3 +9,8 @@ export function patchGroupTask(state: AppState, groupId: string, threadId: strin
     }),
   };
 }
+
+/** A person's mute or unmute in a thread patch: the thread stops following the mute default. */
+export function muteChoice(patch: { notificationsMuted?: boolean }): { followsMuteDefault?: false } {
+  return patch.notificationsMuted === undefined ? {} : { followsMuteDefault: false };
+}

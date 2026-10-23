@@ -48,3 +48,21 @@ export interface NotificationLogEntry extends Notification {
   at: number;
   read: boolean;
 }
+
+/** A bot conversation thread's notification mute, as WireTask carries it. */
+export interface WireThreadMute {
+  /** Muted: the thread's notifications stay off the person's devices, except
+   * the ones `THREAD_MUTE_POLICY` (server/thread-mute.ts) keeps: everything
+   * waiting on the person (approvals, questions, sign-ins, a turn that ended
+   * needing input), escalations and incidents no Chief of Staff received, a
+   * failure unless the Chief took its report, the brief's news for the
+   * person, and spend alerts. Its messages
+   * and unread state are unchanged. Stored only once a person or a Chief of
+   * Staff chose it; always the effective value on the wire. */
+  notificationsMuted?: boolean;
+  /** Who chose `notificationsMuted`; a Chief of Staff never changes the person's choice. */
+  notificationsMutedBy?: "person" | "chief";
+  /** true: nobody chose, so `features.muteBotOpenedThreads` decides. Derived
+   * at projection, never stored. */
+  followsMuteDefault?: boolean;
+}

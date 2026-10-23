@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adoptConversationSettings, conversationSettings } from "./cloud-send-chats.ts";
+import { adoptConversationSettings, conversationSettings, settingsSchema } from "./cloud-send-chats.ts";
 import { listConnections, connectionFingerprints, answerConnection } from "./cloud-connections.ts";
 import type { AppConfig } from "./config.ts";
 
@@ -48,6 +48,20 @@ describe("a conversation's own settings", () => {
     const wide = held();
     adoptConversationSettings(wide.store, [{ threadId: "t-room", settings: { audienceFloor: "admins" } }], allowed);
     expect(wide.changes).toEqual([["room", { audienceFloor: "admins" }]]);
+  });
+
+  it("carry a thread's notification mute and who chose it, and My Cloud's own choice stays", () => {
+    const sent = conversationSettings(held({ notificationsMuted: true, notificationsMutedBy: "chief", snoozedUntil: 7 }).store, { bot: "b1", threadId: "t1" });
+    expect(sent).toEqual({ notificationsMuted: true, notificationsMutedBy: "chief", snoozedUntil: 7 });
+    const received = settingsSchema.parse(JSON.parse(JSON.stringify({ v: 1, conversations: [{ threadId: "t1", settings: sent }] })));
+    const fresh = held();
+    expect(adoptConversationSettings(fresh.store, received.conversations, allowed)).toBe(1);
+    expect(fresh.bot.tasks[0]).toMatchObject({ notificationsMuted: true, notificationsMutedBy: "chief", snoozedUntil: 7 });
+
+    const own = held({ notificationsMuted: false, notificationsMutedBy: "person" });
+    adoptConversationSettings(own.store, received.conversations, allowed);
+    expect(own.bot.tasks[0]).toMatchObject({ notificationsMuted: false, notificationsMutedBy: "person" });
+    expect(conversationSettings(held({ notificationsMuted: true, snoozedUntil: 7 }).store, { bot: "b1", threadId: "t1" })).toEqual({ notificationsMuted: true, snoozedUntil: 7 });
   });
 });
 

@@ -10,6 +10,10 @@ import type { BotRecord, Message, Store } from "../store.ts";
 type PeerAsk = NonNullable<Message["peerAsk"]>;
 
 export type EscalationOutcome = "chief" | "person" | "muted" | "off" | "skipped" | "failed";
+/** "chief": the Chief accepted the report (its turn started or queued; a later refusal tells the person);
+ * "person": the person was told instead. A report nobody received (it folded into assigned work or hit the rate limit)
+ * has no outcome. */
+export type IncidentOutcome = "chief" | "person";
 
 export interface ChiefNoticeDeps {
   store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "groupByThread" | "createTask" | "appendMessage" | "messagesFor">;
@@ -52,13 +56,14 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
 
   function deliver(input: {
     chief: BotRecord | null; title: string; bot: BotRecord; threadId: string; chip: string; text: string; alreadyNotified: boolean;
+    personNotice?: Notification;
   }): "chief" | "person" {
     const { chief, bot, threadId } = input;
     const task = store.taskByThread(bot.id, threadId);
     const group = store.groupByThread(threadId);
     const tellThePerson = () => {
       if (!input.alreadyNotified) {
-        deps.notify(buildNotification("incident", bot, threadId, input.chip, {
+        deps.notify(input.personNotice ?? buildNotification("incident", bot, threadId, input.chip, {
           avatarUrl: bot.avatarUrl,
           ...(group ? { group: { id: group.id, name: group.name } } : {}),
         }));
@@ -92,7 +97,9 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     return "chief";
   }
 
-  function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string }): void {
+  function reportIncident(input: {
+    kind: IncidentKind; bot: BotRecord; threadId: string; detail: string; alreadyNotified?: boolean; personNotice?: Notification;
+  }): IncidentOutcome | undefined {
     const { bot, threadId } = input;
     if (deps.quietThread?.(bot.id, threadId)) return;
     const task = store.taskByThread(bot.id, threadId);
@@ -109,10 +116,10 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     };
     const count = incidentLedger.note(threadId);
     if (count.muted) return;
-    deliver({
+    return deliver({
       chief: chiefForBot(store.bots, bot), title: INCIDENTS_THREAD_TITLE, bot, threadId,
-      chip: incidentChip(incident), text: incidentText(incident, count),
-      alreadyNotified: input.kind === "could-not-start" || input.kind === "routine-failed",
+      chip: incidentChip(incident), text: incidentText(incident, count), alreadyNotified: input.alreadyNotified === true,
+      ...(input.personNotice ? { personNotice: input.personNotice } : {}),
     });
   }
 

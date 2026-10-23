@@ -102,6 +102,41 @@ it("delivers a pending peer-comm approval card to the Chief's escalations thread
   }
 }, 150_000);
 
+it("still notifies the person of a peer approval waiting in a muted thread, even when a Chief receives the escalation", async () => {
+  const { url, api, control, messages, plan, useCli, escalationsThread, close } = await launch();
+  try {
+    const chief = (await control(["new-bot", "--name", "Clive", "--section", "Ops"])).bot;
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
+    const ada = (await control(["new-bot", "--name", "Ada", "--section", "Ops"])).bot;
+    await api("PATCH", `/api/bots/${ada.id}`, { approvePeerComms: true, approvalMode: "ask", notifications: true });
+    const hedge = (await control(["new-bot", "--name", "Hedge", "--section", "Ops"])).bot;
+    await api("PATCH", `/api/bots/${ada.id}/tasks/${ada.activeTaskId}`, { notificationsMuted: true });
+    await useCli();
+    plan(ada.activeTaskId, {
+      tools: [{ name: "coordinate_bots", server: "agents", input: { bot_ids: [hedge.id], message: "Hedge, a quick one.", consult: true } }],
+      replies: ["I asked Hedge and will wait for the person's say-so."],
+    });
+    plan(chief.activeTaskId, { replies: ["Standing by."] });
+    const stream = await openSse(`${url}/api/events`, { origin: url });
+    try {
+      await control(["send", "--bot", ada.id, "--text", "Check with Hedge."]);
+      await expect.poll(async () => (await messages(ada.activeTaskId)).some((m) => m.kind === "options" && m.card?.requestId), { timeout: 20_000 }).toBe(true);
+      const asked = await stream.until((frame) => frame.kind === "notify" && frame.notification?.kind === "approval"
+        && frame.notification.threadId === ada.activeTaskId, 20_000);
+      expect(asked.notification.botId).toBe(ada.id);
+      const escalations = await escalationsThread(chief.id);
+      await expect.poll(async () => (await messages(escalations.threadId)).some((m) => m.role === "user" && /Escalation notice/.test(m.text ?? "")), { timeout: 10_000 }).toBe(true);
+      expect((await messages(escalations.threadId)).find((m) => m.role === "user" && /Escalation notice/.test(m.text ?? ""))?.peerAsk?.incident)
+        .toEqual({ threadId: ada.activeTaskId, notified: true });
+      expect(stream.frames.some((frame) => frame.kind === "notify" && frame.notification?.kind === "incident")).toBe(false);
+    } finally {
+      stream.close();
+    }
+  } finally {
+    await close();
+  }
+}, 150_000);
+
 it("delivers a teammate turn that ends needing input to the Chief's escalations thread", async () => {
   const { api, control, dump, messages, plan, useCli, turnEnded, escalationsThread, close } = await launch();
   try {
