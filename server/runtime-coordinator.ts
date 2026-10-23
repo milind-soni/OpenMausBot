@@ -76,7 +76,7 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
     id: a.id, rootId: a.rootId, threadId: a.assignee.destination.threadId, botId: a.assignee.botId, key: a.assignee.botId,
     text: a.brief, createdAt: a.createdAt, status, result: a.result, reported: a.reportedAt !== undefined, executions: a.executions,
     lastProgressAt: a.lastActivityAt, approvalGranted: a.approved ?? false, kind: kindOf(groupId, parent), restarts: a.restarts,
-    mode: a.mode, reply: a.reply,
+    mode: a.mode, level: a.level, reply: a.reply, originKind: a.origin.kind,
   };
   if (a.outcome !== undefined) node.outcome = a.outcome;
   if (a.outcomeDetail !== undefined) node.outcomeDetail = a.outcomeDetail;
@@ -198,7 +198,7 @@ export class RuntimeCoordinator implements Coordinator {
     const reply: Reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
     const requester: Requester = { kind: "bot_turn", botId: parent.assignee.botId, threadId: parent.assignee.destination.threadId,
       chief: this.host.chiefOf(address(parent)), ...(parent.id === root.id && root.requester.runId !== undefined ? { runId: root.requester.runId } : {}) };
-    const level = this.host.levelOf(target, address(parent));
+    const level = this.host.levelOf(target, address(parent), parent.origin.kind, mode);
     const result = this.runtime.enqueue({
       parentId: parent.id,
       origin: parent.origin,

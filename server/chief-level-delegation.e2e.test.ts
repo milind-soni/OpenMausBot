@@ -2,9 +2,10 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { readHandoffs } from "./testing/handoff-rows.ts";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 
-it("starts a thread a Chief opens with a teammate at the Chief's level, and a Chief on Ask raises nobody", async () => {
+it("uses a Chief's recorded grant transiently, and a Chief on Ask raises nobody", async () => {
   const fixture = await launchVerificationServer({}, undefined, undefined, undefined, undefined, { scripted: true });
   const { url, dataDir } = fixture.info;
   const planPath = join(dataDir, "room-plan.json");
@@ -49,9 +50,10 @@ it("starts a thread a Chief opens with a teammate at the Chief's level, and a Ch
     await api("PATCH", `/api/bots/${chief.id}/tasks/${chief.activeTaskId}`, { approvalMode: "auto", acknowledgeLocalAuto: true });
     const adaTurn = await bringIn(chief, chief.activeTaskId, ada, "check-auto");
     expect(adaTurn.permissionMode).toBe("auto");
-    expect(persistedTask(ada.id, adaTurn.threadId)).toMatchObject({ approvalMode: "auto", autoApprove: false });
+    expect(persistedTask(ada.id, adaTurn.threadId)?.approvalMode ?? "ask").toBe("ask");
+    expect(readHandoffs(dataDir).find(row => row.botId === ada.id && row.parentId)).toMatchObject({ level: "auto", mode: "work" });
     expect((await messages(adaTurn.threadId)).some(message => message.kind === "activity"
-      && message.tool?.name === "Approve for me — delegated by Clive, a Chief of Staff on Approve for me")).toBe(true);
+      && /delegated by/.test(message.tool?.name ?? ""))).toBe(false);
     expect((await api("GET", "/api/bots")).bots.find((bot: any) => bot.id === ada.id).approvalMode ?? "ask").toBe("ask");
 
     const askThread = (await api("POST", `/api/bots/${chief.id}/tasks`, { title: "Plain Ask work", approvalMode: "ask" }, 201)).task;

@@ -47,6 +47,7 @@ export interface HandoffView {
   restart?: "rerun" | "cut" | "teammates";
   /** work: do it; consult: answer, act on nothing; notify: one-way. */
   mode: Mode;
+  level: Level;
   /** resume: the requester is woken; poll: it reads its inbox; none: nothing comes back. */
   reply: Reply;
   outcome?: Outcome;
@@ -54,6 +55,8 @@ export interface HandoffView {
   question?: string;
   cards?: string[];
   continuation?: { note: string; handoffPath?: string; count: number };
+  /** Runtime lineage keeps routines distinct from quoted-user authorization evidence. */
+  originKind?: Origin["kind"];
   goalRunId?: string;
 }
 
@@ -126,7 +129,7 @@ export interface CoordinatorHost {
   park(node: HandoffView, question: string, restored?: boolean): void;
   /** The level the target thread will really run with, so the envelope states the truth. A Chief's level flows into a room
    * with the hand-off, never onto the shared thread, so it resolves from `source`. */
-  levelOf(target: RoomAddress, source?: RoomAddress): { level: Level; driverKind?: string };
+  levelOf(target: RoomAddress, source?: RoomAddress, origin?: Origin["kind"], mode?: Mode): { level: Level; driverKind?: string };
   chiefOf(address: RoomAddress): boolean;
   /** What the cut turn already did outward (sent, posted, paid): a turn that acted outward is not run again. */
   outward?(node: HandoffView): string[];

@@ -6,7 +6,7 @@ provider's own permission modes, passed through. A native tool request that
 reaches you is one the provider left for you. OpenMausBot only answers from an
 explicit grant: Full Access, a saved exact command or MCP read-shaped tool, or
 the narrow built-in web-search allowance under Approve for me. In Full Access,
-OMB also applies its own configuration tools without another approval.
+OMB also runs connected-app actions and applies its own configuration tools without another approval.
 
 Every bot and conversation starts at **Full access**, the default T3 Code uses
 too: each engine runs in its own most permissive mode, and a real question or
@@ -64,6 +64,14 @@ authentication, CAPTCHA or MFA, service permissions,
 or workspace/team ownership and computer-sharing grants. Full Access controls
 approval prompts; it does not sign in for you, enable a feature you disabled,
 or grant another bot access to a different workspace.
+
+Explicit connected-app scopes and tool grants still apply in Full access.
+Opaque Composio code cannot run against a restricted tool grant because its
+targets cannot be verified. The source thread's Full grant is checked again
+immediately before dispatch; revoking it while session setup waits stops the
+call. Below Full, sending still needs approval or a counted daily allowance,
+and opaque code always needs explicit approval. Full actions do not consume
+that allowance, and are recorded in the decision log with `source: full-access`.
 
 The effective setting belongs to the source conversation. An existing Ask
 thread remains Ask even if the bot default is Full; a Full thread works

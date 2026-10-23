@@ -30,7 +30,7 @@ export interface TeamConnectionsHostDeps {
   /** The person whose own message provably started this turn generation (the latest one when none is named), or null. */
   requester(threadId: string, generation?: string): string | null;
   /** A `connectors` capability for this turn; `connectorsFor` makes it the member's own bridge's. */
-  mint(capability: { botId: string; threadId: string; generation: string; connectorsFor?: string }): string;
+  mint(capability: { botId: string; threadId: string; generation: string; roomHandoffId?: string; connectorsFor?: string }): string;
   mcpOAuth: McpOAuthManager;
   /** The bot's enabled MCP servers, as policy allows them, before any sign-in is attached. */
   botMcp(bot: { mcpServers?: string[] }): Record<string, McpServerSpec>;
@@ -112,16 +112,16 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     turnPerson,
 
     /** The connected-apps bridges of a turn: the team's, and in a member's own turn their own beside it. */
-    async appsIntegrations(bot: Bot, threadId: string, generation: string): Promise<{ composio?: Integration; composioOwn?: Integration }> {
+    async appsIntegrations(bot: Bot, threadId: string, generation: string, roomHandoffId?: string): Promise<{ composio?: Integration; composioOwn?: Integration }> {
       const cfg = deps.cfg();
       const out: { composio?: Integration; composioOwn?: Integration } = {};
       const base = { harnessUrl: deps.harnessUrl, botId: bot.id, threadId, connectorTools: bot.connectorTools };
-      const shared = await deps.composio.mcpIntegration(cfg, { ...base, commsToken: deps.mint({ botId: bot.id, threadId, generation }) });
+      const shared = await deps.composio.mcpIntegration(cfg, { ...base, commsToken: deps.mint({ botId: bot.id, threadId, generation, ...(roomHandoffId ? { roomHandoffId } : {}) }) });
       if (shared) out.composio = shared;
       const person = personApps().length ? turnPerson(threadId, generation) : null;
       const access = person ? people.appsAccess(person) : null;
       if (person && access) {
-        const own = await deps.composio.mcpIntegration(cfg, { ...base, as: access, commsToken: deps.mint({ botId: bot.id, threadId, generation, connectorsFor: person }) });
+        const own = await deps.composio.mcpIntegration(cfg, { ...base, as: access, commsToken: deps.mint({ botId: bot.id, threadId, generation, ...(roomHandoffId ? { roomHandoffId } : {}), connectorsFor: person }) });
         if (own) out.composioOwn = own;
       }
       return out;

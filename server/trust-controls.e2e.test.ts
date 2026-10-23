@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+  import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
@@ -15,6 +15,9 @@ let broker: Server;
 let admin: string;
 let member: string;
 let fullBot: any;
+let askSibling: any;
+let threadFullBot: any;
+let roomChief: any;
 let brokerOrigin = "";
 const relayed: unknown[] = [];
 const evidence: unknown[] = [];
@@ -33,7 +36,7 @@ const api = async (method: string, path: string, body?: unknown, token = admin) 
 };
 // Below Full access, so sends reach the outbound card and the daily allowance.
 const bot = async (name: string) => {
-  const created = await api("POST", "/api/bots", { name });
+  const created = await api("POST", "/api/bots", { name, settings: { approvalMode: "ask" } });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   expect((await api("PATCH", `/api/bots/${created.body.bot.id}`, { approvalMode: "ask" })).status).toBe(200);
   return created.body.bot;
@@ -87,22 +90,49 @@ beforeAll(async () => {
   const address = broker.address() as { port: number };
   brokerOrigin = `http://127.0.0.1:${address.port}`;
   fixture = await launchVerificationServer();
-  // Seed an already-granted Full task here only: the public API refuses operator grants outside the desktop channel.
   const created = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Existing Full grant" }) });
   expect(created.status).toBe(201);
   fullBot = (await created.json() as any).bot;
+  const createThread = await fetch(fixture.info.url + `/api/bots/${fullBot.id}/tasks`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Ask sibling", approvalMode: "ask" }),
+  });
+  expect(createThread.status).toBe(201);
+  askSibling = (await createThread.json() as any).task;
+  const inverse = await fetch(fixture.info.url + "/api/bots", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full thread, Ask default", settings: { approvalMode: "ask" } }),
+  });
+  expect(inverse.status).toBe(201);
+  threadFullBot = (await inverse.json() as any).bot;
+  const fullThread = await fetch(fixture.info.url + `/api/bots/${threadFullBot.id}/tasks`, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Full thread" }),
+  });
+  expect(fullThread.status).toBe(201);
+  threadFullBot.activeTaskId = (await fullThread.json() as any).task.threadId;
+  const chiefCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST",
+    headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Room Full Chief" }) });
+  expect(chiefCreated.status).toBe(201);
+  roomChief = (await chiefCreated.json() as any).bot;
   await waitForExit(fixture.child, { signal: "SIGTERM" });
   const botsFile = join(fixture.info.dataDir, "bots.json");
   const bots = JSON.parse(readFileSync(botsFile, "utf8"));
   const saved = bots.find((row: any) => row.id === fullBot.id);
   saved.approvalMode = "full";
   saved.autoApprove = false;
-  for (const task of saved.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
+  for (const task of saved.tasks) { task.approvalMode = task.threadId === askSibling.threadId ? "ask" : "full"; task.autoApprove = false; }
+  const savedInverse = bots.find((row: any) => row.id === threadFullBot.id);
+  savedInverse.tasks.find((task: any) => task.threadId === threadFullBot.activeTaskId).approvalMode = "full";
+  const savedChief = bots.find((row: any) => row.id === roomChief.id);
+  savedChief.chiefOfStaff = true;
+  savedChief.approvalMode = "full";
+  savedChief.modelSelection.instanceId = "roomTrustFixture";
+  for (const task of savedChief.tasks) task.approvalMode = "full";
   writeFileSync(botsFile, JSON.stringify(bots));
   const configFile = join(fixture.info.dataDir, "config.json");
   const config = JSON.parse(readFileSync(configFile, "utf8"));
   config.signIn = { admins: ["admin@fixture.test"], members: ["member@fixture.test"] };
   config.composio = { apiKey: "ak_isolated_fixture", userId: "fixture-user", sessionId: "fixture-session" };
+  config.instances.roomTrustFixture = { ...config.instances.claude, displayName: "Room connector fixture",
+    environment: { FAKE_CLAUDE_ROOM_PLAN: join(fixture.info.dataDir, "room-plan.json") } };
   config.instances.activityFixture = { ...config.instances.claude, displayName: "Exact task activity fixture",
     environment: { FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_RELEASE: join(fixture.info.dataDir, "activity-release") } };
   writeFileSync(configFile, JSON.stringify(config));
@@ -121,7 +151,7 @@ beforeAll(async () => {
   closeSync(log);
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
-    try { if ((await fetch(fixture.info.url + "/api/health")).ok) return; } catch {}
+    try { if ((await fetch(fixture.info.url + "/api/health")).ok) return; } catch { /* starting */ }
     await new Promise(resolve => setTimeout(resolve, 20));
   }
   throw new Error("isolated trust server did not start");
@@ -165,6 +195,91 @@ it("sends in Full without a card, and still refuses an app outside the bot's sco
   await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
   expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
   expect(relayed).toHaveLength(before + 2);
+});
+
+it("honors Full for direct sends, batches and opaque code without cards or daily caps", async () => {
+  await api("PATCH", `/api/bots/${fullBot.id}`, { connectorScopes: null, outbound: { policy: "allow", dailyCap: 1 } });
+  const token = await mint(fullBot.id, fullBot.threadId);
+  const fullDecisions = async () => ((await api("GET", "/api/decisions?limit=100")).body.decisions as any[])
+    .filter(row => row.botId === fullBot.id && row.threadId === fullBot.threadId && row.source === "full-access" && row.decision === "auto-approved").length;
+  const decisionsBefore = await fullDecisions();
+  const operations = [
+    ["COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print('synthetic fixture')" }],
+    ["GMAIL_SEND_EMAIL", { to: "fixture@example.invalid" }],
+    ["COMPOSIO_MULTI_EXECUTE_TOOL", { tools: [{ tool_slug: "GMAIL_SEND_EMAIL" }, { tool_slug: "SLACK_SEND_MESSAGE" }] }],
+    ["COMPOSIO_REMOTE_BASH_TOOL", { command: "printf fixture" }],
+  ] as const;
+  for (const [name, args] of operations) {
+    const before = relayed.length;
+    const result = relay(token, name, args);
+    let held: any;
+    await expect.poll(async () => {
+      held = (await cards(fullBot.threadId)).findLast(row => row.card?.outboundRequest && !row.card.answered);
+      return relayed.length > before || Boolean(held);
+    }, { timeout: 5_000 }).toBe(true);
+    // Settle an unexpected card before asserting, so a broken gate cannot
+    // leave an unresolved request in the disposable server.
+    if (held) await api("POST", `/api/threads/${fullBot.threadId}/respond`, { requestId: held.card.requestId, behavior: "deny" });
+    expect((await result).body.result.isError).not.toBe(true);
+    expect(held).toBeUndefined();
+    expect(relayed).toHaveLength(before + 1);
+    expect((relayed.at(-1) as any).params).toEqual({ name, arguments: args });
+  }
+  expect((await api("GET", `/api/bots/${fullBot.id}/outbound`)).body.today).toBe(0);
+  await expect.poll(fullDecisions).toBe(decisionsBefore + operations.length);
+});
+
+it("uses the calling thread's Full grant rather than the bot default or selected sibling", async () => {
+  const askToken = await mint(fullBot.id, askSibling.threadId);
+  const before = relayed.length;
+  const held = relay(askToken, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print('Ask sibling')" });
+  const card = await pending(askSibling.threadId);
+  await api("POST", `/api/threads/${askSibling.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+  expect((await held).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before);
+  const fullToken = await mint(threadFullBot.id, threadFullBot.activeTaskId);
+  expect((await relay(fullToken, "GMAIL_SEND_EMAIL")).body.result.isError).not.toBe(true);
+  expect(relayed).toHaveLength(before + 1);
+  expect((await cards(threadFullBot.activeTaskId)).some(row => row.card?.outboundRequest)).toBe(false);
+});
+
+it("preserves explicit connector scopes in Full, including changes before dispatch", async () => {
+  const token = await mint(fullBot.id, fullBot.threadId);
+  const before = relayed.length;
+  await api("PATCH", `/api/bots/${fullBot.id}`, { connectorScopes: { apps: { gmail: "read" } } });
+  expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
+  expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print('restricted')" })).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before);
+  await api("PATCH", `/api/bots/${fullBot.id}`, { connectorScopes: null });
+  sessionEntered = false;
+  blockSession = () => {};
+  const held = relay(token, "GMAIL_SEND_EMAIL");
+  try {
+    await expect.poll(() => sessionEntered, { timeout: 5_000 }).toBe(true);
+    await api("PATCH", `/api/bots/${fullBot.id}`, { connectorScopes: { apps: { gmail: "read" } } });
+  } finally {
+    blockSession();
+    blockSession = undefined;
+  }
+  expect((await held).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before);
+});
+
+it("rechecks Full revocation after session metadata and before connector execution", async () => {
+  const token = await mint(threadFullBot.id, threadFullBot.activeTaskId);
+  const before = relayed.length;
+  sessionEntered = false;
+  blockSession = () => {};
+  const held = relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print('revoked before dispatch')" });
+  try {
+    await expect.poll(() => sessionEntered, { timeout: 5_000 }).toBe(true);
+    expect((await api("PATCH", `/api/bots/${threadFullBot.id}/tasks/${threadFullBot.activeTaskId}`, { approvalMode: "ask" })).status).toBe(200);
+  } finally {
+    blockSession();
+    blockSession = undefined;
+  }
+  expect((await held).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before);
 });
 
 it("shows each outbound batch recipient and amount with explicit preview truncation before consent", async () => {
@@ -346,6 +461,112 @@ it("preserves accounts referenced by a fallback chain before delete or credentia
   expect((await api("DELETE", `/api/instances/${instanceId}`)).status).toBe(200);
 });
 
+it("uses live Chief handoff authority for connector sends and code, without leaking to later room turns", async () => {
+  const memberBot = await bot("Ask room sender");
+  const selection = { instanceId: "roomTrustFixture", model: roomChief.modelSelection.model };
+  await api("PATCH", `/api/bots/${memberBot.id}`, { modelSelection: selection, outbound: { policy: "allow", dailyCap: 1 } });
+  const source = (await api("POST", "/api/groups", { name: "Chief source", memberIds: [roomChief.id] })).body.group;
+  const destination = (await api("POST", "/api/groups", { name: "Member destination", memberIds: [memberBot.id] })).body.group;
+  expect((await api("PATCH", `/api/groups/${source.id}/setup`, { action: "skip" })).status).toBe(200);
+  expect((await api("PATCH", `/api/groups/${destination.id}/setup`, { action: "skip" })).status).toBe(200);
+  const readyFile = join(fixture.info.dataDir, "room-member-ready");
+  const gateFile = join(fixture.info.dataDir, "room-member-gate");
+  const nextReady = join(fixture.info.dataDir, "room-member-next-ready");
+  const nextGate = join(fixture.info.dataDir, "room-member-next-gate");
+  const planPath = join(fixture.info.dataDir, "room-plan.json");
+  writeFileSync(planPath, JSON.stringify({
+    [roomChief.id]: { turns: [
+      { steps: [{ tool: "coordinate_bots", arguments: { group_id: destination.id, bot_ids: [memberBot.id], message: "Check the connector fixture" } }], reply: "Assigned" },
+      { reply: "Finished" },
+    ] },
+    [memberBot.id]: { turns: [
+      { readyFile, gateFile, reply: "Checked" }, { readyFile: nextReady, gateFile: nextGate, reply: "Ordinary room reply" },
+    ] },
+  }));
+  const dump = () => JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
+  const connectorToken = () => Object.values(dump().mcpConfig.mcpServers as Record<string, any>)
+    .find(mount => mount.env?.OMB_CONNECTOR_TOKEN)?.env.OMB_CONNECTOR_TOKEN as string;
+  const settled = async (groupId: string) => expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.groups
+    .find((group: any) => group.id === groupId)?.working, { timeout: 20_000 }).toBe(false);
+  let token = "";
+  try {
+    expect((await api("POST", `/api/groups/${source.id}/messages`, { text: "Delegate the fixture check", threadId: source.threadId })).status).toBe(202);
+    await expect.poll(() => existsSync(readyFile), { timeout: 20_000 }).toBe(true);
+    token = connectorToken();
+    expect(token).toBeTruthy();
+    expect(dump().argv).toContain("bypassPermissions");
+    expect(dump().mcpConfig.mcpServers.agents.env.OMB_BOT_ID).toBe(memberBot.id);
+    const inheritedCall = async (name: string, args = {}) => {
+      const before = relayed.length;
+      const result = relay(token, name, args);
+      let card: any;
+      await expect.poll(async () => {
+        card = (await cards(destination.threadId)).findLast(row => row.card?.outboundRequest && !row.card.answered);
+        return Boolean(card) || relayed.length > before;
+      }, { timeout: 5_000 }).toBe(true);
+      if (card) await api("POST", `/api/threads/${destination.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+      expect((await result).body.result.isError).not.toBe(true);
+      expect(card).toBeUndefined();
+      expect(relayed).toHaveLength(before + 1);
+    };
+    await inheritedCall("GMAIL_SEND_EMAIL");
+    await inheritedCall("GMAIL_SEND_EMAIL");
+    await inheritedCall("COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print('inherited authority')" });
+    expect((await api("GET", `/api/bots/${memberBot.id}/outbound`)).body.today).toBe(0);
+    expect((await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === memberBot.id).approvalMode ?? "ask").toBe("ask");
+    const siblingToken = await mint(memberBot.id, memberBot.threadId);
+    expect((await relay(siblingToken, "GMAIL_SEND_EMAIL")).body.result.isError).not.toBe(true);
+    expect((await api("GET", `/api/bots/${memberBot.id}/outbound`)).body.today).toBe(1);
+    expect((await relay(siblingToken, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
+    await inheritedCall("GMAIL_SEND_EMAIL");
+    expect((await api("GET", `/api/bots/${memberBot.id}/outbound`)).body.today).toBe(1);
+    expect((await api("PATCH", `/api/bots/${memberBot.id}`, { connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] } } })).status).toBe(200);
+    const restrictedCodeCount = relayed.length;
+    expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print('restricted grant')" })).body.result.isError).toBe(true);
+    expect(relayed).toHaveLength(restrictedCodeCount);
+    expect((await api("PATCH", `/api/bots/${memberBot.id}`, { connectorTools: null })).status).toBe(200);
+    await api("PATCH", `/api/bots/${memberBot.id}`, { connectorScopes: { apps: { gmail: "read" } } });
+    const restrictedCount = relayed.length;
+    expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
+    expect(relayed).toHaveLength(restrictedCount);
+    await api("PATCH", `/api/bots/${memberBot.id}`, { connectorScopes: null });
+    sessionEntered = false;
+    blockSession = () => {};
+    const beforeRevoke = relayed.length;
+    const held = relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print('must not run')" });
+    try {
+      await expect.poll(() => sessionEntered, { timeout: 5_000 }).toBe(true);
+      expect((await api("PATCH", `/api/bots/${roomChief.id}`, { approvalMode: "ask" })).status).toBe(200);
+    } finally { blockSession(); blockSession = undefined; }
+    expect((await held).body.result.isError).toBe(true);
+    expect(relayed).toHaveLength(beforeRevoke);
+    writeFileSync(gateFile, "release");
+    await settled(destination.id);
+    await settled(source.id);
+    expect((await relay(token, "GMAIL_SEND_EMAIL")).status).toBe(401);
+    await api("PATCH", `/api/bots/${memberBot.id}`, { outbound: { policy: "ask", dailyCap: 1 } });
+    expect((await api("POST", `/api/groups/${destination.id}/messages`, { text: "Ordinary user turn", threadId: destination.threadId })).status).toBe(202);
+    await expect.poll(() => existsSync(nextReady), { timeout: 15_000 }).toBe(true);
+    expect(dump().argv).not.toContain("bypassPermissions");
+    const nextToken = connectorToken();
+    const nextCount = relayed.length;
+    const next = relay(nextToken, "GMAIL_SEND_EMAIL");
+    const card = await pending(destination.threadId);
+    await api("POST", `/api/threads/${destination.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+    expect((await next).body.result.isError).toBe(true);
+    expect(relayed).toHaveLength(nextCount);
+  } finally {
+    evidence.push({ roomDump: existsSync(fixture.fixtureDumpPath) ? dump() : null,
+      handoffs: existsSync(join(fixture.info.dataDir, "room-handoffs.json")) ? JSON.parse(readFileSync(join(fixture.info.dataDir, "room-handoffs.json"), "utf8")) : null,
+      providerTurns: existsSync(planPath + ".evidence.jsonl") ? readFileSync(planPath + ".evidence.jsonl", "utf8") : null });
+    await cards(source.threadId); await cards(destination.threadId);
+    blockSession?.(); blockSession = undefined;
+    writeFileSync(gateFile, "release"); writeFileSync(nextGate, "release");
+    await api("POST", `/api/groups/${destination.id}/interrupt`, { threadId: destination.threadId });
+    await api("POST", `/api/groups/${source.id}/interrupt`, { threadId: source.threadId });
+  }
+}, 60_000);
+
 it("does not relay if the allowance cannot be durably written", async () => {
   const b = await bot("Failed allowance");
   await api("PATCH", `/api/bots/${b.id}`, { outbound: { policy: "allow", dailyCap: 1 } });
@@ -357,4 +578,21 @@ it("does not relay if the allowance cannot be durably written", async () => {
   expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
   expect(relayed).toHaveLength(before);
   expect((await api("GET", `/api/bots/${b.id}/outbound`)).body.today).toBe(0);
+});
+
+it("asks in Ask, refuses denied sends, and rechecks scopes after an approval", async () => {
+  const b = await bot("Ask sends");
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length;
+  const denied = relay(token, "GMAIL_SEND_DRAFT", { draft_id: "fixture" });
+  let card = await pending(b.threadId);
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "deny" });
+  expect((await denied).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before);
+  const held = relay(token, "GMAIL_SEND_EMAIL");
+  card = await pending(b.threadId);
+  await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "allow" });
+  expect((await held).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before);
 });

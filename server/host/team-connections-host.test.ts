@@ -65,6 +65,14 @@ function adaConnected(host: ReturnType<typeof setup>["host"], dataDir: string) {
   return file;
 }
 
+it("preserves the source handoff on both team and personal connector capabilities", async () => {
+  const { host, dataDir, minted } = setup({ requester: { "ada-chat": ADA } });
+  adaConnected(host, dataDir);
+  await host.appsIntegrations({ id: "scout", name: "Scout" }, "ada-chat", "generation", "handoff-fixture");
+  expect(minted).toHaveLength(2);
+  for (const capability of minted) expect(capability).toMatchObject({ roomHandoffId: "handoff-fixture" });
+});
+
 describe("whose connection a turn may use", () => {
   it("defaults every app and server to the team's", () => {
     const { host } = setup();
