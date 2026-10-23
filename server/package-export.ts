@@ -499,7 +499,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
   const skipped: TeamExportSkip[] = [...(input.skipped ?? [])];
 
   const release = input.release?.trim() || nextPatchRelease(input.published?.lastRelease);
-  if (!SEMVER.test(release)) throw new TeamExportError("Use a version like 1.2.3.");
+  if (!SEMVER.test(release)) throw teamExportRefusal("serverError.share.version");
   const notes = input.notes?.trim();
   if (notes && notes.length > RELEASE_NOTES_MAX) throw new TeamExportError(`Release notes must be at most ${RELEASE_NOTES_MAX} characters.`);
   const displayName = input.name?.trim() || team || "General";
@@ -520,7 +520,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
     throw teamExportRefusal("serverError.department.shareSkillLimit", { count: PACKAGE_MAX_SKILLS });
   }
   const crowded = bots.find((bot) => (agentSkills.get(bot.id)?.length ?? 0) > AGENT_MAX_SKILLS);
-  if (crowded) throw new TeamExportError(`${crowded.name} has more than ${AGENT_MAX_SKILLS} skills. Choose fewer skills and try again.`);
+  if (crowded) throw teamExportRefusal("serverError.department.shareBotSkillLimit", { name: crowded.name, count: String(AGENT_MAX_SKILLS) });
   const requirements = requiredApps(bots);
 
   // Addresses and header names only; values stay on this computer.
@@ -745,7 +745,7 @@ function withPresetSkills(
   return { ...preset, ...(kept.length ? { skills: kept } : {}) };
 }
 
-export const PRESET_TOO_LARGE_MESSAGE = "This preset is too large to share (4 MB). Leave out starter notes or some skills and try again.";
+export const PRESET_TOO_LARGE_MESSAGE = USER_ERROR["serverError.preset.tooLarge"];
 
 export interface LibraryExportInput {
   name?: string;
@@ -768,10 +768,10 @@ export interface LibraryExportResult {
 }
 
 export function createLibraryPackageExport(input: LibraryExportInput): LibraryExportResult {
-  if (!input.preset) throw new TeamExportError("Your New bot defaults are empty. Give them a name, instructions, skills or starter notes first.");
+  if (!input.preset) throw teamExportRefusal("serverError.preset.empty");
   const skipped: TeamExportSkip[] = [...(input.skipped ?? [])];
   const release = input.release?.trim() || nextPatchRelease(input.published?.lastRelease);
-  if (!SEMVER.test(release)) throw new TeamExportError("Use a version like 1.2.3.");
+  if (!SEMVER.test(release)) throw teamExportRefusal("serverError.share.version");
   const notes = input.notes?.trim();
   if (notes && notes.length > RELEASE_NOTES_MAX) throw new TeamExportError(`Release notes must be at most ${RELEASE_NOTES_MAX} characters.`);
   const displayName = (input.name?.trim() || input.preset.preset.name).slice(0, 100).trim();
@@ -803,7 +803,7 @@ export function createLibraryPackageExport(input: LibraryExportInput): LibraryEx
   try {
     document = parsePackageDocument(redactedDocument, { trust: "file" });
   } catch (error) {
-    if (error instanceof PackageFormatError && error.code === "too_large") throw new TeamExportError(PRESET_TOO_LARGE_MESSAGE);
+    if (error instanceof PackageFormatError && error.code === "too_large") throw teamExportRefusal("serverError.preset.tooLarge");
     throw new TeamExportError(error instanceof Error ? error.message : "This preset could not be shared.");
   }
   return {

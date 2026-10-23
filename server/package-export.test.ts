@@ -407,6 +407,9 @@ describe("whole-team export (package v2)", () => {
     const caught = (run: () => unknown) => { try { run(); } catch (error) { return error; } throw new Error("expected a refusal"); };
     expect(caught(() => createTeamPackageExport({ ...fixture(), team: "Empty" }))).toMatchObject({ errorKey: "serverError.department.shareNoBots" });
     expect(caught(() => createTeamPackageExport(huge))).toMatchObject({ errorKey: "serverError.department.shareTooLarge" });
+    const badVersion = caught(() => createTeamPackageExport({ ...fixture(), release: "one" }));
+    expect(badVersion).toMatchObject({ errorKey: "serverError.share.version" });
+    expect(badVersion).not.toHaveProperty("errorParams");
   });
 
   describe("skills that do not all fit", () => {
@@ -495,7 +498,7 @@ describe("whole-team export (package v2)", () => {
       expect(conflict).toBeInstanceOf(TeamExportError);
       expect((conflict as Error).message).toBe('Two bots in this department have different skills named "pricing". Leave that skill out and try again.');
       expect(conflict).toMatchObject({ errorKey: "serverError.department.shareSkillClash", errorParams: { skill: "pricing" } });
-      expect(crowded).not.toHaveProperty("errorKey");
+      expect(crowded).toMatchObject({ errorKey: "serverError.department.shareBotSkillLimit", errorParams: { name: "Morgan", count: "30" } });
       const secret = `sk-${"a1B2c3D4".repeat(3)}`;
       const leaked = refusal(new Map([["lead", [skill(secret)]], ["scout", [{ ...conflicting, name: secret }]]]));
       expect(leaked).toBeInstanceOf(TeamExportError);

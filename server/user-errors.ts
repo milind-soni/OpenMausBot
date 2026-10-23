@@ -51,10 +51,14 @@ export const USER_ERROR = {
   "serverError.department.shareSkillClash": "Two bots in this department have different skills named \"{skill}\". Leave that skill out and try again.",
   "serverError.department.shareNoBots": "Add a bot to this department before sharing it.",
   "serverError.department.shareSkillLimit": "A department can share at most {count} skills. Choose fewer skills and try again.",
+  "serverError.department.shareBotSkillLimit": "{name} has more than {count} skills. Choose fewer skills and try again.",
   "serverError.department.createFirst": "Create the named department before giving a Chief access to it",
   "serverError.department.chiefOnlyExtra": "Only a Chief may manage existing additional departments",
   "serverError.department.confirmExtra": "Confirm additional department access (acknowledgePeerScope)",
   "serverError.department.stopBots": "Stop running bots before granting access to another department, or use the desktop app or a paired Full-access session.",
+  "serverError.share.version": "Use a version like 1.2.3.",
+  "serverError.preset.empty": "Your New bot defaults are empty. Give them a name, instructions, skills or starter notes first.",
+  "serverError.preset.tooLarge": "This preset is too large to share (4 MB). Leave out starter notes or some skills and try again.",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;
