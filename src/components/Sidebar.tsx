@@ -1573,7 +1573,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     sectionChiefs,
     sectionedBots,
     unsectionedBots,
-  } = partitionSidebarBots(matchingBots, { universalPins });
+  } = partitionSidebarBots(matchingBots);
   const { botChats, sectionedRooms, unsectionedRooms } = partitionSidebarGroups(visibleGroups);
 
   const sectionNames: string[] = (state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase()));

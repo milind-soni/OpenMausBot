@@ -103,13 +103,9 @@ export function pinnedCircleThreadListVisible(
   return circles && density !== "icons" && pinnedCount > 0;
 }
 
-export function partitionSidebarBots<T extends SidebarBot>(
-  bots: T[],
-  options?: { universalPins?: boolean },
-) {
-  const universalPins = options?.universalPins === true;
+export function partitionSidebarBots<T extends SidebarBot>(bots: T[]) {
   const visible = bots.filter((bot) => !bot.hidden);
-  const pinnedBots = visible.filter((bot) => Boolean(bot.pinned) && (universalPins || !bot.chiefOfStaff));
+  const pinnedBots = visible.filter((bot) => Boolean(bot.pinned));
   const pinnedIds = new Set(pinnedBots.map((bot) => bot.id));
   const unsectionedChief = visible.find((bot) => bot.chiefOfStaff && !bot.section && !pinnedIds.has(bot.id)) ?? null;
   const sectionChiefs = visible.filter((bot) => bot.chiefOfStaff && Boolean(bot.section) && !pinnedIds.has(bot.id));
