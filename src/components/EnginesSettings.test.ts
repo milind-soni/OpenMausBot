@@ -62,6 +62,30 @@ describe("Settings → Engines → ChatGPT accounts", () => {
   });
 });
 
+describe("Settings → Engines → connection choices", () => {
+  it("separates agent apps from direct model connections, including an API-key Claude agent", () => {
+    const connection = (instanceId: string, driverKind: string, access: InstanceInfo["access"]): InstanceInfo => ({
+      instanceId, driverKind, displayName: instanceId, access, readOnly: true,
+      snapshot: { state: "available", authenticated: true },
+      models: { default: "model", options: [{ id: "model", label: "Model" }] },
+    });
+    fixture.instances = [
+      connection("opencode", "opencodeGo", "subscription"),
+      connection("claudeApi", "claudeAgent", "api"),
+      connection("openrouter", "openai-compat", "api"),
+    ];
+    fixture.bots = [];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    const agent = html.split('data-connection-kind="agent"')[1]!.split('data-connection-kind="direct"')[0]!;
+    const direct = html.split('data-connection-kind="direct"')[1]!;
+    expect(agent).toContain('data-engine-card="opencode"');
+    expect(agent).toContain('data-engine-card="claudeApi"');
+    expect(agent).toContain("Claude Code agent · Anthropic API billing");
+    expect(agent).not.toContain('data-engine-card="openrouter"');
+    expect(direct).toContain('data-engine-card="openrouter"');
+  });
+});
+
 describe("Settings → Engines → Grok", () => {
   function renderGrok(authenticated: boolean): string {
     vi.stubGlobal("window", {});
@@ -252,6 +276,7 @@ describe("Settings → Engines → setup cards", () => {
     expect(saved).toContain("OpenAI uses your API key");
     expect(saved).toContain("Change key");
     expect(saved).not.toContain("OpenAI needs an API key");
+    expect(saved).not.toContain("CLI path and updates");
 
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const remote = renderToStaticMarkup(createElement(EnginesSettings));

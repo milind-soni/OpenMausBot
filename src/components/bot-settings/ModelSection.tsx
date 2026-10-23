@@ -13,8 +13,8 @@ export function ModelSection({ bot }: { bot: Bot }) {
   const { draft } = useBotEditor();
   const modelVariants = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)?.capabilities?.modelVariants;
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-xl bg-card p-4">
+    <div className="flex min-w-0 flex-col gap-4">
+      <div className="min-w-0 rounded-xl bg-card p-4">
         <ModelPicker
           bot={bot}
           contained

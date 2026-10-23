@@ -1220,7 +1220,7 @@
   "keys.providers.title": "Ключі провайдерів",
   "keys.integrations.title": "Інтеграції",
   "keys.anthropic.label": "API-ключ Anthropic",
-  "keys.anthropic.desc": "Додає «Claude (API key)» у вибір моделі з оплатою за токени у вашій консолі Anthropic. Боти Claude, що ввійшли в акаунт, лишаються на своєму плані.",
+  "keys.anthropic.desc": "Додає «Claude Code (API key)» у вибір моделі з оплатою за токени у вашій консолі Anthropic. Боти Claude, що ввійшли в акаунт, лишаються на своєму плані.",
   "keys.anthropic.link": "Консоль Anthropic",
   "keys.openaiCompat.label": "API-ключ, сумісний з OpenAI",
   "keys.openaiCompat.desc": "Для Groq, Together, локального сервера Ollama чи будь-якого іншого сервера з API OpenAI. Вкажіть його базову URL-адресу нижче.",

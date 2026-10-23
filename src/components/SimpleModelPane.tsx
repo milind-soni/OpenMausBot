@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronRight, KeyRound, Loader2 } from "lucide-react";
 import type { InstanceInfo } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
@@ -8,6 +8,7 @@ import { modelBlurb } from "@/lib/model-friendly";
 import { effortLabel } from "./ModelPicker";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { isDirectModelDriver } from "../../shared/model-arrangement";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
 
@@ -44,6 +45,7 @@ export function SimpleModelPane({
   effort,
   variantsRow,
   onManage,
+  arrangement,
 }: {
   providers: RailProvider[];
   onProvider: (instance: InstanceInfo) => void;
@@ -65,51 +67,62 @@ export function SimpleModelPane({
   effort?: { levels: EffortLevel[]; current?: EffortLevel; onPick: (level: EffortLevel) => void } | null;
   variantsRow?: ReactNode;
   onManage: () => void;
+  arrangement?: ReactNode;
 }) {
   const row = "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
   const note = "px-2 py-1.5 text-[12.5px] text-ink-secondary";
+  const orderedProviders = [...providers].sort((a, b) =>
+    Number(isDirectModelDriver(a.target.driverKind)) - Number(isDirectModelDriver(b.target.driverKind)));
   return (
     <div data-simple-model-pane className="flex min-h-0 w-full flex-col">
+      {arrangement && <div className="shrink-0 p-2 pb-0">{arrangement}</div>}
       <div className="flex min-h-0 flex-1">
         <div
           data-simple-providers
           role="group"
           aria-label={t("model.simple.provider")}
-          className="flex w-32 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-hairline/40 bg-panel p-1.5"
+          className="flex w-36 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-hairline/40 bg-panel p-1.5"
         >
-          {providers.map((provider) => {
+          {orderedProviders.map((provider, index) => {
             const apiKey = provider.target.access === "api";
+            const direct = isDirectModelDriver(provider.target.driverKind);
+            const previous = orderedProviders[index - 1];
+            const groupStart = !previous || isDirectModelDriver(previous.target.driverKind) !== direct;
             const name = providerName(provider);
             const policy = provider.target.policy
               ? t("policy.managedBy", { organization: provider.target.policy.organizationName })
               : undefined;
             const spoken = [name, apiKey ? t("model.simple.apiKey") : undefined, policy].filter(Boolean).join(" · ");
             return (
-              <button
-                key={provider.instance.instanceId}
-                type="button"
-                data-simple-provider={provider.instance.instanceId}
-                aria-pressed={provider.selected}
-                aria-label={spoken === name ? undefined : spoken}
-                title={[name, policy ?? (apiKey ? t("model.apiKeyHint") : undefined)].filter(Boolean).join(" · ")}
-                onClick={() => onProvider(provider.target)}
-                className={cn(
-                  row,
-                  "font-medium",
-                  provider.selected ? "bg-raised-hover text-accent-text" : "text-ink hover:bg-control/60",
-                  policy && "opacity-40",
-                )}
-              >
-                <span className="relative flex shrink-0">
-                  <InstanceProviderMark instance={provider.target} size={16} />
-                  {apiKey && (
-                    <span data-simple-key className="absolute -bottom-1 -right-1 flex size-3 items-center justify-center rounded-full bg-panel text-ink-secondary">
-                      <KeyRound size={8} aria-hidden="true" />
-                    </span>
+              <Fragment key={provider.instance.instanceId}>
+                {groupStart && <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">
+                  {t(direct ? "model.connection.directTitle" : "model.connection.agentTitle")}
+                </div>}
+                <button
+                  type="button"
+                  data-simple-provider={provider.instance.instanceId}
+                  aria-pressed={provider.selected}
+                  aria-label={spoken === name ? undefined : spoken}
+                  title={[name, policy ?? (apiKey ? t("model.apiKeyHint") : undefined)].filter(Boolean).join(" · ")}
+                  onClick={() => onProvider(provider.target)}
+                  className={cn(
+                    row,
+                    "font-medium",
+                    provider.selected ? "bg-raised-hover text-accent-text" : "text-ink hover:bg-control/60",
+                    policy && "opacity-40",
                   )}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{name}</span>
-              </button>
+                >
+                  <span className="relative flex shrink-0">
+                    <InstanceProviderMark instance={provider.target} size={16} />
+                    {apiKey && (
+                      <span data-simple-key className="absolute -bottom-1 -right-1 flex size-3 items-center justify-center rounded-full bg-panel text-ink-secondary">
+                        <KeyRound size={8} aria-hidden="true" />
+                      </span>
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{name}</span>
+                </button>
+              </Fragment>
             );
           })}
         </div>
@@ -159,17 +172,18 @@ export function SimpleModelPane({
                     const current = option.id === currentModelId;
                     const blurb = modelBlurb(option);
                     const route = option.provider && repeatedLabels?.has(option.label) ? option.provider : undefined;
+                    const label = option.id === "agent-default" ? t("model.arrangement.agentConfigured") : option.label;
                     return (
                       <button
                         key={option.id}
                         type="button"
                         aria-pressed={current}
-                        aria-label={option.provider ? `${option.label} · ${option.provider}` : undefined}
-                        title={[option.label, option.provider, blurb].filter(Boolean).join(" · ")}
+                        aria-label={option.provider ? `${label} · ${option.provider}` : undefined}
+                        title={[label, option.provider, blurb].filter(Boolean).join(" · ")}
                         onClick={() => onPick(option.id)}
                         className={cn(row, "font-medium text-ink", current ? "bg-raised-hover" : "hover:bg-control/60")}
                       >
-                        <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                        <span className="min-w-0 flex-1 truncate">{label}</span>
                         {route && (
                           <span data-simple-route className="max-w-[45%] shrink-0 truncate text-[11.5px] font-normal text-ink-secondary">{route}</span>
                         )}

@@ -1311,6 +1311,7 @@ describe("credential env narrowing", () => {
 
   it("runs only Claude (API key) on a key saved from Settings, and every Claude bot when asked", () => {
     const own = instanceConfigs({ anthropic: { key: "SECRET-ANT", everyClaudeBot: false } });
+    expect(own.claudeApi).toMatchObject({ driver: "claudeAgent", displayName: "Claude Code (API key)", access: "api" });
     expect(own.claudeApi.environment).toEqual({ ANTHROPIC_API_KEY: "SECRET-ANT" });
     expect(own.claude.environment).toEqual({});
     for (const anthropic of [{ key: "SECRET-ANT" }, { key: "SECRET-ANT", everyClaudeBot: true }]) {

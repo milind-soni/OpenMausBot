@@ -257,7 +257,12 @@ describe("control-omb ui drives the real renderer", () => {
     const options = models.instances.find((instance: any) => instance.instanceId === originalBot.modelSelection.instanceId).models.options;
     const originalLabel = options.find((option: any) => option.id === originalModel).label;
     const nextModel = options.find((option: any) => option.id !== originalModel);
-    await ui("click", info.ui, "--name", originalLabel);
+    await ui("click", info.ui, "--name", `Claude Code · ${originalLabel}`);
+    const arrangement = await ui("eval", info.ui, "--js", "document.querySelector('[data-model-arrangement]')?.innerText");
+    expect(arrangement.result).toContain("Claude Code runs this bot");
+    expect(await ui("eval", info.ui, "--js", "document.querySelector('[data-model-arrangement]')?.getAttribute('data-agent-kind')")).toMatchObject({ result: "connected" });
+    expect(arrangement.result).toContain("Claude Code");
+    expect(arrangement.result).toContain(originalLabel);
     expect(await ui("eval", info.ui, "--js", "[...document.querySelectorAll('[aria-label=\"Apply model changes to\"] button')].find(b => b.textContent === 'Only this thread').getAttribute('aria-pressed')"))
       .toMatchObject({ result: "true" });
     await ui("click", info.ui, "--name", "Thread + bot default");
@@ -267,7 +272,7 @@ describe("control-omb ui drives the real renderer", () => {
     await ui("click", info.ui, "--name", nextModel.label);
     await expect.poll(async () => (await savedBot()).modelSelection.model, { timeout: 10_000 }).toBe(nextModel.id);
     expect((await savedBot()).tasks.find((task: any) => task.threadId === originalBot.threadId).modelSelection.model).toBe(nextModel.id);
-    await ui("click", info.ui, "--name", nextModel.label);
+    await ui("click", info.ui, "--name", `Claude Code · ${nextModel.label}`);
     await ui("click", info.ui, "--name", "Only this thread");
     const modelSnapshot = await ui("snapshot", info.ui, "--interactive");
     const originalRow = Object.entries(modelSnapshot.refs as Record<string, { name: string; role: string }>)

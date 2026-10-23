@@ -1,3 +1,5 @@
+import { modelLabel, modelProvider, probeLocalModels } from "./model-picker-options";
+export { probeLocalModels, LOCAL_PROBE_TIMEOUT_MS } from "./model-picker-options";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, KeyRound, Loader2, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
@@ -22,40 +24,17 @@ import { COMPACT_SQUARE } from "@/lib/compact-chip";
 import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
 import { Select } from "./Select";
+import { ModelArrangementCard } from "./ModelArrangementCard";
+import { modelArrangement } from "@/lib/model-arrangement";
+import { isDirectModelDriver } from "../../shared/model-arrangement";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
 const COMPACT_MODEL_COUNT = 5;
-
-function modelLabel(instance: InstanceInfo | undefined, model: string): string {
-  return instance?.models.options.find((option) => option.id === model)?.label ?? model;
-}
-
-function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
-  return instance?.models.options.find((option) => option.id === model)?.provider;
-}
 
 export function engineStatus(instance: InstanceInfo): string {
   if (needsCli(instance)) return t("model.setupRequired");
   if (needsSignIn(instance)) return t("model.signInRequired");
   return instance.snapshot.version ?? t("model.ready");
-}
-
-export const LOCAL_PROBE_TIMEOUT_MS = 5_000;
-
-export function probeLocalModels(
-  instanceId: string,
-  refreshModels: (instanceId: string) => Promise<void>,
-  timeoutMs = LOCAL_PROBE_TIMEOUT_MS,
-): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, timeoutMs);
-    void refreshModels(instanceId)
-      .catch(() => {})
-      .finally(() => {
-        clearTimeout(timer);
-        resolve();
-      });
-  });
 }
 
 export function offersLocalModels(instance: InstanceInfo | undefined, localCount: number): boolean {
@@ -256,7 +235,7 @@ function ModelRow({
       )}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <span className="truncate">{option.label}</span>
+        <span className="truncate">{option.id === "agent-default" ? t("model.arrangement.agentConfigured") : option.label}</span>
         {option.provider && (
           <span
             className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary"
@@ -376,6 +355,9 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
   onAddApiKeys?: () => void;
 }) {
   const { subscription, api, custom: local } = railProviders(instances, selectedInstance, claudeInstance, openaiInstance);
+  const providers = [...subscription, ...api, ...local];
+  const agents = providers.filter(({ target }) => !isDirectModelDriver(target.driverKind));
+  const direct = providers.filter(({ target }) => isDirectModelDriver(target.driverKind));
   const railButton = ({ instance, target, selected, label }: RailProvider) => {
     const attention = needsCli(target) || needsSignIn(target) || Boolean(target.snapshot.update);
     const managedBy = target.policy ? t("policy.managedBy", { organization: target.policy.organizationName }) : undefined;
@@ -401,10 +383,10 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
   };
   return (
     <div className="flex w-14 shrink-0 flex-col gap-1 overflow-y-auto border-r border-hairline/40 bg-panel p-2">
-      {subscription.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-0.5 text-center text-[9px]">{t("model.rail.cloud")}</EngineGroupLabel>}
-      {subscription.map(railButton)}
-      {(api.length > 0 || onAddApiKeys) && <EngineGroupLabel className={cn("px-0 pb-0.5 text-center text-[9px] leading-tight", subscription.length > 0 ? "pt-2" : "pt-0.5")}>{t("model.rail.apiKeys")}</EngineGroupLabel>}
-      {api.map(railButton)}
+      {agents.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-0.5 text-center text-[9px] leading-tight">{t("model.rail.agents")}</EngineGroupLabel>}
+      {agents.map(railButton)}
+      {(direct.length > 0 || onAddApiKeys) && <EngineGroupLabel className="px-0 pb-0.5 pt-2 text-center text-[9px] leading-tight">{t("model.rail.direct")}</EngineGroupLabel>}
+      {direct.map(railButton)}
       {onAddApiKeys && (
         <button
           type="button"
@@ -417,8 +399,6 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
           <Plus size={16} aria-hidden="true" />
         </button>
       )}
-      {local.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-2 text-center text-[9px]">{t("model.rail.local")}</EngineGroupLabel>}
-      {local.map(railButton)}
     </div>
   );
 }
@@ -761,6 +741,15 @@ export function ModelPicker({
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
       }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${t("model.effort.summary", { level: effortLabel(selection.effort) })}` : ""}`
     : selection.model;
+  const activeEndpoint = active?.instanceId === "openaiCompat" ? state.config?.openaiCompat?.url : undefined;
+  const activeArrangement = modelArrangement(active, selection, activeEndpoint);
+  const activeSummary = <ModelArrangementCard instance={active} selection={selection} endpointUrl={activeEndpoint} />;
+  const browsingSelection = railInstance?.instanceId === selection.instanceId ? selection
+    : { instanceId: railInstance?.instanceId ?? selection.instanceId, model: railInstance?.models.default ?? "" };
+  const railEndpoint = railInstance?.instanceId === "openaiCompat" ? state.config?.openaiCompat?.url : undefined;
+  const arrangementCard = <ModelArrangementCard instance={railInstance} selection={browsingSelection}
+    endpointUrl={railEndpoint}
+    changing={Boolean(railInstance && railInstance.instanceId !== selection.instanceId)} />;
   const followLine = follows === true ? `\n${t("model.followsBot", { name: profile.name })}` : follows === false ? `\n${t("model.ownModel")}` : "";
 
   const trigger = (
@@ -786,7 +775,8 @@ export function ModelPicker({
       aria-expanded={open && !bot.busy}
       aria-haspopup="dialog"
       className={cn(
-        "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-control/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-control/60",
+        "flex min-w-0 items-center gap-1.5 rounded-full border border-hairline/40 bg-control/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-control/60",
+        contained && "w-full justify-between",
         !contained && active && !showActiveAccount && COMPACT_SQUARE,
       )}
       title={bot.busy ? `${summary}${followLine}\n${t(threadId ? "model.threadBusy" : "model.busy")}` : `${summary}${followLine}`}
@@ -795,8 +785,9 @@ export function ModelPicker({
       {!contained && active && showActiveAccount && (
         <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
       )}
-      <span className={cn("flex min-w-0 items-center gap-1", !contained && active && "@max-4xl/chathead:hidden")}>
-        <span className="max-w-[160px] truncate">
+      <span className={cn("flex min-w-0 items-center gap-1", contained && "flex-1", !contained && active && "@max-4xl/chathead:hidden")}>
+        <span data-model-agent className={cn("truncate text-ink-secondary", contained ? "max-w-[40%] shrink-0" : "max-w-[100px]")}>{activeArrangement.agent} ·</span>
+        <span className={cn("truncate", contained ? "min-w-0 flex-1" : "max-w-[160px]")}>
           {active && showActiveAccount && (
             <span data-model-account className="text-ink-secondary">{active.displayName} · </span>
           )}
@@ -827,13 +818,15 @@ export function ModelPicker({
   return (
     <div ref={rootRef} className={cn(contained ? "w-full" : "relative", className)}>
       {contained ? (
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 flex-col items-stretch gap-3">
           {label}
           {trigger}
         </div>
       ) : (
         trigger
       )}
+
+      {contained && <div className="mt-3 min-w-0">{activeSummary}</div>}
 
       {motion.shown && (
         <div
@@ -856,6 +849,7 @@ export function ModelPicker({
           <div className="flex min-h-0 min-w-0 flex-1">
           {simpleView ? (
             <SimpleModelPane
+              arrangement={!contained || railInstance?.instanceId !== selection.instanceId ? arrangementCard : undefined}
               providers={simpleProviders}
               onProvider={browseSimple}
               account={railInstance && simpleAccounts.length > 1 ? (
@@ -912,6 +906,7 @@ export function ModelPicker({
             onAddApiKeys={window.ogb?.remoteClient?.active === true ? undefined : openApiKeys} />}
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+            {(!contained || railInstance?.instanceId !== selection.instanceId) && <div className="shrink-0 p-2 pb-0">{arrangementCard}</div>}
             {threadId && (
               <div className="shrink-0 border-b border-hairline/40 px-3 py-2">
                 <div role="group" aria-label={t("model.scope.label")} className="flex gap-1">
@@ -977,7 +972,7 @@ export function ModelPicker({
                     <ChatGptPlanStatus key={railInstance.instanceId} instanceId={railInstance.instanceId} />
                   )}
                   {railInstance.access === "api"
-                    ? <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t("model.apiKeyHint")}</div>
+                    ? <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t(modelArrangement(railInstance, { instanceId: railInstance.instanceId, model: "agent-default" }, railEndpoint).location === "local" ? "model.localEndpointHint" : "model.apiKeyHint")}</div>
                     : pane === "custom" && <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t("model.localHint")}</div>}
                 </div>
 

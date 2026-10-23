@@ -265,3 +265,15 @@ describe("the built-in browser switch", () => {
     expect(experimental.keywords).not.toContain("browser");
   });
 });
+
+
+it.each([
+  [false, "engines", true], [false, "connections", true], [false, "decisionModel", true],
+  [true, "engines", true], [true, "connections", false], [true, "decisionModel", false],
+] as const)("keeps the providers surface opaque exactly when visible (advanced=%s, section=%s)", (advanced, section, providersVisible) => {
+  fixture.advancedMode = advanced;
+  fixture.section = section;
+  const html = render();
+  expect(html.includes("MARKER:engines;")).toBe(providersVisible);
+  expect(html.includes("glass-surface-opaque")).toBe(providersVisible);
+});

@@ -89,7 +89,7 @@ const codex = engine("codex", "codex", "Codex", "subscription", [{ id: "gpt-5.6"
 const grok = engine("grok", "grokAgent", "Grok", "subscription", [{ id: "grok-5", label: "Grok 5" }]);
 const cursor = engine("cursor", "cursorAgent", "Cursor", "subscription", [{ id: "auto", label: "Auto" }]);
 const openaiKey = engine("openai", "openai-compat", "OpenAI", "api", [{ id: "gpt-5.6", label: "GPT-5.6" }]);
-const claudeKey = engine("claudeApi", "claudeAgent", "Claude (API key)", "api", claudeModels);
+const claudeKey = engine("claudeApi", "claudeAgent", "Claude Code (API key)", "api", claudeModels);
 const local = engine("pi", "piAgent", "pi", "custom", [
   { id: "qwen", label: "Qwen 3", custom: true },
   { id: "mistral", label: "Mistral Small", custom: true },
@@ -205,7 +205,7 @@ describe("the model picker in Simple mode", () => {
     fixture.instances = [claude(), codex, grok, cursor, openaiKey, claudeKey, local];
     const opened = open(bot());
     expect(pane(opened)!.props.providers.map((provider) => provider.label))
-      .toEqual(["Claude", "OpenAI", "Grok", "Cursor", "OpenAI", "Claude (API key)", "pi"]);
+      .toEqual(["Claude", "OpenAI", "Grok", "Cursor", "OpenAI", "Claude Code (API key)", "pi"]);
     const column = region(menu(opened.html), "data-simple-providers", "data-simple-models");
     for (const name of ["Claude", "OpenAI", "Grok", "Cursor", "pi"]) expect(column).toContain(`>${name}</span>`);
     expect(column.match(/data-simple-key/g)).toHaveLength(2);
@@ -216,7 +216,7 @@ describe("the model picker in Simple mode", () => {
     const hasKey = (id: string) => nodes(byId(id).props.children).some((node) => node.props["data-simple-key"] !== undefined);
     expect(byId("openai").props["aria-label"]).toBe("OpenAI · API key");
     expect(byId("openai").props.title).toContain("Runs on your API key");
-    expect(byId("claudeApi").props["aria-label"]).toBe("Claude · API key");
+    expect(byId("claudeApi").props["aria-label"]).toBe("Claude Code · API key");
     expect(hasKey("openai")).toBe(true);
     expect(hasKey("claudeApi")).toBe(true);
     expect(byId("codex").props["aria-label"]).toBeUndefined();

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { Bot, Check, Cpu, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
@@ -13,6 +13,7 @@ import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
+import { isDirectModelDriver } from "../../shared/model-arrangement";
 
 interface ProbeResult {
   ok: boolean;
@@ -365,7 +366,7 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
           {instance.instanceId.startsWith("antigravity-") && <RemoveAntigravityAccount instance={instance} />}
         </div>
       )}
-      <EngineAdvanced instance={instance} />
+      {!isDirectModelDriver(instance.driverKind) && <EngineAdvanced instance={instance} />}
     </EngineCard>
   );
 }
@@ -384,26 +385,50 @@ export function EnginesSettings() {
     return group && groups.get(group)?.[0] === instance ? group : null;
   };
   const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
+  const agentApps = rows.filter((instance) => !isDirectModelDriver(instance.driverKind));
+  const directModels = rows.filter((instance) => isDirectModelDriver(instance.driverKind));
+  const renderEngine = (instance: InstanceInfo) => {
+    const group = groupOf(instance);
+    return group
+      ? <AccountsCard group={group} accounts={groups.get(group)!} advanced={<EngineAdvanced instance={instance} />} />
+      : <EngineRow instance={instance} />;
+  };
+  const isReady = (instance: InstanceInfo) => {
+    const group = groupOf(instance);
+    return group ? accountsReady(groups.get(group)!) : engineReady(instance);
+  };
 
   return (
     <div className="flex min-w-0 flex-col gap-6 pb-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 basis-60 space-y-2 px-4">
-          <h1 className="text-[22px] font-semibold tracking-tight text-ink">{t("settings.engines.title")}</h1>
-          <p className="mt-2 max-w-lg text-[13px] leading-relaxed text-ink-secondary">{t("engines.library.intro")}</p>
+          <h1 className="text-[22px] font-semibold tracking-tight text-ink">{t("model.connection.title")}</h1>
+          <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-ink-secondary">{t("model.connection.intro")}</p>
         </div>
         <RefreshEngines />
       </div>
-      <EngineSections
-        instances={rows}
-        isReady={(instance) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); }}
-        renderEngine={(instance) => {
-          const group = groupOf(instance);
-          return group
-            ? <AccountsCard group={group} accounts={groups.get(group)!} advanced={<EngineAdvanced instance={instance} />} />
-            : <EngineRow instance={instance} />;
-        }}
-      />
+      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))] items-stretch gap-4">
+        <section data-connection-kind="agent" aria-labelledby="agent-connections-title" className="min-w-0 rounded-2xl border border-accent/30 bg-accent/[0.045] p-3">
+          <div className="border-b border-accent/20 px-2 pb-4 pt-2">
+            <div className="flex items-center gap-2.5">
+              <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent-text"><Bot size={18} /></span>
+              <h2 id="agent-connections-title" className="text-[17px] font-semibold text-ink">{t("model.connection.agentTitle")}</h2>
+            </div>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">{t("model.connection.agentDescription")}</p>
+          </div>
+          <div className="pt-4"><EngineSections instances={agentApps} isReady={isReady} renderEngine={renderEngine} /></div>
+        </section>
+        <section data-connection-kind="direct" aria-labelledby="direct-connections-title" className="min-w-0 rounded-2xl border border-hairline/80 bg-inset/65 p-3">
+          <div className="border-b border-hairline/70 px-2 pb-4 pt-2">
+            <div className="flex items-center gap-2.5">
+              <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-raised text-ink"><Cpu size={18} /></span>
+              <h2 id="direct-connections-title" className="text-[17px] font-semibold text-ink">{t("model.connection.directTitle")}</h2>
+            </div>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">{t("model.connection.directDescription")}</p>
+          </div>
+          <div className="pt-4"><EngineSections instances={directModels} isReady={isReady} renderEngine={renderEngine} /></div>
+        </section>
+      </div>
       <CacheKeepWarmSettings />
     </div>
   );

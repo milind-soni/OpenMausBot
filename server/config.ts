@@ -1216,7 +1216,7 @@ const API_KEY_FLEET: InstanceConfigMap = {
     config: { url: "https://api.openai.com/v1", apiKeyEnv: "OMB_OPENAI_API_KEY", catalog: "openai" },
   },
   [CLAUDE_API_INSTANCE]: {
-    driver: "claudeAgent", displayName: "Claude (API key)", access: "api", icon: { kind: "preset", preset: "anthropic" },
+    driver: "claudeAgent", displayName: "Claude Code (API key)", access: "api", icon: { kind: "preset", preset: "anthropic" },
     config: { requireApiKey: true },
   },
   [XAI_API_INSTANCE]: { driver: "grok", displayName: "xAI", access: "api", icon: { kind: "preset", preset: "xai" } },

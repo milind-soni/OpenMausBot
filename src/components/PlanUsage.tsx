@@ -90,7 +90,7 @@ function windowLabel(label: string): string {
 function providerLabel(provider: Pick<PlanProvider, "name">): string {
   const normalized = provider.name.trim().toLowerCase();
   if (normalized === "chatgpt plan") return t("planUsage.provider.chatgptPlan");
-  if (normalized === "claude (api key)") return t("planUsage.provider.claudeApiKey");
+  if (normalized === "claude (api key)" || normalized === "claude code (api key)") return t("planUsage.provider.claudeApiKey");
   return provider.name;
 }
 

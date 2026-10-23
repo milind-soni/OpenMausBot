@@ -2,6 +2,7 @@
 // approval fixture. Provider replies are synthetic; no account is contacted.
 const { BrowserWindow, ipcMain } = require("electron");
 const assert = require("node:assert/strict");
+const en = require("../../src/locales/en.json");
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { pathToFileURL } = require("node:url");
@@ -10,7 +11,14 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
   const { mountPreview } = await import(pathToFileURL(join(root, "scripts/testing/preview-fixture.ts")).href);
   const bot = (await api("/api/bots", "POST", { name: "Model switch fixture", modelSelection: { instanceId: "codex", model: "gpt-fake-default" } })).body.bot;
   await grant(bot.id, "custom");
+  const initialInstances = (await api("/api/instances")).body.instances;
+  const siblingModel = initialInstances.find(instance => instance.instanceId === "codex").models.options.find(option => option.custom && option.id.includes("fixture-local"));
+  assert.ok(siblingModel);
   const sibling = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Unrelated custom conversation" })).body.task;
+  const siblingChanged = await api(`/api/bots/${bot.id}/tasks/${sibling.threadId}`, "PATCH", { modelSelection: { instanceId: "codex", model: siblingModel.id } });
+  assert.equal(siblingChanged.status, 200);
+  assert.equal(siblingChanged.body.task.modelSelection.model, siblingModel.id);
+  const following = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Follows bot default" })).body.task;
   const selected = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Research brief" })).body.task;
   const read = async () => (await api("/api/bots?messages=0")).body.bots.find(candidate => candidate.id === bot.id);
   const selection = { instanceId: "claude", model: "claude-sonnet-5" };
@@ -18,7 +26,10 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
   // the Custom boundary from a bot-accessible HTTP connection.
   assert.equal((await api(`/api/bots/${bot.id}/tasks/${selected.threadId}`, "PATCH", { approvalMode: "ask", modelSelection: selection })).status, 403);
   assert.equal((await api(`/api/bots/${bot.id}/tasks/${selected.threadId}`, "PATCH", { resetApprovalToAsk: true, modelSelection: selection })).status, 403);
-  const preview = await mountPreview({ info: { url } }, { entry: "/src/testing/thread-approvals.tsx", route: "/__thread-approvals.html", title: "Isolated model switching", logLevel: "silent" });
+  const pairing = (await api("/api/auth/pairing", "POST", { scopes: ["admin", "client"] })).body;
+  const session = (await api("/api/auth/pair", "POST", { code: pairing.code, label: "Isolated model-switch preview" })).body;
+  assert.equal(typeof session.token, "string");
+  const preview = await mountPreview({ info: { url } }, { proxyHeaders: { authorization: `Bearer ${session.token}` }, entry: "/src/testing/thread-approvals.tsx", route: "/__thread-approvals.html", title: "Isolated model switching", logLevel: "silent" });
   const window = new BrowserWindow({ show: false, width: 1100, height: 850, webPreferences: { preload: join(root, "scripts/testing/approval-preview-preload.cjs"), contextIsolation: true, sandbox: true } });
   const calls = [];
   ipcMain.handle("fixture:thread-approval", (event, botId, mode, options) => {
@@ -50,7 +61,7 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
     assert.equal(instances.find(instance => instance.instanceId === "claude-signed-out").snapshot.authenticated, false);
     assert.notEqual(instances.find(instance => instance.instanceId === "missing-codex").snapshot.state, "available");
     assert.equal(await evaluate("!!document.querySelector('[data-model-picker-content] button[aria-label=\"Missing provider fixture\"]')"), false);
-    assert.ok((await text()).includes("Engines and accounts"));
+    assert.ok((await text()).includes(en["settings.engines.title"]));
     assert.equal(await evaluate("[...document.querySelectorAll('[aria-label=\"Apply model changes to\"] button')].find(b => b.textContent === 'Only this thread').getAttribute('aria-pressed')"), "true");
     await click("Claude");
     await until(() => evaluate("!!document.querySelector('[data-model-picker-content] select option[value=claude]')"));
@@ -112,13 +123,16 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
     await openPicker();
     await click("Thread + bot default");
     await selectClaude();
-    assert.ok((await text()).includes("Groups and new threads use this default"));
+    assert.ok((await text()).includes(en["model.providerSwitch.botBody"].replace("{model}", "Claude Sonnet 5")));
     writeFileSync(join(evidence, "default-confirmation.png"), (await window.webContents.capturePage()).toPNG());
     await click("Switch with Ask");
     await until(async () => (await read()).modelSelection.instanceId === "claude");
     const after = await read();
     assert.equal(after.approvalMode, "ask");
     assert.equal(after.tasks.find(task => task.threadId === sibling.threadId).approvalMode, "custom");
+    assert.equal(after.tasks.find(task => task.threadId === sibling.threadId).modelSelection.model, siblingModel.id);
+    assert.equal(after.tasks.find(task => task.threadId === following.threadId).approvalMode, "ask");
+    assert.equal(after.tasks.find(task => task.threadId === following.threadId).modelSelection.instanceId, "claude");
     assert.equal(calls[1].updateBotDefault, true);
     const newThread = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Uses the new default" })).body.task;
     assert.equal(newThread.modelSelection.instanceId, "claude");

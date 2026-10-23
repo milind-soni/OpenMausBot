@@ -1433,7 +1433,7 @@
   "keys.providers.subtitle": "这个安装实例中所有机器人运作所使用的密钥，会依词元向你的提供方账户计费。",
   "keys.integrations.title": "集成",
   "keys.anthropic.label": "Anthropic API 密钥",
-  "keys.anthropic.desc": "在模型选择器中添加“Claude（API 密钥）”，按词元向你的 Anthropic 控制台计费。已登录的 Claude 机器人继续使用原有方案。",
+  "keys.anthropic.desc": "在模型选择器中添加“Claude Code（API 密钥）”，按词元向你的 Anthropic 控制台计费。已登录的 Claude 机器人继续使用原有方案。",
   "keys.anthropic.link": "Anthropic 主控台",
   "keys.openaiCompat.label": "兼容于 OpenAI 的 API 密钥",
   "keys.openaiCompat.desc": "用于 Groq、Together、本地 Ollama 服务器或任何支持 OpenAI API 的服务器。请在下方设置其基础 URL。",
