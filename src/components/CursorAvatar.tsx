@@ -2,8 +2,7 @@
 import React, { useEffect, useId, useMemo, useRef } from 'react'
 
 import { MASCOT_BODIES } from "../../shared/mascot-bodies"
-import { t } from "@/lib/i18n"
-import { silhouetteName } from "@/lib/mascot-names"
+import { mascotLabel } from "@/lib/mascot-names"
 import {
   EXPRESSIONS,
   EXPRESSION_COUNT,
@@ -19,8 +18,7 @@ import {
 import { GLYPH_EASE_MS, MOTION, VIEW_SPAN, bodyTransform, faceTravelUnits, morphUnitsPerMs, nextMascotFrame, type BodyMotion } from "./mascot-motion"
 import { mascotClock, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock"
 
-export { MOTION, bodyTransform }
-export type { BodyMotion }
+export { MOTION, bodyTransform, type BodyMotion }
 export {
   EXPRESSIONS,
   EXPRESSION_COUNT,
@@ -1239,7 +1237,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     }, [])
 
     const dimension = typeof size === 'number' ? `${size}px` : size
-    const label = title === undefined ? t("mascot.label", { name: silhouetteName(silhouette.name) }) : title
+    const label = title === undefined ? mascotLabel(silhouette.name) : title
     const body = silhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
 
     return (

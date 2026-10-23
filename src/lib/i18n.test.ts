@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { documentLanguage, intlLocale, resolveLocale, setLocale, t, tFromServer } from "./i18n";
+import { activePackComplete, documentLanguage, intlLocale, resolveLocale, setLocale, t, tFromServer } from "./i18n";
 import { en, localeChoices, locales } from "@/locales";
 
 afterEach(() => {
@@ -118,6 +118,21 @@ describe("t", () => {
       name in { name: "Maus" } ? String({ name: "Maus" }[name as "name"]) : match,
     );
     expect(rendered).toBe("Hello Maus, {missing}!");
+  });
+});
+
+describe("activePackComplete", () => {
+  it("is true only for a pack other than English that has every English key", () => {
+    expect(activePackComplete()).toBe(false);
+    setLocale("pt-br");
+    expect(activePackComplete()).toBe(true);
+    locales["zz"] = { "approval.held.native": "x" };
+    try {
+      setLocale("zz");
+      expect(activePackComplete()).toBe(false);
+    } finally {
+      delete locales["zz"];
+    }
   });
 });
 

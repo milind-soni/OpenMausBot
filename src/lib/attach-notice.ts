@@ -1,5 +1,5 @@
 import { intlLocale, t } from "@/lib/i18n";
-import type { AttachProblem } from "@/lib/composer-attachments";
+import { intakeFiles, type AttachProblem, type DroppedFile } from "@/lib/composer-attachments";
 
 function numberText(value: number, fractionDigits = 0): string {
   return new Intl.NumberFormat(intlLocale(), { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits }).format(value);
@@ -31,4 +31,9 @@ export function attachNoticeText(problems: readonly AttachProblem[]): string | n
   const failed = problems.filter((problem) => problem.kind !== "unsupported").map(problemText).join("; ");
   if (unsupported && failed) return `${unsupported} (${failed})`;
   return unsupported || failed || null;
+}
+
+export async function intakeFilesWithNotice<T extends DroppedFile & { type: string }>(files: readonly T[], options: Parameters<typeof intakeFiles<T>>[1]) {
+  const { attachments, problems } = await intakeFiles(files, options);
+  return { attachments, notice: attachNoticeText(problems) };
 }

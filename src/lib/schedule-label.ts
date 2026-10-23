@@ -1,6 +1,8 @@
 import { atLocalTime } from "@/lib/routine-calendar";
 import type { RoutineSchedule } from "@/lib/routines";
 import { cronScheduleLabel } from "../../shared/cron-label";
+import { cronText } from "@/lib/cron-text";
+import { clockOptions } from "@/lib/clock-time";
 import { limitResetWhen } from "@/lib/limit-resets";
 import { intlLocale, t } from "@/lib/i18n";
 
@@ -11,7 +13,7 @@ export function dayName(day: number): string {
 }
 
 export function niceTime(at: number): string {
-  return new Date(at).toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit" });
+  return new Date(at).toLocaleTimeString(intlLocale(), clockOptions(intlLocale()));
 }
 
 export function niceDate(at: number): string {
@@ -58,7 +60,7 @@ function intervalRestrictions(schedule: Extract<RoutineSchedule, { type: "interv
 }
 
 export function scheduleLabel(schedule: RoutineSchedule | { type: "once"; at: number } | { type: "daily"; time: string; weekdays: number[] }): string {
-  if (schedule.type === "cron") return cronScheduleLabel(schedule);
+  if (schedule.type === "cron") return cronText(schedule);
   if (schedule.type === "limit_reset") return limitResetWhen(schedule);
   if (schedule.type === "once") return `${niceDate(schedule.at)}, ${niceTime(schedule.at)}`;
   if (schedule.type === "interval") {

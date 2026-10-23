@@ -16,7 +16,7 @@ import type { WebhookRequestCardData } from "./webhook-request.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
-import type { ServerTextParams } from "./server-text.ts";
+import type { ServerTextLine, ServerTextParams } from "./server-text.ts";
 import type { ModelRequestCardData } from "./model-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
@@ -424,7 +424,7 @@ export type CardAnswerer = (
 };
 
 /** One transcript line, serialized as stored. */
-export interface WireMessage {
+export interface WireMessage extends ServerTextLine {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";

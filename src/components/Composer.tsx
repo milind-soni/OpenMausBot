@@ -6,7 +6,7 @@ import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type M
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
-import { attachNoticeText } from "@/lib/attach-notice";
+import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
@@ -49,7 +49,6 @@ import {
   composerTakesFocusOnOpen,
   imageAttachmentFromFile,
   replyTargetTakesFocus,
-  intakeFiles,
   isLongPaste,
   optimisticImageAttachment,
   pasteAttachment,
@@ -492,13 +491,12 @@ export function Composer({
     if (!picked?.length) return;
     changeDraftAttachmentPending(draftId, true);
     try {
-      const { attachments: added, problems } = await intakeFiles(Array.from(picked), {
+      const { attachments: added, notice } = await intakeFilesWithNotice(Array.from(picked), {
         allowImages: engineSupportsImages,
         getPath: pathForFile,
         uploadImage,
       });
       if (added.length) addAttachments(added);
-      const notice = attachNoticeText(problems);
       if (notice) setAttachmentNotice(notice);
     } finally {
       changeDraftAttachmentPending(draftId, false);

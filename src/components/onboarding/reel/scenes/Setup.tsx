@@ -7,16 +7,16 @@ import { reducedMotion } from "@/lib/onboarding";
 import { api } from "@/state/store";
 import type { SceneProps } from "./types";
 import { t } from "@/lib/i18n";
+import { en } from "@/locales";
 
 const SETUP_MS = 6600;
 
 const COMMAND = "/setup";
-const JOB = " watch Discord, file bugs in Linear";
-const TYPED = COMMAND + JOB;
+const typedText = () => COMMAND + t("onboarding.reel.demo.setupJob");
 
 const TYPE_AT = 400;
-const MS_PER_CHAR = 34;
-const SEND_AT = TYPE_AT + TYPED.length * MS_PER_CHAR + 350;
+const TYPING_MS = (COMMAND + en["onboarding.reel.demo.setupJob"]).length * 34;
+const SEND_AT = TYPE_AT + TYPING_MS + 350;
 const REPLY_AT = SEND_AT + 650;
 const STEP_AT = REPLY_AT + 350;
 const STEP_GAP = 420;
@@ -101,7 +101,8 @@ function Row({ icon: Icon, label, done, children, bar }: { icon: typeof Folder; 
 
 export function Setup({ playing, onCue, onEnded, label }: SceneProps) {
   const still = reducedMotion() || !playing;
-  const [typed, setTyped] = useState(still ? TYPED.length : 0);
+  const typedLine = typedText();
+  const [typed, setTyped] = useState(still ? typedLine.length : 0);
   const [phase, setPhase] = useState<Phase>(still ? "configured" : "compose");
   const [steps, setSteps] = useState(still ? 4 : 0);
   const [pressed, setPressed] = useState(false);
@@ -122,7 +123,7 @@ export function Setup({ playing, onCue, onEnded, label }: SceneProps) {
     setSteps(0);
     onCue?.("listening");
     const timers = [
-      ...Array.from(TYPED, (_, i) => setTimeout(() => setTyped(i + 1), TYPE_AT + i * MS_PER_CHAR)),
+      ...Array.from(typedLine, (_, i) => setTimeout(() => setTyped(i + 1), TYPE_AT + i * (TYPING_MS / typedLine.length))),
       setTimeout(() => setPressed(true), SEND_AT - 120),
       setTimeout(() => {
         setPressed(false);
@@ -155,7 +156,7 @@ export function Setup({ playing, onCue, onEnded, label }: SceneProps) {
         <div className="flex min-w-0 flex-1 flex-col justify-end gap-2.5">
           {sent && (
             <div className="animate-msg-in self-end rounded-2xl rounded-br-md bg-bubble-user px-3 py-2 shadow-md shadow-black/15">
-              <Typed text={TYPED} caret={false} sent />
+              <Typed text={typedLine} caret={false} sent />
             </div>
           )}
           {sent && (
@@ -192,7 +193,7 @@ export function Setup({ playing, onCue, onEnded, label }: SceneProps) {
               {sent ? (
                 <span className="text-[12.5px] text-ink-secondary">{t("onboarding.reel.demo.message")}</span>
               ) : (
-                <Typed text={TYPED.slice(0, typed)} caret />
+                <Typed text={typedLine.slice(0, typed)} caret />
               )}
             </div>
             <span

@@ -25,6 +25,11 @@ export function botEngine(bot: Bot | undefined, instances: InstanceInfo[]): Inst
   return bot && instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
 }
 
+export function failedTurnNotice(tool: ActivityTool): { cause: string; notice: string | null } {
+  const cause = failedTurnCause(tool.name) ?? tool.name;
+  return { cause, notice: isNoticeCode(tool.nameCode) ? activityText(tool, cause) : null };
+}
+
 export function failedTurnText(tool: ActivityTool, cause: string): string {
   return isNoticeCode(tool.nameCode) ? activityText(tool, cause) : plainErrorLine(cause) ?? cause;
 }

@@ -1,4 +1,5 @@
-import { t } from "./i18n";
+import { t, tFromServer } from "./i18n";
+import { namesLocale } from "./clock-time";
 import { en, type LocaleKey } from "@/locales";
 
 export const ACTIVITY_WHATS = ["all", "approvals", "decisions", "config", "people", "session", "webhook", "mcp", "engine", "bot", "budget", "visibility"] as const;
@@ -90,18 +91,24 @@ export interface ActivityDay {
 const localDayKey = (date: Date): string =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 function dayLabel(date: Date, now: Date): string {
   const key = localDayKey(date);
-  if (key === localDayKey(now)) return "Today";
+  if (key === localDayKey(now)) return t("chat.day.today");
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  if (key === localDayKey(yesterday)) return "Yesterday";
-  const base = `${DAY_NAMES[date.getDay()]} ${date.getDate()} ${MONTH_NAMES[date.getMonth()]}`;
-  return date.getFullYear() === now.getFullYear() ? base : `${base} ${date.getFullYear()}`;
+  if (key === localDayKey(yesterday)) return t("chat.day.yesterday");
+  const part = (options: Intl.DateTimeFormatOptions) => date.toLocaleDateString(namesLocale(), options);
+  const base = t("activity.day.date", { weekday: part({ weekday: "short" }), day: date.getDate(), month: part({ month: "short" }) });
+  return date.getFullYear() === now.getFullYear() ? base : t("activity.day.dateYear", { date: base, year: date.getFullYear() });
 }
+
+/** Only `activity.tool.*` keys are taken, so a server cannot make the panel show any other catalog string. */
+export const activityLabel = (row: Pick<ActivityRow, "label" | "labelKey">): string =>
+  row.labelKey?.startsWith("activity.tool.") ? tFromServer(row.labelKey, row.label) : row.label;
+
+/** Only `activity.app.*` keys are taken, for the same reason. */
+export const activityApp = (row: Pick<ActivityRow, "app" | "appKey">): string | null =>
+  row.app !== null && row.appKey?.startsWith("activity.app.") ? tFromServer(row.appKey, row.app) : row.app;
 
 export function groupActivityByDay(rows: ActivityRow[], now: Date): ActivityDay[] {
   const days: ActivityDay[] = [];

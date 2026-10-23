@@ -3,7 +3,7 @@ import { Archive, CircleUser, Cloud, Coins, Download, FlaskConical, KeyRound, Lo
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
-import { t } from "@/lib/i18n";
+import { activePackComplete, t } from "@/lib/i18n";
 import { withTourReset } from "@/lib/guided-tour";
 import { completionPatch } from "@/lib/onboarding";
 import { AnthropicEveryClaudeBot, ApiKeyRow, OpenCodeProviderKeys, VpsConnection } from "./ApiKeys";
@@ -319,7 +319,7 @@ function LanguageRow() {
   return (
     <SettingRow
       title={t("settings.language.title")}
-      subtitle={t("settings.language.subtitle")}
+      subtitle={t(activePackComplete() ? "settings.language.subtitleComplete" : "settings.language.subtitle")}
     >
       <Select size="sm" className="w-full max-w-[240px]"
         value={current}

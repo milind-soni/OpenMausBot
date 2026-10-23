@@ -8,7 +8,11 @@ import { listenLiveFrames } from "@/lib/live-events";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import { RunLog } from "./RunLog";
 import { timelineEvents } from "@/lib/taskTimeline";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
+import { capital } from "@/lib/automations";
+import type { LocaleKey } from "@/locales";
+
+const tabLabel = (key: LocaleKey) => (activeLocale() === "en" ? t(key) : capital(t(key)));
 
 type Lens = "run" | "events" | "raw";
 
@@ -181,11 +185,12 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
               tabIndex={lens === l ? 0 : -1}
               onClick={() => setLens(l)}
               className={cn(
-                "rounded-md px-2.5 py-1 text-[12px] font-medium capitalize",
+                "rounded-md px-2.5 py-1 text-[12px] font-medium",
+                activeLocale() === "en" && "capitalize",
                 lens === l ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
               )}
             >
-              {t(l === "run" ? "inspector.run.title" : l === "events" ? "inspector.tab.events" : "inspector.tab.raw")}
+              {tabLabel(l === "run" ? "inspector.run.title" : l === "events" ? "inspector.tab.events" : "inspector.tab.raw")}
             </button>
           ))}
         </div>

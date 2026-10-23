@@ -82,7 +82,6 @@ import {
 import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
-import nativeTextModule from "./native-text.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
 import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
@@ -91,7 +90,7 @@ import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDes
 import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudPlanSnapshot, cloudTarget, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
 import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice, installCloudBuy, lookFile } from "./cloud-buy.mjs";
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
-import { createDesktopPrefs, DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
+import { createDesktopPrefs, createDesktopText, DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
 import { createDesktopIncludedX } from "./included-x.mjs"; import { createDesktopIncludedPages } from "./included-pages.mjs";
 import { cloudHomeConnectUrl, cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, openSleepingCloud, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
@@ -406,10 +405,7 @@ let desktopCompanionRelay = null;
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
 const desktopPrefs = createDesktopPrefs(jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")));
-// Electron knows the system's language only once the app is ready.
-const nativeText = nativeTextModule.createNativeText({ saved: desktopPrefs.language(), system: () => (app.isReady() ? app.getLocale() : "") });
-const nativeT = nativeText.t;
-
+const nativeText = createDesktopText(desktopPrefs, app), nativeT = nativeText.t;
 /** True when the store could not be read, which is not the same as nothing saved. */
 let credentialStoreUnavailable = false;
 
@@ -1642,15 +1638,12 @@ function refreshApplicationMenu() {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings");
       },
       ...cloudMenuOptions(),
-      home: homeWindow.cloudOrigin() ? { origin: homeWindow.cloudOrigin(), onBack: () => void showHome({ place: "cloud" }) } : null,
-      t: nativeT,
+      home: homeWindow.cloudOrigin() ? { origin: homeWindow.cloudOrigin(), onBack: () => void showHome({ place: "cloud" }) } : null, t: nativeT,
     }),
   );
 }
 
-function mainWindowTitle() {
-  return workspaceWindowTitle(environmentsState, desktopRemoteAccess, homeWindow.cloudOrigin(), nativeT);
-}
+function mainWindowTitle() { return workspaceWindowTitle(environmentsState, desktopRemoteAccess, homeWindow.cloudOrigin(), nativeT); }
 
 function persistEnvironments(next) {
   environmentsStore.write(next);
@@ -1660,17 +1653,14 @@ function persistEnvironments(next) {
 }
 
 function applyNativeLanguage() {
-  refreshApplicationMenu();
-  desktopTray?.relabel();
-  lendingTray?.relabel();
+  refreshApplicationMenu(); desktopTray?.relabel(); lendingTray?.relabel();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(mainWindowTitle());
   applyUnreadBadge();
 }
 
 async function workspaceMenuAction(action) {
   try { await action(); } catch (error) {
-    await dialog.showMessageBox({ type: "error", message: nativeT("native.dialog.updateServers.title"),
-      detail: error?.code === ENVIRONMENTS_SAVE_FAILED ? nativeT("native.dialog.updateServers.saveFailed") : error.message });
+    await dialog.showMessageBox({ type: "error", message: nativeT("native.dialog.updateServers.title"), detail: error?.code === ENVIRONMENTS_SAVE_FAILED ? nativeT("native.dialog.updateServers.saveFailed") : error.message });
   }
 }
 
@@ -2889,8 +2879,7 @@ ipcMain.handle("workspaces:menu", workspaceOnly(async (_event, from) => {
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
       ...cloudMenuOptions(from === "howto" ? "app_howto" : "app_menu"),
-      ...(homeWindow.cloudOrigin() ? { homeOrigin: homeWindow.cloudOrigin() } : await placesMenuOptions({ cloud: cloudHomeEntry(), home: oneHome.away(), platform: process.platform, port: SERVER_PORT, text: nativeText })),
-      text: nativeText,
+      ...(homeWindow.cloudOrigin() ? { homeOrigin: homeWindow.cloudOrigin() } : await placesMenuOptions({ cloud: cloudHomeEntry(), home: oneHome.away(), platform: process.platform, port: SERVER_PORT, text: nativeText })), text: nativeText,
     }));
     await new Promise((resolve) => menu.popup({ window: mainWindow, callback: resolve }));
   } finally {
@@ -3120,8 +3109,7 @@ app.whenReady().then(async () => {
   registerCuaIpc();
   androidDevice.registerIpc(ipcMain);
   registerUpdaterIpc({ pageAllowed: updaterPageAllowed });
-  registerDesktopPrefs({ ipcMain, prefs: desktopPrefs, localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady),
-    onLanguage: code => { if (nativeText.set(code)) applyNativeLanguage(); },
+  registerDesktopPrefs({ ipcMain, prefs: desktopPrefs, localConfig: jsonFile(path.join(desktopDataDir(), "config.json")).read, cloudOffered: () => cloudAccountRestored().then(cloudOffersReady), onLanguage: code => { if (nativeText.set(code)) applyNativeLanguage(); },
     page: event => senderIsLocal(event) ? "local" : cloudPageAsking(event) ?? (workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null) });
   // Before the window, so the harness has the CUA descriptor on first render.
   cuaReady =

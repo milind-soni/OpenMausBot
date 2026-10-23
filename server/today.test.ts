@@ -181,7 +181,7 @@ describe("needs you", () => {
     w.fail(w.atlas.threadId, at(9), "Invalid API key · Please run /login", { setup: true });
     w.fail(lou.threadId, at(8), "401 Unauthorized: OAuth token has expired");
     w.fail(kai.threadId, at(8, 30), TRIAL_CREDIT_REFUSED.paused);
-    w.fail(w.pepper.threadId, at(9, 30), "You've hit your usage limit. Try again at 3pm.");
+    w.fail(w.pepper.threadId, at(9, 30), "You've hit your usage limit. Try again at 3pm.", { text: { key: "chat.notice.usageLimit", params: { provider: "Codex", detail: "" } } });
     w.fail(rex.threadId, at(10), TRIAL_CREDIT_REFUSED.used_up);
     w.fail(rex.threadId, at(10, 5), "This month's cloud desktop hours are used up.", { place: { state: "cc-no-hours", params: { bot: "Rex" }, source: "works-on" } });
     w.fail(zed.threadId, at(10, 6), "Cloud computers can't start right now.", { place: { state: "cc-unavailable", params: { bot: "Zed" }, source: "works-on" } });
@@ -221,6 +221,7 @@ describe("needs you", () => {
     expect(needsYou.find((item) => item.kind === "signed-out" && item.instanceId === "grok")).toMatchObject({ botIds: [w.zed.id] });
     expect(needsYou.find((item) => item.kind === "signed-out" && item.instanceId === "claude")).toMatchObject({ botIds: [w.lou.id, w.atlas.id], threadId: w.atlas.threadId });
     expect(needsYou.find((item) => item.kind === "question" && item.threadId === w.zedTask.threadId)).toMatchObject({ botId: w.zed.id });
+    expect(needsYou.find((item) => item.kind === "usage-limit")).toMatchObject({ textCode: "chat.notice.usageLimit", textParams: { provider: "Codex", detail: "" } });
   });
 
   it("drops a failure once the bot finished a turn after it, an engine signed back in, or the app worked again", () => {

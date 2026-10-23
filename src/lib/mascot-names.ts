@@ -18,3 +18,5 @@ export function silhouetteName(name: string): string {
   const body = BODIES.find((candidate) => candidate.name === name);
   return body ? bodyName(body.id) : name;
 }
+
+export const mascotLabel = (silhouette: string): string => t("mascot.label", { name: silhouetteName(silhouette) });

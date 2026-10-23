@@ -1,6 +1,7 @@
 /** Canonical runtime-event shapes, as they ride the live wire and the
  * inspector log. */
 import type { AskQuestion } from "./ask-question.ts";
+import type { ServerText } from "./server-text.ts";
 
 export type DriverKind = string;
 export type InstanceId = string;
@@ -176,7 +177,9 @@ export type RuntimeEvent = RuntimeEventBase &
     // `stalled`: the engine went silent and the turn was stopped as stuck.
     // `limitResetsAt`: epoch ms when the usage limit refusing this account resets, when the engine says.
     | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean; trialCredit?: "used_up" | "ended" | "paused" | "too_low";
-        stalled?: boolean; limitResetsAt?: number }
+        stalled?: boolean; limitResetsAt?: number;
+        /** `message` as a `chat.notice.*` key and params, when it is one of the server's fixed sentences. */
+        text?: ServerText }
     /** Something the person should know that did not fail the turn — for
      * example, a saved model the engine no longer offers was replaced. */
     | { type: "runtime.notice"; message: string }

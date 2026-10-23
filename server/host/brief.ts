@@ -17,7 +17,8 @@ import type { RoutineRun } from "../routines.ts";
 import { sectionKey, type BotRecord, type Message, type Store } from "../store.ts";
 import { answered, localDate, qualifies, validZone } from "./check-plan.ts";
 import { parseWatchResult } from "./check-prompts.ts";
-import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, prepCard, reminderCard, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard } from "./brief-cards.ts";
+import type { WidgetText } from "../../shared/widget-text.ts";
+import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, moment, prepCard, reminderCard, words, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard } from "./brief-cards.ts";
 import type { CheckReport } from "./routine-checks.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
@@ -84,6 +85,15 @@ export interface PresenceAnswer {
   open?: { botId: string; threadId: string };
 }
 
+export const WATCH_FAILURE = {
+  "brief.row.watchUnreadable": "The watch's answer could not be read, so nothing was posted. Its emails and meetings wait for the next check.",
+  "brief.row.watchRestarted": "OpenMausBot restarted before this run's answer was read; its emails and meetings wait for the next check.",
+} as const;
+const watchFailureWords = (note: string): { note?: WidgetText } => {
+  const key = (Object.keys(WATCH_FAILURE) as Array<keyof typeof WATCH_FAILURE>)
+    .find((one) => WATCH_FAILURE[one] === note || (note.endsWith("…") && WATCH_FAILURE[one].startsWith(note.slice(0, -1))));
+  return key ? { note: words(key) } : {};
+};
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const addressOf = (from: string): string => (/<([^<>\s]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
 const firstSentence = (text: string): string => {
@@ -182,8 +192,10 @@ export function createBrief(deps: BriefDeps) {
       const bot = deps.store.bot(run.botId);
       if (!bot || bot.hidden) continue;
       const open = run.threadId && deps.store.taskByThread(run.botId, run.threadId) ? { botId: run.botId, threadId: run.threadId } : undefined;
-      if (run.status === "completed") done.push({ text: oneLine(run.routineName, 80), note: clip(firstSentence(run.output ?? "") || "Finished", 140), ...(open ? { open } : {}) });
-      else needs.push({ text: `${oneLine(run.routineName, 80)} ${run.status === "missed" ? "was missed" : "failed"}`, note: clip(oneLine(run.error ?? "", 140) || "It did not finish", 140), ...(open ? { open } : {}) });
+      const name = oneLine(run.routineName, 80), note = run.status === "completed" ? firstSentence(run.output ?? "") : oneLine(run.error ?? "", 140);
+      if (run.status === "completed") done.push({ text: name, note: clip(note || "Finished", 140), ...(open ? { open } : {}), ...(note ? {} : { said: { note: words("brief.row.finished") } }) });
+      else needs.push({ text: `${name} ${run.status === "missed" ? "was missed" : "failed"}`, note: clip(note || "It did not finish", 140), ...(open ? { open } : {}),
+        said: { text: words(run.status === "missed" ? "brief.row.missed" : "brief.row.failed", { name }), ...(note ? watchFailureWords(note) : { note: words("brief.row.didNotFinish") }) } });
     }
     return { needs, done };
   }
@@ -191,14 +203,21 @@ export function createBrief(deps: BriefDeps) {
   function needsYouRows(): BriefRow[] {
     return deps.needsYou().map((item): BriefRow => {
       const open = item.threadId ? { botId: "botId" in item ? item.botId : item.botIds[0]!, threadId: item.threadId } : undefined;
-      const row = (text: string, note: string): BriefRow => ({ text, note, ...(open && deps.store.taskByThread(open.botId, open.threadId) ? { open } : {}) });
+      const row = (text: string, note: string, said: BriefRow["said"]): BriefRow => ({ text, note, said, ...(open && deps.store.taskByThread(open.botId, open.threadId) ? { open } : {}) });
       switch (item.kind) {
-        case "signed-out": return row(`${deps.engineName(item.instanceId)} is signed out`, "Sign in again in Settings, Model providers.");
-        case "usage-limit": return row("An AI reached its usage limit", clip(item.text, 140));
-        case "out-of-credit": return row("The trial credit can't run this", "Sign in with your own AI account, or add a key.");
-        case "connection": return row(`${item.app} needs reconnecting`, clip(item.text, 140));
-        case "place": return row("A bot couldn't reach its computer", "Open it to choose another place.");
-        case "question": return row(`${deps.store.bot(item.botId)?.name ?? "A bot"} asked you`, clip(item.text, 140));
+        case "signed-out": {
+          const engine = deps.engineName(item.instanceId);
+          return row(`${engine} is signed out`, "Sign in again in Settings, Model providers.", { text: words("brief.row.signedOut", { engine }), note: words("brief.row.signInAgain") });
+        }
+        case "usage-limit": return row("An AI reached its usage limit", clip(item.text, 140),
+          { text: words("brief.row.usageLimit"), ...(item.textCode ? { note: words(item.textCode, item.textParams) } : {}) });
+        case "out-of-credit": return row("The trial credit can't run this", "Sign in with your own AI account, or add a key.", { text: words("brief.row.trialCredit"), note: words("brief.row.trialCreditNote") });
+        case "connection": return row(`${item.app} needs reconnecting`, clip(item.text, 140), { text: words("brief.row.reconnect", { app: item.app }) });
+        case "place": return row("A bot couldn't reach its computer", "Open it to choose another place.", { text: words("brief.row.place"), note: words("brief.row.placeNote") });
+        case "question": {
+          const name = deps.store.bot(item.botId)?.name;
+          return row(`${name ?? "A bot"} asked you`, clip(item.text, 140), { text: words("brief.row.asked", { name: name ?? words("brief.part.aBot") }) });
+        }
       }
     });
   }
@@ -209,13 +228,17 @@ export function createBrief(deps: BriefDeps) {
     const clashRows: BriefRow[] = (calendar?.clashes ?? []).map(([first, second]) => ({
       text: `${oneLine(first.title, 52)} and ${oneLine(second.title, 52)} overlap`,
       note: `${clockTime(first.start, zone)} and ${clockTime(second.start, zone)}`,
+      said: { text: words("brief.row.clash", { first: oneLine(first.title, 52), second: oneLine(second.title, 52) }),
+        note: words("brief.row.clashNote", { first: moment(first.start, "clock", zone), second: moment(second.start, "clock", zone) }) },
     }));
     const troubleRows: BriefRow[] = (trouble ?? []).map((one) => {
       const app = one.app === "gmail" ? "Gmail" : "Google Calendar";
-      return { text: `Couldn't read ${app}`, note: one.signedOut ? `Reconnect ${app} in Connected apps.` : "I'll try again soon." };
+      return { text: `Couldn't read ${app}`, note: one.signedOut ? `Reconnect ${app} in Connected apps.` : "I'll try again soon.",
+        said: { text: words("brief.row.cantRead", { app }), note: one.signedOut ? words("brief.row.reconnectIn", { app }) : words("brief.row.tryAgainSoon") } };
     });
     const unfencedRows: BriefRow[] = unfenced
-      ? [{ text: "I didn't sort email or prepare meetings", note: `That needs a Claude model as ${chiefBot.name}'s AI. Your day, reminders and clashes still show here.` }]
+      ? [{ text: "I didn't sort email or prepare meetings", note: `That needs a Claude model as ${chiefBot.name}'s AI. Your day, reminders and clashes still show here.`,
+        said: { text: words("brief.row.unfenced"), note: words("brief.row.unfencedNote", { name: chiefBot.name }) } }]
       : [];
     const meetings = calendar === undefined ? null : calendar.meetings
       .filter((meeting) => qualifies(meeting) || (meeting.ownedCalendar === true && meeting.status !== "cancelled" && !meeting.allDay && !meeting.selfDeclined))
@@ -366,7 +389,7 @@ export function createBrief(deps: BriefDeps) {
     const given = { mail: new Set(items?.mail.map((email) => email.id) ?? []), prep: new Set(items?.prep.map((one) => one.key) ?? []) };
     const result = items ? parseWatchResult(reply, given) : null;
     if (!items || !result) {
-      deps.failRun(run.id, items ? "The watch's answer could not be read, so nothing was posted. Its emails and meetings wait for the next check." : "OpenMausBot restarted before this run's answer was read; its emails and meetings wait for the next check.");
+      deps.failRun(run.id, WATCH_FAILURE[items ? "brief.row.watchUnreadable" : "brief.row.watchRestarted"]);
       return;
     }
     const at = now();

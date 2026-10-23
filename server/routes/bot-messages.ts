@@ -203,7 +203,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (press && !press.ok) return json(res, press.status, { error: press.error });
       const answered = press ? serverPress(bot, threadId, press.messageId, press.action, auth) : null;
       if (answered === "handled") return json(res, 202, { ok: true, threadId, handled: true });
-      if (answered === "refused") return json(res, 403, { error: "Only the owner or an admin can do that." });
+      if (answered === "refused") return json(res, 403, userError("serverError.chat.ownerOrAdmin"));
       // acceptDirectSend checks these again; nothing awaits between.
       const refused = directSendRefusal(bot.id, threadId);
       if (refused) return json(res, refused.status, refused.body);

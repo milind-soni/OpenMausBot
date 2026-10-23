@@ -30,6 +30,7 @@ import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type Even
 import { cloneAttachments } from "./routine-attachments.ts";
 import { loadInstalledPackage, loadRoutine, loadRun } from "./routine-load.ts";
 import { sanitizeInput } from "./routine-input.ts";
+import { applyCheckResult, routineLine, runLineFields, type RoutineLineCodes, type RoutineTroubleCode } from "./routine-lines.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
 
 export type { RoutineContextAttachment, RoutineIntervalWindow, RoutineRunStatus, RoutineRunTrigger };
@@ -43,7 +44,7 @@ export type RoutineTarget = "bot" | "room-goal";
 export type RoutineGoalStatus = Exclude<GroupGoalRunStatus, "working">;
 
 
-export interface Routine {
+export interface Routine extends RoutineTroubleCode {
   id: string;
   name: string;
   prompt: string;
@@ -84,7 +85,7 @@ export interface RoutinePackageStamp {
   parts: Record<RoutinePart, PartPair>;
 }
 
-export interface RoutineRun {
+export interface RoutineRun extends RoutineLineCodes {
   id: string;
   routineId: string;
   routineName: string;
@@ -201,7 +202,7 @@ function routineRequestOwnerKey(owner: RoutineRequestOwner): string {
 
 /** What a routine's checks found: items for one AI run, a sentence while an app cannot be read, and the next time they
  * have something to do on time. */
-export interface RoutineCheckResult { run?: { prompt: string; key: string }; trouble?: string; wakeAt?: number }
+export interface RoutineCheckResult { run?: { prompt: string; key: string }; trouble?: string; troubleCode?: string; wakeAt?: number }
 
 export interface RoutineChecks {
   /** Runs a routine's checks. With `hold` they may do only what needs no AI, and their items wait. */
@@ -635,7 +636,7 @@ export class RoutineManager {
       if (!clean.runOnStartup) delete routine.runOnStartup;
       if (!clean.access) delete routine.access;
       if (!clean.deliver) delete routine.deliver;
-      if (!clean.checks) for (const key of ["checks", "checkedAt", "checkTrouble", "wakeAt"] as const) delete routine[key];
+      if (!clean.checks) for (const key of ["checks", "checkedAt", "checkTrouble", "checkTroubleCode", "wakeAt"] as const) delete routine[key];
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;
       }
@@ -1203,7 +1204,7 @@ export class RoutineManager {
       result = await hook.check(cloneRoutine(routine), { manual: manual !== undefined, ...(hold ? { hold } : {}) });
     } catch (error) {
       console.error(`routines: the checks of ${routineId} failed`, error);
-      result = { trouble: "The checks could not run; they try again at the next check." };
+      result = { trouble: routineLine("routines.server.checksFailed"), troubleCode: "routines.server.checksFailed" };
     } finally {
       this.checking.delete(key);
     }
@@ -1217,14 +1218,12 @@ export class RoutineManager {
     let run: RoutineRun | undefined;
     try {
       this.commitMutation(() => {
-        for (const field of ["wakeAt", "checkTrouble"] as const) delete current[field];
-        Object.assign(current, result.wakeAt === undefined ? {} : { wakeAt: result.wakeAt }, result.trouble ? { checkTrouble: result.trouble.slice(0, 300) } : {},
-          result.trouble || result.run ? {} : { checkedAt: this.now() });
+        applyCheckResult(current, result, this.now());
         if (result.run) {
           run = queued ?? this.newRun(current, this.now(), false, allocations);
           Object.assign(run, { prompt: result.run.prompt, checkKey: result.run.key });
         } else if (queued && !result.trouble) {
-          Object.assign(queued, { status: "completed", output: "Nothing new since the last check", report: { state: "quiet" }, finishedAt: this.now() } satisfies Partial<RoutineRun>);
+          Object.assign(queued, { status: "completed", output: routineLine("routines.server.nothingNew"), outputCode: "routines.server.nothingNew", report: { state: "quiet" }, finishedAt: this.now() } satisfies Partial<RoutineRun>);
         }
       }, () => this.discardResultsThreads(allocations));
     } catch (error) {
@@ -1266,7 +1265,7 @@ export class RoutineManager {
     } else if (event.type === "item.completed" && event.itemType === "assistant_text") {
       run.output = redactSecretsInText(event.text).trim().slice(0, 2_000);
     } else if (event.type === "runtime.error") {
-      run.error = redactSecretsInText(event.message).slice(0, 500);
+      Object.assign(run, runLineFields("error", event.message, event.text));
       this.failureFacts.set(run.id, engineFacts(event));
     } else if (event.type === "turn.completed") {
       if (this.closing && (!event.ok || event.stopReason === "cancelled" || event.stopReason === "interrupted")) return null;

@@ -1,9 +1,10 @@
-import { appendFileSync, mkdirSync, mkdtempSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { describeTool, readBotActivity, type ActivityRow } from "./activity.ts";
+import englishCatalog from "../src/locales/en.json" with { type: "json" };
+import { describedTool, describeTool, readBotActivity, type ActivityRow } from "./activity.ts";
 import type { DecisionRow } from "./decision-log.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
@@ -59,6 +60,33 @@ describe("describeTool", () => {
   it("falls back to spacing out an unknown name rather than showing it raw", () => {
     expect(describeTool("TaskUpdate")).toEqual({ app: null, label: "Task update" });
     expect(describeTool("replace_file_content")).toEqual({ app: null, label: "Replace file content" });
+  });
+
+  it("names this app's own tools by an activity.tool key whose English is exactly the label", () => {
+    const en: Record<string, string> = englishCatalog;
+    const goldens = ["full", "bridged"].flatMap((name) => [...readFileSync(new URL(`./drivers/agents-catalog-goldens/${name}.tools-list.json`, import.meta.url), "utf8").matchAll(/"name":\s*"([a-z_]+)"/g)].map((match) => match[1]!));
+    const named = [
+      "Bash", "Read", "Edit", "MultiEdit", "Write", "Glob", "Grep", "LS", "WebSearch", "WebFetch", "Skill", "Task", "Agent", "AskUserQuestion", "TodoWrite",
+      ...goldens.map((tool) => `mcp__agents__${tool}`), "mcp__agents__ask_bot", "mcp__agents__delegate_bot", "mcp__agents__send",
+      ...["screenshot", "get_screen_size", "click", "move", "drag", "type_text", "key_press", "scroll", "open_url", "exec", "computer_exec", "wait_for"].map((tool) => `mcp__computer__${tool}`),
+    ];
+    const calls = ["apollo.people.search", "crunchbase.companies.lookup", "x.funding.rounds", "newsapi.news.everything", "tikhub.tiktok.user", "g.trends.daily", "serp.google.search", "moz.seo.backlinks", "fal.images.generate", "anyapi.x.search", "people.vendor.thing"];
+    const rows = [...named.map((name) => describedTool(name)), ...calls.map((id) => describedTool("mcp__agents__research_call", { id }))];
+    for (const row of rows) {
+      expect(row.labelKey, row.label).toMatch(/^activity\.tool\./);
+      expect(en[row.labelKey!], row.labelKey).toBe(row.label);
+    }
+    expect(new Set(rows.map((row) => row.labelKey)).size).toBeGreaterThan(80);
+    for (const row of rows.filter((entry) => entry.appKey)) expect(en[row.appKey!], row.appKey).toBe(row.app);
+    expect(["mcp__agents__list_bots", "mcp__computer__click", "mcp__agents__research_search", "mcp__agents__x_search", "mcp__claude_ai_Research__find"].map((name) => describedTool(name).appKey))
+      .toEqual(["activity.app.team", "activity.app.computer", "activity.app.research", undefined, undefined]);
+  });
+
+  it("keeps an unknown or third-party tool in its own words, with no key", () => {
+    for (const name of ["GMAIL_SEND_EMAIL", "mcp__composio__GITHUB_CREATE_AN_ISSUE", "mcp__claude_ai_Gmail__search_threads", "mcp__highlevel__HIGHLEVEL_ADD_NOTE",
+      "mcp__agents__brand_new_tool", "mcp__computer__teleport", "mcp__some_server__do_thing", "TaskUpdate", "constructor"]) {
+      expect(describedTool(name).labelKey, name).toBeUndefined();
+    }
   });
 });
 
@@ -116,7 +144,7 @@ describe("readBotActivity", () => {
   it("turns a finished tool item into one row that says it ran", () => {
     toolRun("t1", "i1", "Read", "2026-09-07T09:00:00.000Z", true);
     expect(read()).toEqual([
-      expect.objectContaining({ at: "2026-09-07T09:00:00.000Z", threadId: "t1", tool: "Read", label: "Read a file", outcome: "ran" }),
+      expect.objectContaining({ at: "2026-09-07T09:00:00.000Z", threadId: "t1", tool: "Read", label: "Read a file", labelKey: "activity.tool.readFile", outcome: "ran" }),
     ]);
   });
 
@@ -160,6 +188,7 @@ describe("readBotActivity", () => {
     expect(read()).toEqual([
       expect.objectContaining({ app: "Gmail", label: "Send email", outcome: "waiting" }),
     ]);
+    expect(read()[0]).not.toHaveProperty("labelKey");
   });
 
   it("does not attach an approval to a different tool, or to a run long after it", () => {

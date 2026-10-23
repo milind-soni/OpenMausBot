@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { claimRecallCrossings, forgetRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
+import { briefCrossingTool, claimRecallCrossings, forgetRecallCrossings, recallCrossingTool } from "./recall-disclosure.ts";
 
 beforeEach(() => forgetRecallCrossings());
 
@@ -38,9 +38,11 @@ describe("claimRecallCrossings", () => {
   });
 });
 
-describe("recallCrossingLabel", () => {
-  it("says what crossed, and counts in plain words", () => {
-    expect(recallCrossingLabel("Cia", 1)).toBe("Cia recalled 1 message from its private chat with you");
-    expect(recallCrossingLabel("Cia", 3)).toBe("Cia recalled 3 messages from its private chat with you");
+describe("the crossing notices", () => {
+  it("say what crossed, count in plain words, and carry a code per count", () => {
+    expect(recallCrossingTool("Cia", 1)).toEqual({ ok: true, name: "Cia recalled 1 message from its private chat with you", nameCode: "chat.notice.recallCrossingOne", nameParams: { name: "Cia", count: 1 } });
+    expect(recallCrossingTool("Cia", 3).name).toBe("Cia recalled 3 messages from its private chat with you");
+    expect(briefCrossingTool("Cia", 1)).toEqual({ ok: true, name: "Cia's recent-work brief covers 1 private chat with you", nameCode: "chat.notice.briefCrossingOne", nameParams: { name: "Cia", count: 1 } });
+    expect(briefCrossingTool("Cia", 2)).toMatchObject({ name: "Cia's recent-work brief covers 2 private chats with you", nameCode: "chat.notice.briefCrossingMany" });
   });
 });

@@ -59,7 +59,7 @@ import { AcpHost, type AcpLink } from "./host.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
-import { engineFailureKind, engineFailureMessage } from "../engine-errors.ts";
+import { engineFailure, engineFailureKind } from "../engine-errors.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
 import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts";
 
@@ -1700,7 +1700,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               emit({
                 ...base(threadId, turnId),
                 type: "runtime.error",
-                message: engineFailureMessage(support.displayName, errorMessage) ?? errorMessage,
+                ...(engineFailure(support.displayName, errorMessage) ?? { message: errorMessage }),
               });
               settle(threadId, session, false, reason ?? "failed");
             }
@@ -1735,14 +1735,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   return;
                 }
                 acknowledge();
-                if (!state.stopped) emit({ ...base(threadId, turnId), type: "runtime.error", message: engineFailureMessage(support.displayName, message) ?? message });
+                if (!state.stopped) emit({ ...base(threadId, turnId), type: "runtime.error", ...(engineFailure(support.displayName, message) ?? { message }) });
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: state.stopped,
                   stopReason: state.stopped ? "cancelled" : "rpc_error", cost: null });
                 return;
               }
               emit({
                 ...base(threadId, turnId), type: "runtime.error",
-                message: (accountError ? support.describeAccountError?.(code, cliTurn.model) : undefined) ?? engineFailureMessage(support.displayName, message) ?? message,
+                ...(accountError && support.describeAccountError ? { message: support.describeAccountError(code, cliTurn.model) } : engineFailure(support.displayName, message) ?? { message }),
                 ...(needsAuth ? { setup: true } : {}), ...((e as any)?.acpPromptStall === true ? { stalled: true } : {}),
               });
               // Never replay an accepted prompt (it may have run tools); evict before listeners start the next turn.

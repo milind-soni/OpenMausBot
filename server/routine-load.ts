@@ -95,10 +95,11 @@ export function loadRoutine(routine: Routine, now: number): Routine | null {
     installedPackage: loadInstalledPackage(routine.installedPackage),
     checkedAt: instant(routine.checkedAt),
     checkTrouble: typeof routine.checkTrouble === "string" && routine.checkTrouble ? routine.checkTrouble.slice(0, 300) : undefined,
+    checkTroubleCode: typeof routine.checkTrouble === "string" && routine.checkTrouble && typeof routine.checkTroubleCode === "string" ? routine.checkTroubleCode.slice(0, 80) : undefined,
     wakeAt: instant(routine.wakeAt),
   };
   delete loaded.failureStreak;
-  return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "installedPackage", "checkedAt", "checkTrouble", "wakeAt"]));
+  return withCheckFields(withoutUndefined(loaded, ["timeoutMinutes", "runOnStartup", "installedPackage", "checkedAt", "checkTrouble", "checkTroubleCode", "wakeAt"]));
 }
 
 export function loadRun(run: RoutineRun): RoutineRun {

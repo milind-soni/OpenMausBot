@@ -57,7 +57,7 @@ export function buildTeamMapSections<T extends TeamMapBot>(bots: T[], names: str
   }
   return [...sections].map(([key, sectionBots]) => ({
     key,
-    name: key || "General",
+    name: key || t("teamSettings.general"),
     chiefs: sectionBots.filter((bot) => bot.chiefOfStaff),
     members: sectionBots.filter((bot) => !bot.chiefOfStaff),
   }));

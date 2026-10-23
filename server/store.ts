@@ -17,7 +17,7 @@ import { workspaceDir } from "./workspace.ts";
 import type { Destination } from "./surface.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
-import { redactSecretsInText } from "./redact.ts";
+import { redactParams, redactSecretsInText } from "./redact.ts";
 import { scrubbedSkillRequest } from "./skill-request-card.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
@@ -128,10 +128,10 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     title: redactSecretsInText(out.dataResult.title),
     ...(out.dataResult.sql === undefined ? {} : { sql: redactSecretsInText(out.dataResult.sql) }),
   };
-  if (typeof out.text === "string") out.text = redactSecretsInText(out.text);
+  if (typeof out.text === "string") Object.assign(out, { text: redactSecretsInText(out.text) }, out.textParams ? { textParams: redactParams(out.textParams) } : {});
   if (out.compaction) out.compaction = { ...out.compaction, summary: redactSecretsInText(out.compaction.summary) };
   if (out.tool?.name) {
-    out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name) };
+    out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name), ...(out.tool.nameParams ? { nameParams: redactParams(out.tool.nameParams) } : {}) };
     if (out.tool.summary) out.tool.summary = redactSecretsInText(out.tool.summary);
   }
   if (out.routineRun) {

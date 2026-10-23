@@ -26,6 +26,10 @@ export interface ActivityRow {
   app: string | null;
   /** the action, in words */
   label: string;
+  /** `label` as an `activity.tool.*` catalog key, for a client to say in its own language */
+  labelKey?: string;
+  /** `app` as an `activity.app.*` catalog key, only for the app's own surfaces (Team, Computer, Research) */
+  appKey?: string;
   /** the arguments the decision log recorded, already redacted */
   summary?: string;
   outcome: ActivityOutcome;

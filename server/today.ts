@@ -6,6 +6,7 @@ import type { TurnDigest } from "../shared/digest.ts";
 import { isClientCancellation } from "../shared/client-cancel.ts";
 import { failedTurnCause } from "../shared/failed-turn.ts";
 import type { PlaceRow, PlaceState } from "../shared/place-view.ts";
+import type { ServerTextParams } from "../shared/server-text.ts";
 import type { RoutineRunReport, RoutineRunStatus, RoutineRunTrigger } from "../shared/routines.ts";
 import { classifyToolCall, isReportRoutine, minutesSaved, OUTCOME_CATEGORIES, toolApps, type OutcomeCategory, type OutcomeCounts } from "../shared/today-outcomes.ts";
 import { NEEDS_YOU_WINDOW_MS, TODAY_MAX_LINES, TODAY_MAX_WINDOW_MS, type NeedsYouItem, type TodayLine, type TodayReport, type TodayStarter } from "../shared/today.ts";
@@ -90,6 +91,13 @@ const parse = <T,>(text: string | null): T | null => {
   if (!text) return null;
   try { return JSON.parse(text) as T; } catch { return null; }
 };
+
+function causeCode(row: Pick<AttentionRow, "nameCode" | "nameParams">): { textCode?: string; textParams?: ServerTextParams } {
+  if (!row.nameCode?.startsWith("chat.notice.")) return {};
+  const params = parse<unknown>(row.nameParams);
+  const flat = params && typeof params === "object" && !Array.isArray(params) && Object.values(params).every((value) => typeof value === "string" || typeof value === "number");
+  return { textCode: row.nameCode, ...(flat ? { textParams: params as ServerTextParams } : {}) };
+}
 
 function plainTitle(text: string): string {
   const line = text.replace(/^[\s#>]+/gm, "").replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
@@ -294,7 +302,7 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
     } else {
       const reason = classifyError({ text: cause }).reason;
       if ((row.setup || reason === "auth") && instanceId) keep(`signed-out:${instanceId}`, { kind: "signed-out", id: row.id, at: row.at, instanceId, botIds: [botId], threadId: row.threadId });
-      else if (reason === "quota") keep(`usage-limit:${instanceId ?? botId}`, { kind: "usage-limit", id: row.id, at: row.at, ...(instanceId ? { instanceId } : {}), botIds: [botId], threadId: row.threadId, text: plainTitle(cause) });
+      else if (reason === "quota") keep(`usage-limit:${instanceId ?? botId}`, { kind: "usage-limit", id: row.id, at: row.at, ...(instanceId ? { instanceId } : {}), botIds: [botId], threadId: row.threadId, text: plainTitle(cause), ...causeCode(row) });
     }
   }
 

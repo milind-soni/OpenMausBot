@@ -8,7 +8,7 @@ import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 import { composioActionPhrase, outboundSummary } from "@/lib/approval-summary";
 import { niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
-import { cronScheduleLabel } from "../../shared/cron-label";
+import { cronPresetText, cronText } from "@/lib/cron-text";
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestField } from "../../shared/profile-request";
 import type { RoutineRequestSchedule } from "../../shared/routine-request";
 import type { SkillShareRecord } from "../../shared/skill-request";
@@ -117,8 +117,7 @@ function plainWhen(schedule: RoutineRequestSchedule): string {
       : `${niceDate(schedule.at)}, ${niceTime(schedule.at)}`;
   }
   if (schedule.type === "cron") {
-    const label = cronScheduleLabel(schedule);
-    return label.startsWith("Cron ") ? "" : label;
+    return cronPresetText(schedule) ? cronText(schedule) : "";
   }
   if (schedule.type === "interval") return scheduleLabel({ ...schedule, anchorAt: schedule.anchorAt ?? 0 });
   if (schedule.type === "limit_reset") return scheduleLabel({ ...schedule, at: null });

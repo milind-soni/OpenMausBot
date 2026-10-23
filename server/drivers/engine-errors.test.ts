@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { engineFailureKind, engineFailureMessage, httpStatusOf, outOfCreditsMessage, providerReason, stopCause } from "./engine-errors.ts";
+import { engineFailure, engineFailureKind, engineFailureMessage, httpStatusOf, outOfCreditsMessage, providerReason, stopCause } from "./engine-errors.ts";
 import { classifyError } from "./retry.ts";
 
 const reason = (text: string) => classifyError({ text }).reason;
@@ -86,5 +86,15 @@ describe("stopCause", () => {
     expect(stopCause("provider crashed")).toBe("provider crashed");
     expect(stopCause("  ")).toBeUndefined();
     expect(stopCause(null)).toBeUndefined();
+  });
+});
+
+describe("engineFailure", () => {
+  it("names a usage limit by its catalog key, its provider's quoted words kept raw", () => {
+    const failure = engineFailure("Grok", "Internal error: API error (status 429): You have reached your usage limit for this month (session/prompt)", { kind: "usage_limit" });
+    expect(failure?.text?.key).toBe("chat.notice.usageLimit");
+    expect(failure?.message).toBe(engineFailureMessage("Grok", "Internal error: API error (status 429): You have reached your usage limit for this month (session/prompt)", { kind: "usage_limit" }));
+    expect(failure?.text?.params).toEqual({ provider: "Grok", detail: expect.stringMatching(/^ \(Grok says: ".+"\)$/) });
+    expect(engineFailure("Grok", "429 Too Many Requests", { kind: "rate_limit" })).toEqual({ message: expect.stringContaining("rate limit") });
   });
 });

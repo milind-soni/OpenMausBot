@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import { reducedMotion } from "@/lib/onboarding";
 import type { SceneProps } from "./types";
 
@@ -156,7 +157,7 @@ export function Terminal({ playing, onCue, onEnded, label }: SceneProps) {
         <div className="relative flex min-h-0 flex-1 bg-app">
           <div className="flex w-[104px] shrink-0 flex-col border-r border-hairline/40 bg-panel/70 p-2">
             <div className="h-5 rounded-md bg-inset" />
-            <div className="mt-2 text-[7.5px] font-semibold uppercase tracking-[0.12em] text-ink-tertiary">Bots</div>
+            <div className="mt-2 text-[7.5px] font-semibold uppercase tracking-[0.12em] text-ink-tertiary">{t("sidebar.section.bots")}</div>
             <div className="mt-1 flex items-center gap-1.5 rounded-md bg-raised/70 px-1.5 py-1">
               <MausAvatar color="green" state="happy" size={14} animated={false} trackPointer={false} />
               <div className="min-w-0">
@@ -178,11 +179,11 @@ export function Terminal({ playing, onCue, onEnded, label }: SceneProps) {
             <div className="absolute left-1/2 top-[6px] w-[196px] -translate-x-1/2 rounded-xl border border-hairline/50 bg-panel px-4 py-2.5 shadow-[0_18px_40px_-16px_rgba(0,0,0,0.7)]">
               <div className="flex flex-col items-center">
                 <MausAvatar color="green" state="happy" size={24} animated={!still} trackPointer={false} />
-                <div className="mt-1 text-[10px] font-semibold text-ink">Welcome to OpenMausBot</div>
+                <div className="mt-1 text-[10px] font-semibold text-ink">{t("onboarding.welcome", { app: "OpenMausBot" })}</div>
                 <div className="mt-0.5 h-1 w-24 rounded bg-ink-secondary/40" />
-                <div className="mt-2 flex h-[18px] w-full items-center rounded-md border border-hairline/40 bg-inset px-2 text-[8px] text-ink-secondary">Your name</div>
-                <div className="mt-1 flex h-[18px] w-full items-center rounded-md border border-hairline/40 bg-inset px-2 text-[8px] text-ink-secondary">you@example.com</div>
-                <div className="mt-1 flex h-[18px] w-full items-center justify-center rounded-md bg-accent text-[8.5px] font-medium text-white">Continue</div>
+                <div className="mt-2 flex h-[18px] w-full items-center rounded-md border border-hairline/40 bg-inset px-2 text-[8px] text-ink-secondary">{t("onboarding.name")}</div>
+                <div className="mt-1 flex h-[18px] w-full items-center rounded-md border border-hairline/40 bg-inset px-2 text-[8px] text-ink-secondary">{t("common.emailPlaceholder")}</div>
+                <div className="mt-1 flex h-[18px] w-full items-center justify-center rounded-md bg-accent text-[8.5px] font-medium text-white">{t("onboarding.continue")}</div>
               </div>
             </div>
           </div>

@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { intlLocale, t } from "@/lib/i18n";
+import { namesLocale } from "@/lib/clock-time";
 
-const WEEKDAY_LABELS = ["M", "T", "W", "T", "F", "S", "S"];
+export const weekdayLabels = (): string[] =>
+  Array.from({ length: 7 }, (_, day) => new Intl.DateTimeFormat(namesLocale(), { weekday: "narrow", timeZone: "UTC" }).format(Date.UTC(2023, 0, 2 + day)));
 
 function startOfMonth(value: number | Date) {
   const date = new Date(value);
@@ -77,7 +79,7 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
       </div>
 
       <div className="grid grid-cols-7" aria-hidden="true">
-        {WEEKDAY_LABELS.map((label, index) => (
+        {weekdayLabels().map((label, index) => (
           <div
             key={`${label}-${index}`}
             className="flex h-6 items-center justify-center text-[9px] font-semibold uppercase tracking-[0.08em] text-ink-tertiary"

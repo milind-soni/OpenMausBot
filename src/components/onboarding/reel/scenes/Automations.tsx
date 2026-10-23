@@ -144,7 +144,7 @@ export function Automations({ playing, onCue, onEnded, label }: SceneProps) {
                     <MausAvatar color="green" state={busy ? "working" : "idle"} size={16} animated={!still} trackPointer={false} />
                     <div className="min-w-0">
                       <div className="truncate text-[9.5px] font-semibold leading-tight text-ink">{t("onboarding.reel.demo.weeklyReport")}</div>
-                      <div className="text-[8px] leading-tight tabular-nums text-ink-secondary">9:00 · {t("onboarding.reel.demo.weekly")}</div>
+                      <div className="text-[8px] leading-tight tabular-nums text-ink-secondary">{t("onboarding.reel.demo.nineAm")} · {t("onboarding.reel.demo.weekly")}</div>
                     </div>
                   </div>
                 </>

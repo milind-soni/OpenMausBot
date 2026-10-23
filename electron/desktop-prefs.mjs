@@ -40,6 +40,11 @@ function parse(raw) {
   return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}), ...(language ? { language } : {}) };
 }
 
+/** Main's own words in the language `prefs` keeps. Electron knows the system's language only once the app is ready. */
+export function createDesktopText(prefs, app) {
+  return nativeText.createNativeText({ saved: prefs.language(), system: () => (app.isReady() ? app.getLocale() : "") });
+}
+
 /** A record that cannot be written is still kept for this launch. */
 export function createDesktopPrefs({ read, write, now = Date.now }) {
   let record = null;

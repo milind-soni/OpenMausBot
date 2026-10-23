@@ -177,7 +177,7 @@ export function ProfileFields() {
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         onBlur={save}
-        placeholder="you@example.com"
+        placeholder={t("common.emailPlaceholder")}
         className={inputClass}
       />
       <AboutMeSettings />

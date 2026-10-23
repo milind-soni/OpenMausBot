@@ -46,6 +46,7 @@ describe("buildBotOverview", () => {
     const facts = baseFacts({ bot: { ...baseFacts().bot, chiefOfStaff: true, managedSections: ["Engineering", "Research"], peers: undefined }, engine: { agentsMcp: true }, sectionPeers: 3 });
     expect(buildBotOverview(facts).reaches).toContain("Can talk to 3 other bots in its allowed teams.");
     expect(buildBotOverview(facts).reaches).toContain("May also coordinate these teams: Engineering, Research.");
+    expect(buildBotOverview(facts).managedSections).toEqual(facts.bot.managedSections);
     facts.bot.chiefOfStaff = false;
     expect(buildBotOverview(facts).reaches.join(" ")).not.toContain("Engineering");
   });
@@ -118,6 +119,7 @@ describe("buildBotOverview", () => {
     expect(overview.does[0]).toContain("Last run completed at");
     expect(overview.does[0]).toContain("Next run");
     expect(overview.wont).not.toContain("Won't act on a schedule.");
+    expect(overview.doesRoutines).toEqual([{ name: "Triage Discord", schedule: { type: "interval", everyMinutes: 5, anchorAt: 1_000 }, nextRunAt: 2_000, lastRun: { status: "completed", at: 1_500 } }]);
   });
 
   it("renders a paused routine as Paused: name", () => {
@@ -134,6 +136,7 @@ describe("buildBotOverview", () => {
     });
     const overview = buildBotOverview(facts);
     expect(overview.does).toEqual(["Paused: Nightly Backup."]);
+    expect(overview.doesRoutines).toEqual([{ name: "Nightly Backup", paused: true, schedule: { type: "daily", time: "09:00", weekdays: [1] } }]);
     expect(overview.wont).toContain("Won't act on a schedule.");
   });
 

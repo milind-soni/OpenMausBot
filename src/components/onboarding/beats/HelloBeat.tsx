@@ -70,7 +70,7 @@ export function HelloBeat({ onNext, onSkip, hosted = false }: BeatProps & { host
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && void saveProfile()}
-        placeholder="you@example.com"
+        placeholder={t("common.emailPlaceholder")}
         className={`animate-rise mt-3 ${inputClass}`}
         style={staggerIndex(2)}
       />

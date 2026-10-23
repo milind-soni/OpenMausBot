@@ -533,6 +533,8 @@ export interface AttentionRow {
   name: string | null;
   setup: number | null;
   place: string | null;
+  nameCode: string | null;
+  nameParams: string | null;
   output: string | null;
   input: string | null;
   card: string | null;
@@ -542,6 +544,7 @@ export interface AttentionRow {
 export function attentionRows(since: number): AttentionRow[] {
   const columns = "SELECT thread_id AS threadId, id, at, kind, json_extract(json, '$.from.botId') AS fromBotId, json_extract(json, '$.digest.botId') AS digestBotId, " +
     "json_extract(json, '$.tool.name') AS name, json_extract(json, '$.tool.setup') AS setup, json_extract(json, '$.tool.place') AS place, " +
+    "json_extract(json, '$.tool.nameCode') AS nameCode, json_extract(json, '$.tool.nameParams') AS nameParams, " +
     `substr(json_extract(json, '$.tool.output'), 1, 2000) AS output, ${MULTI_EXECUTE_INPUT}, ` +
     "CASE WHEN kind = 'options' THEN json_extract(json, '$.card') END AS card";
   return db().prepare(

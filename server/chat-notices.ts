@@ -11,6 +11,27 @@ export const CHAT_NOTICE = {
     "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.",
   "chat.notice.roomHeld": "{name} is held (stopped by you) — @mention it or say resume",
   "chat.notice.answerPassed": "Answer passed to the waiting work",
+  "chat.notice.recallCrossingOne": "{name} recalled {count} message from its private chat with you",
+  "chat.notice.recallCrossingMany": "{name} recalled {count} messages from its private chat with you",
+  "chat.notice.briefCrossingOne": "{name}'s recent-work brief covers {count} private chat with you",
+  "chat.notice.briefCrossingMany": "{name}'s recent-work brief covers {count} private chats with you",
+  "chat.notice.webhookMoved":
+    "Now that I live on My Cloud, my webhook \"{name}\" has a new address. Open Automations, choose Copy address on \"{name}\", and paste it into the app that sends to it.",
+  "chat.notice.usageLimit": "This {provider} account has reached its usage limit{detail}. Wait for it to reset, or switch this bot to another AI.",
+  "chat.notice.claudeExtraUsage":
+    "Claude refused this turn because this model runs on extra usage for your account, and those credits are used up. Your plan's own usage is not affected: switch this bot to a model your plan includes, or add extra usage in your Claude account.",
+  "chat.notice.claudeLimitResets": "This Claude account has reached its {limit}, which resets {resets}. Until then, {meanwhile}.",
+  "chat.notice.claudeLimitSaid": "This Claude account has reached its {limit} (Claude says: \"{said}\"). For now, {meanwhile}.",
+  "chat.notice.claudeLimit": "This Claude account has reached its {limit}. For now, {meanwhile}.",
+  "chat.notice.part.fiveHourLimit": "5-hour limit",
+  "chat.notice.part.weeklyLimit": "weekly limit",
+  "chat.notice.part.weeklyOpusLimit": "weekly Opus limit",
+  "chat.notice.part.weeklySonnetLimit": "weekly Sonnet limit",
+  "chat.notice.part.usageLimit": "usage limit",
+  "chat.notice.part.chooseModel": "choose another model for this bot",
+  "chat.notice.part.switchAccount": "switch this bot to another AI or Claude account",
+  "chat.notice.webhookHome":
+    "I'm back on this computer, so my webhook \"{name}\" has an address here again. Open Automations, choose Copy address on \"{name}\", and paste it into the app that sends to it.",
 } as const;
 
 export type ChatNoticeKey = keyof typeof CHAT_NOTICE;

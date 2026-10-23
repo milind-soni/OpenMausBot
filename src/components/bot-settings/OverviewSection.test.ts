@@ -110,3 +110,23 @@ describe("OverviewSection", () => {
     expect(markup).not.toContain("Couldn’t refresh");
   });
 });
+
+describe("the overview's reach and limits in the person's language", () => {
+  it("words the bots it can talk to, contact and Ask mode, each count by its own plural", async () => {
+    const { setLocale } = await import("@/lib/i18n");
+    const overview = { ...sentences, reaches: ["Can talk to 1 other bot in its section.", "Can talk to 3 other bots in its allowed teams."],
+      wont: ["Cannot initiate contact with other bots.", "Command approvals use Ask mode; saved permissions and provider rules still apply."] };
+    const html = () => render(createElement(OverviewSection, { overview, prompt: null, onOpen: vi.fn() }));
+    expect(html()).toContain("Can talk to 1 other bot in its section.");
+    setLocale("pt-br");
+    try {
+      const shown = html();
+      expect(shown).toContain("Pode falar com 1 outro bot da seção.");
+      expect(shown).toContain("Pode falar com 3 outros bots nas equipes permitidas.");
+      expect(shown).toContain("Não inicia contato com outros bots.");
+      expect(shown).toContain("As aprovações de comandos usam o modo “Pedir”.");
+    } finally {
+      setLocale("en");
+    }
+  });
+});

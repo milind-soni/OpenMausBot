@@ -35,8 +35,7 @@ import { CODEX_USAGE_URL, codexUsageLimitReached } from "../../shared/codex-usag
 import { ClaudeUpdatePrompt } from "./ClaudeUpdatePrompt";
 import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
 import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
-import { failedTurnCause, signedOutEngine } from "@/lib/failed-turn";
-import { activityText, isNoticeCode } from "@/lib/activity-text";
+import { failedTurnCause, failedTurnNotice, signedOutEngine } from "@/lib/failed-turn";
 import { plainErrorLine } from "@/lib/plain-error";
 import { openPlaceAction, placeRowViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
 import type { PlaceRow } from "../../shared/place-view";
@@ -113,7 +112,7 @@ import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { NewMessagesDivider } from "./NewMessagesDivider";
 import { unreadMessageIds } from "@/lib/unread-divider";
 import { appendComposerDraft, appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
-import { dayLabel, localDay, transcriptLookups, type TranscriptLookups } from "@/lib/transcript-derivations";
+import { botLineText, dayLabel, localDay, transcriptLookups, type TranscriptLookups } from "@/lib/transcript-derivations";
 import { citationPreviewText, splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { useCanWriteIn } from "@/lib/cloud-guest";
@@ -288,8 +287,7 @@ export function FailedTurnRow({ tool, engine, onRetry, botId, threadId }: {
   const credit = trialCreditKind(failedTurnCause(tool.name) ?? "");
   if (credit) return <TrialCreditFailedRow kind={credit} onRetry={onRetry} />;
   const signedOut = signedOutEngine(tool, engine);
-  const cause = failedTurnCause(tool.name) ?? tool.name;
-  const notice = isNoticeCode(tool.nameCode) ? activityText(tool, cause) : null;
+  const { cause, notice } = failedTurnNotice(tool);
   return (
     <ErrorRow
       message={notice ?? cause}
@@ -399,7 +397,7 @@ const Bubble = memo(function Bubble({
   const [viewRaw, setViewRaw] = useState(false);
   const speech = useSpeech();
   const speaking = speech.messageId === message.id && speech.status !== "idle";
-  const rawText = peer ? peer.body : (message.text ?? "");
+  const rawText = peer ? peer.body : botLineText(message);
   const text = user ? rawText : stripLeakedSystemHarnessMessages(rawText);
   const botMenu = useBotMessageMenu({
     text,

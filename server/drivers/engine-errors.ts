@@ -1,6 +1,8 @@
 // Plain words for an engine's failure, shared by every driver: an account out of credits, a usage or rate limit, an
 // overloaded or failing service, or any other HTTP refusal names the provider and keeps its own short reason. Each
 // sentence keeps the words classifyError (retry.ts) reads, so retries, account switching and health codes are unchanged.
+import type { ServerText } from "../../shared/server-text.ts";
+import { chatNotice } from "../chat-notices.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { USAGE_LIMIT } from "./retry.ts";
 
@@ -72,8 +74,16 @@ export function engineFailureKind(text: string, status = httpStatusOf(text)): En
 export function engineFailureMessage(
   provider: string,
   text: string,
-  { kind, status }: { kind?: EngineFailureKind | null; status?: number | null } = {},
+  options: { kind?: EngineFailureKind | null; status?: number | null } = {},
 ): string | null {
+  return engineFailure(provider, text, options)?.message ?? null;
+}
+
+export function engineFailure(
+  provider: string,
+  text: string,
+  { kind, status }: { kind?: EngineFailureKind | null; status?: number | null } = {},
+): { message: string; text?: ServerText } | null {
   const http = status === undefined ? httpStatusOf(text) : status;
   const what = kind ?? engineFailureKind(text, http);
   if (!what) return null;
@@ -81,13 +91,16 @@ export function engineFailureMessage(
   const says = reason ? `${provider} says: "${reason}"` : null;
   const detail = (...parts: Array<string | null>) => parts.some(Boolean) ? ` (${parts.filter(Boolean).join("; ")})` : "";
   const code = http ? `HTTP ${http}` : null;
+  if (what === "usage_limit") {
+    const params = { provider, detail: detail(says) };
+    return { message: chatNotice("chat.notice.usageLimit", params), text: { key: "chat.notice.usageLimit", params } };
+  }
   switch (what) {
-    case "credits": return `Your ${provider} account is out of credits${detail(says)}. Add credits with ${provider}, then run it again.`;
-    case "usage_limit": return `This ${provider} account has reached its usage limit${detail(says)}. Wait for it to reset, or switch this bot to another AI.`;
-    case "rate_limit": return `${provider} hit a rate limit${detail(code, says)}. Wait a minute, then run it again.`;
-    case "overloaded": return `${provider} is overloaded right now${detail(code, says)}. This is usually temporary, so try again in a few minutes.`;
-    case "server": return `${provider} had a temporary server problem${detail(code, says)}. Try again in a few minutes.`;
-    case "refused": return `${provider} stopped with an error${detail(code, says)}.`;
+    case "credits": return { message: `Your ${provider} account is out of credits${detail(says)}. Add credits with ${provider}, then run it again.` };
+    case "rate_limit": return { message: `${provider} hit a rate limit${detail(code, says)}. Wait a minute, then run it again.` };
+    case "overloaded": return { message: `${provider} is overloaded right now${detail(code, says)}. This is usually temporary, so try again in a few minutes.` };
+    case "server": return { message: `${provider} had a temporary server problem${detail(code, says)}. Try again in a few minutes.` };
+    case "refused": return { message: `${provider} stopped with an error${detail(code, says)}.` };
   }
 }
 

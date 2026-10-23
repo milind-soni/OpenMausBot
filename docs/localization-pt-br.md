@@ -216,6 +216,7 @@ the whole catalog in the same change.
 | automation | automação | Plural `automações`. Distinct from routine. |
 | backup | backup | Masculine. “Restore” → “restaurar”. Not “cópia de segurança”. |
 | bot | bot | Masculine. Never `robô` or `agente`. |
+| brief | resumo | A bot's brief: “Brief” → “Resumo”. |
 | browser | navegador | |
 | call (voice) | chamada | “tool call” → “chamada de ferramenta”. Not “ligação”. |
 | chat (the screen) | chat | The chat surface: “no chat”, “Abrir o chat”. A single thread is a `conversa`. |
@@ -277,6 +278,7 @@ the whole catalog in the same change.
 | Team map | Mapa da equipe | |
 | template | modelo | “Templates” section → “Modelos”. Say “modelo de IA” if a sentence mentions both. |
 | thread | conversa | Not `thread` or `tópico`. |
+| trace (usage) | rastreamento | “View trace” → “Ver rastreamento”. |
 | trial | teste | “free trial” → “teste grátis”; “trial credit” → “crédito do teste”. |
 | trigger | gatilho | |
 | turn (a bot's turn) | turno | |

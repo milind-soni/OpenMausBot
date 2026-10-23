@@ -38,18 +38,17 @@ import { pathForFile } from "@/components/ComposerAttachments";
 import { ResultsDestination } from "@/components/routines/ResultsDestination";
 import { CronScheduleFields, CronSchedulePreview } from "@/components/routines/CronScheduleFields";
 import { cronChoiceFor, cronDraftFor, cronEditorValue, isCronChoice, type CronChoice } from "@/components/routines/cron-editor";
-import { routineRunLabel, routineRunsOn, routineRunTime, routineScheduleState } from "@/lib/routine-display";
+import { routineRunLabel, routineRunsOn, routineRunText, routineRunTime, routineScheduleState } from "@/lib/routine-display";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { intlLocale, t } from "@/lib/i18n";
-import { attachNoticeText } from "@/lib/attach-notice";
+import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import type { CalendarCall, CalendarCallAttachment, CalendarCallInput } from "@/lib/calendar-calls";
 import { isDone } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import {
   imageAttachmentFromFile,
-  intakeFiles,
   type Attachment,
 } from "@/lib/composer-attachments";
 import { MAUS_COLORS, type MausState } from "@/lib/mascot";
@@ -466,7 +465,7 @@ export function EventEditor({
     if (!files?.length || isRoomGoal) return;
     setAttachmentPendingCount((count) => count + 1);
     try {
-      const result = await intakeFiles(Array.from(files), {
+      const result = await intakeFilesWithNotice(Array.from(files), {
         allowImages: true,
         getPath: pathForFile,
         uploadImage: imageAttachmentFromFile,
@@ -476,8 +475,7 @@ export function EventEditor({
         setAttachments((current) => [...current, ...added].slice(0, 20));
         if (runOn === "cloud") setRunOn("maus");
       }
-      const notice = attachNoticeText(result.problems);
-      if (notice) setAttachmentNotice(notice);
+      if (result.notice) setAttachmentNotice(result.notice);
     } finally {
       setAttachmentPendingCount((count) => Math.max(0, count - 1));
     }
@@ -1571,8 +1569,8 @@ export function EventDetails({
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
-        {run && <div role="status" aria-live="polite" className="rounded-xl border border-hairline/40 bg-inset p-3"><div className="flex items-center gap-2 text-[12px] font-medium text-ink">{run.status === "running" && <Loader2 size={13} className="animate-spin text-accent" />}{routineRunLabel(run)}</div>{run.output && <div className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-[11.5px] leading-relaxed text-ink-secondary">{run.output}</div>}{run.error && <div className="mt-2 text-[11.5px] text-danger">{run.error}</div>}</div>}
-        {run?.attention && <div className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2.5 text-warning"><CircleAlert size={15} className="mt-0.5 shrink-0" /><div className="min-w-0 whitespace-pre-wrap text-[11.5px] leading-relaxed">{run.attention}</div></div>}
+        {run && <div role="status" aria-live="polite" className="rounded-xl border border-hairline/40 bg-inset p-3"><div className="flex items-center gap-2 text-[12px] font-medium text-ink">{run.status === "running" && <Loader2 size={13} className="animate-spin text-accent" />}{routineRunLabel(run)}</div>{run.output && <div className="mt-2 max-h-48 overflow-y-auto whitespace-pre-wrap text-[11.5px] leading-relaxed text-ink-secondary">{routineRunText(run, "output")}</div>}{run.error && <div className="mt-2 text-[11.5px] text-danger">{routineRunText(run, "error")}</div>}</div>}
+        {run?.attention && <div className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2.5 text-warning"><CircleAlert size={15} className="mt-0.5 shrink-0" /><div className="min-w-0 whitespace-pre-wrap text-[11.5px] leading-relaxed">{routineRunText(run, "attention")}</div></div>}
         {run?.status === "waiting" && !run.attention && <div className="rounded-xl border border-warning/30 bg-warning/10 px-3 py-2.5 text-[11.5px] text-warning">{t("routines.drawer.runWaiting")}</div>}
 
         <DrawerField label={isCall ? t("routines.drawer.guests") : isRoomGoal ? t("routines.drawer.lead") : t("routines.drawer.bot")}>

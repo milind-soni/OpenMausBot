@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import type { InspectorEntry, NativeRecord } from "../../shared/inspector";
+import { usdText } from "@/lib/usage";
 export type { InspectorEntry, InspectorPage, NativeRecord } from "../../shared/inspector";
 
 interface FoldPreview {
@@ -64,7 +65,7 @@ export function summarizeRuntime(e: RuntimeEvent): { summary: string; tone: Insp
     case "turn.completed": {
       const parts = [e.ok ? "turn ok" : "turn failed"];
       if (e.stopReason) parts.push(e.stopReason);
-      if (typeof e.cost === "number") parts.push(`$${e.cost.toFixed(4)}`);
+      if (typeof e.cost === "number") parts.push(usdText(e.cost, 4));
       if (e.denials?.length) parts.push(`${e.denials.length} denied`);
       return { summary: parts.join(" · "), tone: e.ok ? "boundary" : "error" };
     }

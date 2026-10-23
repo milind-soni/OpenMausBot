@@ -2,6 +2,7 @@
 // of kind "widget". Node names and props follow ChatKit's widget components.
 // Model input is normalised here once; every renderer reads canonical trees only.
 import type { JsonValue } from "./json.ts";
+import { readWidgetText } from "./widget-text.ts";
 
 export const WIDGET_VERSION = 1;
 
@@ -539,6 +540,7 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
     if (value !== undefined) node[key] = value;
   }
   if (type === "Button") node.style = buttonStyle(raw);
+  if (raw.i18n !== undefined) node.i18n = readWidgetText(raw.i18n);
   if (type === "Icon") node.name ??= "dot";
   if (type === "Progress") {
     const max = typeof raw.max === "number" && Number.isFinite(raw.max) && raw.max > 0 ? raw.max : undefined;

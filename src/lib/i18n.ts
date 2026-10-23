@@ -70,6 +70,10 @@ export function tFromServer(key: string | undefined, fallback: string | undefine
   return unfilled ? fallback : t(key as LocaleKey, params);
 }
 
+export function activePackComplete(): boolean {
+  return activePack !== en && Object.keys(en).every((key) => Object.hasOwn(activePack, key));
+}
+
 export function t(key: LocaleKey, params?: Record<string, string | number>): string {
   const template = activePack[key] ?? en[key];
   if (!params) return template;

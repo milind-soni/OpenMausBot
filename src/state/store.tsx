@@ -57,7 +57,8 @@ import { showNotification } from "@/lib/notify";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { speaker } from "@/lib/tts";
 import { roleProfilePatch, type BotRole } from "@/lib/bot-roles";
-import { intlLocale, t } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
+export { formatTime } from "@/lib/clock-time";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import { useChatErrorClear } from "./chat-error";
 import { openLiveEvents, publishLiveFrame, publishMissedFrames } from "@/lib/live-events";
@@ -3514,15 +3515,4 @@ export function useStore() {
 
 export function BotEditorStore({ value, children }: { value: ReturnType<typeof useStore>; children: ReactNode }) {
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
-}
-
-let timeFormat: { locale: string; clock: Intl.DateTimeFormat } | undefined;
-
-export function formatTime(at: number) {
-  const date = new Date(at);
-  // toLocaleTimeString's output, where Intl.DateTimeFormat.format would throw
-  if (Number.isNaN(date.getTime())) return "Invalid Date";
-  const locale = intlLocale();
-  if (timeFormat?.locale !== locale) timeFormat = { locale, clock: new Intl.DateTimeFormat(locale, { hour: "numeric", minute: "2-digit" }) };
-  return timeFormat.clock.format(date);
 }

@@ -4,6 +4,7 @@ import { Circle, Sparkles } from "lucide-react";
 import type { BotOverview } from "@/lib/bot-overview-types";
 import { t } from "@/lib/i18n";
 import { whenLabel } from "@/lib/schedule-label";
+import { overviewLineText, overviewRoutineText, recentChangeText } from "@/lib/bot-overview-text";
 import type { BotSettingsSection } from "@/state/store";
 import { PromptPreview, type PromptPreviewData } from "./PromptPreview";
 
@@ -31,18 +32,6 @@ export function OverviewSection({
   const setup = overview.setup ?? [];
   const remaining = setup.filter((step) => !step.done);
   const setupLabel = (id: string, fallback: string) => t(`botOverview.setup.${id}` as never) || fallback;
-  const overviewLine = (line: string) => {
-    if (line === "Works in its private workspace.") return t("botOverview.line.privateWorkspace");
-    if (line === "Has the built-in browser.") return t("botOverview.line.browser");
-    if (line === "Has no connected apps.") return t("botOverview.line.noApps");
-    if (line === "Won't act on a schedule.") return t("botOverview.line.noSchedule");
-    const computer = line.match(/^Computer preference: (.+)\.$/);
-    if (computer) {
-      const preference = computer[1] === "Auto; availability is checked when a task starts" ? t("botOverview.preference.auto") : computer[1] === "cloud computer" ? t("botOverview.preference.cloud") : computer[1] === "Local VM" ? t("botOverview.preference.vm") : computer[1] === "this computer" ? t("botOverview.preference.local") : computer[1] === "browser only" ? t("botOverview.preference.browser") : computer[1];
-      return t("botOverview.line.computer", { preference });
-    }
-    return line;
-  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -118,7 +107,7 @@ export function OverviewSection({
         ) : (
           <ul className="mt-2 flex flex-col gap-1.5 text-[13px] leading-relaxed text-ink">
             {overview.does.map((line, i) => (
-              <li key={i}>{overviewLine(line)}</li>
+              <li key={i}>{overviewRoutineText(overview.doesRoutines?.[i]) ?? overviewLineText(line)}</li>
             ))}
           </ul>
         )}
@@ -131,7 +120,7 @@ export function OverviewSection({
         ) : (
           <ul className="mt-2 flex flex-col gap-1.5 text-[13px] leading-relaxed text-ink">
             {overview.reaches.map((line, i) => (
-              <li key={i}>{overviewLine(line)}</li>
+              <li key={i}>{overviewLineText(line, overview.managedSections)}</li>
             ))}
           </ul>
         )}
@@ -141,7 +130,7 @@ export function OverviewSection({
         <div className="text-[15px] font-medium text-ink">{t("botOverview.wont")}</div>
         <ul className="mt-2 flex flex-col gap-1.5 text-[13px] leading-relaxed text-ink">
           {overview.wont.map((line, i) => (
-            <li key={i}>{overviewLine(line)}</li>
+            <li key={i}>{overviewLineText(line, overview.managedSections)}</li>
           ))}
         </ul>
       </div>
@@ -170,7 +159,7 @@ export function OverviewSection({
           <ul className="mt-2 flex flex-col gap-1.5 text-[13px] text-ink">
             {overview.recent.map((entry, i) => (
               <li key={i} className="flex items-baseline justify-between gap-3">
-                <span className="min-w-0 truncate">{entry.summary}</span>
+                <span className="min-w-0 truncate">{recentChangeText(entry.summary)}</span>
                 <span className="shrink-0 text-[11.5px] text-ink-secondary">· {whenLabel(entry.at)}</span>
               </li>
             ))}

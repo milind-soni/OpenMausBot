@@ -1,4 +1,5 @@
 // Each private thread a room answer recalled from is announced once per room thread; in memory, so a restart re-announces (the safe direction).
+import { noticeTool } from "./chat-notices.ts";
 
 const announced = new Map<string, Set<string>>();
 
@@ -22,8 +23,8 @@ export function claimRecallCrossings(roomThreadId: string, sources: readonly str
   return { threadIds, count };
 }
 
-export function recallCrossingLabel(botName: string, count: number): string {
-  return `${botName} recalled ${count} message${count === 1 ? "" : "s"} from its private chat with you`;
+export function recallCrossingTool(botName: string, count: number) {
+  return noticeTool(count === 1 ? "chat.notice.recallCrossingOne" : "chat.notice.recallCrossingMany", { name: botName, count }, { ok: true });
 }
 
 export function forgetRecallCrossings(roomThreadId?: string): void {
@@ -31,6 +32,6 @@ export function forgetRecallCrossings(roomThreadId?: string): void {
   else announced.delete(roomThreadId);
 }
 
-export function briefCrossingLabel(botName: string, count: number): string {
-  return `${botName}'s recent-work brief covers ${count} private chat${count === 1 ? "" : "s"} with you`;
+export function briefCrossingTool(botName: string, count: number) {
+  return noticeTool(count === 1 ? "chat.notice.briefCrossingOne" : "chat.notice.briefCrossingMany", { name: botName, count }, { ok: true });
 }

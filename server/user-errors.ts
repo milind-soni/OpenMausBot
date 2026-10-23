@@ -26,6 +26,12 @@ export const USER_ERROR = {
   "serverError.chat.savingCredential": "this task is securely saving a credential — try again when it finishes",
   "serverError.team.personalMove": "Moving a computer's bots, chats and logins goes to My Cloud only. Nothing personal comes into {team}.",
   "serverError.team.memberLogin": "On {team} only an admin can save a login, and it is then used by every bot in {team}.",
+  "serverError.team.signInFirst": "Sign in to {team} in the app first.",
+  "serverError.chat.ownerOrAdmin": "Only the owner or an admin can do that.",
+  "serverError.routine.checks": "Choose checks from calendar, mail and runs",
+  "serverError.routine.checksRepeat": "Checks need a bot routine that repeats",
+  "serverError.routine.access": "Choose read-and-draft access or none",
+  "serverError.routine.deliver": "Only a bot routine can deliver to the brief",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;
@@ -34,6 +40,11 @@ export type UserError = { error: string; errorKey: UserErrorKey; errorParams?: S
 
 export function userError(key: UserErrorKey, params?: ServerTextParams): UserError {
   return { error: formatServerText(USER_ERROR[key], params), errorKey: key, ...(params ? { errorParams: params } : {}) };
+}
+
+export function userErrorThrown(key: UserErrorKey, params?: ServerTextParams): Error {
+  const { error, ...fields } = userError(key, params);
+  return Object.assign(new Error(error), fields);
 }
 
 export function userErrorFields(value: unknown): Pick<ServerErrorBody, "errorKey" | "errorParams"> {

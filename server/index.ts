@@ -94,6 +94,7 @@ import { applyHoldDirective, classifyHoldDirective, heldMemberLine, rememberHeld
 import { refusalBody, userError, userErrorFields } from "./user-errors.ts";
 import { chatNotice, failedNoticeTool, noticeTool } from "./chat-notices.ts";
 import type { ServerErrorBody } from "../shared/server-text.ts";
+import { emailSignInRoute } from "./routes/email-sign-in.ts";
 import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
 import { pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts";
@@ -241,7 +242,7 @@ import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-g
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./drivers/acp/opencode-go.ts";
 import { readMessageText, recallMessages, recentMessages, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing, logNotification, lastRowAt } from "./message-db.ts";
-import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
+import { briefCrossingTool, claimRecallCrossings, recallCrossingTool } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
 import { chiefEscalationsEnabled, NEEDS_INPUT_GATE, peerApprovalGate, RAISED_GATE } from "./escalations.ts";
 import { createChiefNotices } from "./host/chief-notices.ts";
@@ -5451,8 +5452,7 @@ const turnUsage = new Map<string, { input: number; output: number; cachedInput?:
 const turnContext = new Map<string, { tokens?: number; window?: number }>();
 
 const TURN_STALL_MS = Math.max(60_000, Number(process.env.OMB_TURN_STALL_MS) || 20 * 60_000);
-const STALL_MINUTES = Math.round(TURN_STALL_MS / 60_000);
-const STALL_CAUSE = chatNotice("chat.notice.stalled", { minutes: STALL_MINUTES });
+const STALL_MINUTES = Math.round(TURN_STALL_MS / 60_000), STALL_CAUSE = chatNotice("chat.notice.stalled", { minutes: STALL_MINUTES });
 const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
 const COMPUTER_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_COMPUTER_WAIT_MAX_MS) || 30 * 60_000);
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
@@ -10763,7 +10763,7 @@ async function runClaimedGroupMemberTurn(
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: briefCrossingLabel(bot.name, crossing.count), ok: true },
+        tool: briefCrossingTool(bot.name, crossing.count),
       });
     }
   }
@@ -13665,43 +13665,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const challenge = customDomainVerifier.challenge(domainCheck[1]);
       return json(res, challenge ? 200 : 404, challenge ?? { error: "No active domain check." });
     }
-    // Never on a Cloud home: it is personal, and the owner's devices sign in through the Admin.
-    if (CLOUD_HOME && method === "POST" && (path === "/api/auth/email/start" || path === "/api/auth/email/verify")) {
-      return json(res, 403, { ...userError("serverError.cloud.personal"), code: "cloud_personal" });
-    }
-    if (method === "POST" && (path === "/api/auth/email/start" || path === "/api/auth/email/verify")) {
-      if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
-        return json(res, 415, { error: "send the sign-in request as JSON (content-type: application/json)" });
-      }
-      if (!emailSignIn.enabled()) return json(res, 404, userError("serverError.email.notSetUp"));
-      const source = requestSource(req);
-      const allowed = sessions.attemptAllowed(source);
-      if (!allowed.ok) return json(res, 429, userError("serverError.signIn.tooMany", { seconds: Math.ceil(allowed.retryAfterMs / 1000) }));
-      const body = await readBody(req);
-      const email = typeof body?.email === "string" ? body.email : "";
-      if (path === "/api/auth/email/start") {
-        const started = await emailSignIn.start(email);
-        if (!started.ok) {
-          if (started.status === 403) sessions.noteFailure(source);
-          return json(res, started.status, refusalBody(started));
-        }
-        return json(res, 200, { ok: true });
-      }
-      const code = typeof body?.code === "string" ? body.code : "";
-      const label = typeof body?.label === "string" ? body.label : "";
-      const verified = await emailSignIn.verify(email, code);
-      if (!verified.ok) {
-        if (verified.status === 401 || verified.status === 403) sessions.noteFailure(source);
-        console.warn(`email sign-in refused from ${source}: ${verified.error}`);
-        return json(res, verified.status, refusalBody(verified));
-      }
-      sessions.clearFailures(source);
-      const issued = sessions.issue({ label: label.trim() || labelFromUserAgent(req.headers["user-agent"]), scopes: verified.scopes, userId: verified.userId, email: verified.email });
-      const environment = environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: true, sharedComputers: lendingEnabled() });
-      const secure = requestOrigin(req)?.startsWith("https://") === true;
-      res.setHeader("set-cookie", serializeSessionCookie(SESSION_COOKIE, issued.token, { secure, maxAgeSeconds: cookieMaxAgeSeconds(issued.session) }));
-      return json(res, 200, { session: issued.session, environment });
-    }
+    if (await emailSignInRoute({ cloudHome: Boolean(CLOUD_HOME), emailSignIn, sessions, cookieName: SESSION_COOKIE,
+      environment: () => environmentDescriptor({ environmentId: ENVIRONMENT_ID, ...TEAM_LABEL, desktopManaged: DESKTOP_MANAGED, emailSignIn: true, sharedComputers: lendingEnabled() }) }, req, res, path, method)) return;
     if (cloudSigned && await cloudSigned({ req, res, url, path, method })) return;
     if (method === "POST" && path === "/api/auth/pair") {
       // JSON only: a cross-site HTML form cannot send this content type without a preflight, so no unused code is planted as a session.
@@ -14623,7 +14588,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           role: "bot",
           kind: "activity",
           from: { botId: bot.id, name: bot.name, color: bot.color },
-          tool: { name: recallCrossingLabel(bot.name, crossing.count), ok: true },
+          tool: recallCrossingTool(bot.name, crossing.count),
         });
       };
       if (method === "GET" && path === "/api/internal/session-search") {

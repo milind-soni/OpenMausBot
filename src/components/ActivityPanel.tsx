@@ -4,6 +4,8 @@ import { useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import {
+  activityApp,
+  activityLabel,
   formatActivityTime,
   groupActivityByDay,
   outcomeChip,
@@ -158,9 +160,9 @@ function ActivityLine({ row, current, onJump }: { row: ActivityRow; current: boo
       <span className="mt-[2px] shrink-0 tabular-nums text-[11px] text-ink-secondary">{formatActivityTime(row.at)}</span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5 text-[13px] text-ink">
-          {row.app && <span className="font-medium">{row.app}</span>}
+          {row.app && <span className="font-medium">{activityApp(row)}</span>}
           {row.app && <span className="text-ink-secondary">·</span>}
-          <span className="truncate">{row.label}</span>
+          <span className="truncate">{activityLabel(row)}</span>
         </span>
         {row.summary && (
           <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-secondary">{row.summary}</span>
