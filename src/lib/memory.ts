@@ -116,11 +116,24 @@ export interface CaptureReport {
   note?: string;
 }
 
+export interface DreamReport {
+  at: number;
+  conversations: number;
+  learned: { text: string; where: string }[];
+  outdated: { was: string; now: string }[];
+  ideas: string[];
+  aboutMe: number;
+  note?: string;
+}
+
 export interface UpkeepStatus {
   enabled: boolean;
   modelSteps: boolean;
   lastTidy?: TidyReport;
   lastCapture?: CaptureReport;
+  /** Dream every night; absent from a server without dreaming. */
+  dreams?: boolean;
+  lastDream?: DreamReport;
 }
 
 export function noticedCount(report: CaptureReport | undefined): number {
@@ -142,6 +155,14 @@ export function markMemoryReviewed(botId: string, token: string): Promise<{ ok: 
 
 export function tidyMemoryNow(botId: string): Promise<{ report: TidyReport; overview: MemoryOverview }> {
   return api(`/api/bots/${botId}/memory/tidy`, { method: "POST" });
+}
+
+export function dreamNow(botId: string): Promise<{ report: DreamReport; overview: MemoryOverview }> {
+  return api(`/api/bots/${botId}/memory/dream`, { method: "POST" });
+}
+
+export function setNightlyDreams(botId: string, nightly: boolean): Promise<UpkeepStatus> {
+  return api(`/api/bots/${botId}/memory/dream`, { method: "PATCH", body: JSON.stringify({ nightly }) });
 }
 
 export function tidySummary(report: TidyReport): string {

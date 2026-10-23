@@ -37,6 +37,7 @@ import { api, ApiError, useStore, type Bot, type ConfigStatus } from "@/state/st
 import { Switch } from "../SettingsPrimitives";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { inputCls } from "./field";
+import { MemoryDreamCard } from "./MemoryDreamCard";
 
 const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50";
 const quietButtonCls = "rounded-md px-2 py-1 text-[12.5px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
@@ -351,6 +352,10 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
         onTidy={() => void tidyNow()}
         rooms={{ enabled: learnFromRooms, saving: roomsSaving, error: roomsError, onToggle: () => void toggleRooms() }}
       />}
+
+      {bot.memoryEnabled !== false && bot.memoryUpkeep !== false && upkeep?.dreams !== undefined && (
+        <MemoryDreamCard botId={bot.id} botName={bot.name} status={upkeep} onStatus={setUpkeep} onDreamt={() => void refresh(editing && !editing.dirty ? editing.path : undefined)} />
+      )}
 
       {editing && (
         <div className="rounded-xl bg-card p-4">

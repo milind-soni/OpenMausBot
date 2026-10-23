@@ -21,7 +21,12 @@ afterEach(async () => {
 async function serve(deps: Partial<BotMemoryRouteDeps> = {}, beforeDispatch?: (res: import("node:http").ServerResponse) => void): Promise<string> {
   const routes = [createBotMemoryRoutes({
     bot: (id) => BOTS[id], taskByThread: () => undefined,
-    upkeep: { status: () => ({ modelSteps: false }), tidy: async () => { throw new Error("unexpected tidy"); } },
+    upkeep: {
+      status: () => ({ modelSteps: false, dreams: false }),
+      tidy: async () => { throw new Error("unexpected tidy"); },
+      dream: async () => { throw new Error("unexpected dream"); },
+      setDreams: () => { throw new Error("unexpected dream switch"); },
+    },
     aboutMe: () => "", saveAboutMe: () => { throw new Error("unexpected profile save"); },
     ...deps,
   })];
@@ -82,6 +87,7 @@ describe("the bot-memory module through the route table", () => {
       ["POST", "/api/bots/missing/memory/journal/e1/revert"],
       ["GET", "/api/bots/missing/memory/upkeep"],
       ["POST", "/api/bots/missing/memory/tidy"],
+      ["POST", "/api/bots/missing/memory/dream"],
       ["POST", "/api/bots/missing/memory/open", { target: "folder" }],
     ] as Array<[string, string, unknown?]>) {
       const response = await fetch(`${base}${path}`, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
@@ -97,11 +103,13 @@ describe("the bot-memory module through the route table", () => {
     const base = await serve({
       bot: (id) => ({ id, memoryUpkeep: enabled }),
       upkeep: {
-        status: () => ({ modelSteps: false, lastTidy: report }),
+        status: () => ({ modelSteps: false, dreams: false, lastTidy: report }),
         tidy: async (id) => { tidied.push(id); return report; },
+        dream: async () => { throw new Error("unexpected dream"); },
+        setDreams: () => { throw new Error("unexpected dream switch"); },
       },
     });
-    expect(await (await fetch(`${base}/api/bots/bot-123/memory/upkeep`)).json()).toEqual({ enabled: true, modelSteps: false, lastTidy: report });
+    expect(await (await fetch(`${base}/api/bots/bot-123/memory/upkeep`)).json()).toEqual({ enabled: true, modelSteps: false, dreams: false, lastTidy: report });
     const tidy = await fetch(`${base}/api/bots/bot-123/memory/tidy`, { method: "POST" });
     expect(tidy.status).toBe(200);
     expect(await tidy.json()).toMatchObject({ report, overview: { botId: "bot-123" } });
@@ -109,6 +117,33 @@ describe("the bot-memory module through the route table", () => {
     expect(await (await fetch(`${base}/api/bots/bot-123/memory/upkeep`)).json()).toMatchObject({ enabled: false });
     expect((await fetch(`${base}/api/bots/bot-123/memory/tidy`, { method: "POST" })).status).toBe(409);
     expect(tidied).toEqual(["bot-123"]);
+  });
+
+  it("dreams now and switches nightly dreams through the upkeep service, only while upkeep is on", async () => {
+    let enabled = true;
+    let nightly = false;
+    const dreamt: string[] = [];
+    const report = { at: 1, conversations: 3, learned: [{ text: "The person wants short drafts", where: "MEMORY.md" }], outdated: [], ideas: [], aboutMe: 0 };
+    const base = await serve({
+      bot: (id) => ({ id, memoryUpkeep: enabled }),
+      upkeep: {
+        status: () => ({ modelSteps: true, dreams: nightly }),
+        tidy: async () => { throw new Error("unexpected tidy"); },
+        dream: async (id) => { dreamt.push(id); return report; },
+        setDreams: (_id, on) => { nightly = on; },
+      },
+    });
+    const dream = await fetch(`${base}/api/bots/bot-123/memory/dream`, { method: "POST" });
+    expect(dream.status).toBe(200);
+    expect(await dream.json()).toMatchObject({ report, overview: { botId: "bot-123" } });
+    const patch = (body: unknown) => fetch(`${base}/api/bots/bot-123/memory/dream`, { method: "PATCH", body: JSON.stringify(body) });
+    expect((await patch({ nightly: "yes" })).status).toBe(400);
+    expect(await (await patch({ nightly: true })).json()).toEqual({ enabled: true, modelSteps: true, dreams: true });
+    enabled = false;
+    expect((await fetch(`${base}/api/bots/bot-123/memory/dream`, { method: "POST" })).status).toBe(409);
+    expect((await patch({ nightly: false })).status).toBe(409);
+    expect(dreamt).toEqual(["bot-123"]);
+    expect(nightly).toBe(true);
   });
 
   it("removes learned facts through the current About me and save seams", async () => {
@@ -163,6 +198,7 @@ describe("the bot-memory module through the route table", () => {
       ["GET", "/api/bots/bot-123/memory/open"],
       ["POST", "/api/bots/bot-123/memory/upkeep"],
       ["GET", "/api/bots/bot-123/memory/tidy"],
+      ["GET", "/api/bots/bot-123/memory/dream"],
       ["POST", "/api/profile/learned"],
       ["GET", "/api/profile/learned/e1/remove"],
       ["POST", "/api/profile/learned/e1/remove/extra"],
@@ -194,6 +230,8 @@ describe("the bot-memory module through the route table", () => {
       ["POST", "/api/bots/b1/memory/journal/e1/revert"],
       ["GET", "/api/bots/b1/memory/upkeep"],
       ["POST", "/api/bots/b1/memory/tidy"],
+      ["POST", "/api/bots/b1/memory/dream"],
+      ["PATCH", "/api/bots/b1/memory/dream"],
       ["GET", "/api/profile/learned"],
       ["POST", "/api/profile/learned/e1/remove"],
       ["POST", "/api/bots/b1/memory/open"],
@@ -215,6 +253,8 @@ describe("the bot-memory family behind the gate on a real server", () => {
     ["POST", "/api/bots/b1/memory/journal/e1/revert"],
     ["GET", "/api/bots/b1/memory/upkeep"],
     ["POST", "/api/bots/b1/memory/tidy"],
+    ["POST", "/api/bots/b1/memory/dream"],
+    ["PATCH", "/api/bots/b1/memory/dream", { nightly: true }],
     ["GET", "/api/profile/learned"],
     ["POST", "/api/profile/learned/e1/remove"],
     ["POST", "/api/bots/b1/memory/open", { target: "folder" }],
