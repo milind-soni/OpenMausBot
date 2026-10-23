@@ -28,7 +28,7 @@ interface Fixture {
   evidence: unknown[];
 }
 
-async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: boolean }, check: (fixture: Fixture) => Promise<void>) {
+async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: boolean; handoffHook?: "note" | "fail" }, check: (fixture: Fixture) => Promise<void>) {
   const fixture = await launchVerificationServer({});
   const { dataDir, url, logPath } = fixture.info;
   const limitedFile = join(dataDir, "claude-limited.json");
@@ -59,16 +59,25 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
     config.instances.claude.environment = { ...config.instances.claude.environment, FAKE_CLAUDE_LIMITED_FILE: limitedFile, FAKE_CLAUDE_PROMPTS: promptsFile, FAKE_CLAUDE_TOOL_CALLS: "[]" };
     config.instances.codex = { driver: "codex", config: { cli: fileURLToPath(new URL("./testing/fake-codex-app-server.ts", import.meta.url)) } };
     if (setup.secondClaude) config.instances.claudeWork = { ...config.instances.claude, displayName: "Second Claude sign-in" };
+    if (setup.handoffHook) config.instances.codex.environment = { FAKE_CODEX_DUMP: join(dataDir, "codex-dump.json") };
     if (setup.recovery) config.automaticRecovery = setup.recovery;
     writeFileSync(configPath, JSON.stringify(config));
     // No engine reports usage here: what the server knows of the limit comes from the refusal itself.
     writeFileSync(usageFile, JSON.stringify({ providers: [] }));
+    // A host's handoff hook: records what it was sent, then answers with a note (or exits with an error).
+    const hookPath = join(dataDir, "handoff-hook.mjs");
+    writeFileSync(hookPath, `#!${process.execPath}
+import { readFileSync, writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(join(dataDir, "handoff-input.json"))}, readFileSync(0, "utf8"));
+${setup.handoffHook === "fail" ? "process.exit(3);" : 'process.stdout.write(JSON.stringify({ text: "HANDOFF-NOTE-FROM-HOOK: the plan lives in memory page 7" }));'}
+`, { mode: 0o755 });
     const log = openSync(logPath, "a", 0o600);
     server = spawn(process.execPath, [
       "--experimental-strip-types", "--import", new URL("./testing/limit-clock-hooks.mjs", import.meta.url).href, fileURLToPath(new URL("./index.ts", import.meta.url)),
     ], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), OMB_TEST_LIMIT_CLOCK: "1", OMB_TEST_PLAN_USAGE_FILE: usageFile },
+      env: { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), OMB_TEST_LIMIT_CLOCK: "1", OMB_TEST_PLAN_USAGE_FILE: usageFile,
+        ...(setup.handoffHook ? { OMB_ACCOUNT_HANDOFF_COMMAND: hookPath } : {}) },
       stdio: ["ignore", log, log],
     });
     closeSync(log);
@@ -197,6 +206,27 @@ it("never moves to another sign-in of the same engine; the stopped turn offers C
       expect(claudePrompts()).toHaveLength(1);
       expect((await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).tasks.find((entry: any) => entry.threadId === threadId).modelSelection?.instanceId ?? "claude").toBe("claude");
     });
+}, 120_000);
+
+it.each(["note", "fail"] as const)("a limit switch sends the conversation to the host's handoff hook; the backup gets its note only when it answers (%s)", async (handoffHook) => {
+  await withLimitFixture({ recovery: { enabled: true, backup: codex }, handoffHook }, async ({ api, control, limit, lift, dataDir }) => {
+    const { bot } = await control("new-bot", "--name", "Planner");
+    const threadId = bot.activeTaskId;
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "First question");
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+    limit(Math.floor(Date.now() / 1000) + 600);
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "Second question");
+    expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+    expect(recoveryLines(await messagesOf(api, threadId))).toEqual([expect.stringContaining("so Codex took over")]);
+    const sent = JSON.parse(readFileSync(join(dataDir, "handoff-input.json"), "utf8"));
+    expect(sent).toMatchObject({ schemaVersion: 1, event: "engine-switch", reason: "usage_limit", conversationId: `${bot.id}:${threadId}`, to: "Codex" });
+    expect(sent.summary).toContain("First question");
+    expect(sent.summary).not.toContain("Second question");
+    // The switch happens either way; a hook that fails only means no note.
+    const note = "HANDOFF-NOTE-FROM-HOOK: the plan lives in memory page 7";
+    expect(readFileSync(join(dataDir, "codex-dump.json"), "utf8").includes(note)).toBe(handoffHook === "note");
+    lift();
+  });
 }, 120_000);
 
 it("a model out of extra-usage credits moves that turn to the backup, but never holds the engine", async () => {

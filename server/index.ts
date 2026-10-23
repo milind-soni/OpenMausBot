@@ -11,7 +11,8 @@ import { extname, join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
 import { selectReplay, replayToolCalls, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
-import { draftSummary, foldPoint } from "./compaction-summary.ts";
+import { draftSummary, foldPoint, deterministicSummary } from "./compaction-summary.ts";
+import { accountHandoffCommand, accountHandoffContext, HANDOFF_SUMMARY_MAX_BYTES, runAccountHandoff } from "./account-handoff.ts";
 import { compactBudget, compactionReading, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
@@ -8087,6 +8088,8 @@ async function startTurn(
     compactOnly?: boolean;
     automaticRecoveryAttempted?: boolean;
     automaticRecoveryIndex?: number;
+    /** A usage-limit switch to a backup: names for the optional handoff hook (OMB_ACCOUNT_HANDOFF_COMMAND). */
+    accountHandoff?: { from: string; to: string };
     onTurnSettled?: () => void;
     coordination?: { id: string; resumed: boolean; settle: (outcome: HostTurnResult) => void };
   },
@@ -8331,6 +8334,27 @@ async function startTurn(
         drainQueuedSends();
         return;
       }
+      let handoffContext = "";
+      const handoffCommand = opts?.accountHandoff ? accountHandoffCommand() : null;
+      const handoffCwd = store.taskByThread(bot.id, threadId)?.cwd;
+      if (opts?.accountHandoff && handoffCommand && handoffCwd) {
+        const history = directContext(bot, threadId, store.activePath(threadId))
+          .filter(entry => entry.id !== userMessage.id).map(({ id, role, text }) => ({ id, role, text }));
+        if (history.length) {
+          const controller = new AbortController();
+          compactionControllers.set(threadId, { generation: dispatchClaimId, controller });
+          try {
+            const note = await runAccountHandoff({
+              schemaVersion: 1, event: "engine-switch", reason: "usage_limit", conversationId: `${bot.id}:${threadId}`, cwd: handoffCwd,
+              from: opts.accountHandoff.from, to: opts.accountHandoff.to, summary: deterministicSummary(history, HANDOFF_SUMMARY_MAX_BYTES),
+            }, { command: handoffCommand, signal: controller.signal });
+            if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during the handoff");
+            if (note) handoffContext = accountHandoffContext(note);
+          } finally {
+            if (compactionControllers.get(threadId)?.generation === dispatchClaimId) compactionControllers.delete(threadId);
+          }
+        }
+      }
       const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
       const activeMessages = store.activePath(threadId);
       const coordinationChildren = opts?.coordination?.resumed
@@ -8379,7 +8403,7 @@ async function startTurn(
         skillAuthoring ? expandLearnTurnText(setupText) : setupText,
         opts?.replyTo,
         cfg.profile?.name?.trim() || "User",
-      ), personLine ? activeMessages : [], skipTranscript, cfg.profile?.name?.trim() || "User");
+      ), personLine ? activeMessages : [], skipTranscript, cfg.profile?.name?.trim() || "User") + handoffContext;
       const replay = usesNativeImageInput
         ? extractReplayImages(selection.inline, turnImages)
         : { transcript: selection.inline, images: [] };
@@ -9107,7 +9131,9 @@ async function startTurn(
             if (opts?.coordination) directCoordinationSettlers.delete(dispatchClaimId);
             else settleDirectCoordination(dispatchClaimId, { ok: false, text: message });
             await startTurn(bot.id, text, { ...opts, threadId, userMessage, editedMessageId: undefined,
-              automaticRecoveryAttempted: true, automaticRecoveryIndex: nextIndex + 1 });
+              automaticRecoveryAttempted: true, automaticRecoveryIndex: nextIndex + 1,
+              accountHandoff: e instanceof TurnUsageLimitRefusedError && accountHandoffCommand()
+                ? { from: engineName(instanceId), to: engineName(target.instanceId) } : undefined });
             // The backup now owns these callbacks: publish no failed result and release no queued receipt in between.
             directFollowupSettlers.delete(dispatchClaimId);
             return;
