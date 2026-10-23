@@ -110,7 +110,7 @@ registerHooks({
     if (url.endsWith('/turn-watchdog.ts')) {
       return { ...result, source: `import { readFileSync as readVmWatch } from 'node:fs';\n` +
         String(result.source).replace('this.opts = opts;', 'this.opts = { ...opts, checkMs: 30 };')
-          .replace('at - turn.lastEventAt < this.opts.stallMs', `at - turn.lastEventAt < (JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stall ? 0 : JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stallThread === turn.threadId ? 100 : this.opts.stallMs)`) };
+          .replace('at - turn.lastEventAt < silentMs', `at - turn.lastEventAt < (JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stall ? 0 : JSON.parse(readVmWatch(${JSON.stringify(state)}, 'utf8')).stallThread === turn.threadId ? 100 : silentMs)`) };
     }
     if (url.endsWith('/turn-dispatch-guard.ts')) {
       // wedgeClear parks a room turn inside waitForClear; the clearwait marker proves it got there.

@@ -157,8 +157,8 @@ describe("room turn timeout", () => {
     deadline.start();
     unregister = stalls.register("room-thread", finish);
 
-    expect(stalls.stall("room-thread")).toBe(true);
-    expect(stalls.stall("room-thread")).toBe(false);
+    expect(stalls.stall("room-thread", "no activity")).toBe(true);
+    expect(stalls.stall("room-thread", "no activity")).toBe(false);
     await finished;
     expect(completions).toBe(1);
 
@@ -169,13 +169,13 @@ describe("room turn timeout", () => {
     const settledElsewhere = vi.fn();
     const cleanup = stalls.register("room-thread", settledElsewhere);
     cleanup();
-    expect(stalls.stall("room-thread")).toBe(false);
+    expect(stalls.stall("room-thread", "no activity")).toBe(false);
     expect(settledElsewhere).not.toHaveBeenCalled();
 
     const nextTurn = vi.fn();
     stalls.register("room-thread", nextTurn);
-    expect(stalls.stall("room-thread")).toBe(true);
-    expect(nextTurn).toHaveBeenCalledOnce();
+    expect(stalls.stall("room-thread", "no activity for 120 minutes")).toBe(true);
+    expect(nextTurn).toHaveBeenCalledExactlyOnceWith("no activity for 120 minutes");
   });
 
   it("lets one conversation replace the group ceiling and clears back to it", () => {

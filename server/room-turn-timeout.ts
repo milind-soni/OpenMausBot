@@ -110,20 +110,20 @@ export class RoomTurnDeadline {
 }
 
 export class RoomTurnStallRegistry {
-  private handlers = new Map<string, () => void>();
+  private handlers = new Map<string, (cause: string) => void>();
 
-  register(threadId: string, handler: () => void): () => void {
+  register(threadId: string, handler: (cause: string) => void): () => void {
     this.handlers.set(threadId, handler);
     return () => {
       if (this.handlers.get(threadId) === handler) this.handlers.delete(threadId);
     };
   }
 
-  stall(threadId: string): boolean {
+  stall(threadId: string, cause: string): boolean {
     const handler = this.handlers.get(threadId);
     if (!handler) return false;
     this.handlers.delete(threadId);
-    handler();
+    handler(cause);
     return true;
   }
 }

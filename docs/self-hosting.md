@@ -1140,6 +1140,36 @@ the bot then answered. With the loop guard on, set `loopGuard.correctiveRounds`
 that many times first; the turn counts as done only if the tools it runs after
 that succeed. A tool call that was denied is never sent back.
 
+## A turn that goes silent
+
+The server stops a turn that has sent it nothing for 20 minutes
+(`OMB_TURN_STALL_MS`) and says why in the chat. Engines report a tool only
+when it starts and when it ends, so a turn whose tool is still running may stay
+silent longer: up to `OMB_TOOL_STALL_MS` (default 2 hours) after that tool
+started. That deadline belongs to the tool. Text or other tools in the same
+turn do not extend it. Time the turn spends waiting on a person or a computer
+does not count toward it, but only the part of a wait that fell while that tool
+ran, and waits that overlap count once. A tool still running at its deadline
+stops the turn with "a tool ran for N minutes without finishing".
+
+A wait belongs to the turn, not to one tool, so a hung tool beside another that
+keeps asking a person would never reach that deadline. Every tool therefore
+also has a cap of twice `OMB_TOOL_STALL_MS` (default 4 hours) from its first
+start that counts every wait and that no event extends. The server checks it
+even while the turn waits, and a tool still running at the cap stops the turn
+with "a tool ran too long".
+
+Both take whole milliseconds. `OMB_TURN_STALL_MS` is never below 60000 (one
+minute) and `OMB_TOOL_STALL_MS` never below `OMB_TURN_STALL_MS`. A value that
+is not a positive finite number (empty, `65m`, `0`, a negative number,
+`Infinity`, `1e309`) leaves the default. Set them in the server's environment
+and restart it; the restart stops every running turn.
+
+A turn in a room also has a work ceiling of its own, `rooms.turnTimeoutMinutes`
+in `config.json` (default 5 minutes, 1-1440, which one conversation can
+replace). It stops a member's turn even while its tool runs, and these two
+settings do not change it.
+
 ## Updating
 
 For the npm service, [install the chosen new version](deploy-vps.md#update)
