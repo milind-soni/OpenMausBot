@@ -7678,10 +7678,12 @@ function drainQueuedSendsNow() {
 }
 
 async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"] }) {
+  const groupTurn = activeGroupTurnForBot(botId);
   const decision = admit("direct", {}, {
     atCapacity: botAtThreadCapacity(botId),
     threadBusy: threadBusy(botId, threadId),
-    groupTurn: Boolean(activeGroupTurnForBot(botId)),
+    groupTurn: Boolean(groupTurn),
+    groupTurnElsewhere: Boolean(groupTurn && groupTurn.threadId !== threadId),
     parksBehindCoordination: parksBehindCoordination(botId, threadId),
   });
   if (decision.action === "queue") {
@@ -7699,7 +7701,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app, allowRoomTurnElsewhere: true });
   return { ok: true as const, threadId, message };
 }
 
@@ -8089,6 +8091,8 @@ async function startTurn(
     automaticRecoveryIndex?: number;
     onTurnSettled?: () => void;
     coordination?: { id: string; resumed: boolean; settle: (outcome: HostTurnResult) => void };
+    /** A person's 1:1 send on a settled thread may run beside a room turn that owns a different thread. */
+    allowRoomTurnElsewhere?: boolean;
   },
 ) {
   workspaceMaintenance.assertAvailable(); moveFreeze.assertTurns();
@@ -8130,7 +8134,8 @@ async function startTurn(
     computerSkipped ??= changing;
   }
   if (threadBusy(botId, threadId)) throw Object.assign(new Error("this thread is already working — interrupt it first"), { status: 409, code: "thread_busy" });
-  if (activeGroupTurnForBot(botId)) {
+  const roomTurn = activeGroupTurnForBot(botId);
+  if (roomTurn && !(opts?.allowRoomTurnElsewhere && roomTurn.threadId !== threadId)) {
     throw Object.assign(new Error("the bot is already working in a channel — wait for it to finish"), { status: 409, code: "thread_busy" });
   }
   if (botAtThreadCapacity(botId)) {

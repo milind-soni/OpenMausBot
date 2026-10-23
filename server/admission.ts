@@ -64,6 +64,8 @@ export interface AdmissionState {
   threadBusy?: boolean;
   atCapacity?: boolean;
   groupTurn?: boolean;
+  /** Set with groupTurn when the room turn is on another thread: a person's 1:1 thread keeps its own slot. */
+  groupTurnElsewhere?: boolean;
   parksBehindCoordination?: boolean;
   roomWorking?: boolean;
   threadWorking?: boolean;
@@ -93,9 +95,11 @@ export function admit(
       return { action: "steer" };
     }
     case "direct": {
-      if (state.atCapacity || state.threadBusy || state.groupTurn || state.parksBehindCoordination) {
+      // A room turn on another thread holds no slot here; it still fills the bot's capacity, and the same thread still waits.
+      const roomTurnHere = state.groupTurn === true && state.groupTurnElsewhere !== true;
+      if (state.atCapacity || state.threadBusy || roomTurnHere || state.parksBehindCoordination) {
         // Capacity outranks a room turn in the receipt because the person can fix it.
-        const reason = state.atCapacity ? "capacity" : state.groupTurn ? "group-turn" : undefined;
+        const reason = state.atCapacity ? "capacity" : roomTurnHere ? "group-turn" : undefined;
         return { action: "queue", reason };
       }
       return { action: "start" };

@@ -34,6 +34,25 @@ describe("admission golden tables", () => {
     expect(admit("direct", {}, { botBusy: true })).toEqual({ action: "start" });
   });
 
+  it("direct: a room turn on another thread leaves the person's own slot alone", () => {
+    const roomElsewhere = { groupTurn: true, groupTurnElsewhere: true };
+    expect(admit("direct", {}, roomElsewhere)).toEqual({ action: "start" });
+    // Capacity and the landing thread still outrank it, and coordination still parks.
+    expect(admit("direct", {}, { ...roomElsewhere, atCapacity: true })).toEqual({ action: "queue", reason: "capacity" });
+    expect(admit("direct", {}, { ...roomElsewhere, threadBusy: true })).toEqual({ action: "queue" });
+    expect(admit("direct", {}, { ...roomElsewhere, parksBehindCoordination: true })).toEqual({ action: "queue" });
+    expect(admit("direct", {}, { groupTurnElsewhere: true })).toEqual({ action: "start" });
+  });
+
+  it("every other surface still treats any live room turn as busy", () => {
+    const roomElsewhere = { groupTurn: true, groupTurnElsewhere: true };
+    expect(admit("guarded", {}, roomElsewhere)).toEqual({ action: "refuse", code: "guarded_busy" });
+    expect(admit("unattended", {}, roomElsewhere)).toEqual({ action: "refuse", code: "busy" });
+    expect(admit("peer", {}, roomElsewhere)).toEqual({ action: "refuse", code: "busy" });
+    expect(admit("opened-thread", {}, roomElsewhere)).toEqual({ action: "queue", reason: "group-turn" });
+    expect(admit("incident", {}, roomElsewhere)).toEqual({ action: "queue", reason: "group-turn" });
+  });
+
   it("room: a working channel always queues; it never auto-steers", () => {
     expect(admit("room", {}, { roomWorking: true })).toEqual({ action: "queue" });
     expect(admit("room", {}, { roomWorking: false })).toEqual({ action: "start" });
