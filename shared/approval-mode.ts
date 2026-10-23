@@ -1,7 +1,5 @@
-/** The approval levels exposed by the app. Each one is a provider's own
- * permission mode, passed through: OpenMausBot never decides a permission
- * itself (Full access aside, which answers residual prompts because that is
- * what the person granted). The order is the order the selector shows. */
+/** The approval levels exposed by the app. Native providers implement their
+ * own modes; app-owned tools use the harness execution gate. */
 export const APPROVAL_MODES = ["ask", "edits", "auto", "full", "custom"] as const;
 
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
@@ -21,12 +19,19 @@ export function supportsApprovalMode(driverKind: string | undefined, mode: Appro
   return true;
 }
 
-/** Whether switching engines must first drop this level to Ask. A Custom
- * grant's rules belong to one provider's tool semantics, so it never crosses
- * engines; Full carries silently to any engine; Auto-accept edits stops at an
- * engine without it.
- * Adapted from tahodev's provider-switch guard. */
-export function modelSwitchNeedsAsk(
+/** App-owned tool loops can read a new selection before each execution. */
+export function supportsLiveApprovalMode(driverKind: string | undefined): boolean {
+  return ["openai-compat", "grok", "minimax", "mistral", "cerebras", "groq", "meta"].includes(driverKind ?? "");
+}
+
+/** Native modes retain their dispatched ceiling while app gates honor revocation. */
+export function runningApprovalMode(dispatched: ApprovalMode, selected: ApprovalMode, live: boolean): ApprovalMode {
+  if (live) return selected;
+  const rank = { ask: 0, edits: 1, auto: 2, custom: 2, full: 3 };
+  return rank[selected] < rank[dispatched] ? selected : dispatched;
+}
+
+ export function modelSwitchNeedsAsk(
   mode: ApprovalMode,
   fromDriver: string | undefined,
   toDriver: string | undefined,
@@ -78,9 +83,7 @@ export function setDefaultApprovalMode(mode: ApprovalMode): void {
   defaultApprovalMode = mode;
 }
 
-/** An unset level runs at the default, the pre-approvalMode Auto bit reads as
- * safe Auto, and an unknown persisted value fails closed to Ask. */
-export function approvalModeFor(bot: {
+ export function approvalModeFor(bot: {
   approvalMode?: unknown;
   autoApprove?: unknown;
   /** Server-only two-phase grant marker. Until Electron confirms it, the

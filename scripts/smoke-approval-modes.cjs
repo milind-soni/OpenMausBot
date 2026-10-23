@@ -98,6 +98,7 @@ app.whenReady().then(async () => {
       HOME: home, USERPROFILE: home, OMB_DATA_DIR: home, PATH: "",
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(webhookPort),
+      OMB_DEV_TRUST_LOCAL_BROWSER: "1",
       OMB_TEST_INTERNAL_CAPABILITY_KEY: testCapabilityKey,
       FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump,
       FAKE_ACP_MODE: "permission", FAKE_ACP_AUTH_METHOD: "oauth-personal",
@@ -137,6 +138,11 @@ app.whenReady().then(async () => {
     });
     return;
   }
+  if (process.argv.includes("--live-modes-only")) {
+    await require("./testing/live-approval-ui-smoke.cjs")({ root, url: `http://127.0.0.1:${port}`, api, until,
+      grant: (botId, mode, options) => coordinator.request(child, botId, mode, options) });
+    return;
+  }
   // One explicit grant covers old, archived and future threads, even if their
   // provider differs. Use the real private bridge, not fixture state edits.
   const whole = (await api("/api/bots", "POST", { name: "All threads fixture", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
@@ -161,7 +167,6 @@ app.whenReady().then(async () => {
   const revoked = await coordinator.request(child, whole.id, "ask", { allThreads: true });
   assert.equal(revoked.approvalMode, "ask");
   assert.ok(revoked.tasks.every(task => task.approvalMode === "ask"));
-  // Auto and Edits reach every thread the same way, in one write.
   const autoEverywhere = await coordinator.request(child, whole.id, "auto", { allThreads: true });
   assert.equal(autoEverywhere.approvalMode, "auto");
   assert.ok(autoEverywhere.tasks.every(task => task.approvalMode === "auto"));
@@ -171,8 +176,6 @@ app.whenReady().then(async () => {
   const created = await api("/api/bots", "POST", { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
   assert.equal(created.status, 201);
   const id = created.body.bot.id;
-  // Full needs no private channel: the API applies it at once. Custom keeps
-  // the private channel (checked below).
   assert.equal((await api(`/api/bots/${id}`, "PATCH", { approvalMode: "full" })).status, 200);
   assert.equal((await api(`/api/bots/${id}`, "PATCH", { approvalMode: "ask" })).status, 200);
   for (const [mode, native] of [["full", "bypassPermissions"], ["auto", "auto"], ["edits", "acceptEdits"], ["ask", "default"]]) {
@@ -255,14 +258,13 @@ app.whenReady().then(async () => {
   assert.equal((await api(`/api/bots/${parallel.id}/tasks/${working.threadId}`, "POST")).status, 200);
   assert.equal((await api(`/api/bots/${parallel.id}/messages`, "POST", { text: "Hold for fixture approval", threadId: working.threadId })).status, 202);
   const held = await until(async () => pendingCard((await api("/api/bots")).body.bots.find(bot => bot.id === parallel.id)));
-  const parallelModes = async () => (await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === parallel.id).tasks.map(task => task.approvalMode);
-  const modesBefore = await parallelModes();
-  await assert.rejects(coordinator.request(child, parallel.id, "full", { allThreads: true }), /active turns/);
-  assert.deepEqual(await parallelModes(), modesBefore);
-  await assert.rejects(coordinator.request(child, parallel.id, "full", { threadId: working.threadId, threadOnly: true }), /Stop this thread/);
+  await coordinator.request(child, parallel.id, "full", { threadId: working.threadId, threadOnly: true });
+  assert.equal((await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === parallel.id).tasks.find(task => task.threadId === working.threadId).approvalMode, "full");
+  // This native turn retains Ask; the saved Full grant applies on its next turn.
+  assert.equal(pendingCard((await api("/api/bots")).body.bots.find(bot => bot.id === parallel.id)).requestId, held.requestId);
   const separate = await coordinator.request(child, parallel.id, "full", { threadId: idle.threadId, threadOnly: true });
   assert.equal(separate.tasks.find(task => task.threadId === working.threadId).busy, true);
-  assert.equal(separate.tasks.find(task => task.threadId === working.threadId).approvalMode, "ask");
+  assert.equal(separate.tasks.find(task => task.threadId === working.threadId).approvalMode, "full");
   assert.equal(separate.tasks.find(task => task.threadId === idle.threadId).approvalMode, "full");
   await api(`/api/bots/${parallel.id}/respond`, "POST", { requestId: held.requestId, behavior: "deny" });
   await until(async () => !(await api("/api/bots?messages=0")).body.bots.find(bot => bot.id === parallel.id).busy);
@@ -283,8 +285,6 @@ app.whenReady().then(async () => {
           return !state.busy && state;
         });
         const text = settled.messages.slice(before).map((message) => message.text ?? "").join("\n");
-        // Anchored to line starts: session_search's result quotes earlier
-        // reads mid-line.
         assert.match(text, /^list_bots:/m);
         assert.match(text, /^session_search:/m);
         assert.equal((text.match(/^list_bots:/gm) ?? []).length, 2, "Repeated reads complete without another prompt");

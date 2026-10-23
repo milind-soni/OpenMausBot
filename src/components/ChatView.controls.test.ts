@@ -10,7 +10,7 @@ import { failedTurnTool } from "../../shared/failed-turn";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean; submenu?: { key: string; disabled?: boolean; onSelect?: () => void }[] }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -21,8 +21,7 @@ vi.mock("@/state/store", async (importOriginal) => {
     dispatch: fixture.dispatch,
   }) };
 });
-// The real useCaptionChrome rides along: it only asks this module for the window chrome.
-vi.mock("./DesktopCapabilities", async (importOriginal) => ({
+  vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: fixture.platform }, localComputer: { available: false, reasonCode: fixture.localReasonCode, message: fixture.localMessage } }, ready: true }),
 }));
@@ -32,8 +31,7 @@ vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   useShowThreads: () => fixture.advanced && fixture.showThreads,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
-// The trigger still renders, so the markup assertions in this file see the same header.
-vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
+  vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
   ...await importOriginal<typeof import("./SidebarPopoverMenu")>(),
   SidebarPopoverMenu: (props: { ariaLabel: string; items: never[]; renderTrigger: (state: { open: boolean }) => unknown }) => {
     fixture.menus.push({ ariaLabel: props.ariaLabel, items: props.items });
@@ -328,6 +326,36 @@ describe("thread control placement", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
+  it("keeps approval selection enabled while the selected thread is working", () => {
+    const working = { ...bot, tasks: bot.tasks!.map(task => ({ ...task, busy: true, activity: "working" as const })) };
+    renderToStaticMarkup(createElement(ChatView, { bot: working }));
+    expect(fixture.approval?.disabled).toBeFalsy();
+    expect(fixture.approval?.busy).toBe(true);
+    fixture.dispatch.mockClear();
+    fixture.approval!.onSelect("auto");
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "auto" } });
+  });
+
+  it("keeps Simple mode approval choices enabled during work", () => {
+    fixture.advanced = false;
+    fixture.menus.length = 0;
+    fixture.dispatch.mockClear();
+    try {
+      const working = { ...bot, tasks: bot.tasks!.map(task => ({ ...task, busy: true, activity: "working" as const })) };
+      renderToStaticMarkup(createElement(ChatView, { bot: working }));
+      const approval = fixture.menus.flatMap(menu => menu.items).find(item => item.key === "approval");
+      expect(approval).toBeDefined();
+      expect(approval!.disabled).toBeFalsy();
+      const full = approval!.submenu!.find(item => item.key === "approval:full");
+      expect(full).toBeDefined();
+      expect(full!.disabled).toBeFalsy();
+      full!.onSelect!();
+      expect(fixture.dispatch).toHaveBeenCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "full" } });
+    } finally {
+      fixture.advanced = true;
+    }
+  });
+
   it("explains provider safety errors without offering an ineffective Retry", () => {
     const markup = renderToStaticMarkup(createElement(ErrorRow, { message: "Blocked by our safety systems", onRetry: () => {} }));
     expect(markup).toContain("Full access controls tool approvals, not provider safety checks");
@@ -510,7 +538,6 @@ describe("thread control placement", () => {
       ...bot,
       messages: [{ id: "mixed-script", role: "user", kind: "text", at: 1, text }],
     } }));
-    // unicode-bidi does not inherit, so the class must sit on the node holding the prose.
     expect(markup).toMatch(/<div class="chat-text[^"]*"[^>]*>(?:شغّل|שלום|مرحبا)/);
     expect(markup).not.toMatch(/class="[^"]*chat-text[^"\n]*bg-bubble-user/);
   });
@@ -542,7 +569,7 @@ describe("thread control placement", () => {
     expect(markup.indexOf("data-test-approval-control")).toBeLessThan(markup.indexOf("<textarea"));
     expect(markup).not.toContain('aria-label="Thread settings"');
     expect(fixture.model).toMatchObject({ threadId: "selected", bot: { busy: false, modelSelection: { model: "thread-model" } } });
-    expect(fixture.approval).toMatchObject({ approvalMode: "ask", disabled: false, trustedModesAvailable: false });
+    expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: false, trustedModesAvailable: false });
     fixture.approval!.onSelect("auto");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "auto" } });
   });
@@ -565,7 +592,7 @@ describe("thread control placement", () => {
   });
 });
 
-describe("screen reader announcements", () => {
+    describe("screen reader announcements", () => {
   it("keeps the transcript log out of live announcements", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup).toMatch(/role="log" aria-live="off" aria-label="Conversation with Pepper"/);
@@ -585,7 +612,7 @@ describe("screen reader announcements", () => {
   });
 });
 
-describe("a guest's composer on a Cloud home", () => {
+  describe("a guest's composer on a Cloud home", () => {
   it("offers a new conversation in one click, with no dialog", () => {
     const onNew = vi.fn();
     const markup = renderToStaticMarkup(createElement(NewConversationInstead, { onNew }));

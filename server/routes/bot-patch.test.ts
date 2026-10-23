@@ -240,3 +240,49 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
     expect(scan).toHaveBeenCalledTimes(3);
   });
 });
+
+it("rechecks unpaired Auto elevation after interruption yields to another turn", async () => {
+  const bot = { id: "fixture", name: "Fixture", soul: "", computer: "local", approvalMode: "ask", busy: false, modelSelection: { instanceId: "fixture", model: "fixture" } };
+  const patchBot = vi.fn();
+  const interrupt = vi.fn(async () => { bot.busy = true; });
+  const deps = {
+    store: { bot: () => bot, bots: [bot], groups: [], patchBot, taskByThread: () => undefined },
+    cfg: {}, registry: { get: () => undefined }, sessions: { isLive: () => false },
+    browserRuntime: { heldBy: () => false },
+    routines: () => ({ activeBotRunForBot: () => undefined }), activeVpsThreads: { has: () => false },
+    requestedTaskBot: () => null, supportsApprovalMode: () => true, activeGroupTurnForBot: () => undefined,
+    interruptAllDirectThreads: interrupt, desktopManaged: false, hostedWorkspace: false,
+  } as unknown as BotPatchRouteDeps;
+  const route = createBotPatchRoutes(deps);
+  const json = vi.fn();
+  await route({ req: { headers: {} }, res: {}, path: "/api/bots/fixture", method: "PATCH", auth: { kind: "loopback" },
+    json, readBody: async () => ({ computer: "off", approvalMode: "auto" }),
+  } as unknown as Parameters<typeof route>[0]);
+  expect(interrupt).toHaveBeenCalledOnce();
+  expect(json).toHaveBeenCalledWith(expect.anything(), 409, { error: expect.stringContaining("Change approval mode") });
+  expect(patchBot).not.toHaveBeenCalled();
+});
+
+
+it.each(["before", "after"])("refuses unpaired Auto elevation of a busy Ask thread %s awaiting interruption", async when => {
+  const bot = { id: "fixture", name: "Fixture", soul: "", computer: "local", approvalMode: "auto", busy: false, modelSelection: sonnet };
+  const task = { threadId: "busy-thread", approvalMode: when === "before" ? "ask" : "auto", busy: true, modelSelection: sonnet };
+  const patchBot = vi.fn(() => bot), setAllThreadApprovalMode = vi.fn();
+  const interrupt = vi.fn(async () => { task.approvalMode = "ask"; });
+  const route = createBotPatchRoutes({
+    store: { bot: () => bot, bots: [bot], groups: [], tasks: () => [task], projectBotForTask: () => ({ ...bot, ...task }), patchBot, setAllThreadApprovalMode, clearAutoSurfacePins: () => {}, taskByThread: () => undefined },
+    cfg: {}, registry: { get: () => undefined }, sessions: { isLive: () => false }, browserRuntime: { heldBy: () => false },
+    routines: () => ({ activeBotRunForBot: () => undefined }), activeVpsThreads: { has: () => false },
+    requestedTaskBot: () => null, supportsApprovalMode: () => true, activeGroupTurnForBot: () => undefined,
+    interruptAllDirectThreads: interrupt, desktopManaged: false, hostedWorkspace: false,
+    assertTeamComputerChangeIdle: () => {}, wireBot: (record: unknown) => record, broadcast: () => {}, audienceChanged: () => {},
+  } as unknown as BotPatchRouteDeps);
+  const json = vi.fn();
+  await route({ req: { headers: {} }, res: {}, path: "/api/bots/fixture", method: "PATCH", auth: { kind: "loopback" }, json,
+    readBody: async () => ({ computer: "off", approvalMode: "auto", applyToAllThreads: true, acknowledgeLocalAuto: true }),
+  } as unknown as Parameters<typeof route>[0]);
+  expect(json).toHaveBeenCalledWith(expect.anything(), 409, { error: expect.stringContaining("Change approval mode") });
+  expect(interrupt).toHaveBeenCalledTimes(when === "before" ? 0 : 1);
+  expect(patchBot).not.toHaveBeenCalled();
+  expect(setAllThreadApprovalMode).not.toHaveBeenCalled();
+});

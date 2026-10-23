@@ -110,6 +110,24 @@ hand-off still uses the recipient's setting. A consultation (`consult: true`)
 answers from what the teammate knows and acts on nothing, so no level travels
 with it. Questions and missing credentials still reach you.
 
+## Changing the level while working
+
+The composer selector stays available during a running turn. OpenMausBot saves
+changes for that conversation; its siblings keep their selections. Full access uses the existing upstream grant flow.
+
+For OpenAI-compatible and other chat API engines, the new selection applies
+before the next tool executes, including later tools in the same response.
+Changing the level preserves delivered tool history;
+it does not itself reset the API conversation's replay prefix.
+
+Native harnesses receive their permission mode with each user turn. Selecting a
+new level while working saves it for the next user turn. App-side gates honor a
+narrower grant immediately, including revoking a Chief's delegated connector
+access; elevation waits for the native harness's next user turn.
+
+Already-running actions finish, and already-open cards remain for you to answer.
+Changing the selection never silently answers a question or an open approval.
+
 ## Answering a request
 
 Approve or deny requests in the conversation to let the bot continue. **Allow

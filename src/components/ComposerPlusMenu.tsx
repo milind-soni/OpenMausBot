@@ -1,6 +1,6 @@
 import type { ComponentProps } from "react";
 import { AudioLines, Check, ListChecks, Paperclip, Phone, Plus, Target } from "lucide-react";
-import { approvalModeFor } from "../../shared/approval-mode";
+import { approvalModeFor, supportsLiveApprovalMode } from "../../shared/approval-mode";
 import {
   approvalModeOptions,
   approvalModeOptionsFor,
@@ -62,7 +62,7 @@ function approvalItem(name: string, choice: ApprovalChoice): SidebarMenuItem {
     separatorBefore: true,
     label: t("botSettings.simple.beforeActs", { name }),
     subtitle: current.label,
-    note: choice.disabled ? t("approvalMode.busy") : localOnly ? t("approvalMode.customLocalOnlyDot") : undefined,
+    note: choice.disabled ? t("approvalMode.busy") : localOnly ? t("approvalMode.customLocalOnlyDot") : choice.busy ? t(supportsLiveApprovalMode(choice.driverKind) ? "approvalMode.liveChange" : "approvalMode.nextTurnChange") : undefined,
     icon: <CurrentIcon size={16} />,
     disabled: Boolean(choice.disabled) && !choice.onManageCommandAllowlist,
     onSelect: () => {},

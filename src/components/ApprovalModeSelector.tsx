@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Check, ListChecks } from "lucide-react";
 
-import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
+import { approvalModeFor, supportsLiveApprovalMode, type ApprovalMode } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { APPROVAL_LEVELS_URL, openExternalLink } from "@/lib/app-links";
@@ -20,7 +20,7 @@ export {
   type ApprovalModeOption,
 } from "@/lib/approval-mode-options";
 
-export function ApprovalModeSelector({
+ export function ApprovalModeSelector({
   approvalMode,
   autoApprove,
   providerName,
@@ -30,6 +30,7 @@ export function ApprovalModeSelector({
   menuDirection = "up",
   wide = false,
   disabled = false,
+  busy = false,
   trustedModesAvailable = true,
   trustedModesNotice,
   onManageCommandAllowlist,
@@ -43,6 +44,7 @@ export function ApprovalModeSelector({
   menuDirection?: "up" | "down";
   wide?: boolean;
   disabled?: boolean;
+  busy?: boolean;
   trustedModesAvailable?: boolean;
   trustedModesNotice?: string;
   onManageCommandAllowlist?: () => void;
@@ -143,6 +145,9 @@ export function ApprovalModeSelector({
             <div className="text-[14px] font-medium text-ink">
               {t("approvalMode.question", { provider: providerName })}
             </div>
+            {busy && <p className="mt-2 text-[12px] text-ink-secondary" role="status">
+              {t(supportsLiveApprovalMode(driverKind) ? "approvalMode.liveChange" : "approvalMode.nextTurnChange")}
+            </p>}
             <button
               type="button"
               onClick={() => void openExternalLink(APPROVAL_LEVELS_URL)}
