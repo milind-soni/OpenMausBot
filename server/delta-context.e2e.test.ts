@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+   import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -18,7 +18,7 @@ import { withoutTurnClock } from "./testing/turn-clock-text.ts";
 
 const count = (text: string, needle: string) => text.split(needle).length - 1;
 
-const assignedBy = (requester: string, lineage: "person" | "outside" = "person") =>
+ const assignedBy = (requester: string, lineage: "person" | "outside" = "person") =>
   new RegExp(`^\\[OpenMausBot assignment \\S+ from @${requester}${lineage === "person" ? " for the user" : ""}\\]$`, "m");
 const personLineage = (request: string) =>
   `the user asked: ${JSON.stringify(request)}. This is your task, sent on the user's behalf: do it with your own tools and permissions.`;
@@ -27,7 +27,6 @@ const jsonl = (path: string) => existsSync(path)
   ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
 async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.ProcessEnv; codex?: Record<string, string> } = {}) {
-  // The fixture's Claude is new enough to refresh a resumed session's recorded system prompt; a test may override it.
   const parentEnv = { ...process.env, FAKE_CLAUDE_VERSION: "2.1.270", ...options.env };
   const session = await launchVerificationServer(parentEnv, undefined, undefined, undefined, undefined,
     { scripted: true }, options.codex ? ["codex"] : []);
@@ -60,7 +59,6 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
         `if (after("--resume") || after("--session-id")) appendFileSync(${JSON.stringify(launchesPath)}, JSON.stringify({ botId, pid: process.pid, resume: after("--resume"), sessionId: after("--session-id"), mode: process.env.FAKE_CLAUDE_MODE ?? "happy" }) + "\\n");`,
         `else if (argv[0] === "app-server") appendFileSync(${JSON.stringify(codexLaunchesPath)}, JSON.stringify({ botId: process.env.OMB_BOT_ID ?? null }) + "\\n");`,
         `if (botId) process.env.FAKE_CLAUDE_PROMPTS = ${JSON.stringify(join(dataDir, "consumed-"))} + botId + ".jsonl";`,
-        // A warm Claude process ends once idle after its mode changed, like a CLI that exited, so the next turn launches under the new mode.
         ...(name === "claude" ? [
           'if (after("--resume") || after("--session-id")) {',
           `  const modeNow = () => existsSync(${JSON.stringify(modePath(name))}) ? readFileSync(${JSON.stringify(modePath(name))}, "utf8") : "";`,
@@ -120,10 +118,8 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
       const launch = launches(botId).at(-1);
       return launch?.resume ?? launch?.sessionId ?? null;
     };
-    // A launch record is written before the engine reads its prompt, and a node's "running" before setup, so neither proves the prompt arrived.
     const consumed = (botId = chief.id) => jsonl(join(dataDir, `consumed-${botId}.jsonl`)).length;
     const codexLaunches = (botId = chief.id) => jsonl(codexLaunchesPath).filter((launch: any) => launch.botId === botId);
-    // Codex thread/resume keeps the native thread's model and effort; thread/start is where they are set.
     const codexCalls = () => JSON.parse(readFileSync(codexDumpPath, "utf8")).calls as Array<{ method: string; params: any }>;
     const codexModels = async () => (await cli("models")).instances.find((item: any) => item.instanceId === "codex").models.options.map((m: any) => m.id);
     const selectModel = (model: string, extra: Record<string, unknown> = {}) =>
@@ -131,7 +127,6 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
     const alive = (pid: number) => {
       try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
     };
-    // Waits for the Source's warm process to end, so its next turn launches under the new mode.
     const setMode = async (mode?: string, engine = "claude") => {
       if (mode) writeFileSync(modePath(engine), mode);
       else rmSync(modePath(engine), { force: true });
@@ -247,7 +242,7 @@ it("offers a result that lands mid-turn after its source was stopped to the next
   expect(count(f.prompt(f.turns().at(-1)), "STOPPED_SOURCE_RESULT")).toBe(0);
 }), hostTimeout(90_000));
 
-it("offers a message steered into a running turn to the next turn once, marked as possibly already seen", () => fixture(async (f) => {
+  it("offers a message steered into a running turn to the next turn once, marked as possibly already seen", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.chief.id] = { reply: "Working", readyFile: f.gate("turn-ready"), gateFile: f.gate("turn") };
   await f.send("Start on the report.");
@@ -288,7 +283,6 @@ it("offers the results again when the return turn fails before the provider acts
 it("offers the results again when the person stops the return turn before the provider acts on it", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "STOPPED_RETURN_RESULT" };
-  // The return turn holds on a gate that never opens: only the person's Stop ends it.
   f.plan[f.chief.id] = { turns: [{}, f.delegate("build", [f.lead], "Build the export"), { reply: "never sent", gateFile: f.gate("return") }] };
   await f.send("Please have Engineering build the export.");
   await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 20_000 }).toBe("completed");
@@ -296,7 +290,6 @@ it("offers the results again when the person stops the return turn before the pr
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.idle();
 
-  // Whether the stopped fixture records a turn depends on the platform's teardown order, so the next reply is named explicitly.
   f.plan[f.chief.id] = { reply: "Recovered", resumeReply: "Recovered" };
   await f.send("What did Engineering find?");
   await f.wait();
@@ -387,7 +380,7 @@ it("keeps the person's request on work a one-way notice's recipient hands on", (
   expect(handedOn).toContain(personLineage(request));
 }), hostTimeout(60_000));
 
-it("keeps the person's request on work a thread the bot opened on itself hands on, running or queued", () => fixture(async (f) => {
+   it("keeps the person's request on work a thread the bot opened on itself hands on, running or queued", () => fixture(async (f) => {
   f.plan[f.lead.id] = { reply: "LEAD_DONE" };
   const round = async (ask: string, job: string) => {
     f.plan[f.chief.id] = {
@@ -448,7 +441,6 @@ it("keeps the person's request on work handed on after a card answer, on the roo
   const afterCard = await briefed("CARD_ONE_BRIEF");
   expect(afterCard).toMatch(assignedBy(f.chief.name));
   expect(afterCard).toContain(personLineage("PERSON_CARD_ONE please tidy the team"));
-  // Round one settles first: a line sent into that owed resume would be folded into it.
   await f.wait();
 
   f.plan[f.chief.id] = ask("late-card", "CARD_TWO_BRIEF check the team", "ttsKey");
@@ -495,7 +487,6 @@ it("resets Claude's native context on edit, then resumes only the replacement br
   expect(replay).not.toContain("ABANDONED_");
   const resets = () => jsonl(join(f.dataDir, "native", `${f.thread}.ndjson`))
     .filter((entry: any) => entry.source === "claude.session" && entry.msg.close === "context reset");
-  // Merely clearing --resume can accidentally reuse an idle process, so the explicit reset is asserted.
   expect(resets()).toHaveLength(1);
 
   f.plan[f.chief.id] = { reply: "Continuing the replacement" };
@@ -580,7 +571,7 @@ it("records a Codex handoff whose turn completes before turn/start is acknowledg
   expect(f.prompt(next)).not.toContain("Messages this conversation received");
 }, { codex: { FAKE_CODEX_COMPLETE_BEFORE_ACK: "1" } }), hostTimeout(90_000));
 
-const resultAcrossRestart = async (f: any, stripRecord: boolean) => {
+   const resultAcrossRestart = async (f: any, stripRecord: boolean) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "RESULT_AFTER_RESTART", gateFile: f.gate("after-restart") };
   f.plan[f.chief.id] = f.delegate("build", [f.lead], "Build the export");
@@ -629,7 +620,7 @@ it("keeps resuming a stored conversation with a handoff record when a result arr
   expect(f.launches().at(-1).resume).not.toBeNull();
 }), hostTimeout(90_000));
 
-it.each(["SIGTERM", "SIGKILL"] as const)("runs each teammate turn a restart cut again once, in place, and resumes the Chief told so (%s)", (signal) => fixture(async (f) => {
+      it.each(["SIGTERM", "SIGKILL"] as const)("runs each teammate turn a restart cut again once, in place, and resumes the Chief told so (%s)", (signal) => fixture(async (f) => {
   const chats: string[] = [];
   const upstream = createServer(async (req, res) => {
     if (req.url === "/v1/models") { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ data: [{ id: "fixture-model" }] })); return; }
@@ -646,7 +637,6 @@ it.each(["SIGTERM", "SIGKILL"] as const)("runs each teammate turn a restart cut 
     await f.api("/api/config", { openaiCompat: { key: "synthetic-fixture-key", url: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/v1`, model: "fixture-model" } }, "PATCH");
     await f.cli("set-model", "--bot", f.ops.id, "--instance", "openaiCompat", "--model", "fixture-model");
     await warmUp(f);
-    // Engineering has visibly acted when the restart cuts it, so the rerun resumes that session.
     f.plan[f.lead.id] = { progress: "LEAD_WORKING", reply: "LEAD_RESUMED_RESULT", gateFile: f.gate("lead") };
     f.plan[f.chief.id] = f.delegate("build", [f.lead, f.ops], "Build the export", { resumeReply: "RESTART_REVIEWED" });
     await f.send("Please have Engineering and Ops build the export.");
@@ -707,7 +697,7 @@ it.each(["SIGTERM", "SIGKILL"] as const)("runs each teammate turn a restart cut 
   }
 }), hostTimeout(120_000));
 
-it.each(["SIGTERM", "SIGKILL"] as const)("resumes a Chief whose own turn a restart cut after it sent work, once that work settles (%s)", (signal) => fixture(async (f) => {
+     it.each(["SIGTERM", "SIGKILL"] as const)("resumes a Chief whose own turn a restart cut after it sent work, once that work settles (%s)", (signal) => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "LEAD_DONE_BEFORE_RESTART" };
   f.plan[f.chief.id] = f.delegate("build", [f.lead], "Build the export", { gateFile: f.gate("chief"), resumeReply: "CUT_REVIEWED" });
@@ -729,7 +719,7 @@ it.each(["SIGTERM", "SIGKILL"] as const)("resumes a Chief whose own turn a resta
   expect((await f.messages()).map((m: any) => m.tool?.name).filter((name: string | undefined) => name?.startsWith("error:"))).toEqual([]);
 }), hostTimeout(90_000));
 
-it("tells the requester when a teammate's review a restart cut runs again", () => fixture(async (f) => {
+  it("tells the requester when a teammate's review a restart cut runs again", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.qa.id] = { reply: "QA_VERIFIED" };
   f.plan[f.lead.id] = { turns: [
@@ -752,7 +742,7 @@ it("tells the requester when a teammate's review a restart cut runs again", () =
   expect(f.prompt(f.turns().at(-1))).toContain("Engineering lead (resumed once in place and told to check what it had already done)");
 }), hostTimeout(90_000));
 
-it("runs a Chief's review a restart cut again once, without notifying again", () => fixture(async (f) => {
+   it("runs a Chief's review a restart cut again once, without notifying again", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "LEAD_RESULT_FOR_REVIEW" };
   f.plan[f.chief.id] = { turns: [{}, f.delegate("build", [f.lead], "Build the export"), { reply: "REVIEW_RERUN_DONE", gateFile: f.gate("review") }] };
@@ -779,7 +769,7 @@ it("runs a Chief's review a restart cut again once, without notifying again", ()
   expect((await f.messages()).filter((m: any) => m.tool?.name === "Resumed with Engineering lead results after a restart, reviewing")).toHaveLength(1);
 }), hostTimeout(90_000));
 
-it("ends a Chief's review a second restart cuts, and says so in its conversation", () => fixture(async (f) => {
+  it("ends a Chief's review a second restart cuts, and says so in its conversation", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "LEAD_RESULT_FOR_REVIEW" };
   f.plan[f.chief.id] = { turns: [{}, f.delegate("build", [f.lead], "Build the export"), { reply: "NEVER_SENT", gateFile: f.gate("review") }] };
@@ -798,6 +788,7 @@ it("ends a Chief's review a second restart cuts, and says so in its conversation
   expect(f.consumed()).toBe(4);
   expect((await f.messages()).some((m: any) => m.text === "NEVER_SENT")).toBe(false);
 }), hostTimeout(90_000));
+
 
 // Running, and its engine launched: a per-launch mode set afterwards cannot reach the teammate.
 const leadRunning = async (f: any, launches = 1) => {
@@ -834,7 +825,7 @@ it("gives a replacement session the full assignment when a result returns after 
   expect(returned).toContain(`[OpenMausBot report from @${f.lead.name} on assignment ${lead.id}: done]`);
 }), hostTimeout(90_000));
 
-it("gives a replacement session an earlier round's result that its rebuild could not replay, and credits it only with that rebuild", () => fixture(async (f) => {
+it("preserves an earlier round's result across a long recovery replay and credits the replacement session", () => fixture(async (f) => {
   await warmUp(f, "Warm up.");
   const chat = 21;
   f.plan[f.lead.id] = { turns: [{ reply: "ROUND_ONE_RESULT_TOKEN" }, { reply: "ROUND_TWO_RESULT", gateFile: f.gate("r2") }] };
@@ -851,7 +842,6 @@ it("gives a replacement session an earlier round's result that its rebuild could
   await expect.poll(() => f.turns().length, { timeout: 10_000 }).toBe(3);
   await expect.poll(() => count(f.prompt(f.turns()[2]), "ROUND_ONE_RESULT_TOKEN"), { timeout: 10_000 }).toBe(1);
   await expect.poll(() => f.launches(f.lead.id).length, { timeout: 15_000 }).toBe(2);
-  // A terminal message is published before the driver releases its turn: wait, or a loaded runner steers into the previous turn.
   const sourceWaiting = () => expect.poll(async () => (await f.api("/api/bots")).bots
     .find((bot: any) => bot.id === f.chief.id).tasks
     .find((task: any) => task.threadId === f.thread).waitingForTeammates,
@@ -874,16 +864,17 @@ it("gives a replacement session an earlier round's result that its rebuild could
   await f.setMode();
   const recovery = f.prompt(f.turns().at(-1));
   expect(recovery).toContain("could not be resumed");
-  expect(count(recovery, "ROUND_ONE_RESULT_TOKEN")).toBe(0);
+  expect(count(recovery, "ROUND_ONE_RESULT_TOKEN")).toBe(1);
 
+  // Recovery credits the complete replay to the replacement session.
   const replacement = cursor(f);
   expect(replacement).not.toBe(original);
   const records = Object.values(f.handed()) as any[];
   expect(records).toHaveLength(1);
   expect(records[0].session).toBe(replacement);
   const order = await history();
-  expect(records[0].ids).not.toContain(resultMessage.id);
-  expect(order.indexOf(records[0].omitted)).toBeGreaterThanOrEqual(order.indexOf(resultMessage.id));
+  expect(records[0].omitted).toBeUndefined();
+  expect(order.indexOf(records[0].through)).toBeGreaterThanOrEqual(order.indexOf(resultMessage.id));
 
   await sourceWaiting();
   f.open(f.gate("r2"));
@@ -892,7 +883,14 @@ it("gives a replacement session an earlier round's result that its rebuild could
   await f.wait();
   const returned = f.prompt(f.turns().at(-1));
   expect(count(returned, "ROUND_TWO_RESULT")).toBe(1);
+  const evidencePath = `${f.session.info.logPath}.cumulative-replay.json`;
+  writeFileSync(evidencePath, JSON.stringify({ recovery, returned, turns: f.turns().slice(-3), launches: f.launches().slice(-3), handed: f.handed() }, null, 2));
+  console.info(`Replay evidence: ${evidencePath}`);
+  expect(f.launches().at(-1).resume).toBe(replacement);
+  // The final coordination report intentionally includes all settled rounds;
+  // no unseen-message or recovery replay adds another copy of the old result.
   expect(count(returned, "ROUND_ONE_RESULT_TOKEN")).toBe(1);
+  expect(returned).not.toContain("[Messages this conversation received that your session has not seen yet");
   expect(returned).not.toContain("already delivered");
 }), hostTimeout(240_000));
 
@@ -960,6 +958,7 @@ it("gives an engine switched in while a teammate works the full assignment when 
   expect(f.prompt(returned)).toContain(`[OpenMausBot report from @${f.lead.name} on assignment ${lead.id}: done]`);
 }, { codex: {} }), hostTimeout(90_000));
 
+
 it("does not offer a message or steer the person stopped before any reply again", () => fixture(async (f) => {
   f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { readyFile: f.gate("slow-ready"), reply: "never shown", gateFile: f.gate("slow") }, { reply: "Listed" }] };
   await f.send("Warm up.");
@@ -1026,7 +1025,7 @@ it("does not offer a steered message again after the person stops the turn it we
   expect(f.prompt(f.turns().at(-1))).not.toContain("STOPPED_TURN_STEER");
 }), hostTimeout(60_000));
 
-it("does not offer a message again that the person steered out of the queue into a turn they then stopped", () => {
+  it("does not offer a message again that the person steered out of the queue into a turn they then stopped", () => {
   const refuseLiveSteers = join(tmpdir(), `omb-queue-steer-${process.pid}-${Date.now()}.gate`);
   writeFileSync(refuseLiveSteers, "refuse live steers until the queue is lifted");
   return fixture(async (f) => {
@@ -1040,7 +1039,6 @@ it("does not offer a message again that the person steered out of the queue into
     const queued = await f.send("QUEUED_STEER also cover costs");
     expect(queued.queued).toBe(true);
     rmSync(refuseLiveSteers, { force: true });
-    // A refused steer restores the queue untouched, so ask again until the engine is far enough into the turn.
     await expect.poll(async () =>
       (await f.api(`/api/bots/${f.chief.id}/queue/${queued.queueId}/steer`, { threadId: f.thread })).steered,
     { timeout: 20_000 }).toBe(true);
@@ -1089,7 +1087,6 @@ it("does not hand the model a queued follow-up that a restart recovered with an 
   await expect.poll(async () => (await f.messages(other)).some((m: any) => m.kind === "activity" && m.tool?.name?.includes("Review the result")), { timeout: 20_000 }).toBe(true);
   expect((await f.messages(other)).filter((m: any) => m.role === "user" && m.text?.includes("RECOVERED_FOLLOWUP"))).toHaveLength(1);
 
-  // The crashed turn never completes its evidence record, so the next reply is named explicitly.
   f.plan[f.chief.id] = { reply: "Answered" };
   await f.send("Anything new?", other);
   await f.wait(other);
@@ -1098,6 +1095,7 @@ it("does not hand the model a queued follow-up that a restart recovered with an 
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(f.prompt(next)).not.toContain("RECOVERED_FOLLOWUP");
 }), hostTimeout(90_000));
+
 
 it("gives a delegated return the fresh session and replay it always had when the bot's soul changed while teammates worked", () => fixture(async (f) => {
   await warmUp(f);
@@ -1132,6 +1130,7 @@ it("keeps resuming an ordinary turn after a soul change, as before", () => fixtu
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(withoutTurnClock(f.prompt(f.turns().at(-1)))).toBe("Second message.");
 }), hostTimeout(60_000));
+
 
 it("offers a steer written into a resume the provider then rejected on the next turn", () => fixture(async (f) => {
   await warmUp(f);
@@ -1170,6 +1169,7 @@ it("offers a steered message again when only output of the model call already ru
   await f.wait();
   expect(count(f.prompt(f.turns().at(-1)), "BUFFERED_STEER")).toBe(1);
 }), hostTimeout(60_000));
+
 
 it("rebuilds a delegated return whose Codex thread is gone into a new thread with today's replay", () => fixture(async (f) => {
   await f.useModel("codex");
@@ -1216,8 +1216,7 @@ it("replays a result that reaches an engine switched in before it arrived with t
   expect(count(returned, "EARLY_SWITCH_RESULT")).toBe(1);
 }, { codex: {} }), hostTimeout(90_000));
 
-// A `git` on PATH that holds its first command while `hold` exists, so a turn's checkpoint waits inside turn setup.
-const holdingGit = (dataDir: string, hold: string, held: string) => {
+  const holdingGit = (dataDir: string, hold: string, held: string) => {
   const real = (process.env.PATH ?? "").split(delimiter).map((dir) => join(dir, "git")).find((path) => existsSync(path));
   if (!real) throw new Error("this test needs git on PATH");
   const bin = join(dataDir, "fake-bin");
@@ -1236,8 +1235,7 @@ const holdingGit = (dataDir: string, hold: string, held: string) => {
   return bin;
 };
 
-// POSIX only: the holding `git` is a node shebang script, and on Windows git is git.exe and a shebang file is not executable.
-it.skipIf(process.platform === "win32")("gives a delegated return today's fresh session and replay when the soul changes while that turn is being set up", () => fixture(async (f) => {
+    it.skipIf(process.platform === "win32")("gives a delegated return today's fresh session and replay when the soul changes while that turn is being set up", () => fixture(async (f) => {
   const project = join(f.dataDir, "project");
   mkdirSync(project);
   await f.api(`/api/bots/${f.chief.id}`, { cwd: project }, "PATCH");
@@ -1273,6 +1271,7 @@ it.skipIf(process.platform === "win32")("gives a delegated return today's fresh 
   expect(f.launches().at(-1).resume).toBe(Object.values(f.task().resumeCursors)[0]);
   expect(count(f.prompt(f.turns().at(-1)), "SETUP_SOUL_RESULT")).toBe(0);
 }), hostTimeout(90_000));
+
 
 it("gives a Codex return the model chosen while its teammate worked", () => fixture(async (f) => {
   await f.useModel("codex");

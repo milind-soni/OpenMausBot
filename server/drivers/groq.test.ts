@@ -157,6 +157,20 @@ describe("Groq provider", () => {
     } finally { recorder.stop(); }
   });
 
+  it("reports Groq streaming checkpoint usage exactly once", async () => {
+    reply = (_body, res) => stream(res, [
+      { choices: [{ delta: { content: "Checkpoint." }, finish_reason: "stop" }] },
+      { model: "openai/gpt-oss-120b", choices: [], x_groq: { usage: { prompt_tokens: 30, completion_tokens: 7 } } },
+    ]);
+    const instance = await create({ url: base });
+    const onUsage = vi.fn();
+    await expect(instance.generateCheckpoint!("Summarize", {
+      signal: new AbortController().signal, maxTokens: 100, prefillTimeoutMs: 1_000, idleTimeoutMs: 1_000, onUsage,
+    })).resolves.toEqual({ text: "Checkpoint.", stopReason: "stop", outputTokens: 7 });
+    expect(onUsage).toHaveBeenCalledTimes(1);
+    expect(onUsage).toHaveBeenCalledWith(expect.objectContaining({ model: "openai/gpt-oss-120b", input: 30, output: 7 }));
+  });
+
   it("reports Groq usage from a non-streaming helper response", async () => {
     reply = (_body, res) => {
       res.writeHead(200, { "content-type": "application/json" });

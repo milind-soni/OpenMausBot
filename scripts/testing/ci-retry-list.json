@@ -24,7 +24,7 @@
     },
     {
       "file": "server/delta-context.e2e.test.ts",
-      "test": "gives a replacement session an earlier round's result that its rebuild could not replay, and credits it only with that rebuild",
+      "test": "preserves an earlier round's result across a long recovery replay and credits the replacement session",
       "owner": "milind-soni",
       "reason": "Failed 5 runs since Sep 24, mostly Windows; same commit later green.",
       "since": "2026-10-08"

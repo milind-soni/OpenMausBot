@@ -209,11 +209,12 @@ instance, and optionally one of its models, that writes a small background
 text a bot's own engine cannot write:
 
 - memory upkeep's steps and the automatic skill review, for an engine with no
-  quick text call at all (Pi and Muse Code, for now);
-- the summary written when a long conversation is compacted, for those
-  engines and for Codex and the ACP engines too. Their own quick call starts
-  a whole agent process, so it is kept for background work and a turn never
-  waits on it; without a helper they keep a summary made of excerpts.
+  quick text call at all (Pi and Muse Code, for now).
+
+Conversation checkpoints use the selected engine's separate tool-free streaming
+checkpoint capability. They do not use the generic helper. Unsupported engines
+retain the original history instead of replacing it with a freeform or excerpt
+summary; a manual compaction request reports the unsupported capability.
 
 A bot whose own engine can write a job always writes it itself; the helper
 never takes its place.
@@ -239,8 +240,8 @@ not know about the helper.
 
 **What leaves the bot's provider.** With a helper set, the text those jobs
 read is sent to the helper's provider, which may not be the one the bot runs
-on: the turns being captured and the bot's memory notes, the history being
-summarised, and the conversation and skills under review. That is why it is
+on: the turns being captured, the bot's memory notes, and the conversation and
+skills under review. That is why it is
 opt-in. It applies to every bot whose engine cannot write the job, including
 one you run on a local model, unless you keep that bot off the helper (below).
 An engine your organisation does not allow is never used as the helper, and
@@ -249,8 +250,8 @@ on a hosted workspace only a model assigned to it is.
 **Keeping one bot off the helper.** Any bot can be switched to never use the
 helper model: send `PATCH /api/bots/<bot id>` with `{ "helperModel": false }`
 (there is no Settings switch for it yet). From its next job on, the helper
-writes none of that bot's own jobs: not its compaction summary, not its memory
-upkeep, not its skill review. For those three the bot gets what it would get
+writes neither memory upkeep nor skill review for that bot. For those jobs
+the bot gets what it would get
 with no helper set.
 
 The switch covers that bot's own jobs and nothing else. What the bot says in
@@ -267,11 +268,9 @@ exports that hold a bot's notes and chats, so a restored bot stays off the
 helper. A shared team package carries no personal settings and does not carry
 this one.
 
-A helper that is missing, switched off, failing or slow breaks nothing: the
-job falls back exactly as it does with no helper (an excerpt summary, no
-capture, no review), and the server log says once why the helper is not
-used. The one job a turn waits for is the compaction summary, and a helper
-that hangs holds it for at most the summary's usual 20 seconds. Helper calls
+A helper that is missing, switched off, failing or slow leaves the job with
+the same fallback as no helper: no capture and no review. The server log says
+once why the helper is not used. Helper calls
 count toward the monthly spend limit and stop at it. Each is its own row in
 **Settings → Usage → History**, for the bot it wrote for, with the helper's
 engine and model: group by **Person** to see them together as *Helper

@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+  import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
@@ -128,7 +128,8 @@ describe("TurnWatchdog", () => {
 describe("the stall handler", () => {
   function load(engineMemory = new EngineMemory({ enabled: false })) {
     const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-    const from = source.indexOf("\nconst TURN_STALL_MS"), to = source.indexOf("\nwatchdog.start();");
+    const from = /^[ \t]*const TURN_STALL_MS\b/m.exec(source)?.index ?? -1;
+    const to = /^[ \t]*watchdog\.start\(\);/m.exec(source)?.index ?? -1;
     if (from < 0 || to <= from) throw new Error("Stall handler section moved");
     const code = ts.transpileModule(`${source.slice(from, to)}\nglobalThis.watchdog = watchdog;`,
       { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
@@ -182,4 +183,15 @@ describe("the stall handler", () => {
     vm.runInContext('turnStops.stopping("t1", "turn-1", "turn interrupted — the Company connection changed")', context);
     expect(context.stoppedTurnText("t1", "turn-1", undefined, "interrupted")).toMatch(/^Turn interrupted — the Company connection changed\. Before it stopped/);
   });
+});
+
+it("lets checkpoint generation own slow prefill and semantic idle deadlines, then resumes normal stall checks", () => {
+  let now = 0; const stalls: unknown[] = [];
+  const dog = new TurnWatchdog({ stallMs: 100, checkMs: 10, now: () => now, onStall: turn => stalls.push(turn) });
+  dog.watch("checkpoint", "bot");
+  dog.setCheckpointOwnsDeadline("checkpoint", true);
+  now = 10_000; dog.sweep(); expect(stalls).toEqual([]);
+  dog.setCheckpointOwnsDeadline("checkpoint", false);
+  now += 99; dog.sweep(); expect(stalls).toEqual([]);
+  now += 1; dog.sweep(); expect(stalls).toHaveLength(1);
 });

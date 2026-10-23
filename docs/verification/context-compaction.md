@@ -1,8 +1,8 @@
 # Conversation context compaction
 
-Long direct conversations can summarize older exchanges before the next turn.
+Long direct conversations can checkpoint older exchanges before the next turn.
 The full transcript, its branches and attachments are retained. The new session
-gets a bounded summary plus recent exchanges; later turns resume that session.
+gets the complete checkpoint plus recent exchanges; later turns resume that session.
 A visible, expandable note explains what was summarized, even with tool chips off.
 
 ## Exercise the real path
@@ -195,19 +195,25 @@ session.
 
 Evidence covers:
 
-- Automatic compaction keeps the two latest exchanges and the incoming request.
+- Automatic compaction keeps at least the two latest exchanges, a useful recent tail, and the incoming request.
+- Repeated automatic and manual checkpoints retain the original user requirement and its source message ID in the cumulative requirements ledger.
 - A completed turn retains the driver's latest-prompt measurement, separately from summed input tokens.
 - Claude compaction leaves headroom before the selected account's numeric native threshold, including after a previous compaction; `auto` and `off` do not invent a numeric native limit.
 - Manual compaction executes no additional agent turn and retains the original messages.
 - A repeated request at the same compacted tip is a no-op.
 - Restart before the next send retains the summary and replaces the native session once.
+- A checkpoint saved before the requirements ledger existed reconstructs its user provenance from the original active-branch messages on the next fold.
 - A later send keeps that replacement session instead of injecting the summary again.
 - Editing an old message replays its selected branch, not the abandoned summary.
+- Native-session recovery retains results older than the former rolling replay window
+  and credits the replacement session before it resumes. Final coordination reports
+  still intentionally include all settled rounds.
 - Stop aborts a hanging helper without a late record; a new send still works.
-- With the `helper` setting naming an instance, a bot on an engine with no tool-free one-shot for the summary (the fake Pi and the fake Codex) gets a model-written summary from that instance, booked as a helper call; without the setting, or with the bot switched to never use the helper, the Pi bot keeps the excerpt summary.
+- With or without a configured generic helper, Pi and Codex reject unsupported manual checkpoints, retain the original transcript and native cursor, and can continue the conversation. Memory capture and skill-review helpers retain their separate behavior.
+- Malformed output and an exhausted continuation allowance retain the original transcript and native session; a later send still works.
 - Private session bookkeeping stays off the task wire shape; stored summaries redact secrets.
 
-Each API fixture retains exact requests, waits and bounded transcripts in
+Each API fixture retains exact requests, waits, checkpoints and bounded transcripts in
 `<server-log>.context.json`, prints that location, and closes its exact child and
 temporary home. No live account, computer or user workspace is touched.
 
@@ -258,10 +264,12 @@ those at the top level. A URL inside a command is left as the command ran.
 
 `context` settings in config.json are optional. `autoCompact: false` disables
 automatic folding, `compactAt` is a fraction below 1 or a token count, and
-`rebuildBytes` controls replay size (default 24,000 bytes). Context-only settings
-do not reload provider processes. The default threshold is 80% of the known
-model window; a real latest-prompt measurement wins over a transcript estimate,
-except an ACP agent's own reading, which is shown and does not time compaction.
+`checkpointTailTokens` controls the recent tail retained after a fold (default
+15,000 estimated tokens, with at least two exchanges). The active transcript
+remains complete between checkpoints; `rebuildBytes` no longer clips direct
+conversation replay. Context-only settings do not reload provider processes.
+The default threshold is 80% of the known
+model window; a real latest-prompt measurement wins over a transcript estimate. ACP readings marked as meter-only do not trigger compaction.
 Summed input tokens across tool rounds are never treated as context size.
 For Claude, the threshold and post-compaction regrowth floor also leave 10%
 headroom below the selected account's numeric native-compaction setting.
@@ -269,21 +277,42 @@ That account's setting takes precedence over the inherited launch environment.
 Native `auto`/`off` settings supply no known numeric bound; other engines keep
 their own model-window threshold. The native CLI setting itself is unchanged.
 
-The selected account's tool-free helper can produce a historical summary, with
-a 20-second timeout and source-labelled fallback when unavailable. Summaries
-are capped at 6,000 bytes and retain recent source corrections. The helper may
-incur provider usage; its one-shot cost is not separately reported by the current
-provider interface. Summaries are not verified facts and can omit details.
+The selected model's tool-free streaming helper produces a structured checkpoint.
+It carries prior requirements with their user-message provenance. A model-suggested
+cancellation retains the original requirement alongside the exact later user wording;
+a neutral message cannot erase a restriction. Old checkpoints without this ledger
+are rebuilt once from their complete durable raw prefix. The helper separates
+assistant claims from outcomes supported by execution receipts, and renders the
+complete result for replay. Slow initial processing can wait without a fixed
+prefill deadline; meaningful output renews a five-minute idle limit. Stop remains
+available throughout. If the first output allowance is exhausted, one append-only
+continuation gets half that allowance to finish the required sections.
+`checkpointOutputTokens` defaults to 8,192 (plus one 4,096-token grace pass),
+reduced for small context windows. `checkpointPrefillTimeoutMs` defaults to null
+(wait until Stop); `checkpointIdleTimeoutMs` defaults to 300,000. Large inputs
+are staged conservatively by bytes without clipping source messages. A single
+message or protected ledger too large to fit causes a visible failure.
+Helpers without streaming checkpoint support retain their engine-native automatic
+compaction; manual harness compaction reports unsupported.
+Incomplete, unsupported or oversized checkpoints fail without replacing history.
+The exported `MAX_SUMMARY_BYTES` safety limit bounds complete rendered checkpoints;
+it does not clip a successful checkpoint. Every reported helper call, including
+the grace pass and staged calls, is booked to the usage ledger with reported cache
+hits and actual provider cost where supplied. Native Claude gets a minimal system
+prompt and an isolated tool-free process; compatible APIs receive no tool schemas.
+These synthetic fixtures establish preservation and failure behavior, not live-model
+summary quality. Initial extraction of previously unknown instructions and
+semantic reconciliation still depend on the model; deterministic validation proves
+structure and provenance, not interpretation.
 
-An engine with no tool-free helper for the summary (Pi and Muse Code, which have
-none at all, and Codex and the ACP engines, whose one-shot starts a whole agent
-process and is kept for background work) keeps the source-labelled fallback
-unless a helper model is set ([the memory guide](../memory.md), "The helper
-model"). That instance then writes the summary under the same 20-second timeout
-and fallback, and its call is one usage row with the trigger `helper`. A bot
-switched to never use the helper (`helperModel: false`) keeps the fallback.
-`server/helper-model.e2e.test.ts` boots its own server in a throwaway home with
-the fake Claude, Codex and Pi engines, once with the setting and once without.
+Conversation checkpoints require the selected engine's tool-free streaming
+checkpoint capability. An unsupported engine retains its complete history;
+manual compaction reports that limitation and automatic compaction leaves its
+native policy in control. A generic helper model never substitutes a freeform
+or excerpt summary for a validated checkpoint. The helper model remains
+available for memory upkeep and skill review under its existing opt-in and
+per-bot settings. `server/helper-model.e2e.test.ts` verifies these boundaries
+with fake Pi, Codex and Claude engines in temporary homes.
 
 This slice covers direct threads. It does not add channel compaction, change
 provider-native compaction, prove live-model summary quality, or ship native
