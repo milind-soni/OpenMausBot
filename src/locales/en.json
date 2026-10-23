@@ -2357,7 +2357,7 @@
   "model.variant.unverifiedChoice": "Saved variant “{variant}” has not been checked in this session.",
   "model.variant.none": "No variant selected.",
   "model.variant.sessionValue": "Session: {variant}.",
-  "model.variant.clearHint": "Send no variant selection; OpenCode keeps its session or configured setting",
+  "model.variant.clearHint": "Send no thinking selection; the agent keeps its session or configured setting",
   "model.variant.clear": "Clear variant selection",
   "model.variant.use": "Use {variant} for this model",
   "model.scope.label": "Apply model changes to",

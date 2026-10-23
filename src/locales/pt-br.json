@@ -2240,7 +2240,7 @@
   "model.variant.unverifiedChoice": "A variante salva “{variant}” ainda não foi verificada nesta sessão.",
   "model.variant.none": "Nenhuma variante selecionada.",
   "model.variant.sessionValue": "Sessão: {variant}.",
-  "model.variant.clearHint": "Não enviar seleção de variante; o OpenCode mantém a configuração da sessão ou a configurada",
+  "model.variant.clearHint": "Não enviar seleção de raciocínio; o agente mantém a configuração da sessão ou a configurada",
   "model.variant.clear": "Limpar seleção de variante",
   "model.variant.use": "Usar {variant} para este modelo",
   "model.scope.label": "Aplicar alterações do modelo a",

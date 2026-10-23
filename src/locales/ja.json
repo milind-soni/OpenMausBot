@@ -2236,7 +2236,7 @@
   "model.variant.unverifiedChoice": "保存されたバリアント「{variant}」は、このセッションではまだ確認されていません。",
   "model.variant.none": "バリアントが選択されていません。",
   "model.variant.sessionValue": "セッション：{variant}。",
-  "model.variant.clearHint": "バリアントの指定を送信しません。OpenCodeはセッションまたは設定済みの値を保持します",
+  "model.variant.clearHint": "思考設定を送信しません。エージェントは現在のセッション設定または構成済みの設定を保持します",
   "model.variant.clear": "バリアントの選択を解除",
   "model.variant.use": "このモデルに{variant}を使用",
   "model.scope.label": "モデル変更の適用範囲",

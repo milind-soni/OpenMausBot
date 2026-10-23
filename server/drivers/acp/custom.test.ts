@@ -41,7 +41,7 @@ describe("CustomAcpDriver config", () => {
     });
     expect(CustomAcpDriver.models).toEqual({
       default: "agent-default",
-      options: [{ id: "agent-default", label: "Agent default" }],
+      options: [{ id: "agent-default", label: "Agent default", custom: true }],
     });
     expect(CustomAcpDriver.install).toBeUndefined();
   });
