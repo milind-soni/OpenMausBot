@@ -1,0 +1,28 @@
+{
+  "date": "2026-10-14",
+  "method": "Identical five-turn scripted synthetic fixture; UTF-8 JSON bytes, fake completions, no real inference/native tokenization",
+  "rows": [
+    {
+      "label": "upstream-0109",
+      "source": "8c7ac58e91fe529c1c511a676a9555f2a3422b9e",
+      "sourceDirty": false,
+      "requests": 7,
+      "tools": 108,
+      "firstRequestUtf8Bytes": 193783,
+      "totalRequestUtf8Bytes": 1386402,
+      "syntheticInboxReads": 2,
+      "catalogHash": "ea82be4d6006308275623eeacebe7f179486623c6512b9c331544e1903613f59"
+    },
+    {
+      "label": "independent-pr1-0109",
+      "source": "d9c4517d89a9d7cb2aa432f9b0d4ebb66e9fd376",
+      "sourceDirty": false,
+      "requests": 9,
+      "tools": 15,
+      "firstRequestUtf8Bytes": 28970,
+      "totalRequestUtf8Bytes": 346834,
+      "syntheticInboxReads": 2,
+      "catalogHash": "ea82be4d6006308275623eeacebe7f179486623c6512b9c331544e1903613f59"
+    }
+  ]
+}

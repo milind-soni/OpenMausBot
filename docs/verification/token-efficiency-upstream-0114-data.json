@@ -1,0 +1,30 @@
+{
+  "date": "2026-10-16",
+  "method": "Identical five-turn synthetic fixture; serialized UTF-8 JSON bytes, fake completions. No native tokenization, inference timing, cache-hit or answer-quality measurement.",
+  "rows": [
+    {
+      "label": "upstream-0114",
+      "source": "d54311a918b9f2fd02fc9b51f146b4d6d47ec860",
+      "sourceDirty": false,
+      "requests": 7,
+      "tools": 108,
+      "firstRequestUtf8Bytes": 194928,
+      "totalRequestUtf8Bytes": 1394375,
+      "syntheticInboxReads": 2,
+      "catalogHash": "ea82be4d6006308275623eeacebe7f179486623c6512b9c331544e1903613f59"
+    },
+    {
+      "label": "deferred-0114",
+      "source": "fd49e07c0a0602461166cbfb8bd972a82747adb3",
+      "sourceDirty": false,
+      "requests": 9,
+      "tools": 15,
+      "firstRequestUtf8Bytes": 29492,
+      "totalRequestUtf8Bytes": 351484,
+      "syntheticInboxReads": 2,
+      "catalogHash": "ea82be4d6006308275623eeacebe7f179486623c6512b9c331544e1903613f59"
+    }
+  ],
+  "initialByteReductionPercent": 84.87,
+  "totalByteReductionPercent": 74.79
+}

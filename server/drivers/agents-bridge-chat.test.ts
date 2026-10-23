@@ -47,8 +47,8 @@ it("a bridged turn on the chat-completions runtime carries on after use_tool nam
     let data = "";
     for await (const part of request) data += part.toString();
     requests.push(JSON.parse(data) as ChatRequest);
-    if (requests.length === 1) calls(response, "call_guess", "agents_use_tool", { name: "schedule_task", arguments: { every: "morning" } });
-    else if (requests.length === 2) calls(response, "call_search", "agents_find_tool", { query: "schedule a recurring task every morning" });
+    if (requests.length === 1) calls(response, "call_guess", "agents_call_tool", { name: "use_tool", arguments: { name: "schedule_task", arguments: { every: "morning" } } });
+    else if (requests.length === 2) calls(response, "call_search", "agents_call_tool", { name: "find_tool", arguments: { query: "schedule a recurring task every morning" } });
     else sse(response, { content: "The tool for that is create_trigger." }, "stop");
   });
   await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
@@ -80,7 +80,7 @@ it("a bridged turn on the chat-completions runtime carries on after use_tool nam
 
   // The model was handed the bridged list.
   const handed = requests[0]!.tools!.map((tool) => tool.function.name);
-  expect(handed).toEqual(expect.arrayContaining(["agents_coordinate_bots", "agents_find_tool", "agents_use_tool"]));
+  expect(handed).toEqual(expect.arrayContaining(["agents_search_tools", "agents_describe_tool", "agents_call_tool"]));
   expect(handed).not.toContain("agents_create_trigger");
 
   // The wrong guess came back as a failed call it could read...

@@ -1,5 +1,4 @@
-// The container boundary is the group-local-vm fixture; the provider is an in-process stub recording the tool list per request.
-import { spawn, type ChildProcess } from "node:child_process";
+     import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -73,8 +72,12 @@ async function until<T>(read: () => T | Promise<T>, accept: (value: T) => boolea
   }
 }
 const toolNames = (request: ChatRequest | undefined) => (request?.tools ?? []).map(tool => tool.function.name);
-// The native tee is what a person pastes into a bug report, so its "out" line must carry the request's tool names.
-const nativeToolNames = (threadId: string): string[] => {
+const canSelectComputer = (request: ChatRequest | undefined) => {
+  const names = toolNames(request);
+  return names.includes("agents_select_computer") ||
+    ["agents_search_tools", "agents_call_tool"].every(name => names.includes(name));
+};
+   const nativeToolNames = (threadId: string): string[] => {
   const file = join(nativeDir, `${threadId}.ndjson`);
   if (!existsSync(file)) return [];
   const names = new Set<string>();
@@ -104,14 +107,24 @@ beforeAll(async () => {
     for await (const chunk of req) raw += chunk;
     const request = JSON.parse(raw || "{}") as ChatRequest;
     requests.push(request);
-    const toolResult = request.messages?.some(message => message.role === "tool");
+    const lastToolResult = request.messages?.filter(message => message.role === "tool").at(-1);
     res.writeHead(200, { "content-type": "text/event-stream" });
-    if (toolResult) {
-      res.end(frame({ content: "Selection acknowledged; waiting for the new surface." }, "stop") + "data: [DONE]\n\n");
-    } else if (pendingSelect) {
-      const call = { index: 0, id: "select-call", type: "function", function: { name: "agents_select_computer", arguments: JSON.stringify({ surface: pendingSelect.surface }) } };
+    if (pendingSelect && lastToolResult?.tool_call_id === "select-search-call") {
+      if (!JSON.stringify(lastToolResult.content).includes("select_computer")) throw new Error("Tool search did not expose select_computer");
+      const call = { index: 0, id: "select-call", type: "function", function: { name: "agents_call_tool", arguments: JSON.stringify({ name: "select_computer", arguments: { surface: pendingSelect.surface } }) } };
       pendingSelect = null;
       res.end(frame({ tool_calls: [call] }, "tool_calls") + "data: [DONE]\n\n");
+    } else if (pendingSelect && !lastToolResult) {
+      const offered = toolNames(request);
+      const direct = offered.includes("agents_select_computer");
+      const name = direct ? "agents_select_computer" : "agents_search_tools";
+      if (!direct && !offered.includes("agents_call_tool")) throw new Error("Agent selection is not available through offered tools");
+      const args = direct ? { surface: pendingSelect.surface } : { query: "select computer surface Local VM" };
+      const call = { index: 0, id: direct ? "select-call" : "select-search-call", type: "function", function: { name, arguments: JSON.stringify(args) } };
+      if (direct) pendingSelect = null;
+      res.end(frame({ tool_calls: [call] }, "tool_calls") + "data: [DONE]\n\n");
+    } else if (lastToolResult) {
+      res.end(frame({ content: "Selection acknowledged; waiting for the new surface." }, "stop") + "data: [DONE]\n\n");
     } else {
       res.end(frame({ content: "Done." }, "stop") + "data: [DONE]\n\n");
     }
@@ -127,7 +140,6 @@ beforeAll(async () => {
   writeFileSync(join(ui, "index.html"), "<title>openai-compat VM tools</title>");
   writeFileSync(join(ui, "assets", "test.css"), "body{}");
   writeFileSync(join(data, "config.json"), JSON.stringify({
-    // Per-bot isolation: a fresh bot's VM is unseen until touched, so the strict pin cannot hide behind a warm cache entry.
     localVm: { mode: "per-bot" },
     instances: { claude: {
       driver: "claudeAgent",
@@ -186,7 +198,7 @@ describe("openai-compat Local VM tools", () => {
     await until(() => requests.length, count => count >= 1);
     await idle(bot.id);
     expect(toolNames(requests[0])).toContain("computer_screenshot");
-    expect(toolNames(requests[0])).toContain("agents_select_computer");
+    expect(canSelectComputer(requests[0])).toBe(true);
     await until(() => nativeToolNames(bot.threadId), names => names.length > 0);
     expect(nativeToolNames(bot.threadId)).toContain("computer_screenshot");
   }, 60_000);
@@ -200,7 +212,7 @@ describe("openai-compat Local VM tools", () => {
     pendingSelect = { surface: "vm" };
     await api("POST", `/api/bots/${bot.id}/messages`, { text: "Open a browser on my Local VM." });
     try {
-      await until(() => requests.length, count => count >= 3);
+      await until(() => requests.find(request => toolNames(request).includes("computer_screenshot")), Boolean);
     } catch (error) {
       const state = await api("GET", "/api/bots");
       const current = state.bots.find((item: any) => item.id === bot.id);
@@ -211,9 +223,10 @@ describe("openai-compat Local VM tools", () => {
       throw error;
     }
     await idle(bot.id);
-    const continuation = requests[2];
+    const continuation = requests.find((request, index) => index > 0 && toolNames(request).includes("computer_screenshot"));
+    expect(continuation).toBeTruthy();
     expect(toolNames(continuation), JSON.stringify({ tools: toolNames(continuation), requests: requests.length })).toContain("computer_screenshot");
-    expect(toolNames(continuation)).toContain("agents_select_computer");
+    expect(canSelectComputer(continuation)).toBe(true);
     const shown = (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id).messages;
     expect(shown.filter((message: any) => message.card)).toEqual([]);
   }, 60_000);

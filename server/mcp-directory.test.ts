@@ -4,6 +4,7 @@ import {
   CALL_TOOL,
   DESCRIBE_BYTES,
   DESCRIBE_TOOL,
+  DESCRIPTION_CHARS,
   LISTED_CHARS_MAX,
   LISTED_TOOLS_MAX,
   SEARCH_LIMIT_DEFAULT,
@@ -29,7 +30,7 @@ import { parameterHeavyCatalog, whopLikeCatalog } from "./testing/whop-like-cata
 const catalog = whopLikeCatalog(300);
 const text = (result: DirectoryResult) => result.content[0].text;
 const matches = async (directory: ToolDirectory, args: unknown) =>
-  (JSON.parse(text(await directory.search(args))) as { matches: Array<{ name: string; description: string; input: string; readOnly?: true; destructive?: true }> }).matches;
+  (JSON.parse(text(await directory.search(args))) as { matches: Array<{ name: string; description: string; input: string; readOnly?: true; destructive?: true; needsDescription?: true }> }).matches;
 const tool = (name: string, description = "", inputSchema: unknown = { type: "object" }): CatalogTool => ({ name, description, inputSchema });
 
 describe("when a catalog is searched", () => {
@@ -107,6 +108,27 @@ describe("BM25 ranking", () => {
     expect((await bm25Ranker("payments_list_refunded", catalog, 3))[0].name).toBe("payments_list_refunded");
     const twins = [tool("zeta_read", "Read the notes"), tool("alpha_read", "Read the notes")];
     expect((await bm25Ranker("notes", twins, 2)).map((entry) => entry.name)).toEqual(["alpha_read", "zeta_read"]);
+  });
+
+  it("finds capture and navigation tools through ordinary user wording", async () => {
+    const capture = tool("frame_capture", "Capture the full display as a PNG image in screen pixels.");
+    const navigation = tool("tab_navigate", "Navigate a browser tab to a new URL.");
+    const settings = tool("settings_update", "Update configuration.", {
+      type: "object", properties: { screenshot_quality: { type: "number" } },
+    });
+    const tools = [settings, navigation, capture];
+    expect(await bm25Ranker("take a screenshot", tools, 2)).toContain(capture);
+    expect(await bm25Ranker("open a webpage", tools, 2)).toContain(navigation);
+    expect(await bm25Ranker("capture a snapshot", tools, 2)).toContain(capture);
+  });
+
+  it("keeps literal and exact-name matches ahead of expanded query words", async () => {
+    const literal = tool("webpage_open", "Open a webpage.");
+    const navigation = tool("tab_navigate", "Navigate a browser tab to a URL.");
+    const capture = tool("frame_capture", "Capture the full display as a PNG image in screen pixels.");
+    const named = tool("screenshot", "Use the requested capture format.");
+    expect((await bm25Ranker("open a webpage", [navigation, literal], 2))[0]).toBe(literal);
+    expect((await bm25Ranker(named.name, [capture, named], 2))[0]).toBe(named);
   });
 
   it("names a tool's area by its prefix before the first underscore", () => {
@@ -241,6 +263,7 @@ describe("the directory's three tools", () => {
     expect(found).toHaveLength(SEARCH_LIMIT_DEFAULT);
     expect(found[0]).toEqual({
       name: "payments_list",
+      needsDescription: true,
       description: "List payments for a company, newest first. Supports pagination with first and after.",
       input: '{ company_id: string; first?: number; after?: string; order?: "created_at" | "updated_at" }',
       readOnly: true,
@@ -266,6 +289,29 @@ describe("the directory's three tools", () => {
       expect(answer.isError).toBeUndefined();
       expect(text(answer)).toContain('"query"');
     }
+  });
+
+  it("marks abbreviated instructions even when the argument signature fits", async () => {
+    const full = tool("frame_capture", "Capture the screen. " + "Required prerequisite. ".repeat(DESCRIPTION_CHARS));
+    const short = tool("frame_read", "Read a frame.");
+    const directory = new ToolDirectory([full, short]);
+    const found = await matches(directory, { query: "frame" });
+    const abbreviated = found.find((match) => match.name === full.name)!;
+    expect(abbreviated.needsDescription).toBe(true);
+    expect(abbreviated.description.length).toBeLessThan((full.description as string).length);
+    expect(abbreviated.input).not.toContain("…");
+    expect(found.find((match) => match.name === short.name)?.needsDescription).toBeUndefined();
+    expect(JSON.parse(text(directory.describe({ name: full.name })))).toMatchObject({ description: full.description });
+  });
+
+  it("marks incomplete input signatures for full schema discovery", async () => {
+    const complex = tool("frame_query", "Read frames.", {
+      type: "object", properties: Object.fromEntries(Array.from({ length: SIGNATURE_CHARS }, (_, i) => [`filter_${i}`, { type: "string" }])),
+    });
+    const directory = new ToolDirectory([complex]);
+    const [found] = await matches(directory, { query: "frame" });
+    expect(found.input).toContain("…");
+    expect(found.needsDescription).toBe(true);
   });
 
   it("describes one tool exactly, and guides past a name it does not have", () => {
@@ -323,7 +369,6 @@ describe("the directory's three tools", () => {
 describe("describe_tool on a huge schema", () => {
   const bytes = (value: string) => Buffer.byteLength(value);
   const groups = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
-  /** About 51 KB, like Whop's largest tool. */
   const described = () => {
     const leaf = (index: number) => ({ type: "string", description: `Filter ${index}: ${"narrows the results to matching records. ".repeat(5)}`, examples: ["first example", "second example"], default: "first example" });
     const group = (name: string) => ({ type: "object", description: `${name} filters.`, properties: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [`${name}_${index}`, leaf(index)])) });
@@ -440,4 +485,21 @@ describe("describe_tool's last resort, whatever the names", () => {
     expect(Buffer.byteLength(text(outline))).toBeLessThanOrEqual(DESCRIBE_BYTES);
     for (const field of JSON.parse(text(outline)).fields) expect(field.path.length).toBeLessThanOrEqual(200);
   });
+});
+
+it.each([
+  { type: "object", required: ["company_id"] },
+  { type: "object", required: ["company_id"], properties: {} },
+  { type: "object", properties: { filter: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } } },
+  { type: "object", properties: { limit: { type: "integer", minimum: 1 } } },
+  { type: "object", properties: { name: { type: "string", description: "Use the exact case." } } },
+])("requires full discovery for omitted schema semantics (%j)", async schema => {
+  const directory = new ToolDirectory([tool("frame_query", "Read frames.", schema)]);
+  expect((await matches(directory, { query: "frame" }))[0]!.needsDescription).toBe(true);
+});
+
+it("marks long instructions when truncation falls at whitespace", async () => {
+  const description = "x".repeat(DESCRIPTION_CHARS - 1) + " " + "suffix that must be read";
+  const directory = new ToolDirectory([tool("frame_query", description)]);
+  expect((await matches(directory, { query: "frame" }))[0]!.needsDescription).toBe(true);
 });

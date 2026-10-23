@@ -135,9 +135,9 @@ describe("every mount that puts a selection in front of the agents server", () =
     it("lists the whole catalog but what the selection leaves out, with no bridge tools", async () => {
       const names = await mounted(DENY_VM);
       for (const absent of ["agents_find_tool", "agents_use_tool", "agents_vm_exec"]) expect(names, absent).not.toContain(absent);
-      expect(names).toEqual(expect.arrayContaining(["agents_coordinate_bots", "agents_create_trigger", "agents_list_triggers", "agents_session_search"]));
+      expect(names).toEqual(["agents_search_tools", "agents_describe_tool", "agents_call_tool"]);
       // still OpenMausBot's own server, which never asks
-      expect(session!.view("agents_list_triggers", {})).toMatchObject({ ask: false });
+      expect(session!.view("agents_call_tool", { name: "list_triggers", arguments: {} })).toMatchObject({ ask: false });
       expect(() => session!.validate("agents_use_tool", { name: "vm_exec" })).toThrow("not advertised for this turn");
     });
 
@@ -147,9 +147,9 @@ describe("every mount that puts a selection in front of the agents server", () =
 
     it("is bridged as built when the bot has no selection", async () => {
       const names = await mounted();
-      expect(names.slice(-2)).toEqual(["agents_find_tool", "agents_use_tool"]);
+      expect(names).toEqual(["agents_search_tools", "agents_describe_tool", "agents_call_tool"]);
       expect(names).not.toContain("agents_create_trigger");
-      expect(session!.view("agents_use_tool", { name: "list_triggers" })).toMatchObject({ ask: false });
+      expect(session!.view("agents_call_tool", { name: "use_tool", arguments: { name: "list_triggers", arguments: {} } })).toMatchObject({ ask: false });
     });
   });
 });

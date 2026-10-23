@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+     import { createServer } from "node:http";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -10,7 +10,7 @@ import { roomRetryRequest } from "../src/lib/room-retry.ts";
 const CANCELLED = "The request was cancelled by the client.";
 const PARTIAL = "Partial answer before the stop.";
 
-type ChatMessage = { role: string; content?: unknown; tool_call_id?: string };
+type ChatMessage = { role: string; content?: unknown; tool_call_id?: string; tool_calls?: Array<{ function: { name: string } }> };
 type ChatRequest = { messages: ChatMessage[]; tools?: Array<{ function: { name: string } }> };
 
 const frame = (delta: unknown, finish_reason: string | null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
@@ -43,14 +43,24 @@ it("keeps a client abort a quiet stop and retries the room request it stopped", 
       return;
     }
     if (user.includes("Use the tool, then stop.")) {
-      if (request.messages.some((message) => message.role === "tool")) {
-        // The second round is aborted by the client, as some gateways say.
+      const last = request.messages.at(-1);
+      const previousCall = [...request.messages].reverse().find(message => message.tool_calls?.length)?.tool_calls?.[0];
+      if (last?.role === "tool" && previousCall?.function.name === "agents_search_tools") {
+        const result = JSON.parse(JSON.parse(String(last.content)).result);
+        if (!result.matches.some((match: any) => match.name === "list_bots")) throw new Error("Team listing is unavailable through discovery");
+        res.end(frame({ tool_calls: [{ index: 0, id: "look-1", type: "function", function: { name: "agents_call_tool", arguments: JSON.stringify({ name: "list_bots", arguments: {} }) } }] }, "tool_calls") + "data: [DONE]\n\n");
+        return;
+      }
+      if (last?.role === "tool") {
+        // The round after the approved read is aborted, as some gateways say.
         res.end(`data: ${JSON.stringify({ error: { message: CANCELLED } })}\n\n`);
         return;
       }
-      // A harmless read of the harness's own team list: like every agents
-      // tool it asks nothing, and the turn goes on.
-      res.end(frame({ content: PARTIAL, tool_calls: [{ index: 0, id: "look-1", type: "function", function: { name: "agents_list_bots", arguments: "{}" } }] }, "tool_calls") + "data: [DONE]\n\n");
+      // A harmless harness read, direct or discovered, needs no approval card.
+      const direct = request.tools?.some(tool => tool.function.name === "agents_list_bots");
+      const call = direct ? { name: "agents_list_bots", arguments: "{}" }
+        : { name: "agents_search_tools", arguments: JSON.stringify({ query: "list bots" }) };
+      res.end(frame({ content: PARTIAL, tool_calls: [{ index: 0, id: direct ? "look-1" : "look-search", type: "function", function: call }] }, "tool_calls") + "data: [DONE]\n\n");
       return;
     }
     res.end(frame({ content: "Done." }, "stop") + "data: [DONE]\n\n");
@@ -134,4 +144,3 @@ it("keeps a client abort a quiet stop and retries the room request it stopped", 
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
   }
 }, 180_000);
-

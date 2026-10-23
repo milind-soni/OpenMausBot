@@ -1,10 +1,9 @@
-// The upstream handshake is OMB's own, never the engine's: an engine's client adds capability fields a strict server
-// refuses. stdout carries only protocol frames.
-import { createInterface } from "node:readline";
+             import { createInterface } from "node:readline";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { allowsTool, parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
 
 import type { ValidateFunction } from "ajv";
+import { CATALOG_FINGERPRINT_META, fingerprintCatalog } from "./mcp-catalog-fingerprint.ts";
 import {
   CALL_TOOL,
   DESCRIBE_TOOL,
@@ -48,7 +47,7 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-const CREDENTIALS_REFUSED = "This MCP server refused its credentials (HTTP 401). If it uses a sign-in, send the message again: "
+ const CREDENTIALS_REFUSED = "This MCP server refused its credentials (HTTP 401). If it uses a sign-in, send the message again: "
   + "OpenMausBot refreshes sign-ins when a message starts. If it still fails, open Plugins → MCP servers and sign in to it again, "
   + "or check its header values.";
 
@@ -78,17 +77,16 @@ function privateSettings(): Record<string, string | undefined> {
     if (isRecord(value) && Object.entries(value).every(([name, setting]) => SETTINGS.includes(name) && typeof setting === "string")) {
       return value as Record<string, string>;
     }
-  } catch {}
+  } catch { /* invalid private config */ }
   return {};
 }
 
 const settings = privateSettings();
 let spec;
-try { spec = remoteMcpSpec(JSON.parse(settings.OMB_REMOTE_MCP_SERVER ?? "")); } catch {}
+try { spec = remoteMcpSpec(JSON.parse(settings.OMB_REMOTE_MCP_SERVER ?? "")); } catch { /* invalid private config */ }
 if (!spec) fail("invalid remote MCP configuration");
 
-/** A selection that cannot be read must never widen to all tools. */
-function directorySettings(raw: string | undefined): { server: string; scope: ToolScope | undefined } | undefined {
+ function directorySettings(raw: string | undefined): { server: string; scope: ToolScope | undefined } | undefined {
   if (raw === undefined) return undefined;
   try {
     const value: unknown = JSON.parse(raw);
@@ -97,7 +95,7 @@ function directorySettings(raw: string | undefined): { server: string; scope: To
       const parsed = parseToolScope(value.toolScope);
       if (parsed.ok) return { server: value.name, scope: parsed.scope };
     }
-  } catch {}
+  } catch { /* reported below */ }
   return fail("invalid tool directory configuration");
 }
 const directory = directorySettings(settings.OMB_REMOTE_MCP_DIRECTORY);
@@ -112,9 +110,8 @@ const appOnly = new Set<string>();
 const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
 const logFit = (line: string) => { process.stderr.write(`mcp-remote-proxy: ${line}\n`); };
 
-const REMOTE_ERROR_CHARS = 1_000;
-/** Configured values (address parts, header values) a remote error must never echo. */
-const configured: string[] = (() => {
+ const REMOTE_ERROR_CHARS = 1_000;
+ const configured: string[] = (() => {
   const values = new Set<string>([spec.url]);
   try {
     const url = new URL(spec.url);
@@ -123,14 +120,14 @@ const configured: string[] = (() => {
     if (url.pathname.length > 1) values.add(url.pathname);
     for (const segment of url.pathname.split("/")) if (segment.length >= 16) values.add(segment);
     for (const value of url.searchParams.values()) if (value.length >= 4) values.add(value);
-  } catch {}
+  } catch { /* checked by remoteMcpSpec */ }
   for (const value of Object.values(spec.headers)) {
     if (value.trim().length >= 4) values.add(value.trim());
     for (const word of value.split(/\s+/)) if (word.length >= 8) values.add(word);
   }
   return [...values].filter((value) => value.length >= 4).sort((a, b) => b.length - a.length);
 })();
-function remoteErrorText(detail: string): string {
+ function remoteErrorText(detail: string): string {
   let text = detail.slice(0, REMOTE_ERROR_CHARS * 8);
   for (const value of configured) text = text.split(value).join("«redacted»");
   text = redactSecretsInText(text).trim();
@@ -150,18 +147,18 @@ function remoteStatusText(status: number | undefined): string {
 }
 const allowed = (name: string) => !directory?.scope || allowsTool(directory.scope, { kind: "mcp", server: directory.server, name });
 
-interface Catalog { tools: ToolDirectory; searched: boolean }
+
+ interface Catalog { tools: ToolDirectory; searched: boolean }
 const CATALOG_PAGES = 100;
 const CATALOG_MS = 120_000;
 let catalog: Catalog | undefined;
 let loading: Promise<Catalog> | undefined;
 let generation = 0;
-/** Once searched, always searched: the engine was handed call_tool, and a tool it found must stay reachable. */
-let searching = false;
+ let searching = false;
 const context: DirectoryContext = { server: directory?.server ?? "" };
 
 const closed = new AbortController();
-const viaProxy = plainHttpProxyFetch(process.env);
+ const viaProxy = plainHttpProxyFetch(process.env);
 const client = new RemoteMcpClient(spec, {
   maxBytes: MAX_REMOTE_MCP_BYTES,
   ...(viaProxy ? { fetch: viaProxy } : {}),
@@ -223,7 +220,7 @@ async function readCatalog(): Promise<CatalogTool[]> {
   throw new Error("tool catalog has too many pages");
 }
 
-const validators = new WeakMap<CatalogTool, ValidateFunction | null>();
+ const validators = new WeakMap<CatalogTool, ValidateFunction | null>();
 function argumentProblems(tool: CatalogTool, args: Json): string[] | undefined {
   let validate = validators.get(tool);
   if (validate === undefined) {
@@ -235,7 +232,7 @@ function argumentProblems(tool: CatalogTool, args: Json): string[] | undefined {
   catch { return undefined; }
 }
 
-function raced<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+ function raced<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) return Promise.reject(new Error("aborted"));
   return new Promise<T>((resolve, reject) => {
     const abort = () => reject(new Error("aborted"));
@@ -294,7 +291,8 @@ async function directed(message: Json, signal: AbortSignal): Promise<unknown> {
   if (message.method === "tools/list") {
     if (isRecord(message.params) && message.params.cursor !== undefined) throw new Refusal(-32602, "Invalid cursor");
     const { tools, searched } = await currentCatalog(signal);
-    return { tools: searched ? tools.listed(context) : tools.tools };
+    return { tools: searched ? tools.listed(context) : tools.tools,
+      ...(searched ? { _meta: { [CATALOG_FINGERPRINT_META]: fingerprintCatalog(context.server, tools.tools) } } : {}) };
   }
   if (message.method === "tools/call") return callTool(message.params, signal);
   return upstream(message.method as string, message.params, signal);
@@ -314,13 +312,12 @@ async function handle(message: Json): Promise<void> {
   if (!id) {
     if (message.method === "notifications/initialized" && initialized) return;
     try { await client.notify(message.method, message.params, AbortSignal.timeout(30_000)); }
-    catch {}
+    catch { /* notifications have no reply and must not print remote details */ }
     return;
   }
   if (pending.has(id)) { error(message.id, -32600, "Duplicate request ID"); return; }
   const controller = new AbortController();
   pending.set(id, controller);
-  // Engines keep their own tool-call deadline (Gemini CLI and Qwen Code wait ten minutes) and cancel through this proxy.
   const deadline = message.method !== "tools/call" ? 30_000 : directory ? 120_000 : undefined;
   const signal = deadline === undefined ? controller.signal : AbortSignal.any([controller.signal, AbortSignal.timeout(deadline)]);
   try {
@@ -328,7 +325,6 @@ async function handle(message: Json): Promise<void> {
     if (message.method === "initialize") initialized = true;
     send({ jsonrpc: "2.0", id: message.id, result: message.method === "tools/list" ? fitToolListResult(result, SCHEMA_PROFILE, logFit) : result });
   } catch (failure) {
-    // Transport failures may carry URLs or header values: never relayed.
     if (failure instanceof Refusal) error(message.id, failure.code, failure.message);
     else if (failure instanceof McpRpcError) error(message.id, failure.code ?? -32603, remoteErrorText(failure.detail));
     else if (failure instanceof McpHttpError && failure.status === 401) error(message.id, -32603, CREDENTIALS_REFUSED);
