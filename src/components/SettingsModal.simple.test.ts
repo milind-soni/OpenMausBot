@@ -48,6 +48,7 @@ vi.mock("./ApiKeys", () => ({
   ApiKeyRow: marker("apiKey"),
   AnthropicEveryClaudeBot: marker("anthropicEvery"),
   OpenAiCompatUrl: marker("compatUrl"),
+  OpenAiCompatSettings: marker("compatUrl"),
   OpenCodeProviderKeys: marker("opencodeProviderKeys"),
   VpsConnection: marker("vps"),
 }));

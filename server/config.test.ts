@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "./schema.ts";
+import { openaiCompatConnectionUrl } from "./openai-compat-settings.ts";
 
 import { cacheUntilConfigChanges,
   changedInstanceIds,
@@ -48,7 +49,7 @@ import { cacheUntilConfigChanges,
   type AppConfig,
 } from "./config.ts";
 
-const reloaded = (patch: object, cfg: AppConfig = {}) =>
+ const reloaded = (patch: object, cfg: AppConfig = {}) =>
   changedInstanceIds(engineLaunches(instanceConfigs(cfg), {}), engineLaunches(instanceConfigs({ ...cfg, ...patch } as AppConfig), {}));
 
 describe("configuration boundaries", () => {
@@ -388,7 +389,6 @@ describe("configuration boundaries", () => {
       const second = browserProfilePartitionTarget(once, aliases.get("foo-2-2")!);
       expect(first).toEqual({ profileId: "foo-2-3", partitionId: "foo-2-2" });
       expect(second).toEqual({ profileId: "foo-2-2-2", partitionId: "FOO-2" });
-      // bots.json may be migrated before config.json is rewritten: a second hydration must leave migrated references fixed.
       expect(aliases.get(first!.profileId) ?? first!.profileId).toBe(first!.profileId);
       expect(aliases.get(second!.profileId) ?? second!.profileId).toBe(second!.profileId);
       expect(parseStoredConfig(JSON.parse(JSON.stringify(once)))).toEqual(once);
@@ -1439,7 +1439,6 @@ describe("credential env preference", () => {
   });
 
   it("prefers env over the config file for every credential", () => {
-    // The desktop shell hands secrets over as env and leaves the file without them: env must win over a leftover plaintext value.
     writeFileSync(
       join(DATA_DIR, "config.json"),
       JSON.stringify({
@@ -1744,7 +1743,6 @@ describe("credential env preference", () => {
   });
 
   it("treats a blanked file field as absent when env supplies the secret", () => {
-    // The desktop shell may leave "" behind (a key cleared mid-session); the env-injected value must still win.
     writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ xai: { key: "" } }));
     process.env.XAI_API_KEY = "env-xai";
     expect(loadConfig().xai?.key).toBe("env-xai");
@@ -1847,13 +1845,11 @@ describe("workspace credential env strip", () => {
   });
 
   it("keeps a hosted tenant's control-plane secrets out of every child env, and only those", () => {
-    // What a hosting control plane and a fleet put in the server's env; OMB_CLOUD_FUTURE_SECRET stands for a name added later.
     const operator = {
       OMB_CLOUD_READY_TOKEN: "ready", OMB_CLOUD_BOOTSTRAP: "bootstrap", OMB_CLOUD_GATEWAY_TOKEN: "gateway",
       OMB_CLOUD_MODELS: "models", OMB_CLOUD_REVISION: "revision", OMB_CLOUD_FUTURE_SECRET: "later",
       OMB_LICENSE_KEY: "license", OMB_INSTALLATION_CREDENTIAL: "fleet", omb_cloud_ready_token: "windows-spelling",
     };
-    // What an engine deliberately receives (the hosted model token as its provider key), plus look-alike names.
     const engine = {
       PATH: "/usr/bin", ANTHROPIC_API_KEY: "hosted-token", ANTHROPIC_AUTH_TOKEN: "hosted-token",
       ANTHROPIC_BASE_URL: "https://admin.example.test/api/gateway/w/anthropic", OPENMAUSBOT_COMPANY_API_KEY: "hosted-token",
@@ -2144,7 +2140,6 @@ describe("a value derived from config.json", () => {
     // In place, as a hand edit does: the size and the time change.
     writeSettled({ members: ["one@example.test"] }, 2);
     expect(read()).toEqual(["one@example.test"]);
-    // Renamed over the file, as the CLI and the fleet agent write it: same size and time, only the file identity differs.
     const before = statSync(path);
     writeFileSync(`${path}.next`, JSON.stringify({ signIn: { members: ["two@example.test"] } }));
     utimesSync(`${path}.next`, before.atime, before.mtime);
@@ -2249,4 +2244,34 @@ describe("X research's included relay token", () => {
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_CLOUD_X_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TREG_KEY");
   });
+});
+
+it("scopes compatible context overrides to their endpoint and default connection", () => {
+  const endpoint = "https://first.invalid/v1";
+  const model = "qwen-local";
+  const patch = { openaiCompat: { url: endpoint, contextWindows: { [endpoint]: { [model]: 262144 } } } };
+  expect(parseConfigPatch(patch)).toEqual(patch);
+  const configs = instanceConfigs({ ...patch, instances: {
+    openaiCompat: { driver: "openai-compat" },
+    separate: { driver: "openai-compat", config: { url: endpoint } },
+    openai: { driver: "openai-compat", config: { apiKeyEnv: "OMB_OPENAI_API_KEY" } },
+  } });
+  expect(configs.openaiCompat.config).toMatchObject({ contextWindows: { [model]: 262144 } });
+  expect(configs.separate.config).not.toHaveProperty("contextWindows");
+  expect(configs.openai.config).not.toHaveProperty("contextWindows");
+  const changed = instanceConfigs({ ...patch, openaiCompat: { ...patch.openaiCompat, url: "https://second.invalid/v1" } });
+  expect(changed.openaiCompat.config).not.toHaveProperty("contextWindows");
+  const own = instanceConfigs({ ...patch, instances: { openaiCompat: { driver: "openai-compat", config: { contextWindows: { [model]: 8192 } } } } });
+  expect(own.openaiCompat.config).toMatchObject({ contextWindows: { [model]: 8192 } });
+  const automaticEndpoint = "https://openrouter.ai/api/v1";
+  expect(instanceConfigs({ openaiCompat: { url: "", contextWindows: { [automaticEndpoint]: { [model]: 32768 } } },
+    instances: { openaiCompat: { driver: "openai-compat", config: { url: "" } } } }).openaiCompat.config)
+    .toMatchObject({ contextWindows: { [model]: 32768 } });
+  for (const value of [0, -1, 1.5, "262144"]) expect(() => parseConfigPatch({ openaiCompat: { contextWindows: { [endpoint]: { [model]: value } } } })).toThrow();
+});
+
+it("resolves context-limit edits against the instance endpoint before workspace defaults", () => {
+  expect(openaiCompatConnectionUrl({ instances: { openaiCompat: { driver: "openai-compat", config: { url: "https://instance.invalid/v1" } } },
+    openaiCompat: { url: "https://workspace.invalid/v1" } })).toBe("https://instance.invalid/v1");
+  expect(openaiCompatConnectionUrl({ openaiCompat: { url: "https://workspace.invalid/v1" } })).toBe("https://workspace.invalid/v1");
 });
