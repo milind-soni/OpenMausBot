@@ -159,6 +159,19 @@ export function execCli(
   }
 }
 
+/** Concurrent probes on a busy machine can outlast the timeout, so a CLI that answered before keeps its last version. */
+export function cliVersionReader(cli: string): (err: Error | null, stdout: string) => { version: string } | { reason: string } {
+  let last: string | null = null;
+  return (err, stdout) => {
+    const version = err ? "" : stdout.trim();
+    if (version) return { version: (last = version) };
+    const failure = err as (NodeJS.ErrnoException & { killed?: boolean }) | null;
+    const timedOut = failure?.killed === true && typeof failure.code !== "string";
+    if (timedOut && last) return { version: last };
+    return { reason: timedOut ? `\`${cli}\` took longer than 8 seconds to answer --version. The machine may be busy; check again.` : `\`${cli}\` CLI not found` };
+  };
+}
+
 /** Node reports a missing cwd as the CLI's own ENOENT, so pass `cwd` to tell a moved folder from a missing CLI. */
 type SpawnFailure = { message: string; setup: boolean };
 

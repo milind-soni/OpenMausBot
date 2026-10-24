@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import {
   assertSafeCliArgv,
+  cliVersionReader,
   describeSpawnFailure,
   estimatedWindowsCommandLineChars,
   execCli,
@@ -101,4 +102,21 @@ describe("out of memory", () => {
       await Promise.all([killCliTree(engine), killCliTree(other)]);
     }
   });
+});
+
+describe("CLI version probes", () => {
+  it("keeps the last version through a timed-out probe and names the timeout without one", async () => {
+    const timedOut = await new Promise<Error | null>((resolve) => {
+      execCli(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeout: 200 }, (error) => resolve(error));
+    });
+    expect(cliVersionReader("claude")(timedOut, "")).toEqual({ reason: expect.stringContaining("took longer than 8 seconds") });
+    const read = cliVersionReader("claude");
+    expect(read(null, " 2.1.302\n")).toEqual({ version: "2.1.302" });
+    expect(read(timedOut, "")).toEqual({ version: "2.1.302" });
+    const trapped = await new Promise<Error | null>((resolve) => {
+      execCli(process.execPath, ["-e", "process.on('SIGTERM', () => process.exit(1)); setInterval(() => {}, 1000)"], { timeout: 200 }, (error) => resolve(error));
+    });
+    expect(read(trapped, "")).toEqual({ version: "2.1.302" });
+    expect(read(Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" }), "")).toEqual({ reason: "`claude` CLI not found" });
+  }, hostTimeout(20_000));
 });
