@@ -6,11 +6,16 @@ import { BotThreadList, botRowProps, GroupThreadList } from "./Sidebar";
 import { formatUpdatedAt } from "./SidebarThreadRow";
 import { GroupTaskPicker, TaskPicker } from "./TaskPicker";
 
-vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
+vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}), useCaptionChrome: () => ({}) }));
 // Threads are an Advanced-mode surface (Simple keeps one conversation per bot), so these render as Advanced.
 vi.mock("@/lib/interface-mode", async (original) => ({
   ...await original<typeof import("@/lib/interface-mode")>(),
   useAdvancedMode: () => true,
+}));
+// The one-thread guarantee is checked under the new opt-in All threads menu gate.
+vi.mock("@/lib/thread-preferences", async (original) => ({
+  ...await original<typeof import("@/lib/thread-preferences")>(),
+  useAllThreadsMenu: () => true,
 }));
 
 const bot: Bot = {
@@ -42,7 +47,7 @@ describe("sidebar bot threads", () => {
     expect(markup).not.toContain("test");
   });
 
-  it("keeps All threads accessible even with one thread so its history actions remain reachable", () => {
+  it("keeps All threads reachable with one thread under the new setting", () => {
     const render = (candidate: Bot) => renderToStaticMarkup(createElement(StoreProvider, null, createElement(TaskPicker, { bot: candidate })));
     expect(render(bot)).toContain('aria-label="All threads"');
     const single = render({ ...bot, tasks: [bot.tasks![1]!] });

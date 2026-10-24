@@ -2,8 +2,9 @@ import { useState } from "react";
 import { t } from "@/lib/i18n";
 import { CHAT_WIDTH_IDS, applyChatWidth, readChatWidth, type ChatWidthId } from "@/lib/chat-width";
 import { FONT_IDS, applyFont, readFont, type FontId } from "@/lib/fonts";
+import { setAllThreadsMenu, useAllThreadsMenu } from "@/lib/thread-preferences";
 import { parseSidebarToolsLayout, setSidebarToolsLayout, SIDEBAR_TOOLS_LAYOUTS, useSidebarToolsLayout } from "@/lib/sidebar-preferences";
-import { SettingRow } from "./SettingsPrimitives";
+import { SettingRow, Switch } from "./SettingsPrimitives";
 import { Select } from "./Select";
 
 export function FontRow() {
@@ -63,6 +64,19 @@ export function SidebarToolsLayoutRow() {
           <option key={option} value={option}>{t(`sidebar.toolsLayout.${option}`)}</option>
         ))}
       </Select>
+    </SettingRow>
+  );
+}
+
+export function AllThreadsMenuRow() {
+  const enabled = useAllThreadsMenu();
+  return (
+    <SettingRow title={t("settings.allThreadsMenu.title")} subtitle={t("settings.allThreadsMenu.subtitle")}>
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.allThreadsMenu.show")}
+        onClick={() => setAllThreadsMenu(!enabled)}
+      />
     </SettingRow>
   );
 }

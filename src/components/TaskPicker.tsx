@@ -10,8 +10,10 @@ import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { formatTaskTokens, headlineTokens, usageDetail } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
-import { useShowThreads } from "@/lib/thread-preferences";
-import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { useAllThreadsMenu, useShowThreads } from "@/lib/thread-preferences";
+import { useCaptionChrome } from "./DesktopCapabilities";
+import { attentionOwnerName, AttentionThreadRows, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
 import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency, threadUpdatedLabel, useRelativeNow } from "./SidebarThreadRow";
 import { Select } from "./Select";
 
@@ -86,12 +88,20 @@ function ConversationTaskPicker({
   attention,
   onAttentionJump,
   workingElsewhere = 0,
+  anchor = "right",
+  noDrag = false,
+  chip = false,
+  noCompact = false,
 }: {
   threadId: string;
   tasks: PickerTask[];
   busy: boolean;
   workingElsewhere?: number;
   bot?: Bot;
+  anchor?: "left" | "right";
+  noDrag?: boolean;
+  chip?: boolean;
+  noCompact?: boolean;
   onNew: () => void;
   onSwitch: (threadId: string) => void;
   onRename: (threadId: string, title: string) => void;
@@ -110,6 +120,7 @@ function ConversationTaskPicker({
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishingRename = useRef(false);
   const now = useRelativeNow();
+  const { noDragStyle } = useCaptionChrome();
 
   const current = tasks.find((t) => t.threadId === threadId);
 
@@ -216,7 +227,7 @@ function ConversationTaskPicker({
   const results = [...attentionRows.map((entry) => ({ kind: "attention" as const, entry })), ...visible.map((task) => ({ kind: "task" as const, task }))];
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative" ref={ref} style={noDrag ? noDragStyle : undefined}>
       <button
         type="button"
         onClick={() => {
@@ -227,11 +238,12 @@ function ConversationTaskPicker({
         aria-label={t("task.switch")}
         className={cn(
           "flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink",
-          COMPACT_BUBBLE,
+          !noCompact && COMPACT_BUBBLE,
+          chip && "bg-raised/60",
         )}
       >
-        <span className="truncate @max-4xl/chathead:hidden">{t("task.switch")}</span>
-        <span className="shrink-0 tabular-nums opacity-60 @max-4xl/chathead:opacity-100">{tasks.length}</span>
+        <span className={cn("truncate", !noCompact && "@max-4xl/chathead:hidden")}>{t("task.switch")}</span>
+        <span className={cn("shrink-0 tabular-nums opacity-60", !noCompact && "@max-4xl/chathead:opacity-100")}>{tasks.length}</span>
         {workingElsewhere > 0 && (
           <span
             role="img"
@@ -241,11 +253,11 @@ function ConversationTaskPicker({
             className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent"
           />
         )}
-        <ChevronDown size={12} className="shrink-0 @max-4xl/chathead:hidden" />
+        <ChevronDown size={12} className={cn("shrink-0", !noCompact && "@max-4xl/chathead:hidden")} />
       </button>
 
       {motion.shown && (
-        <div className={cn("absolute right-0 top-full z-40 mt-1 w-[300px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50", motion.className)} {...motion.exitProps}>
+        <div className={cn(`absolute ${anchor === "left" ? "left-0" : "right-0"} top-full z-40 mt-1 w-[300px] max-w-[calc(100vw-3rem)] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1 shadow-2xl shadow-black/50`, motion.className)} {...motion.exitProps}>
           <div className="px-2 pb-1 pt-1.5">
             <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 focus-within:border-focus">
               <Search size={13} className="shrink-0 text-ink-secondary" />
@@ -440,23 +452,26 @@ export function BotActivityPicker({ bot }: { bot: Bot }) {
 }
 
 export function TaskPicker({ bot }: { bot: Bot }) {
-  const { state, dispatch } = useStore();
-  const showThreads = useShowThreads();
-  if (!showThreads) return null;
+  const { dispatch } = useStore();
+  const allThreadsMenu = useAllThreadsMenu();
+  const advanced = useAdvancedMode();
+  if (!allThreadsMenu || !advanced) return null;
   return (
     <ConversationTaskPicker
       threadId={bot.threadId}
       tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId))}
       busy={false}
       bot={bot}
-      attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id, state.groups)}
+      anchor="left"
+      noDrag
+      chip
+      noCompact
       onNew={() => dispatch({ type: "newTask", botId: bot.id })}
       onSwitch={(threadId) => dispatch({ type: "switchTask", botId: bot.id, threadId })}
       onRename={(threadId, title) => dispatch({ type: "renameTask", botId: bot.id, threadId, title })}
       onDelete={(threadId) => dispatch({ type: "deleteTask", botId: bot.id, threadId })}
       onMove={(threadId, projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { projectId } })}
       onPin={(threadId, pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { pinned } })}
-      onAttentionJump={(entry) => dispatch(attentionJumpAction(entry))}
     />
   );
 }

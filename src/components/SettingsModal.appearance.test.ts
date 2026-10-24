@@ -12,6 +12,8 @@ const fixture = vi.hoisted(() => ({
   section: "appearance" as AppSettingsSection,
   showThreads: true,
   setShowThreads: vi.fn(),
+  allThreadsMenu: false,
+  setAllThreadsMenu: vi.fn(),
   showRunCard: true,
   setShowRunCard: vi.fn(),
   sidebarDensity: "comfortable" as "comfortable" | "compact" | "icons",
@@ -43,6 +45,8 @@ vi.mock("@/lib/thread-preferences", () => ({
   useShowThreads: () => fixture.showThreads,
   useShowThreadsChoice: () => fixture.showThreads,
   setShowThreads: fixture.setShowThreads,
+  useAllThreadsMenu: () => fixture.allThreadsMenu,
+  setAllThreadsMenu: fixture.setAllThreadsMenu,
 }));
 vi.mock("@/lib/run-card-preferences", () => ({
   useShowRunCard: () => fixture.showRunCard,
@@ -92,6 +96,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   fixture.section = "appearance";
   fixture.showThreads = true;
+  fixture.allThreadsMenu = false;
   fixture.showRunCard = true;
   fixture.sidebarDensity = "comfortable";
   fixture.toolsLayout = "rows";
@@ -167,6 +172,30 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("channels are unchanged");
     expect(html).toContain("Turn this back on");
     expect(html).not.toContain("Maximum turn length");
+  });
+
+  it("shows the All threads menu row in Advanced Appearance and not in Simple", () => {
+    fixture.advancedMode = true;
+    fixture.switches = [];
+    fixture.setAllThreadsMenu.mockClear();
+    const advancedHtml = render();
+    expect(advancedHtml).toContain('aria-label="Show the All threads menu"');
+    expect(advancedHtml).toContain("All threads menu at the top of bot chats");
+    expect(advancedHtml).toContain("It works even when the Threads sidebar display is turned off.");
+    const toggle = fixture.switches.find((props) => props["aria-label"] === "Show the All threads menu")!;
+    expect(toggle.checked).toBe(false);
+    toggle.onClick!({} as never);
+    expect(fixture.setAllThreadsMenu).toHaveBeenCalledWith(true);
+    expect(advancedHtml).toContain('aria-label="Show threads"');
+    expect(advancedHtml.indexOf('aria-label="Show threads"')).toBeLessThan(advancedHtml.indexOf('aria-label="Show the All threads menu"'));
+
+    fixture.advancedMode = false;
+    fixture.switches = [];
+    const simpleHtml = render();
+    expect(simpleHtml).not.toContain('aria-label="Show the All threads menu"');
+    expect(simpleHtml).not.toContain('aria-label="Show threads"');
+    expect(fixture.api).not.toHaveBeenCalled();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
   it.each([true, false])("only updates the local preference when the switch is %s", (enabled) => {
@@ -307,6 +336,13 @@ describe("Settings → Appearance", () => {
   it("finds chat width and message colors in Appearance", () => {
     const appearance = SECTIONS.find((section) => section.id === "appearance")!;
     for (const query of ["width", "wide", "full width", "bubble", "color"]) {
+      expect(sectionMatches(appearance, query), query).toBe(true);
+    }
+  });
+
+  it("finds the All threads menu setting by name in Appearance search", () => {
+    const appearance = SECTIONS.find((section) => section.id === "appearance")!;
+    for (const query of ["all threads menu", "all threads", "chat threads", "threads", "show threads", "hide threads"]) {
       expect(sectionMatches(appearance, query), query).toBe(true);
     }
   });

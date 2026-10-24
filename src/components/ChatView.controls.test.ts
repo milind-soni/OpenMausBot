@@ -10,7 +10,7 @@ import { failedTurnTool } from "../../shared/failed-turn";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { showThreads: true, advanced: true, allThreadsMenu: false, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -30,6 +30,7 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/thread-preferences")>(),
   useShowThreads: () => fixture.advanced && fixture.showThreads,
+  useAllThreadsMenu: () => fixture.allThreadsMenu,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 // The trigger still renders, so the markup assertions in this file see the same header.
@@ -271,6 +272,15 @@ describe("thread control placement", () => {
     expect(markup).not.toContain('aria-label="All threads"');
     expect(markup.includes('data-testid="chat-more"')).toBe(advanced);
     fixture.advanced = true;
+  });
+
+  it("renders the All threads pill on the bot-title row's left slot with the setting on", () => {
+    fixture.allThreadsMenu = true;
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+    const pill = markup.indexOf('aria-label="All threads"');
+    expect(pill).toBeGreaterThan(markup.indexOf("data-chathead-row"));
+    expect(pill).toBeLessThan(markup.indexOf("data-chathead-identity"));
+    fixture.allThreadsMenu = false;
   });
 
   it.each([true, false])("calls from the composer beside dictation, not the header (advanced %s)", (advanced) => {

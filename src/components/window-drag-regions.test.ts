@@ -8,9 +8,18 @@ import { StoreProvider, type Bot, type Group } from "@/state/store";
 
 type Chrome = "mac-inset" | "win-caption" | "native";
 const PLATFORM: Record<Chrome, string> = { "mac-inset": "darwin", "win-caption": "win32", native: "linux" };
-const fixture = { chrome: "native" as Chrome };
+const fixture = vi.hoisted(() => ({ chrome: "native" as "mac-inset" | "win-caption" | "native", allThreadsMenu: false }));
 
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
+// Full replacement: renderToStaticMarkup reads the server snapshot of literal false, so only a mock can turn the
+// preference on for the cut-out case; the existing cases pin it off to keep their meaning.
+vi.mock("@/lib/thread-preferences", () => ({
+  useShowThreads: () => true,
+  useShowThreadsChoice: () => true,
+  setShowThreads: vi.fn(),
+  setAllThreadsMenu: vi.fn(),
+  useAllThreadsMenu: () => fixture.allThreadsMenu,
+}));
 
 const { ChatView } = await import("./ChatView");
 const { GroupView } = await import("./GroupView");
@@ -53,6 +62,8 @@ const cutOut = (control: DomNode, header: DomNode) => {
 };
 
 beforeEach(() => {
+  fixture.chrome = "native";
+  fixture.allThreadsMenu = false;
   vi.stubGlobal("window", { ogb: undefined, location: { protocol: "http:", search: "" }, innerWidth: 1280 });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
 });
@@ -117,6 +128,24 @@ describe.each([
     expect(document.querySelector("[data-window-drag]")).toBeNull();
     expect(document.body.innerHTML).not.toContain("app-region");
   });
+});
+
+describe("the All threads pill wrapper", () => {
+  it.each<Chrome>(["mac-inset", "win-caption"])(
+    "reads no-drag off its style attribute with the setting on, on %s",
+    (chrome) => {
+      fixture.chrome = chrome;
+      fixture.allThreadsMenu = true;
+      try {
+        const document = dom(createElement(ChatView, { bot }));
+        const pill = document.querySelector('[aria-label="All threads"]');
+        expect(pill).not.toBeNull();
+        expect(region(pill!.parentElement)).toBe("no-drag");
+      } finally {
+        fixture.allThreadsMenu = false;
+      }
+    },
+  );
 });
 
 describe("headerless views", () => {

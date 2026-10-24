@@ -34,6 +34,7 @@ vi.mock("@/lib/thread-preferences", () => ({
   useShowThreads: () => fixture.showThreads,
   useShowThreadsChoice: () => fixture.showThreads,
   setShowThreads: fixture.setShowThreads,
+  useAllThreadsMenu: () => false,
 }));
 vi.mock("@/lib/run-card-preferences", () => ({
   useShowRunCard: () => fixture.showRunCard,

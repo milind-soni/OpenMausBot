@@ -120,6 +120,45 @@ describe("local thread visibility", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
+  it("clears only the matching override on a keyed storage event and both on clear", async () => {
+    const preference = await import("./thread-preferences");
+    preference.useShowThreadsChoice();
+    preference.useAllThreadsMenu();
+    hook.subscribe!(vi.fn());
+
+    preference.setShowThreads(false);
+    preference.setAllThreadsMenu(true);
+
+    local.setItem(preference.SHOW_THREADS_KEY, "1");
+    storageEvent(preference.SHOW_THREADS_KEY);
+    expect(preference.useShowThreadsChoice()).toBe(true);
+    expect(preference.useAllThreadsMenu()).toBe(true);
+
+    preference.setShowThreads(false);
+    local.setItem(preference.ALL_THREADS_MENU_KEY, "0");
+    storageEvent(preference.ALL_THREADS_MENU_KEY);
+    expect(preference.useShowThreadsChoice()).toBe(false);
+    expect(preference.useAllThreadsMenu()).toBe(false);
+
+    preference.setShowThreads(false);
+    preference.setAllThreadsMenu(true);
+    local.clear();
+    storageEvent(null);
+    expect(preference.useShowThreadsChoice()).toBe(true);
+    expect(preference.useAllThreadsMenu()).toBe(false);
+
+    local.setItem.mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    preference.setAllThreadsMenu(true);
+    storageEvent(preference.SHOW_THREADS_KEY);
+    expect(preference.useAllThreadsMenu()).toBe(true);
+
+    preference.setShowThreads(false);
+    storageEvent(preference.ALL_THREADS_MENU_KEY);
+    expect(preference.useShowThreadsChoice()).toBe(false);
+  });
+
   it.each(["getter", "read", "write", "missing"])("keeps the choice usable when storage fails at %s", async (failure) => {
     if (failure === "getter") {
       Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("blocked"); } });
@@ -135,6 +174,100 @@ describe("local thread visibility", () => {
     expect(preference.useShowThreadsChoice()).toBe(false);
     preference.setShowThreads(true);
     expect(preference.useShowThreadsChoice()).toBe(true);
+  });
+});
+
+describe("all threads menu preference", () => {
+  it("defaults off and ignores malformed values without writing anything", async () => {
+    const preference = await import("./thread-preferences");
+    expect(preference.useAllThreadsMenu()).toBe(false);
+    expect(hook.serverSnapshot!()).toBe(false);
+    for (const value of ["", "0", "false", "broken"]) {
+      local.setItem(preference.ALL_THREADS_MENU_KEY, value);
+      expect(preference.useAllThreadsMenu()).toBe(false);
+    }
+    local.setItem(preference.ALL_THREADS_MENU_KEY, "1");
+    expect(preference.useAllThreadsMenu()).toBe(true);
+    local.setItem.mockClear();
+    preference.useAllThreadsMenu();
+    expect(local.setItem).not.toHaveBeenCalled();
+  });
+
+  it("persists the choice through a renderer reload", async () => {
+    let preference = await import("./thread-preferences");
+    preference.setAllThreadsMenu(true);
+    expect(local.getItem(preference.ALL_THREADS_MENU_KEY)).toBe("1");
+    expect(preference.useAllThreadsMenu()).toBe(true);
+
+    vi.resetModules();
+    preference = await import("./thread-preferences");
+    expect(preference.useAllThreadsMenu()).toBe(true);
+    preference.setAllThreadsMenu(false);
+    expect(local.getItem(preference.ALL_THREADS_MENU_KEY)).toBe("0");
+    vi.resetModules();
+    preference = await import("./thread-preferences");
+    expect(preference.useAllThreadsMenu()).toBe(false);
+  });
+
+  it("notifies mounted consumers immediately and unsubscribes cleanly", async () => {
+    const preference = await import("./thread-preferences");
+    preference.useAllThreadsMenu();
+    const first = vi.fn();
+    const second = vi.fn();
+    const unsubscribeFirst = hook.subscribe!(first);
+    const unsubscribeSecond = hook.subscribe!(second);
+    preference.setAllThreadsMenu(true);
+    expect(first).toHaveBeenCalledOnce();
+    expect(second).toHaveBeenCalledOnce();
+    expect(hook.snapshot!()).toBe(true);
+
+    unsubscribeFirst();
+    preference.setAllThreadsMenu(false);
+    expect(first).toHaveBeenCalledOnce();
+    expect(second).toHaveBeenCalledTimes(2);
+    unsubscribeSecond();
+    preference.setAllThreadsMenu(true);
+    expect(second).toHaveBeenCalledTimes(2);
+  });
+
+  it("follows cross-window changes and clear, ignoring other storage", async () => {
+    const preference = await import("./thread-preferences");
+    preference.useAllThreadsMenu();
+    const listener = vi.fn();
+    const unsubscribe = hook.subscribe!(listener);
+    local.setItem(preference.ALL_THREADS_MENU_KEY, "1");
+    storageEvent(preference.ALL_THREADS_MENU_KEY);
+    expect(listener).toHaveBeenCalledOnce();
+    expect(hook.snapshot!()).toBe(true);
+
+    storageEvent("other-key");
+    storageEvent(preference.ALL_THREADS_MENU_KEY, memoryStorage());
+    expect(listener).toHaveBeenCalledOnce();
+
+    local.clear();
+    storageEvent(null);
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(hook.snapshot!()).toBe(false);
+    unsubscribe();
+    storageEvent(null);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(["getter", "read", "write", "missing"])("keeps the menu usable when storage fails at %s", async (failure) => {
+    if (failure === "getter") {
+      Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("blocked"); } });
+    } else if (failure === "missing") {
+      vi.stubGlobal("localStorage", undefined);
+    } else {
+      if (failure === "write") local.setItem.mockImplementation(() => { throw new Error("blocked"); });
+      if (failure === "read") local.getItem.mockImplementation(() => { throw new Error("blocked"); });
+    }
+    const preference = await import("./thread-preferences");
+    expect(preference.useAllThreadsMenu()).toBe(false);
+    preference.setAllThreadsMenu(true);
+    expect(preference.useAllThreadsMenu()).toBe(true);
+    preference.setAllThreadsMenu(false);
+    expect(preference.useAllThreadsMenu()).toBe(false);
   });
 });
 
