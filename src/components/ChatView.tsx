@@ -58,6 +58,7 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
+import { HandoffReply } from "./HandoffReply";
 import { VerifyCard } from "./VerifyCard";
 import { askText, runSkill, runSteps, runSummary, showRun, skillPrompt } from "@/lib/verify-steps";
 import { useShowRunCard } from "@/lib/run-card-preferences";
@@ -674,7 +675,7 @@ const ActivityChip = memo(function ActivityChip({ message, place = "auto" }: { m
   if (comm) {
     const withBot = bots.find((b) => b.id === comm.withBotId);
     return (
-      <div className="flex justify-start">
+      <HandoffReply message={message}>
         <button
           onClick={() => dispatch({ type: "select", id: comm.groupId })}
           title={t("chat.openConversationWith", { name: comm.withName })}
@@ -684,7 +685,7 @@ const ActivityChip = memo(function ActivityChip({ message, place = "auto" }: { m
           <span className="max-w-[480px] truncate">{tool.name}</span>
           <ChevronRight size={13} />
         </button>
-      </div>
+      </HandoffReply>
     );
   }
   return <ToolActivity tool={tool} place={toolPlace(tool.name, place)} />;

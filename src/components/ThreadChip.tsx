@@ -3,6 +3,7 @@ import { openThread, useStore, type Message } from "@/state/store";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { t } from "@/lib/i18n";
 import { BotAvatar } from "./Avatar";
+import { HandoffReply } from "./HandoffReply";
 
 export function ThreadChip({ message }: { message: Message }) {
   const { state, dispatch } = useStore();
@@ -12,7 +13,7 @@ export function ThreadChip({ message }: { message: Message }) {
   if (!ref || !tool) return null;
   const bot = state.bots.find((candidate) => candidate.id === ref.botId);
   return (
-    <div className="flex justify-start">
+    <HandoffReply message={message}>
       <button
         type="button"
         data-thread-chip={ref.threadId}
@@ -24,6 +25,6 @@ export function ThreadChip({ message }: { message: Message }) {
         <span className="max-w-[480px] truncate">{tool.name}</span>
         <ChevronRight size={13} />
       </button>
-    </div>
+    </HandoffReply>
   );
 }

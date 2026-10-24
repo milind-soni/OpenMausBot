@@ -96,6 +96,7 @@ import { roomSpeakerIds, roomThreadSpeakerId, roomThreadWorking } from "@/lib/ro
 import { RoomQueueList, RoutedByLine, roomMemberQueueTitle } from "./RoomQueueList";
 import { JumpToLatestButton } from "./JumpToLatestButton";
 import { Select } from "./Select";
+import { HandoffReply } from "./HandoffReply";
 import { RoomWorkingFolder, RoomWorkingFolderChip } from "./RoomWorkingFolder";
 
 export function RoomToolChip({ message, roomId }: { message: Message; roomId?: string }) {
@@ -110,7 +111,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
   if (comm && comm.groupId !== roomId) {
     const withBot = state.bots.find((b) => b.id === comm.withBotId);
     return (
-      <div className="flex justify-start">
+      <HandoffReply message={message}>
         <button
           type="button"
           onClick={() => {
@@ -127,7 +128,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
           <span className="max-w-[480px] truncate">{tool.name}</span>
           <ChevronRight size={13} />
         </button>
-      </div>
+      </HandoffReply>
     );
   }
   if (!comm) return <ToolActivity tool={tool} />;
