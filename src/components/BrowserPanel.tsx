@@ -242,6 +242,8 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const typingReady = connected && you;
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
+  // A My Chrome profile stays on agent-browser even when the Chrome engine is on.
+  const myChrome = state.config?.browserEngine?.myChrome === true && (state.config?.browserProfiles ?? []).some((profile) => profile.id === bot.browserProfile && profile.browser === "chrome");
   return <div ref={panel} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink" data-browser-transport={stream ? "stream" : "live"}>
     <ChromeRow
       ref={address}
@@ -252,6 +254,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       control={control}
       takeStatus={takeStatus}
       commandsReady={commandsReady}
+      closesLastTab={state.config?.browserEngine?.engine === "chrome" && !myChrome}
       profileName={profileName}
       fullscreen={fullscreen}
       onCommand={interact}
