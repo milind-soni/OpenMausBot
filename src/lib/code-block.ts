@@ -85,6 +85,14 @@ export function getLanguageDisplayName(lang?: string | null): string {
   return normalized.charAt(0).toUpperCase() + normalized.slice(1);
 }
 
+/** A one-line block longer than this overflows a chat bubble. */
+export const WRAP_ONE_LINE_OVER = 80;
+
+/** A single line longer than a bubble starts wrapped; several lines keep their layout. */
+export function startsWrapped(code?: string | null): boolean {
+  return Boolean(code) && countLines(code) === 1 && code!.length > WRAP_ONE_LINE_OVER;
+}
+
 export function countLines(code?: string | null): number {
   if (!code) {
     return 0;
