@@ -10,7 +10,7 @@ import {
   MOUTHS,
   MOUTH_STROKE,
   mouthFrame,
-} from "./cursor-face-data";
+} from "../../shared/cursor-face-data.ts";
 
 describe("cursor face data", () => {
   it("carries one entry per expression in every table", () => {

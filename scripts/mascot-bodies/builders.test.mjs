@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BODY_DEFS, BODY_IDS } from "./builders.ts";
 
 const EXPECTED_IDS = [
-  "cursor", "blob", "circle", "squircle", "capsule",
+  "cursor", "kitten", "blob", "circle", "squircle", "capsule",
   "drop", "shield", "hexagon", "diamond", "star",
 ];
 

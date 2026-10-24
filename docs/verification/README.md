@@ -185,6 +185,9 @@ against an isolated server, synthetic desktop and VPS SSH forward.
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
 
+The [custom mascot fixture](custom-mascots.md) checks outline import, animated
+previews, saved-shape reuse, and profile persistence in an isolated renderer.
+
 The [hosted Slack management fixture](hosted-slack-management.md) checks the
 agent settings link to Admin: hosted-only availability, the member-readable
 route module, and stale-response isolation.

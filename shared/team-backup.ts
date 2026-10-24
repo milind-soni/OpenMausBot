@@ -2,10 +2,11 @@ import { z } from "zod";
 
 import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, MAUS_COLOR_NAMES } from "./wire.ts";
 import { parseToolScope, type ToolScope } from "./tool-scope.ts";
+import { mascotProfileSchema } from "./mascot-profile.ts";
 
 export const MAX_TEAM_BACKUP_BYTES = 50 * 1024 * 1024;
-export const TEAM_BACKUP_CONTENTS = "Bot profiles, instructions, sections, rooms, playbooks, routines, each bot's memory (MEMORY.md, topic notes and daily logs) and conversation text (all tasks and branches).";
-export const TEAM_BACKUP_EXCLUSIONS = "Files, images, custom avatars, account connections, model settings and permissions are not included. Action cards are saved as text. Memory is saved with secrets removed. Imported routines start paused.";
+export const TEAM_BACKUP_CONTENTS = "Bot profiles, instructions, mascot selections and saved custom mascot shapes, sections, rooms, playbooks, routines, each bot's memory (MEMORY.md, topic notes and daily logs) and conversation text (all tasks and branches).";
+export const TEAM_BACKUP_EXCLUSIONS = "Files, profile images, account connections, model settings and permissions are not included. Action cards are saved as text. Memory is saved with secrets removed. Imported routines start paused.";
 
 const key = z.string().min(1).max(200);
 const name = z.string().trim().min(1).max(200);
@@ -106,6 +107,7 @@ const backupSchema = z.object({
     color,
     mascotExpression: z.string().max(80).optional(),
     mascotBody: z.string().max(40).optional(),
+    mascotProfile: mascotProfileSchema.optional(),
     chiefOfStaff: z.boolean(),
     hidden: z.boolean(),
     playbooks: z.array(playbook).max(200),

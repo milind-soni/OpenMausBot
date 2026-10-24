@@ -26,7 +26,11 @@ import { freePortBlock, withFreeSignInPort } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
+import { validateCustomMascotDefinition } from "./custom-mascot-validation.ts";
 import { computerPrompt, SIGN_IN_PROMPT } from "./system-prompt.ts";
+import { createCustomMascotFitContext, suggestCustomMascotAnchor } from "../shared/custom-mascot-fitting.ts";
+import { FACE_BOX } from "../shared/cursor-face-data.ts";
+import { addOrSelectCustomMascot, createMascotProfile } from "../shared/mascot-profile.ts";
 import {
   PHONE_SECRET_INFO,
   phoneSecretAAD,
@@ -119,7 +123,6 @@ let managedBoatRows: Array<Record<string, unknown>> = [];
 let managedBoatListRowsOverride: Array<Record<string, unknown>> | null = null;
 let managedBoatListStatus = 200;
 let managedBoatStopDelayMs = 0;
-let managedBoatRenameDelayMs = 0;
 type DeferredGate = {
   wait: Promise<void>;
   release: () => void;
@@ -139,6 +142,7 @@ const deferredGate = (): DeferredGate => {
 };
 let managedBoatListGate: DeferredGate | null = null;
 let managedBoatCreateGate: DeferredGate | null = null;
+let managedBoatRenameGate: DeferredGate | null = null;
 let managedBoatDeleteGate: DeferredGate | null = null;
 const managedBoatRejectedTokens = new Set<string>();
 const managedBoatCreateBodies: Array<Record<string, unknown>> = [];
@@ -1085,8 +1089,10 @@ beforeAll(async () => {
         let raw = "";
         for await (const chunk of req) raw += chunk;
         const requestedName = raw ? JSON.parse(raw).name : undefined;
-        if (managedBoatRenameDelayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, managedBoatRenameDelayMs));
+        const renameGate = managedBoatRenameGate;
+        if (renameGate) {
+          renameGate.enter();
+          await renameGate.wait;
         }
         if (managedBoatCreateMode === "fail-rename") {
           res.statusCode = 503;
@@ -1256,6 +1262,8 @@ describe("harness HTTP API", () => {
     managedBoatCreateGate = null;
     managedBoatDeleteGate?.release();
     managedBoatDeleteGate = null;
+    managedBoatRenameGate?.release();
+    managedBoatRenameGate = null;
     const deadline = Date.now() + 15_000;
     let stuck = { bots: [] as string[], groups: [] as string[], computers: [] as string[] };
     while (Date.now() < deadline) {
@@ -5609,6 +5617,7 @@ describe("harness HTTP API", () => {
       title: "Researcher",
       description: "Finds evidence",
       color: "cyan",
+      mascotBody: "cursor",
     });
     await api("PATCH", `/api/bots/${hidden.id}`, { name: "Archived", hidden: true });
 
@@ -5623,7 +5632,7 @@ describe("harness HTTP API", () => {
     expect(exported.body.team.members.map((member: { name: string }) => member.name)).toEqual(visibleNames);
     expect(exported.body.team.members).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: "mira", name: "Mira", title: "Project Lead", appearance: { color: "purple", mascotExpression: "focused" } }),
-      expect.objectContaining({ key: "scout", name: "Scout", title: "Researcher", appearance: { color: "cyan" } }),
+      expect.objectContaining({ key: "scout", name: "Scout", title: "Researcher", appearance: { color: "cyan", mascotBody: "cursor" } }),
     ]));
     expect(exported.body.team).not.toHaveProperty("room");
     expect(JSON.stringify(exported.body)).not.toMatch(/Archived|autoApprove|alwaysAllow|modelSelection|threadId/);
@@ -6073,6 +6082,55 @@ describe("harness HTTP API", () => {
       description: "reads diffs",
       modelSelection: { instanceId: "ghost", model: "ghost-1", effort: "xhigh" },
     });
+  });
+
+  it("creates and selects validated custom mascots without applying workspace body defaults", async () => {
+    const outline = Array.from({ length: 96 }, (_, index) => {
+      const angle = (index / 96) * Math.PI * 2;
+      return [FACE_BOX / 2 + Math.cos(angle) * 108, FACE_BOX / 2 + Math.sin(angle) * 108] as const;
+    });
+    const anchor = suggestCustomMascotAnchor(createCustomMascotFitContext(outline));
+    const shape = validateCustomMascotDefinition({ name: "Bunny", outline, anchor });
+    const profile = addOrSelectCustomMascot(createMascotProfile(), shape);
+    const priorDefaults = (await api("GET", "/api/bot-defaults")).body.defaults;
+    const catDefaults = structuredClone(priorDefaults);
+    catDefaults.profile.mascotBody = "cat";
+    let createdBotId: string | undefined;
+    try {
+      expect((await api("PUT", "/api/config", { newBotDefaults: catDefaults })).status).toBe(200);
+      const created = await api("POST", "/api/bots", { mascotProfile: profile });
+      expect(created.status).toBe(201);
+      createdBotId = created.body.bot.id;
+      expect(created.body.bot).toMatchObject({
+        mascotBody: "cursor",
+        mascotProfile: { selected: { kind: "custom", shapeId: shape.id }, shapes: [shape] },
+      });
+
+      const { id: _shapeId, ...definition } = shape;
+      const saved = await api("POST", `/api/bots/${createdBotId}/mascot-shapes`, {
+        shape: { ...definition, name: "Bunny copy" },
+      });
+      expect(saved.status).toBe(201);
+      expect(saved.body.bot).toMatchObject({
+        mascotBody: "cursor",
+        avatarUrl: null,
+        avatarCrop: "mascot",
+        mascotProfile: {
+          selected: { kind: "custom" },
+          shapes: [{ name: "Bunny" }, { name: "Bunny copy" }],
+        },
+      });
+
+      const forged = structuredClone(profile);
+      forged.shapes[0]!.id = "b".repeat(64);
+      forged.selected = { kind: "custom", shapeId: "b".repeat(64) };
+      const rejected = await api("POST", "/api/bots", { mascotProfile: forged });
+      expect(rejected.status).toBe(400);
+      expect(rejected.body.error).toContain("fingerprint does not match");
+    } finally {
+      if (createdBotId) await api("DELETE", `/api/bots/${createdBotId}`);
+      await api("PUT", "/api/config", { newBotDefaults: priorDefaults });
+    }
   });
 
   it("rejects an unknown effort value even while the engine is offline", async () => {
@@ -8239,6 +8297,7 @@ describe("harness HTTP API", () => {
 
   it("rejects a Boat token change while create and rename own the lifecycle lane", async () => {
     let botId = "";
+    const renameGate = deferredGate();
     try {
       managedBoatRows = [];
       expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
@@ -8248,18 +8307,19 @@ describe("harness HTTP API", () => {
       managedBoatCreateMode = "success";
       managedBoatCreateId = "bx_fghjkmnp";
       managedBoatCreateName = managedBoatNameForFixture(bot.id);
-      managedBoatRenameDelayMs = 1_000;
+      managedBoatRenameGate = renameGate;
       boatRouteCalls.length = 0;
 
       const provisioning = api("POST", `/api/bots/${bot.id}/computer/provision`, {});
-      await expect.poll(() => boatRouteCalls.some(
-        (call) => call.method === "PATCH" && call.path === `/sandboxes/${managedBoatCreateId}`,
-      )).toBe(true);
+      await Promise.race([renameGate.entered, provisioning.then(({ status }) => {
+        throw new Error(`Provisioning completed before the rename gate (HTTP ${status})`);
+      })]);
       const racedChange = await api("PUT", "/api/config", { box: { token: "box_good" } });
       expect(racedChange.status).toBe(409);
       expect(racedChange.body.error).toMatch(/cloud computer actions/i);
+      renameGate.release();
       expect((await provisioning).status).toBe(200);
-      managedBoatRenameDelayMs = 0;
+      managedBoatRenameGate = null;
 
       expect((await api("POST", `/api/computers/boxes/${managedBoatCreateId}/delete`, {
         confirmName: managedBoatCreateName,
@@ -8267,7 +8327,8 @@ describe("harness HTTP API", () => {
       expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
       botId = "";
     } finally {
-      managedBoatRenameDelayMs = 0;
+      renameGate.release();
+      managedBoatRenameGate = null;
       managedBoatCreateMode = "refuse";
       managedBoatCreateId = "bx_cdefghjk";
       managedBoatCreateName = "";

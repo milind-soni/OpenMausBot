@@ -275,9 +275,16 @@ describe("adding from the shelf", () => {
     }
     expect(scout.packageBase!.name).toEqual({ r: app.parts.partHash("Scout"), w: app.parts.partHash("Scout 2") });
     const lead = byKey.get("lead")!;
-    for (const part of ["name", "title", "description", "soul", "look", "playbooks", "skills"] as const) {
+    for (const part of ["name", "title", "description", "soul", "playbooks", "skills"] as const) {
       expect(lead.packageBase![part]!.w, part).toBe(lead.packageBase![part]!.r);
     }
+    const leadReleaseLook = app.parts.releaseLook(team.document.package.agents.find((agent: any) => agent.key === "lead")!.appearance);
+    const leadWrittenLook = { ...leadReleaseLook, ...app.parts.mascotLookFields(lead) };
+    expect(lead.mascotProfile?.selected).toEqual({ kind: "builtin", bodyId: "cursor" });
+    expect(leadReleaseLook.mascotBody).toBeNull();
+    expect(leadWrittenLook.mascotBody).toBe("cursor");
+    expect(lead.packageBase!.look).toEqual({ r: app.parts.partHash(leadReleaseLook), w: app.parts.partHash(leadWrittenLook) });
+    expect(lead.packageBase!.look!.r).not.toBe(lead.packageBase!.look!.w);
     expect(byKey.get("lead")!.packageBase!.approval!.r).toBe(app.parts.partHash("auto"));
 
     expect(app.skills.listSkills(scout.id)).toEqual([

@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { BODY_DEFS } from "./builders.ts";
-import { maskFromPolylines } from "./raster.ts";
-import { applyFit, boundsOf, fitTransform, flatten } from "./geometry.ts";
-import { fieldFromMask } from "./sdf.ts";
-import { buildClouds, report } from "./solve.ts";
+import { maskFromPolylines } from "../../shared/mascot-geometry/raster.ts";
+import { applyFit, boundsOf, fitTransform, flatten } from "../../shared/mascot-geometry/geometry.ts";
+import { fieldFromMask } from "../../shared/mascot-geometry/sdf.ts";
+import { buildClouds, report } from "../../shared/mascot-geometry/solve.ts";
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies.ts";
 
 // fileURLToPath, not `.pathname`: on Windows the latter yields "/C:/…" with a

@@ -18,7 +18,8 @@ const generatedImageResponseSchema = z.object({
 });
 
 type AvatarIdentity = Pick<BotRecord, "name" | "title" | "description">;
-type AvatarGenerationState = Pick<BotRecord, "avatarUrl" | "avatarCrop">;
+type AvatarGenerationState = Pick<BotRecord, "avatarUrl" | "avatarCrop"> & Partial<Pick<BotRecord, "mascotProfile">>;
+type AvatarGenerationSnapshot = Pick<AvatarGenerationState, "avatarUrl" | "avatarCrop"> & { mascotProfile: string };
 interface AvatarImageConfig {
   imageGen?: ImageGenerationConfig;
   xai?: { key?: string };
@@ -50,15 +51,17 @@ export function avatarImageStatus(cfg: AvatarImageConfig) {
 }
 
 /** Copy the mutable avatar fields before an asynchronous generation starts. */
-export function snapshotAvatarGenerationState(bot: AvatarGenerationState): AvatarGenerationState {
-  return { avatarUrl: bot.avatarUrl, avatarCrop: bot.avatarCrop };
+export function snapshotAvatarGenerationState(bot: AvatarGenerationState): AvatarGenerationSnapshot {
+  return { avatarUrl: bot.avatarUrl, avatarCrop: bot.avatarCrop, mascotProfile: JSON.stringify(bot.mascotProfile ?? null) };
 }
 
 export function avatarGenerationStateMatches(
-  initial: AvatarGenerationState,
+  initial: AvatarGenerationSnapshot,
   current: AvatarGenerationState,
 ): boolean {
-  return current.avatarUrl === initial.avatarUrl && current.avatarCrop === initial.avatarCrop;
+  return current.avatarUrl === initial.avatarUrl
+    && current.avatarCrop === initial.avatarCrop
+    && JSON.stringify(current.mascotProfile ?? null) === initial.mascotProfile;
 }
 
 /** A product-owned art brief: fixed crop, no text, and the user's direction JSON-quoted so it cannot blur the brief's bounds. */

@@ -9,10 +9,24 @@ import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { parseTeamBackup } from "../shared/team-backup.ts";
 import { approvalModeFor } from "../shared/approval-mode.ts";
 import { WIDGET_SAMPLES } from "../shared/widget-samples.ts";
+import { FACE_BOX } from "../shared/cursor-face-data.ts";
+import { createCustomMascotFitContext, suggestCustomMascotAnchor } from "../shared/custom-mascot-fitting.ts";
+import { type CustomMascotPoint, type MascotProfile } from "../shared/mascot-profile.ts";
+import { validateCustomMascotDefinition } from "./custom-mascot-validation.ts";
 import { soulFile, soulHash } from "./bot-folder.ts";
 import { appendMemoryLog, readMemoryFile, readMemoryLog, readMemoryTopic, searchMemoryFiles, updateMemory, workspaceDir, writeMemoryTopic } from "./workspace.ts";
 
 const selection = () => ({ instanceId: "fixture", model: "fixture-model" });
+
+function customMascotProfile(): MascotProfile {
+  const outline: CustomMascotPoint[] = Array.from({ length: 96 }, (_, index) => {
+    const angle = (index / 96) * Math.PI * 2;
+    return [FACE_BOX / 2 + Math.cos(angle) * 108, FACE_BOX / 2 + Math.sin(angle) * 108] as const;
+  });
+  const anchor = suggestCustomMascotAnchor(createCustomMascotFitContext(outline));
+  const shape = validateCustomMascotDefinition({ name: "Bunny", outline, anchor });
+  return { version: 1, shapes: [shape], selected: { kind: "custom", shapeId: shape.id } };
+}
 
 function fixture() {
   const store = new Store(selection);
@@ -158,6 +172,22 @@ describe("additive portable team backups", () => {
     expect(readMemoryFile(chief.id).text).toBe(exported.file);
     const noMemory = result.bots.find((bot) => bot.name === "Scout 2")!;
     expect(readMemoryFile(noMemory.id).text).toBe("");
+  });
+
+  it("round-trips validated custom mascot profiles and rejects stale fingerprints before adding bots", () => {
+    const { store, routines, chief } = fixture();
+    const profile = customMascotProfile();
+    store.patchBot(chief.id, { mascotProfile: profile });
+    const backup = createTeamBackup(store, routines.listRoutines(), "Bunny team");
+    expect(backup.bots.find((bot) => bot.key === chief.id)!.mascotProfile).toEqual(profile);
+    const imported = importTeamBackup(store, routines, parseTeamBackup(JSON.parse(JSON.stringify(backup))), selection());
+    expect(imported.bots.find((bot) => bot.name === "Mira 2")!.mascotProfile).toEqual(profile);
+
+    const stale = structuredClone(backup);
+    stale.bots.find((bot) => bot.key === chief.id)!.mascotProfile!.shapes[0]!.name = "Changed";
+    const existingIds = store.bots.map((bot) => bot.id);
+    expect(() => importTeamBackup(store, routines, stale, selection())).toThrow(/fingerprint/);
+    expect(store.bots.map((bot) => bot.id)).toEqual(existingIds);
   });
 
   it("round-trips all bots, sections, Chiefs, rooms, tasks and branches without changing originals", () => {

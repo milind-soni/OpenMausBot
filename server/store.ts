@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { writeFileAtomic, writeFileAtomicIfChanged } from "./atomic.ts";
 import { commitRegistryChange, keptRevocation, saveRegistryFor } from "./registry-save.ts";
-import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts";
+import { parseToolScope } from "../shared/tool-scope.ts";
 import { reorderStable } from "../shared/bot-order.ts";
 import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
@@ -21,6 +21,8 @@ import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactBotAuthored } from "./message-redaction.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
+import { mascotStateForCreation, mascotStateWithCustomShape, normalizeStoredBotMascotState, preserveInvalidMascotProfileRegistry, type CustomMascotShape } from "./mascot-profile-store.ts";
+import { applyBotProfilePatch, BotAppearanceRevisionTracker, normalizeBotPatch } from "./store-bot-patches.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
@@ -35,7 +37,6 @@ import type {
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
 import { movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
-import { parseConnectorTools } from "./connector-tools.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal } from "./default-bot.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
@@ -322,6 +323,7 @@ export class Store {
   private registeringInitialSections = true;
   /** Clearing this slot must not clear a concurrently running task's activity. */
   private legacyActivities = new Map<string, BotActivity>();
+  readonly appearanceRevisions = new BotAppearanceRevisionTracker();
 
   constructor(
     defaultSelection: () => ModelSelection,
@@ -537,6 +539,7 @@ export class Store {
     const clearModelCopies = !existsSync(THREAD_MODEL_COPIES_CLEARED) && (botsLoaded || !existsSync(BOTS_FILE));
     const fillAskedAts = !existsSync(ASKED_AT_FILLED) && (botsLoaded || !existsSync(BOTS_FILE));
     for (const b of this.bots) {
+      if (normalizeStoredBotMascotState(b, () => preserveInvalidMascotProfileRegistry(BOTS_FILE, b.id))) botsMigrated = true;
       if (b.projects?.some((project) => "modelSelection" in project)) {
         b.projects = b.projects.map(({ id, name, emoji }) => ({ id, name, ...(isProjectEmoji(emoji) ? { emoji } : {}) }));
         botsMigrated = true;
@@ -1331,7 +1334,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section" | "cwd" | "visibility" | "toolScope" | "createdBy" | "reportsTo"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "mascotProfile" | "modelSelection" | "section" | "cwd" | "visibility" | "toolScope" | "createdBy" | "reportsTo"
       >
     > = {},
     opts: {
@@ -1343,6 +1346,7 @@ export class Store {
     this.rememberSections([profile.section]);
     const name = profile.name?.trim() || pickBotName(this.bots.map((b) => b.name));
     const section = sectionKey(profile.section);
+    const mascotState = mascotStateForCreation(profile);
     const bot: BotRecord = {
       id: opts.id ?? newId(),
       threadId: opts.threadId ?? newId(),
@@ -1354,7 +1358,7 @@ export class Store {
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
-      ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
+      ...mascotState,
       // Restricted from its first frame: no one else is ever told it exists.
       ...(profile.visibility && profile.visibility !== "everyone" ? { visibility: structuredClone(profile.visibility) } : {}),
       ...(toolScope.scope ? { toolScope: toolScope.scope } : {}),
@@ -1534,26 +1538,13 @@ export class Store {
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
-    if (patch.connectorTools !== undefined) {
-      const parsed = parseConnectorTools(patch.connectorTools);
-      if (!parsed.ok) throw new Error(parsed.error);
-      patch = { ...patch, connectorTools: parsed.grants };
-    }
-    if (Object.hasOwn(patch, "toolScope")) {
-      const parsed = parseToolScope(patch.toolScope);
-      if (!parsed.ok) throw new Error(parsed.error);
-      patch = { ...patch, toolScope: parsed.scope };
-    }
-    const wideningToolScope = Object.hasOwn(patch, "toolScope") && toolScopeWidens(bot.toolScope, patch.toolScope);
-    const nextToolScope = patch.toolScope;
-    if (wideningToolScope) {
-      patch = { ...patch };
-      delete patch.toolScope;
-    }
+    const normalized = normalizeBotPatch(bot, patch);
+    patch = normalized.patch;
     const toAsk = patch.modelSelection ? (bot.tasks ?? []).filter((task) => task.modelSelection === undefined &&
       this.switchNeedsAsk(id, task.threadId, bot.modelSelection, patch.modelSelection!)) : [];
     // Revocations take effect in memory even when the disk write fails.
     Object.assign(bot, patch);
+    this.appearanceRevisions.recordChoice(bot, patch);
     for (const task of toAsk) Object.assign(task, structuredClone(ASK_NOW));
     const task = this.activeTask(id);
     if (task) {
@@ -1564,10 +1555,10 @@ export class Store {
       }
       bot.unread = bot.tasks!.some(taskCountsAsBotUnread);
     }
-    if (wideningToolScope) {
+    if (normalized.wideningToolScope) {
       // New authority goes live only after its durable save succeeds.
-      this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, toolScope: nextToolScope } : candidate));
-      bot.toolScope = nextToolScope;
+      this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, toolScope: normalized.nextToolScope } : candidate));
+      bot.toolScope = normalized.nextToolScope;
     } else this.saveBots();
     this.emit({ type: "bot", botId: id });
     return bot;
@@ -1589,18 +1580,26 @@ export class Store {
   patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
-    const next = { ...bot, ...patch };
-    if (patch.soul !== undefined) {
-      next.soulHash = soulHash(patch.soul);
-      next.soulDrift = false;
-    }
+    const next = applyBotProfilePatch(bot, patch);
     this.saveBots(this.bots.map((candidate) => candidate.id === id ? next : candidate));
     Object.assign(bot, next);
+    this.appearanceRevisions.recordChoice(bot, patch);
     if (patch.soul !== undefined) {
       try { writeSoulMirror(id, patch.soul); } catch (e) {
         console.warn(`[bot-folder] could not write SOUL.md mirror for ${id}: ${(e as Error).message}`);
       }
     }
+    this.emit({ type: "bot", botId: id });
+    return bot;
+  }
+
+  addOrSelectMascotShape(id: string, shape: CustomMascotShape): BotRecord | null {
+    const bot = this.bot(id);
+    if (!bot) return null;
+    const next: BotRecord = { ...bot, ...mascotStateWithCustomShape(bot.mascotProfile, shape) };
+    this.saveBots(this.bots.map((candidate) => candidate.id === id ? next : candidate));
+    Object.assign(bot, next);
+    this.appearanceRevisions.record(bot);
     this.emit({ type: "bot", botId: id });
     return bot;
   }

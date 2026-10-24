@@ -30,10 +30,40 @@ if (!REAL_BROWSER) console.log("skipping the Team Cloud sign-in check: it needs 
 const stub = REAL_BROWSER ? null : (() => {
   const dir = mkdtempSync(join(tmpdir(), "omb-team-browser-stub-"));
   const engine = join(dir, "agent-browser"), log = join(dir, "commands.log");
-  writeFileSync(engine, ["#!/bin/sh", `printf '%s %s\\n' "$AGENT_BROWSER_SESSION" "$1" >> '${log}'`,
-    `if [ "$1" = session ]; then printf '{"success":true,"data":{"sessions":[]}}\\n'; fi`, "exit 0"].join("\n"), { mode: 0o755 });
+  const program = [
+    'const fs = require("node:fs");',
+    `fs.appendFileSync(${JSON.stringify(log)}, String(process.env.AGENT_BROWSER_SESSION ?? "") + " " + process.argv[1] + "\\n");`,
+    'if (process.argv[1] === "session" && process.argv[2] === "list") fs.writeSync(1, JSON.stringify({ success: true, data: { sessions: [] } }));',
+  ].join("\n");
+  const nodeOptions = `--import=data:text/javascript,${encodeURIComponent(`
+    import childProcess from "node:child_process";
+    import { syncBuiltinESMExports } from "node:module";
+    import { promisify } from "node:util";
+    const spawn = childProcess.spawn;
+    const execFile = childProcess.execFile;
+    const execFilePromise = execFile[promisify.custom];
+    const program = ${JSON.stringify(program)};
+    childProcess.spawn = function(command, args, options) {
+      if (command !== process.env.OMB_AGENT_BROWSER_PATH) return spawn(command, args, options);
+      return spawn(process.execPath, ["-e", program, "--", ...args], options);
+    };
+    const remapExecFile = (command, args) => {
+      if (command !== process.env.OMB_AGENT_BROWSER_PATH) return [command, ...args];
+      const commandArgs = Array.isArray(args[0]) ? args.shift() : [];
+      if (args[0] === undefined) args.shift();
+      return [process.execPath, ["-e", program, "--", ...commandArgs], ...args];
+    };
+    childProcess.execFile = function(command, ...args) {
+      return execFile.apply(this, remapExecFile(command, args));
+    };
+    childProcess.execFile[promisify.custom] = function(command, ...args) {
+      return execFilePromise.apply(execFile, remapExecFile(command, args));
+    };
+    syncBuiltinESMExports();
+  `).replaceAll("'", "%27")}`;
+  writeFileSync(engine, "fixture browser marker");
   const lines = () => (existsSync(log) ? readFileSync(log, "utf8") : "").split("\n").filter(Boolean);
-  return { dir, engine, lines, sessions: () => lines().map((line) => line.split(" ")[0]!).filter(Boolean) };
+  return { dir, engine, nodeOptions, lines, sessions: () => lines().map((line) => line.split(" ")[0]!).filter(Boolean) };
 })();
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
@@ -42,7 +72,13 @@ let bot: { id: string; mainThreadId: string };
 let adaThread = "", cleoThread = "", roomId = "", roomThread = "";
 
 beforeAll(async () => {
-  fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-team-${randomBytes(8).toString("hex")}`, team: { id: "team-acme-1", name: "Acme", engine: ENGINE, ...(stub ? { env: { OMB_AGENT_BROWSER_PATH: stub.engine } } : {}) } });
+  fx = await launchCloudSendFixture({
+    onePasswordToken: `ops_fake-team-${randomBytes(8).toString("hex")}`,
+    team: { id: "team-acme-1", name: "Acme", engine: ENGINE, ...(stub ? { env: {
+      OMB_AGENT_BROWSER_PATH: stub.engine,
+      NODE_OPTIONS: [process.env.NODE_OPTIONS, stub.nodeOptions].filter(Boolean).join(" "),
+    } } : {}) },
+  });
   team = fx.team!;
   owner = (await team.pair(OWNER)).token!;
   admin = (await team.pair(ADMIN)).token!;

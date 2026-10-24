@@ -3,9 +3,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { flatten } from "./geometry.ts";
+import { flatten } from "../../shared/mascot-geometry/geometry.ts";
 import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies.ts";
-import { MASCOT_BODY_IDS } from "../../shared/mascot-bodies.ts";
+import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies.ts";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const CATALOG = new URL("../../shared/halloween-bodies.ts", import.meta.url);
@@ -44,6 +44,14 @@ describe("Halloween catalog", () => {
       expect(MASCOT_BODY_IDS).not.toContain(id);
       expect(HALLOWEEN_BODIES[id].id).toBe(id);
     }
+  });
+
+  it("keeps the gradient Cat separate from the Halloween cat id", () => {
+    expect(HALLOWEEN_BODY_IDS).toContain("cat");
+    expect(HALLOWEEN_BODIES.cat.id).toBe("cat");
+    expect(MASCOT_BODY_IDS).toContain("kitten");
+    expect(MASCOT_BODY_IDS).not.toContain("cat");
+    expect(MASCOT_BODIES.kitten.name).toBe("Cat");
   });
 
   it("emits cubic-only path data the phone parsers can read", () => {

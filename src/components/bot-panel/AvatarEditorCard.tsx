@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { ImagePlus, Loader2, PawPrint, Trash2 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -11,9 +11,11 @@ import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../../shared/halloween-
 import { isHalloweenBody, type BotBodyId } from "../../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { MausAvatar } from "../Avatar";
+import { CustomMascotCreator } from "../CustomMascotCreator";
 import { AvatarImageGenerator } from "../AvatarImageGenerator";
 import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "../avatar-editing";
 import { Segmented } from "./rows";
+import { selectedCustomMascot } from "../../../shared/mascot-profile";
 
 export type AvatarEditorTab = "bot" | "generate" | "upload";
 
@@ -54,31 +56,58 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
   onPatch: (patch: AvatarPatch) => void;
   onClose: () => void;
 }) {
-  const image = useAvatarImage(bot, onPatch);
+  const mascotRevisionRef = useRef(0);
+  const generatingRevisionRef = useRef<{ revision: number } | null>(null);
+  const [customMascotOpen, setCustomMascotOpen] = useState(false);
+  const applyAvatarPatch = (patch: AvatarPatch) => {
+    const generation = generatingRevisionRef.current;
+    if (patch.avatarUrl !== undefined && generation && generation.revision !== mascotRevisionRef.current) return;
+    onPatch(patch);
+  };
+  const image = useAvatarImage(bot, applyAvatarPatch);
   const { fileRef, crop, uploading, generating, setSavingConnection, busy, error, upload, removeImage, generate } = image;
   const showsImage = crop !== "mascot" && Boolean(bot.avatarUrl);
   const [tab, setTab] = useState<AvatarEditorTab>(showsImage ? "upload" : "bot");
   const tabsRef = useRef<HTMLDivElement>(null);
+  const controlsDisabled = busy && !generating;
+  const selectedCustom = selectedCustomMascot(bot.mascotProfile);
+  const body = bot.mascotProfile?.selected.kind === "builtin"
+    ? bot.mascotProfile.selected.bodyId
+    : bot.mascotBody ?? "cursor";
+  const invalidateGeneration = () => {
+    mascotRevisionRef.current += 1;
+  };
+  const generateImage = async (direction: string) => {
+    const generation = { revision: mascotRevisionRef.current };
+    generatingRevisionRef.current = generation;
+    try {
+      await generate(direction);
+    } finally {
+      if (generatingRevisionRef.current === generation) generatingRevisionRef.current = null;
+    }
+  };
   // The card is a dialog: focus moves into it, onto the tab it opened on, so Escape and Tab work from the start.
   useEffect(() => {
     tabsRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus();
   }, []);
-  const pickMascot = (patch: AvatarPatch) => onPatch(crop === "mascot" ? patch : { ...patch, avatarCrop: "mascot" });
-  const body = bot.mascotBody ?? "cursor";
-  const costume = wornBody(bot.mascotBody, bot.color, useHalloweenDressed());
-  const dressedAs = costume !== body && isHalloweenBody(costume) ? HALLOWEEN_BODIES[costume].name : null;
+  const pickMascot = (patch: AvatarPatch) => {
+    invalidateGeneration();
+    onPatch(crop === "mascot" ? patch : { ...patch, avatarCrop: "mascot" });
+  };
+  const costume = wornBody(body, bot.color, useHalloweenDressed());
+  const dressedAs = !showsImage && !selectedCustom && costume !== body && isHalloweenBody(costume) ? HALLOWEEN_BODIES[costume].name : null;
   const bodyButton = (id: BotBodyId, name: string) => (
     <button
       key={id}
       type="button"
-      disabled={busy}
-      aria-pressed={!showsImage && body === id}
+      disabled={controlsDisabled}
+      aria-pressed={!showsImage && !selectedCustom && body === id}
       aria-label={`Use the ${name} body`}
       title={name}
       onClick={() => pickMascot({ mascotBody: id })}
       className={cn(
         "flex h-[58px] items-center justify-center rounded-xl disabled:opacity-50",
-        !showsImage && body === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]",
+        !showsImage && !selectedCustom && body === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]",
       )}
     >
       <MausAvatar color={bot.color} bodyId={id} size={40} animated={false} trackPointer={false} />
@@ -98,7 +127,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
       aria-label={t("botPanel.avatar.edit")}
       data-panel-avatar-editor
       onKeyDown={onKeyDown}
-      className="absolute inset-x-[-6px] top-[92px] z-30 overflow-hidden rounded-2xl border border-ink/[0.08] bg-menu text-left shadow-2xl shadow-black/50"
+      className="absolute inset-x-[-6px] top-[92px] z-30 max-h-[calc(100vh-7rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-2xl border border-ink/[0.08] bg-menu text-left shadow-2xl shadow-black/50"
     >
       <div ref={tabsRef} className="flex items-center gap-0.5 border-b border-ink/[0.06] p-2">
         {TABS.map(([id, label]) => (
@@ -120,8 +149,8 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
         <button
           type="button"
           data-avatar-reset
-          disabled={busy}
-          onClick={() => onPatch(RESET_MASCOT_PATCH)}
+          disabled={controlsDisabled}
+          onClick={() => pickMascot(RESET_MASCOT_PATCH)}
           className="ml-auto rounded-lg px-[11px] py-[5px] text-[13px] text-ink-secondary hover:text-ink disabled:opacity-50"
         >
           {t("botPanel.avatar.reset")}
@@ -141,12 +170,36 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
             <div className="grid grid-cols-5 gap-1.5" data-halloween-bodies>
               {HALLOWEEN_BODY_IDS.map((id) => bodyButton(id, HALLOWEEN_BODIES[id].name))}
             </div>
+            <div className="mt-2">
+              <button
+                type="button"
+                data-avatar-custom-mascot
+                aria-expanded={customMascotOpen}
+                aria-controls={`simple-custom-mascot-creator-${bot.id}`}
+                disabled={controlsDisabled}
+                onClick={() => setCustomMascotOpen((open) => !open)}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-ink/[0.08] px-3 py-2 text-[12.5px] font-medium text-ink-secondary hover:bg-ink/[0.04] hover:text-ink disabled:opacity-50"
+              >
+                <PawPrint size={14} aria-hidden="true" />
+                {t("mascot.creator.open")}
+              </button>
+              {customMascotOpen && (
+                <div id={`simple-custom-mascot-creator-${bot.id}`}>
+                  <CustomMascotCreator
+                    bot={bot}
+                    disabled={controlsDisabled}
+                    onSelectionStart={invalidateGeneration}
+                    onClose={() => setCustomMascotOpen(false)}
+                  />
+                </div>
+              )}
+            </div>
             <div className="flex flex-wrap justify-center gap-2 px-1 pb-1 pt-3.5">
               {MAUS_COLOR_NAMES.map((color) => (
                 <button
                   key={color}
                   type="button"
-                  disabled={busy}
+                  disabled={controlsDisabled}
                   aria-pressed={bot.color === color}
                   aria-label={`Use ${color} mascot color`}
                   title={t(MAUS_COLOR_LABEL[color])}
@@ -165,7 +218,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
                 <button
                   key={expression}
                   type="button"
-                  disabled={busy}
+                  disabled={controlsDisabled}
                   data-avatar-face={expression}
                   aria-pressed={activeState === expression}
                   onClick={() => pickMascot({ mascotExpression: expression })}
@@ -187,7 +240,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
               botLabel={bot.title || bot.name}
               disabled={uploading}
               generating={generating}
-              onGenerate={generate}
+              onGenerate={generateImage}
               onSavingChange={setSavingConnection}
             />
           </div>

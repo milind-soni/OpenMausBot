@@ -4,7 +4,7 @@
  * axis): a wrong distance shows up as a mouth hanging off the edge.
  */
 
-import { FACE_BOX } from "../../src/components/cursor-face-data.ts"
+import { FACE_BOX } from "../cursor-face-data.ts"
 
 export interface Sdf {
   size: number

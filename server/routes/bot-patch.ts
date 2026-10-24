@@ -15,6 +15,7 @@ import { cloudBackendChangeError, vpsBotAliasChangeError, vpsLeftBehindNotice, V
 import * as composio from "../composio.ts";
 import { isValidSshAlias, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
+import { validateMascotProfile } from "../custom-mascot-validation.ts";
 import type { createApprovalModeSupport } from "../harness-capabilities.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import type { hostedModelPolicy } from "../hosted-models.ts";
@@ -164,6 +165,13 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       }
       const patch: Record<string, unknown> = {};
       Object.assign(patch, profile.patch);
+      if (Object.hasOwn(body, "mascotProfile")) {
+        try {
+          patch.mascotProfile = validateMascotProfile(body.mascotProfile);
+        } catch (error) {
+          return json(res, 400, { error: error instanceof Error ? error.message : "mascotProfile is invalid" });
+        }
+      }
       let section: string | undefined | null;
       if (body.section !== undefined) {
         if (body.section === null) section = null;

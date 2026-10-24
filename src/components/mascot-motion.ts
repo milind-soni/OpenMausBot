@@ -1,4 +1,4 @@
-import { FACE_BOX, type Ring } from "./cursor-face-data";
+import { FACE_BOX, type Ring } from "../../shared/cursor-face-data.ts";
 import type { CursorState, StateEffects } from "./CursorAvatar";
 
 export const FULL_FRAME_MS = 1000 / 60;

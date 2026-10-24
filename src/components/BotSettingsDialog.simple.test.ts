@@ -5,7 +5,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Routine } from "@/lib/routines";
 import type { MemoryDoc } from "@/lib/memory";
 import type { Bot, BotSettingsSection, InstanceInfo } from "@/state/store";
+import type { MascotProfile, CustomMascotShape } from "../../shared/mascot-profile";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN } from "../../shared/bot-avatar";
+import { BOT_BODY_IDS } from "../../shared/bot-body";
 import type { ManagedSkill } from "./bot-settings/SkillsSection";
 import type { BotApps } from "./bot-settings/useBotApps";
 
@@ -52,6 +54,11 @@ vi.mock("react", async (original) => ({
     return [fixture.values[index], (next: unknown) => {
       fixture.values[index] = typeof next === "function" ? next(fixture.values[index]) : next;
     }];
+  },
+  useRef: <T>(initial: T) => {
+    const index = fixture.index++;
+    if (!(index in fixture.values)) fixture.values[index] = { current: initial };
+    return fixture.values[index] as { current: T };
   },
   useEffect: () => {},
 }));
@@ -116,6 +123,7 @@ const { BotSettingsDialog } = await import("./BotSettingsDialog");
 const { BotPanel } = await import("./bot-panel/PanelShell");
 const { PanelHero } = await import("./bot-panel/PanelHero");
 const { AvatarEditorCard } = await import("./bot-panel/AvatarEditorCard");
+const { CustomMascotCreator } = await import("./CustomMascotCreator");
 const { BotTab } = await import("./bot-panel/BotTab");
 const { ComputerTab } = await import("./bot-panel/ComputerTab");
 const { PageBody, AppsPage, RoutinesPage, MemoryPage, SkillsPage, FolderPage, BrowserPage } = await import("./bot-panel/pages");
@@ -135,6 +143,23 @@ const { SignedInSites } = await import("./SignedInSites");
 const { AvatarImageGenerator } = await import("./AvatarImageGenerator");
 const { AvatarFraming } = await import("./avatar-editing");
 const { Switch } = await import("./SettingsPrimitives");
+const { BotAvatar } = await import("./Avatar");
+
+const SAVED_SHAPE = {
+  id: "a".repeat(64),
+  name: "Bunny",
+  outline: [[32, 6], [48, 9], [57, 22], [56, 40], [44, 55], [26, 58], [11, 45], [7, 27]],
+  anchor: { x: 32, y: 34, scale: 0.5 },
+} as const satisfies CustomMascotShape;
+const SAVED_PROFILE: MascotProfile = {
+  version: 1,
+  shapes: [SAVED_SHAPE],
+  selected: { kind: "builtin", bodyId: "cursor" },
+};
+const SELECTED_PROFILE: MascotProfile = {
+  ...SAVED_PROFILE,
+  selected: { kind: "custom", shapeId: SAVED_SHAPE.id },
+};
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -335,6 +360,14 @@ describe("the bot panel in Simple mode", () => {
     expect(ofType(panel(bot), AvatarEditorCard)).toBeUndefined();
   });
 
+  it("passes the complete mascot profile into Simple avatar editing", () => {
+    const bot = makeBot({ mascotProfile: SELECTED_PROFILE });
+    const rendered = panel(bot);
+    expect(ofType(rendered, PanelHero)?.props.bot).toMatchObject({ mascotProfile: SELECTED_PROFILE });
+    (ofType(rendered, PanelHero)!.props.onToggleEditor as () => void)();
+    expect(ofType(panel(bot), AvatarEditorCard)?.props.bot).toMatchObject({ mascotProfile: SELECTED_PROFILE });
+  });
+
   it.each([
     ["overview", "bot", undefined], ["identity", "bot", undefined], ["slack", "bot", undefined],
     ["soul", "bot", undefined], ["skills", "bot", "skills"], ["memory", "bot", "memory"],
@@ -385,6 +418,11 @@ describe("the bot panel in Simple mode", () => {
 describe("the hero", () => {
   const hero = (bot: Bot, editorOpen = false) =>
     capture(() => PanelHero({ bot, activeState: "idle", patch, editorOpen, onToggleEditor: vi.fn() }));
+
+  it("passes the selected custom profile to the simple avatar preview", () => {
+    const bot = makeBot({ mascotProfile: SELECTED_PROFILE });
+    expect(ofType(hero(bot), BotAvatar)?.props.bot).toMatchObject({ mascotProfile: SELECTED_PROFILE });
+  });
 
   it("labels the avatar Edit avatar and shows whether the editor is open", () => {
     const rendered = hero(makeBot(), true);
@@ -450,10 +488,86 @@ describe("the hero", () => {
 describe("the avatar editor", () => {
   const editor = (bot: Bot) => capture(() => AvatarEditorCard({ bot, activeState: "idle", onPatch: patch, onClose }));
 
-  it("picks one of the ten bodies, ten Halloween bodies, twelve colors and a face for the mascot", () => {
+  it("opens the existing custom mascot library from the Simple Bot tab", () => {
+    const bot = makeBot({ mascotProfile: SAVED_PROFILE });
+    click(find(editor(bot), "data-avatar-custom-mascot"));
+    const opened = editor(bot);
+    const creator = ofType(opened, CustomMascotCreator)!;
+    expect(creator.props.bot).toBe(bot);
+    expect(creator.props.onSelectionStart).toBeTypeOf("function");
+    expect(find(opened, "data-panel-avatar-editor").props.className).toContain("overflow-y-auto");
+    expect(opened.html).toContain("Choose SVG");
+    expect(opened.html).toContain("Bunny");
+  });
+
+  it("starts selection before saving a saved mascot from the shared library", async () => {
+    fresh();
+    const bot = makeBot({ avatarUrl: "/api/attachments/photo.webp", avatarCrop: "circle", mascotProfile: SAVED_PROFILE });
+    const selectedBot = makeBot({ avatarUrl: "/api/attachments/photo.webp", avatarCrop: "mascot", mascotBody: "cursor", mascotProfile: SELECTED_PROFILE });
+    const onSelectionStart = vi.fn();
+    fixture.api = vi.fn(() => Promise.resolve({ bot: selectedBot }));
+    const library = capture(() => CustomMascotCreator({ bot, onSelectionStart, onClose }));
+
+    click(find(library, "aria-label", "Use Bunny"));
+    expect(onSelectionStart).toHaveBeenCalledOnce();
+    await Promise.resolve();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "botPatched", bot: selectedBot });
+  });
+
+  it("returns to builtins without losing the saved shape library", () => {
+    const bot = makeBot({ mascotProfile: SELECTED_PROFILE });
+    const rendered = editor(bot);
+    expect(find(rendered, "aria-label", "Use the Cursor body").props["aria-pressed"]).toBe(false);
+    click(find(rendered, "aria-label", "Use the Star body"));
+    expect(patch).toHaveBeenLastCalledWith({ mascotBody: "star" });
+    expect(bot.mascotProfile?.shapes).toEqual([SAVED_SHAPE]);
+
+    const afterSelection = makeBot({
+      mascotBody: "star",
+      mascotProfile: { ...SELECTED_PROFILE, selected: { kind: "builtin", bodyId: "star" } },
+    });
+    const returned = editor(afterSelection);
+    expect(find(returned, "aria-label", "Use the Star body").props["aria-pressed"]).toBe(true);
+    click(find(returned, "data-avatar-custom-mascot"));
+    expect(editor(afterSelection).html).toContain("Bunny");
+  });
+
+  it("drops a late generated avatar patch after a saved mascot selection starts", async () => {
+    const bot = makeBot({ avatarUrl: "/api/attachments/photo.webp", avatarCrop: "circle", mascotProfile: SAVED_PROFILE });
+    const selectedBot = makeBot({ avatarUrl: "/api/attachments/photo.webp", avatarCrop: "mascot", mascotBody: "cursor", mascotProfile: SELECTED_PROFILE });
+    let finishGeneration: (result: unknown) => void = () => {};
+    const pendingGeneration = new Promise<unknown>((resolve) => { finishGeneration = resolve; });
+    fixture.api = vi.fn((path: unknown) =>
+      typeof path === "string" && path.endsWith("/avatar/generate")
+        ? pendingGeneration
+        : Promise.resolve({ bot: selectedBot }),
+    );
+
+    click(find(editor(bot), "data-avatar-tab", "generate"));
+    const generate = ofType(editor(bot), AvatarImageGenerator)!.props.onGenerate as (direction: string) => Promise<void>;
+    const generation = generate("blue bunny");
+    await Promise.resolve();
+
+    click(find(editor(bot), "data-avatar-tab", "bot"));
+    click(find(editor(bot), "data-avatar-custom-mascot"));
+    const opened = editor(bot);
+    const creator = ofType(opened, CustomMascotCreator)!;
+    const onSelectionStart = creator.props.onSelectionStart as () => void;
+    onSelectionStart();
+    fixture.dispatch({ type: "botPatched", bot: selectedBot });
+    await Promise.resolve();
+
+    finishGeneration({ avatarUrl: "/api/attachments/generated.webp", bot: makeBot({ avatarUrl: "/api/attachments/generated.webp", avatarCrop: "circle" }) });
+    await generation;
+
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "botPatched", bot: selectedBot });
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("picks each available body, twelve colors and a face for the mascot", () => {
     const bot = makeBot();
     const rendered = editor(bot);
-    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(20);
+    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(BOT_BODY_IDS.length);
     expect(rendered.html).toContain(">Halloween<");
     click(find(rendered, "aria-label", "Use the Pumpkin body"));
     expect(patch).toHaveBeenLastCalledWith({ mascotBody: "pumpkin" });

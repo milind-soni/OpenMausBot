@@ -4,7 +4,7 @@
  * `node --experimental-strip-types`, so only erasable type syntax.
  */
 
-import { FACE_BOX } from "../../src/components/cursor-face-data.ts"
+import { FACE_BOX } from "../cursor-face-data.ts"
 
 type Point = [number, number]
 

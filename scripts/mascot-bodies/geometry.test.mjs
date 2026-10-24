@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyFit, boundsOf, fitTransform, flatten } from "./geometry.ts";
+import { applyFit, boundsOf, fitTransform, flatten } from "../../shared/mascot-geometry/geometry.ts";
 
 const FACE_BOX = 228.541;
 

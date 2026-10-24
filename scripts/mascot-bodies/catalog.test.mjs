@@ -9,8 +9,8 @@ import {
 } from "../../shared/mascot-bodies.ts";
 
 describe("the generated catalog", () => {
-  it("carries all ten bodies", () => {
-    expect(MASCOT_BODY_IDS).toHaveLength(10);
+  it("carries all eleven bodies", () => {
+    expect(MASCOT_BODY_IDS).toHaveLength(11);
     for (const id of MASCOT_BODY_IDS) expect(MASCOT_BODIES[id].id).toBe(id);
   });
 

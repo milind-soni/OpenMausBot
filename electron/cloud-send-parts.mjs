@@ -7,7 +7,7 @@ export const BOT_PARTS = Object.freeze({
   title: ["title"],
   description: ["description"],
   soul: ["soul"],
-  look: ["color", "mascotExpression", "mascotBody", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY"],
+  look: ["color", "mascotExpression", "mascotBody", "mascotProfile", "avatarCrop", "avatarZoom", "avatarFocusX", "avatarFocusY"],
   model: ["modelSelection"],
   access: ["approvalMode", "alwaysAllow"],
   voice: ["speakReplies", "replyStyle", "voice", "voiceNotes"],

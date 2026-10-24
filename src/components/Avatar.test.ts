@@ -10,6 +10,18 @@ import {
   type MausAvatarProps,
 } from "./Avatar";
 import { MASCOT_BODIES } from "../../shared/mascot-bodies";
+import { FACE_BOX } from "../../shared/cursor-face-data";
+import { customMascotOutlinePathData, type CustomMascotShape } from "../../shared/mascot-profile";
+
+const customShape: CustomMascotShape = {
+  id: "a".repeat(64),
+  name: "Test bunny",
+  outline: Array.from({ length: 48 }, (_, index) => {
+    const angle = (index / 48) * Math.PI * 2;
+    return [FACE_BOX / 2 + Math.cos(angle) * 82, FACE_BOX / 2 + Math.sin(angle) * 90] as const;
+  }),
+  anchor: { x: FACE_BOX / 2, y: FACE_BOX / 2, scale: 0.5 },
+};
 
 const render = (props: Partial<MausAvatarProps>) =>
   renderToStaticMarkup(createElement(MausAvatar, { color: "green", animated: false, ...props }));
@@ -83,6 +95,26 @@ describe("BotAvatar's two avatar outcomes", () => {
     const markup = renderBot({ avatarUrl: undefined, avatarCrop: "circle" });
     expect(markup).not.toContain("<img");
     expect(markup).toContain("<svg");
+  });
+
+  it("renders a selected custom outline through the native face and gradient renderer", () => {
+    const markup = renderBot({
+      avatarCrop: "mascot",
+      mascotBody: "cursor",
+      mascotProfile: {
+        version: 1,
+        shapes: [customShape],
+        selected: { kind: "custom", shapeId: customShape.id },
+      },
+    });
+    const path = customMascotOutlinePathData(customShape.outline);
+
+    expect(markup).toContain("<clipPath id=");
+    expect(markup).toContain(`<path d="${path}"></path></clipPath>`);
+    expect(markup).toContain(`<path d="${path}" fill="url(#`);
+    expect(markup).toContain("<linearGradient id=");
+    expect(markup).not.toContain("<image");
+    expect(markup).not.toContain("<rect");
   });
 });
 

@@ -15,7 +15,7 @@
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
 //     the egress gate (every connection to the internet goes through it) and the harness gate (only /api/internal/
 //     routes of this server). Nothing else on the server's loopback is reachable.
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 
 export type BoxNet = "isolated" | "shared";
 
@@ -100,7 +100,10 @@ export function argvPaths(args: readonly string[]): string[] {
   const paths: string[] = [];
   for (const arg of args) {
     const value = arg.startsWith("--") && arg.includes("=") ? arg.slice(arg.indexOf("=") + 1) : arg;
-    if (isAbsolute(value) && value.length > 1 && !paths.includes(value)) paths.push(resolve(value));
+    if (posix.isAbsolute(value) && value.length > 1) {
+      const path = posix.resolve(value);
+      if (!paths.includes(path)) paths.push(path);
+    }
   }
   return paths;
 }
@@ -184,14 +187,18 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
   }
   const readOnly = new Set<string>();
-  for (const path of [...(request.ro ?? []), ...argvPaths(request.args)]) {
-    const full = resolve(path);
+  const addReadOnly = (full: string, target: string) => {
     // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
-    if (covered(full) || readOnly.has(full)) continue;
-    if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
+    if (covered(full) || readOnly.has(full)) return;
+    if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) return;
     readOnly.add(full);
-    mounts.push({ kind: "ro", source: full, target: full, optional: true });
+    mounts.push({ kind: "ro", source: full, target, optional: true });
+  };
+  for (const path of request.ro ?? []) {
+    const full = resolve(path);
+    addReadOnly(full, full);
   }
+  for (const path of argvPaths(request.args)) addReadOnly(resolve(path), path);
 
   const options = ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--hostname", BOX_HOSTNAME];
   if (!mutate.has("share-pid")) options.push("--unshare-pid");
@@ -199,7 +206,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   if (net === "isolated") {
     options.push("--unshare-net");
     mounts.push({ kind: "dir", target: IN_BOX_SOCKET_DIR });
-    for (const bridge of setup.bridges) mounts.push({ kind: "bind", source: bridge.socket, target: join(IN_BOX_SOCKET_DIR, `${bridge.name}.sock`) });
+    for (const bridge of setup.bridges) mounts.push({ kind: "bind", source: bridge.socket, target: posix.join(IN_BOX_SOCKET_DIR, `${bridge.name}.sock`) });
   }
   if (cwd) options.push("--chdir", cwd);
   return { mounts, options, net, writable, botId };
@@ -238,5 +245,5 @@ export function visibleInBox(plan: BoxPlan, path: string): "rw" | "ro" | "none" 
 }
 
 export function inBoxSocket(name: string): string {
-  return join(IN_BOX_SOCKET_DIR, `${name}.sock`);
+  return posix.join(IN_BOX_SOCKET_DIR, `${name}.sock`);
 }

@@ -10,12 +10,12 @@
 import { writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 
-import { MOUTH_STROKE } from "../src/components/cursor-face-data.ts"
+import { MOUTH_STROKE } from "../shared/cursor-face-data.ts"
 import { BODY_DEFS, type BodyDef } from "./mascot-bodies/builders.ts"
-import { applyFit, boundsOf, fitTransform, flatten } from "./mascot-bodies/geometry.ts"
-import { maskFromPolylines } from "./mascot-bodies/raster.ts"
-import { fieldFromMask, largestInscribedCircle, type Sdf } from "./mascot-bodies/sdf.ts"
-import { buildClouds, maxScaleAt, report } from "./mascot-bodies/solve.ts"
+import { applyFit, boundsOf, fitTransform, flatten } from "../shared/mascot-geometry/geometry.ts"
+import { maskFromPolylines } from "../shared/mascot-geometry/raster.ts"
+import { fieldFromMask, largestInscribedCircle, type Sdf } from "../shared/mascot-geometry/sdf.ts"
+import { buildClouds, maxScaleAt, report } from "../shared/mascot-geometry/solve.ts"
 
 const DEFAULT_ID = "cursor"
 

@@ -740,13 +740,20 @@ it("parks a message behind outstanding teammate work when the bot opts in, then 
   const assignment = f.nodes().find((node: any) => node.parentId);
   await assigningTurnEnded(f);
 
-  const receipt = await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Also make sure the export is UTF-8.", threadId: f.chief.activeTaskId });
-  expect(receipt.queued).toBe(true);
-  expect(typeof receipt.queueId).toBe("string");
-  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Also make sure the export is UTF-8.")).toBe(false);
-  expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
-  expect(f.nodes().find((node: any) => node.id === assignment.id).status).toBe("running");
-  writeFileSync(gate, "finish after the message was parked");
+  await expect.poll(async () => {
+    const chief = (await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.chief.id);
+    return { busy: chief.busy, waitingForTeammates: chief.waitingForTeammates };
+  }, { timeout: 15_000 }).toEqual({ busy: false, waitingForTeammates: true });
+  try {
+    const receipt = await f.api(`/api/bots/${f.chief.id}/messages`, { text: "Also make sure the export is UTF-8.", threadId: f.chief.activeTaskId });
+    expect(receipt.queued).toBe(true);
+    expect(typeof receipt.queueId).toBe("string");
+    expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "Also make sure the export is UTF-8.")).toBe(false);
+    expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id)).toHaveLength(1);
+    expect(f.nodes().find((node: any) => node.id === assignment.id).status).toBe("running");
+  } finally {
+    writeFileSync(gate, "finish after the message was parked");
+  }
 
   expect((await f.wait()).status).toBe("settled");
   await expect.poll(() => f.evidence().filter((turn: any) => turn.botId === f.chief.id).length, { timeout: 20_000 }).toBe(3);

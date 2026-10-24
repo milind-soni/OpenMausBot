@@ -217,7 +217,7 @@ function CarvedAvatarComponent(
     let blinkAt = last + 1500 + Math.random() * 3500;
     let target: [number, number] = [0, 0];
     const step = (now: number) => {
-      const dt = Math.min(0.05, (now - last) / 1000);
+      const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
       last = now;
       const mood = moodFor(props.current.state);
       const rate = mood.glance ?? 1;

@@ -6,14 +6,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { openBridge, parseBridgeArgs } from "./box-bridge.ts";
 import { bridgedCommand, shellWord } from "./bridge.ts";
+import { testSocketPath } from "./test-socket-path.ts";
 
 const bridges = [{ name: "egress", port: 3128, socket: "/x/egress.sock" }, { name: "harness", port: 8799, socket: "/x/harness.sock" }];
 
-// The box runs only on a Linux Cloud home (detect.ts says "not-linux" anywhere else): the bridge is a POSIX shell
-// inside it, over unix sockets at POSIX paths, and Windows has neither.
-const linuxBox = describe.skipIf(process.platform === "win32");
-
-linuxBox("the in-box bridge command", () => {
+describe("the in-box bridge command", () => {
   it("with socat: a shell that starts one socat per bridge, waits for the first, then execs the engine with its argv untouched", () => {
     const { command, args } = bridgedCommand({ socat: "/usr/bin/socat", bridgeScript: "/app/box-bridge.js", node: "/usr/bin/node" }, bridges, "/usr/local/bin/claude", ["-p", "it's", "--x=1"]);
     expect(command).toBe("/bin/sh");
@@ -42,14 +39,14 @@ linuxBox("the in-box bridge command", () => {
   });
 });
 
-linuxBox("the Node bridge", () => {
+describe("the Node bridge", () => {
   const dirs: string[] = [];
   afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-  it("pipes a loopback connection to the unix socket and back", async () => {
+  it("pipes a loopback connection to the local socket and back", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-bridge-"));
     dirs.push(dir);
-    const socketPath = join(dir, "u.sock");
+    const socketPath = testSocketPath(dir, "u.sock");
     const echo = createServer((socket) => socket.on("data", (data) => socket.write(`echo:${data}`)));
     await new Promise<void>((resolve) => echo.listen(socketPath, resolve));
     const bridge = await openBridge({ port: 0, socket: socketPath });

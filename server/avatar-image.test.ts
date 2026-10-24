@@ -8,6 +8,7 @@ import {
   generateAvatarImage,
   snapshotAvatarGenerationState,
 } from "./avatar-image.ts";
+import { createMascotProfile, selectBuiltinMascot } from "../shared/mascot-profile.ts";
 
 const BOT = { name: "Scout", title: "Research agent", description: "Finds evidence quickly." };
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
@@ -41,7 +42,16 @@ describe("avatar image generation", () => {
     mutable.avatarUrl = "/api/attachments/new.webp";
 
     expect(avatarGenerationStateMatches(initial, mutable)).toBe(false);
-    expect(initial).toEqual({ avatarUrl: "/api/attachments/old.webp", avatarCrop: "circle" });
+    expect(initial).toEqual({ avatarUrl: "/api/attachments/old.webp", avatarCrop: "circle", mascotProfile: "null" });
+  });
+
+  it("detects a mascot selection edit made after image generation starts", () => {
+    const mutable = { avatarUrl: undefined, avatarCrop: "mascot" as const, mascotProfile: createMascotProfile("kitten") };
+    const initial = snapshotAvatarGenerationState(mutable);
+
+    mutable.mascotProfile = selectBuiltinMascot(mutable.mascotProfile, "star");
+
+    expect(avatarGenerationStateMatches(initial, mutable)).toBe(false);
   });
 
   it("uses one low-quality square GPT Image 2 request and decodes WebP bytes", async () => {

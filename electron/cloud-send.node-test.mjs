@@ -8,11 +8,20 @@ import vm from "node:vm";
 import { BOT_PARTS, differenceSignature, itemKey, parseSendSummary, pendingRows, planSend } from "./cloud-send-parts.mjs";
 import { botPatch, CloudSendError, createCloudSend, parseSendState, sendNotice, unanswered } from "./cloud-send.mjs";
 import { installCloudSend, openOwnerSession } from "./cloud-send-main.mjs";
+import { createCustomMascotFitContext, suggestCustomMascotAnchor } from "../shared/custom-mascot-fitting.ts";
+import { validateCustomMascotDefinition } from "../server/custom-mascot-validation.ts";
 
 const LOCAL = "http://127.0.0.1:4100";
 const CLOUD = "https://omb-u-1.fly.dev";
 const summary = (items) => ({ v: 1, appVersion: "0.1.117", items });
 const bot = (id, parts, extra = {}) => ({ key: itemKey.bot(id), kind: "bot", label: id, id, parts, ...extra });
+
+function bunnyMascotProfile() {
+  const outline = JSON.parse(readFileSync(new URL("../shared/mascot-fixtures/bunny-outline.json", import.meta.url), "utf8"));
+  const anchor = suggestCustomMascotAnchor(createCustomMascotFitContext(outline));
+  const shape = validateCustomMascotDefinition({ name: "Bunny", outline, anchor });
+  return { version: 1, shapes: [shape], selected: { kind: "custom", shapeId: shape.id } };
+}
 
 test("a part goes when it changed here and not there; My Cloud's own change is kept; what was removed there stays removed", () => {
   const here = summary([
@@ -75,6 +84,8 @@ test("a bot's fields reach My Cloud without Custom approval and without naming b
   const body = botPatch(ember, ["soul", "access", "team", "model"], new Set(["juno"]));
   assert.deepEqual(body, { soul: "Be brief.", alwaysAllow: ["Bash(ls)"], peers: ["juno"], modelSelection: { instanceId: "claude", model: "m" }, requireAvailableModel: true });
   assert.ok(!Object.values(BOT_PARTS).flat().includes("cwd"), "a working folder is this computer's");
+  const mascotProfile = bunnyMascotProfile();
+  assert.deepEqual(botPatch({ ...ember, mascotProfile }, ["look"], new Set()), { mascotProfile });
   assert.deepEqual(parseSendState({ auto: false, clouds: { "javascript:alert(1)": {}, [CLOUD]: { off: { a: "you", b: "nonsense" }, created: { "bot:x": true, "login:y": true }, creating: { "bot:z": true, "skill:q": true }, release: [{ id: "mcp:a", digest: "d" }, { id: 3 }] } } }),
     { v: 1, clouds: { [CLOUD]: { sent: {}, off: { a: "you" }, dismissed: "", last: null, whole: null, arrived: { bots: 0, updatedBots: 0, skills: 0, logins: 0, settings: 0, onePassword: false, chats: { conversations: 0, messages: 0 } },
       chats: {}, created: { "bot:x": true }, creating: { "bot:z": true }, release: [{ id: "mcp:a", digest: "d" }], files: {}, on: {} } } }, "nothing is kept of the switch that once sent by itself");

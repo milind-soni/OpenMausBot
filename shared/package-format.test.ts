@@ -240,14 +240,29 @@ describe("canonical form", () => {
 
 describe("files for older apps", () => {
   it("writes a v1 team that the v1 reader accepts", () => {
-    const result = downgradeToV1(parsePackageDocument(fixture("full-team.v2.json"), { trust: "org" }));
+    const input = fixture("full-team.v2.json");
+    const mascotId = "a".repeat(64);
+    input.package.agents[0]!.appearance.mascotProfile = {
+      version: 1,
+      shapes: [{
+        id: mascotId,
+        name: "Bunny",
+        outline: [[20, 100], [40, 50], [100, 20], [160, 50], [180, 100], [160, 150], [100, 180], [40, 150]],
+        anchor: { x: 112, y: 112, scale: 0.5 },
+      }],
+      selected: { kind: "custom", shapeId: mascotId },
+    };
+    const document = parsePackageDocument(input, { trust: "org" });
+    expect(document.package.agents[0]!.appearance.mascotProfile).toEqual(input.package.agents[0]!.appearance.mascotProfile);
+    const result = downgradeToV1(document);
     if ("error" in result) throw new Error(result.error);
     expect(result.dropped).toContain("package.publisher");
+    expect(result.dropped).toContain("agents[lead].appearance.mascotProfile");
     const v1 = parsePackageV1(result.document);
     expect(v1.package.chiefOfStaff).toBe("lead");
     expect(v1.package.routines).toEqual([expect.objectContaining({ key: "daily-digest", enabledAfterInstall: false })]);
     expect(v1.package.skills?.entries.map((skill) => skill.name)).toEqual(["pricing-policy", "research-brief"]);
-    expect(JSON.stringify(v1)).not.toMatch(/"avatar"|"seed"|"approval"|"connections"|"presets"|"brief"/);
+    expect(JSON.stringify(v1)).not.toMatch(/"avatar"|"mascotProfile"|"seed"|"approval"|"connections"|"presets"|"brief"/);
   });
 
   it("drops run on startup for an older app, and says so", () => {

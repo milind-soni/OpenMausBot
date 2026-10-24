@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { harnessPathAllowed, openHarnessGate, type HarnessGate } from "./harness-gate.ts";
+import { testSocketPath } from "./test-socket-path.ts";
 
 function call(socketPath: string, method: string, path: string, body?: string, headers: Record<string, string> = {}): Promise<{ status: number; body: string; headers: Record<string, string | string[] | undefined> }> {
   return new Promise((resolve, reject) => {
@@ -18,11 +19,7 @@ function call(socketPath: string, method: string, path: string, body?: string, h
   });
 }
 
-// The box runs only on a Linux Cloud home (detect.ts says "not-linux" anywhere else): its harness gate listens on a
-// unix socket, which Windows refuses at a file path (EACCES).
-const linuxBox = describe.skipIf(process.platform === "win32");
-
-linuxBox("the harness gate", () => {
+describe("the harness gate", () => {
   let upstream: Server, gate: HarnessGate, dir: string;
   const seen: Array<{ method: string; url: string; body: string; authorization: string | undefined }> = [];
   afterEach(async () => {
@@ -50,7 +47,7 @@ linuxBox("the harness gate", () => {
     });
     await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
     dir = mkdtempSync(join(tmpdir(), "omb-harness-"));
-    gate = await openHarnessGate({ socketPath: join(dir, "h.sock"), port: (upstream.address() as { port: number }).port });
+    gate = await openHarnessGate({ socketPath: testSocketPath(dir, "h.sock"), port: (upstream.address() as { port: number }).port });
   }
 
   it("forwards the harness routes with their method, query, body and bearer, and streams an event stream", async () => {

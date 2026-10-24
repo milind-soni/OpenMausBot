@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { maskFromPolylines } from "./raster.ts";
+import { maskFromPolylines } from "../../shared/mascot-geometry/raster.ts";
 
 const FACE_BOX = 228.541;
 const SIZE = 256;

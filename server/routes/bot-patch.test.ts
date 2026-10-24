@@ -1,14 +1,17 @@
 // The relocation guard's scan is the only VPS call this route makes; the mocked scan stands in for SSH
 // and lets each test mutate the store mid-scan deterministically.
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createCustomMascotFitContext, suggestCustomMascotAnchor } from "../../shared/custom-mascot-fitting.ts";
+import type { CustomMascotPoint, MascotProfile } from "../../shared/mascot-profile.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
+import { validateCustomMascotDefinition } from "../custom-mascot-validation.ts";
 import { Store, type BotRecord } from "../store.ts";
 import * as vps from "../vps-computer.ts";
 import type { ManagedVpsInventory } from "../vps-computer.ts";
@@ -77,6 +80,13 @@ function fixture() {
     return sent[0]!;
   };
   return { store, bot, activeVpsThreads, patch };
+}
+
+function bunnyMascotProfile(): MascotProfile {
+  const outline = JSON.parse(readFileSync(new URL("../../shared/mascot-fixtures/bunny-outline.json", import.meta.url), "utf8")) as CustomMascotPoint[];
+  const anchor = suggestCustomMascotAnchor(createCustomMascotFitContext(outline));
+  const shape = validateCustomMascotDefinition({ name: "Bunny", outline, anchor });
+  return { version: 1, shapes: [shape], selected: { kind: "custom", shapeId: shape.id } };
 }
 
 describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
@@ -238,5 +248,44 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
     expect(refused.status).toBe(409);
     expect(refused.body.error).toBe(VPS_BOT_ALIAS_CHANGE_ERROR);
     expect(scan).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("PATCH /api/bots/:id mascot profile", () => {
+  it("accepts an exact custom profile and rejects forged or clipped shapes without changing it", async () => {
+    const { store, bot, patch } = fixture();
+    const profile = bunnyMascotProfile();
+    const now = Date.now();
+    const client: RequestAuth = {
+      kind: "session", via: "bearer", scopes: ["client"],
+      session: { id: "phone", label: "Phone", scopes: ["client"], tokenHash: "0".repeat(64), createdAt: now, lastSeenAt: now, expiresAt: now + 60_000 },
+    };
+
+    const clientWrite = await patch(bot.id, { mascotProfile: profile }, { auth: client });
+    expect(clientWrite.status).toBe(403);
+    expect(clientWrite.body.error).toMatch(/not "mascotProfile"/);
+    expect(store.bot(bot.id)?.mascotProfile).not.toEqual(profile);
+
+    const accepted = await patch(bot.id, { mascotProfile: profile });
+
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.bot.mascotProfile).toEqual(profile);
+    expect(store.bot(bot.id)?.mascotProfile).toEqual(profile);
+
+    const beforeInvalid = structuredClone(store.bot(bot.id)?.mascotProfile);
+    const forged = { ...profile, shapes: profile.shapes.map((shape) => ({ ...shape, name: "Forged Bunny" })) };
+    const rejectedFingerprint = await patch(bot.id, { mascotProfile: forged });
+
+    expect(rejectedFingerprint.status).toBe(400);
+    expect(store.bot(bot.id)?.mascotProfile).toEqual(beforeInvalid);
+
+    const clipped = {
+      ...profile,
+      shapes: profile.shapes.map((shape) => ({ ...shape, anchor: { x: 0, y: 0, scale: 0.791 } })),
+    };
+    const rejectedGeometry = await patch(bot.id, { mascotProfile: clipped });
+
+    expect(rejectedGeometry.status).toBe(400);
+    expect(store.bot(bot.id)?.mascotProfile).toEqual(beforeInvalid);
   });
 });

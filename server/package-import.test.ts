@@ -4,10 +4,36 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PackageDocument } from "../shared/package-format.ts";
+import { FACE_BOX } from "../shared/cursor-face-data.ts";
+import { createCustomMascotFitContext, suggestCustomMascotAnchor } from "../shared/custom-mascot-fitting.ts";
+import { type CustomMascotPoint, type MascotProfile } from "../shared/mascot-profile.ts";
+import { validateCustomMascotDefinition } from "./custom-mascot-validation.ts";
 
 const FIXTURES = join(import.meta.dirname, "..", "shared", "package-fixtures");
 const fixture = (name: string): any => JSON.parse(readFileSync(join(FIXTURES, name), "utf8"));
 let home: string;
+
+function customMascotProfile(): MascotProfile {
+  const outline: CustomMascotPoint[] = Array.from({ length: 96 }, (_, index) => {
+    const angle = (index / 96) * Math.PI * 2;
+    return [FACE_BOX / 2 + Math.cos(angle) * 108, FACE_BOX / 2 + Math.sin(angle) * 108] as const;
+  });
+  const anchor = suggestCustomMascotAnchor(createCustomMascotFitContext(outline));
+  const shape = validateCustomMascotDefinition({ name: "Bunny", outline, anchor });
+  return { version: 1, shapes: [shape], selected: { kind: "custom", shapeId: shape.id } };
+}
+
+function packageMascotProfile(profile: MascotProfile): NonNullable<PackageDocument["package"]["agents"][number]["appearance"]["mascotProfile"]> {
+  return {
+    version: profile.version,
+    shapes: profile.shapes.map((shape) => ({
+      ...shape,
+      outline: shape.outline.map(([x, y]): [number, number] => [x, y]),
+      anchor: { ...shape.anchor },
+    })),
+    selected: { ...profile.selected },
+  };
+}
 
 async function installation(options: { refuse?: (name: string) => string | undefined; servers?: Record<string, unknown> } = {}) {
   home = mkdtempSync(join(tmpdir(), "omb-package-import-"));
@@ -109,6 +135,23 @@ describe("importing a whole team", () => {
     expect(result.brief).toBe(true);
     expect(result.skipped).toEqual([{ part: "presets[support]", reason: "presets_not_supported_yet" }]);
     expect(app.events.filter((kind) => kind === "bot")).toHaveLength(3);
+  });
+
+  it("imports validated custom mascot profiles and rolls back a stale fingerprint", async () => {
+    const app = await installation();
+    const document: PackageDocument = app.parsePackageDocument(fixture("full-team.v2.json"));
+    const profile = packageMascotProfile(customMascotProfile());
+    document.package.agents.find((agent) => agent.key === "lead")!.appearance.mascotProfile = profile;
+    const result = app.importer.importPackageDocument(document, { trust: "file", mode: "add" }, app.deps);
+    if (result.alreadyAdded) throw new Error("unexpected");
+    const lead = app.store.bot(result.bots.find((bot) => bot.installedPackage?.agentKey === "lead")!.id)!;
+    expect(lead.mascotProfile).toEqual(profile);
+
+    const stale = structuredClone(document);
+    stale.package.agents.find((agent) => agent.key === "lead")!.appearance.mascotProfile!.shapes[0]!.name = "Changed";
+    const before = app.snapshot();
+    expect(() => app.importer.importPackageDocument(stale, { trust: "file", mode: "add" }, app.deps)).toThrow(/fingerprint/);
+    expect(app.snapshot()).toBe(before);
   });
 
   it("brings a new install's chrome MausBot back in chrome from its own export", async () => {

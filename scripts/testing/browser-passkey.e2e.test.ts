@@ -19,6 +19,7 @@ if (!enabled) console.log("skipping browser passkey e2e: no agent-browser binary
 const out = mkdtempSync(join(tmpdir(), "omb-passkey-e2e-"));
 const home = userInfo().homedir;
 const machineEnv = { ...process.env, HOME: home, USERPROFILE: home };
+let preserveOutput = false;
 
 /** The step's request, and what the page shows once it ends. WebAuthn needs a registrable RP ID: localhost, not 127.0.0.1. */
 const PASSKEY_STEP = `<!doctype html><meta charset="utf-8"><title>Sign in - Google Accounts</title><h1>Verifying it’s you</h1>
@@ -29,7 +30,10 @@ const PASSKEY_STEP = `<!doctype html><meta charset="utf-8"><title>Sign in - Goog
     .then(() => { state.textContent = "Signed in"; }, (error) => { state.textContent = "Something went wrong: " + error.name; });
 </script>`;
 
-afterAll(async () => { await removeTempDir(out); });
+afterAll(async () => {
+  if (preserveOutput) console.error(`browser passkey diagnostics retained at ${out}`);
+  else await removeTempDir(out);
+});
 
 function text(result: unknown): string {
   const answer = result as { content?: Array<{ type?: string; text?: string }>; isError?: boolean } | null;
@@ -64,11 +68,17 @@ describe.skipIf(!enabled)("a passkey step in a bot's headless browser on agent-b
     const browser = engine ? { binary: engine, chrome: picked } : await ensureUiBrowser(process.env, () => {}, UI_TOOLS_DIR);
     const chrome = picked || browser.chrome || installedGoogleChrome(chromeHost({ dataDir: out, env: machineEnv }));
     if (!chrome || isHeadlessShell(chrome)) throw new Error(`a full Chrome is needed, not ${chrome ?? "nothing"}: set OMB_CHROME_PATH`);
-    await withBotBrowser({ engine: browser.binary, chrome, out, sessionPrefix: "omb-pk-e2e" }, async (call) => {
-      expect(await openOwnPageAsBot(call, fx.crossSiteUrl("/v3/signin/challenge/pk/presend"), (line) => console.log(line))).toBeNull();
-      expect(await pageSays(call, "document.getElementById('state').textContent", (state) => !state.includes("Waiting"))).toContain("Something went wrong: NotAllowedError");
-      await call("agent_browser_click", { selector: "#other" });
-      expect(await pageSays(call, "location.pathname", (path) => path.includes("selection"))).toContain("/v3/signin/challenge/selection");
-    });
+    try {
+      const log = (line: string) => console.error(line);
+      await withBotBrowser({ engine: browser.binary, chrome, out, sessionPrefix: "omb-pk-e2e", log }, async (call) => {
+        expect(await openOwnPageAsBot(call, fx.crossSiteUrl("/v3/signin/challenge/pk/presend"), log)).toBeNull();
+        expect(await pageSays(call, "document.getElementById('state').textContent", (state) => !state.includes("Waiting"))).toContain("Something went wrong: NotAllowedError");
+        await call("agent_browser_click", { selector: "#other" });
+        expect(await pageSays(call, "location.pathname", (path) => path.includes("selection"))).toContain("/v3/signin/challenge/selection");
+      });
+    } catch (error) {
+      preserveOutput = true;
+      throw error;
+    }
   }, 240_000);
 });

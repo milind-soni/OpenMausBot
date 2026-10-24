@@ -1,4 +1,5 @@
-import { ImagePlus, Loader2, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { ImagePlus, Loader2, PawPrint, Trash2 } from "lucide-react";
 
 import type { Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -16,6 +17,7 @@ import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bod
 import type { BotBodyId } from "../../shared/bot-body";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
+import { CustomMascotCreator } from "./CustomMascotCreator";
 import { AvatarFraming, OrganizationAvatarIcons, RESET_MASCOT_PATCH, useAvatarImage, type AvatarPatch } from "./avatar-editing";
 import { t } from "@/lib/i18n";
 
@@ -30,6 +32,7 @@ export function BotProfileAvatarCard({
   mascotMotion: { kind: Exclude<MausMotion, "none">; nonce: number } | null;
   onPatch: (patch: AvatarPatch) => void;
 }) {
+  const [customMascotOpen, setCustomMascotOpen] = useState(false);
   const { fileRef, crop, uploading, generating, setSavingConnection, busy, error, upload, removeImage, generate } = useAvatarImage(bot, onPatch);
 
   return (
@@ -93,6 +96,23 @@ export function BotProfileAvatarCard({
         </div>
         <div className="mt-1.5 text-[11.5px] text-ink-secondary">{t("botIdentity.imageTypes")}</div>
 
+        <button
+          type="button"
+          disabled={busy}
+          aria-expanded={customMascotOpen}
+          aria-controls={`custom-mascot-creator-${bot.id}`}
+          onClick={() => setCustomMascotOpen((open) => !open)}
+          className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-hairline/50 px-3 py-2 text-[12.5px] font-medium text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"
+        >
+          <PawPrint size={14} aria-hidden="true" />
+          {t("mascot.creator.open")}
+        </button>
+        {customMascotOpen && (
+          <div id={`custom-mascot-creator-${bot.id}`}>
+            <CustomMascotCreator bot={bot} disabled={busy} onClose={() => setCustomMascotOpen(false)} />
+          </div>
+        )}
+
         <div className="mb-2 mt-4 text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">
           {t("botIdentity.shape")}
         </div>
@@ -135,7 +155,7 @@ export function BotProfileAvatarCard({
                   title={expression}
                   aria-label={`Use ${expression} expression`}
                 >
-                  <MausAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state={expression} size={42} animated={false} />
+                  <BotAvatar bot={bot} state={expression} size={42} animated={false} />
                 </button>
               ))}
             </div>
@@ -202,7 +222,9 @@ function BodyButton({ id, name, bot, busy, onPatch }: {
   busy: boolean;
   onPatch: (patch: AvatarPatch) => void;
 }) {
-  const selected = (bot.mascotBody ?? "cursor") === id;
+  const selected = bot.mascotProfile
+    ? bot.mascotProfile.selected.kind === "builtin" && bot.mascotProfile.selected.bodyId === id
+    : (bot.mascotBody ?? "cursor") === id;
   return (
     <button
       type="button"

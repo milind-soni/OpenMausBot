@@ -1,34 +1,30 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { engineInstallRoots } from "../engine-roots.ts";
 import { BOX_MUTATIONS, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
 
-const home = "/data";
-const dataDir = "/data/.openmausbot";
+const home = resolve("/data");
+const dataDir = join(home, ".openmausbot");
 const setup = (mutate?: BoxMutation[]): BoxSetup => ({
   dataDir, home, codeRoots: ["/app"], engineRoots: engineInstallRoots(dataDir), seccompFd: 3,
-  bridges: [{ name: "egress", port: 3128, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }],
+  bridges: [{ name: "egress", port: 3128, socket: join(dataDir, "box", "egress.sock") }, { name: "harness", port: 8799, socket: join(dataDir, "box", "harness.sock") }],
   mutate: mutate ? new Set(mutate) : undefined,
 });
 const cwd = join(dataDir, "task-workspaces", "bot-a", "thread-1");
 const turn = (mutate?: BoxMutation[]) => planBox(setup(mutate), {
   command: "/usr/local/bin/claude", args: ["-p", "--mcp-config", "/tmp/omb-mcp-x/mcp.json", "--append-system-prompt-file=/tmp/omb-system-y/prompt.txt"],
-  cwd, env: { PATH: "/usr/bin", HOME: home, CLAUDE_CONFIG_DIR: "/data/.claude" }, rw: [join(dataDir, "perm-abc.sock")],
+  cwd, env: { PATH: "/usr/bin", HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude") }, rw: [join(dataDir, "perm-abc.sock")],
 });
 
-// The box runs only on a Linux Cloud home (detect.ts says "not-linux" anywhere else): its plan is bubblewrap's argv
-// over POSIX paths, which Windows' path module would write with drive letters and backslashes.
-const linuxBox = describe.skipIf(process.platform === "win32");
-
-linuxBox("the box plan", () => {
+describe("the box plan", () => {
   it("shows the turn its own folders and the code, and nothing else of the data folder", () => {
     const plan = turn();
     expect(plan.botId).toBe("bot-a");
     expect(visibleInBox(plan, cwd)).toBe("rw");
     expect(visibleInBox(plan, join(dataDir, "workspaces", "bot-a", "MEMORY.md"))).toBe("rw");
     expect(visibleInBox(plan, join(dataDir, "perm-abc.sock"))).toBe("rw");
-    expect(visibleInBox(plan, "/data/.claude/settings.json")).toBe("rw");
+    expect(visibleInBox(plan, join(home, ".claude", "settings.json"))).toBe("rw");
     expect(visibleInBox(plan, "/tmp/omb-mcp-x/mcp.json")).toBe("ro");
     expect(visibleInBox(plan, "/tmp/omb-system-y/prompt.txt")).toBe("ro");
     expect(visibleInBox(plan, "/app/dist-server/index.js")).toBe("ro");
@@ -56,7 +52,7 @@ linuxBox("the box plan", () => {
     expect(args[order[1]! + 1]).toBe(dataDir);
     expect(order[0]).toBeLessThan(order[1]!);
     expect(order[1]).toBeLessThan(order[2]!);
-    expect(text).toContain(`--dir /run/omb --bind ${dataDir}/box/egress.sock /run/omb/egress.sock --bind ${dataDir}/box/harness.sock /run/omb/harness.sock`);
+    expect(text).toContain(`--dir /run/omb --bind ${join(dataDir, "box", "egress.sock")} /run/omb/egress.sock --bind ${join(dataDir, "box", "harness.sock")} /run/omb/harness.sock`);
     expect(text).not.toContain("--new-session");
   });
 
@@ -117,9 +113,9 @@ linuxBox("the box plan", () => {
   });
 
   it("a cwd outside the data folder is the turn's folder; a bot named by the caller gets its own folder", () => {
-    const plan = planBox(setup(), { command: "/usr/bin/codex", args: [], cwd: "/data/projects/site", env: { HOME: home }, botId: "bot-z" });
+    const plan = planBox(setup(), { command: "/usr/bin/codex", args: [], cwd: join(home, "projects", "site"), env: { HOME: home }, botId: "bot-z" });
     expect(plan.botId).toBe("bot-z");
-    expect(visibleInBox(plan, "/data/projects/site/index.html")).toBe("rw");
+    expect(visibleInBox(plan, join(home, "projects", "site", "index.html"))).toBe("rw");
     expect(visibleInBox(plan, join(dataDir, "workspaces", "bot-z"))).toBe("rw");
     expect(visibleInBox(plan, join(dataDir, "workspaces", "bot-y"))).toBe("none");
   });
@@ -128,7 +124,7 @@ linuxBox("the box plan", () => {
     const own = join(dataDir, "engine-homes", "member-aaaaaaaaaaaaaaaa"), other = join(dataDir, "engine-homes", "member-bbbbbbbbbbbbbbbb");
     const plan = planBox(setup(), {
       command: "/usr/local/bin/claude", args: [], cwd, env: { HOME: own, CLAUDE_CONFIG_DIR: `${own}/.claude-work`, CODEX_HOME: `${own}/.omb-folders/CODEX_HOME-abc` },
-      home: own, shared: [{ source: "/data/.claude/.credentials.json", target: `${own}/.claude/.credentials.json` }, { source: "/data/x", target: "/elsewhere/x" }],
+      home: own, shared: [{ source: join(home, ".claude", ".credentials.json"), target: join(own, ".claude", ".credentials.json") }, { source: join(home, "x"), target: "/elsewhere/x" }],
     });
     expect(visibleInBox(plan, `${own}/.claude/projects/p/s.jsonl`)).toBe("rw");
     expect(visibleInBox(plan, `${own}/.claude/.credentials.json`)).toBe("rw");
@@ -144,19 +140,20 @@ linuxBox("the box plan", () => {
     expect(args).not.toContain(home);
     expect(at("--tmpfs", dataDir)).toBeGreaterThan(-1);
     expect(at("--tmpfs", dataDir)).toBeLessThan(at("--bind", own));
-    expect(at("--bind", own)).toBeLessThan(at("--bind-try", `${own}/.claude/.credentials.json`));
-    expect(args.join(" ")).toContain(`--bind-try /data/.claude/.credentials.json ${own}/.claude/.credentials.json`);
-    expect(args.filter((arg) => arg.startsWith(`${own}/.omb-folders`) || arg === `${own}/.claude-work`)).toEqual([]);
+    expect(at("--bind", own)).toBeLessThan(at("--bind-try", join(own, ".claude", ".credentials.json")));
+    expect(args.join(" ")).toContain(`--bind-try ${join(home, ".claude", ".credentials.json")} ${join(own, ".claude", ".credentials.json")}`);
+    expect(args.filter((arg) => arg.startsWith(join(own, ".omb-folders")) || arg === join(own, ".claude-work"))).toEqual([]);
     // Without an engine home (a My Cloud, a desktop) the box has the server's HOME as before.
     expect(visibleInBox(turn(), "/data/.claude/projects/p/s.jsonl")).toBe("rw");
   });
 
   it("a data folder outside HOME is simply not there", () => {
-    const plan = planBox({ ...setup(), dataDir: "/srv/omb", home: "/home/maus" }, { command: "/usr/bin/x", args: [], cwd: "/srv/omb/task-workspaces/b/t", env: {} });
-    expect(visibleInBox(plan, "/srv/omb/messages.db")).toBe("none");
-    expect(visibleInBox(plan, "/srv/omb/task-workspaces/b/t")).toBe("rw");
-    expect(visibleInBox(plan, "/srv/omb/workspaces/b")).toBe("rw");
-    expect(bwrapArgs(plan).join(" ")).not.toContain("--tmpfs /srv/omb");
+    const separateDataDir = resolve("/srv/omb"), separateHome = resolve("/home/maus");
+    const plan = planBox({ ...setup(), dataDir: separateDataDir, home: separateHome }, { command: "/usr/bin/x", args: [], cwd: join(separateDataDir, "task-workspaces", "b", "t"), env: {} });
+    expect(visibleInBox(plan, join(separateDataDir, "messages.db"))).toBe("none");
+    expect(visibleInBox(plan, join(separateDataDir, "task-workspaces", "b", "t"))).toBe("rw");
+    expect(visibleInBox(plan, join(separateDataDir, "workspaces", "b"))).toBe("rw");
+    expect(bwrapArgs(plan).join(" ")).not.toContain(`--tmpfs ${separateDataDir}`);
   });
 
   it("each mutation opens exactly the hole it names", () => {
@@ -185,9 +182,9 @@ linuxBox("the box plan", () => {
 
   it("reads the bot and conversation off a task workspace, and absolute paths off the command line", () => {
     expect(taskWorkspaceIds(cwd, dataDir)).toEqual({ botId: "bot-a", threadId: "thread-1" });
-    expect(taskWorkspaceIds("/data/projects/x", dataDir)).toBeNull();
+    expect(taskWorkspaceIds(join(home, "projects", "x"), dataDir)).toBeNull();
     expect(taskWorkspaceIds(join(dataDir, "task-workspaces"), dataDir)).toBeNull();
     expect(taskWorkspaceIds(join(dataDir, "task-workspaces", "../../etc", "x"), dataDir)).toBeNull();
-    expect(argvPaths(["-p", "--mcp-config", "/tmp/a/mcp.json", "--settings=/tmp/b/s.json", "/", "relative/file", "--model", "x"])).toEqual(["/tmp/a/mcp.json", "/tmp/b/s.json"]);
+    expect(argvPaths(["-p", "--mcp-config", "/tmp/a/../a/mcp.json", "/tmp/a/mcp.json", "--settings=/tmp/b/s.json/", "/", "relative/file", "--model", "x"])).toEqual(["/tmp/a/mcp.json", "/tmp/b/s.json"]);
   });
 });

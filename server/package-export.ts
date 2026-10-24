@@ -29,6 +29,19 @@ import {
   type PackageRoutine,
   type PackageRoutineSchedule,
 } from "../shared/package-format.ts";
+import type { MascotProfile } from "../shared/mascot-profile.ts";
+
+function portableMascotProfile(profile: MascotProfile): NonNullable<PackageAgent["appearance"]["mascotProfile"]> {
+  return {
+    version: profile.version,
+    shapes: profile.shapes.map((shape) => ({
+      ...shape,
+      outline: shape.outline.map(([x, y]): [number, number] => [x, y]),
+      anchor: { ...shape.anchor },
+    })),
+    selected: { ...profile.selected },
+  };
+}
 
 function portableKey(value: string, fallback: string, used: Set<string>): string {
   const stem = value
@@ -211,6 +224,7 @@ export function createBotPackageExport(input: {
     const appearance: BotPackageDefinition["agents"][number]["appearance"] = { color: bot.color };
     if (bot.mascotExpression) appearance.mascotExpression = bot.mascotExpression;
     if (bot.mascotBody) appearance.mascotBody = bot.mascotBody;
+    if (bot.mascotProfile?.shapes.length) appearance.mascotProfile = portableMascotProfile(bot.mascotProfile);
     const agent: BotPackageDefinition["agents"][number] = {
       key: idToKey.get(bot.id)!,
       name: bot.name,
@@ -568,6 +582,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
     const appearance: PackageAgent["appearance"] = { color: bot.color };
     if (bot.mascotExpression) appearance.mascotExpression = bot.mascotExpression;
     if (bot.mascotBody) appearance.mascotBody = bot.mascotBody;
+    if (bot.mascotProfile?.shapes.length) appearance.mascotProfile = portableMascotProfile(bot.mascotProfile);
     const offered = input.avatars?.[bot.id];
     if (offered !== undefined) {
       const crop = bot.avatarCrop === "rounded" || bot.avatarCrop === "square" ? bot.avatarCrop : "circle";

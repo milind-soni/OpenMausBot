@@ -36,6 +36,7 @@ import {
   type Action,
 } from "./store";
 import { LAST_CONVERSATION_KEY } from "@/lib/last-conversation";
+import { duplicateBotProfile, restrictedCopyRequest } from "@/lib/bot-duplicate";
 import { cacheDesktopCapabilities, desktopCapabilitiesNow } from "@/lib/desktop";
 import { LAST_BOT_SECTION_KEY } from "@/lib/last-bot-section";
 import { transcriptLookups } from "@/lib/transcript-derivations";
@@ -74,6 +75,41 @@ describe("mounted Data view context", () => {
     expect(opened.dataView).toEqual(view);
     expect(opened.dataResultFocus).toBeNull();
     expect(reducer(opened, { type: "dataView", view: null }).dataView).toBeNull();
+  });
+});
+
+describe("bot duplication payload", () => {
+  it("carries saved mascot snapshots in bot creation, not in the later profile patch", () => {
+    const mascotProfile = {
+      version: 1,
+      shapes: [{
+        id: "a".repeat(64),
+        name: "Bunny",
+        outline: [[10, 10], [30, 10], [30, 30], [10, 30]],
+        anchor: { x: 20, y: 20, scale: 0.5 },
+      }],
+      selected: { kind: "builtin", bodyId: "star" },
+    } as unknown as Bot["mascotProfile"];
+    const source = {
+      id: "source",
+      name: "Atlas",
+      title: "Guide",
+      description: "Keeps the path clear.",
+      notifications: true,
+      color: "blue",
+      modelSelection: { instanceId: "codex", model: "test-model" },
+      mascotProfile,
+    } as unknown as Bot;
+
+    const createBody = JSON.parse(JSON.stringify(restrictedCopyRequest(source)));
+    expect(createBody).toMatchObject({
+      mascotProfile: {
+        shapes: [{ id: "a".repeat(64), name: "Bunny" }],
+        selected: { kind: "builtin", bodyId: "star" },
+      },
+    });
+    expect(duplicateBotProfile(source)).toMatchObject({ name: "Atlas copy", title: "Guide" });
+    expect(duplicateBotProfile(source)).not.toHaveProperty("mascotProfile");
   });
 });
 

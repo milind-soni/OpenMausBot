@@ -5,6 +5,8 @@ import type { WireBot } from "../../shared/wire.ts";
 import { deleteAttachment, saveImage } from "../attachments.ts";
 import { avatarGenerationRequestSchema, avatarGenerationStateMatches, generateAvatarImage, snapshotAvatarGenerationState } from "../avatar-image.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
+import { validateCustomMascotDefinition } from "../custom-mascot-validation.ts";
+import { MascotProfileValidationError } from "../../shared/mascot-profile.ts";
 import { commandAllowlistCandidate, type CommandAllowlistStore } from "../command-allowlist.ts";
 import type { AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -59,12 +61,40 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const requirePinnedClientThread = pinnedClientThread(auth, req);
+    m = path.match(/^\/api\/bots\/([\w-]+)\/mascot-shapes$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => key !== "shape")) {
+        return json(res, 400, { error: "body must contain only a shape" });
+      }
+      let shape: ReturnType<typeof validateCustomMascotDefinition>;
+      try {
+        shape = validateCustomMascotDefinition(body.shape);
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : "custom mascot is invalid" });
+      }
+      let bot: BotRecord | null;
+      try {
+        bot = store.addOrSelectMascotShape(m[1], shape);
+      } catch (error) {
+        if (error instanceof MascotProfileValidationError) {
+          return json(res, 400, { error: error.message });
+        }
+        console.error("[mascot] could not save selected shape", error);
+        throw new Error("custom mascot could not be saved");
+      }
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const visible = wireBot(bot);
+      broadcast({ kind: "bot", bot: visible });
+      return json(res, 201, { bot: visible });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/avatar\/generate$/);
     if (m && method === "POST") {
       const existing = store.bot(m[1]);
       if (!existing) return json(res, 404, { error: "no such bot" });
       // Snapshot the fields this request owns before the first await, so a late result cannot win.
       const initialAvatar = snapshotAvatarGenerationState(existing);
+      const initialAppearanceRevision = store.appearanceRevisions.get(existing);
       const parsed = avatarGenerationRequestSchema.safeParse(await readBody(req));
       if (!parsed.success) {
         return json(res, 400, { error: `prompt must be at most 400 characters` });
@@ -72,7 +102,8 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       const generated = await generateAvatarImage(cfg, existing, parsed.data.prompt);
       const current = store.bot(existing.id);
       if (!current) return json(res, 404, { error: "no such bot" });
-      if (!avatarGenerationStateMatches(initialAvatar, current)) {
+      if (current !== existing || store.appearanceRevisions.get(current) !== initialAppearanceRevision ||
+          !avatarGenerationStateMatches(initialAvatar, current)) {
         return json(res, 409, { error: "avatar changed while generation was in progress" });
       }
       const saved = saveImage(generated.bytes, generated.mime);

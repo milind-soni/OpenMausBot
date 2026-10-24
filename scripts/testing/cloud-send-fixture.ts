@@ -324,6 +324,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
           teamServer.send("stop");
           await waitForExit(teamServer, { graceMs: 10_000 });
         } else await waitForExit(teamServer, { signal: "SIGTERM" });
+        if (stopOverIpc && teamServer.exitCode !== 0) throw new Error(`team fixture did not stop cleanly (exitCode=${teamServer.exitCode}, signalCode=${teamServer.signalCode})`);
         teamServer = await startTeam(more);
       },
     };

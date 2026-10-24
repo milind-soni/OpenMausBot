@@ -1,6 +1,20 @@
 import { describe, expect, it } from "vitest";
 
+import { FACE_BOX } from "../shared/cursor-face-data.ts";
+import { createCustomMascotFitContext, suggestCustomMascotAnchor } from "../shared/custom-mascot-fitting.ts";
+import { type CustomMascotPoint, type MascotProfile } from "../shared/mascot-profile.ts";
+import { validateCustomMascotDefinition } from "./custom-mascot-validation.ts";
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
+
+function customMascotProfile(): MascotProfile {
+  const outline: CustomMascotPoint[] = Array.from({ length: 96 }, (_, index) => {
+    const angle = (index / 96) * Math.PI * 2;
+    return [FACE_BOX / 2 + Math.cos(angle) * 108, FACE_BOX / 2 + Math.sin(angle) * 108] as const;
+  });
+  const anchor = suggestCustomMascotAnchor(createCustomMascotFitContext(outline));
+  const shape = validateCustomMascotDefinition({ name: "Bunny", outline, anchor });
+  return { version: 1, shapes: [shape], selected: { kind: "custom", shapeId: shape.id } };
+}
 
 describe("team manifests", () => {
   it("round-trips optional soul exactly and rejects over-budget Unicode", () => {
@@ -52,6 +66,26 @@ describe("team manifests", () => {
     });
     expect(manifest.team).not.toHaveProperty("room");
     expect(JSON.stringify(manifest)).not.toMatch(/bot-a|bot-b|thread|model|permission|message/i);
+  });
+
+  it("round-trips validated custom mascot profiles and omits empty libraries", () => {
+    const profile = customMascotProfile();
+    const manifest = createTeamManifest({ name: "Makers", memberIds: ["one"] }, [{
+      id: "one", name: "One", title: "", description: "", color: "blue", mascotProfile: profile,
+    }]);
+    expect(manifest.team.members[0]!.appearance.mascotProfile).toEqual(profile);
+    const parsed = parseTeamManifest(manifest).team.members[0]!;
+    expect(importedMemberProfile(parsed, new Set()).mascotProfile).toEqual(profile);
+
+    const stale = structuredClone(manifest);
+    stale.team.members[0]!.appearance.mascotProfile!.shapes[0]!.name = "Changed";
+    expect(() => importedMemberProfile(parseTeamManifest(stale).team.members[0]!, new Set())).toThrow(/fingerprint/);
+
+    const empty: MascotProfile = { version: 1, shapes: [], selected: { kind: "builtin", bodyId: "cursor" } };
+    const withoutShapes = createTeamManifest({ name: "Makers", memberIds: ["one"] }, [{
+      id: "one", name: "One", title: "", description: "", color: "blue", mascotProfile: empty,
+    }]);
+    expect(withoutShapes.team.members[0]!.appearance).not.toHaveProperty("mascotProfile");
   });
 
   it("parses legacy room files while dropping unrelated settings", () => {

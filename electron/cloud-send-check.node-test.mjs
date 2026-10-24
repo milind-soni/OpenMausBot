@@ -28,6 +28,13 @@ test("a move's check finds nothing missing when My Cloud holds all this computer
   assert.deepEqual(manifestGaps(here, there).parts, [{ key: "bot:ember", label: "Ember", parts: ["team"] }], "the same part never recorded as taken is not");
 });
 
+test("a missing mascot profile hash is reported as an appearance-part gap", () => {
+  const here = manifest({ items: manifest().items.map((item) => item.key === "bot:ember" ? { ...item, parts: { ...item.parts, look: "profile-hash" } } : item) });
+  const there = manifest();
+
+  assert.deepEqual(manifestGaps(here, there).parts, [{ key: "bot:ember", label: "Ember", parts: ["look"] }]);
+});
+
 test("a part changed on both sides since it last went keeps My Cloud's, and so does one only My Cloud changed; one only this computer changed is missing", () => {
   const here = manifest({ items: manifest().items.map((item) => item.key === "bot:ember" ? { ...item, parts: { soul: "s1", team: "t-here" } } : item) });
   const there = manifest({ items: manifest().items.map((item) => item.key === "bot:ember" ? { ...item, parts: { soul: "s1", team: "t-there" } } : item) });

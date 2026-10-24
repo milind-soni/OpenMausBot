@@ -154,16 +154,15 @@ describe("the chat-app tools", () => {
       const names = availableTools(profile).map((tool) => tool.name);
       expect(names.slice(names.indexOf("show_widget"), names.indexOf("show_widget") + 4)).toEqual(["show_widget", "update_widget", "show_html", "update_html"]);
     }
-    const tools = new Map(availableTools(PROFILE).map((tool) => [tool.name, tool as { description: string; inputSchema: { required: string[] }; annotations?: unknown }]));
+    const tools = new Map(availableTools(PROFILE).map((tool) => [tool.name, tool as { description: string; inputSchema: { required: string[]; properties: Record<string, unknown> }; annotations?: unknown }]));
     expect(tools.get("show_html")!.description).toMatch(/^Show a small self-contained web page in this chat, where the person watches it appear and can point at a part to change: /);
     expect(tools.get("show_html")!.description).toContain("or `jsx`, one React component file with a default export");
-    // Its last sentence points a dashboard at the bundled data-dashboards skill.
     expect(tools.get("show_html")!.description).toMatch(/At most 256 KB\. Never put secrets in it\. Not available in rooms\. For a data dashboard, follow the data-dashboards skill\.$/);
     expect(tools.get("show_html")!.inputSchema.required).toEqual(["title"]);
     expect(tools.get("update_html")!.description).toBe("Replace a page you showed with show_html, in place, with new `html`, `jsx` or `path`. `app_id` is the id show_html returned. The page reloads, so anything the person did in it is lost.");
     expect(tools.get("update_html")!.inputSchema.required).toEqual(["app_id"]);
     for (const name of ["show_html", "update_html"]) {
-      expect(Object.keys((tools.get(name)!.inputSchema as unknown as { properties: object }).properties), name).toEqual(expect.arrayContaining(["html", "jsx", "path", "title"]));
+      expect(Object.keys(tools.get(name)!.inputSchema.properties), name).toEqual(expect.arrayContaining(["html", "jsx", "path", "title"]));
       expect(Buffer.byteLength(JSON.stringify(tools.get(name))), name).toBeLessThan(12 * 1024);
     }
     for (const name of ["show_html", "update_html"]) expect(tools.get(name), name).not.toHaveProperty("annotations");

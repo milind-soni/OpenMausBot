@@ -1,7 +1,14 @@
 /** Made with Blob Studio. */
 import React, { useEffect, useId, useMemo, useRef } from 'react'
 
-import { MASCOT_BODIES } from "../../shared/mascot-bodies"
+import {
+  CursorSilhouetteBody,
+  CursorSilhouetteClipPath,
+  DEFAULT_SILHOUETTE,
+  customMascotSilhouette,
+  isCustomCursorSilhouette,
+  type CursorSilhouette,
+} from "./custom-cursor-silhouette"
 import {
   EXPRESSIONS,
   EXPRESSION_COUNT,
@@ -13,12 +20,15 @@ import {
   MOUTH_STROKE,
   mouthFrame,
   type Ring,
-} from "./cursor-face-data"
+} from "../../shared/cursor-face-data.ts"
 import { GLYPH_EASE_MS, MOTION, VIEW_SPAN, bodyTransform, faceTravelUnits, morphUnitsPerMs, nextMascotFrame, type BodyMotion } from "./mascot-motion"
 import { mascotClock, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock"
 
 export { MOTION, bodyTransform }
 export type { BodyMotion }
+export { DEFAULT_SILHOUETTE, customMascotSilhouette }
+export { isCustomCursorSilhouette }
+export type { BuiltinCursorSilhouette, CustomCursorSilhouette, CursorSilhouette } from "./custom-cursor-silhouette"
 export {
   EXPRESSIONS,
   EXPRESSION_COUNT,
@@ -31,19 +41,6 @@ export {
   mouthFrame,
 }
 export type { Ring }
-
-
-export interface CursorSilhouette {
-  name: string
-  fit: string
-  /** SVG markup for the body. The token {{GRADIENT}} is replaced with the instance gradient. */
-  body: string
-  clip: string
-  anchor: { x: number; y: number; scale: number }
-}
-
-const { id: _cursorBodyId, ...cursorSilhouette } = MASCOT_BODIES.cursor;
-export const DEFAULT_SILHOUETTE: CursorSilhouette = cursorSilhouette;
 
 export const DEFAULT_GRADIENT: [string, string, string] = ["#9FE6B5","#3FAE6E","#1C7A4C"]
 
@@ -1239,7 +1236,6 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
 
     const dimension = typeof size === 'number' ? `${size}px` : size
     const label = title === undefined ? `${silhouette.name} mascot` : title
-    const body = silhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
 
     return (
       <svg
@@ -1259,19 +1255,18 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
             <stop offset="55%" stopColor={gradient[1]} />
             <stop offset="100%" stopColor={gradient[2]} />
           </linearGradient>
-          {/* The fit goes on the clipPath itself: browsers ignore a <g> inside one, which is also why silhouette.clip is pre-flattened. */}
-          <clipPath
-            id={`${uid}-clip`}
-            transform={silhouette.fit || undefined}
-            dangerouslySetInnerHTML={{ __html: silhouette.clip }}
-          />
+          <CursorSilhouetteClipPath silhouette={silhouette} id={`${uid}-clip`} />
         </defs>
         <g transform={flip ? `translate(${FACE_BOX} 0) scale(-1 1)` : undefined}>
           <g ref={trailLayer} />
           <g ref={bodyGroup}>
           <g ref={bodyContent}>
-          {picture ? <image href={picture} x="-15" y="-15" width={VIEW_SPAN} height={VIEW_SPAN} preserveAspectRatio="none" /> : <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />}
-          <g clipPath={`url(#${uid}-clip)`} visibility={picture ? 'hidden' : undefined}>
+          {picture ? (
+            <image href={picture} x="-15" y="-15" width={VIEW_SPAN} height={VIEW_SPAN} preserveAspectRatio="none" />
+          ) : (
+            <CursorSilhouetteBody silhouette={silhouette} gradientId={`${uid}-grad`} />
+          )}
+          <g clipPath={`url(#${uid}-clip)`} visibility={picture ? "hidden" : undefined}>
             <g transform={anchorTransform(silhouette.anchor)}>
               <path ref={eye0} fill={eyeColor} />
               <path ref={eye1} fill={eyeColor} />

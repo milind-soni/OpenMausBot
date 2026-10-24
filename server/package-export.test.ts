@@ -2,9 +2,23 @@ import { describe, expect, it } from "vitest";
 
 import { createBotPackageExport, createTeamPackageExport, shareableAddress, TEAM_TOO_LARGE_MESSAGE, TeamExportError } from "./package-export.ts";
 import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
+import { FACE_BOX } from "../shared/cursor-face-data.ts";
+import { createCustomMascotFitContext, suggestCustomMascotAnchor } from "../shared/custom-mascot-fitting.ts";
+import { type CustomMascotPoint, type MascotProfile } from "../shared/mascot-profile.ts";
+import { validateCustomMascotDefinition } from "./custom-mascot-validation.ts";
 import type { Routine } from "./routines.ts";
 import type { BotRecord, GroupRecord } from "./store.ts";
 import { includedSkills, requestedSkills, startingTicks } from "../src/lib/team-share-skills.ts";
+
+function customMascotProfile(): MascotProfile {
+  const outline: CustomMascotPoint[] = Array.from({ length: 96 }, (_, index) => {
+    const angle = (index / 96) * Math.PI * 2;
+    return [FACE_BOX / 2 + Math.cos(angle) * 108, FACE_BOX / 2 + Math.sin(angle) * 108] as const;
+  });
+  const anchor = suggestCustomMascotAnchor(createCustomMascotFitContext(outline));
+  const shape = validateCustomMascotDefinition({ name: "Bunny", outline, anchor });
+  return { version: 1, shapes: [shape], selected: { kind: "custom", shapeId: shape.id } };
+}
 
 describe("package export", () => {
   it("preserves the exact cron and timezone through export and import", () => {
@@ -322,6 +336,27 @@ describe("whole-team export (package v2)", () => {
     input.bots[1] = { ...input.bots[1]!, recordBrowserSteps: true };
     const agents = createTeamPackageExport(input).document.package.agents;
     expect(agents.map((agent) => agent.recordBrowserSteps)).toEqual([undefined, true]);
+  });
+
+  it("exports custom mascot libraries and omits empty libraries", () => {
+    const profile = customMascotProfile();
+    const emptyProfile: MascotProfile = { version: 1, shapes: [], selected: { kind: "builtin", bodyId: "cursor" } };
+    const bot = { id: "b1", threadId: "t1", name: "Bunny", color: "green", createdAt: 1, mascotProfile: profile } as BotRecord;
+    const single = createBotPackageExport({ name: "Bunny", authorName: "Tester", bots: [bot], groups: [], routines: [] });
+    expect(single.package.agents[0]!.appearance.mascotProfile).toEqual(profile);
+    const emptySingle = createBotPackageExport({
+      name: "Bunny", authorName: "Tester", bots: [{ ...bot, mascotProfile: emptyProfile }], groups: [], routines: [],
+    });
+    expect(emptySingle.package.agents[0]!.appearance).not.toHaveProperty("mascotProfile");
+
+    const teamInput = fixture();
+    teamInput.bots[0] = { ...teamInput.bots[0]!, mascotProfile: profile };
+    const team = createTeamPackageExport(teamInput).document.package;
+    expect(team.agents[0]!.appearance.mascotProfile).toEqual(profile);
+    const emptyTeamInput = fixture();
+    emptyTeamInput.bots[0] = { ...emptyTeamInput.bots[0]!, mascotProfile: emptyProfile };
+    const emptyTeam = createTeamPackageExport(emptyTeamInput).document.package;
+    expect(emptyTeam.agents[0]!.appearance).not.toHaveProperty("mascotProfile");
   });
 
   it("adds starter notes only when asked, within the caps", () => {

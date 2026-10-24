@@ -1,4 +1,5 @@
 import type { WireBot } from "../../shared/wire.ts";
+import { validateMascotProfile } from "../custom-mascot-validation.ts";
 import { validateBotCwd } from "../bot-cwd.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
 import { parseVisibility } from "../bot-visibility.ts";
@@ -79,6 +80,14 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if ("error" in kept) return json(res, kept.error.includes("already") ? 409 : 400, { error: kept.error });
       const { id: _id, threadId: _threadId, ...rest } = body;
       body = rest;
+      let mascotProfile: ReturnType<typeof validateMascotProfile> | undefined;
+      if (body.mascotProfile !== undefined) {
+        try {
+          mascotProfile = validateMascotProfile(body.mascotProfile);
+        } catch (error) {
+          return json(res, 400, { error: error instanceof Error ? error.message : "mascotProfile is invalid" });
+        }
+      }
       const template = resolveBotCreationDefaults(cfg.newBotDefaults, body);
       const settings = template.profile;
       if (auth.kind === "session" && !auth.scopes.includes("admin")) {
@@ -171,12 +180,14 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       // Checked again beside the synchronous write: an await above let another request take the same id.
       if (kept.id && "error" in keptBotIds(kept, store)) return json(res, 409, { error: "a bot with this id already exists here" });
       const bot = store.createBot({ ...profile.patch, soul: settings.soul, section, modelSelection: selection,
+        ...(mascotProfile ? { mascotProfile } : {}),
         toolScope: settings.toolScope ?? undefined,
         ...(deps.team && creator ? { createdBy: creator } : {}), ...(reportsTo ? { reportsTo } : {}),
         ...(created?.ok ? { visibility: created.visibility } : {}) }, kept.id ? { ...kept, seedMessages: false } : {});
       const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
       try {
         const { chiefOfStaff: _chief, managedSections: _managed, toolScope: _toolScope, ...ordinary } = settings;
+        if (mascotProfile) delete ordinary.mascotBody;
         store.patchBot(bot.id, {
           // Store creation completed the workspace defaults (effort included): the rest of the template must not undo them.
           ...ordinary, name: bot.name, section, modelSelection: bot.modelSelection,

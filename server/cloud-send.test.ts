@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { BOT_PARTS, EMPTY, PICTURE_PART, itemKey } from "../electron/cloud-send-parts.mjs";
+import { createCustomMascotFitContext, suggestCustomMascotAnchor } from "../shared/custom-mascot-fitting.ts";
+import type { CustomMascotPoint, MascotProfile } from "../shared/mascot-profile.ts";
 import { botParts, cloudSendSummary, partHash, unused, type CloudSendSources } from "./cloud-send.ts";
+import { validateCustomMascotDefinition } from "./custom-mascot-validation.ts";
 import { keptBotIds } from "./routes/bots-create.ts";
 import type { BotRecord } from "./store.ts";
 
@@ -9,6 +13,13 @@ const bot = (extra: Partial<BotRecord> = {}): BotRecord => ({
   unread: false, modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, resumeCursors: {}, createdAt: 1, tasks: [{ threadId: "thread-0001" }],
   ...extra,
 } as unknown as BotRecord);
+
+function bunnyMascotProfile(name = "Bunny"): MascotProfile {
+  const outline = JSON.parse(readFileSync(new URL("../shared/mascot-fixtures/bunny-outline.json", import.meta.url), "utf8")) as CustomMascotPoint[];
+  const anchor = suggestCustomMascotAnchor(createCustomMascotFitContext(outline));
+  const shape = validateCustomMascotDefinition({ name, outline, anchor });
+  return { version: 1, shapes: [shape], selected: { kind: "custom", shapeId: shape.id } };
+}
 
 const sources = (extra: Partial<CloudSendSources> = {}): CloudSendSources => ({
   appVersion: "0.1.117",
@@ -35,6 +46,16 @@ describe("what a server reports for Send to My Cloud", () => {
     expect(partHash({ b: 1, a: 2 })).toBe(partHash({ a: 2, b: 1 }));
     // A working folder is this computer's: it is not part of what is compared.
     expect(botParts(bot({ cwd: "/Users/amit/work" }), () => null)).toEqual(parts);
+  });
+
+  it("hashes a custom shape and selection as appearance, including shape changes and removal", () => {
+    const bunny = botParts(bot({ mascotProfile: bunnyMascotProfile() }), () => null);
+    const renamed = botParts(bot({ mascotProfile: bunnyMascotProfile("Bunny II") }), () => null);
+    const removed = botParts(bot({ mascotProfile: { version: 1, shapes: [], selected: { kind: "builtin", bodyId: "cursor" } } }), () => null);
+
+    expect(bunny.look).not.toBe(removed.look);
+    expect(renamed.look).not.toBe(bunny.look);
+    expect(Object.entries(renamed).filter(([part, hash]) => bunny[part] !== hash).map(([part]) => part)).toEqual(["look"]);
   });
 
   it("lists bots, their skills, logins, 1Password and settings, without a secret or a picture's bytes", () => {

@@ -3,19 +3,19 @@
 // --public, reads the four public bot-test pages. Read-only: it never signs in or submits a form.
 // Usage: node --experimental-strip-types scripts/verify-browser-identity.ts [--chrome PATH] [--engine PATH] [--public] [--out DIR]
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createConnection } from "node:net";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
 
-import { agentBrowserIntegration, closeBrowserSession, prepareBrowserSessionState, resolveAgentBrowserBinary, setBrowserViewport } from "../server/browser-engine.ts";
+import { agentBrowserDevToolsPorts, agentBrowserIntegration, closeBrowserSession, prepareBrowserSessionState, resolveAgentBrowserBinary, runningBrowserSessionNames, setBrowserViewport } from "../server/browser-engine.ts";
 import { BrowserRuntime, browserRuntimeEnv, type BrowserSpawnSpec } from "../server/browser-runtime.ts";
 import { ChromeLauncher } from "../server/browser/chrome/launcher.ts";
 import { openGate } from "../server/browser/egress/gate.ts";
 import { refusalFor } from "../server/browser/egress/policy.ts";
 import { DATA_DIR } from "../server/config.ts";
-import { removeTempDir } from "../server/testing/cleanup.ts";
 import { expectedUserAgent, startIdentityProbe, type ProbeReports, type ReportedIdentity } from "./testing/browser-identity-probe.ts";
 
 export const PUBLIC_PAGES = [
@@ -106,10 +106,8 @@ function refused(result: unknown): string | null {
  * what the bot was told when it failed.
  */
 export async function openOwnPageAsBot(call: BotCall, url: string, log: (line: string) => void): Promise<string | null> {
-  const failed = refused(await call("agent_browser_open", { url }));
-  if (!failed || !failed.includes("net::ERR_ABORTED")) return failed;
-  log(`the bot's browser: Chrome cancelled its first navigation (${failed}); opening ${url} once more`);
-  return refused(await call("agent_browser_open", { url }));
+  const navigation = await openIdentityProbePage(call, url, log);
+  return navigation.kind === "failed" ? navigation.detail : null;
 }
 
 /** The runtime keeps file paths away from the engine, so a screenshot comes back as image content. */
@@ -153,8 +151,63 @@ export interface BotBrowserOptions {
   log?: (line: string) => void;
 }
 
+export function browserFixtureEnvironment(scratch: string, platform: NodeJS.Platform): NodeJS.ProcessEnv {
+  const home = join(scratch, "home");
+  if (platform === "win32") {
+    return { HOME: home, USERPROFILE: home, APPDATA: join(home, "AppData", "Roaming"), LOCALAPPDATA: join(home, "AppData", "Local") };
+  }
+  if (platform === "linux") {
+    return { HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, ".config"), XDG_CACHE_HOME: join(home, ".cache"), XDG_RUNTIME_DIR: join(scratch, "runtime") };
+  }
+  return { HOME: home, USERPROFILE: home };
+}
+
+type FixtureBrowserShutdown =
+  | { kind: "closed"; session: "closed" | "already-closed" }
+  | { kind: "unconfirmed"; detail: string; liveDevToolsPorts: number[] };
+
+async function devToolsPortIsLive(port: number): Promise<boolean> {
+  return await new Promise((resolve) => {
+    let settled = false;
+    const socket = createConnection({ host: "127.0.0.1", port });
+    const finish = (live: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(live);
+    };
+    const timer = setTimeout(() => finish(false), 500);
+    timer.unref?.();
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
+}
+
+async function liveFixtureDevToolsPorts(profiles: string): Promise<number[]> {
+  const ports = agentBrowserDevToolsPorts(profiles, join(profiles, "saved-profiles"));
+  return (await Promise.all(ports.map(async (port) => await devToolsPortIsLive(port) ? port : null))).filter((port): port is number => port !== null);
+}
+
 /** A browser tool call, as the bot makes it. */
 export type BotCall = (name: string, args: Record<string, unknown>) => Promise<unknown>;
+
+export type IdentityProbeNavigation =
+  | { kind: "opened"; attempts: number; result: unknown }
+  | { kind: "failed"; attempts: number; result: unknown; detail: string };
+
+export async function openIdentityProbePage(call: BotCall, url: string, log: (line: string) => void = () => {}): Promise<IdentityProbeNavigation> {
+  let attempts = 1;
+  let result = await call("agent_browser_open", { url });
+  let detail = refused(result);
+  if (detail && /\bnet::ERR_ABORTED\b/u.test(detail)) {
+    log(`the bot's browser: Chrome cancelled its first navigation (${detail}); opening ${url} once more`);
+    attempts++;
+    result = await call("agent_browser_open", { url });
+    detail = refused(result);
+  }
+  return detail ? { kind: "failed", attempts, result, detail } : { kind: "opened", attempts, result };
+}
 
 /** A bot's browser as the server starts it, on a throwaway profile, for as long as `work` runs: agent-browser drives the
  * Chrome named here through the same launcher, identity connection and egress gate. `work` gets the bot's tool calls and
@@ -167,11 +220,18 @@ export async function withBotBrowser<T>(options: BotBrowserOptions, work: (call:
   mkdirSync(profiles);
   // agent-browser's socket path must stay under 104 bytes; temporary folders on macOS are long.
   const sockets = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "omb-id-"));
-  // Chrome on macOS with any other HOME asks for a keychain it cannot find, in a dialog on the person's screen; a test
-  // runner's HOME is a temporary folder, so the real one comes from the user database.
-  const home = userInfo().homedir;
+  const fixtureEnv = browserFixtureEnvironment(scratch, process.platform);
+  // Chrome on macOS needs the real home directory to find its keychain; other platforms keep fixture homes.
+  if (process.platform === "darwin") {
+    const home = userInfo().homedir;
+    fixtureEnv.HOME = home;
+    fixtureEnv.USERPROFILE = home;
+  }
+  const home = fixtureEnv.HOME!;
+  mkdirSync(home, { recursive: true });
+  for (const path of Object.values(fixtureEnv)) if (path && path !== home) mkdirSync(path, { recursive: true, mode: 0o700 });
   const session = `${options.sessionPrefix ?? "omb-identity"}-${randomBytes(3).toString("hex")}`;
-  const launcher = new ChromeLauncher({ dataDir: join(scratch, "data"), env: { ...process.env, HOME: home, USERPROFILE: home, OMB_CHROME_PATH: options.chrome }, log });
+  const launcher = new ChromeLauncher({ dataDir: join(scratch, "data"), env: { ...process.env, ...fixtureEnv, OMB_CHROME_PATH: options.chrome }, log });
   // Where the launcher adds nothing (OMB_BROWSER_LEGACY_SHELL=1, a headless shell), agent-browser would otherwise look for a
   // browser of its own, such as an installed Google Chrome, instead of the one named here.
   const launcherEnv = launcher.env();
@@ -183,25 +243,82 @@ export async function withBotBrowser<T>(options: BotBrowserOptions, work: (call:
   } });
   const integration = agentBrowserIntegration({
     binaryPath: options.engine, session, encryptionKey: randomBytes(32).toString("hex"), persistent: false, launcher: launcherEnv, egressPort: gate.port,
-    env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, ...(Object.keys(launcherEnv).length ? {} : { AGENT_BROWSER_EXECUTABLE_PATH: options.chrome }) },
+    env: { PATH: process.env.PATH ?? "", ...fixtureEnv, ...(Object.keys(launcherEnv).length ? {} : { AGENT_BROWSER_EXECUTABLE_PATH: options.chrome }) },
   });
-  const spec: BrowserSpawnSpec = { ...integration, env: { ...integration.env, HOME: home, USERPROFILE: home, TMPDIR: profiles, TEMP: profiles, TMP: profiles, AGENT_BROWSER_SOCKET_DIR: sockets } };
+  const spec: BrowserSpawnSpec = { ...integration, env: { ...integration.env, ...fixtureEnv, TMPDIR: profiles, TEMP: profiles, TMP: profiles, AGENT_BROWSER_SOCKET_DIR: sockets } };
   const runtime = new BrowserRuntime({
     launch: launcher, resultBudget: 500_000,
     applyViewport: (value) => setBrowserViewport(value.command, value.env),
     closeBrowser: (name, value) => closeBrowserSession(value.command, browserRuntimeEnv({ ...value.env, AGENT_BROWSER_SESSION: name })),
   });
+  let outcome: { kind: "success"; value: T } | { kind: "failure"; error: unknown };
   try {
     await prepareBrowserSessionState(options.engine, session, { env: spec.env, persistent: false });
     await launcher.prepare();
-    return await work((name, args) => runtime.agentRpc(session, spec, "tools/call", { name, arguments: args }), decided, launcher);
-  } finally {
-    await closeBrowserSession(options.engine, browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session })).catch(() => false);
-    await runtime.closeAll();
-    await gate.close();
-    await removeTempDir(scratch);
-    await removeTempDir(sockets);
+    outcome = { kind: "success", value: await work((name, args) => runtime.agentRpc(session, spec, "tools/call", { name, arguments: args }), decided, launcher) };
+  } catch (error) {
+    outcome = { kind: "failure", error };
   }
+
+  const cleanupErrors: string[] = [];
+  let browserShutdown: FixtureBrowserShutdown = { kind: "unconfirmed", detail: "shutdown was not checked", liveDevToolsPorts: [] };
+  try {
+    const browserEnv = browserRuntimeEnv({ ...spec.env, AGENT_BROWSER_SESSION: session });
+    const sessions = await runningBrowserSessionNames(options.engine, browserEnv);
+    const alreadyClosed = sessions !== null && !sessions.includes(session);
+    const closed = alreadyClosed || (sessions !== null && await closeBrowserSession(options.engine, browserEnv));
+    if (closed) {
+      const deadline = Date.now() + 5_000;
+      let liveDevToolsPorts = await liveFixtureDevToolsPorts(profiles);
+      while (liveDevToolsPorts.length && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        liveDevToolsPorts = await liveFixtureDevToolsPorts(profiles);
+      }
+      browserShutdown = liveDevToolsPorts.length
+        ? { kind: "unconfirmed", detail: `${alreadyClosed ? "session was already closed" : "session close returned"}, but Chrome still answers on its unique profile`, liveDevToolsPorts }
+        : { kind: "closed", session: alreadyClosed ? "already-closed" : "closed" };
+    } else {
+      browserShutdown = { kind: "unconfirmed", detail: sessions === null ? "could not list running browser sessions" : "agent-browser shutdown was not confirmed", liveDevToolsPorts: await liveFixtureDevToolsPorts(profiles) };
+    }
+    if (browserShutdown.kind === "unconfirmed") cleanupErrors.push(browserShutdown.detail);
+  } catch (error) {
+    browserShutdown = { kind: "unconfirmed", detail: `agent-browser shutdown failed: ${error instanceof Error ? error.message : String(error)}`, liveDevToolsPorts: await liveFixtureDevToolsPorts(profiles).catch(() => []) };
+    cleanupErrors.push(browserShutdown.detail);
+  }
+  try {
+    await runtime.closeAll();
+  } catch (error) {
+    cleanupErrors.push(`browser transport shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
+    await gate.close();
+  } catch (error) {
+    cleanupErrors.push(`egress gate shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const workFailed = outcome.kind === "failure";
+  if (browserShutdown.kind === "closed" && cleanupErrors.length === 0 && !workFailed) {
+    try {
+      rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    } catch (error) {
+      cleanupErrors.push(`browser profile cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    try {
+      rmSync(sockets, { recursive: true, force: true });
+    } catch (error) {
+      cleanupErrors.push(`browser socket cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  } else {
+    log(`browser fixture retained at ${scratch}; socket directory retained at ${sockets}`);
+  }
+
+  if (cleanupErrors.length) {
+    const details = cleanupErrors.join("; ");
+    log(`browser fixture cleanup incomplete: ${details}`);
+    if (!workFailed) throw new Error(`Browser fixture cleanup failed: ${details}; temporary paths: ${scratch}, ${sockets}`);
+  }
+  if (outcome.kind === "failure") throw outcome.error;
+  return outcome.value;
 }
 
 export async function verifyBrowserIdentity(options: BotBrowserOptions & { publicPages?: boolean }): Promise<{ readout: IdentityReadout; public: PublicVerdict[] }> {
@@ -209,8 +326,12 @@ export async function verifyBrowserIdentity(options: BotBrowserOptions & { publi
   const probe = await startIdentityProbe();
   try {
     return await withBotBrowser(options, async (call, decided, launcher) => {
-      const failed = await openOwnPageAsBot(call, probe.url, log);
-      if (failed) throw new Error(`the bot's browser could not open the probe page: ${failed}`);
+      const navigation = await openIdentityProbePage(call, probe.url, log);
+      if (navigation.kind === "failed") {
+        const probePort = Number(new URL(probe.url).port);
+        writeFileSync(join(options.out, "browser-navigation-failure.json"), `${JSON.stringify({ url: probe.url, attempts: navigation.attempts, error: navigation.detail, result: navigation.result, probePort, gatedPorts: [...decided], gateSawProbe: decided.has(probePort) }, null, 2)}\n`);
+        throw new Error(`the bot's browser could not open the probe page after ${navigation.attempts} attempt(s): ${navigation.detail}`);
+      }
       const reports = await probe.complete(30_000);
       const major = String(reports.page?.high?.uaFullVersion ?? "").split(".")[0] ?? "";
       const expected = expectedUserAgent(major);

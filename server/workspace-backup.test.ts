@@ -10,6 +10,7 @@ import { browserProfilesRoot } from "./browser-engine.ts";
 import { openRuntimeStore } from "./runtime/store.ts";
 import type { Assignment } from "./runtime/types.ts";
 import { SessionRegistry } from "./sessions.ts";
+import { connectTestSocket, testSocketPath } from "./bot-box/test-socket-path.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   applyPendingWorkspaceRestore, commitPendingWorkspaceRestore, createWorkspaceBackup,
@@ -404,11 +405,11 @@ describe("encrypted full workspace backups", () => {
     const source = directory();
     mkdirSync(join(source, "box"), { mode: 0o700 });
     writeFileSync(join(source, "box", "seccomp.bpf"), Buffer.from([0x20, 0, 0, 0]), { mode: 0o600 });
-    // The live socket is the Linux box's (a Cloud home): Windows refuses a unix socket at a file path, so there the
-    // folder holds only the filter, and must still be left out.
-    const broker = process.platform === "win32" ? null : createNetServer();
-    if (broker) await new Promise<void>((resolve) => broker.listen(join(source, "box", "broker.sock"), resolve));
+    const broker = createNetServer();
+    const socketPath = testSocketPath(source, "box/broker.sock");
+    await new Promise<void>((resolve) => broker.listen(socketPath, resolve));
     try {
+      await connectTestSocket(socketPath);
       mkdirSync(join(source, "attachments"));
       writeFileSync(join(source, "attachments", "note.txt"), "ordinary user file");
       const exported = await createWorkspaceBackup(source, { password: PASSWORD });

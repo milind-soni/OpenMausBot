@@ -8,13 +8,14 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
-import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
+import { CursorAvatar, customMascotSilhouette, isCustomCursorSilhouette, type CursorAvatarHandle, type CursorSilhouette } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { CarvedAvatar } from "./CarvedAvatar";
 import { steelBodyImage } from "@/lib/steel-body";
+import { selectedCustomMascot, type MascotProfile } from "../../shared/mascot-profile";
 
 export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
@@ -92,6 +93,7 @@ export type MausAvatarProps = {
   trackPointer?: boolean;
   animated?: boolean;
   bodyId?: BotBodyId;
+  silhouette?: CursorSilhouette;
   gradient?: [string, string, string];
 };
 
@@ -137,12 +139,16 @@ function GradientAvatarComponent(
     trackPointer = true,
     animated = true,
     bodyId,
+    silhouette: requestedSilhouette,
     gradient,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
-  const silhouette = MASCOT_BODIES[botMascotBody(bodyId)];
+  const silhouette = requestedSilhouette ?? MASCOT_BODIES[botMascotBody(bodyId)];
   const chrome = color === "chrome";
+  const picture = chrome && !isCustomCursorSilhouette(silhouette)
+    ? steelBodyImage(botMascotBody(bodyId), size, globalThis.devicePixelRatio ?? 1)
+    : null;
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
     blink: () => inner.current?.blink(),
@@ -188,7 +194,7 @@ function GradientAvatarComponent(
         size={size}
         silhouette={silhouette}
         gradient={gradient ?? gradientFor(color)}
-        picture={chrome ? steelBodyImage(silhouette.id, size, globalThis.devicePixelRatio ?? 1) : null}
+        picture={picture}
         eyeColor={chrome ? CHROME_EYES : undefined}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
@@ -219,6 +225,7 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color" | "gradient"> & {
     avatarFocusX?: number;
     avatarFocusY?: number;
     mascotBody?: BotBodyId | null;
+    mascotProfile?: MascotProfile;
   };
 };
 
@@ -251,9 +258,12 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
   });
 
   if (outcome !== "flatImage") {
+    const customShape = selectedCustomMascot(bot.mascotProfile);
+    const customSilhouette = customShape ? customMascotSilhouette(customShape) : undefined;
     return (
       <MausAvatar
-        bodyId={wornBody(bot.mascotBody, bot.color, dressed)}
+        bodyId={customShape ? undefined : wornBody(bot.mascotBody, bot.color, dressed)}
+        silhouette={customSilhouette}
         {...mascotProps}
         color={bot.color}
         gradient={readable ? roomAvatarGradient(bot.color) : undefined}

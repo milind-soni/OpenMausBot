@@ -168,6 +168,11 @@ export interface StartOptions {
   log?: (line: string) => void;
   /** Overrides for tests. */
   detect?: (env: Record<string, string | undefined>) => BoxDetection;
+  socketPathFor?: (directory: string, name: "egress" | "harness" | "broker") => string;
+}
+
+function isWindowsNamedPipe(path: string): boolean {
+  return path.toLowerCase().startsWith("\\\\.\\pipe\\");
 }
 
 export function defaultCodeRoots(): string[] {
@@ -201,8 +206,9 @@ export class BotBox {
     }
     const dir = join(options.dataDir, "box");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const egressSocket = join(dir, "egress.sock"), harnessSocket = join(dir, "harness.sock"), brokerSocket = join(dir, "broker.sock");
-    for (const socket of [egressSocket, harnessSocket, brokerSocket]) rmSync(socket, { force: true });
+    const socketPathFor = options.socketPathFor ?? ((directory: string, name: "egress" | "harness" | "broker") => join(directory, `${name}.sock`));
+    const egressSocket = socketPathFor(dir, "egress"), harnessSocket = socketPathFor(dir, "harness"), brokerSocket = socketPathFor(dir, "broker");
+    for (const socket of [egressSocket, harnessSocket, brokerSocket]) if (!isWindowsNamedPipe(socket)) rmSync(socket, { force: true });
     this.egress = await openBoxEgressGate({ socketPath: egressSocket });
     this.harness = await openHarnessGate({ socketPath: harnessSocket, port: options.port });
     this.credentials = await openCredentialBroker({ socketPath: brokerSocket });

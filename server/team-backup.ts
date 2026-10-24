@@ -6,6 +6,7 @@ import { helperModelAllowed, type BotVisibility } from "../shared/wire.ts";
 import type { BotRecord, GroupRecord, Message, Store, TaskRecord } from "./store.ts";
 import type { Routine, RoutineManager } from "./routines.ts";
 import { redactSecretsInText } from "./redact.ts";
+import { validateMascotProfile } from "./custom-mascot-validation.ts";
 import {
   listMemoryLogs, listMemoryTopics, readMemoryFile, readMemoryLog, readMemoryTopic,
   writeMemoryFile, writeMemoryLog, writeMemoryTopic,
@@ -105,6 +106,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       key: bot.id, name: bot.name, title: bot.title, description: bot.description, soul: bot.soul,
       section: bot.section, color: bot.color,
       mascotExpression: bot.mascotExpression ?? undefined, mascotBody: bot.mascotBody ?? undefined,
+      mascotProfile: bot.mascotProfile ? structuredClone(bot.mascotProfile) : undefined,
       chiefOfStaff: Boolean(bot.chiefOfStaff), hidden: Boolean(bot.hidden), playbooks: bot.playbooks ?? [],
       // Grants travel so the team's shape survives, but the import still lands every bot grant-less.
       ...(bot.connectorTools ? { connectorTools: structuredClone(bot.connectorTools) } : {}),
@@ -132,6 +134,9 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
 /** Always additive: rollback owns only the fresh records and cannot touch an existing bot or chat. */
 export function importTeamBackup(store: Store, routines: RoutineManager, input: unknown, selection: ModelSelection, options: { visibility?: BotVisibility } = {}) {
   const backup = parseTeamBackup(input);
+  const mascotProfiles = new Map(backup.bots.flatMap((bot) => bot.mascotProfile
+    ? [[bot.key, validateMascotProfile(bot.mascotProfile)] as const]
+    : []));
   const bots: BotRecord[] = [];
   const groups: GroupRecord[] = [];
   const createdRoutines: Routine[] = [];
@@ -169,10 +174,12 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
   try {
     // Allocate all bot IDs before remapping any conversation participants.
     for (const source of backup.bots) {
+      const mascotProfile = mascotProfiles.get(source.key);
       const bot = store.createBot({
         name: takeImportName(source.name, takenNames), title: source.title, description: source.description, soul: source.soul,
         color: source.color, mascotExpression: source.mascotExpression,
         mascotBody: botBodyId(source.mascotBody),
+        ...(mascotProfile ? { mascotProfile } : {}),
         modelSelection: selection, section: sectionFor(source.section),
         // who may see the imported team is the importing admin's choice
         ...(options.visibility ? { visibility: options.visibility } : {}),

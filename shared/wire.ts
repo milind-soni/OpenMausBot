@@ -8,6 +8,7 @@ import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
 import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
+import type { MascotProfile } from "./mascot-profile.ts";
 import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
@@ -284,6 +285,7 @@ export interface WireBot extends DefaultBotFields {
   color: MausColor;
   mascotExpression?: MausExpression | null;
   mascotBody?: BotBodyId | null;
+  mascotProfile?: MascotProfile;
   /** App-owned attachment served as this bot's custom profile image;
    * always present on the wire, null when the bot has none. */
   avatarUrl: string | null;

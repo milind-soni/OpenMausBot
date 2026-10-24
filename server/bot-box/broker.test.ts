@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BROKER_PROCESS_TTL_MS, BROKER_THREAD_TTL_MS, BROKER_TOKEN_PREFIX, brokerUrl, openCredentialBroker, type CredentialBroker } from "./broker.ts";
+import { testSocketPath } from "./test-socket-path.ts";
 
 const REAL_KEY = "sk-ant-real-key-0123456789abcdef";
 
@@ -20,11 +21,7 @@ function call(socketPath: string, method: string, path: string, headers: Record<
   });
 }
 
-// The box runs only on a Linux Cloud home (detect.ts says "not-linux" anywhere else): its broker listens on a unix
-// socket, which Windows refuses at a file path (EACCES).
-const linuxBox = describe.skipIf(process.platform === "win32");
-
-linuxBox("the credential broker", () => {
+describe("the credential broker", () => {
   let upstream: Server, broker: CredentialBroker, dir: string, clock = 1_800_000_000_000;
   const seen: Array<{ method: string; url: string; headers: Record<string, string | string[] | undefined>; body: string }> = [];
   afterEach(async () => {
@@ -52,7 +49,7 @@ linuxBox("the credential broker", () => {
     });
     await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
     dir = mkdtempSync(join(tmpdir(), "omb-broker-"));
-    broker = await openCredentialBroker({ socketPath: join(dir, "b.sock"), now: () => clock });
+    broker = await openCredentialBroker({ socketPath: testSocketPath(dir, "b.sock"), now: () => clock });
     return (upstream.address() as { port: number }).port;
   }
 
