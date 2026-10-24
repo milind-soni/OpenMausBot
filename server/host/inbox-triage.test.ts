@@ -135,7 +135,7 @@ describe("the brief on a non-Claude engine, sorted by the helper models", () => 
     };
     const brief = createBrief({
       store, dataDir: dir, now: () => now, hosted: false, watching: () => true, mainThread: () => store.bot(chief.id)!.threadId, threadBusy: () => false,
-      notify: () => undefined, runs: () => runs, needsYou: () => [], engineName: () => "Codex", hostTimeZone: () => "UTC", session: () => null,
+      notify: () => undefined, runs: () => runs, needsYou: () => [], engineName: () => "Codex", hostTimeZone: () => "UTC", language: () => undefined, session: () => null,
       address: () => "me@x.test", failRun: () => undefined, keep: () => undefined, items: () => null,
     });
     const checks = createRoutineChecks({

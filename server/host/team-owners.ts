@@ -61,7 +61,7 @@ export function createTeamOwners(deps: TeamOwnersDeps) {
     startBriefs(brief: BriefDeps): void {
       if (!team) return;
       briefs = createTeamBriefs({
-        ...brief, dataDir: deps.dataDir, personKeyOf: keyOf, askedPerson: routing.askedPerson,
+        ...brief, dataDir: deps.dataDir, personKeyOf: keyOf, askedPerson: routing.askedPerson, language: () => team.language,
         needsYou: (person) => brief.needsYou((botId, threadId) => routing.askedPerson(botId, threadId) === person),
         startedBy: (threadId) => deps.starters.get(threadId), open: (threadId, person) => deps.starters.set(threadId, person),
       });
@@ -71,7 +71,7 @@ export function createTeamOwners(deps: TeamOwnersDeps) {
       if (briefs && (ASK_NOTIFICATIONS.has(notification.kind) || notification.kind === "done")) briefs.soon(routing.askedPerson(notification.botId, notification.threadId));
     },
     /** A member opened the app: their own brief; undefined off a team. */
-    presence: team ? (auth: RequestAuth) => briefs?.active(viewer(auth).person) ?? { returned: false } : undefined,
+    presence: team ? (auth: RequestAuth, language?: string) => briefs?.active(viewer(auth).person, language) ?? { returned: false } : undefined,
     /** What the Chief notices are told about owners; undefined off a team. */
     noticeRouting: team ? {
       askedPerson: routing.askedPerson,

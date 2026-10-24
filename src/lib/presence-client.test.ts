@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { duePing, openTarget, PRESENCE_MIN_INTERVAL_MS, presenceBody } from "./presence-client";
+import { setLanguageChoice } from "./language-preference";
+import { duePing, openTarget, PRESENCE_MIN_INTERVAL_MS, presenceBody, shownLanguage } from "./presence-client";
 
 describe("presence client", () => {
-  it("sends the device's zone with the desktop source", () => {
-    expect(presenceBody("Asia/Kolkata")).toEqual({ source: "desktop", timeZone: "Asia/Kolkata" });
-    expect(presenceBody("")).toEqual({ source: "desktop" });
-    expect(presenceBody().source).toBe("desktop");
+  it("sends the device's zone and the app's language with the desktop source", () => {
+    expect(presenceBody("Asia/Kolkata", "pt-br")).toEqual({ source: "desktop", timeZone: "Asia/Kolkata", language: "pt-br" });
+    expect(presenceBody("", "en")).toEqual({ source: "desktop", language: "en" });
+  });
+
+  it("names the pack the app shows: the device's pick, else the server's language", () => {
+    expect(shownLanguage("pt-BR")).toBe("pt-br");
+    setLanguageChoice("es");
+    expect(shownLanguage("pt-br")).toBe("es");
   });
 
   it("pings once a minute at most, and at once the first time", () => {

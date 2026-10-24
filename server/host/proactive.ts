@@ -102,7 +102,7 @@ export function createProactive(deps: ProactiveDeps) {
 
   const brief = createBrief({
     store, dataDir: deps.dataDir, hosted: deps.team, watching, mainThread: deps.mainThread, threadBusy: deps.threadBusy, runs,
-    needsYou: deps.needsYou, engineName: deps.engineName, hostTimeZone: deps.hostTimeZone,
+    needsYou: deps.needsYou, engineName: deps.engineName, hostTimeZone: deps.hostTimeZone, language: () => cfg.language,
     notify: (bot, threadId, detail) => deps.notify(briefNotification(bot, threadId, detail)),
     session: () => (composio.configured(cfg) ? reads.session() : null),
     address: () => checks.address(),

@@ -14,7 +14,8 @@ import { createAgentCard } from "../chat-widgets.ts";
 import type { RoutineRun } from "../routines.ts";
 import type { BotRecord, Store } from "../store.ts";
 import { localDate } from "./check-plan.ts";
-import { briefCard, type BriefRow, type BuiltCard } from "./brief-cards.ts";
+import { briefCard, type BriefRow, type BuiltCard, type NeedRow } from "./brief-cards.ts";
+import { briefWords, type BriefWords } from "./brief-words.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
 export const TEAM_BRIEFS_FILE = "team-briefs.json";
@@ -26,7 +27,11 @@ const id = z.string().min(1).max(512);
 const cardSchema = z.object({ day: z.string().max(10), botId: id, threadId: id, messageId: id });
 const fileSchema = z.object({
   version: z.literal(1),
-  people: z.record(z.string().regex(/^p_[\w-]{22}$/u), z.object({ card: cardSchema.optional(), notified: z.array(z.string().max(600)).max(200), openedOn: z.string().max(10).optional() })),
+  people: z.record(z.string().regex(/^p_[\w-]{22}$/u), z.object({
+    card: cardSchema.optional(), notified: z.array(z.string().max(600)).max(200), openedOn: z.string().max(10).optional(),
+    /** The language the member's app shows, from their last arrival. */
+    language: z.string().max(35).optional(),
+  })),
 });
 type PersonState = z.infer<typeof fileSchema>["people"][string];
 
@@ -35,6 +40,8 @@ export interface TeamBriefDeps {
   dataDir: string;
   now?: () => number;
   timeZone?(): string | undefined;
+  /** The team's language, for a member whose app has not said which it shows. */
+  language?(): string | undefined;
   personKeyOf(email: string): string;
   /** What waits on this person now, routed to them alone. */
   needsYou(person: string): NeedsYouItem[];
@@ -91,12 +98,13 @@ export function createTeamBriefs(deps: TeamBriefDeps) {
     return created.threadId;
   }
 
-  function rows(person: string): { needs: BriefRow[]; done: BriefRow[] } {
-    const named = (botId: string) => deps.store.bot(botId)?.name ?? "A bot";
+  function rows(person: string, w: BriefWords): { needs: NeedRow[]; done: BriefRow[] } {
     const opens = (botId: string, threadId: string | undefined) => threadId && deps.store.taskByThread(botId, threadId) ? { open: { botId, threadId } } : {};
-    const needs: BriefRow[] = deps.needsYou(person).flatMap((item): BriefRow[] => item.kind === "question"
-      ? [{ text: `${named(item.botId)} is asking you`, note: clip(item.text, 140), ...opens(item.botId, item.threadId) }]
-      : []);
+    const needs: NeedRow[] = deps.needsYou(person).flatMap((item): NeedRow[] => {
+      if (item.kind !== "question") return [];
+      const bot = deps.store.bot(item.botId)?.name, note = clip(item.text, 140);
+      return [{ key: `question:${bot ?? ""}:${note}`, text: w.isAsking(bot ?? w.aBot), note, ...opens(item.botId, item.threadId) }];
+    });
     const done: BriefRow[] = [];
     const since = dayStart();
     const latest = new Map<string, RoutineRun>();
@@ -112,8 +120,12 @@ export function createTeamBriefs(deps: TeamBriefDeps) {
       const bot = deps.store.bot(run.botId);
       if (!bot || bot.hidden) continue;
       const open = opens(run.botId, run.resultsThreadId ?? run.threadId);
-      if (run.status === "completed") done.push({ text: oneLine(run.routineName, 80), note: clip(oneLine(run.output ?? "", 140) || "Finished", 140), ...open });
-      else needs.push({ text: `${oneLine(run.routineName, 80)} ${run.status === "missed" ? "was missed" : "failed"}`, note: clip(oneLine(run.error ?? "", 140) || "It did not finish", 140), ...open });
+      const name = oneLine(run.routineName, 80);
+      if (run.status === "completed") done.push({ text: name, note: clip(oneLine(run.output ?? "", 140) || w.finished, 140), ...open });
+      else {
+        const error = clip(oneLine(run.error ?? "", 140), 140);
+        needs.push({ key: `routine:${name}:${run.status}:${error}`, text: run.status === "missed" ? w.missed(name) : w.failed(name), note: error || w.didNotFinish, ...open });
+      }
     }
     return { needs, done };
   }
@@ -129,7 +141,8 @@ export function createTeamBriefs(deps: TeamBriefDeps) {
     const day = today();
     const current = state?.card && state.card.day === day && state.card.botId === chief.id &&
       deps.store.messagesFor(state.card.threadId).some((row) => row.id === state.card!.messageId && row.serverCard) ? state.card : undefined;
-    const { needs, done } = rows(person);
+    const language = state?.language ?? deps.language?.();
+    const { needs, done } = rows(person, briefWords(language));
     if (!current && (needs.length === 0 && (!options.create || done.length === 0))) return null;
     const threadId = current?.threadId ?? home(chief, person, state);
     if (!threadId) return null;
@@ -137,7 +150,7 @@ export function createTeamBriefs(deps: TeamBriefDeps) {
       pending.add(person);
       return null;
     }
-    const built: BuiltCard = briefCard({ now: now(), ...(deps.timeZone?.() ? { timeZone: deps.timeZone()! } : {}), intro: false, needs, meetings: null, emails: [], routines: done });
+    const built: BuiltCard = briefCard({ now: now(), ...(deps.timeZone?.() ? { timeZone: deps.timeZone()! } : {}), ...(language ? { language } : {}), intro: false, needs, meetings: null, emails: [], routines: done });
     const written = current
       ? writes(chief, threadId, { tool: "update_widget", widget_id: current.messageId, widget: built.card })
       : writes(chief, threadId, { tool: "show_widget", widget: built.card });
@@ -147,7 +160,7 @@ export function createTeamBriefs(deps: TeamBriefDeps) {
     }
     if (!current) deps.store.patchTask(chief.id, threadId, { unread: true });
     const seen = new Set(state?.notified ?? []);
-    const fresh = needs.map((row) => `need:${row.text}:${row.note}`).filter((key) => !seen.has(key));
+    const fresh = needs.map((row) => `need:${row.key}`).filter((key) => !seen.has(key));
     if (fresh.length) deps.notify(chief, threadId, built.summary);
     people[person] = { ...state, card: { day, botId: chief.id, threadId, messageId: current?.messageId ?? written.messageId }, notified: [...seen, ...fresh].slice(-200) };
     save();
@@ -177,9 +190,13 @@ export function createTeamBriefs(deps: TeamBriefDeps) {
       timer ??= setTimeout(flush, SETTLE_MS);
       timer.unref?.();
     },
-    /** The person opened the app: today's brief catches up, and opens on their first arrival of the day. */
-    active(person: string | null): { returned: boolean; open?: { botId: string; threadId: string } } {
+    /** The person opened the app: today's brief catches up in the language their app shows, and opens on their first arrival of the day. */
+    active(person: string | null, language?: string): { returned: boolean; open?: { botId: string; threadId: string } } {
       if (!person) return { returned: false };
+      if (language && language !== people[person]?.language) {
+        people[person] = { ...(people[person] ?? { notified: [] }), language };
+        save();
+      }
       const shown = render(person, { create: true });
       const day = today();
       if (!shown || people[person]?.openedOn === day) return { returned: false };

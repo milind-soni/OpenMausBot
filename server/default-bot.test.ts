@@ -18,7 +18,7 @@ const intros = (store: Store, bot: BotRecord) => (bot.tasks ?? []).flatMap((task
 const boot = (store: Store) => ensureDefaultBot(store, { dataDir: DATA_DIR });
 /** Who the daily brief comes from, as the server picks it. */
 const briefChief = (store: Store) => createBrief({ store, dataDir: DATA_DIR, hosted: false, watching: () => true, mainThread: (id) => store.bot(id)?.threadId,
-  threadBusy: () => false, notify: () => {}, runs: () => [], needsYou: () => [], engineName: () => "Claude", hostTimeZone: () => "UTC", session: () => null,
+  threadBusy: () => false, notify: () => {}, runs: () => [], needsYou: () => [], engineName: () => "Claude", hostTimeZone: () => "UTC", language: () => undefined, session: () => null,
   address: () => undefined, failRun: () => {}, keep: () => {}, items: () => null }).chief();
 /** A new install from before MausBot was marked: its first bot was MausBot in silver, made its Chief. */
 function seededBefore(store: Store): BotRecord {
