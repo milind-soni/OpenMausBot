@@ -49,6 +49,16 @@ describe("send idempotency", () => {
     expect(sendFingerprint("ship it", undefined, "goal")).not.toBe(sendFingerprint("ship it", undefined, "chat"));
   });
 
+  it("binds explicit retries to the original operation and generation", () => {
+    const delivery = { mode: "steer" as const, runId: "run-A" };
+    const message = userMessage({ composerDelivery: delivery });
+    expect(acceptedSendMatch([message], message.sendId!, "ship it", undefined, undefined, delivery).kind).toBe("match");
+    for (const changed of [undefined, { mode: "queue" as const }, { mode: "steer" as const, runId: "run-B" }]) {
+      expect(acceptedSendMatch([message], message.sendId!, "ship it", undefined, undefined, changed).kind).toBe("conflict");
+      expect(sendFingerprint("ship it", undefined, undefined, changed)).not.toBe(sendFingerprint("ship it", undefined, undefined, delivery));
+    }
+  });
+
   it("treats a legacy missing channel mode as ordinary chat", () => {
     const sendId = "send_1234567890123456";
     const message = userMessage();

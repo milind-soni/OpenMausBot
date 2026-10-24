@@ -48,6 +48,16 @@ test("tools layout persists in the backup client keys", () => {
   }
 });
 
+test("native snapshots preserve the separate newline and add-to-run assignments", () => {
+  const f = fixture();
+  f.values.set("omb-steer-key", "mod");
+  f.values.set("omb-newline-key", "shift-enter");
+  f.collect({ requestId });
+  assert.deepEqual(f.sent[0], ["company-backups:client-state", {
+    requestId, clientState: { "omb-steer-key": "mod", "omb-newline-key": "shift-enter" },
+  }]);
+});
+
 test("each native request collects fresh allowed state and never credentials or unknown keys", () => {
   const f = fixture();
   f.values.set("omb-drafts", "first draft"); f.values.set("omb-skin", "dark");

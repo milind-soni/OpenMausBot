@@ -210,6 +210,7 @@ export interface FollowupPayload {
   prompt?: string;
   replyToId?: string;
   sendId?: string;
+  composerDelivery?: Message["composerDelivery"];
   dataContext?: Message["dataContext"];
   reason?: SteerQueueReason;
   unattended?: boolean;

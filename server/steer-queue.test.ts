@@ -71,6 +71,22 @@ function fakeStore(bots: BotRecord[]): SteerStore & { messages: Message[] } {
 }
 
 describe("steer-queue module", () => {
+  it("keeps app attribution and explicit delivery together while holding and draining", () => {
+    const bot = fakeBot("delivery-app-bot", "delivery-app-thread", true);
+    const store = fakeStore([bot]);
+    const composerDelivery = { mode: "queue" as const };
+    const fromApp = { messageId: "app-row", title: "Synthetic app" };
+    const queued = queueSteeredMessage(bot.id, bot.threadId, "selected slot", { composerDelivery, fromApp, prompt: "context and selected slot" });
+    const held = holdSteeredQueue(bot.id, bot.threadId, queued.id)!;
+    expect(held.items[0]).toMatchObject({ composerDelivery, fromApp });
+    restoreHeldSteeredQueue(held);
+    bot.busy = false;
+    const run = vi.fn();
+    drainSteeredMessages(store, run);
+    expect(run.mock.calls[0][2]).toBe("context and selected slot");
+    expect(store.messages[0]).toMatchObject({ text: "selected slot", composerDelivery, fromApp });
+  });
+
   it("keeps readable citation prompts byte-for-byte through queue, hold, and drain", () => {
     const bot = fakeBot("bot-citation-queue", "thread-citation-queue", true);
     const store = fakeStore([bot]);

@@ -127,3 +127,18 @@ describe("keyboard shortcut opening guard", () => {
     expect(shouldOpenKeyboardShortcuts(event("/", { metaKey: true, shiftKey: true }))).toBe(false);
   });
 });
+
+it("lists the opted-in add-to-run key separately from normal send", () => {
+  const groups = shortcutGroupsFor("enter", "mod");
+  const items = groups.flatMap(group => group.items);
+  expect(items.find(item => item.id === "send-message")?.winKeys).toEqual(["Enter"]);
+  expect(items.find(item => item.id === "add-to-run")?.macKeys).toEqual(["⌘", "Return"]);
+  expect(shortcutGroupsFor("enter").flatMap(group => group.items).some(item => item.id === "add-to-run")).toBe(false);
+});
+
+it("shows the independently chosen newline key without changing the send or steer help", () => {
+  const items = shortcutGroupsFor("enter", "mod", "alt").flatMap(group => group.items);
+  expect(items.find(item => item.id === "new-line")).toMatchObject({ macKeys: ["⌥", "Return"], winKeys: ["Alt", "Enter"] });
+  expect(items.find(item => item.id === "send-message")?.winKeys).toEqual(["Enter"]);
+  expect(items.find(item => item.id === "add-to-run")?.winKeys).toEqual(["Ctrl", "Enter"]);
+});

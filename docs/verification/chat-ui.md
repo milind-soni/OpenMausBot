@@ -235,3 +235,66 @@ browser panel and updater UI, and anything `Show threads` gates (that toggle is
 renderer localStorage, outside `ui flag`). `AGENT_BROWSER_HEADLESS=1` is set
 for consistency with the harness, but agent-browser 0.37.0 is headless by
 default and reads `AGENT_BROWSER_HEADED` to opt out.
+
+
+## Explicit composer delivery
+
+Normal Send uses the configured send key: it starts an idle direct conversation
+or waits in its queue while work is running. An optional **Add to current run** key
+is configured in Settings. It sends only the current draft, leaves existing
+queued messages alone, and refuses an unsupported, ended or replaced run.
+The composer keeps its existing arrow button, with the normal send key in its
+tooltip. Stop stays separate.
+The previous empty-composer double-Enter steering gesture is removed. Room sends
+retain their existing queue behavior; room steering remains on queued messages.
+
+The direct composer opts in through `POST /api/bots/:id/messages/explicit`, with
+`delivery: {mode: "queue"}` or `{mode: "steer", runId}`. `activeRunId` comes from
+the target task's server snapshot. It is an opaque generation marker, not an
+authorization token. An older server rejects the dedicated route rather than
+silently interpreting the new client intent as a legacy steer-first send.
+Legacy message routes retain their behavior for integrations.
+
+A retry keeps its original sendId, delivery and target until the person edits
+the draft. A possibly delivered steer has an `ok: false, uncertain: true`
+receipt, remains in the draft/outbox and is marked uncertain in the transcript.
+Checking that sendId again returns its saved receipt without another provider
+write. An uncertain send is never queued automatically. Check the response
+before editing it into a new send, which would use a new identity.
+
+```sh
+pnpm exec vitest run src/components/Composer.delivery.test.ts src/components/Composer.ime.test.ts src/components/Composer.dictation.test.ts src/lib/drafts.test.ts src/state/store.test.ts
+pnpm exec vitest run server/steer-e2e.test.ts server/steer-queue.test.ts
+```
+
+The first command checks configured keys, IME guards, explicit keyboard intent,
+retry recovery and dictation regressions. The second uses temporary homes and
+fake provider CLIs to check queue preservation, paired-client access, intent
+conflicts, uncertain delivery without replay, stale run refusal, and a delayed
+receipt after the queue starts the next run. These fixtures do not prove every
+real provider's timing, native IME behavior, or screen-reader usability.
+
+The add-to-run key defaults to Disabled, so existing sending preferences are
+preserved. Settings offers modifier+Enter, modifier+Shift+Enter and Alt+Enter;
+modifier+Enter cannot also be the configured normal send key. Invalid stored
+conflicts refuse the key rather than guess its intent. The isolated Test app
+opts into Enter for send/queue and Command+Enter for adding to the current run.
+
+
+Settings → Appearance places **Start a new line with** immediately above
+**Send messages with**. The newline key defaults to Automatic, preserving the
+existing Enter/Shift+Enter behavior. An explicit newline key replaces the
+selected text with a newline and preserves the caret; it takes priority over
+the legacy modifier-send fallback. Send, newline and add-to-run options cannot
+share their configured key. Invalid persisted overlaps refuse the action
+without sending or changing the draft. IME confirmation is left to the input
+method. The shortcut help and encrypted workspace client-preference backup
+include the chosen newline key.
+
+Verify with `src/lib/newline-key.test.ts`,
+`src/components/Composer.delivery.test.ts`,
+`src/components/SettingsModal.appearance.test.ts` and
+`src/lib/keyboard-shortcuts.test.ts`. In the isolated desktop test app, change
+newline to Option/Alt+Enter, insert a line in a synthetic draft, restore
+Shift+Enter, and reopen Settings to check persistence and row order. The
+composer retains its single arrow with the normal Send key tooltip.

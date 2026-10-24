@@ -548,7 +548,7 @@ describe("loopback trust: owner on one person's machine, service on a shared wor
     ["POST", "/api/instances"], ["GET", "/api/instances"], ["POST", "/api/mcp-servers"],
     ["POST", "/api/keys/test"], ["GET", "/api/usage"], ["GET", "/api/decisions"], ["GET", "/api/decisions.csv"],
     ["POST", "/api/fleet/workspaces"], ["POST", "/api/settings/custom-domain"], ["POST", "/api/workspace-backup/export"],
-    ["POST", "/api/bots/bot-1/messages"], ["POST", "/api/bots/bot-1/respond"], ["POST", "/api/bots/bot-1/always-allow"],
+    ["POST", "/api/bots/bot-1/messages"], ["POST", "/api/bots/bot-1/messages/explicit"], ["POST", "/api/bots/bot-1/respond"], ["POST", "/api/bots/bot-1/always-allow"],
     ["POST", "/api/threads/thread-1/undo"], ["POST", "/api/groups/room-1/messages"], ["POST", "/api/routines"], ["GET", "/api/events"],
   ];
 

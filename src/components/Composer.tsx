@@ -1,13 +1,17 @@
+import type { ComposerDelivery } from "../../shared/composer-delivery";
+import { ComposerSendControls } from "./ComposerSendControls";
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Sparkles, Square, Target, X } from "lucide-react";
+import { BookOpen, Mic, Paperclip, Sparkles, Square, Target, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { insertsNewline, newlineKeyConflict, useNewlineKey } from "@/lib/newline-key";
+import { shortcutConflict, steersMessage, useSteerKey } from "@/lib/steer-key";
 import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
 import {
   draftRevision,
@@ -20,6 +24,7 @@ import {
   rememberFailedComposerSend,
   replaceDraftAttachment,
   restoredSendId,
+  restoredDelivery,
   restoredRequestText,
   useComposerDraft,
   useComposerChannelMode,
@@ -71,8 +76,6 @@ import { useThreadRefs } from "./ThreadRefs";
 import {
   QueuedComposerMessages,
   composerCanSteerQueuedMessages,
-  doubleEnterSteerWindowExpiresAt,
-  doubleEnterSteersQueue,
 } from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import { mentionChoicesForQuery, mentionQueryAt } from "@/lib/mentions";
@@ -120,6 +123,8 @@ export function Composer({
   const { capabilities } = useDesktopCapabilities();
   const advanced = useAdvancedMode();
   const sendKey = useSendKey();
+  const steerKey = useSteerKey();
+  const newlineKey = useNewlineKey();
   const sendLabel = sendKeyLabel(sendKey);
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const threadId = group?.threadId ?? bot?.threadId ?? "";
@@ -433,18 +438,6 @@ export function Composer({
     if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId, onCancelled });
     else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId, onCancelled });
   };
-  const steerAgainUntilRef = useRef(0);
-  const prevPendingCountRef = useRef(pendingCount);
-  useEffect(() => {
-    const expiresAt = doubleEnterSteerWindowExpiresAt(
-      prevPendingCountRef.current,
-      pendingCount,
-      busy,
-      canSteer,
-    );
-    if (expiresAt !== null) steerAgainUntilRef.current = expiresAt;
-    prevPendingCountRef.current = pendingCount;
-  }, [pendingCount, busy, canSteer]);
   useEffect(() => {
     if (!busy || pendingCount === 0) {
       setSteering(false);
@@ -536,16 +529,18 @@ export function Composer({
           replyToId: failed.replyToId,
           threadId: failed.threadId,
           channelMode: failed.channelMode,
+          delivery: failed.delivery,
         });
       },
     };
     if (group) {
       dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, ...retry });
+      dispatch({ type: "send", botId: bot.id, delivery: failed.delivery, ...retry });
     }
   };
-  const send = () => {
+  const send = (requestedDelivery?: ComposerDelivery) => {
+    const delivery = restoredDelivery(draftId) ?? requestedDelivery ?? { mode: "queue" as const };
     if (locked || attachmentPending) return;
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
@@ -570,6 +565,7 @@ export function Composer({
       replyToId: replyTo?.id,
       threadId,
       channelMode: group ? effectiveChannelMode : undefined,
+      delivery: group ? undefined : delivery,
     };
     if (group) {
       dispatch({
@@ -586,11 +582,11 @@ export function Composer({
     } else if (bot) {
       const points = takePointedChips(threadId);
       dispatch({
-        type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext,
+        type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, delivery,
         ...(points ? { pointed: points.pointed } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
-      directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && !canSteer);
+      directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && delivery.mode === "queue");
     }
     setText("");
     setAttachments([]);
@@ -934,17 +930,49 @@ export function Composer({
               onEditLast();
               return;
             }
-            if (sendsMessage(e.nativeEvent, sendKey)) {
-              e.preventDefault();
-              if (
-                canSteer &&
-                doubleEnterSteersQueue(steerAgainUntilRef.current, Date.now(), pendingCount, hasContent)
-              ) {
-                steerAgainUntilRef.current = 0;
-                steerQueued();
+            if (insertsNewline(e.nativeEvent, newlineKey)) {
+              if (newlineKeyConflict(newlineKey, sendKey, steerKey)) {
+                e.preventDefault();
+                dispatch({ type: "error", message: t("composer.delivery.newlineConflict") });
                 return;
               }
+              if (newlineKey === "enter" || newlineKey === "shift-enter") return;
+              e.preventDefault();
+              if (recording) stopDictation();
+              const input = e.currentTarget;
+              const start = input.selectionStart;
+              const end = input.selectionEnd;
+              editText(text.slice(0, start) + "\n" + text.slice(end));
+              setCaret(start + 1);
+              requestAnimationFrame(() => {
+                if (inputRef.current === input && input.isConnected) input.setSelectionRange(start + 1, start + 1);
+              });
+              return;
+            }
+            if (steersMessage(e.nativeEvent, steerKey)) {
+              e.preventDefault();
+              if (!hasContent) return;
+              if (shortcutConflict(sendKey, steerKey)) {
+                dispatch({ type: "error", message: t("composer.delivery.keyConflict") });
+                return;
+              }
+              if (group || !busy || !canSteer || approval || !bot?.activeRunId) {
+                dispatch({ type: "error", message: t("composer.delivery.unavailable") });
+                return;
+              }
+              const previous = restoredDelivery(draftId);
+              if (previous && (previous.mode !== "steer" || previous.runId !== bot.activeRunId)) {
+                dispatch({ type: "error", message: t("composer.delivery.retryLocked") });
+                return;
+              }
+              send({ mode: "steer", runId: bot.activeRunId });
+              return;
+            }
+            if (sendsMessage(e.nativeEvent, sendKey)) {
+              e.preventDefault();
               send();
+            } else if (newlineKey !== "auto" && e.key === "Enter") {
+              e.preventDefault();
             }
             if (e.key === "Escape" && recording) stopDictation();
           }}
@@ -963,10 +991,6 @@ export function Composer({
               ? t("composer.placeholder.listening")
               : replyTo && !busy
               ? t("composer.placeholder.reply")
-              : busy && canSteer
-                ? pendingCount > 0
-                  ? t("composer.placeholder.steerQueued", { name: busyName, key: sendLabel })
-                  : t("composer.placeholder.steer", { name: busyName, key: sendLabel })
               : busy
                 ? group
                   ? t("composer.placeholder.queueGroup", { name: busyName, key: sendLabel })
@@ -1011,34 +1035,9 @@ export function Composer({
         )}
         {bot && !group && <CallButton bot={bot} placement="composer" fill={advanced ? undefined : MAUS_COLORS[bot.color] ?? MAUS_COLORS.green} />}
         {group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill="var(--color-accent)" />}
-        {hasContent && !locked && (
-          <button
-            onClick={send}
-            disabled={attachmentPending}
-            aria-label={
-              busy && canSteer
-                  ? t("composer.send.steer")
-                  : busy
-                    ? t("composer.send.queue")
-                    : t("composer.send.message")
-            }
-            title={
-              busy && canSteer
-                  ? t("composer.send.steer")
-                  : busy
-                    ? t("composer.send.queueHint")
-                    : `${t("chat.send")} (${sendLabel})`
-            }
-            className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full text-white",
-              busy && !canSteer
-                  ? "bg-raised text-ink-secondary hover:bg-raised-hover"
-                  : "bg-accent hover:brightness-110",
-            )}
-          >
-            {busy && !canSteer ? <Clock size={15} /> : <ArrowUp size={17} />}
-          </button>
-          )}
+        {hasContent && !locked && <ComposerSendControls busy={busy} pending={attachmentPending}
+          retrySteer={restoredDelivery(draftId)?.mode === "steer"} sendLabel={sendLabel} onSend={() => send()} />}
+
           </div>
         </div>
         </div>

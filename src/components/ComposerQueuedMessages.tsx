@@ -20,28 +20,6 @@ export function composerCanSteerQueuedMessages(
   return busy && !locked && !approvalPending && pendingCount > 0;
 }
 
-export const DOUBLE_ENTER_STEER_WINDOW_MS = 1_500;
-
-export function doubleEnterSteerWindowExpiresAt(
-  prevPendingCount: number,
-  pendingCount: number,
-  busy: boolean,
-  canSteer: boolean,
-  now = Date.now(),
-): number | null {
-  if (!busy || !canSteer) return null;
-  return pendingCount > prevPendingCount ? now + DOUBLE_ENTER_STEER_WINDOW_MS : null;
-}
-
-export function doubleEnterSteersQueue(
-  windowExpiresAt: number,
-  now: number,
-  pendingCount: number,
-  hasContent: boolean,
-): boolean {
-  return !hasContent && pendingCount > 0 && now < windowExpiresAt;
-}
-
 export function QueuedComposerMessages({
   items,
   onSteer,

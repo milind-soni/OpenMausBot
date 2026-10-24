@@ -9,6 +9,8 @@ export const WORKSPACE_BACKUP_CLIENT_KEYS = [
   "omb-show-threads",
   "omb-show-run-card",
   "omb-send-key",
+  "omb-steer-key",
+  "omb-newline-key",
   "omb-color-user-bubbles",
   "omb-chat-width",
   "openmausbot.sidebarDensity",

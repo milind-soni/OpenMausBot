@@ -24,6 +24,7 @@ import {
   recoverFailedComposerSend,
   replaceDraftAttachment,
   restoredSendId,
+  restoredDelivery,
   restoredRequestText,
   setDraft,
   setDraftAttachments,
@@ -76,6 +77,23 @@ function renderedChannelMode(id: string): string {
 }
 
 describe("channel draft delivery mode", () => {
+  it("retains steering intent and its run across draft restore, outbox and reload, until edited", () => {
+    const store = memoryStorage();
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });
+    const draftId = "bot:explicit-retry:task";
+    const delivery = { mode: "steer" as const, runId: "run-original" };
+    const sent = { draftId, revision: draftRevision(draftId), sendId: "explicit-retry-id", threadId: "task", text: "add this", requestText: "add this", attachments: [], delivery };
+    expect(recoverFailedComposerSend(sent)).toBe("restored");
+    expect(restoredDelivery(draftId)).toEqual(delivery);
+    const stored = JSON.parse(store.getItem("omb-draft-send-ids")!)[draftId];
+    store.setItem("omb-draft-send-ids", JSON.stringify({ "bot:explicit-reloaded:task": stored }));
+    expect(restoredDelivery("bot:explicit-reloaded:task")).toEqual(delivery);
+    markDraftEdited(draftId);
+    expect(restoredDelivery(draftId)).toBeUndefined();
+    expect(recoverFailedComposerSend(sent)).toBe("outbox");
+    expect(failedComposerSends(draftId).at(-1)?.delivery).toEqual(delivery);
+  });
+
   it("keeps the exact request paired with a failed send until the person edits", () => {
     const store = memoryStorage();
     Object.defineProperty(globalThis, "localStorage", { configurable: true, value: store });

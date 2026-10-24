@@ -1,5 +1,7 @@
 // Import first: it reads a Cloud home's secrets off the launcher's pipe before any module can start a process.
 import { BOOT_CLOUD_SECRETS } from "./cloud-secrets-boot.ts";
+import { existingDirectSendReceipt, type DirectSendReceipt } from "./direct-send-receipt.ts";
+import type { ComposerDelivery } from "../shared/composer-delivery.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, realpathSync, rmSync } from "node:fs";
@@ -106,7 +108,7 @@ import { createDataRoutes } from "./data/routes.ts";
 import { DataSheetRegistry } from "./data/sheet.ts";
 import { DataFailure } from "./data/types.ts";
 import { TeamComputers, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
-import { isEffortLevel, type CardAnswerer, type ResolvedSender, type SignInRequestCardData, type SteerQueueReason, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isEffortLevel, type CardAnswerer, type ResolvedSender, type SignInRequestCardData, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import { isPersistentQuestionCard, shouldSettleRequestCard } from "../shared/ask-question.ts";
 import { parseToolScope } from "../shared/tool-scope.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
@@ -267,7 +269,6 @@ import {
   type ChannelQueueItem,
 } from "./channel-queue.ts";
 import {
-  acceptedSendMatch,
   sendFingerprint,
   SendSequencer,
 } from "./send-idempotency.ts";
@@ -3032,7 +3033,7 @@ const wireTask = (task: TaskRecord, botModel: ModelSelection, awaiting = threads
   // Snoozes heal on read against the server clock; the 0 sentinel ("until new activity") survives reads.
   const { snoozedUntil, ...base } = toWireTask(task, botModel);
   const keepWarm = cacheKeepWarmStatus(task.threadId);
-  const coordinated = { ...base, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}) };
+  const coordinated = { ...base, activeRunId: task.busy ? directTurnGenerationByThread.get(task.threadId) : undefined, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}) };
   const asleep = snoozedUntil === 0 || (snoozedUntil !== undefined && snoozedUntil > Date.now());
   return asleep ? { ...coordinated, snoozedUntil } : coordinated;
 };
@@ -3045,7 +3046,7 @@ const wireBot = (bot: BotRecord): WireBot => {
     ? { ...rest, approvalMode: "ask" as const, autoApprove: false }
     : { ...rest, approvalMode: approvalModeFor(rest) };
   const awaiting = threadsAwaitingTeammates();
-  return { ...visible, waitingForTeammates: awaiting.has(bot.threadId) && !threadBusy(bot.id, bot.threadId),
+  return { ...visible, activeRunId: bot.busy ? directTurnGenerationByThread.get(bot.threadId) : undefined, waitingForTeammates: awaiting.has(bot.threadId) && !threadBusy(bot.id, bot.threadId),
     mainThreadId: botMainThread(bot.id),
     avatarUrl: visible.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
 };
@@ -7608,7 +7609,7 @@ function drainQueuedSendsNow() {
   );
 }
 
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }, composerDelivery?: ComposerDelivery) {
   const decision = admit("direct", {}, {
     atCapacity: botAtThreadCapacity(botId),
     threadBusy: threadBusy(botId, threadId),
@@ -7619,6 +7620,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
+      composerDelivery,
       dataContext, fromApp: app?.fromApp,
       reason: decision.reason,
       prompt: (app?.context ?? "") + promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId)),
@@ -7630,13 +7632,9 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     });
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
-  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app });
+  const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app, composerDelivery });
   return { ok: true as const, threadId, message };
 }
-
-type DirectSendReceipt =
-  | { ok: true; threadId: string; message: Message; steered?: true }
-  | { ok: true; queued: true; queueId: string; threadId: string; reason?: SteerQueueReason };
 
 class DirectSendRefused extends Error {
   readonly status: number;
@@ -7673,6 +7671,7 @@ async function acceptDirectSend(
     callId?: string;
     dataContext?: DataContext;
     personPresent: boolean;
+    delivery?: ComposerDelivery;
     app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
@@ -7682,35 +7681,15 @@ async function acceptDirectSend(
   if (refused) throw refused;
   return sendSequencer.run(
     sendId ? `bot:${botId}:${threadId}:${sendId}` : undefined,
-    sendFingerprint(text, replyTo?.id),
+    sendFingerprint(text, replyTo?.id, undefined, input.delivery),
     async (): Promise<DirectSendReceipt> => {
       if (sendId) {
         if (cancelledChatFollowup("bot", botId, threadId, sendId)) {
           throw Object.assign(new Error("this queued sendId was cancelled; send a new message to try again"), { status: 409 });
         }
-        const accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, text, replyTo?.id);
-        if (accepted.kind === "conflict") {
-          throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
-        }
-        if (accepted.kind === "match") {
-          const canonical = {
-            ok: true as const,
-            threadId,
-            message: accepted.message,
-          };
-          return accepted.message.steered
-            ? { ...canonical, steered: true as const }
-            : canonical;
-        }
-        const queued = queuedSteeredMessage(botId, threadId, sendId);
-        if (queued) {
-          if (queued.text !== text || queued.replyToId !== replyTo?.id) {
-            throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
-          }
-          return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: queued.reason };
-        }
+        const receipt = existingDirectSendReceipt(store.messagesFor(threadId), () => queuedSteeredMessage(botId, threadId, sendId), { threadId, sendId, text, replyToId: replyTo?.id, delivery: input.delivery });
+        if (receipt) return receipt;
       }
-
       // Provider discovery yields, and probes afresh for an engine installed or signed in since; the transcript reservation after these checks must stay synchronous.
       const profile = store.bot(botId);
       if (profile && ((!profile.modelSelection.instanceId && !profile.modelSelection.model) ||
@@ -7725,6 +7704,12 @@ async function acceptDirectSend(
       }
 
       if (guardedStart) return guardedStart(currentAtStart);
+      if (input.delivery?.mode === "queue") {
+        return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, input.delivery);
+      }
+      if (input.delivery?.mode === "steer" && (!currentAtStart.busy || directTurnGenerationByThread.get(threadId) !== input.delivery.runId)) {
+        throw new DirectSendRefused(409, { error: "The selected run ended or changed. Your message was not sent.", code: "steer_target_changed" });
+      }
 
       if (currentAtStart.busy) {
         const instance = runningTurnInstance(currentAtStart, threadId);
@@ -7732,6 +7717,7 @@ async function acceptDirectSend(
         const steerInput = extractTurnImages(text);
         const carriesImages = steerInput.images.length > 0;
         const steerTarget = handoffs.current(threadId);
+        const steerAnchor = store.activePath(threadId).at(-1)?.id;
         const busyAdmission = admit("direct-busy", {
           carriesImages,
           engineCanSteerImages: engineSteersImages(instance),
@@ -7751,9 +7737,13 @@ async function acceptDirectSend(
         if (!store.taskByThread(botId, threadId)) {
           throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
         }
+        if (input.delivery?.mode === "steer" && steered === "refused") {
+          throw new DirectSendRefused(409, { error: "This run cannot accept the message. Your draft is unchanged.", code: "steer_refused" });
+        }
         const delivered = steered !== "refused";
+        const uncertain = input.delivery?.mode === "steer" && (steered === "indeterminate" || !current.busy || directTurnGenerationByThread.get(threadId) !== input.delivery.runId);
         if (delivered) {
-          if (steered === "steered" && !current.busy) {
+          if (!input.delivery && steered === "steered" && !current.busy) {
             throw Object.assign(
               new Error("the running turn ended before the steered message could be recorded"),
               { status: 409 },
@@ -7761,7 +7751,7 @@ async function acceptDirectSend(
           }
           // "indeterminate" is recorded too: the words may already be in a turn, and a resend could run them twice.
           if (personPresent) clearUnattended(threadId);
-          const message = store.appendMessage(threadId, {
+          const message = store.insertMessageAfter(threadId, input.delivery ? steerAnchor : store.activePath(threadId).at(-1)?.id, {
             role: "user",
             kind: "text",
             text,
@@ -7769,11 +7759,16 @@ async function acceptDirectSend(
             sendId,
             ...(dataContext ? { dataContext } : {}), ...(app?.fromApp ? { fromApp: app.fromApp } : {}),
             steered: true,
+            ...(input.delivery ? { composerDelivery: input.delivery } : {}),
+            ...(uncertain ? { steerUncertain: true } : {}),
             sender,
             ...spokenLineFields(via, callId),
           });
-          store.setTaskAskedAt(botId, threadId, message.at);
+          if (!input.delivery || (current.busy && directTurnGenerationByThread.get(threadId) === input.delivery.runId)) {
+            store.setTaskAskedAt(botId, threadId, message.at);
+          }
           handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
+          if (message.steerUncertain) return { ok: false, uncertain: true, threadId, message };
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
@@ -7983,6 +7978,7 @@ async function startTurn(
     computerSelectionContinuation?: boolean;
     replyTo?: ReplyTarget;
     sendId?: string;
+    composerDelivery?: ComposerDelivery;
     via?: "call";
     callId?: string;
     relayed?: boolean;
@@ -8123,6 +8119,7 @@ async function startTurn(
           replyToId: opts?.replyTo?.id,
           reaction: opts?.replyTo?.reactedWith,
           sendId: opts?.sendId,
+          ...(opts?.composerDelivery ? { composerDelivery: opts.composerDelivery } : {}),
           ...(opts?.dataContext ? { dataContext: opts.dataContext } : {}), ...(opts?.app?.fromApp ? { fromApp: opts.app.fromApp } : {}), ...(opts?.app?.pointed ? { pointed: opts.app.pointed } : {}),
           peerAsk: opts?.peerAsk,
           sender: opts?.sender,
@@ -16600,7 +16597,7 @@ for (const row of chatFollowups()) {
   const messages = store.messagesFor(row.threadId);
   const recovered = messages.find((message) => message.queueId === row.id && message.role === "user") ?? store.appendMessage(row.threadId, {
     role: "user", kind: "text", text: row.payload.text, replyToId: row.payload.replyToId,
-    sendId: row.payload.sendId, queueId: row.id, sender: row.payload.sender,
+    sendId: row.payload.sendId, queueId: row.id, sender: row.payload.sender, composerDelivery: row.payload.composerDelivery,
     ...(row.kind === "channel" ? { channelMode: row.payload.mode, via: row.payload.via } : {}),
     ...(row.kind === "bot" ? spokenLineFields(row.payload.via, row.payload.callId) : {}),
   });

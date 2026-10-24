@@ -9,10 +9,11 @@ import { CSP_META_PREFIX } from "../shared/app-frame/document.ts";
 import { APP_SAMPLES } from "../shared/app-samples.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
-it("shows, replaces and serves a bot's page, and carries its context and its message to the engine", async () => {
+it.each(["", "/explicit"])("shows a page and carries app context through the messages%s route", async (suffix) => {
   const gates = mkdtempSync(join(tmpdir(), "omb-chat-apps-"));
   const gate = join(gates, "finish");
   const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate, FAKE_CLAUDE_VERSION: "2.1.270" });
+  const delivery = suffix ? { delivery: { mode: "queue" } } : {};
   const evidence: unknown[] = [];
   const api = async (method: string, path: string, body?: unknown, expected = 200, token?: string) => {
     const response = await fetch(fixture.info.url + path, {
@@ -36,7 +37,7 @@ it("shows, replaces and serves a bot's page, and carries its context and its mes
     const transcript = async (): Promise<any[]> => (await api("GET", `/api/threads/${bot.threadId}/messages`)).messages;
     const card = (body: unknown, expected: number, token: string) => api("POST", "/api/internal/options-card", body, expected, token);
 
-    await api("POST", `/api/bots/${bot.id}/messages`, { threadId: bot.threadId, text: "Count my coffees", sendId: "apps-e2e-send-000000001" }, 202);
+    await api("POST", `/api/bots/${bot.id}/messages${suffix}`, { ...delivery, threadId: bot.threadId, text: "Count my coffees", sendId: "apps-e2e-send-000000001" }, 202);
     let token = "";
     await expect.poll(() => {
       try { token = dump().mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN; } catch { return false; }
@@ -62,8 +63,8 @@ it("shows, replaces and serves a bot's page, and carries its context and its mes
     expect(await api("POST", `/api/bots/${bot.id}/apps/${shown.messageId}/rpc`, { threadId: bot.threadId, method: "tools/list" }, 404)).toEqual({ error: "That app has no server to call." });
 
     expect(await api("POST", `/api/bots/${bot.id}/apps/${shown.messageId}/context`, { threadId: bot.threadId, content: [{ type: "text", text: "The counter shows 3 cups." }] })).toEqual({ ok: true });
-    const sent = await api("POST", `/api/bots/${bot.id}/messages`, {
-      threadId: bot.threadId, sendId: "apps-e2e-send-000000002", appMessage: { messageId: shown.messageId, text: "I have had 3 cups of coffee today." },
+    const sent = await api("POST", `/api/bots/${bot.id}/messages${suffix}`, {
+      ...delivery, threadId: bot.threadId, sendId: "apps-e2e-send-000000002", appMessage: { messageId: shown.messageId, text: "I have had 3 cups of coffee today." },
     }, 202);
     expect(sent.message).toMatchObject({ role: "user", text: "I have had 3 cups of coffee today.", replyToId: shown.messageId, fromApp: { messageId: shown.messageId, title: "Coffee" } });
     await expect.poll(turnPrompt, { timeout: 15_000 }).toContain("sent from an app shown in this chat");
@@ -82,10 +83,20 @@ it("shows, replaces and serves a bot's page, and carries its context and its mes
     await settledTurn();
 
     // The context was handed over once: the next message carries none.
-    await api("POST", `/api/bots/${bot.id}/messages`, { threadId: bot.threadId, sendId: "apps-e2e-send-000000003", text: "Thanks" }, 202);
+    await api("POST", `/api/bots/${bot.id}/messages${suffix}`, { ...delivery, threadId: bot.threadId, sendId: "apps-e2e-send-000000003", text: "Thanks" }, 202);
     await expect.poll(turnPrompt, { timeout: 15_000 }).toContain("Thanks");
     expect(turnPrompt()).not.toContain("--- app context ---");
     writeFileSync(gate, "finish");
+    await settledTurn();
+
+    const pointed = [{ appId: shown.messageId, rev: 1, tag: "button", role: "button", text: "Change cups", selector: "button", html: "<button>Change cups</button>" }];
+    const picked = await api("POST", `/api/bots/${bot.id}/messages${suffix}`, {
+      ...delivery, threadId: bot.threadId, sendId: "apps-e2e-send-000000004", text: "Change this counter", pointed,
+    }, 202);
+    expect(picked.message).toMatchObject({ pointed: [{ appId: shown.messageId, label: "“Change cups”" }], ...(suffix ? { composerDelivery: { mode: "queue" } } : {}) });
+    await expect.poll(turnPrompt, { timeout: 15_000 }).toContain("Change this counter");
+    expect(turnPrompt()).toContain("the person pointed at parts of your page");
+    expect(turnPrompt()).toContain("Change cups");
     await settledTurn();
 
     const after = await transcript();

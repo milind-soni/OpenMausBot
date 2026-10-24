@@ -1,3 +1,4 @@
+import type { ComposerDelivery } from "../../shared/composer-delivery.ts";
 import type { ServerResponse } from "node:http";
 import { z } from "zod";
 
@@ -31,6 +32,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 type RunningInstance = ReturnType<ProviderRegistry["get"]>;
 
 type DirectSendReceipt =
+  | { ok: false; uncertain: true; steered?: never; threadId: string; message: Message }
   | { ok: true; threadId: string; message: Message; steered?: true }
   | { ok: true; queued: true; queueId: string; threadId: string; reason?: SteerQueueReason };
 
@@ -59,7 +61,7 @@ export interface BotMessageRouteDeps {
   acceptDirectSend(
     input: {
       botId: string; threadId: string; text: string; sendId?: string; replyTo?: Message; sender?: ResolvedSender;
-      trigger: UsageTrigger; dataContext?: DataContext; personPresent: boolean;
+      trigger: UsageTrigger; dataContext?: DataContext; personPresent: boolean; delivery?: ComposerDelivery;
       app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
     },
     guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
@@ -157,14 +159,23 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     let m: RegExpMatchArray | null = null;
     const requirePinnedClientThread = pinnedClientThread(auth, req);
     const routines = deps.routines();
-    m = path.match(/^\/api\/bots\/([\w-]+)\/messages(?:\/(guarded))?$/);
+    m = path.match(/^\/api\/bots\/([\w-]+)\/messages(?:\/(guarded|explicit))?$/);
     if (m && method === "POST") {
       const guarded = m[2] === "guarded";
+      const explicit = m[2] === "explicit";
       const body = await readBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
       const pressed = body.widgetAction !== undefined && body.widgetAction !== null;
+      const deliverySchema = z.discriminatedUnion("mode", [
+        z.object({ mode: z.literal("queue") }).strict(),
+        z.object({ mode: z.literal("steer"), runId: z.string().regex(/^[\w-]{1,100}$/) }).strict(),
+      ]);
+      const delivery = explicit ? deliverySchema.safeParse(body.delivery) : undefined;
+      if (explicit && (!delivery?.success || pressed) || !explicit && body.delivery !== undefined) {
+        return json(res, 400, { error: "explicit messages require a valid delivery intent and cannot answer widgets" });
+      }
       if (guarded && pressed) return json(res, 400, { error: "guarded sends cannot answer a widget" });
       const fromAnApp = body.appMessage !== undefined && body.appMessage !== null;
       if (guarded && fromAnApp) return json(res, 400, { error: "guarded sends cannot speak for an app" });
@@ -269,6 +280,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
+          ...(delivery?.success ? { delivery: delivery.data } : {}),
           // The bot's own shell reaches this route on a headless server (loopback is the owner), so only a
           // paired session or the desktop capability proves a person and lifts the webhook block.
           personPresent: auth.kind === "session" || DESKTOP_MANAGED,
@@ -346,10 +358,12 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           text: item.text,
           replyToId: item.replyToId,
           sendId: item.sendId,
+          composerDelivery: item.composerDelivery,
           ...(item.dataContext ? { dataContext: item.dataContext } : {}),
           queueId: item.messageId,
           peerAsk: item.peerAsk,
           steered: true,
+          ...(steered === "indeterminate" ? { steerUncertain: true } : {}),
           sender: item.sender,
           ...spokenLineFields(item.via, item.callId),
           ...(item.fromApp ? { fromApp: item.fromApp } : {}),
@@ -359,7 +373,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         for (const message of messages) handoffs.steered(bot.threadId, steerTarget, instance?.instanceId, message.id);
         const queueIds = held.items.map((item) => item.messageId);
         settleHeldSteeredQueue(held);
-        return json(res, 200, { ok: true, steered: true, threadId: bot.threadId, messages, queueIds });
+        return json(res, 200, { ...(steered === "indeterminate" ? { ok: false, uncertain: true } : { ok: true, steered: true }), threadId: bot.threadId, messages, queueIds });
       }
       if (steered === "indeterminate") {
         // No destination left: settle, so a restart cannot replay words a dead turn may have run.

@@ -2,6 +2,8 @@ import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
+import type { NewlineKey } from "@/lib/newline-key";
+import type { SteerKey } from "@/lib/steer-key";
 import type { SendKey } from "@/lib/send-key";
 import { en, locales } from "@/locales";
 import type { AppSettingsSection } from "@/state/store";
@@ -22,6 +24,10 @@ const fixture = vi.hoisted(() => ({
   setNotificationSounds: vi.fn(),
   setNotificationFeed: vi.fn(),
   sendKey: "enter" as SendKey,
+  steerKey: "off" as SteerKey,
+  newlineKey: "auto" as NewlineKey,
+  setNewlineKey: vi.fn(),
+  setSteerKey: vi.fn(),
   setSendKey: vi.fn(),
   colorUserBubbles: false,
   setColorUserBubbles: vi.fn(),
@@ -63,6 +69,16 @@ vi.mock("@/lib/notification-preferences", () => ({
   useFinishedNotifications: () => true,
   setFinishedNotifications: vi.fn(),
 }));
+vi.mock("@/lib/newline-key", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/newline-key")>(),
+  useNewlineKey: () => fixture.newlineKey,
+  setNewlineKey: fixture.setNewlineKey,
+}));
+vi.mock("@/lib/steer-key", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/steer-key")>(),
+  useSteerKey: () => fixture.steerKey,
+  setSteerKey: fixture.setSteerKey,
+}));
 vi.mock("@/lib/send-key", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/send-key")>(),
   useSendKey: () => fixture.sendKey,
@@ -97,6 +113,8 @@ beforeEach(() => {
   fixture.toolsLayout = "rows";
   fixture.notificationSounds = true;
   fixture.sendKey = "enter";
+  fixture.newlineKey = "auto";
+  fixture.steerKey = "off";
   fixture.colorUserBubbles = false;
   // these pin the Advanced rail; Simple has its own suite (SettingsModal.simple.test.ts)
   fixture.advancedMode = true;
@@ -242,7 +260,8 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("Choose Shift+Enter or Ctrl+Enter so Enter starts a new line");
     expect(html).toContain("as Japanese input does. Ctrl+Enter sends whichever you choose.");
     expect(html).toContain(`<option value="${sendKey}" selected="">${label}</option>`);
-    const options = [...html.matchAll(/<option value="(enter|shift-enter|mod-enter)"[^>]*>([^<]*)</g)].map((match) => [match[1], match[2]]);
+    const sendSelect = html.match(/<select[^>]*aria-label="Send messages with"[^>]*>(.*?)<\/select>/)![1];
+    const options = [...sendSelect.matchAll(/<option value="(enter|shift-enter|mod-enter)"[^>]*>([^<]*)</g)].map((match) => [match[1], match[2]]);
     expect(options).toEqual([["enter", "Enter"], ["shift-enter", "Shift+Enter"], ["mod-enter", "Ctrl+Enter"]]);
     expect(fixture.setSendKey).not.toHaveBeenCalled();
     expect(fixture.api).not.toHaveBeenCalled();
@@ -258,6 +277,19 @@ describe("Settings → Appearance", () => {
     expect(html).toContain('<option value="enter">Enter</option>');
     expect(html).toContain('<option value="shift-enter" selected="">Shift+Enter</option>');
     expect(html).toContain('<option value="mod-enter">Ctrl+Enter</option>');
+  });
+
+  it("shows an optional steering key and prevents an identical normal-send shortcut", () => {
+    fixture.steerKey = "mod";
+    let html = render();
+    expect(html).toContain("Add to current run with");
+    expect(html).toContain('<option value="mod-enter" disabled="">Ctrl+Enter</option>');
+    fixture.steerKey = "off";
+    fixture.sendKey = "mod-enter";
+    html = render();
+    expect(html).toContain('<option value="mod" disabled="">Ctrl+Enter</option>');
+    expect(fixture.setSteerKey).not.toHaveBeenCalled();
+    expect(fixture.api).not.toHaveBeenCalled();
   });
 
   it("finds the send key by the keys' names on every platform", () => {
@@ -443,4 +475,21 @@ describe("Settings → Appearance", () => {
     vi.stubGlobal("window", { ogb: { cloudAccount: {}, remoteClient: { active: true } } });
     expect(render()).not.toContain('<option value="cloudAccount"');
   });
+});
+
+it("places independently configured newline immediately above send and disallows overlaps", () => {
+  fixture.newlineKey = "mod-shift";
+  fixture.sendKey = "enter";
+  fixture.steerKey = "mod";
+  const html = render();
+  expect(html.indexOf('aria-label="Start a new line with"')).toBeLessThan(html.indexOf('aria-label="Send messages with"'));
+  const select = html.match(/<select[^>]*aria-label="Start a new line with"[^>]*>(.*?)<\/select>/)![1];
+  expect(select).toContain('<option value="enter" disabled="">Enter</option>');
+  expect(select).toContain('<option value="mod" disabled="">Ctrl+Enter</option>');
+  expect(select).toContain('<option value="mod-shift" selected="">Ctrl+Shift+Enter</option>');
+  const steer = html.match(/<select[^>]*aria-label="Add to current run with"[^>]*>(.*?)<\/select>/)![1];
+  expect(steer).toContain('<option value="mod-shift" disabled="">Ctrl+Shift+Enter</option>');
+  fixture.newlineKey = "shift-enter";
+  expect(render()).toContain('<option value="shift-enter" disabled="">Shift+Enter</option>');
+  expect(fixture.setNewlineKey).not.toHaveBeenCalled();
 });

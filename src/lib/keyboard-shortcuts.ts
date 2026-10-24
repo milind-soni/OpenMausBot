@@ -1,3 +1,5 @@
+import type { NewlineKey } from "./newline-key";
+import type { SteerKey } from "./steer-key";
 import type { SendKey } from "./send-key";
 
 export interface ShortcutItem {
@@ -127,16 +129,26 @@ const SEND_ROWS: Record<Exclude<SendKey, "enter">, [Keys, Keys]> = {
   "mod-enter": [{ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] }, ENTER],
 };
 
-export function shortcutGroupsFor(sendKey: SendKey): readonly ShortcutGroup[] {
-  if (sendKey === "enter") return SHORTCUT_GROUPS;
-  const [send, newLine] = SEND_ROWS[sendKey];
-  return SHORTCUT_GROUPS.map((group) => ({
+export function shortcutGroupsFor(sendKey: SendKey, steerKey: SteerKey = "off", newlineKey: NewlineKey = "auto"): readonly ShortcutGroup[] {
+  const [send, legacyNewLine] = sendKey === "enter" ? [ENTER, SHIFT_ENTER] : SEND_ROWS[sendKey];
+  const newLine: Keys = newlineKey === "auto" ? legacyNewLine
+    : newlineKey === "enter" ? ENTER : newlineKey === "shift-enter" ? SHIFT_ENTER
+      : newlineKey === "alt" ? { macKeys: ["⌥", "Return"], winKeys: ["Alt", "Enter"] }
+        : { macKeys: ["⌘", ...(newlineKey === "mod-shift" ? ["⇧"] : []), "Return"], winKeys: ["Ctrl", ...(newlineKey === "mod-shift" ? ["Shift"] : []), "Enter"] };
+  const groups = sendKey === "enter" && newlineKey === "auto" ? SHORTCUT_GROUPS : SHORTCUT_GROUPS.map((group) => ({
     ...group,
     items: group.items.map((item) =>
       item.id === "send-message" ? { ...item, ...send }
         : item.id === "new-line" ? { ...item, ...newLine }
           : item),
   }));
+  if (steerKey === "off") return groups;
+  const keys: Keys = steerKey === "alt" ? { macKeys: ["⌥", "Return"], winKeys: ["Alt", "Enter"] }
+    : { macKeys: ["⌘", ...(steerKey === "mod-shift" ? ["⇧"] : []), "Return"], winKeys: ["Ctrl", ...(steerKey === "mod-shift" ? ["Shift"] : []), "Enter"] };
+  return groups.map(group => group.category !== "Chat & Composer" ? group : {
+    ...group,
+    items: [...group.items, { id: "add-to-run", description: "Add draft to current run (keep queued messages)", ...keys }],
+  });
 }
 
 export function shouldOpenKeyboardShortcuts(event: KeyboardEvent): boolean {

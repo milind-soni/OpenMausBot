@@ -207,7 +207,7 @@ describe("an input method in the composer's menus", () => {
 });
 
 describe("the send key in hints", () => {
-  it("names the key on the send button and in the busy composer", () => {
+  it("names the send key on the arrow and describes queueing in busy composers", () => {
     fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test", capabilities: { queueing: true } } as unknown as InstanceInfo];
     render(createElement(Composer, { bot }));
     type(textarea(), "hi");
@@ -219,18 +219,18 @@ describe("the send key in hints", () => {
 
     type(textarea(), "");
     render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
-    expect(textarea().placeholder).toBe("Pepper is working — Ctrl+Enter sends this into the running turn");
+    expect(textarea().placeholder).toBe("Pepper is working — sends when this turn finishes");
     render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [{ ...bot, modelSelection: { instanceId: "none", model: "x" } }] }));
     expect(textarea().placeholder).toBe("Pepper is working — Ctrl+Enter queues your message");
   });
 
-  it("names the key in Japanese hints too", () => {
+  it("describes queueing in the Japanese busy hint too", () => {
     fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test", capabilities: { queueing: true } } as unknown as InstanceInfo];
     setSendKey("mod-enter");
     setLocale("ja");
     try {
       render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
-      expect(textarea().placeholder).toBe("Pepper が作業中です — Ctrl+Enter で実行中のターンに送ります");
+      expect(textarea().placeholder).toBe("Pepper が作業中です — このターンが終わったら送信します");
     } finally {
       setLocale("en");
     }

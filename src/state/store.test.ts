@@ -2895,6 +2895,24 @@ describe("restoring the open conversation", () => {
       expect(seen.notice).toEqual({ kind: "steer-images", botName: null });
     });
 
+    it("an uncertain explicit receipt restores the send and does not claim successful delivery", async () => {
+      const { stream } = await boot();
+      stream.send(hello()); await settle();
+      const delivery = { mode: "steer" as const, runId: "original-run" };
+      const pointed = [{ appId: "picked-page", rev: 1, tag: "button", role: "button", text: "Choose", selector: "button", html: "<button>Choose</button>" }];
+      const message = { id: "unknown-message", at: 1, role: "user", kind: "text", text: "maybe delivered", sendId: "unknown-send-id", steered: true, steerUncertain: true, composerDelivery: delivery };
+      const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, uncertain: true, threadId: "bot-1-thread", message })));
+      vi.stubGlobal("fetch", request);
+      const restore = vi.fn();
+      flushSync(() => dispatch({ type: "send", botId: "bot-1", threadId: "bot-1-thread", text: message.text, sendId: message.sendId, delivery, pointed, onError: restore }));
+      await settle();
+      expect(request).toHaveBeenCalledWith("/api/bots/bot-1/messages/explicit", expect.objectContaining({ method: "POST", body: expect.stringContaining('"runId":"original-run"') }));
+      expect(JSON.parse(request.mock.calls.find(([path]) => path === "/api/bots/bot-1/messages/explicit")![1].body)).toMatchObject({ delivery, pointed });
+      expect(restore).toHaveBeenCalledTimes(1);
+      expect(seen.error).toContain("Check the response");
+      expect(seen.bots.find(bot => bot.id === "bot-1")!.messages.filter(row => row.sendId === message.sendId)).toHaveLength(1);
+    });
+
     it("the provider restores the conversation remembered on this device", async () => {
       const { stored, stream } = await boot({ [LAST_CONVERSATION_KEY]: "room-1" });
       stream.send(hello());

@@ -8,6 +8,8 @@ import {
   shortcutKeysForPlatform,
   type ShortcutItem,
 } from "@/lib/keyboard-shortcuts";
+import { useNewlineKey } from "@/lib/newline-key";
+import { useSteerKey } from "@/lib/steer-key";
 import { useSendKey } from "@/lib/send-key";
 
 export interface KeyboardShortcutsModalProps {
@@ -41,6 +43,8 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
   const inputRef = useRef<HTMLInputElement>(null);
   const isMac = isMacPlatform();
   const sendKey = useSendKey();
+  const steerKey = useSteerKey();
+  const newlineKey = useNewlineKey();
 
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
@@ -54,7 +58,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
 
   if (!open) return null;
 
-  const groups = filterShortcutGroups(shortcutGroupsFor(sendKey), query, isMac);
+  const groups = filterShortcutGroups(shortcutGroupsFor(sendKey, steerKey, newlineKey), query, isMac);
 
   return (
     <dialog

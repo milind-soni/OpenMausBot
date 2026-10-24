@@ -195,6 +195,9 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
       claim.run("claimed_before_append_legacy", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed by an older build" }));
       claim.run("claimed_before_append_call", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed from a call", via: "call", callId: "call-restart-fixture" }));
       claim.run("claimed_before_append_stray", unappended.id, unappended.threadId, JSON.stringify({ text: "Typed, with a stray call id", callId: "call-stray" }));
+      claim.run("claimed_before_append_explicit", unappended.id, unappended.threadId, JSON.stringify({
+        text: "Explicit queue interrupted before append", sendId: "interrupted_explicit_send_123456", composerDelivery: { mode: "queue" },
+      }));
       crashed.prepare("UPDATE messages SET json = json_set(json, '$.text', '') WHERE thread_id = ? AND id = ?")
         .run(lost.threadId, lostTarget.message.id);
     } finally { crashed.close(); }
@@ -212,7 +215,15 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
       ["claimed_before_append_legacy", "Claimed by an older build", undefined, undefined, undefined],
       ["claimed_before_append_call", "Claimed from a call", undefined, "call", "call-restart-fixture"],
       ["claimed_before_append_stray", "Typed, with a stray call id", undefined, undefined, undefined],
+      ["claimed_before_append_explicit", "Explicit queue interrupted before append", undefined, undefined, undefined],
     ]);
+    const explicitPath = `/api/bots/${unappended.id}/messages/explicit`;
+    const explicitBody = { threadId: unappended.threadId, text: "Explicit queue interrupted before append",
+      sendId: "interrupted_explicit_send_123456", delivery: { mode: "queue" } };
+    const recoveredExplicit = (await api("POST", explicitPath, explicitBody, 202)).message;
+    expect(recoveredExplicit).toMatchObject({ queueId: "claimed_before_append_explicit", composerDelivery: explicitBody.delivery });
+    await api("POST", explicitPath, { ...explicitBody, delivery: { mode: "steer", runId: "old-run" } }, 409);
+    expect(prompts(unappended.threadId)).toHaveLength(0);
     await expect.poll(async () => (await messages(lost.threadId)).some((message) => message.tool?.name?.includes("queued channel message could not start")), { timeout: 15_000 }).toBe(true);
     expect((await messages(lost.threadId)).filter((message) => message.queueId === lostQueued.queueId)).toEqual([
       expect.objectContaining({ role: "user", text: "Reply to a message that disappears", sender: PAIRED }),
@@ -238,6 +249,8 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     expect(prompts(later.threadId)).toHaveLength(1);
     await waitForExit(restarted, { signal: "SIGTERM" });
     await restart();
+    expect((await api("POST", explicitPath, explicitBody, 202)).message.id).toBe(recoveredExplicit.id);
+    expect(prompts(unappended.threadId)).toHaveLength(0);
     expect((await messages(later.threadId)).filter((message) => message.queueId === claimed.queueId)).toEqual(interrupted.filter((message) => message.queueId === claimed.queueId));
     expect(prompts(later.threadId)).toHaveLength(1);
     evidence.push({ settled, channelSettled, journal: journal(), recoveredBot: await messages(bot.threadId), recoveredChannel: await messages(channel.threadId), interrupted });

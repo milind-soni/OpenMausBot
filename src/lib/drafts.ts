@@ -1,3 +1,4 @@
+import type { ComposerDelivery } from "../../shared/composer-delivery.js";
 import { useCallback, useEffect, useState, useSyncExternalStore, type SetStateAction } from "react";
 import { isAttachment, type Attachment } from "./composer-attachments.js";
 
@@ -22,6 +23,7 @@ export interface FailedComposerSend {
   replyToId?: string;
   threadId: string;
   channelMode?: "chat" | "goal";
+  delivery?: ComposerDelivery;
 }
 type FailedComposerSendInput = Omit<FailedComposerSend, "id">;
 export interface ComposerSendSnapshot extends FailedComposerSendInput {
@@ -31,7 +33,7 @@ export interface ComposerSendSnapshot extends FailedComposerSendInput {
 }
 const failedSends = new Map<string, FailedComposerSend[]>();
 const failedSendListeners = new Map<string, Set<(sends: FailedComposerSend[]) => void>>();
-type RestoredSend = { sendId: string; requestText?: string };
+type RestoredSend = { sendId: string; requestText?: string; delivery?: ComposerDelivery };
 const restoredSends = new Map<string, RestoredSend>();
 let failedSendSequence = 0;
 
@@ -263,6 +265,10 @@ export function restoredSendId(draftId: string): string | undefined {
   return restoredSend(draftId)?.sendId;
 }
 
+export function restoredDelivery(draftId: string): ComposerDelivery | undefined {
+  return restoredSend(draftId)?.delivery;
+}
+
 export function restoredRequestText(draftId: string): string | undefined {
   return restoredSend(draftId)?.requestText;
 }
@@ -274,7 +280,9 @@ function restoredSend(draftId: string): RestoredSend | undefined {
   if (!stored || (typeof stored !== "string" && typeof stored !== "object")) return undefined;
   const value = typeof stored === "string" ? { sendId: stored } : stored as Record<string, unknown>;
   if (typeof value.sendId !== "string" || (value.requestText !== undefined && typeof value.requestText !== "string")) return undefined;
-  const send = { sendId: value.sendId, requestText: value.requestText };
+  const delivery = value.delivery as ComposerDelivery | undefined;
+  if (delivery && (delivery.mode !== "queue" && delivery.mode !== "steer" || delivery.mode === "steer" && typeof delivery.runId !== "string")) return undefined;
+  const send = { sendId: value.sendId, requestText: value.requestText, delivery };
   restoredSends.set(draftId, send);
   return send;
 }
@@ -424,6 +432,7 @@ export function recoverFailedComposerSend(sent: ComposerSendSnapshot): "restored
       replyToId: sent.replyToId,
       threadId: sent.threadId,
       channelMode: sent.channelMode,
+      delivery: sent.delivery,
     });
     return "outbox";
   }
@@ -434,7 +443,7 @@ export function recoverFailedComposerSend(sent: ComposerSendSnapshot): "restored
     channelMode: sent.channelMode,
   });
   // The response may have vanished after the server accepted it: the next Send reuses this identity.
-  const retry = { sendId: sent.sendId, requestText: sent.requestText };
+  const retry = { sendId: sent.sendId, requestText: sent.requestText, delivery: sent.delivery };
   restoredSends.set(sent.draftId, retry);
   setStoredSendId(getStore(), sent.draftId, retry);
   return "restored";

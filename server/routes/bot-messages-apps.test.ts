@@ -259,12 +259,13 @@ describe("POST /api/bots/:id/messages with pointed", () => {
     appId, rev: 0, tag: "button", role: "button", text: "Choose Pro", selector: "main > section:nth-of-type(2) > button", html: "<button class=\"cta\">Choose Pro</button>", ...more,
   });
 
-  it("hands the bot what the person pointed at inside a records block, ahead of their words, and keeps the chips on the line", async () => {
+  it.each(["", "/explicit"])("hands the bot what the person pointed at inside a records block through messages%s", async (suffix) => {
     const { threadId, state, post, page } = await fixture();
     const appId = page("Pricing");
-    const answer = await post({ threadId, sendId: sendId(), text: "Make this one stand out", pointed: [pick(appId)] });
+    const answer = await post({ threadId, sendId: sendId(), text: "Make this one stand out", pointed: [pick(appId)], ...(suffix ? { delivery: { mode: "queue" } } : {}) }, suffix);
     expect(answer.status, JSON.stringify(answer.body)).toBe(202);
     expect(state.accepted[0]!.app).toMatchObject({ pointed: [{ appId, label: "“Choose Pro”" }] });
+    if (suffix) expect(state.accepted[0]!.delivery).toEqual({ mode: "queue" });
     const prompt = state.prompts[0]!;
     expect(prompt).toBe([
       "While writing this message the person pointed at parts of your page. To change them, call update_html with that page's app_id.",

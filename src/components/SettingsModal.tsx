@@ -62,9 +62,9 @@ import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { parseSidebarDensity, setPinnedCircles, setSidebarDensity, setUniversalPins, SIDEBAR_DENSITIES, usePinnedCircles, useSidebarDensity, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
-import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 import { Select } from "./Select";
+import { ComposerShortcutSettings } from "./ComposerShortcutSettings";
 
 // labelKey, not a label: t() reads the active pack when called, so a label resolved at module scope would freeze the
 // boot language.
@@ -334,23 +334,6 @@ function LanguageRow() {
           <option key={code} value={code}>
             {label}
           </option>
-        ))}
-      </Select>
-    </SettingRow>
-  );
-}
-
-function SendKeyRow() {
-  const sendKey = useSendKey();
-  return (
-    <SettingRow title={t("settings.sendKey.title")} subtitle={t("settings.sendKey.subtitle", { key: sendKeyLabel("mod-enter") })}>
-      <Select size="sm" className="w-full max-w-[240px]"
-        value={sendKey}
-        aria-label={t("settings.sendKey.title")}
-        onChange={(event) => setSendKey(parseSendKey(event.target.value))}
-      >
-        {SEND_KEYS.map((mode) => (
-          <option key={mode} value={mode}>{sendKeyLabel(mode)}</option>
         ))}
       </Select>
     </SettingRow>
@@ -710,7 +693,7 @@ export function SettingsModal() {
             <FontRow />
             <ChatWidthRow />
             <ColorUserBubblesRow />
-            <SendKeyRow />
+            <ComposerShortcutSettings />
             <SidebarDensityRow />
             {advanced && <SidebarToolsLayoutRow />}
             {advanced && <ShowThreadsRow />}

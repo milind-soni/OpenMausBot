@@ -550,8 +550,8 @@ const Bubble = memo(function Bubble({
                 }}
               />}
               {message.steered && (
-                <div className="mt-1 text-[11px] text-ink-tertiary" title={t("chat.sentMidTurnHint")}>
-                  {t("chat.sentMidTurn")}
+                <div className="mt-1 text-[11px] text-ink-tertiary" title={t(message.steerUncertain ? "composer.delivery.uncertainHint" : "chat.sentMidTurnHint")}>
+                  {t(message.steerUncertain ? "composer.delivery.uncertain" : "chat.sentMidTurn")}
                 </div>
               )}
               {message.quickModel && <QuickModelNote model={message.quickModel} />}

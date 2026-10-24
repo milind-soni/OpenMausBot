@@ -1,3 +1,5 @@
+import { applyComposerSendReceipt, applyQueuedSteerReceipt } from "./composer-send-receipt";
+import type { ComposerDelivery } from "../../shared/composer-delivery";
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError } from "./api";
 import {
@@ -149,6 +151,8 @@ export interface Message extends Pick<import("../../shared/wire").WireMessage, "
   channelMode?: "chat" | "goal";
   tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; claudeUpdate?: boolean; place?: PlaceRow; limitResetsAt?: number; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean };
   steered?: boolean;
+  steerUncertain?: boolean;
+  composerDelivery?: ComposerDelivery;
   via?: "api" | "call";
   callId?: string;
   requestMessageId?: string;
@@ -249,6 +253,7 @@ export interface Task extends Pick<WireTask, "private"> {
   alwaysAllow?: string[];
   activity?: Bot["activity"];
   busy?: boolean;
+  activeRunId?: string;
   turnStartedAt?: number;
   unread?: boolean;
   lastReadMessageId?: string;
@@ -308,6 +313,7 @@ export interface Bot extends DefaultBotFields {
   avatarFocusY?: number;
   unread: boolean;
   busy?: boolean;
+  activeRunId?: string;
   activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead" | "parked.computer";
   turnStartedAt?: number | null;
   modelSelection: ModelSelection;
@@ -385,6 +391,7 @@ export function currentTaskBot(bot: Bot, threadId = bot.threadId): Bot {
     unread: task.unread ?? bot.unread,
     pinnedMessageId: task.pinnedMessageId,
     turnStartedAt: task.turnStartedAt ?? null,
+    activeRunId: task.activeRunId,
     waitingForTeammates: task.waitingForTeammates ?? false,
   };
 }
@@ -744,6 +751,7 @@ export type Action =
       botId: string;
       text: string;
       sendId?: string;
+      delivery?: ComposerDelivery;
       replyToId?: string;
       threadId?: string;
       dataContext?: import("../../shared/data-context").DataContext; pointed?: import("../../shared/app-frame/point").PointedElement[];
@@ -2486,14 +2494,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "steerQueued":
           void api(`/api/bots/${action.botId}/queue/${action.queueId}/steer`, { method: "POST", body: JSON.stringify({ threadId: action.threadId }) })
             .then((body) => {
-              if (body?.steered === true && Array.isArray(body.messages) && typeof body.threadId === "string") {
-                for (const message of body.messages) {
-                  rawDispatch({ type: "messageAdded", threadId: body.threadId, message });
-                }
-                for (const queueId of body.queueIds ?? []) {
-                  rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
-                }
-              } else if (body?.queued === true && body.blockedBy === "images") {
+              if (!applyQueuedSteerReceipt(body, rawDispatch, showError, action.onError) && body?.queued === true && body.blockedBy === "images") {
                 wrapped({ type: "notice", notice: { kind: "steer-images", botName: null } });
               }
               action.onSettled?.();
@@ -2540,33 +2541,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             action.threadId ?? stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
           const sendId = action.sendId ?? crypto.randomUUID();
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
-            .then(() => api(`/api/bots/${action.botId}/messages`, {
+            .then(() => api(`/api/bots/${action.botId}/messages${action.delivery ? "/explicit" : ""}`, {
                 method: "POST",
-                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.dataContext ? { dataContext: action.dataContext } : {}), ...(action.pointed?.length ? { pointed: action.pointed } : {}) }),
+                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.delivery ? { delivery: action.delivery } : {}), ...(action.dataContext ? { dataContext: action.dataContext } : {}), ...(action.pointed?.length ? { pointed: action.pointed } : {}) }),
               }))
-            .then((body) => {
-              if (body?.message && typeof body.threadId === "string") {
-                rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
-              }
-              if (
-                body?.queued &&
-                typeof body.threadId === "string" &&
-                typeof body.queueId === "string"
-              ) {
-                rawDispatch({
-                  type: "optimisticMessageRemoved",
-                  threadId: body.threadId,
-                  sendId,
-                });
-                rawDispatch({
-                  type: "pendingQueued",
-                  threadId: body.threadId,
-                  queueId: body.queueId,
-                  text: action.text,
-                  reason: body.reason === "capacity" || body.reason === "group-turn" ? body.reason : undefined,
-                });
-              }
-            })
+            .then((body) => applyComposerSendReceipt(body, { sendId, text: action.text, onError: action.onError }, rawDispatch, showError))
             .catch((error) => {
               if (threadId) {
                 rawDispatch({ type: "optimisticMessageRemoved", threadId, sendId });

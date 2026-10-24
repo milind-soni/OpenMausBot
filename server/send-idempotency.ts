@@ -22,6 +22,7 @@ export function acceptedSendMatch(
   text: string,
   replyToId?: string,
   channelMode?: "chat" | "goal",
+  delivery?: Message["composerDelivery"],
 ): AcceptedSendMatch {
   const message = messages.find((candidate) => candidate.sendId === sendId);
   if (!message) return { kind: "none" };
@@ -30,6 +31,7 @@ export function acceptedSendMatch(
     message.kind !== "text" ||
     message.text !== text ||
     message.replyToId !== replyToId ||
+    JSON.stringify(message.composerDelivery) !== JSON.stringify(delivery) ||
     (message.channelMode ?? "chat") !== (channelMode ?? "chat")
   ) {
     return { kind: "conflict" };
@@ -65,6 +67,6 @@ export class SendSequencer {
   }
 }
 
-export function sendFingerprint(text: string, replyToId?: string, channelMode?: "chat" | "goal"): string {
-  return JSON.stringify([text, replyToId ?? null, channelMode ?? null]);
+export function sendFingerprint(text: string, replyToId?: string, channelMode?: "chat" | "goal", delivery?: Message["composerDelivery"]): string {
+  return JSON.stringify([text, replyToId ?? null, channelMode ?? null, ...(delivery ? [delivery] : [])]);
 }
