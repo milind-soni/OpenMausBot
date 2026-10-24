@@ -215,8 +215,12 @@ class AttachmentReservation {
   }
 
   private reserveAtLeast(required: number, preferred: number): void {
-    const used = committedBytes();
-    const available = ATTACHMENTS_MAX_BYTES - used - reservedAttachmentBytes;
+    let available = ATTACHMENTS_MAX_BYTES - committedBytes() - reservedAttachmentBytes;
+    if (available < required) {
+      // People free space by deleting attachments outside the app, which the cache never sees.
+      invalidateAttachmentAccounting();
+      available = ATTACHMENTS_MAX_BYTES - committedBytes() - reservedAttachmentBytes;
+    }
     if (available < required) {
       throw statusError(
         507,

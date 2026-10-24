@@ -361,6 +361,16 @@ describe("aggregate attachment storage", () => {
     expect(readdirSync(ATTACHMENTS_DIR)).toEqual([second.path.split(/[\\/]/).pop()!]);
   });
 
+  it("frees quota for a file deleted outside the app once the store looks full", () => {
+    const first = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(first.path, ATTACHMENTS_MAX_BYTES - 2);
+    __resetAttachmentAccountingForTests();
+    expect(() => saveImage(Buffer.from("yyy"), "image/png")).toThrow(/storage is full/);
+
+    realUnlinkSync(first.path);
+    expect(saveImage(Buffer.from("yyy"), "image/png").bytes).toBe(3);
+  });
+
   it.each([1, 2])("counts a committed upload after %i partial-cleanup failures and an idempotent retry", async (failures) => {
     const existing = saveImage(Buffer.from("x"), "image/png");
     truncateSync(existing.path, ATTACHMENTS_MAX_BYTES - 3);
