@@ -9,6 +9,9 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const css = readFileSync(join(root, "src/styles.css"), "utf8");
+// What `text-accent` renders: the accent's text tone when the stylesheet
+// routes the utility there, else the raw accent (a fill colour).
+const ACCENT_AS_TEXT = /\.text-accent\s*\{\s*color:\s*var\(--color-accent-text\)/.test(css) ? "--color-accent-text" : "--color-accent";
 
 function declarations(body) {
   const tokens = {};
@@ -94,6 +97,11 @@ const PAIRS = [
   ["--color-accent-text", "--color-app", 4.5],
   ["--color-accent-text", "--color-panel", 4.5],
   ["--color-accent-text", "--color-card", 4.5],
+  // the accent as TEXT (`text-accent`: links, senders, pills, "Voltar") is
+  // held to AA on panel and card (INSP-I r3 #1). The stylesheet routes that
+  // utility to the accent's text tone; measured is whatever it renders.
+  [ACCENT_AS_TEXT, "--color-panel", 4.5],
+  [ACCENT_AS_TEXT, "--color-card", 4.5],
   ["--color-danger", "--color-card", 4.5],
   ["--color-success", "--color-card", 4.5],
   ["--color-warning", "--color-card", 4.5],
