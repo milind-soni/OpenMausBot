@@ -30,6 +30,7 @@ import { brand } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
+import { profileForSession, readSessionState, type SessionState } from "@/lib/session";
 import {
   cloudPhoneDestination,
   connectPhoneEntry,
@@ -349,9 +350,18 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnl
   const update = desktopUpdate ?? serverUpdate;
   const [aboutOpen, setAboutOpen] = useState(false);
   const [phoneAppOpen, setPhoneAppOpen] = useState(false);
+  const [session, setSession] = useState<SessionState | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
 
-  const profile = state.config?.profile;
+  useEffect(() => {
+    let active = true;
+    void readSessionState().then((state) => {
+      if (active) setSession(state);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const profile = profileForSession(state.config?.profile, session);
   const name = profileLabel(profile);
   const connectTo = (destination: PhoneDestination) => selectPhoneDestination(destination, { bridge: cloudPhone.bridge, dispatch });
   const remote = window.ogb?.remoteClient?.active === true;

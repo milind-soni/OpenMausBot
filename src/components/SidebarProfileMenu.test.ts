@@ -14,6 +14,7 @@ import {
   updatePhase,
 } from "./SidebarProfileMenu";
 import { ANDROID_APK_URL, DOCS_URL, FEEDBACK_URL, HELP_CENTER_URL, IOS_APP_STORE_URL, platformLabel } from "@/lib/app-links";
+import { profileForSession } from "@/lib/session";
 import {
   cloudPhoneDestination,
   connectPhoneEntry,
@@ -51,6 +52,28 @@ describe("profileLabel", () => {
     expect(profileLabel({ name: "Omkar", email: "o@x.dev" })).toBe("Omkar");
     expect(profileLabel({ email: "o@x.dev" })).toBe("o@x.dev");
     expect(profileLabel(undefined)).toBe("You");
+  });
+});
+
+describe("the sidebar profile for a signed-in visitor", () => {
+  it("uses the fallback while the session identity is still loading", () => {
+    const visible = profileForSession(
+      { name: "Owner", email: "owner@example.test", avatarUrl: "/owner.png" },
+      null,
+    );
+    expect(profileLabel(visible)).toBe("You");
+    expect(profileInitials(visible)).toBe("?");
+    expect(visible?.avatarUrl).toBeUndefined();
+  });
+
+  it("shows the verified email and initials without the configured owner's name or avatar", () => {
+    const visible = profileForSession(
+      { name: "Owner", email: "owner@example.test", avatarUrl: "/owner.png" },
+      { kind: "session", id: "s", label: "Ada's iPad", email: "ada@example.test", scopes: ["client"], expiresAt: 1 },
+    );
+    expect(profileLabel(visible)).toBe("ada@example.test");
+    expect(profileInitials(visible)).toBe("A");
+    expect(visible?.avatarUrl).toBeUndefined();
   });
 });
 
