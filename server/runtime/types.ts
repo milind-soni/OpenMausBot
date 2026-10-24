@@ -69,7 +69,7 @@ export type Outcome =
   | "budget"
   | "provider_error"
   | "denied"           // a permission the level did not cover was refused
-  | "expired"          // a wait on the person ran out: not run, not refused
+  | "expired"          // a queue or person wait ran out; earlier work may have run
   | "stopped"          // the person stopped it
   | "refused"          // validation refused it at dispatch
   | "duplicate";
@@ -77,8 +77,40 @@ export type Outcome =
 export type Level = ApprovalMode;
 export type LevelSource = "own" | "chief" | "engine_cap";
 
+export interface OfficeAttempt {
+  version: 1;
+  attemptId: string;
+  assignmentId: string;
+  rootId: string;
+  botId: string;
+  threadId: string;
+  generation: string;
+  workerId: string;
+  instanceId: string;
+  driverKind: string;
+  profileId: string;
+  assignmentDigest: string;
+  profileDigest: string;
+  cwd: string;
+  rootDeadline: number;
+  startBefore: number;
+  kind: "work" | "report";
+  digest: string;
+  capabilityHash: string;
+  state: "prepared" | "issued" | "consumed" | "cancelled" | "uncertain";
+  preparedAt: number;
+  issuedAt?: number;
+  consumedAt?: number;
+  finishedAt?: number;
+  cancelledAt?: number;
+  controllerDecision?: { controllerHost: string; controllerDecisionId: string; policyVersion: "office-control-v1"; decision: "allow" | "deny"; at: number };
+}
+
+export type TaskDisposition = { state: "completed" } | { state: "blocked"; reason: string };
+
 export interface Assignment {
   id: string;
+  requestMessageId?: string;
   rootId: string;
   parentId?: string;
   /** Edges from the root: a root is 0. */
@@ -98,6 +130,8 @@ export interface Assignment {
   status: Status;
   outcome?: Outcome;
   outcomeDetail?: string;
+  /** Explicit requested-task outcome, independently of the engine turn lifecycle. */
+  disposition?: TaskDisposition;
   level: Level;
   levelSource: LevelSource;
   /** Turns started for it, including resumes and reruns. */
@@ -144,6 +178,7 @@ export interface Assignment {
   approved?: boolean;
   /** A room brief shown once per call: every recipient of that call shares it. */
   batchKey?: string;
+  office?: { rootDeadline: number; reportUntil?: number; reportStarted?: boolean; attempts: OfficeAttempt[] };
   version: 1;
 }
 
@@ -237,15 +272,16 @@ export interface RunInput {
 }
 
 export type RunResult =
-  | { kind: "completed"; text: string; evidence?: TurnEvidence }
+  | { kind: "completed"; text: string; evidence?: TurnEvidence; disposition?: TaskDisposition }
   | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence }
-  | { kind: "needs_input"; question: string; cards?: string[]; evidence?: TurnEvidence }
+  | { kind: "needs_input"; question: string; text?: string; cards?: string[]; evidence?: TurnEvidence }
   /** The turn stopped short (a step cap, a seat it could not get) and the
    * same node continues in place with its next execution. */
   | { kind: "continue"; text: string; note: string; handoffPath?: string; evidence?: TurnEvidence };
 
 /** How a host-run root turn ended (Runtime.end). */
 export interface EndResult {
+  disposition?: TaskDisposition;
   ok: boolean;
   text: string;
   evidence?: TurnEvidence;
@@ -322,8 +358,8 @@ export interface Limits {
   /** A turn with no activity for this long is stalled (the host says what
    * counts as activity by touching progress()). */
   turnStallMs: number;
-  /** How long a parked assignment waits on the person before it expires:
-   * not run, not refused. */
+  /** How long a parked assignment waits on the person before it expires.
+   * Expiry does not approve the pending action or discard earlier work. */
   inputWaitMs: number;
 }
 

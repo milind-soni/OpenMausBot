@@ -426,6 +426,29 @@ describe("an engine's adapter on a Cloud home", () => {
 });
 
 describe("engines that run several threads' sessions", () => {
+  it("composes existing admission with native execution cancellation while waiting for memory", async () => {
+    const h = host({ available: 300 * MB });
+    h.memory.turnStarted("busy"); h.spawn("busy");
+    const fake = fakeInstance("codex");
+    fake.instance.adapter.capabilities.engineAdmission = true;
+    let forwarded: SendTurnInput | undefined;
+    fake.instance.adapter.sendTurn = async (input) => { forwarded = input; return { turnId: "memory-turn" }; };
+    const decorated = withEngineMemory(fake.instance, h.memory);
+    const calls: string[] = [];
+    const controller = new AbortController();
+    const context = { attemptId: "office-attempt", signal: controller.signal, deadline: Date.now() + 60_000,
+      assert: () => { calls.push("execution"); } };
+    await decorated.adapter.sendTurn({ threadId: "office-memory", text: "fixture", executionContext: context,
+      engineAdmission: async () => { calls.push("existing"); } });
+    expect(forwarded!.executionContext).toBe(context);
+    const admitted = forwarded!.engineAdmission!("process");
+    await settle();
+    expect(calls).toEqual(["existing"]);
+    controller.abort();
+    await expect(admitted).rejects.toBeInstanceOf(TurnNotStartedError);
+    expect(calls).toEqual(["existing"]);
+  });
+
   it("lets a session into a running engine where a whole new engine would not fit", async () => {
     // One busy engine on 1.6 GB: 900 MB free less the 410 MB kept back fits a 200 MB session but not a 700 MB engine.
     const h = host({ available: 1.6 * GB });

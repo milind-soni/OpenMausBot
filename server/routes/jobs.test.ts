@@ -9,7 +9,7 @@ import type { ModelSelection } from "../contracts.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { requiredScope } from "../request-auth.ts";
-import type { Assignment } from "../runtime/types.ts";
+import type { Assignment, OfficeAttempt } from "../runtime/types.ts";
 import { Store } from "../store.ts";
 import { createJobRoutes } from "./jobs.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -87,6 +87,55 @@ const get = async (base: string, path: string) => {
 };
 
 describe("GET /api/threads/:id/job", () => {
+  it("selects the current native job from active user request ids across branch switches", async () => {
+    const f = fixture();
+    const firstRequest = f.store.appendMessage(f.threadId, { role: "user", kind: "text", text: "First branch" });
+    const secondRequest = f.store.branchMessage(f.threadId, firstRequest.id, "Second branch")!;
+    f.rows = [f.root({ id: "first", rootId: "first", status: "cancelled", outcome: "stopped", requestMessageId: firstRequest.id }),
+      f.root({ id: "second", rootId: "second", status: "completed", outcome: "done", createdAt: 3_000, requestMessageId: secondRequest.id }),
+      f.root({ id: "foreign", rootId: "foreign", status: "running", createdAt: 4_000, requestMessageId: secondRequest.id,
+        assignee: { botId: "foreign-chief", destination: { kind: "standing_thread", threadId: f.threadId } } })];
+    const base = await serve(f);
+    const second = (await get(base, `/api/threads/${f.threadId}/job?since=0`)).body;
+    expect(second.current).toMatchObject({ rootId: "second", requestMessageId: secondRequest.id, status: "completed", state: "completed" });
+    const held = get(base, `/api/threads/${f.threadId}/job?since=0&wait=20000&version=${second.version}`);
+    await expect.poll(() => f.subscribers()).toBe(1);
+    f.store.setActiveLeaf(f.threadId, firstRequest.id);
+    const switched = (await held).body;
+    expect(switched.current).toMatchObject({ rootId: "first", requestMessageId: firstRequest.id, status: "cancelled", state: "cancelled" });
+    expect(switched.version).not.toBe(second.version);
+    const unmatched = f.store.branchMessage(f.threadId, firstRequest.id, "Unstarted branch")!;
+    expect(f.store.activeLeaf(f.threadId)).toBe(unmatched.id);
+    expect((await get(base, `/api/threads/${f.threadId}/job?since=0`)).body.current).toBeNull();
+  });
+
+  it("refreshes native unconfirmed stops even when all assignment statuses remain terminal", async () => {
+    const f = fixture();
+    const oldRequest = f.store.appendMessage(f.threadId, { role: "user", kind: "text", text: "Earlier request" });
+    const latestRequest = f.store.appendMessage(f.threadId, { role: "user", kind: "text", text: "Latest request" });
+    const officeAttempt: OfficeAttempt = {
+      version: 1, attemptId: "old-attempt", assignmentId: "old", rootId: "old", botId: f.botId, threadId: f.threadId,
+      generation: "old-generation", workerId: "hel1", instanceId: "codex", driverKind: "codex", profileId: f.botId,
+      assignmentDigest: "assignment", profileDigest: "profile", cwd: "/fixture", rootDeadline: 60_000, startBefore: 2_000,
+      kind: "work", digest: "attempt", capabilityHash: "capability", state: "uncertain", preparedAt: 1_000, consumedAt: 1_001,
+    };
+    f.rows = [f.root({ id: "old", rootId: "old", status: "cancelled", outcome: "stopped", requestMessageId: oldRequest.id,
+      brief: "Earlier request", office: { rootDeadline: 60_000, attempts: [officeAttempt] } }),
+    f.root({ id: "latest", rootId: "latest", status: "completed", outcome: "done", createdAt: 3_000, requestMessageId: latestRequest.id })];
+    const base = await serve(f, 25);
+    const before = (await get(base, `/api/threads/${f.threadId}/job?since=0`)).body;
+    expect(before.current).toMatchObject({ rootId: "latest", state: "completed" });
+    expect(before.unconfirmedStops).toEqual([{ rootId: "old", sourceRequest: "Earlier request" }]);
+    const held = get(base, `/api/threads/${f.threadId}/job?since=0&wait=20000&version=${before.version}`);
+    await expect.poll(() => f.subscribers()).toBe(1);
+    officeAttempt.state = "cancelled";
+    officeAttempt.finishedAt = 4_000;
+    const after = (await held).body;
+    expect(after.current).toEqual(before.current);
+    expect(after.unconfirmedStops).toEqual([]);
+    expect(after.version).not.toBe(before.version);
+  });
+
   it("is a client read, like the transcript", () => {
     expect(requiredScope("GET", "/api/threads/thread-1/job")).toBe("client");
   });

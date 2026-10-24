@@ -10,14 +10,14 @@ import { homedir } from "node:os";
 import { codexConfigMcp, codexConfigRunsServer, mountedMcpServerName } from "./codex-mcp-names.ts";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
-import { laterStartup, openStartupModelCatalog, writeStartupModelCache } from "../startup-model-catalog.ts";
+import { laterStartup, openStartupModelCatalog, readStartupModelCache, writeStartupModelCache } from "../startup-model-catalog.ts";
 import { hostedWorkspaceConfigured } from "../enterprise.ts";
 import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
-import { describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
+import { captureCliTree, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
 import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tryCodexLaunchSlot } from "./codex-process.ts";
-import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
+import { isReservedMcpEnvEntry, mcpServerNameError } from "../mcp-registry.ts";
 
 import type {
   DriverCreateInput,
@@ -32,7 +32,7 @@ import type {
   SteerOutcome,
   TextGenerationOptions,
 } from "../contracts.ts";
-import { newEventId, newId } from "../contracts.ts";
+import { newEventId, newId, TurnNotStartedError } from "../contracts.ts";
 import { decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 import { codexLocalProviderArgs } from "./local-inject.ts";
 import { codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.ts";
@@ -63,6 +63,14 @@ import { CALL_TOOL, DESCRIBE_TOOL, SEARCH_TOOL, directoryCallTarget } from "../m
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
 const DRIVER_KIND = "codex";
+const OFFICE_FEATURES_OFF = ["multi_agent", "memories", "goals", "tool_suggest", "hooks", "apps", "plugins", "remote_plugin",
+  "image_generation", "sleep_tool", "daemon_auto_start"] as const;
+
+function stripOfficeEnvironment(env: Record<string, string | undefined>): void {
+  for (const name of Object.keys(env)) {
+    if (/proxy|^AGENT_VAULT|^(?:BASH_ENV|ENV|NODE_OPTIONS|LD_PRELOAD|DYLD_INSERT_LIBRARIES|OPENAI_BASE_URL|OPENAI_API_BASE)$/i.test(name)) delete env[name];
+  }
+}
 
 class CodexRpcError extends Error {
   code: unknown;
@@ -294,8 +302,8 @@ function mcpAppApprovalForm(params: unknown): McpApprovalForm | null {
     content[key] = chosen;
   }
 
-  const tool = boundedLabel(appName) ?? boundedLabel(request.serverName) ?? "app_access";
-  return { tool, summary: message, allowResult: { action: "accept", content } };
+  const label = boundedLabel(appName) ?? boundedLabel(request.serverName) ?? "app_access";
+  return { tool: label.startsWith("mcp__") ? "app_access" : label, summary: message, allowResult: { action: "accept", content } };
 }
 
 /** Thread-config overrides adding `patterns` to the person's shell exclusions. Codex keeps two
@@ -519,6 +527,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
   async create(input: DriverCreateInput<CodexConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
+    const officeExecution = input.officeExecution === true;
     const plan = config.authMode === "chatgpt-plan";
     const planUnavailable = plan && (hostedWorkspaceConfigured() || cloudHomeConfigured())
       ? "ChatGPT plan sign-in for hosted Pro requires OpenAI's hosted-app approval. Use a Company model or API key until that integration is approved; the local desktop flow cannot be used here."
@@ -535,6 +544,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       delete env.OPENAI_API_KEY;
       stripWorkspaceCredentialEnv(env);
       delete env.OPENMAUSBOT_CHATGPT_TOKEN;
+      if (officeExecution) stripOfficeEnvironment(env);
       if (plan) env.CODEX_HOME = join(planDirectory, "codex");
       return env;
     };
@@ -546,7 +556,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     let planWarning: string | undefined;
     let models = plan ? { default: "", options: [] } : config.managed ? { default: config.managed.models[0], options: config.managed.models.map(id => ({ id, label: id })) } : STATIC_CODEX_MODELS;
     const refreshModels = async (preserveExisting = false) => {
-      if (config.managed) return;
+      if (config.managed || officeExecution) return;
       if (planAuth) {
         const generation = planGeneration;
         const kept = preserveExisting && models.options.length > 0 ? models : null;
@@ -570,7 +580,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     // Codex's model list ships with the CLI: updating 0.155.1 to 0.162.1 in place adds gpt-6.1-sol.
     let modelsCliVersion: string | null = null;
     let startupModelRefresh: Promise<void> | null = null;
-    if (config.managed) {
+    if (officeExecution) {
+      const cached = readStartupModelCache(instanceId);
+      const options = cached?.options.filter(model => decodeCodexSelection(model.id).modelProvider === OFFICIAL_CODEX_PROVIDER);
+      models = options?.length ? { default: options.some(model => model.id === cached!.default) ? cached!.default : options[0].id, options } : STATIC_CODEX_MODELS;
+    } else if (config.managed) {
       await refreshModels();
     } else {
       startupModelRefresh = (await openStartupModelCatalog({
@@ -616,6 +630,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       steer?: (text: string) => Promise<SteerOutcome>;
       turnId: string;
       asks: Map<string, CodexAsk>;
+      office?: boolean;
     }
     const active = new Map<string, Turn>();
 
@@ -631,10 +646,22 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     });
 
     const sendTurn = async (turn: SendTurnInput) => {
+      if (officeExecution && !turn.executionContext) throw new Error("Office execution requires a native controller lease.");
+      const restrictedOffice = officeExecution || turn.executionContext !== undefined;
+      const assertPreparing = () => {
+        if (disposed) throw new Error("This provider was removed. Select a connected account and send again.");
+        if (turn.executionContext?.signal.aborted
+          || (turn.executionContext && Date.now() >= turn.executionContext.deadline)) {
+          throw new TurnNotStartedError(newId(), "Codex execution was stopped before provider admission.");
+        }
+      };
+      assertPreparing();
       if (startupModelRefresh) await startupModelRefresh;
+      assertPreparing();
       turn = { ...turn, toolScope: assertToolScopeSupported(DRIVER_KIND, turn.toolScope) };
       const generation = planGeneration;
       const assertPlanCurrent = () => {
+        assertPreparing();
         if (disposed) throw new Error("This provider was removed. Select a connected account and send again.");
         if (planAuth && (planSigningOut || generation !== planGeneration)) throw new Error("The ChatGPT account changed while this message was preparing. Select a connected account and send again.");
       };
@@ -672,6 +699,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const stopSignal = new AbortController();
       const { threadId } = turn;
       const approvalMode: ApprovalMode = turn.approvalMode ?? (config.fullAuto ? "full" : "ask");
+      if (restrictedOffice && approvalMode === "auto") {
+        throw new Error("Office execution does not support automatic model permission review.");
+      }
       for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
         if ("url" in server) continue;
         const reserved = Object.entries(server.env).find(([key, value]) => isReservedMcpEnvEntry(key, value));
@@ -682,6 +712,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       let autoAcceptPermissions = approvalMode === "full";
       const chatgptTurn = ownLogin &&
         decodeCodexSelection(turn.model || models.default).modelProvider === OFFICIAL_CODEX_PROVIDER;
+      if (turn.executionContext && !chatgptTurn) {
+        throw new Error("Office execution permits only native Codex OAuth model routes.");
+      }
       const route: CodexRoute = plan ? "plan" : chatgptTurn ? "own" : "other";
       const signedOut = chatgptTurn && await loginCheck(childEnv()) === "missing";
       assertPlanCurrent();
@@ -695,11 +728,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       }
       const retryScale = Number(process.env.FAKE_CODEX_RETRY_SCALE ?? "1");
       let announced = false;
-      const waitForLaunchSlot = async (attempt: number) => {
-        const waiting: Turn = { stop: async () => { stopRequested = true; stopSignal.abort(); return true; }, turnId, asks: new Map() };
+      const waitingTurn = (attempt: number): Turn => {
+        const waiting: Turn = { stop: async () => { stopRequested = true; stopSignal.abort(); return true; }, turnId, asks: new Map(), office: restrictedOffice };
         active.set(threadId, waiting);
-        if (attempt === 0) emit({ ...base(threadId, turnId), type: "turn.started" });
+        if (attempt === 0 && !announced) emit({ ...base(threadId, turnId), type: "turn.started" });
         announced = true;
+        return waiting;
+      };
+      const waitForLaunchSlot = async (attempt: number) => {
+        const waiting = waitingTurn(attempt);
         emit({ ...base(threadId, turnId), type: "runtime.notice", message: `Waiting for a free Codex slot: ${codexLaunchesStarting()} Codex runs are starting on this computer. This one starts on its own.` });
         const slot = await codexLaunchSlot(stopSignal.signal);
         if (slot && !stopRequested) return slot;
@@ -710,23 +747,41 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         }
         return null;
       };
+      const prelaunchFailed = (error: unknown) => {
+        const current = active.get(threadId);
+        if ((current && current.turnId !== turnId) || (!current && announced)) return;
+        active.delete(threadId);
+        if (!announced) emit({ ...base(threadId, turnId), type: "turn.started" });
+        announced = true;
+        const cancelled = stopRequested || turn.executionContext?.signal.aborted;
+        if (!cancelled) emit({ ...base(threadId, turnId), type: "runtime.error", message: error instanceof Error ? error.message : String(error) });
+        emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: cancelled ? "interrupted" : "execution_not_admitted", cost: null });
+      };
       const launchAttempt = async (attempt: number): Promise<void> => {
         const env = childEnv();
         const launchedLogin = chatgptTurn ? storedCodexLogin(env) : null;
         if (planToken) env.OPENMAUSBOT_CHATGPT_TOKEN = planToken;
         const appServerArgs = ["app-server", ...(plan ? chatgptPlanCodexArgs() : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs(),
+          ...(restrictedOffice ? OFFICE_FEATURES_OFF.flatMap(feature => ["-c", `features.${feature}=false`]) : []),
           // Native shell snapshots can restore variables the shell policy removed.
-          ...(turn.toolScope === undefined ? [] : ["-c", "features.shell_snapshot=false"]),
+          ...(turn.toolScope === undefined && !restrictedOffice ? [] : ["-c", "features.shell_snapshot=false"]),
           // A guest-driven turn: no shell, no file reads (-c wins over config files).
           ...(turn.guestConfined ? GUEST_CONFINED_CODEX_ARGS : [])];
         const baseEnv = new Map(Object.entries(env).filter(([, value]) => value !== undefined));
         const mountedNames = new Set<string>();
         const selectedMcp = new Map<string, StdioMcpSpec>();
         const selectedApprovals = new Map<string, McpApprovalMode>();
+        const customMcpNames = new Map<string, string>();
         const directoryMounts = new Set<string>();
         const literalEnvs = new Map<string, Record<string, string>>();
         const scopedServer = (name: string, mountName: string, server: McpServerSpec): StdioMcpSpec | null => {
           if (!canUseMcpServer(turn.toolScope, name)) return null;
+          if (restrictedOffice && !("url" in server)) {
+            const env = { ...server.env };
+            stripOfficeEnvironment(env);
+            for (const name of ["HOME", "USERPROFILE", "CODEX_HOME", "OPENAI_API_KEY", "OPENMAUSBOT_CHATGPT_TOKEN"]) delete env[name];
+            server = { ...server, env };
+          }
           // Every URL server goes through OpenMausBot's remote proxy: Codex's own client adds fields
           // strict servers refuse (codex-cli 0.160.1 sends elicitation.form/url; rmcp 3.2 can add
           // schemaValidation), and Codex does not speak SSE. A plan turn has no tool_search, so its URL
@@ -774,16 +829,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // A `-c` override merges with a same-named server in config.toml, and stdio over url is
         // "invalid configuration" that kills the turn, so such a server mounts under its own name.
         const codexConfig = codexConfigMcp(env), declaredInCodexConfig = codexConfig.names;
-        if (turn.toolScope !== undefined) {
+        if (turn.toolScope !== undefined || restrictedOffice) {
           for (const name of declaredInCodexConfig) appServerArgs.push("-c", `mcp_servers.${name}.enabled=false`);
         }
-        for (const [name, server] of Object.entries(turn.integrations?.custom ?? {}).filter(([name, server]) => turn.toolScope !== undefined || !codexConfigRunsServer(codexConfig, name, server))) {
+        for (const [name, server] of Object.entries(turn.integrations?.custom ?? {}).filter(([name, server]) => turn.toolScope !== undefined || restrictedOffice || !codexConfigRunsServer(codexConfig, name, server))) {
           const mountName = mountedMcpServerName(name, declaredInCodexConfig);
           if (mountName !== name) noteRenamedMcpServer(name, mountName);
           mountSelected(name, mountName, server, "prompt");
+          if (selectedMcp.has(mountName) && !mcpServerNameError(name) && !name.includes("__")) customMcpNames.set(mountName, name);
         }
         if (turn.integrations?.phone) {
-          if (turn.toolScope !== undefined) {
+          if (turn.toolScope !== undefined || restrictedOffice) {
             mountSelected("phone", "openmausbot_phone", turn.integrations.phone);
           } else {
           const bridge = turn.integrations.phone;
@@ -812,20 +868,45 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const provenPrivateEnv = turn.toolScope !== undefined || directoryMounts.size > 0;
         if (privateEnv.length && turn.toolScope === undefined) appServerArgs.push("-c", "features.shell_snapshot=false");
 
-        const selectionConfig: { config?: Record<string, unknown> } = turn.toolScope === undefined ? {} : { config: { mcp_servers: Object.fromEntries(
+        const selectionConfig: { config?: Record<string, unknown> } = turn.toolScope === undefined && !restrictedOffice ? {} : { config: { mcp_servers: Object.fromEntries(
           [...selectedMcp].map(([name, server]) => [name, {
             command: server.command, args: server.args, env_vars: Object.keys(server.env), env: {}, default_tools_approval_mode: selectedApprovals.get(name) ?? "prompt",
           }]),
         ) } };
 
         const commandCwd = permissionLaunchCwd(turn.cwd ?? homedir());
+        if (restrictedOffice) {
+          stripOfficeEnvironment(env);
+          delete env.OPENAI_API_KEY;
+          delete env.OPENMAUSBOT_CHATGPT_TOKEN;
+          for (const name of ["HOME", "USERPROFILE", "CODEX_HOME"]) {
+            if (baseEnv.has(name)) env[name] = baseEnv.get(name);
+            else delete env[name];
+          }
+        }
         const releaseSlot = tryCodexLaunchSlot() ?? await waitForLaunchSlot(attempt);
         if (!releaseSlot) return;
-        const child = spawnHoldingSlot(releaseSlot, () => spawnCli(...codexLaunch(config.cli, appServerArgs), {
-          cwd: turn.cwd ?? homedir(),
-          env,
-          stdio: ["pipe", "pipe", "pipe"],
-        }, "bot"));
+        const waiting = waitingTurn(attempt);
+        try {
+          assertPreparing();
+          if (stopRequested) throw new TurnNotStartedError(turnId, "Codex was stopped while waiting for a launch slot.");
+          await turn.engineAdmission?.("process");
+          assertPreparing();
+          if (stopRequested || active.get(threadId) !== waiting) throw new TurnNotStartedError(turnId, "Codex was stopped while waiting for memory.");
+          turn.executionContext?.assert("process");
+        } catch (error) {
+          releaseSlot();
+          throw error;
+        }
+        const child = spawnHoldingSlot(releaseSlot, () => {
+          assertPreparing();
+          if (stopRequested) throw new TurnNotStartedError(turnId, "Codex was stopped before process start.");
+          return spawnCli(...codexLaunch(config.cli, appServerArgs), {
+            cwd: turn.cwd ?? homedir(),
+            env,
+            stdio: ["pipe", "pipe", "pipe"],
+          }, "bot");
+        });
 
       let abandoned = false;
       let codexThreadId: string | null = null;
@@ -909,7 +990,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         });
 
       let stopping: Promise<boolean> | undefined;
-      const terminate = () => stopping ??= killCliTree(child).then((stopped) => {
+      const terminate = () => stopping ??= killCliTree(child, turn.executionContext ? 0 : 5_000).then((stopped) => {
         if (!stopped) stopping = undefined;
         return stopped;
       });
@@ -918,9 +999,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // "codex exited null (signal SIGTERM) before turn/completed".
       let interruptRequested = false;
       const stop = async () => {
+        captureCliTree(child);
         stopRequested = true;
         stopSignal.abort();
-        if (!state.settled && !interruptRequested && codexThreadId && codexTurnId &&
+        if (!turn.executionContext && !state.settled && !interruptRequested && codexThreadId && codexTurnId &&
             child.exitCode === null && child.signalCode === null) {
           interruptRequested = true;
           const graceMs = Math.max(1, Number(process.env.FAKE_CODEX_INTERRUPT_GRACE_MS ?? 750) || 750);
@@ -969,7 +1051,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           return settle(false, failedStop);
         }
         await interruptibleDelay(Math.max(1, Math.round(delayMs * retryScale)), stopSignal.signal).promise;
-        if (!stopRequested) void launchAttempt(attempt).catch(() => {});
+        if (!stopRequested) void launchAttempt(attempt).catch(prelaunchFailed);
         else await settle(false, "interrupted");
       };
 
@@ -977,6 +1059,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (state.settled || abandoned || stopRequested || !codexThreadId || !codexTurnId) return "refused";
         if (child.exitCode !== null || child.signalCode !== null) return "refused";
         try {
+          assertPreparing();
+          turn.executionContext?.assert("steer");
           const steerTimeoutMs = Math.max(1, Number(process.env.FAKE_CODEX_STEER_TIMEOUT_MS ?? 10_000) || 10_000);
           await request("turn/steer", {
             threadId: codexThreadId,
@@ -993,6 +1077,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
       const handleServerRequest = (msg: any) => {
+        if (turn.executionContext) {
+          if (stopRequested || state.settled || abandoned) { void stop(); return; }
+          try { assertPreparing(); turn.executionContext.assert("steer"); }
+          catch { void stop(); return; }
+        }
         const method = msg.method as string;
         const params = msg.params ?? {};
         const legacy = method === "execCommandApproval" || method === "applyPatchApproval";
@@ -1046,11 +1135,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           return;
         }
         const runs = searchedServer && asksAbout(CALL_TOOL) ? directoryCallTarget(CALL_TOOL, params._meta?.tool_params) : undefined;
+        const customMcpName = typeof params.serverName === "string" ? customMcpNames.get(params.serverName) : undefined;
+        const customMcpTool = runs ?? mcpTool ?? "mcp";
+        const qualifiedMcpTool = isLegacyMcpPermission && customMcpName && mcpTool && asksAbout(mcpTool)
+          && customMcpTool && /^[A-Za-z0-9_.:-]+$/.test(customMcpTool)
+          ? `mcp__${customMcpName}__${customMcpTool}` : undefined;
         const tool =
           mcpAppApproval
             ? mcpAppApproval.tool
             : isLegacyMcpPermission
-            ? (runs ?? mcpTool ?? "mcp")
+            ? (qualifiedMcpTool ?? (customMcpTool.startsWith("mcp__") ? "mcp" : customMcpTool))
             : isAdditionalPermission
               ? "permissions"
             : method === "item/fileChange/requestApproval" || method === "applyPatchApproval"
@@ -1456,7 +1550,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         void settle(false, "exit_before_result");
       });
 
-      active.set(threadId, { stop, turnId, asks, steer: steerActiveTurn });
+      active.set(threadId, { stop, turnId, asks, steer: steerActiveTurn, office: restrictedOffice });
       if (attempt === 0 && !announced) emit({ ...base(threadId, turnId), type: "turn.started" });
 
       try {
@@ -1483,10 +1577,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               : "Could not read Codex configuration; cannot safely update bot instructions. Retry after checking Codex.",
           );
         }
-        if (privateEnv.length) {
+        if (privateEnv.length || restrictedOffice) {
           const snapshot = (effectiveConfig as { features?: { shell_snapshot?: unknown } } | null)?.features?.shell_snapshot;
-          if (provenPrivateEnv ? snapshot !== false : snapshot === true) {
+          if (provenPrivateEnv || restrictedOffice ? snapshot !== false : snapshot === true) {
             throw new Error("Codex could not disable inherited shell snapshots. No prompt was sent.");
+          }
+        }
+        if (restrictedOffice) {
+          const features = (effectiveConfig as { features?: Record<string, unknown> } | null)?.features;
+          if (OFFICE_FEATURES_OFF.some(feature => features?.[feature] !== false)) {
+            throw new Error("Codex could not disable unrequested native agent or background model features. No prompt was sent.");
           }
         }
         if (privateEnv.length || plan) {
@@ -1497,7 +1597,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           selectionConfig.config = { ...selectionConfig.config,
             ...extendShellExclusions((rawPolicy ?? {}) as Record<string, unknown>, [...(plan ? ["OPENMAUSBOT_CHATGPT_TOKEN"] : []), ...privateEnv]) };
         }
-        if (turn.toolScope !== undefined) {
+        if (turn.toolScope !== undefined || restrictedOffice) {
           const catalog = (effectiveConfig as { mcp_servers?: unknown } | null)?.mcp_servers;
           if (!catalog || typeof catalog !== "object" || Array.isArray(catalog)) throw new Error("Codex could not confirm its selected MCP configuration. No prompt was sent.");
           for (const [name, entry] of Object.entries(catalog)) {
@@ -1532,6 +1632,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           approvalParams = customApprovalParams(effectiveConfig);
         } else {
           approvalParams = namedApprovalParams(approvalMode);
+        }
+        if (restrictedOffice && (approvalParams.thread.approvalsReviewer !== "user"
+          || approvalParams.turn.approvalsReviewer !== "user")) {
+          throw new Error("Office execution does not support automatic model permission review.");
         }
         // Codex's `never` means "do not ask to escalate", not "grant every requested permission":
         // only Full may synthesize approvals.
@@ -1632,6 +1736,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           ...await codexImageInputs(turn.images),
         ];
         const startTurn = () => {
+          assertPreparing();
+          if (stopRequested || state.settled || abandoned) throw new Error("Codex was stopped before prompt dispatch.");
+          turn.executionContext?.assert("prompt");
           promptSubmitted = true;
           startingNativeTurn = true;
           return request("turn/start", {
@@ -1679,7 +1786,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       }
     };
 
-    void launchAttempt(0).catch(() => {});
+    void launchAttempt(0).catch(prelaunchFailed);
     return { turnId };
   };
 
@@ -1717,6 +1824,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
   /** The background one-shot: `codex exec` with no tools or session, in an empty folder. Never
    * generateText, or titles and compaction would each start a Codex process. */
   const generateMemoryText = async (prompt: string, options: TextGenerationOptions = {}): Promise<string> => {
+    if (officeExecution) throw new Error("Office execution disables unrequested background model calls.");
     if (startupModelRefresh) await startupModelRefresh;
     if (disposed) throw new Error("This provider was removed.");
     if (planUnavailable) throw new Error(planUnavailable);
@@ -1813,10 +1921,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         nativeImageInput: true,
         effortLevels: ["low", "medium", "high", "xhigh", "max"],
         strictResume: true,
+        engineAdmission: true,
       },
       sendTurn,
-      interruptTurn: async (threadId) => {
-        await active.get(threadId)?.stop();
+      interruptTurn: async (threadId, turnId) => {
+        const current = active.get(threadId);
+        if (current && (turnId === undefined || current.turnId === turnId)) {
+          const stopped = await current.stop();
+          if (current.office && !stopped) throw new Error("The native Codex process stop is unconfirmed; this office attempt remains blocked.");
+        }
       },
       steer: async (threadId, text) => {
         const turn = active.get(threadId);
@@ -1831,7 +1944,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       },
       hasSession: (threadId) => active.has(threadId),
       stopAll: async () => {
-        await Promise.all([...active.values()].map(({ stop }) => stop()));
+        await Promise.all([...active.values()].map(async (turn) => {
+          if (!await turn.stop() && turn.office) throw new Error("The native Codex process stop is unconfirmed; this office attempt remains blocked.");
+        }));
       },
       onEvent: (listener) => {
         listeners.add(listener);
@@ -1843,7 +1958,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       planGeneration++;
       await authentication.dispose();
       await planAuth?.dispose();
-      await Promise.all([...active.values()].map(({ stop }) => stop()));
+      await Promise.all([...active.values()].map(async (turn) => {
+        if (!await turn.stop() && turn.office) throw new Error("The native Codex process stop is unconfirmed; this office attempt remains blocked.");
+      }));
       listeners.clear();
     },
   };

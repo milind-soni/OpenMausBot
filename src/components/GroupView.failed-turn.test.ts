@@ -40,7 +40,7 @@ const failed = (name: string, patch: Partial<NonNullable<Message["tool"]>> = {})
   from: { botId: "lead", name: "Lead", color: "blue" },
   tool: { name, ok: false, ...patch },
 });
-const room = (message: Message) => renderToStaticMarkup(createElement(RoomToolChip, { message, roomId: "room" }));
+const room = (message: Message) => renderToStaticMarkup(createElement(RoomToolChip, { live: false, message, roomId: "room" }));
 
 describe("a member's failed turn in a room", () => {
   const signedOut = failed("error: Not logged in · Please run /login", { setup: true });

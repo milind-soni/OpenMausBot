@@ -97,6 +97,20 @@ describe("GrokDriver turns (fake fetch)", () => {
     expect(instance.models.options).toContainEqual({ id: "grok-4.7", label: "Grok 4.7", contextWindow: 500_000 });
   });
 
+  it("attaches reported per-turn SSE usage to text-only completion and leaves absent usage unknown", async () => {
+    script = [{ sse: [
+      `data: ${JSON.stringify({ choices: [{ delta: { content: "measured" } }] })}`,
+      `data: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 5 } })}`,
+      "data: [DONE]", "",
+    ].join("\n") }];
+    await create();
+    const measured = await instance.adapter.sendTurn({ threadId: "t-measured", text: "hi" });
+    expect(await recorder.until(e => e.type === "turn.completed" && e.turnId === measured.turnId))
+      .toMatchObject({ usage: { input: 10, output: 5 } });
+    const unknown = await instance.adapter.sendTurn({ threadId: "t-unmeasured", text: "hi" });
+    expect(await recorder.until(e => e.type === "turn.completed" && e.turnId === unknown.turnId)).not.toHaveProperty("usage");
+  });
+
   it("smoke: offers ask_user and returns the person's reply verbatim", async () => {
     const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
       + JSON.stringify(JSON.stringify({ questions: [{ question: "Ship the fixture?", options: [{ label: "Yes" }, { label: "No" }] }] }))

@@ -52,7 +52,7 @@ export function RunLog({ events }: { events: TimelineEvent[] }) {
                 <time dateTime={new Date(event.at).toISOString()} className="shrink-0 tabular-nums text-ink-secondary">{formatTime(event.at)}</time>
               </div>
               {event.command && <pre className="mt-2 whitespace-pre-wrap break-all rounded-lg bg-inset p-2 font-mono text-[11.5px] leading-relaxed text-ink">{event.command}</pre>}
-              {event.kind === "tool" && <p className={cn("mt-1 pl-[22px] text-[11px]", event.state === "failed" ? "text-danger" : "text-ink-secondary")}>{t(STATUS[event.state])}</p>}
+              {event.kind === "tool" && <p className={cn("mt-1 pl-[22px] text-[11px]", event.state === "failed" ? "text-danger" : "text-ink-secondary")}>{event.state === "unverified" ? "Result/status unrecorded and unverified." : t(STATUS[event.state])}</p>}
             </li>;
           })}
         </ol>

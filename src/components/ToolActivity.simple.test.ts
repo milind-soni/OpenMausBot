@@ -8,7 +8,7 @@ vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => mode.advanced })
 const { ToolActivity } = await import("./ToolActivity");
 const { ActivityRun } = await import("./ActivityRun");
 
-const render = (tool: Parameters<typeof ToolActivity>[0]["tool"]) => renderToStaticMarkup(createElement(ToolActivity, { tool }));
+const render = (tool: Parameters<typeof ToolActivity>[0]["tool"]) => renderToStaticMarkup(createElement(ToolActivity, { live: false, tool }));
 
 afterEach(() => {
   mode.advanced = false;

@@ -940,17 +940,19 @@ describe("ACP turns (fake CLI)", () => {
 
     const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated");
     expect(usage).toMatchObject({ input: 10, output: 5 });
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", usage: { input: 10, output: 5 } });
   });
 
   /** The fake hardcodes its usage, so these tests splice the wanted usage into the session/prompt result
    *  in flight, at the root or under _meta. */
-  const stubPromptResultUsage = (usage: Record<string, unknown>, at: "root" | "meta") => {
+  const stubPromptResultUsage = (usage: Record<string, unknown>, at: "root" | "meta", stopReason?: "cancelled" | "failed") => {
     const spawn = procs.spawnCli;
     vi.spyOn(procs, "spawnCli").mockImplementation((...args) => {
       const child = spawn(...args);
       const stdout = child.stdout;
       const spliceUsage = (message: any) => {
         if (message?.result && typeof message.result === "object" && "stopReason" in message.result) {
+          if (stopReason) message.result.stopReason = stopReason;
           message.result = at === "root"
             ? { ...message.result, usage: { ...usage }, _meta: {} }
             : { ...message.result, _meta: { ...message.result._meta, ...usage } };
@@ -984,6 +986,7 @@ describe("ACP turns (fake CLI)", () => {
 
     const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated");
     expect(usage).toMatchObject({ input: 157990, output: 3, cachedInput: 152960 });
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", usage: { input: 157990, output: 3, cachedInput: 152960 } });
   });
 
   it("leaves input alone when totalTokens shows cache reads already inside it", async () => {
@@ -997,6 +1000,7 @@ describe("ACP turns (fake CLI)", () => {
 
     const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated");
     expect(usage).toMatchObject({ input: 1000, output: 10, cachedInput: 800 });
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", usage: { input: 1000, output: 10, cachedInput: 800 } });
   });
 
   it("emits no cachedInput when the result reports no cache reads", async () => {
@@ -1008,6 +1012,8 @@ describe("ACP turns (fake CLI)", () => {
     const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated");
     expect(usage).toMatchObject({ input: 900, output: 20 });
     expect(usage && "cachedInput" in usage).toBe(false);
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", usage: { input: 900, output: 20 } });
+    expect((recorder.events.at(-1) as { usage?: { cachedInput?: number } }).usage).not.toHaveProperty("cachedInput");
   });
 
   it("reads cache reads from _meta usage too", async () => {
@@ -1021,6 +1027,41 @@ describe("ACP turns (fake CLI)", () => {
 
     const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated");
     expect(usage).toMatchObject({ input: 157990, output: 3, cachedInput: 152960 });
+    expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", usage: { input: 157990, output: 3, cachedInput: 152960 } });
+  });
+
+  it.each([{}, { inputTokens: 10 }, { outputTokens: 5 }, { inputTokens: -1, outputTokens: 5 }, { inputTokens: "10", outputTokens: 5 }])(
+    "keeps missing or invalid prompt usage unknown despite context reports: %j", async reported => {
+      const updates = join(scratch, "context-only.json");
+      writeFileSync(updates, JSON.stringify([{ update: { sessionUpdate: "usage_update", used: 48000, size: 200000 } }]));
+      process.env.FAKE_ACP_UPDATES_FILE = updates;
+      stubPromptResultUsage(reported, "root");
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-context-not-turn-usage", text: "go" });
+      const done = await recorder.until(e => e.type === "turn.completed");
+      expect(recorder.events.some(e => e.type === "thread.token-usage.updated" && e.contextTokens === 48000)).toBe(true);
+      expect(done).not.toHaveProperty("usage");
+    },
+  );
+
+  it("retains explicit zero measurements and does not reuse a preceding warm turn's totals", async () => {
+    const reported: Record<string, unknown> = { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0 };
+    stubPromptResultUsage(reported, "root");
+    await create();
+    const first = await instance.adapter.sendTurn({ threadId: "t-usage-warm", text: "first" });
+    expect(await recorder.until(e => e.type === "turn.completed" && e.turnId === first.turnId))
+      .toMatchObject({ usage: { input: 0, output: 0, cachedInput: 0 } });
+    for (const key of Object.keys(reported)) delete reported[key];
+    const second = await instance.adapter.sendTurn({ threadId: "t-usage-warm", text: "second", resumeCursor: "fake-acp-session" });
+    expect(await recorder.until(e => e.type === "turn.completed" && e.turnId === second.turnId)).not.toHaveProperty("usage");
+  });
+
+  it.each(["cancelled", "failed"] as const)("retains reported per-prompt usage when the result is %s", async reason => {
+    stubPromptResultUsage({ inputTokens: 10, outputTokens: 5 }, "root", reason);
+    await create();
+    await instance.adapter.sendTurn({ threadId: `t-usage-${reason}`, text: "go" });
+    expect(await recorder.until(e => e.type === "turn.completed"))
+      .toMatchObject({ stopReason: reason, usage: { input: 10, output: 5 } });
   });
 
   it("passes ACP stdio flags and strips foreign provider keys from the child env", async () => {

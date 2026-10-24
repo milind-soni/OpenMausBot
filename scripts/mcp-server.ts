@@ -2,6 +2,7 @@
 // Model Context Protocol (MCP) server for OpenMausBot over JSON-RPC 2.0 stdio,
 // for external agents (Hermes, Claude Desktop, Cursor, etc.).
 import readline from "node:readline";
+import { FINAL_JOB_STATES } from "../shared/job-state.ts";
 
 export function validateBaseUrl(url: string): string {
   const trimmed = url.replace(/\/+$/, "");
@@ -832,7 +833,6 @@ export interface ToolCallHooks {
   onProgress?(job: Record<string, any>): void;
 }
 
-const FINAL_JOB_STATES = new Set(["needs-input", "completed", "failed", "stalled", "idle"]);
 
 /** Wait on a conversation's job as the server computes it (GET
  * /api/threads/:id/job): each request is held until the job changes, so this

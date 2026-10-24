@@ -52,6 +52,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       missingKeyError: `Save an xAI API key in Settings → API keys, or set ${config.apiKeyEnv}.`,
       unavailableReason: "No xAI API key — open Settings → API keys.",
       timeoutMs: 120_000,
+      includeUsageInCompleted: true,
       retryScale: Number(process.env.FAKE_GROK_RETRY_SCALE ?? "1"),
       generateModel: () => "grok-3-mini",
       nativeLog: {

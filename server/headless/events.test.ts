@@ -83,7 +83,7 @@ describe("events against a server", () => {
     expect(asked).toHaveLength(1);
   });
 
-  it("ends with the job when its last change brings no frame of its own: a heartbeat reads it again", async () => {
+  it.each([["completed", 0], ["blocked", 3], ["cancelled", 130]] as const)("ends on %s when only a heartbeat exposes the final job change", async (state, exitCode) => {
     asked.length = 0;
     let reads = 0;
     const timers: Array<ReturnType<typeof setInterval>> = [];
@@ -92,7 +92,7 @@ describe("events against a server", () => {
         reads += 1;
         res.writeHead(200, { "content-type": "application/json" });
         // running for the first read and the one after the message frame; done after that
-        return res.end(JSON.stringify({ threadId: "t1", since: 1_000, version: `v${reads}`, state: reads <= 2 ? "running" : "completed",
+        return res.end(JSON.stringify({ threadId: "t1", since: 1_000, version: `v${reads}`, state: reads <= 2 ? "running" : state,
           reason: reads <= 2 ? "Room Lead is working" : "Room Lead finished", counts: {}, nodes: [] }));
       }
       stream(res, ['id: c1\ndata: {"kind":"hello","resumed":false}\n\n'], false);
@@ -103,8 +103,8 @@ describe("events against a server", () => {
     const { io, out } = capture();
     try {
       const code = await runHeadless(["events", "--job", "t1", "--until-settled"], { io, env: { OPENMAUSBOT_URL: origin } });
-      expect(code).toBe(0);
-      expect(JSON.parse(out.at(-1)!)).toMatchObject({ kind: "job", threadId: "t1", state: "completed" });
+      expect(code).toBe(exitCode);
+      expect(JSON.parse(out.at(-1)!)).toMatchObject({ kind: "job", threadId: "t1", state });
       expect(reads).toBeGreaterThanOrEqual(3);
     } finally {
       timers.forEach(clearInterval);

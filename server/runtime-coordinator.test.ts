@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import type { BeginTurnRequest, ComposedTurn, CoordinatorHost, HandoffOpener, HandoffOptions, HandoffView, HostTurnResult } from "./coordinator.ts";
 import type { RoomAddress } from "./coordinator.ts";
-import { needsInputQuestion, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
+import { coordinatorUsageAssignment, needsInputQuestion, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
 import type { Assignment, Level, Limits } from "./runtime/types.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
@@ -184,6 +184,18 @@ describe("needsInputQuestion", () => {
 });
 
 describe("RuntimeCoordinator: the requesting turn and its tree", () => {
+  it("supplies a detached exact native assignment for provider-turn usage", () => {
+    const w = world();
+    begun(w, chief, "usage-generation");
+    const snapshot = coordinatorUsageAssignment(w.coordinator, { generation: "usage-generation", threadId: chief.threadId });
+    expect(snapshot).toMatchObject({ id: "usage-generation", rootId: "usage-generation", executions: 1 });
+    snapshot!.assignee.botId = "mutated";
+    expect(w.coordinator.node("usage-generation")?.botId).toBe("chief");
+    expect(coordinatorUsageAssignment(w.coordinator, { assignmentId: "usage-generation", threadId: "other" })).toBeUndefined();
+    expect(coordinatorUsageAssignment(w.coordinator, { generation: "missing", threadId: chief.threadId })).toBeUndefined();
+    w.coordinator.close();
+  });
+
   it("creates the root under the generation, runs the child with the envelope, and resumes the root with the child's report", async () => {
     const w = world((node) => node.botId === "builder" ? { ok: true, text: "Built it on branch csv-export." } : undefined);
     w.host.levels.builder = { level: "edits", driverKind: "claudeAgent" };
@@ -440,6 +452,71 @@ describe("RuntimeCoordinator: the run adapter", () => {
     expect(resumes[0]!.text).toContain(`\n\n[OpenMausBot question from @builder on assignment ${built.id}: waiting on Milind]\nIt asks Milind: "Which region should I deploy to?".`);
     expect(w.coordinator.node("gen-1")?.status).toBe("waiting");
     expect(w.coordinator.node(tested.id)?.status).toBe("running");
+  });
+  it.each(["cards", "trailing question"])("returns partial work to the caller after a %s wait survives reload and settles", async (waitKind) => {
+    const dir = mkdtempSync(join(tmpdir(), "runtime-coordinator-partial-"));
+    const partial = "Read North Star and inspected source. PR checks remain unverified.";
+    const question = "May I read the PR checks?";
+    const text = waitKind === "cards" ? partial : `${partial}\nNEEDS INPUT: ${question}`;
+    try {
+      const before = world(node => node.botId === "builder"
+        ? { ok: true, text, evidence: { commands: 1, toolCalls: 3 }, ...(waitKind === "cards" ? { cards: { question, ids: ["pr-card"] } } : {}) }
+        : undefined, { inputWaitMs: 40 }, dir);
+      const { node } = send(before, chief, "gen-1", undefined, builder, "Review GitHub against North Star");
+      before.coordinator.tick(); await flush();
+      expect(before.coordinator.node(node.id)).toMatchObject({ status: "waiting", result: text, question });
+      ended(before, "gen-1");
+      before.coordinator.close();
+      const after = world(undefined, { inputWaitMs: 40 }, dir);
+      expect(after.coordinator.node(node.id)).toMatchObject({ status: "waiting", result: text });
+      expect(after.host.runs).toEqual([]);
+      await sleep(60);
+      after.coordinator.tick(); await flush();
+      if (waitKind === "cards") {
+        expect(after.coordinator.node(node.id)).toMatchObject({ status: "waiting", result: text });
+        expect(after.host.runs).toEqual([]);
+        after.coordinator.cancelDirect("builder-work", "Stopped while PR permission was pending");
+        after.coordinator.tick(); await flush();
+        expect(after.coordinator.node(node.id)).toMatchObject({ status: "cancelled", outcome: "stopped", result: text });
+      } else {
+        expect(after.coordinator.node(node.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "the person did not answer", result: text });
+      }
+      expect(after.host.reports[0]?.child.result).toBe(text);
+      const resume = after.host.runs.find(run => run.node.id === "gen-1");
+      expect(resume?.resumed).toBe(true);
+      expect(resume?.text).toContain(`What @builder said: ${JSON.stringify(text)}`);
+      expect(resume?.text).toContain("Observed by the harness: 1 command, 3 tool calls.");
+      if (waitKind !== "cards") expect(resume?.text).toContain("Expiry is not approval");
+      expect(resume?.text).not.toContain("nothing ran");
+      expect(after.host.runs.filter(run => run.node.id === node.id)).toEqual([]);
+      after.coordinator.close();
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  it("withholds retained partial text and observations when the route closes before the caller resumes", async () => {
+    const partial = "Synthetic private North Star assessment";
+    const w = world(node => node.botId === "builder"
+      ? { ok: true, text: `${partial}\nNEEDS INPUT: Read PR checks?`, evidence: { toolCalls: 3, summary: "Synthetic private observation" } }
+      : undefined, { inputWaitMs: 40 });
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Review GitHub against North Star");
+    w.coordinator.tick(); await flush();
+    ended(w, "gen-1");
+    w.host.busyAnswer = n => n.botId === "chief";
+    await sleep(60);
+    w.coordinator.tick();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "failed", outcome: "expired", result: expect.stringContaining(partial) });
+    expect(w.host.runs).toHaveLength(1);
+    const validate = w.host.validate;
+    w.host.validate = (n, parent) => n.botId === "builder" && parent ? "The recipient is no longer an allowed peer" : validate(n, parent);
+    w.host.busyAnswer = () => false;
+    w.coordinator.tick(); await flush();
+    const resume = w.host.runs.find(run => run.node.id === "gen-1");
+    expect(resume?.text).toContain("Result withheld: The recipient is no longer an allowed peer");
+    expect(resume?.text).not.toContain(partial);
+    expect(resume?.text).not.toContain("Synthetic private observation");
+    expect(resume?.text).not.toContain("3 tool calls");
   });
 
   it("reads a provider failure as a failed turn, and a stop as stopped", async () => {
@@ -1100,15 +1177,15 @@ describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot,
     expect(w.coordinator.outstandingDirect("chief-chat")).toEqual([]);
   });
 
-  it("a root's own NEEDS INPUT line does not park it: the question is in the chat, and the next typed line is a new root", async () => {
+  it("a root NEEDS INPUT line parks the requested work until the person answers", async () => {
     const w = world((node) => node.id === "gen-1" ? { ok: true, text: "Done half.\nNEEDS INPUT: Which region?" } : undefined);
     begin(w);
     w.coordinator.endTurn("gen-1", { ok: true, text: "", cap: { note: "Cap." } });
     w.coordinator.tick(); await flush();
-    expect(w.coordinator.node("gen-1")).toMatchObject({ status: "completed", result: "Done half.\nNEEDS INPUT: Which region?" });
-    expect(w.host.parks).toEqual([]);
-    expect(w.coordinator.parkedDirect("chief-chat")).toBeUndefined();
-    expect(w.coordinator.answer("chief-chat", "eu")).toBe(false);
+    expect(w.coordinator.node("gen-1")).toMatchObject({ status: "waiting", result: "Done half.\nNEEDS INPUT: Which region?" });
+    expect(w.host.parks).toHaveLength(1);
+    expect(w.coordinator.parkedDirect("chief-chat")).toBeDefined();
+    expect(w.coordinator.answerRoot("gen-1", "eu")).toBe(true);
   });
 
   it("hardening: endTurn on an unknown, a settled or a child id logs and does nothing; answerRoot on a child or a running root is false; view carries cards", () => {
@@ -1294,4 +1371,34 @@ describe("RuntimeCoordinator: outward restart policy, answerNode, continuation o
     expect("continuation" in w.coordinator.node("gen-1")!).toBe(false);
     expect(w.host.runs[0]!.composed.turn).toBe("continued");
   });
+});
+
+describe("explicit terminal task reports through actual finish paths", () => {
+ const complete = 'OPENMAUS_TASK_RESULT: {"state":"completed"}';
+ const blocked = 'Inspected the requested publication. The required tool is absent.\n\nOPENMAUS_TASK_RESULT: {"state":"blocked","reason":"Missing publication tool"}';
+ it.each([[complete, { state: "completed" }], [blocked, { state: "blocked", reason: "Missing publication tool" }]])("persists ordinary source-turn report %s after store restart", async (text, disposition) => {
+  const dir = mkdtempSync(join(tmpdir(), "task-result-source-"));
+  const w = world(undefined, {}, dir);
+  try {
+   w.coordinator.beginTurn({ id: "typed-root", address: chief, brief: "Publish artifact", requestMessageId: "request-typed", level: "ask", origin: userOrigin });
+   w.coordinator.endTurn("typed-root", { ok: true, text: text as string });
+   expect(w.coordinator.node("typed-root")).toMatchObject({ status: "completed", disposition, result: text, requestMessageId: "request-typed" });
+   w.coordinator.close();
+   const restarted = world(undefined, {}, dir);
+   try { expect(restarted.coordinator.node("typed-root")).toMatchObject({ status: "completed", disposition, result: text, requestMessageId: "request-typed" }); }
+   finally { restarted.coordinator.close(); }
+  } finally { w.coordinator.close(); await removeTempDir(dir); }
+ });
+ it("records delegated and resumed explicit outcomes through their ordinary prompt paths", async () => {
+  const w = world(node => ({ ok: true, text: node.botId === "builder" ? blocked : complete }));
+  try {
+   const child = send(w, chief, "gen-protocol", undefined, builder, "Publish artifact").node!;
+   ended(w, "gen-protocol");
+   for (let i = 0; i < 12; i++) { w.coordinator.tick(); await flush(); }
+   expect(w.coordinator.node(child.id)).toMatchObject({ status: "completed", disposition: { state: "blocked", reason: "Missing publication tool" } });
+   expect(w.coordinator.node("gen-protocol")).toMatchObject({ status: "completed", disposition: { state: "completed" } });
+   expect(w.host.runs.some(run => run.node.botId === "builder" && run.text.includes("Brief from"))).toBe(true);
+   expect(w.host.runs.some(run => run.resumed && run.text.includes("Missing publication tool"))).toBe(true);
+  } finally { w.coordinator.close(); }
+ });
 });

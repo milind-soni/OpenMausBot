@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bug, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
-import { useStore, visibleMessages, type Bot } from "@/state/store";
+import { useStore, visibleMessages, currentTaskBot, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { formatTime, toRows, type InspectorEntry, type InspectorPage, type InspectorRow } from "@/lib/inspector";
@@ -12,12 +12,13 @@ import { t } from "@/lib/i18n";
 
 type Lens = "run" | "events" | "raw";
 
-export function InspectorPanel({ bot }: { bot: Bot }) {
+export function InspectorPanel({ bot: profile }: { bot: Bot }) {
+  const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const { dispatch } = useStore();
   const { padClass, dragProps } = useCaptionChrome();
   const threadId = bot.threadId;
   const [lens, setLens] = useState<Lens>("run");
-  const activity = useMemo(() => timelineEvents(visibleMessages(bot)), [bot]);
+  const activity = useMemo(() => timelineEvents(visibleMessages(bot), bot), [bot]);
   const [page, setPage] = useState<InspectorPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());

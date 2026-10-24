@@ -395,14 +395,21 @@ export function withEngineMemory(instance: ProviderInstance, memory: EngineMemor
       const { threadId } = input;
       const admit = async (start: "process" | "session", joining?: number) => {
         const controller = new AbortController();
+        const executionSignal = input.executionContext?.signal;
+        const cancel = () => controller.abort();
+        executionSignal?.addEventListener("abort", cancel, { once: true });
+        if (executionSignal?.aborted) controller.abort();
         waiting.get(threadId)?.abort();
         waiting.set(threadId, controller);
         try {
+          await input.engineAdmission?.(start, joining);
+          if (controller.signal.aborted) throw new TurnNotStartedError(newId(), "stopped while waiting for memory");
           const admitted = await memory.admit(threadId, controller.signal, (message) => {
             for (const listener of listeners) listener(event(threadId, { type: "runtime.notice", message }));
           }, start, joining);
           if (!admitted) throw new TurnNotStartedError(newId(), "stopped while waiting for memory");
         } finally {
+          executionSignal?.removeEventListener("abort", cancel);
           if (waiting.get(threadId) === controller) waiting.delete(threadId);
         }
       };

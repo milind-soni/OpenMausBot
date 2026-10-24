@@ -248,3 +248,16 @@ describe("runtime store: evidence fields and the loop guard", () => {
     expect(() => store.get("bad-outward")).toThrow(/does not match the record schema/);
   });
 });
+
+it("retains typed blocked disposition after closing and reopening the existing database", () => {
+ const dir = mkdtempSync(join(tmpdir(), "omb-disposition-"));
+ try {
+  const path = join(dir, "runtime.db");
+  const s = openRuntimeStore(path);
+  s.insert(assignment("blocked", { status: "completed", disposition: { state: "blocked", reason: "Missing credentials" }, result: "BLOCKED: Missing credentials" }), { kind: "settled", at: 1000 });
+  s.close();
+  const restarted = openRuntimeStore(path);
+  try { expect(restarted.get("blocked")).toMatchObject({ status: "completed", disposition: { state: "blocked", reason: "Missing credentials" }, result: "BLOCKED: Missing credentials" }); }
+  finally { restarted.close(); }
+ } finally { removeTempDir(dir); }
+});

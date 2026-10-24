@@ -78,6 +78,7 @@ import { useMenuMotion } from "./MenuMotion";
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
+import { liveToolIds } from "@/lib/tool-liveness";
 import { turnNowPhrases } from "@/lib/live-activity"; import { useTurnLive } from "@/state/turn-status";
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
@@ -98,7 +99,7 @@ import { JumpToLatestButton } from "./JumpToLatestButton";
 import { Select } from "./Select";
 import { RoomWorkingFolder, RoomWorkingFolderChip } from "./RoomWorkingFolder";
 
-export function RoomToolChip({ message, roomId }: { message: Message; roomId?: string }) {
+export function RoomToolChip({ message, roomId, live }: { message: Message; roomId?: string; live: boolean }) {
   const { state, dispatch } = useStore();
   const tool = message.tool;
   if (!tool) return null;
@@ -130,7 +131,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
       </div>
     );
   }
-  if (!comm) return <ToolActivity tool={tool} />;
+  if (!comm) return <ToolActivity tool={tool} live={live} />;
   return (
     <div className="flex justify-start">
       <div
@@ -344,6 +345,7 @@ export const Transcript = memo(function Transcript({
   const newestMessageId = messages.at(-1)?.id;
   const newestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id;
   const roomBusy = roomThreadWorking(group, group.threadId);
+  const liveTools = useMemo(() => liveToolIds(transcript, { busy: roomBusy, turnStartedAt: group.turnStartedAt }), [transcript, roomBusy, group.turnStartedAt]);
   let retryableId: string | undefined;
   let retryableIndex = -1;
   for (let index = transcript.length - 1; index >= 0; index -= 1) {
@@ -403,7 +405,7 @@ export const Transcript = memo(function Transcript({
               <ActivityRun messages={item.messages} forceOpen={item.messages.some((step) => step.id === focusedId)}>
                 {item.messages.map((step) => (
                   <div key={step.id} className="contents" data-mid={step.id}>
-                    <RoomToolChip message={step} />
+                    <RoomToolChip message={step} live={liveTools.has(step.id)} />
                   </div>
                 ))}
               </ActivityRun>
@@ -461,7 +463,7 @@ export const Transcript = memo(function Transcript({
             </div>
           ) : m.kind === "activity" && m.tool ? (
             roomActivityVisible(m, showToolCalls) ? (
-              m.dataResult ? <DataResultChip message={m} /> : isStatusActivity(m) ? <StatusActivityRow message={m} /> : <RoomToolChip message={m} roomId={group.id} />
+              m.dataResult ? <DataResultChip message={m} /> : isStatusActivity(m) ? <StatusActivityRow message={m} /> : <RoomToolChip message={m} roomId={group.id} live={liveTools.has(m.id)} />
             ) : null
           ) : m.kind === "screen" ? (
             <ScreenFrame threadId={group.threadId} message={m} />

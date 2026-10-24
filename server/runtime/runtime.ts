@@ -21,6 +21,7 @@ export interface RuntimeOptions {
 export interface BeginRequest {
   /** The host's own id for the requesting turn (its generation); default a fresh uuid. */
   id?: string;
+  requestMessageId?: string;
   origin: Origin;
   /** person | routine_run | external_runtime */
   requester: Requester;
@@ -63,6 +64,7 @@ export class Runtime {
   private readonly reportDue = new Set<string>();
   private batch: Map<string, Assignment> | null = null;
   private lastThrew = false;
+  private officeDeadlineMs: number | undefined;
 
   constructor(store: RuntimeStore, runner: TurnRunner, options: RuntimeOptions = {}) {
     this.store = store;
@@ -74,17 +76,48 @@ export class Runtime {
     this.bootAt = this.clock.now();
   }
 
+  enableOfficeControl(deadlineMs = 30 * 60_000): void {
+    if (this.opened) throw new Error("Office control must be configured before runtime recovery");
+    this.officeDeadlineMs = deadlineMs;
+  }
+
   /** Restart reconciliation and re-park of needs_input, from stored data only. Idempotent; runs before the first tick. */
   open(): void {
     if (this.opened) return;
     this.opened = true;
     const now = this.clock.now();
+    if (this.officeDeadlineMs !== undefined) {
+      this.store.transaction(() => {
+        for (const node of this.store.all({ nonTerminal: true })) {
+          if (node.office) continue;
+          const root = this.store.root(node.id);
+          node.office = { rootDeadline: root?.office?.rootDeadline ?? (root?.createdAt ?? node.createdAt) + this.officeDeadlineMs!, attempts: [] };
+          this.store.update(node);
+        }
+      });
+    }
     // Deepest first: a child's fate marks its parent before the parent's own turn is judged.
     const live = this.store.all({ nonTerminal: true }).sort((a, b) => b.depth - a.depth);
     this.withBatch(() => {
       for (const snapshot of live) {
         const n = this.store.get(snapshot.id);
         if (!n || isTerminal(n)) continue;
+        if (n.office) {
+          const uncertain = n.office.attempts.some(attempt => attempt.state === "uncertain" || (attempt.state === "consumed" && attempt.finishedAt === undefined));
+          for (const attempt of n.office.attempts) {
+            if (attempt.state === "consumed" && attempt.finishedAt === undefined) attempt.state = "uncertain";
+            else if (attempt.state === "prepared" || attempt.state === "issued") { attempt.state = "cancelled"; attempt.cancelledAt = now; }
+          }
+          this.store.update(n);
+          if (uncertain) {
+            this.cancelTree(n, "The consumed office attempt was interrupted; its execution is uncertain and will not be repeated", "failed", "interrupted");
+            continue;
+          }
+          if (now >= n.office.rootDeadline) {
+            this.cancelTree(n, "The fixed office work deadline expired", "failed", "expired");
+            continue;
+          }
+        }
         if (n.status === "needs_input") {
           this.store.update(n, { kind: "restart_reconciled", at: now, detail: "needs_input: parked again" });
           this.touch(n);
@@ -93,6 +126,12 @@ export class Runtime {
         }
         if (n.status !== "running") continue;
         const handedOut = childrenSince(this.store, n).length > 0;
+        const lastAttempt = n.office?.attempts.at(-1);
+        const currentAttempt = lastAttempt && n.startedAt !== undefined && lastAttempt.preparedAt >= n.startedAt ? lastAttempt : undefined;
+        if (!handedOut && currentAttempt?.consumedAt !== undefined) {
+          this.settle(n, "failed", "interrupted", "The provider turn ended before its assignment result was committed; its work will not be repeated");
+          continue;
+        }
         const outward = handedOut ? [] : this.outwardOf(n);
         if (handedOut) {
           n.status = "waiting"; n.restart = "cut"; n.lastActivityAt = now;
@@ -117,7 +156,14 @@ export class Runtime {
           this.touch(parent);
         }
       }
-      for (const n of this.store.all()) if (isTerminal(n) && n.reportedAt === undefined) this.reportDue.add(n.id);
+      for (const n of this.store.all()) {
+        if (!isTerminal(n)) continue;
+        if (n.reportedAt === undefined) this.reportDue.add(n.id);
+        else if (n.parentId && n.reply !== "none" && !this.store.inbox(wakeOwner(n)).some(item =>
+          item.assignmentId === n.id && (item.kind === "settled" || item.kind === "stalled"))) {
+          this.store.transaction(() => { this.wake(n, n.outcome === "stalled" ? "stalled" : "settled"); });
+        }
+      }
     });
   }
 
@@ -131,6 +177,8 @@ export class Runtime {
       level: req.level, levelSource: "own", executions: 1, restarts: 0, createdAt: now, startedAt: now, lastActivityAt: now,
       result: "", rework: false, budgets: { since: now, requests: 0, executions: 1, wakes: 0 }, version: 1,
       ...(req.goalRunId ? { goalRunId: req.goalRunId } : {}),
+      ...(req.requestMessageId ? { requestMessageId: req.requestMessageId } : {}),
+      ...(this.officeDeadlineMs !== undefined ? { office: { rootDeadline: now + this.officeDeadlineMs, attempts: [] } } : {}),
     };
     this.store.transaction(() => {
       this.store.insert(root, { kind: "enqueued", at: now, detail: "queued: root" });
@@ -150,11 +198,11 @@ export class Runtime {
     this.turns.delete(rootId);
     const evidence = result.evidence ? { evidence: result.evidence } : {};
     const outcome: RunResult = result.needsInput
-      ? { kind: "needs_input", question: result.needsInput.question, ...(result.needsInput.cards ? { cards: result.needsInput.cards } : {}), ...evidence }
+      ? { kind: "needs_input", text: result.text, question: result.needsInput.question, ...(result.needsInput.cards ? { cards: result.needsInput.cards } : {}), ...evidence }
       : result.continue
         ? { kind: "continue", text: result.text, note: result.continue.note, ...(result.continue.handoffPath ? { handoffPath: result.continue.handoffPath } : {}), ...evidence }
         : result.ok
-          ? { kind: "completed", text: result.text, ...evidence }
+          ? { kind: "completed", text: result.text, ...(result.disposition ? { disposition: result.disposition } : {}), ...evidence }
           : { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence };
     try {
       this.withBatch(() => this.finishTurn(n, outcome, live));
@@ -188,6 +236,7 @@ export class Runtime {
     const mode = req.mode ?? "work";
     const lineage = parent ? path(this.store, parent) : [];
     const root = lineage[0];
+    if (root?.office && now >= root.office.rootDeadline) return refuse("The fixed office work deadline expired");
     const target = req.assignee;
     if (lineage.some(a => a.assignee.botId === target.botId &&
       (!a.assignee.destination.groupId || !target.destination.groupId || a.assignee.destination.groupId === target.destination.groupId))) {
@@ -213,6 +262,8 @@ export class Runtime {
       status: "queued", level, levelSource: source, executions: 0, restarts: 0, createdAt: now, lastActivityAt: now, result: "",
       rework: Boolean(req.rework), ...(req.approved !== undefined ? { approved: req.approved } : {}),
       ...(req.batchKey !== undefined ? { batchKey: req.batchKey } : {}), version: 1,
+      ...(root?.office ? { office: { rootDeadline: root.office.rootDeadline, attempts: [] } }
+        : this.officeDeadlineMs !== undefined ? { office: { rootDeadline: now + this.officeDeadlineMs, attempts: [] } } : {}),
     };
     if (!parent) { node.rootId = node.id; node.budgets = { since: now, requests: 0, executions: 0, wakes: 0 }; }
     const problem = this.safe("validate", () => this.runner.validate(node, parent));
@@ -246,7 +297,9 @@ export class Runtime {
     for (const snapshot of [...live].sort((a, b) => b.depth - a.depth)) {
       const n = this.store.get(snapshot.id);
       if (!n || isTerminal(n)) continue;
-      if (n.status === "queued" && !n.continuation && now - this.since(n.lastActivityAt) > this.limits.queueMs) {
+      if (n.office && now >= n.office.rootDeadline) {
+        this.cancelTree(n, "The fixed office work deadline expired", "failed", "expired");
+      } else if (n.status === "queued" && !n.continuation && now - this.since(n.lastActivityAt) > this.limits.queueMs) {
         this.cancelTree(n, n.executions > 0 ? "not resumed" : "never started", "failed", "expired");
       } else if (n.status === "needs_input" && this.inputExpires(n) && now - this.since(n.lastActivityAt) > this.limits.inputWaitMs) {
         this.cancelTree(n, "the person did not answer", "failed", "expired");
@@ -465,6 +518,7 @@ export class Runtime {
     }
     delete n.guard;
     if (result.kind === "needs_input") {
+      if (result.text?.trim()) n.result = clip(result.text, RESULT_MAX);
       n.status = "needs_input"; n.question = clip(result.question, BRIEF_MAX); n.lastActivityAt = now;
       if (result.cards?.length) n.cards = result.cards; else delete n.cards;
       this.store.update(n, { kind: "parked", at: now, detail: `needs_input: ${clip(result.question, DETAIL_MAX)}` });
@@ -475,6 +529,9 @@ export class Runtime {
       }
       return;
     }
+    if (result.kind === "completed" && result.disposition) n.disposition = result.disposition.state === "blocked"
+      ? { state: "blocked", reason: clip(result.disposition.reason, DETAIL_MAX) } : { state: "completed" };
+    else delete n.disposition;
     n.result = clip(result.text, RESULT_MAX);
     const kids = awaited(this.store.children(n.id));
     const unseen = live !== undefined && kids.some(c => isTerminal(c) && !live.carried.has(c.id));
@@ -526,6 +583,11 @@ export class Runtime {
     const n = this.store.get(id);
     if (!n) return;
     this.withBatch(() => outcome === "failed" ? this.cancelTree(n, reason, "failed", "interrupted") : this.cancelTree(n, reason, "cancelled", "stopped"));
+  }
+
+  expire(id: string, reason = "The fixed office work deadline expired"): void {
+    const node = this.store.get(id);
+    if (node) this.withBatch(() => this.cancelTree(node, reason, "failed", "expired"));
   }
 
   /** The person stopped the requester's conversation: work that never started is dropped, a teammate
@@ -617,6 +679,12 @@ export class Runtime {
     if (status !== "completed" && detail !== undefined && n.result === "") n.result = clip(detail, RESULT_MAX);
     if (outcome === "refused" && detail !== undefined) { n.result = clip(detail, RESULT_MAX); delete n.evidence; }
     delete n.question; delete n.answer; delete n.restart; delete n.carrying;
+    for (const attempt of n.office?.attempts ?? []) {
+      if (attempt.state === "prepared" || attempt.state === "issued" || (attempt.state === "consumed" && attempt.finishedAt === undefined)) {
+        if (attempt.state === "consumed" && (status === "completed" || outcome === "provider_error")) continue;
+        attempt.state = attempt.state === "consumed" ? "uncertain" : "cancelled"; attempt.cancelledAt = now;
+      }
+    }
     const kind: EventKind = status === "cancelled" ? "cancelled" : outcome === "refused" ? "refused" : "settled";
     const root = n.parentId ? this.store.get(n.rootId) : n;
     this.store.transaction(() => {
@@ -639,11 +707,19 @@ export class Runtime {
       this.safe("report", () => this.runner.report(n, parent));
       if (this.lastThrew) { this.reportDue.add(n.id); return; }
     }
-    n.reportedAt = now;
-    this.store.update(n, { kind: "reported", at: now, detail: ownTurn ? "own turn" : "reported" });
+    try {
+      this.store.transaction(() => {
+        n.reportedAt = now;
+        this.store.update(n, { kind: "reported", at: now, detail: ownTurn ? "own turn" : "reported" });
+        if (n.parentId) this.wake(n, n.outcome === "stalled" ? "stalled" : "settled");
+      });
+    } catch (error) {
+      delete n.reportedAt;
+      this.reportDue.add(n.id);
+      throw error;
+    }
     this.reportDue.delete(n.id);
     this.touch(n);
-    if (n.parentId) this.wake(n, n.outcome === "stalled" ? "stalled" : "settled");
   }
 
   private wake(n: Assignment, kind: InboxKind): boolean {

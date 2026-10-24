@@ -25,6 +25,7 @@ export type HandoffStatus = "source" | "queued" | "running" | "waiting" | "resum
 
 export interface HandoffView {
   id: string;
+  requestMessageId?: string;
   rootId: string;
   parentId?: string;
   groupId?: string;
@@ -51,6 +52,7 @@ export interface HandoffView {
   reply: Reply;
   outcome?: Outcome;
   outcomeDetail?: string;
+  disposition?: Assignment["disposition"];
   question?: string;
   cards?: string[];
   continuation?: { note: string; handoffPath?: string; count: number };
@@ -59,6 +61,7 @@ export interface HandoffView {
 
 export interface BeginTurnRequest {
   id: string;
+  requestMessageId?: string;
   address: RoomAddress;
   brief: string;
   level: Level;
@@ -69,6 +72,7 @@ export interface BeginTurnRequest {
 
 /** `cap` continues the same node in place (a step cap, a seat it could not get); `cards` parks it on the person. */
 export interface HostTurnResult {
+  disposition?: Assignment["disposition"];
   ok: boolean;
   text: string;
   evidence?: TurnEvidence;

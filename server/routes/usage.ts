@@ -2,6 +2,8 @@ import { redactSecretsInText } from "../../shared/redact.ts";
 import type { PriceList } from "../prices.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SpendState } from "../spend.ts";
+import type { Assignment } from "../runtime/types.ts";
+import { readJobUsage } from "../job-usage.ts";
 import {
   flushUsageLedger,
   parseUsageRange,
@@ -26,6 +28,8 @@ export interface UsageRouteDeps {
   liveBot: TraceServiceDeps["liveBot"];
   /** Which threads this viewer may read today; a trace shows only those. */
   canSee(auth: RequestAuth): (threadId: string) => boolean;
+  /** Returns only native assignments the caller may read, after thread visibility checks. */
+  jobs?(threadId: string, since: number, auth: RequestAuth): { scopes: string[]; rows: Assignment[]; incompleteRoots?: string[] } | undefined;
 }
 
 const TRACE = /^\/api\/usage\/traces\/([^/]{1,600})$/;
@@ -38,6 +42,23 @@ const whole = (raw: string | null, fallback: number, max: number): number | null
 export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
   const traces = createTraceService({ dataDir: deps.dataDir, recorder: deps.recorder, messages: deps.messages, liveBot: deps.liveBot });
   return async ({ res, url, path, method, auth, json }) => {
+    const jobPath = /^\/api\/threads\/([\w-]+)\/job\/usage$/.exec(path);
+    if (method === "GET" && jobPath && deps.jobs) {
+      const since = Number(url.searchParams.get("since") ?? 0);
+      if (!Number.isSafeInteger(since) || since < 0) return json(res, 400, { error: "since must be a nonnegative integer timestamp" });
+      const job = deps.jobs(jobPath[1]!, since, auth);
+      if (!job) return json(res, 404, { error: "Thread not found" });
+      const requested = url.searchParams.get("rootId");
+      const roots = [...new Set(job.rows.map(node => node.rootId))];
+      if (requested && !roots.includes(requested)) return json(res, 404, { error: "Job not found in this thread" });
+      await flushUsageLedger(deps.dataDir);
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { scopes: job.scopes, jobs: (requested ? [requested] : roots).map(rootId => {
+        const summary = readJobUsage(deps.dataDir, job.rows, rootId);
+        if (job.incompleteRoots?.includes(rootId)) summary.coverage = { ...summary.coverage, state: "partial", scopeComplete: false, tokens: "partial", costs: "partial" };
+        return summary;
+      }) });
+    }
     if (method === "GET" && path === "/api/usage/traces") {
       const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
       if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });

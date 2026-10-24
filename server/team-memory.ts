@@ -26,7 +26,10 @@ export interface TeamMemorySource {
   messageId?: string;
   turnId?: string;
   quote?: string;
+  project?: { id: string; root: string; sectionKey: string; assignmentId?: string; rootJobId?: string };
 }
+
+export type TeamMemoryScope = string | null | undefined | { projectId: string };
 
 export interface TeamMemoryEntry {
   revision?: string;
@@ -66,12 +69,14 @@ const entrySchema = z.object({
   detail: z.string().max(TEAM_MEMORY_DETAIL_MAX),
   aliases: z.array(z.string().min(1).max(TEAM_MEMORY_NAME_MAX)).max(TEAM_MEMORY_ALIASES_MAX),
   status: z.enum(["accepted", "proposed", "superseded", "deleted"]),
-  source: z.object({ botId: z.string(), botName: z.string(), threadId: z.string(), at: z.number().finite(), messageId: z.string().optional(), turnId: z.string().optional(), quote: z.string().max(600).optional() }),
+  source: z.object({ botId: z.string(), botName: z.string(), threadId: z.string(), at: z.number().finite(), messageId: z.string().optional(), turnId: z.string().optional(), quote: z.string().max(600).optional(),
+    project: z.object({ id: z.string(), root: z.string(), sectionKey: z.string(), assignmentId: z.string().optional(), rootJobId: z.string().optional() }).optional() }),
   updatedAt: z.number().finite(),
 });
-const fileSchema = z.object({ version: z.union([z.literal(1), z.literal(2)]), sections: z.record(z.string(), z.array(entrySchema)) });
+const fileSchema = z.object({ version: z.union([z.literal(1), z.literal(2), z.literal(3)]), sections: z.record(z.string(), z.array(entrySchema)),
+  projects: z.record(z.string(), z.array(entrySchema)).optional() });
 type TeamMemoryFile = z.infer<typeof fileSchema>;
-const emptyFile = (): TeamMemoryFile => ({ version: 2, sections: Object.create(null) });
+const emptyFile = (): TeamMemoryFile => ({ version: 2, sections: Object.create(null), projects: Object.create(null) });
 
 const clean = (value: unknown, max: number): string => (typeof value === "string" ? redactSecretsInText(value).replace(/\s+/g, " ").trim().slice(0, max + 1) : "");
 export class TeamMemoryConflict extends Error {
@@ -105,7 +110,8 @@ export class TeamMemory {
   }
 
   private snapshot(): TeamMemoryFile {
-    return { version: 2, sections: Object.assign(Object.create(null), structuredClone(this.data.sections)) };
+    return { version: this.data.version, sections: Object.assign(Object.create(null), structuredClone(this.data.sections)),
+      projects: Object.assign(Object.create(null), structuredClone(this.data.projects ?? {})) };
   }
 
   private load(): TeamMemoryFile {
@@ -113,11 +119,13 @@ export class TeamMemory {
       const input = JSON.parse(readFileSync(this.file, "utf8"));
       if (!fileSchema.safeParse(input).success) throw new Error("invalid team memory");
       const data = emptyFile();
+      if (input.version === 3) data.version = 3;
       // Own keys only, never inherited properties like __proto__.
       for (const [key, value] of Object.entries(input.sections)) {
         const storageKey = input.version === 1 ? ensureSectionMemoryKey(key) : key;
         data.sections[storageKey] = z.array(entrySchema).parse(value).map(entry => ({ ...entry, key: entry.key ?? `${entry.kind}:${entry.name.toLowerCase()}` }));
       }
+      for (const [key, value] of Object.entries(input.projects ?? {})) data.projects![key] = z.array(entrySchema).parse(value);
       if (input.version === 1) writeFileAtomic(this.file, JSON.stringify(data, null, 2), { mode: 0o600 });
       return data;
     } catch (error) {
@@ -129,16 +137,23 @@ export class TeamMemory {
   private save(): void {
     try {
       if (!this.readable) throw new Error("Saved team memory could not be read; the existing file was left unchanged");
+      // Older runtimes must reject project records rather than silently discard a namespace they cannot load.
+      if (Object.values(this.data.projects ?? {}).some(entries => entries.length)) this.data.version = 3;
       writeFileAtomic(this.file, JSON.stringify(this.data, null, 2), { mode: 0o600 });
       this.saved = this.snapshot();
     } catch (error) {
-      this.data = { version: 2, sections: Object.assign(Object.create(null), structuredClone(this.saved.sections)) };
+      this.data = { version: this.saved.version, sections: Object.assign(Object.create(null), structuredClone(this.saved.sections)),
+        projects: Object.assign(Object.create(null), structuredClone(this.saved.projects ?? {})) };
       throw error;
     }
   }
 
-  private entries(section: string | null | undefined, writing = false): TeamMemoryEntry[] {
+  private entries(section: TeamMemoryScope, writing = false): TeamMemoryEntry[] {
     try {
+      if (section && typeof section === "object") {
+        if (!/^[a-f0-9]{64}$/.test(section.projectId)) throw new Error("Invalid project memory scope");
+        return ((this.data.projects ??= Object.create(null))[section.projectId] ??= []);
+      }
       const key = writing ? ensureSectionMemoryKey(section) : sectionMemoryKey(section);
       return (this.data.sections[key] ??= []);
     } catch (error) {
@@ -150,7 +165,7 @@ export class TeamMemory {
 
   /** Another server's entries for this team, as they are there: one this team already has, by id or by its key, stays
    * as it is here. How many were added. */
-  adopt(section: string | null | undefined, entries: readonly unknown[]): number {
+  adopt(section: TeamMemoryScope, entries: readonly unknown[]): number {
     const held = this.entries(section, true);
     const ids = new Set(held.map((entry) => entry.id));
     const keys = new Set(held.filter(active).map((entry) => entry.key));
@@ -169,7 +184,7 @@ export class TeamMemory {
     return added;
   }
 
-  list(section: string | null | undefined, includeHistory = false): TeamMemoryEntry[] {
+  list(section: TeamMemoryScope, includeHistory = false): TeamMemoryEntry[] {
     return this.entries(section).filter(entry => includeHistory || active(entry)).map((entry) => ({ ...structuredClone(entry), revision: teamMemoryRevision(entry) }));
   }
 
@@ -188,7 +203,7 @@ export class TeamMemory {
 
   /** A bot's addition starts proposed; the caller accepts it at once, or the owner does on a card (direct-apply.ts). */
   propose(
-    section: string | null | undefined,
+    section: TeamMemoryScope,
     input: TeamMemoryInput,
     source: TeamMemorySource,
   ): { entry: TeamMemoryEntry; status: "proposed" } {
@@ -209,7 +224,7 @@ export class TeamMemory {
     return { entry: { ...entry, revision: teamMemoryRevision(entry) }, status };
   }
 
-  resolve(section: string | null | undefined, id: string, answer: "accept" | "reject", expectedRevision?: string): TeamMemoryResolution {
+  resolve(section: TeamMemoryScope, id: string, answer: "accept" | "reject", expectedRevision?: string): TeamMemoryResolution {
     const entries = this.entries(section, true);
     const index = entries.findIndex((entry) => entry.id === id);
     if (index === -1 || !active(entries[index])) return { claimed: false };
@@ -246,7 +261,7 @@ export class TeamMemory {
   }
 
   update(
-    section: string | null | undefined,
+    section: TeamMemoryScope,
     id: string,
     patch: Partial<Pick<TeamMemoryEntry, "name" | "detail" | "aliases" | "kind" | "pinned" | "key">>,
     expectedRevision?: string,
@@ -270,7 +285,7 @@ export class TeamMemory {
     return { ...structuredClone(next), revision: teamMemoryRevision(next) };
   }
 
-  remove(section: string | null | undefined, id: string, expectedRevision?: string): boolean {
+  remove(section: TeamMemoryScope, id: string, expectedRevision?: string): boolean {
     const entries = this.entries(section, true);
     const index = entries.findIndex((entry) => entry.id === id);
     if (index === -1 || !active(entries[index])) return false;
@@ -283,7 +298,7 @@ export class TeamMemory {
   }
 
   /** Undoes an addition that applied on its own: the entry goes and any fact it replaced comes back, unless either changed since. */
-  undoAccept(section: string | null | undefined, id: string, revision: string): boolean {
+  undoAccept(section: TeamMemoryScope, id: string, revision: string): boolean {
     const entries = this.entries(section, true);
     const entry = entries.find((candidate) => candidate.id === id);
     if (!entry || entry.status !== "accepted" || teamMemoryRevision(entry) !== revision) return false;
@@ -306,7 +321,7 @@ export class TeamMemory {
     return { claimed: false };
   }
 
-  search(section: string | null | undefined, query: string, limit = 12, range?: { since?: number; until?: number }): TeamMemoryEntry[] {
+  search(section: TeamMemoryScope, query: string, limit = 12, range?: { since?: number; until?: number }): TeamMemoryEntry[] {
     const terms = [...new Set(recallTerms(query))];
     const score = (entry: TeamMemoryEntry) => {
       const words = new Set(recallTerms([entry.name, entry.detail, entry.key, ...entry.aliases].join(" ")));

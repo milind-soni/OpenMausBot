@@ -69,7 +69,8 @@ function assignmentLine(a: Json): string {
   const status = String(a.status ?? "unknown");
   const outcome = typeof a.outcome === "string" && a.outcome && a.outcome !== "done" && a.outcome !== status ? ` (${a.outcome})` : "";
   const detail = typeof a.outcomeDetail === "string" && a.outcomeDetail.trim() ? `: ${a.outcomeDetail.trim()}` : "";
-  return `${id} → ${who}: ${STATUS_WORDS[status] ?? status}${outcome}${detail}`;
+  const job = typeof a.rootId === "string" && a.rootId ? ` [job: ${a.rootId}]` : "";
+  return `${id} → ${who}: ${STATUS_WORDS[status] ?? status}${outcome}${detail}${a.stopUnconfirmed === true ? "; local stop unconfirmed" : ""}${job}`;
 }
 
 function renderAssignmentStatus(r: Json, id: string): string {
@@ -84,8 +85,15 @@ function renderAssignmentStatus(r: Json, id: string): string {
   if (result) lines.push(`Result${result.length > RESULT_HEAD ? " (first part)" : ""}: ${result.slice(0, RESULT_HEAD)}`);
   const children = Array.isArray(r.children) ? r.children.filter(jsonRecord) : [];
   if (children.length) lines.push("Its own hand-offs:", ...children.map((child) => `- ${assignmentLine(child)}`));
+  if (jsonRecord(r.usage)) {
+    const observations = Array.isArray(r.usage.observations) ? r.usage.observations : [];
+    lines.push("Job usage across its native attempts and hand-offs (cached input is included in input; missing measurements remain unknown):",
+      JSON.stringify({ rootId: r.usage.rootId, total: r.usage.total, coverage: r.usage.coverage,
+        observationCount: observations.length, observations: observations.slice(-20) }));
+  }
   const settled = a.status === "completed" || a.status === "failed" || a.status === "cancelled" || a.status === "done";
-  if (!settled) lines.push("It is not settled. Its result resumes you on its own; do not wait on it in this turn.");
+  if (a.stopUnconfirmed === true) lines.push("The local process has not confirmed it stopped. Do not report this job stopped or start replacement work. Retain its partial reports.");
+  else if (!settled) lines.push("It is not settled. Its result resumes you on its own; do not wait on it in this turn.");
   return lines.join("\n");
 }
 
@@ -242,6 +250,22 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     }) });
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
   }
+  if (name === "cancel_job") {
+    const id = typeof args.job_id === "string" ? args.job_id.trim() : "";
+    if (context.externalRuntime) return { text: "Standing external runtimes cannot cancel jobs.", isError: true };
+    if (!/^[\w-]{4,128}$/.test(id) || Object.keys(args).some(key => key !== "job_id")) {
+      return { text: "cancel_job needs job_id: the exact native root id from the job status. It cancels that job and its running hand-offs.", isError: true };
+    }
+    const base = `/api/internal/jobs/${encodeURIComponent(id)}`;
+    const snapshot = await apiResponse(`${base}/cancellation`);
+    if (!snapshot.ok) return { text: String(snapshot.body.error ?? "This job cannot be safely cancelled."), isError: true };
+    const cancelled = await apiResponse(`${base}/cancel`, { method: "POST", body: JSON.stringify(snapshot.body) });
+    if (!cancelled.ok) return { text: String(cancelled.body.error ?? "Cancellation was not confirmed."), isError: true };
+    return { text: cancelled.body.state === "partial"
+      ? "Cancellation is partial; some local work could not confirm interruption. Partial results are retained. Read the job status before reporting it stopped."
+      : "Job cancellation recorded, including its running hand-offs. Partial results are retained.",
+      ...(cancelled.body.state === "partial" ? { isError: true } : {}) };
+  }
   if (name === "assignment_status") {
     const id = args.id === undefined || args.id === null || args.id === "" ? "" : String(args.id).trim();
     if (id && !/^[\w-]{4,64}$/.test(id)) {
@@ -263,9 +287,11 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     }
     if (id) return { text: renderAssignmentStatus(r, id) };
     const outstanding = Array.isArray(r.outstanding) ? r.outstanding.filter(jsonRecord) : [];
-    if (!outstanding.length) return { text: "Nothing outstanding: no assignment of this conversation is still open." };
+    const jobs = Array.isArray(r.jobs) ? r.jobs.filter(jsonRecord) : [];
+    const sourceJobs = jobs.length ? `\nChief source jobs:\n${jobs.map(job => `- ${String(job.jobId)}: ${String(job.title)} (${String(job.status)}; thread ${String(job.threadId)})${typeof job.request === "string" ? ` — ${JSON.stringify(job.request)}` : ""}`).join("\n")}\nFor a requested whole-job cancellation, pass its exact root id as cancel_job job_id.` : "";
+    if (!outstanding.length) return { text: `Nothing outstanding: no assignment of this conversation is still open.${sourceJobs}` };
     return {
-      text: `Outstanding assignments of this conversation (${outstanding.length}):\n${outstanding.map((a) => `- ${assignmentLine(a)}`).join("\n")}\nEach resumes you when it settles; do not wait on them in this turn.`,
+      text: `Outstanding assignments of this conversation (${outstanding.length}):\n${outstanding.map((a) => `- ${assignmentLine(a)}`).join("\n")}\nEach resumes you when it settles; do not wait on them in this turn.${sourceJobs}`,
     };
   }
   if (name === "list_bots") {
@@ -662,6 +688,23 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     });
     if (r.error || r.ok !== true) return { text: String(r.error ?? "The log line was not confirmed."), isError: true };
     return { text: `Logged to ${String(r.file)}: ${String(r.line)}` };
+  }
+  if (name === "project_memory") {
+    const entryId = typeof (args.entryId ?? args.entry_id) === "string" ? String(args.entryId ?? args.entry_id) : undefined;
+    const body: Json = {
+      operation: args.operation,
+      ...(typeof args.query === "string" ? { query: args.query } : {}),
+      ...(entryId ? { entryId } : {}),
+      ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+      ...(typeof args.kind === "string" ? { kind: args.kind } : {}),
+      ...(typeof args.key === "string" ? { key: args.key } : {}),
+      ...(typeof args.name === "string" ? { name: args.name } : {}),
+      ...(typeof args.detail === "string" ? { detail: args.detail } : {}),
+      ...(Array.isArray(args.aliases) ? { aliases: args.aliases.filter((alias): alias is string => typeof alias === "string") } : {}),
+      ...(typeof args.revision === "string" ? { revision: args.revision } : {}),
+    };
+    const response = await apiResponse("/api/internal/project-memory", { method: "POST", body: JSON.stringify(body) });
+    return { text: JSON.stringify(response.body), ...(!response.ok ? { isError: true } : {}) };
   }
   if (name === "propose_team_memory") {
     const kind = String(args.kind ?? "").trim();

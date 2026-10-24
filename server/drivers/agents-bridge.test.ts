@@ -51,7 +51,7 @@ function everyProfile(): Array<{ name: string; profile: CatalogProfile }> {
 const bridgeFor = (options: Parameters<typeof profile>[0] = {}) => createToolBridge(availableTools(profile(options)) as BridgeTool[]);
 const names = (tools: readonly { name: string }[]) => tools.map((tool) => tool.name);
 const FULL_CHIEF = { chief: true, skills: true, shared: true, voice: true } as const;
-const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
+const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread", "cancel_job"];
 
 type Match = { name: string; description: string; inputSchema: Record<string, unknown> };
 type FindPayload = { matches: Match[]; next: string };

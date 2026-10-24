@@ -22,7 +22,7 @@ const chip = (patch: Partial<Message> = {}): Message => ({
 });
 
 const render = (message: Message) =>
-  renderToStaticMarkup(createElement(StoreProvider, null, createElement(RoomToolChip, { message })));
+  renderToStaticMarkup(createElement(StoreProvider, null, createElement(RoomToolChip, { live: false, message })));
 
 describe("RoomToolChip", () => {
   it("turns a linked receipt into a button that opens the room it names", () => {
@@ -56,7 +56,7 @@ describe("RoomToolChip", () => {
       comm: { groupId: "here", withBotId: "eli", withName: "Eli", withColor: "green" },
     });
     const markup = renderToStaticMarkup(createElement(StoreProvider, null,
-      createElement(RoomToolChip, { message, roomId: "here" })));
+      createElement(RoomToolChip, { live: false, message, roomId: "here" })));
     expect(markup).toContain("Sent to Eli");
     expect(markup).toContain('aria-label="Eli"');
     expect(markup).not.toContain("<button");

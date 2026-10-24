@@ -323,6 +323,8 @@
   "toolDetail.noOutput": "No output was recorded for this call.",
   "toolDetail.previewHint": "Shortened, automatically redacted preview. Review before sharing.",
   "toolDetail.tool": "Tool",
+  "toolDetail.unrecorded": "Result/status unrecorded and unverified.",
+  "toolDetail.noTerminalResult": "No terminal result was recorded.",
   "toolStep.runCommand": "Run a command",
   "toolStep.readFile": "Read a file",
   "toolStep.writeFile": "Write a file",

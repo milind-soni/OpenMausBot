@@ -19,6 +19,7 @@ const evidenceSchema = z.object({
 
 const assignmentSchema = z.object({
   id: z.string().min(1),
+  requestMessageId: z.string().min(1).optional(),
   rootId: z.string().min(1),
   parentId: z.string().min(1).optional(),
   depth: z.number().int().nonnegative(),
@@ -53,6 +54,10 @@ const assignmentSchema = z.object({
   outcome: z.enum(["done", "needs_input", "cap_continued", "stalled", "interrupted", "budget", "provider_error", "denied",
     "expired", "stopped", "refused", "duplicate"]).optional(),
   outcomeDetail: z.string().optional(),
+  disposition: z.discriminatedUnion("state", [
+    z.object({ state: z.literal("completed") }).strict(),
+    z.object({ state: z.literal("blocked"), reason: z.string().min(1) }).strict(),
+  ]).optional(),
   level: z.enum(APPROVAL_MODES),
   levelSource: z.enum(["own", "chief", "engine_cap"]),
   executions: z.number().int().nonnegative(),
@@ -76,6 +81,19 @@ const assignmentSchema = z.object({
   carrying: z.array(z.string()).optional(),
   approved: z.boolean().optional(),
   batchKey: z.string().optional(),
+  office: z.object({
+    rootDeadline: z.number().finite(), reportUntil: z.number().finite().optional(), reportStarted: z.boolean().optional(),
+    attempts: z.array(z.object({
+      version: z.literal(1), attemptId: z.string(), assignmentId: z.string(), rootId: z.string(), botId: z.string(), threadId: z.string(),
+      generation: z.string(), workerId: z.string(), profileDigest: z.string(), cwd: z.string(), rootDeadline: z.number().finite(),
+      instanceId: z.string(), driverKind: z.string(), profileId: z.string(),
+      assignmentDigest: z.string(),
+      startBefore: z.number().finite(), kind: z.enum(["work", "report"]), digest: z.string(), capabilityHash: z.string(),
+      state: z.enum(["prepared", "issued", "consumed", "cancelled", "uncertain"]), preparedAt: z.number().finite(),
+      issuedAt: z.number().optional(), consumedAt: z.number().optional(), finishedAt: z.number().optional(), cancelledAt: z.number().optional(),
+      controllerDecision: z.object({ controllerHost: z.string(), controllerDecisionId: z.string(), policyVersion: z.literal("office-control-v1"), decision: z.enum(["allow", "deny"]), at: z.number() }).optional(),
+    })),
+  }).optional(),
   version: z.literal(1),
 });
 
@@ -220,7 +238,11 @@ export function openRuntimeStore(path: string): RuntimeStore {
     deliver: db.prepare("UPDATE inbox SET delivered_at = ? WHERE id = ? AND delivered_at IS NULL"),
     prunable: db.prepare(`SELECT id FROM assignments r WHERE r.parent_id IS NULL AND r.status IN (${terminalList})
       AND r.finished_at IS NOT NULL AND r.finished_at < ?
-      AND NOT EXISTS (SELECT 1 FROM assignments c WHERE c.root_id = r.id AND c.status NOT IN (${terminalList}))`),
+      AND NOT EXISTS (SELECT 1 FROM assignments c WHERE c.root_id = r.id AND c.status NOT IN (${terminalList}))
+      AND NOT EXISTS (SELECT 1 FROM assignments c, json_each(c.json, '$.office.attempts') attempt
+        WHERE c.root_id = r.id AND (json_extract(attempt.value, '$.state') = 'uncertain'
+          OR ((json_extract(attempt.value, '$.state') = 'consumed' OR json_extract(attempt.value, '$.consumedAt') IS NOT NULL)
+            AND json_extract(attempt.value, '$.finishedAt') IS NULL)))`),
     pruneEvents: db.prepare("DELETE FROM assignment_events WHERE assignment_id IN (SELECT id FROM assignments WHERE root_id = ?)"),
     pruneInbox: db.prepare("DELETE FROM inbox WHERE assignment_id IN (SELECT id FROM assignments WHERE root_id = ?)"),
     pruneRows: db.prepare("DELETE FROM assignments WHERE root_id = ?"),

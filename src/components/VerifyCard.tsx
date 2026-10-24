@@ -1,4 +1,4 @@
-import { BookmarkPlus, CheckCircle2, ChevronDown, ChevronUp, ListChecks, Loader2, X, XCircle } from "lucide-react";
+import { BookmarkPlus, Circle, CheckCircle2, ChevronDown, ChevronUp, ListChecks, Loader2, X, XCircle } from "lucide-react";
 import { useState } from "react";
 
 import { cn } from "@/lib/cn";
@@ -8,6 +8,8 @@ import { runSummary, type RunSkill, type RunStep } from "@/lib/verify-steps";
 function StatusIcon({ status }: { status: RunStep["status"] }) {
   const className = "size-4 shrink-0";
   switch (status) {
+    case "unverified":
+      return <Circle aria-hidden="true" className={cn(className, "text-ink-secondary")} />;
     case "running":
       return <Loader2 aria-hidden="true" className={cn(className, "animate-spin text-accent")} />;
     case "passed":

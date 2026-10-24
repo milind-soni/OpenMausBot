@@ -96,6 +96,14 @@ export type InstanceConfigMap = Record<InstanceId, InstanceConfig>;
 export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavailable";
 
 // Sessions start implicitly on the first turn; resumeCursor carries the provider-native continuation (e.g. a Claude session id).
+/** Native-only controller admission. Never serialized into prompts, environments, logs, or engine RPC parameters. */
+export interface TurnExecutionContext {
+  readonly attemptId: string;
+  readonly signal: AbortSignal;
+  readonly deadline: number;
+  assert(stage: "process" | "prompt" | "steer"): void;
+}
+
 export interface SendTurnInput {
   threadId: ThreadId;
   /** Drivers namespace process-level resources (broker socket, CLI session) by botId too: threadIds may coincide across bots. */
@@ -125,6 +133,8 @@ export interface SendTurnInput {
    * adds this thread's session to the running one whose pid is `joining` ("session"); rejects with TurnNotStartedError when
    * the turn is stopped first. */
   engineAdmission?: (start: "process" | "session", joining?: number) => Promise<void>;
+  /** Added only by the registry's mandatory server execution boundary, independently of memory admission. */
+  executionContext?: TurnExecutionContext;
   /** The turn with the conversation replayed inline, sent once on a fresh session when the provider refuses resumeCursor before reading the prompt. */
   recoveryText?: string;
   /** Prior turns for transcript-replay providers (API-backed drivers). */
@@ -399,6 +409,8 @@ export interface DriverCreateInput<Config> {
   environment: Record<string, string>;
   enabled: boolean;
   config: Config;
+  /** Trusted registry startup policy; suppresses provider process/model work outside admitted native turns. */
+  officeExecution?: true;
 }
 
 export interface TextGenerationUsage {

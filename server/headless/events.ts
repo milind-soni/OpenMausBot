@@ -1,5 +1,6 @@
 // Resumes from its cursor after a drop: the server's hello line says whether it could (resumed: false means "read the
 // state again"). --until-settled ends when the job does, with the job's exit code.
+import { FINAL_JOB_STATES } from "../../shared/job-state.ts";
 import { EXIT, flag, usageError } from "./args.ts";
 import { readJob } from "./client.ts";
 import type { VerbContext, VerbOutcome } from "./context.ts";
@@ -8,7 +9,6 @@ import { redactDeep } from "./output.ts";
 type Frame = Record<string, any>;
 
 export const DEFAULT_EVENT_KINDS = ["message", "message.patch", "thread", "bot", "group"];
-const FINAL = new Set(["needs-input", "completed", "failed", "stalled", "idle"]);
 
 export function frameThreads(frame: Frame): string[] {
   const own = (record: Frame | undefined) => [record?.threadId, ...(Array.isArray(record?.tasks) ? record.tasks.map((task: Frame) => task.threadId) : [])];
@@ -46,7 +46,8 @@ export async function* sseFrames(body: AsyncIterable<Uint8Array>): AsyncGenerato
   }
 }
 
-const jobExit = (state: string) => state === "needs-input" ? EXIT.needsInput : state === "failed" || state === "stalled" ? EXIT.failed : EXIT.done;
+const jobExit = (state: string) => state === "needs-input" || state === "blocked" ? EXIT.needsInput
+  : state === "cancelled" ? EXIT.interrupted : state === "failed" || state === "stalled" ? EXIT.failed : EXIT.done;
 
 export async function eventsVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const job = flag(ctx.flags, "job")?.trim();
@@ -70,7 +71,7 @@ export async function eventsVerb(ctx: VerbContext): Promise<VerbOutcome> {
     const view = await readJob(client, job!, since === undefined ? {} : { since: String(since) });
     since ??= Number(view.since);
     for (const node of view.nodes ?? []) threads!.add(node.threadId);
-    if (untilSettled && FINAL.has(view.state)) {
+    if (untilSettled && FINAL_JOB_STATES.has(view.state)) {
       settled = view.state;
       ctx.io.out(JSON.stringify(redactDeep({ kind: "job", threadId: job, state: view.state, reason: view.reason, counts: view.counts })));
       stop.abort();

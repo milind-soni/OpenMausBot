@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { removeTempDir } from "./testing/cleanup.ts";
 import {
   appendUsage,
@@ -93,6 +93,34 @@ describe("usage ledger files", () => {
     appendUsage(join(dataDir, "blocked"), row());
     await expect(flushUsageLedger(join(dataDir, "blocked"))).resolves.toBeUndefined();
     expect(existsSync(join(dataDir, "blocked", "usage"))).toBe(false);
+  });
+
+  it("records an attributed provider turn once despite concurrent completion callbacks", async () => {
+    const booked = row({ job: { rootId: "root", assignmentId: "child", attemptId: "attempt", turnId: "turn" } });
+    const writes = await Promise.all([appendUsage(dataDir, booked), appendUsage(dataDir, booked), appendUsage(dataDir, booked)]);
+    expect(writes).toEqual([true, false, false]);
+    expect(readUsage(dataDir, { from: new Date("2020-01-01"), to: new Date("2100-01-01") })).toHaveLength(1);
+  });
+
+  it("rebuilds turn idempotency from the existing ledger after module restart and across months", async () => {
+    const booked = row({ at: "2026-09-30T23:59:59Z", job: { rootId: "root", assignmentId: "child", attemptId: "attempt", turnId: "turn" } });
+    expect(await appendUsage(dataDir, booked)).toBe(true);
+    vi.resetModules();
+    const restarted = await import("./usage-ledger.ts");
+    expect(await restarted.appendUsage(dataDir, { ...booked, at: "2026-10-01T00:00:01Z" })).toBe(false);
+    expect(restarted.readUsage(dataDir, { from: new Date("2026-09-01"), to: new Date("2026-11-01") })).toHaveLength(1);
+  });
+
+  it("dedupes historical attributed rows on read without collapsing distinct turns or legacy rows", async () => {
+    const at = "2026-09-30T23:59:59Z";
+    const booked = row({ at, job: { rootId: "root", assignmentId: "child", attemptId: "attempt", turnId: "turn" } });
+    await appendUsage(dataDir, booked);
+    const file = usageFileFor(dataDir, new Date(at));
+    writeFileSync(file, JSON.stringify(booked) + "\n", { flag: "a" });
+    await appendUsage(dataDir, { ...booked, job: { ...booked.job!, turnId: "other-turn" } });
+    await appendUsage(dataDir, row({ at }));
+    await appendUsage(dataDir, row({ at }));
+    expect(readUsage(dataDir, { from: new Date("2026-09-01"), to: new Date("2026-10-01") })).toHaveLength(4);
   });
 });
 

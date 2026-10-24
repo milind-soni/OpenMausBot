@@ -252,6 +252,26 @@ describe("Runtime: one tree, one lane", () => {
     invariants(w);
   });
 
+  it.each([undefined, ""])('keeps a clipped partial result when the next parked turn only asks a question (%s)', async (text) => {
+    let turns = 0;
+    const partial = "Reviewed the North Star and source. " + "x".repeat(12_000);
+    const w = world(() => turns++ === 0
+      ? { kind: "needs_input", question: "Which PR?", text: partial, evidence: { toolCalls: 2 } }
+      : { kind: "needs_input", question: "Which account?", ...(text !== undefined ? { text } : {}) }, { inputWaitMs: 1_000 });
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick(); await flush();
+    expect(w.store.get(child.id)?.result).toBe(partial.slice(0, 12_000));
+    expect(w.runtime.answer(child.id, "PR 7")).toBe(true);
+    w.runtime.tick(); await flush();
+    expect(w.store.get(child.id)).toMatchObject({ status: "needs_input", result: partial.slice(0, 12_000), question: "Which account?", evidence: { toolCalls: 2 } });
+    w.clock.advance(1_001);
+    w.runtime.tick();
+    expect(w.store.get(child.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "the person did not answer", result: partial.slice(0, 12_000) });
+    expect(w.runner.reports[0]?.a.result).toBe(partial.slice(0, 12_000));
+    invariants(w);
+  });
+
   it("answers a parked question into the next turn and delivers what settled meanwhile", async () => {
     const w = world();
     let helperId = "";
@@ -719,7 +739,7 @@ describe("Runtime: a root's later executions (every turn a root)", () => {
     const w = world();
     const root = w.runtime.begin(beginReq());
     w.runtime.end(root.id, { ok: true, text: "Connect it.", needsInput: cards });
-    expect(w.store.get(root.id)).toMatchObject({ status: "needs_input", question: "Connect GitHub", cards: ["msg-1", "msg-2"], executions: 1 });
+    expect(w.store.get(root.id)).toMatchObject({ status: "needs_input", question: "Connect GitHub", cards: ["msg-1", "msg-2"], executions: 1, result: "Connect it." });
     expect(w.runner.parks).toEqual([{ a: expect.objectContaining({ id: root.id, cards: ["msg-1", "msg-2"] }), question: "Connect GitHub" }]);
     expect(w.store.inbox({ threadId: "chief-chat" })).toEqual([]);
     w.runtime.tick();
@@ -1185,4 +1205,10 @@ describe("Runtime: a teammate's question reaches the requester waiting on it", (
     expect(runsOf(w, root.id)).toHaveLength(2);
     invariants(w);
   });
+});
+it("persists an explicit blocked task without changing successful engine lifecycle", () => {
+ const w = world();
+ const root = w.runtime.begin(beginReq());
+ w.runtime.end(root.id, { ok: true, text: "Cannot publish", disposition: { state: "blocked", reason: "Missing authenticated GitHub tool" } });
+ expect(w.store.get(root.id)).toMatchObject({ status: "completed", disposition: { state: "blocked", reason: "Missing authenticated GitHub tool" }, result: "Cannot publish" });
 });

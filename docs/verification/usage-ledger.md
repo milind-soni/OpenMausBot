@@ -124,7 +124,9 @@ scope on both routes.
 ## Gotchas
 
 - Rows are appended when `turn.completed` folds. A turn that fails before it
-  settles leaves no row, so a failed turn is not billed.
+  settles can leave no row. That absence does not establish zero usage or a
+  free turn. Failed and cancelled completions retain any provider measurements
+  the harness observed.
 - The cost column is what the engine reported (real on a metered key, an
   equivalent on a subscription) or, for engines that report none, an estimate
   from `server/model-prices.ts`, marked `~` in History and People and labelled
@@ -140,3 +142,71 @@ scope on both routes.
 - A member's chat-only device cannot open traces: the routes are owner-only,
   like the rest of Usage, and a trace leaves out turns in threads its viewer
   cannot see.
+- The renderer's History card is not driven headlessly here; the fixture
+  proves the server side and the table renders from a fixture in its unit test.
+
+## Native job accounting
+
+Attributed rows carry harness-bound root, assignment, execution-attempt and
+provider-turn identities. The existing monthly ledger remains authoritative;
+the job view joins it to native assignments and Office attempts. Repeated
+completion callbacks do not append or charge the same identity twice, including
+after a server restart. Parent, child, resumed and reworked executions are
+separate attempts of the same native root.
+
+`GET /api/threads/THREAD_ID/job/usage?rootId=ROOT_ID` returns only assignments
+accepted by the thread's existing visibility gate. An arbitrary root outside
+that authorized native view is refused. The global usage and CSV routes retain
+their existing admin scope.
+
+The existing `assignment_status` tool receives this same accounting after its
+native conversation-ownership and peer-access checks. It needs no additional
+tool grant. Withheld descendants make coverage partial. Final usage from a
+captured retired provider turn can be recorded without letting that stale
+completion settle a replacement job.
+
+The native Codex driver announces its turn while waiting for launch admission,
+before OfficeControl consumes the directive. That event captures a pending
+native identity. Completion must reread and verify the exact attempt's durable
+consumption before attributing usage. A prelaunch cancellation is not a consumed
+execution, even though a provider turn ID was announced.
+
+ACP drivers attach validated per-prompt usage from the `session/prompt` result
+to `turn.completed`, including cache normalization. Root `usage` and legacy
+`_meta` result fields both feed that final observation. Session context
+`usage_update` notifications do not: missing or incomplete prompt metrics stay
+unknown. Failed and cancelled prompt results retain their reported final totals.
+
+The response keeps reported USD, estimated USD and unknown-price turn counts
+separate. Token totals sum input plus output; cached input is a subset of input
+and is never added again. An omitted token measurement has an explicit unknown
+counter, even when the legacy numerical column stores zero. A consumed attempt
+without a final ledger observation is missing coverage; an active execution is
+pending. Neither is reported as a free or fully accounted execution. A
+descendant-only view cannot claim coverage of the entire root.
+
+Run these checks on the execution worker:
+
+```sh
+pnpm exec vitest run --no-file-parallelism server/job-usage.test.ts server/job-usage-codex.test.ts server/job-usage-api.test.ts server/routes/job-usage.test.ts server/usage-ledger.test.ts server/spend.test.ts
+```
+
+These tests exercise aggregation, duplicate observations, failed/cancelled
+receipts, cached input, explicit zero versus omitted measurements, unknown
+costs, restart gaps, native rework, authorization handoff, and deduplication
+rebuilt from the ledger across a month boundary. A restarted module is a unit
+test of durable ledger idempotency; a real service restart and in-chat return
+still require the isolated recovery fixture and live acceptance receipt.
+
+`server/job-usage-api.test.ts` drives actual fake-provider turns through the
+native HTTP server. It verifies two independent roots and a delegated job with
+three observations: Chief dispatch, engineer result and Chief final summary.
+The completed tree is then read after two real server-process restarts; its
+accounting and fake-provider invocation evidence must remain identical. This
+does not qualify abrupt interruption of live work or host-power-loss durability.
+
+`server/job-usage-codex.test.ts` composes the real Codex driver, Office execution
+wrapper, OfficeControl and native runtime store with the repository's fake
+app-server. It proves the pre-consumption announcement is captured, one final
+measurement is attributed after consumption, and cancellation before native
+process admission creates no usage observation.

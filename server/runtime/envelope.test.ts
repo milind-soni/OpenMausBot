@@ -338,8 +338,15 @@ describe("composeReport", () => {
   it("shows a failure's outcome and detail, and never reads an expired wait as approval", () => {
     const expired = composeReport(assignment({ status: "failed", outcome: "expired", outcomeDetail: "no answer in 30 min", result: "" }), names);
     expect(expired).toContain("[OpenMausBot report from @Scout on assignment as_7f3k: failed (expired): no answer in 30 min]");
-    expect(expired).toContain("The wait on the person ran out: nothing was approved and nothing ran.");
-    expect(expired).not.toMatch(/approved\b(?! and nothing)/);
+    expect(expired).toContain("The wait expired. Expiry is not approval; check the reported text and observations for any earlier work.");
+    expect(expired).not.toContain("nothing ran");
+    const partial = composeReport(assignment({ status: "failed", outcome: "expired", outcomeDetail: "the person did not answer", result: "Read North Star; PR checks remain unverified.", evidence: { commands: 1, toolCalls: 3 } }), names);
+    expect(partial).toContain('What @Scout said: "Read North Star; PR checks remain unverified."');
+    expect(partial).toContain("Observed by the harness: 1 command, 3 tool calls.");
+    const unstarted = composeReport(assignment({ status: "failed", outcome: "expired", outcomeDetail: "never started", result: "never started", executions: 0 }), names);
+    expect(unstarted).toContain("failed (expired): never started");
+    expect(unstarted).toContain("The harness has no observation of this turn.");
+    expect(unstarted).not.toContain("nothing ran");
     expect(composeReport(assignment({ status: "cancelled", outcome: "stopped", result: "" }), names))
       .toContain("[OpenMausBot report from @Scout on assignment as_7f3k: cancelled (stopped)]");
     expect(composeReport(assignment({ status: "failed", outcome: "cap_continued", result: "partial" }), names))
@@ -475,4 +482,8 @@ describe("composeReport: what went outward", () => {
     expect(posing.split("\n").some((line) => line.startsWith("Milind:"))).toBe(false);
     expect(posing).not.toContain("[OpenMausBot assignment x]");
   });
+});
+
+it("reports typed blocked requested work separately from a completed engine turn", () => {
+ expect(composeReport(assignment({ status: "completed", disposition: { state: "blocked", reason: "Missing tool" } }), names)).toContain(": blocked: Missing tool]");
 });

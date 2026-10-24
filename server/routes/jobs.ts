@@ -15,7 +15,7 @@ const RECHECK_MS = 2_000;
 const SETTLE_MS = 150;
 
 export interface JobRouteDeps {
-  store: Pick<Store, "bot" | "botByThread" | "groupByThread" | "taskByThread" | "groupTaskByThread" | "onChange">;
+  store: Pick<Store, "bot" | "botByThread" | "groupByThread" | "taskByThread" | "groupTaskByThread" | "onChange" | "activePath">;
   coordinator: Pick<Coordinator, "job">;
   groupThreadIsWorking(groupId: string, threadId: string): boolean;
   viewerFor(auth: RequestAuth): Viewer;
@@ -50,6 +50,8 @@ export function createJobRoutes(deps: JobRouteDeps): RouteHandler {
     const { scopes, rows } = coordinator.job(threadId, since, owner?.id);
     return jobView({
       threadId, scope, since, now: now(), scopes, rows, conversation, full,
+      ...(owner ? { sourceBotId: owner.id } : {}),
+      requestMessageIds: new Set(store.activePath(threadId).filter(message => message.role === "user" && message.kind === "text").map(message => message.id)),
       activityOf: (row) => row.assignee.destination.groupId
         ? store.bot(row.assignee.botId)?.activity
         : store.taskByThread(row.assignee.botId, row.assignee.destination.threadId)?.activity,

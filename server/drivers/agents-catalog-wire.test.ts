@@ -57,7 +57,7 @@ function profiles(): Record<string, Profile> {
 }
 
 const PROFILES = profiles();
-const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
+const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread", "cancel_job"];
 const CHIEF_TARGET_TOOLS = ["propose_profile", "propose_model"];
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
 const TEAMWORK_TOOLS = ["list_room_targets", "coordinate_bots", "assignment_status", "list_bots", "list_rooms", "list_threads", "close_thread", "start_thread", "post_to_room"];
@@ -67,27 +67,27 @@ const FULL = "skills+shared+voice+escalations+x";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 61361,
-  "voice": 62102,
-  "shared": 63294,
-  "shared+voice": 64035,
-  "skills": 64180,
-  "skills+voice": 64921,
-  "skills+shared": 66113,
-  "skills+shared+voice": 66854,
-  "non-chief": 51512,
-  "voice+non-chief": 52253,
-  "shared+non-chief": 53445,
-  "shared+voice+non-chief": 54186,
-  "skills+non-chief": 54331,
-  "skills+voice+non-chief": 55072,
-  "skills+shared+non-chief": 56264,
-  "skills+shared+voice+non-chief": 57005,
-  "skills+shared+voice+cloud-home": 65909,
-  "skills+shared+voice+non-chief+cloud-home": 56060,
-  "default+legacy-switches": 61361,
-  "skills+shared+voice+escalations": 67714,
-  "skills+shared+voice+escalations+x": 72352,
+  "default": 63838,
+  "voice": 64650,
+  "shared": 65771,
+  "shared+voice": 66583,
+  "skills": 66657,
+  "skills+voice": 67469,
+  "skills+shared": 68590,
+  "skills+shared+voice": 69402,
+  "non-chief": 53518,
+  "voice+non-chief": 54330,
+  "shared+non-chief": 55451,
+  "shared+voice+non-chief": 56263,
+  "skills+non-chief": 56337,
+  "skills+voice+non-chief": 57149,
+  "skills+shared+non-chief": 58270,
+  "skills+shared+voice+non-chief": 59082,
+  "skills+shared+voice+cloud-home": 68457,
+  "skills+shared+voice+non-chief+cloud-home": 58137,
+  "default+legacy-switches": 62112,
+  "skills+shared+voice+escalations": 70262,
+  "skills+shared+voice+escalations+x": 74900,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -209,12 +209,13 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("ignores the switches that once picked a catalog profile", () => {
-    expect(wires["default+legacy-switches"]).toBe(wires.default);
+  it("keeps legacy switches inert while withholding native cancellation and project memory from external runtimes", () => {
+    const native = toolsOf(wires.default!).filter(tool => tool.name !== "cancel_job" && tool.name !== "project_memory");
+    expect(toolsOf(wires["default+legacy-switches"]!)).toEqual(native);
     const profile = catalogProfileFromEnv({ OMB_BOT_ID: "bot-golden", OMB_CHIEF_OF_STAFF: "1", OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1" });
-    expect(JSON.stringify({ tools: availableTools(profile) })).toBe(wires.default);
+    expect(availableTools(profile)).toEqual(native);
     expect(profile).not.toHaveProperty("coordinating");
-    expect(profile).not.toHaveProperty("externalRuntime");
+    expect(profile.externalRuntime).toBe(true);
     expect(profile).not.toHaveProperty("ownThreadCreation");
   });
 

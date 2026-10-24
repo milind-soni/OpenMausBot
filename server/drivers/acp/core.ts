@@ -98,6 +98,7 @@ interface AcpTurn {
     usagePeak: number | null;
     usageLast: number | null;
     usageCompacted: boolean;
+    turnUsage?: { input: number; output: number; cachedInput?: number };
   };
   acknowledge: () => void;
   asks: Map<string, AcpAskFinish>;
@@ -654,7 +655,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             message: `${DRIVER_KIND} ended the turn with no reply, image, or tool result`,
           });
         }
-        emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: finalOk, stopReason: finalStopReason, cost: null });
+        emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: finalOk, stopReason: finalStopReason, cost: null,
+          ...(current.state.turnUsage ? { usage: current.state.turnUsage } : {}) });
         if (session.child.exitCode === null && !session.closing && !session.dead) {
           armIdle(threadId);
           recycleWhenIdle(session.host);
@@ -1598,10 +1600,18 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               const exclusive = cachedRead !== null
                 && (typeof usage.totalTokens !== "number"
                   || usage.totalTokens >= input + output + cachedRead);
+              const normalizedInput = cachedRead !== null && exclusive ? input + cachedRead : input;
+              if (typeof usage.inputTokens === "number" && Number.isFinite(usage.inputTokens) && usage.inputTokens >= 0
+                && typeof usage.outputTokens === "number" && Number.isFinite(usage.outputTokens) && usage.outputTokens >= 0
+                && Number.isFinite(normalizedInput)) {
+                state.turnUsage = { input: normalizedInput, output,
+                  ...(cachedRead !== null ? { cachedInput: exclusive ? cachedRead : Math.min(cachedRead, input) }
+                    : usage.cachedReadTokens === 0 ? { cachedInput: 0 } : {}) };
+              }
               emit({
                 ...base(threadId, turnId),
                 type: "thread.token-usage.updated",
-                input: cachedRead !== null && exclusive ? input + cachedRead : input,
+                input: normalizedInput,
                 output,
                 ...(cachedRead !== null
                   ? { cachedInput: exclusive ? cachedRead : Math.min(cachedRead, input) }

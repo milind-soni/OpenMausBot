@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { jobView, type ConversationState, type JobInput } from "./job-view.ts";
-import type { Assignment } from "./runtime/types.ts";
+import type { Assignment, OfficeAttempt } from "./runtime/types.ts";
 
 const base: Assignment = {
   id: "root", rootId: "root", depth: 0,
@@ -19,6 +19,13 @@ const child = (id: string, botId: string, patch: Partial<Assignment> = {}): Assi
 });
 const idle: ConversationState = { kind: "bot", busy: false, activity: "idle", queued: 0 };
 const names: Record<string, string> = { lead: "Room Lead", priya: "Priya", marcus: "Marcus", kenji: "Kenji" };
+const attempt = (patch: Partial<OfficeAttempt> = {}): OfficeAttempt => ({
+  version: 1, attemptId: "office-attempt", assignmentId: "root", rootId: "root", botId: "lead", threadId: "lead-chat",
+  generation: "office-generation", workerId: "hel1", instanceId: "codex", driverKind: "codex", profileId: "lead",
+  assignmentDigest: "assignment", profileDigest: "profile", cwd: "/fixture", rootDeadline: 60_000, startBefore: 2_000,
+  kind: "work", digest: "attempt", capabilityHash: "capability", state: "consumed", preparedAt: 1_000,
+  consumedAt: 1_001, ...patch,
+});
 
 const view = (rows: Assignment[], patch: Partial<JobInput> = {}) => jobView({
   threadId: "lead-chat", scope: "job", since: 500, now: 9_000, scopes: rows.filter((row) => !row.parentId).map((row) => row.id), rows,
@@ -27,6 +34,85 @@ const view = (rows: Assignment[], patch: Partial<JobInput> = {}) => jobView({
 });
 
 describe("the job of a conversation", () => {
+  it.each([idle, { ...idle, busy: true, activity: "working" }, { ...idle, activity: "dead" }])(
+    "keeps the current completed source job independent of earlier cancellations, failures and conversation activity %j", conversation => {
+      const old = root({ id: "old", rootId: "old", requestMessageId: "old-request", status: "cancelled", outcome: "stopped" });
+      const failed = child("old-child", "priya", { parentId: old.id, rootId: old.id, status: "failed", outcome: "provider_error" });
+      const latest = root({ id: "latest", rootId: "latest", requestMessageId: "latest-request", status: "completed", outcome: "done", createdAt: 3_000,
+        brief: "Complete the latest request" });
+      const job = view([old, failed, latest], { conversation, sourceBotId: "lead", requestMessageIds: new Set(["old-request", "latest-request"]) });
+      expect(job.current).toEqual({ rootId: "latest", requestMessageId: "latest-request", status: "completed", outcome: "done",
+        state: "completed", reason: "Room Lead finished", legacyTaskOutcome: true, sourceRequest: "Complete the latest request" });
+      if (conversation.busy) expect(job.state).toBe("running");
+      else if (conversation.activity === "dead") expect(job.state).toBe("failed");
+      else expect(job.reason).toBe("Room Lead finished");
+    });
+
+  it("binds the current job to active source requests and excludes foreign bot or thread roots", () => {
+    const first = root({ id: "first", rootId: "first", requestMessageId: "first-request", status: "completed" });
+    const later = root({ id: "later", rootId: "later", requestMessageId: "later-request", createdAt: 3_000, status: "completed" });
+    const foreignBot = root({ id: "foreign", rootId: "foreign", requestMessageId: "first-request", createdAt: 4_000,
+      assignee: { ...base.assignee, botId: "other-chief" } });
+    const foreignThread = root({ id: "foreign-thread", rootId: "foreign-thread", requestMessageId: "first-request", createdAt: 5_000,
+      assignee: { botId: "lead", destination: { kind: "standing_thread", threadId: "other-chat" } } });
+    const rows = [first, later, foreignBot, foreignThread];
+    expect(view(rows, { sourceBotId: "lead", requestMessageIds: new Set(["first-request"]) }).current?.rootId).toBe(first.id);
+    expect(view(rows, { sourceBotId: "lead", requestMessageIds: new Set(["later-request"]) }).current?.rootId).toBe(later.id);
+    expect(view(rows, { sourceBotId: "lead", requestMessageIds: new Set(["unrelated-request"]) }).current).toBeNull();
+    expect(view(rows, { sourceBotId: "lead", requestMessageIds: new Set() }).current).toBeNull();
+    expect(view(rows, { sourceBotId: "lead", visible: () => false }).current).toBeNull();
+  });
+
+  it("selects the most recent source root before clipping without depending on row order", () => {
+    const latest = root({ id: "latest", rootId: "latest", createdAt: 3_000, status: "completed", brief: "Latest root before clipping" });
+    const descendants = Array.from({ length: 501 }, (_, i) => child(`recent-${i}`, "priya", {
+      parentId: latest.id, rootId: latest.id, createdAt: 4_000 + i, status: "completed",
+    }));
+    const older = root({ id: "older", rootId: "older", createdAt: 2_000, status: "completed" });
+    const job = view([latest, older, ...descendants], { sourceBotId: "lead" });
+    expect(job.nodes).toHaveLength(500);
+    expect(job.nodes.some(node => node.id === latest.id)).toBe(false);
+    expect(job.current).toMatchObject({ rootId: latest.id, state: "completed", sourceRequest: "Latest root before clipping" });
+  });
+
+  it("keeps visible older unconfirmed stops separate from the current job and ordinary active attempts", () => {
+    const old = root({ id: "old", rootId: "old", status: "cancelled", brief: "Earlier cancellation" });
+    const stopped = child("old-child", "priya", { parentId: old.id, rootId: old.id, status: "cancelled",
+      office: { rootDeadline: 60_000, attempts: [attempt({ state: "uncertain" })] } });
+    const latest = root({ id: "latest", rootId: "latest", createdAt: 3_000, status: "running",
+      office: { rootDeadline: 60_000, attempts: [attempt()] } });
+    const rows = [old, stopped, latest];
+    const before = view(rows, { sourceBotId: "lead" });
+    expect(before.current).toMatchObject({ rootId: latest.id, state: "running" });
+    expect(before.unconfirmedStops).toEqual([{ rootId: old.id, sourceRequest: "Earlier cancellation" }]);
+    expect(view(rows, { sourceBotId: "lead", visible: threadId => threadId !== "priya-work" }).unconfirmedStops)
+      .toEqual([{ rootId: old.id, sourceRequest: "Earlier cancellation" }]);
+    expect(view(rows, { sourceBotId: "lead", visible: threadId => threadId !== "lead-chat" }).unconfirmedStops).toEqual([]);
+    const confirmed = { ...stopped, office: { rootDeadline: 60_000, attempts: [attempt({ state: "cancelled", finishedAt: 5_000 })] } };
+    const after = view([old, confirmed, latest], { sourceBotId: "lead" });
+    expect(after.unconfirmedStops).toEqual([]);
+    expect(after.version).not.toBe(before.version);
+    const terminalUnfinished = { ...stopped, office: { rootDeadline: 60_000, attempts: [attempt({ state: "cancelled" })] } };
+    expect(view([old, terminalUnfinished, latest], { sourceBotId: "lead" }).unconfirmedStops).toEqual([{ rootId: old.id, sourceRequest: "Earlier cancellation" }]);
+  });
+
+  it("changes the view version when active branch selection or current outcome detail changes", () => {
+    const rows = [root({ id: "first", rootId: "first", requestMessageId: "first-request", status: "failed", outcomeDetail: "Original interruption" }),
+      root({ id: "later", rootId: "later", requestMessageId: "later-request", createdAt: 3_000, status: "completed" })];
+    const first = view(rows, { sourceBotId: "lead", requestMessageIds: new Set(["first-request"]) });
+    expect(view(rows, { sourceBotId: "lead", requestMessageIds: new Set(["later-request"]) }).version).not.toBe(first.version);
+    expect(view([{ ...rows[0]!, outcomeDetail: "Updated interruption" }, rows[1]!],
+      { sourceBotId: "lead", requestMessageIds: new Set(["first-request"]) }).version).not.toBe(first.version);
+  });
+
+  it("carries a bounded visible source request only on roots for human job actions", () => {
+    const request = "Compare\n  the proposals " + "x".repeat(200);
+    const job = view([root({ brief: request }), child("a1", "priya", { brief: "Private delegated instructions" })]);
+    expect(job.nodes[0]!.sourceRequest).toHaveLength(160);
+    expect(job.nodes[0]!.sourceRequest).toMatch(/^Compare the proposals /);
+    expect(job.nodes[1]).not.toHaveProperty("sourceRequest");
+    expect(JSON.stringify(view([root({ brief: "Hidden source request" })], { visible: () => false }))).not.toContain("Hidden source request");
+  });
   it("is idle when nothing ran since the time asked about", () => {
     expect(view([])).toMatchObject({ state: "idle", reason: "Nothing is running in this conversation", nodes: [], roots: [] });
   });
@@ -51,7 +137,7 @@ describe("the job of a conversation", () => {
     const rows = [root({ status: "completed", result: "Launch report: [report](report.md)", finishedAt: 8_000 }),
       child("a1", "priya", { status: "completed", result: "Pricing was hard to find" }), child("a2", "marcus", { status: "failed", outcome: "provider_error" })];
     const job = view(rows);
-    expect(job).toMatchObject({ state: "completed", reason: "Room Lead finished; 1 teammate task did not complete (Marcus)" });
+    expect(job).toMatchObject({ state: "failed", reason: "1 teammate task did not complete (Marcus)" });
     expect(job.nodes[0]).toMatchObject({ result: "Launch report: [report](report.md)", finishedAt: 8_000 });
   });
 
@@ -79,7 +165,7 @@ describe("the job of a conversation", () => {
     expect(beside.nodes.map((node) => [node.botName, node.awaited])).toEqual([["Room Lead", true], ["Marcus", true], ["Priya", false]]);
     const stopped = [root({ status: "cancelled", outcome: "stopped" }), child("a1", "priya", { status: "running" }),
       child("a2", "marcus", { status: "needs_input", question: "Continue?" })];
-    expect(view(stopped)).toMatchObject({ state: "failed", reason: "Room Lead's work ended because it was stopped", needsInput: [] });
+    expect(view(stopped)).toMatchObject({ state: "cancelled", reason: "Room Lead was stopped", needsInput: [] });
   });
 
   it("reports how the lead's work ended when it did not finish", () => {
@@ -92,7 +178,7 @@ describe("the job of a conversation", () => {
 
   it("reads only the lead's own turn with scope turn", () => {
     const rows = [root({ status: "waiting" }), child("a1", "priya", { status: "running" })];
-    expect(view(rows, { scope: "turn" })).toMatchObject({ state: "completed", reason: "Room Lead finished" });
+    expect(view(rows, { scope: "turn" })).toMatchObject({ state: "running", reason: "Room Lead is waiting to continue" });
     expect(view(rows, { scope: "turn" }).nodes[1]).toMatchObject({ awaited: false });
     expect(view([root({ status: "resume" })], { scope: "turn" })).toMatchObject({ state: "running" });
   });
@@ -103,6 +189,7 @@ describe("the job of a conversation", () => {
     expect(view(rows, { now: 99_000 }).version).toBe(before);
     expect(view([rows[0]!, { ...rows[1]!, status: "completed" }]).version).not.toBe(before);
     expect(view(rows, { conversation: { ...idle, queued: 1 } }).version).not.toBe(before);
+    expect(view([{ ...rows[0]!, brief: "A different visible source" }, rows[1]!]).version).not.toBe(before);
   });
 
   it("counts what the reader may not see without listing it, and clips results unless asked for them whole", () => {
@@ -135,6 +222,51 @@ describe("the job of a conversation", () => {
     const waiting = view([root({ status: "waiting" }), child("a1", "priya", { status: "running" }), child("a2", "marcus", { status: "running" })], hidden);
     expect(waiting.reason).toBe("Waiting on 2 teammate tasks: a teammate, Marcus");
     const failed = view([root({ status: "completed" }), child("a1", "priya", { status: "failed" })], hidden);
-    expect(failed.reason).toBe("Room Lead finished; 1 teammate task did not complete (a teammate)");
+    expect(failed.reason).toBe("1 teammate task did not complete (a teammate)");
   });
+});
+
+
+describe("requested-task disposition regressions", () => {
+  it("returns cancelled for a cancelled current job", () => {
+    expect(view([root({ status: "cancelled", outcome: "stopped" })]).current?.state).toBe("cancelled");
+  });
+  it("does not complete a parent that still owes continuation", () => {
+    expect(view([root({ status: "waiting" })]).current?.state).toBe("running");
+  });
+  it("selects delegated cancellation in its own visible thread", () => {
+    const delegated = child("delegated", "priya", { status: "cancelled", outcome: "stopped" });
+    expect(view([root(), delegated], { threadId: "priya-work", sourceBotId: "priya", scopes: [delegated.id], requestMessageIds: new Set() }).current?.state).toBe("cancelled");
+  });
+  it("keeps completed turn lifecycle separate from blocked work", () => {
+    const row = root({ status: "completed", disposition: { state: "blocked", reason: "GitHub tool unavailable" } });
+    expect(view([row]).current).toMatchObject({ state: "blocked", reason: "GitHub tool unavailable" });
+  });
+  it("ignores failed rows belonging to old jobs in completion reason", () => {
+    expect(view([root({ status: "completed" }), child("past", "priya", { rootId: "past-root", status: "failed" })]).reason).toBe("Room Lead finished");
+  });
+});
+
+it("does not paint a completed parent green while its current handoff is blocked", () => {
+ expect(view([root({ status: "completed" }), child("blocked", "priya", { status: "completed", disposition: { state: "blocked", reason: "Missing GitHub tool" } })]).current).toMatchObject({ state: "blocked", reason: "Missing GitHub tool" });
+});
+it("a successful explicit rework supersedes that task's earlier failure and blocked result", () => {
+ const original = child("failed", "priya", { status: "failed", outcome: "provider_error" });
+ const blocked = child("blocked", "priya", { status: "completed", createdAt: 3000, rework: true, disposition: { state: "blocked", reason: "Missing GitHub tool" } });
+ const retried = child("retry", "priya", { status: "completed", createdAt: 4000, rework: true });
+ expect(view([retried, root({ status: "completed" }), blocked, original]).current).toMatchObject({ state: "completed", reason: "Room Lead finished" });
+});
+
+it("uses selected transcript request order when job creation events arrive out of order", () => {
+ const latestRequest = root({ id: "new", rootId: "new", requestMessageId: "new-request", createdAt: 1000, status: "completed" });
+ const delayedOldRequest = root({ id: "old", rootId: "old", requestMessageId: "old-request", createdAt: 3000, status: "cancelled" });
+ expect(view([latestRequest, delayedOldRequest], { requestMessageIds: new Set(["old-request", "new-request"]) }).current?.rootId).toBe("new");
+});
+
+it("keeps the delegated selected subtree's blocker and native uncertainty visible", () => {
+ const delegated = child("delegated", "priya", { status: "completed" });
+ const nested = child("nested", "marcus", { parentId: delegated.id, status: "completed", disposition: { state: "blocked", reason: "Missing delegated dependency" }, office: { rootDeadline: 60000, attempts: [attempt({ assignmentId: "nested", state: "uncertain" })] } });
+ const job = view([delegated, nested], { threadId: "priya-work", sourceBotId: "priya", scopes: [delegated.id], requestMessageIds: new Set() });
+ expect(job.current).toMatchObject({ rootId: delegated.id, state: "blocked", reason: "Missing delegated dependency" });
+ expect(job.unconfirmedStops).toEqual([{ rootId: delegated.id }]);
 });

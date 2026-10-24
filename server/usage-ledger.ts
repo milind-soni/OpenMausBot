@@ -1,5 +1,5 @@
 // Append-only usage rows under <data>/usage/ (0600): bookkeeping never fails the turn, and rows never carry message text.
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { TraceParent, TraceStatus, TraceUsageStatus } from "../shared/usage-trace.ts";
@@ -7,6 +7,7 @@ import type { ResolvedSender } from "../shared/wire.ts";
 import type { CostSource } from "./model-prices.ts";
 import { billableFor, type PriceList } from "./prices.ts";
 import type { RequestAuth } from "./request-auth.ts";
+import type { JobUsageAttribution, TokenObservation } from "../shared/job-usage.ts";
 
 /** `helper`: a job the helper model wrote for `botId`, kept apart from `bot` so its cost reads on its own. */
 export type UsageTrigger =
@@ -46,6 +47,9 @@ export interface UsageRow {
   contextTokens?: number;
   contextWindow?: number;
   usageStatus?: TraceUsageStatus;
+  job?: JobUsageAttribution;
+  /** Missing provider measurements stay unknown even though legacy totals use numeric zero. */
+  tokenObservation?: TokenObservation;
 }
 
 export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
@@ -73,6 +77,7 @@ const DIR = "usage";
 const MAX_RANGE_DAYS = 366;
 const DAY_MS = 24 * 60 * 60_000;
 const writeQueues = new Map<string, Promise<void>>();
+const attributedKeys = new Map<string, Set<string>>();
 
 const clean = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
@@ -95,8 +100,18 @@ export function usageFileFor(dataDir: string, at: Date): string {
   return join(dataDir, DIR, `${monthKey(at)}.jsonl`);
 }
 
-export function usageRowKey(row: Pick<UsageRow, "at" | "threadId" | "botId">): string {
+export function usageRowKey(row: Pick<UsageRow, "at" | "threadId" | "botId"> & Pick<Partial<UsageRow>, "job">): string {
+  if (validAttribution(row.job)) return JSON.stringify(["job-turn", row.job.rootId, row.job.assignmentId, row.job.attemptId, row.job.turnId]);
   return `${row.at}|${row.threadId}|${row.botId}`;
+}
+
+function validAttribution(value: unknown): value is JobUsageAttribution {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return ["rootId", "assignmentId", "attemptId", "turnId"].every(key => {
+    const part = row[key];
+    return typeof part === "string" && part.length > 0 && part.length <= 512;
+  });
 }
 
 export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: string }): Promise<boolean> {
@@ -113,6 +128,17 @@ export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: 
   };
   if (record.costUsd === null) delete record.costSource;
   else record.costSource = row.costSource === "estimated" ? "estimated" : "reported";
+  if (!validAttribution(record.job)) delete record.job;
+  else {
+    record.job = { rootId: record.job.rootId, assignmentId: record.job.assignmentId, attemptId: record.job.attemptId, turnId: record.job.turnId };
+    const observed = row.tokenObservation;
+    const valid = (value: unknown) => typeof value === "number" && Number.isFinite(value) && value >= 0;
+    record.tokenObservation = {
+      input: observed?.input === true && valid(row.input),
+      output: observed?.output === true && valid(row.output),
+      cachedInput: observed?.cachedInput === true && valid(row.cachedInput),
+    };
+  }
   const previous = writeQueues.get(dataDir) ?? Promise.resolve();
   const attempt = previous.then(() => write(dataDir, record));
   const queued = attempt.then(
@@ -124,12 +150,33 @@ export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: 
   void queued.finally(() => {
     if (writeQueues.get(dataDir) === queued) writeQueues.delete(dataDir);
   });
-  return attempt.then(() => true, () => false);
+  return attempt.catch(() => false);
 }
 
-async function write(dataDir: string, record: UsageRow): Promise<void> {
+async function write(dataDir: string, record: UsageRow): Promise<boolean> {
+  let keys: Set<string> | undefined;
+  const key = record.job ? usageRowKey(record) : undefined;
+  if (key) {
+    keys = attributedKeys.get(dataDir);
+    if (!keys) {
+      keys = new Set<string>();
+      let files: string[] = [];
+      try { files = readdirSync(join(dataDir, DIR)).filter(name => /^\d{4}-\d{2}\.jsonl$/.test(name)); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      for (const file of files) for (const line of readFileSync(join(dataDir, DIR, file), "utf8").split("\n")) {
+        try {
+          const previous: unknown = JSON.parse(line);
+          if (isUsageRow(previous) && validAttribution(previous.job)) keys.add(usageRowKey(previous));
+        } catch {}
+      }
+      attributedKeys.set(dataDir, keys);
+    }
+    if (keys.has(key)) return false;
+  }
   await mkdir(join(dataDir, DIR), { recursive: true, mode: 0o700 });
   await appendFile(usageFileFor(dataDir, new Date(record.at)), JSON.stringify(record) + "\n", { mode: 0o600 });
+  if (key) keys!.add(key);
+  return true;
 }
 
 export async function flushUsageLedger(dataDir: string): Promise<void> {
@@ -161,6 +208,7 @@ export function monthsBetween(from: Date, to: Date): string[] {
 
 export function readUsage(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
   const rows: UsageRow[] = [];
+  const keys = new Set<string>();
   const from = range.from.getTime();
   const to = range.to.getTime();
   for (const key of monthsBetween(range.from, range.to)) {
@@ -176,7 +224,14 @@ export function readUsage(dataDir: string, range: { from: Date; to: Date }): Usa
         const value: unknown = JSON.parse(line);
         if (!isUsageRow(value)) continue;
         const at = Date.parse(value.at);
-        if (at >= from && at <= to) rows.push(value);
+        if (at >= from && at <= to) {
+          if (validAttribution(value.job)) {
+            const key = usageRowKey(value);
+            if (keys.has(key)) continue;
+            keys.add(key);
+          }
+          rows.push(value);
+        }
       } catch {
       }
     }
