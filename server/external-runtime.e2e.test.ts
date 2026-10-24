@@ -164,6 +164,7 @@ describe("a bot's external runtime", () => {
       }
       const gateway = await botState(runtime.id);
       expect(gateway.tasks.length).toBe(1);
+      expect(gateway.tasks[0].unread).toBe(false);
       const pinned = (await api("GET", `/api/threads/${runtime.threadId}/messages?limit=100`)).body.messages;
       expect(pinned.filter((message: { role: string; turnId?: string; from?: unknown }) => message.role === "bot" && message.turnId && !message.from)).toEqual([]);
       // the poll roots ended because the peer finished, not because the runtime's own turn failed
