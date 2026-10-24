@@ -902,6 +902,7 @@ export interface SkillsLibrarySkillWire {
   description: string;
   source: string;
   enabled: boolean;
+  everyBot: boolean;
   tags: string[];
   version: string | null;
   importedAt: string;

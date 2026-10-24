@@ -4911,6 +4911,8 @@
   "skills.library.noVersion": "No version",
   "skills.library.importedAt": "Imported {date}",
   "skills.library.notAssigned": "Not assigned to any bot.",
+  "skills.library.everyBot": "Every bot",
+  "skills.library.everyBotHint": "Make this skill available to every current and future bot.",
   "skills.library.assignLabel": "Assign to bot",
   "skills.library.assignPickBot": "Pick a bot…",
   "skills.library.assign": "Assign",

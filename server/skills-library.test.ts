@@ -107,6 +107,17 @@ describe("skills library store", () => {
     expect(events).toContainEqual({ kind: "review-state", name: "triage" });
   });
 
+  it("makes a reviewed library skill available to every bot, including bots without an assignment", () => {
+    const name = `universal-${Math.random().toString(36).slice(2, 10)}`;
+    const universal = library.installLibrarySkill({ name, instructions: SKILL(name), source: "lib", reviewState: "approved" });
+    expect("error" in universal).toBe(false);
+    expect(library.setLibrarySkillEveryBot(name, true)).toMatchObject({ everyBot: true });
+    expect(skills.resolveBotSkills(`universal-${Math.random()}`, [])).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name, enabled: true }),
+    ]));
+    expect(library.setLibrarySkillEveryBot(name, false)).toMatchObject({ everyBot: false });
+  });
+
   it("defaults the feature flag off and switches on only via features.skillsLibrary", () => {
     expect(library.skillsLibraryEnabled({} as AppConfig)).toBe(false);
     expect(library.skillsLibraryEnabled({ features: {} } as AppConfig)).toBe(false);

@@ -84,10 +84,13 @@ describe("skills library routes through an isolated HTTP fixture", () => {
     expect((await api("PUT", `/api/bots/${botId}/skills-library`, { skills: ["nope"] })).status).toBe(422);
 
     expect((await api("PATCH", "/api/skills-library/order-audit", { enabled: true }))).toMatchObject({ status: 200 });
+    expect((await api("PATCH", "/api/skills-library/order-audit", { everyBot: true }))).toMatchObject({ status: 200 });
     const text = await api("GET", "/api/skills-library/order-audit");
     expect(text.body.text).toContain("Check every line item");
     const enabled = await api("GET", "/api/skills-library");
-    expect(enabled.body.skills[0]).toMatchObject({ enabled: true, assignedBots: [{ id: botId, name: "Skills fixture" }] });
+    expect(enabled.body.skills[0]).toMatchObject({ enabled: true, everyBot: true });
+    expect(enabled.body.skills[0].assignedBots).toEqual(expect.arrayContaining([{ id: botId, name: "Skills fixture" }]));
+    expect((await api("PATCH", "/api/skills-library/order-audit", { everyBot: false }))).toMatchObject({ status: 200 });
 
     expect((await api("PUT", `/api/bots/${botId}/skills-library`, { skills: [] }))).toMatchObject({
       status: 200,
