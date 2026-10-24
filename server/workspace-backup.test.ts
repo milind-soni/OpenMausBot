@@ -640,6 +640,32 @@ describe("encrypted full workspace backups", () => {
     expect(exported.summary.warnings.some((warning) => warning.includes("1 managed skill"))).toBe(true);
   });
 
+  it("saves links inside one workspace as copies of what they point to, and refuses loops and links to other workspaces", async () => {
+    const root = directory();
+    const project = join(root, "workspaces", "ws", "project");
+    mkdirSync(join(project, ".agents", "skills", "review"), { recursive: true });
+    mkdirSync(join(project, ".claude"), { recursive: true });
+    writeFileSync(join(project, ".agents", "skills", "review", "SKILL.md"), "# Review");
+    writeFileSync(join(project, "AGENTS.md"), "Be brief.");
+    symlinkSync(join("..", ".agents", "skills"), join(project, ".claude", "skills"), process.platform === "win32" ? "junction" : "dir");
+    symlinkSync("AGENTS.md", join(project, "CLAUDE.md"));
+    const exported = await createWorkspaceBackup(root, { password: PASSWORD });
+    expect(exported.summary.warnings.some((warning) => warning.startsWith("2 symbolic link(s) inside a workspace were saved as copies"))).toBe(true);
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const data = join(target, ".backups", staged.id, "staged", "data", "workspaces", "ws", "project");
+    expect(readFileSync(join(data, ".claude", "skills", "review", "SKILL.md"), "utf8")).toBe("# Review");
+    expect(readFileSync(join(data, "CLAUDE.md"), "utf8")).toBe("Be brief.");
+
+    symlinkSync(".", join(project, "loop"), process.platform === "win32" ? "junction" : "dir");
+    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow(/folder that contains it: workspaces\/ws\/project\/loop/);
+    rmSync(join(project, "loop"));
+    mkdirSync(join(root, "workspaces", "other"), { recursive: true });
+    writeFileSync(join(root, "workspaces", "other", "notes.md"), "theirs");
+    symlinkSync(join(root, "workspaces", "other", "notes.md"), join(project, "borrowed.md"));
+    await expect(createWorkspaceBackup(root, { password: PASSWORD })).rejects.toThrow(/user-created symbolic link/);
+  });
+
   it("leaves out node_modules and links in conversation work folders, and says so", async () => {
     const root = directory();
     const outside = directory();
