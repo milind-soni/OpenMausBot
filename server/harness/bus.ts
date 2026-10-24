@@ -15,8 +15,8 @@ const DELTA_MERGE_MS = 50;
 
 const MAX_BATCH_LINES = 64;
 
-const MAX_QUEUED_EVENTS = 256;
-const MAX_QUEUED_BYTES = 1024 * 1024;
+const MAX_QUEUED_EVENTS = 4096;
+const MAX_QUEUED_BYTES = 32 * 1024 * 1024;
 
 export type EventLogAppend = (
   path: string,
