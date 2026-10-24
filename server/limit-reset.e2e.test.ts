@@ -1,7 +1,7 @@
 // A turn stopped by its engine's usage limit, end to end against a real server with fake engines: the stopped turn's
 // "Continue when your limit resets" sets up an automation that continues the conversation after the reset; with a
 // backup configured the conversation continues on the backup and goes back after the reset; a backup that is only
-// another sign-in to the same engine is never used. The limit clock hook shortens the minute after a reset to a
+// another sign-in to the same engine is never used, unless the host opts in. The limit clock hook shortens the minute after a reset to a
 // second, so each run is watched without waiting.
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -28,7 +28,7 @@ interface Fixture {
   evidence: unknown[];
 }
 
-async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: boolean }, check: (fixture: Fixture) => Promise<void>) {
+async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: boolean; accountFailover?: boolean }, check: (fixture: Fixture) => Promise<void>) {
   const fixture = await launchVerificationServer({});
   const { dataDir, url, logPath } = fixture.info;
   const limitedFile = join(dataDir, "claude-limited.json");
@@ -59,6 +59,12 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
     config.instances.claude.environment = { ...config.instances.claude.environment, FAKE_CLAUDE_LIMITED_FILE: limitedFile, FAKE_CLAUDE_PROMPTS: promptsFile, FAKE_CLAUDE_TOOL_CALLS: "[]" };
     config.instances.codex = { driver: "codex", config: { cli: fileURLToPath(new URL("./testing/fake-codex-app-server.ts", import.meta.url)) } };
     if (setup.secondClaude) config.instances.claudeWork = { ...config.instances.claude, displayName: "Second Claude sign-in" };
+    if (setup.accountFailover) {
+      // Two profile directories, and a second sign-in whose own limit is not the one under test.
+      config.instances.claude.config = { ...config.instances.claude.config, configDir: join(dataDir, "profile-a") };
+      config.instances.claudeWork.config = { ...config.instances.claude.config, configDir: join(dataDir, "profile-b") };
+      config.instances.claudeWork.environment = { ...config.instances.claude.environment, FAKE_CLAUDE_LIMITED_FILE: join(dataDir, "unused-limit.json") };
+    }
     if (setup.recovery) config.automaticRecovery = setup.recovery;
     writeFileSync(configPath, JSON.stringify(config));
     // No engine reports usage here: what the server knows of the limit comes from the refusal itself.
@@ -68,7 +74,8 @@ async function withLimitFixture(setup: { recovery?: unknown; secondClaude?: bool
       "--experimental-strip-types", "--import", new URL("./testing/limit-clock-hooks.mjs", import.meta.url).href, fileURLToPath(new URL("./index.ts", import.meta.url)),
     ], {
       cwd: fileURLToPath(new URL("..", import.meta.url)),
-      env: { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), OMB_TEST_LIMIT_CLOCK: "1", OMB_TEST_PLAN_USAGE_FILE: usageFile },
+      env: { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)), OMB_TEST_LIMIT_CLOCK: "1", OMB_TEST_PLAN_USAGE_FILE: usageFile,
+        ...(setup.accountFailover ? { OMB_CLAUDE_ACCOUNT_FAILOVER: "1" } : {}) },
       stdio: ["ignore", log, log],
     });
     closeSync(log);
@@ -196,6 +203,25 @@ it("never moves to another sign-in of the same engine; the stopped turn offers C
       expect(messages.find((message) => message.tool?.name?.startsWith("error:")).tool).toMatchObject({ ok: false, limitResetsAt: resetsAt * 1000 });
       expect(claudePrompts()).toHaveLength(1);
       expect((await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).tasks.find((entry: any) => entry.threadId === threadId).modelSelection?.instanceId ?? "claude").toBe("claude");
+    });
+}, 120_000);
+
+it("with OMB_CLAUDE_ACCOUNT_FAILOVER, a limit moves the conversation to a second Claude profile", async () => {
+  await withLimitFixture({ recovery: { enabled: true, backup: { instanceId: "claudeWork", model: "claude-sonnet-5" } }, secondClaude: true, accountFailover: true },
+    async ({ api, control, limit, claudePrompts }) => {
+      limit(Math.floor(Date.now() / 1000) + 600);
+      const { bot } = await control("new-bot", "--name", "Shared install");
+      const threadId = bot.activeTaskId;
+      await control("send", "--bot", bot.id, "--task", threadId, "--text", "Summarize the inbox");
+      expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status).toBe("settled");
+      const messages = await messagesOf(api, threadId);
+      expect(recoveryLines(messages)).toEqual([expect.stringMatching(/^recovery: Verification fixture hit its limit \(resets .+\), so Second Claude sign-in took over\.$/)]);
+      expect(messages.some((message) => message.tool?.ok === false)).toBe(false);
+      expect(messages.findLast((message) => message.role === "bot" && message.kind === "text")).toMatchObject({ turnSucceeded: true });
+      const task = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id).tasks.find((entry: any) => entry.threadId === threadId);
+      expect(task.modelSelection?.instanceId).toBe("claudeWork");
+      // Both profiles record into the same file: the refused first attempt, then the answered one.
+      expect(claudePrompts()).toHaveLength(2);
     });
 }, 120_000);
 

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { failoverLine, LimitFailovers, limitBackupAllowed, type LimitFailover } from "./limit-failover.ts";
 
@@ -10,6 +10,20 @@ const NOW = Date.parse("2026-10-19T10:00:00Z");
 const HOUR = 3_600_000;
 
 describe("limitBackupAllowed", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("keeps the fleet's explicit fallback between distinct configured Claude profiles", () => {
+    vi.stubEnv("OMB_CLAUDE_ACCOUNT_FAILOVER", "1");
+    const from = { config: { configDir: "/fixture/accounts/primary" } };
+    const backup = { instanceId: "claude-backup", driverKind: "claudeAgent" };
+    expect(limitBackupAllowed(claude, backup, { config: { configDir: "/fixture/accounts/backup" } }, from)).toBe(true);
+    expect(limitBackupAllowed(claude, backup, { config: { configDir: "/fixture/accounts/primary" } }, from)).toBe(false);
+    expect(limitBackupAllowed(claude, backup, {}, from)).toBe(false);
+    expect(limitBackupAllowed(claude, claude, { config: { configDir: "/fixture/accounts/backup" } }, from)).toBe(false);
+    vi.stubEnv("OMB_CLAUDE_ACCOUNT_FAILOVER", "0");
+    expect(limitBackupAllowed(claude, backup, { config: { configDir: "/fixture/accounts/backup" } }, from)).toBe(false);
+  });
+
   it("never rotates to another sign-in of the same subscription engine", () => {
     expect(limitBackupAllowed(claude, claude)).toBe(false);
     expect(limitBackupAllowed(claude, { instanceId: "claude-work", driverKind: "claudeAgent" }, {})).toBe(false);

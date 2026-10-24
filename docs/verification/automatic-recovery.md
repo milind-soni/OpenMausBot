@@ -26,10 +26,25 @@ auto-approved. The backup must retain the source engine's tools/attachments
 and use the same pinned working folder; legacy unpinned threads and remote
 runner changes require a manual choice. Backup provider charges may apply.
 
+## Several Claude accounts on one install (opt-in)
+
+By default a usage-limit refusal never moves a conversation to another sign-in
+of the same subscription engine; the backup must be another engine or a
+pay-per-use key. A team that shares one install, where each person signs in to
+their own Claude subscription, can start the server with
+`OMB_CLAUDE_ACCOUNT_FAILOVER=1`. A usage-limit refusal may then continue on a
+backup that is a different named Claude account, as long as
+both accounts have an absolute `configDir` and the two directories differ. The
+backup is still the one chosen under Automatic recovery or a bot's fallback
+list; nothing is picked automatically, and the thread goes back to its own
+account once that account's limit has reset. The host takes responsibility for
+using this within each provider's terms.
+
 ## Repeatable checks
 
 ```sh
 pnpm exec vitest run server/automatic-recovery.test.ts server/automatic-recovery.e2e.test.ts server/drivers/acp/acp.test.ts server/drivers/retry.test.ts server/turn-dispatch-guard.test.ts server/config.test.ts src/components/AutomaticRecoverySettings.test.ts src/state/store.test.ts
+pnpm exec vitest run server/limit-failover.test.ts
 pnpm exec vitest run server/drivers/claude-auth-recovery.test.ts server/drivers/claude.test.ts
 pnpm exec vitest run server/direct-coordination.e2e.test.ts server/guarded-messages-api.test.ts server/acp-recovery.e2e.test.ts --maxWorkers=2
 pnpm typecheck

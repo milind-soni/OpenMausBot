@@ -1,6 +1,7 @@
 // A conversation whose engine hit its usage limit continues on the configured backup, and goes back to its own engine
 // once that limit has reset.
 import { readFileSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 
 import { sameModelSelection } from "../shared/thread-model.ts";
 import type { ModelSelection } from "../shared/wire.ts";
@@ -15,13 +16,25 @@ const PAY_PER_USE_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_A
 
 type Engine = { instanceId: string; driverKind: string };
 
-/** Whether `to` may take over a turn `from`'s usage limit refused. Never the same engine, and never another sign-in to
- * the same subscription engine: rotating accounts to get past a provider's usage limit breaks its terms and can get the
- * accounts closed. Another engine, or a pay-per-use key on the same one, is fine. */
-export function limitBackupAllowed(from: Engine, to: Engine, toConfig?: Pick<InstanceConfig, "environment" | "access">): boolean {
+function configuredClaudeProfile(config: unknown): string | null {
+  return config && typeof config === "object" && "configDir" in config && typeof config.configDir === "string" && isAbsolute(config.configDir)
+    ? resolve(config.configDir) : null;
+}
+
+/** Whether `to` may take over a turn `from`'s usage limit refused. Never the same engine. Another engine, or a pay-per-use
+ * key on the same one, is fine. Another sign-in to the same subscription engine is refused, because rotating accounts to
+ * get past a provider's usage limit can break its terms: the one exception is a host that sets OMB_CLAUDE_ACCOUNT_FAILOVER=1
+ * and so takes that responsibility, and then only between two distinct Claude profile directories the host configured
+ * (absolute `configDir`), never the same directory twice. */
+export function limitBackupAllowed(from: Engine, to: Engine, toConfig?: Pick<InstanceConfig, "environment" | "access" | "config">,
+  fromConfig?: Pick<InstanceConfig, "config">): boolean {
   if (to.instanceId === from.instanceId) return false;
   if (to.driverKind !== from.driverKind || !SUBSCRIPTION_DRIVERS.has(from.driverKind)) return true;
-  return toConfig?.access === "api" || PAY_PER_USE_KEYS.some((key) => Boolean(toConfig?.environment?.[key]?.trim()));
+  if (toConfig?.access === "api" || PAY_PER_USE_KEYS.some((key) => Boolean(toConfig?.environment?.[key]?.trim()))) return true;
+  if (process.env.OMB_CLAUDE_ACCOUNT_FAILOVER !== "1" || from.driverKind !== "claudeAgent") return false;
+  const fromProfile = configuredClaudeProfile(fromConfig?.config);
+  const toProfile = configuredClaudeProfile(toConfig?.config);
+  return fromProfile !== null && toProfile !== null && fromProfile !== toProfile;
 }
 
 export function resetClock(at: number, timeZone = hostTimeZone()): string {
