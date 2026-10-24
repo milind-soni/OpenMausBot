@@ -1581,7 +1581,6 @@
   "sidebar.density.compact": "Compacta",
   "sidebar.density.iconsOnly": "Só avatares",
   "sidebar.toolsLayout.title": "Layout das ferramentas",
-  "sidebar.toolsLayout.subtitle": "Mostre Rotinas, Gatilhos e Mapa da equipe como linhas ou como uma única linha de ícones. A densidade “Só avatares” sempre mostra ícones.",
   "sidebar.toolsLayout.rows": "Linhas",
   "sidebar.toolsLayout.toolbar": "Barra de ferramentas",
   "sidebar.toolsLayout.chooseAria": "Escolher o layout das ferramentas",

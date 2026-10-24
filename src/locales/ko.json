@@ -1778,7 +1778,6 @@
   "sidebar.density.compact": "촘촘하게",
   "sidebar.density.iconsOnly": "아바타만",
   "sidebar.toolsLayout.title": "도구 배치",
-  "sidebar.toolsLayout.subtitle": "루틴, 트리거, 팀 맵을 행으로 보여 줄지 아이콘 한 줄로 보여 줄지 정해요. 아이콘 밀도에서는 항상 아이콘으로 보여요.",
   "sidebar.toolsLayout.rows": "행",
   "sidebar.toolsLayout.toolbar": "도구 모음",
   "sidebar.toolsLayout.chooseAria": "도구 배치 선택",

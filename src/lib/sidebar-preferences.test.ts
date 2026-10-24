@@ -270,4 +270,27 @@ describe("sidebar tools layout preference", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("parseSidebarToolsLayout accepts bottom", () => {
+    expect(parseSidebarToolsLayout("bottom")).toBe("bottom");
+    expect(parseSidebarToolsLayout("nope")).toBe("rows");
+    const values = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => void values.set(key, value),
+    });
+    const listener = vi.fn();
+    const unsubscribe = subscribeSidebarToolsLayout(listener);
+    try {
+      setSidebarToolsLayout("bottom");
+      expect(listener).toHaveBeenCalledOnce();
+      expect(values.get(SIDEBAR_TOOLS_LAYOUT_KEY)).toBe("bottom");
+      expect(loadSidebarToolsLayout()).toBe("bottom");
+      setSidebarToolsLayout("rows");
+      expect(listener).toHaveBeenCalledTimes(2);
+    } finally {
+      unsubscribe();
+      vi.unstubAllGlobals();
+    }
+  });
 });

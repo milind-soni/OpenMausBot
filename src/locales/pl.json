@@ -1610,7 +1610,6 @@
   "sidebar.density.compact": "Kompaktowa",
   "sidebar.density.iconsOnly": "Tylko awatary",
   "sidebar.toolsLayout.title": "Układ narzędzi",
-  "sidebar.toolsLayout.subtitle": "Pokazuj rutyny, wyzwalacze i mapę zespołu jako wiersze lub jako jeden wiersz ikon. Tryb ikon zawsze pokazuje ikony.",
   "sidebar.toolsLayout.rows": "Wiersze",
   "sidebar.toolsLayout.toolbar": "Pasek narzędzi",
   "sidebar.toolsLayout.chooseAria": "Wybierz układ narzędzi",

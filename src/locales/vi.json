@@ -1233,7 +1233,6 @@
   "sidebar.density.compact": "Gọn gàng",
   "sidebar.density.iconsOnly": "Chỉ ảnh đại diện",
   "sidebar.toolsLayout.title": "Bố cục công cụ",
-  "sidebar.toolsLayout.subtitle": "Hiển thị Tác vụ định kỳ, Trình kích hoạt và Sơ đồ team dưới dạng các hàng hoặc một hàng biểu tượng. Mật độ Chỉ ảnh đại diện luôn hiển thị biểu tượng.",
   "sidebar.toolsLayout.rows": "Hàng",
   "sidebar.toolsLayout.toolbar": "Thanh công cụ",
   "sidebar.toolsLayout.chooseAria": "Chọn bố cục công cụ",

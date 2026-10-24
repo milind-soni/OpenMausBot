@@ -1684,7 +1684,6 @@
   "sidebar.density.compact": "Компактная",
   "sidebar.density.iconsOnly": "Только аватары",
   "sidebar.toolsLayout.title": "Макет инструментов",
-  "sidebar.toolsLayout.subtitle": "Показывать «Рутины», «Триггеры» и «Карту команды» строками или одной строкой иконок. В режиме иконок всегда отображаются только иконки.",
   "sidebar.toolsLayout.rows": "Строки",
   "sidebar.toolsLayout.toolbar": "Панель",
   "sidebar.toolsLayout.chooseAria": "Выбрать макет инструментов",

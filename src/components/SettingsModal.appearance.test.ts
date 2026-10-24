@@ -16,7 +16,7 @@ const fixture = vi.hoisted(() => ({
   setShowRunCard: vi.fn(),
   sidebarDensity: "comfortable" as "comfortable" | "compact" | "icons",
   setSidebarDensity: vi.fn(),
-  toolsLayout: "rows" as "rows" | "toolbar",
+  toolsLayout: "rows" as "rows" | "toolbar" | "bottom",
   setSidebarToolsLayout: vi.fn(),
   notificationSounds: true,
   setNotificationSounds: vi.fn(),
@@ -234,7 +234,7 @@ describe("Settings → Appearance", () => {
     const html = render();
     expect(html).toContain('aria-label="Choose tools layout"');
     expect(html).toContain("Tools layout");
-    expect(html).toContain("Icons density always shows icons");
+    expect(html).toContain("Icons density always shows button icons");
     expect(html).toContain('<option value="rows" selected="">Rows</option>');
     expect(html).toContain('<option value="toolbar">Toolbar</option>');
     expect(html.indexOf('aria-label="Choose sidebar density"')).toBeLessThan(
@@ -243,9 +243,19 @@ describe("Settings → Appearance", () => {
     expect(fixture.setSidebarToolsLayout).not.toHaveBeenCalled();
   });
 
+  it("the tools layout select offers bottom", () => {
+    fixture.toolsLayout = "bottom";
+    const html = render();
+    expect(html).toContain('<option value="rows">Rows</option>');
+    expect(html).toContain('<option value="toolbar">Toolbar</option>');
+    expect(html).toContain('<option value="bottom" selected="">Bottom</option>');
+    expect(html).toContain("as one row of buttons, or as buttons in the bottom bar");
+    expect(html).toContain("Icons density always shows button icons");
+  });
+
   it("appearance search finds the tools layout row via toolbar", () => {
     const appearance = SECTIONS.find((entry) => entry.id === "appearance")!;
-    for (const query of ["toolbar", "tools layout", "footer", "routines", "triggers", "team map"]) {
+    for (const query of ["toolbar", "tools layout", "bottom", "footer", "routines", "triggers", "team map"]) {
       expect(sectionMatches(appearance, query)).toBe(true);
     }
   });

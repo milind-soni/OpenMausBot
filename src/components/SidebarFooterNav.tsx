@@ -93,8 +93,49 @@ export function useAutomationsNeedYou(): boolean {
 }
 
 export function SidebarBottomButtons() {
+  const { state, dispatch } = useStore();
+  const advanced = useAdvancedMode();
+  const toolsLayout = useSidebarToolsLayout();
+  const toolsInBar = advanced && toolsLayout === "bottom";
+  const webPanels = useWebPanels();
+  const automationsNeedYou = useAutomationsNeedYou();
+  const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
   return (
     <div data-sidebar-bottom-buttons="" className="flex shrink-0 items-center gap-0.5">
+      {toolsInBar && <>
+        <NavRow
+          id="automations"
+          label={t("sidebar.nav.automations")}
+          tourId="nav-automations"
+          iconsOnly
+          rail
+          active={state.activeView === "routines"}
+          attention={automationsNeedYou}
+          icon={(active) => <Zap size={18} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showRoutines", view: "list" })}
+        />
+        <NavRow
+          id="team-map"
+          label={t("sidebar.nav.teamMap")}
+          iconsOnly
+          rail
+          active={state.activeView === "team-map"}
+          icon={(active) => <UsersRound size={18} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showTeamMap" })}
+        />
+        {webPanels.map((panel) => (
+          <NavRow
+            key={panel.id}
+            id={`web-panel-${panel.id}`}
+            label={panel.name}
+            iconsOnly
+            rail
+            active={state.activeView === "web-panel" && state.webPanelId === panel.id}
+            icon={(active) => <Globe size={18} className={tone(active)} />}
+            onClick={() => dispatch({ type: "showWebPanel", id: panel.id })}
+          />
+        ))}
+      </>}
       <SidebarAppsButton />
       <UpdateIndicator />
     </div>
@@ -140,6 +181,7 @@ export function SidebarFooterNav({
     icon={(active) => <FolderOpen size={iconSize} className={tone(active)} />}
     onClick={() => dispatch({ type: "showFiles" })}
   />;
+  if (advanced && toolsLayout === "bottom" && !iconsOnly) return filesRow ? <nav aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">{filesRow}</nav> : null;
   if (!advanced && !iconsOnly) return null;
   const appsRow = iconsOnly && <NavRow
     id="apps"

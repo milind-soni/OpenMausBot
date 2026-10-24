@@ -9,6 +9,7 @@ const fixture = vi.hoisted(() => ({
   state: {} as Record<string, unknown>,
   toolsLayout: "rows" as SidebarToolsLayout,
   panels: [] as { id: string; name: string; url: string }[],
+  cloudFilesReady: false,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) }));
@@ -17,6 +18,10 @@ vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
   useSidebarToolsLayout: () => fixture.toolsLayout,
 }));
 vi.mock("@/lib/web-panel-preferences", () => ({ useWebPanels: () => fixture.panels }));
+vi.mock("@/lib/cloud-files", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/cloud-files")>(),
+  useCloudFilesReady: () => fixture.cloudFilesReady,
+}));
 vi.mock("./UpdateIndicator", () => ({ UpdateIndicator: () => null }));
 import { SidebarAppsButton, SidebarBottomButtons, SidebarFooterNav } from "./SidebarFooterNav";
 
@@ -42,6 +47,7 @@ beforeEach(() => {
   fixture.state = { activeView: "chat", routineRuns: [], pluginsOpen: false };
   fixture.toolsLayout = "rows";
   fixture.panels = [];
+  fixture.cloudFilesReady = false;
   vi.stubGlobal("window", {});
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -218,6 +224,71 @@ describe("the bottom bar beside the profile", () => {
     expect(html).not.toContain('data-sidebar-nav="team-map"');
     expect(html).toContain('data-sidebar-nav="apps"');
   });
+
+  it("advanced bottom carries the tools icons beside apps", () => {
+    fixture.advanced = true;
+    fixture.toolsLayout = "bottom";
+    fixture.state.routineRuns = [{ id: "r", status: "failed", scheduledFor: 1 }];
+    const { html } = renderBottom();
+    for (const label of ["Automations", "Team map"]) {
+      expect(html).toContain(`aria-label="${label}" title="${label}"`);
+      expect(html).not.toContain(`>${label}</span>`);
+    }
+    const order = ["automations", "team-map", "apps"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(html).toMatch(/data-tour="nav-automations" data-sidebar-nav="automations"/);
+    const dot = html.indexOf('data-testid="routines-attention"');
+    expect(dot).toBeGreaterThan(html.indexOf('data-sidebar-nav="automations"'));
+    expect(dot).toBeLessThan(html.indexOf('data-sidebar-nav="team-map"'));
+    for (const toolsLayout of ["rows", "toolbar"] as const) {
+      fixture.toolsLayout = toolsLayout;
+      const bar = renderBottom().html;
+      expect(bar).not.toContain('data-sidebar-nav="automations"');
+      expect(bar).not.toContain('data-sidebar-nav="team-map"');
+      expect(bar).toContain('data-sidebar-nav="apps"');
+    }
+  });
+
+  it("advanced bottom renders one icon row per pinned panel", () => {
+    fixture.advanced = true;
+    fixture.toolsLayout = "bottom";
+    fixture.panels = [
+      { id: "panel-1", name: "Fleet board", url: "http://127.0.0.1:7841/" },
+      { id: "panel-2", name: "Metrics", url: "http://127.0.0.1:7842/" },
+    ];
+    fixture.state = { ...fixture.state, activeView: "web-panel", webPanelId: "panel-2" };
+    const { html, nodes: tree } = renderBottom();
+    expect(html.match(/data-sidebar-nav="web-panel-/g)).toHaveLength(2);
+    const order = ["automations", "team-map", "web-panel-panel-1", "web-panel-panel-2", "apps"].map((id) => html.indexOf(`data-sidebar-nav="${id}"`));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(html).toContain('aria-label="Fleet board" title="Fleet board"');
+    expect(html).toContain('aria-label="Metrics" title="Metrics"');
+    expect(html).toContain("lucide lucide-globe");
+    expect(html).toMatch(/data-sidebar-nav="web-panel-panel-2"[^>]*aria-current="page"/);
+    expect(html).not.toMatch(/data-sidebar-nav="web-panel-panel-1"[^>]*aria-current="page"/);
+    const row = tree.find((node) => node.props.id === "web-panel-panel-1" && typeof node.props.onClick === "function")!;
+    (row.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showWebPanel", id: "panel-1" });
+  });
+
+  it("rows toolbar and simple keep the bottom bar free of panel rows", () => {
+    fixture.panels = [{ id: "panel-1", name: "Fleet board", url: "http://127.0.0.1:7841/" }];
+    const arrangements = [
+      { advanced: true, toolsLayout: "rows" as const },
+      { advanced: true, toolsLayout: "toolbar" as const },
+      { advanced: false, toolsLayout: "bottom" as const },
+    ];
+    for (const { advanced, toolsLayout } of arrangements) {
+      fixture.advanced = advanced;
+      fixture.toolsLayout = toolsLayout;
+      const { html } = renderBottom();
+      expect(html).not.toContain('data-sidebar-nav="web-panel-panel-1"');
+      expect(html).not.toContain('aria-label="Fleet board"');
+      expect(html).toContain('data-sidebar-nav="apps"');
+    }
+  });
 });
 
 describe("Apps beside the profile", () => {
@@ -280,6 +351,7 @@ describe("toolbar tools layout", () => {
     fixture.advanced = true;
     const rows = render("icons").html;
     expect(render("icons", { toolsLayout: "toolbar" }).html).toBe(rows);
+    expect(render("icons", { toolsLayout: "bottom" }).html).toBe(rows);
     expect(rows).toContain('class="flex flex-col items-center gap-1"');
   });
 
@@ -295,5 +367,38 @@ describe("toolbar tools layout", () => {
       expect(unset).not.toContain(`title="${label}"`);
       expect(unset).not.toContain(`aria-label="${label}"`);
     }
+  });
+});
+
+describe("bottom tools layout", () => {
+  it.each(["comfortable", "compact"] as const)("advanced bottom renders the headerless files row alone (%s)", (density) => {
+    fixture.advanced = true;
+    expect(render(density, { toolsLayout: "bottom" }).html).toBe("");
+    fixture.cloudFilesReady = true;
+    const { html } = render(density, { toolsLayout: "bottom" });
+    expect(html).toContain('<nav aria-label="Tools" class="flex flex-col gap-0.5">');
+    expect(html).toContain(">Files</span>");
+    expect(html).toContain('data-sidebar-nav="files"');
+    expect(html).not.toContain(">Tools<");
+    expect(html).not.toContain('data-sidebar-nav="automations"');
+    expect(html).not.toContain('data-sidebar-nav="team-map"');
+  });
+
+  it.each(["rows", "toolbar"] as const)("advanced rows and toolbar keep the tools section (%s)", (toolsLayout) => {
+    fixture.advanced = true;
+    const { html } = render("comfortable", { toolsLayout });
+    expect(html).toContain(">Tools<");
+    for (const id of ["automations", "team-map"]) expect(html).toContain(`data-sidebar-nav="${id}"`);
+  });
+
+  it.each(["comfortable", "compact"] as const)("simple mode renders bottom as a no-op (%s)", (density) => {
+    const rows = render(density).html;
+    expect(render(density, { toolsLayout: "toolbar" }).html).toBe(rows);
+    expect(render(density, { toolsLayout: "bottom" }).html).toBe(rows);
+    expect(rows).toBe("");
+    fixture.cloudFilesReady = true;
+    const ready = render(density).html;
+    expect(ready).toBe("");
+    expect(render(density, { toolsLayout: "bottom" }).html).toBe(ready);
   });
 });
