@@ -1,4 +1,4 @@
-// Opt-in size cap for per-thread NDJSON logs: keep the newest half, cut on a line boundary, same filename.
+// Size cap for per-thread NDJSON logs (on by default, see threadEventLogMaxBytes): keep the newest half, cut on a line boundary, same filename.
 import { closeSync, fstatSync, openSync, readSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 
 let capProvider: () => number | null = () => null;
