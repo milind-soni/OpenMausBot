@@ -490,6 +490,8 @@ describe("Apps pop-up", () => {
     expect(headings).toEqual(["Connected", "Productivity", "Communication", "Analytics", "All apps"]);
     expect(tree.filter((node) => node.props["data-apps-category"]).map((node) => node.props["data-apps-category"])).toEqual(["Productivity", "Communication", "Analytics", "Design", "Files"]);
     expect(html).toContain('aria-label="More categories"');
+    // The dialog clips overflow, so the menu must portal out of it rather than open in place.
+    expect(tree.find((node) => node.props.ariaLabel === "More categories")!.props.placement).toBeUndefined();
     tree.find((node) => node.props["data-apps-category"] === "Design")!.props.onClick!();
     const design = render();
     expect(design.html.match(/data-app-tile="(?!whop)[^"]*"/g)).toEqual(['data-app-tile="figma"']);
