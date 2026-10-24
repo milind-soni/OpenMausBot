@@ -50,7 +50,7 @@ function run(kind: HarnessMcpKind): void {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const kind = parseHarnessMcpKind(process.argv[2]);
   if (!kind) {
-    process.stderr.write("usage: harness-mcp-proxy browser|computer|data|highlevel\n");
+    process.stderr.write("usage: harness-mcp-proxy browser|computer|data|highlevel|device\n");
     process.exitCode = 2;
   } else run(kind);
 }

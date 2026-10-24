@@ -99,6 +99,8 @@ async function fixture() {
     activeGroupTurnForBot: () => null,
     cloudThreadRefusal: () => null,
     phoneSecretSubmissions: { hasThread: () => false },
+    fromPhone: () => false,
+    notePhoneSend: () => {},
   } as unknown as BotMessageRouteDeps;
   const routes = [createBotMessageRoutes(deps)];
   const server = createServer(async (req, res) => {

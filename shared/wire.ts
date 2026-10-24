@@ -366,6 +366,8 @@ export interface WireBot extends DefaultBotFields {
   connectorTools?: Record<string, ConnectorToolGrant>;
   connectorScopes?: { apps: Record<string, "read" | "write"> };
   outbound?: { policy: "ask" | "allow"; dailyCap: number };
+  /** Which of a paired phone's apps this bot may use; absent: every bot may use what the phone allows (shared/phone-apps.ts). */
+  phoneApps?: import("./phone-apps.ts").PhoneApps;
   /** Ordered backups used only by opt-in, pre-prompt startup recovery. */
   fallback?: Array<{ instanceId: string; model: string }>;
   /** Whether this bot gets the app's built-in browser. */
@@ -418,8 +420,8 @@ export interface ResolvedSender {
  * owner on this machine, or a session-less local caller on a shared server
  * (`worker`: the Slack worker, or any other process on that machine). */
 export type CardAnswerer = (
-  /** `person`: the answering session's opaque person key, recorded on an OMB
-   * Cloud home only. */
+  /** `person`: the answering session's opaque person key, so the owner checks
+   * can tell whose answer it was. */
   | { kind: "session"; name: string; person?: string }
   | { kind: "loopback" }
   | { kind: "worker" }
@@ -952,5 +954,7 @@ export type ServerFrame =
   /** The whole fleet in its new order (PUT /api/bots/order); a member is sent only the bots they see. */
   | { kind: "bots.order"; botIds: string[] }
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
+  /** A job is waiting for the phone whose registry key this is; it polls now. */
+  | { kind: "device.job"; phone: string; id: string }
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

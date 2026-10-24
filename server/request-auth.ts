@@ -12,7 +12,11 @@ import { denyReason as companionDenial, isCompanionNotice } from "../companion/s
 export type LoopbackTrust = "owner" | "service";
 
 export type RequestAuth =
-  | { kind: "loopback"; scopes: readonly Scope[]; trust?: "service" }
+  | {
+    kind: "loopback"; scopes: readonly Scope[]; trust?: "service";
+    /** Set only on the verified companion-token path: the sidecar's id for the phone that authenticated. */
+    companionDevice?: string;
+  }
   | { kind: "session"; session: SessionRecord; via: "bearer" | "cookie" | "ticket"; scopes: readonly Scope[] };
 
 export interface RequestAuthResult {
@@ -276,6 +280,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/shared-computers$/, feature: "sharedComputers" },
   // The same desktop's device link: a WebSocket bound to that secret too.
   { methods: ["GET"], path: /^\/api\/shared-computers\/[\w-]+\/link$/, feature: "sharedComputers" },
+  // This phone's own apps, keyed by its session (routes/phones.ts): register, poll, lease, answer.
+  { methods: ["GET", "PUT", "DELETE"], path: /^\/api\/phones\/self$/ },
+  { methods: ["GET"], path: /^\/api\/phones\/self\/jobs$/ },
+  { methods: ["POST"], path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
   { methods: ["GET"], path: /^\/api\/health$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
   { methods: ["GET"], path: /^\/api\/brand$/ },
@@ -513,7 +521,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
         !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-openmausbot-companion-device"]) ?? "") ||
         (companionDenial({ path, method, authenticated: true }) && !isCompanionNotice(method, path))
       ) return deny(403, "forbidden: invalid companion request");
-      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-openmausbot-companion-device"]) }, status: 401, error: "" };
     }
     const desktopOwner = options.loopbackMutationToken !== undefined &&
       secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken);

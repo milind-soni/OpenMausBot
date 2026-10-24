@@ -46,6 +46,7 @@ export type BotUpdatePatch = Partial<
   computer?: Bot["computer"] | null;
   connectorTools?: Bot["connectorTools"] | null;
   connectorScopes?: Bot["connectorScopes"] | null;
+  phoneApps?: Bot["phoneApps"] | null;
   /** The server's proof the local-auto warning was shown: wire-only, never folded into bot state. */
   acknowledgeLocalAuto?: boolean;
   applyToAllThreads?: boolean;
@@ -56,11 +57,12 @@ export type BotUpdatePatch = Partial<
 
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "connectorTools" | "connectorScopes" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId"
+  "computer" | "connectorTools" | "connectorScopes" | "phoneApps" | "acknowledgeLocalAuto" | "applyToAllThreads" | "keepThreadModels" | "threadId"
 > & {
   computer?: Bot["computer"];
   connectorTools?: Bot["connectorTools"];
   connectorScopes?: Bot["connectorScopes"];
+  phoneApps?: Bot["phoneApps"];
 };
 
 interface BotPatchQueueEntry {
@@ -114,6 +116,7 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     computer,
     connectorTools,
     connectorScopes,
+    phoneApps,
     ...fields
   } = patch;
   const normalized: BotStatePatch = { ...fields };
@@ -123,6 +126,8 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
   else if (connectorTools !== undefined) normalized.connectorTools = connectorTools;
   if (connectorScopes === null) normalized.connectorScopes = undefined;
   else if (connectorScopes !== undefined) normalized.connectorScopes = connectorScopes;
+  if (phoneApps === null) normalized.phoneApps = undefined;
+  else if (phoneApps !== undefined) normalized.phoneApps = phoneApps;
   return normalized;
 };
 

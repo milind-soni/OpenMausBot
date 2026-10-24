@@ -907,6 +907,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false,
         dataMcp: options.tools !== false,
         highlevelMcp: options.tools !== false,
+        deviceMcp: options.tools !== false,
         queueing: true,
         guestTurns: "confined" },
       sendTurn,

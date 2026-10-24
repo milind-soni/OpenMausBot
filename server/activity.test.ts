@@ -28,6 +28,7 @@ describe("describeTool", () => {
     expect(describeTool("GOOGLESHEETS_BATCH_UPDATE")).toEqual({ app: "Google Sheets", label: "Batch update" });
     expect(describeTool("mcp__highlevel__HIGHLEVEL_ADD_NOTE")).toEqual({ app: "HighLevel", label: "Add note" });
     expect(describeTool("HIGHLEVEL_UPDATE_CONTACT")).toEqual({ app: "HighLevel", label: "Update contact" });
+    expect(describeTool("mcp__device__PHONE_CREATE_EVENT")).toEqual({ app: "Phone", label: "Create event" });
   });
 
   it("treats the bot's computer and its teammates as apps too", () => {

@@ -2,7 +2,10 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { HARNESS_PROXY_TIMEOUT_MS } from "./harness-budget.ts";
+import { DEVICE_PROXY_TIMEOUT_MS, HARNESS_PROXY_TIMEOUT_MS } from "./harness-budget.ts";
+import { OUTBOUND_HOLD_MS } from "./outbound-hold.ts";
+import { PHONE_RECOVERY } from "./phones/instructions.ts";
+import { PHONE_RECONNECT_WAIT_MS, PHONE_SEND_TIMEOUT_MS } from "./phones/jobs.ts";
 import { harnessMcpRequest } from "./harness-mcp-proxy.ts";
 
 let server: Server;
@@ -24,7 +27,7 @@ beforeAll(async () => {
   url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 });
 afterAll(async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); });
-const connection = (kind: "browser" | "computer" | "data" | "highlevel" = "browser") => ({ url, token: "scoped-capability", kind });
+const connection = (kind: "browser" | "computer" | "data" | "highlevel" | "device" = "browser") => ({ url, token: "scoped-capability", kind });
 const frame = (method: string, params: unknown = {}) => ({ jsonrpc: "2.0", id: 1, method, params });
 
 describe("harness MCP capability proxy", () => {
@@ -56,6 +59,19 @@ describe("harness MCP capability proxy", () => {
     const refused = await harnessMcpRequest(frame("tools/call", { name: "HIGHLEVEL_ADD_NOTE", arguments: {} }), connection("highlevel")) as any;
     expect(refused.result.isError).toBe(true);
     expect(refused.result.content[0].text).toContain("never message anyone through the CRM");
+  });
+
+  it("forwards device calls to /api/internal/device/mcp with the phone recovery text", async () => {
+    status = 200;
+    payload = { result: { tools: [{ name: "phone_send" }] } };
+    await harnessMcpRequest(frame("tools/list"), connection("device"));
+    expect(requests.at(-1)).toEqual({ path: "/api/internal/device/mcp", auth: "Bearer scoped-capability", body: { method: "tools/list", params: {} } });
+    await expect(harnessMcpRequest(frame("initialize"), connection("device"))).resolves.toMatchObject({ result: { instructions: expect.stringContaining("phone") } });
+    status = 503;
+    payload = { error: "no phone is connected" };
+    const refused = await harnessMcpRequest(frame("tools/call", { name: "phone_send", arguments: {} }), connection("device")) as any;
+    expect(refused.result.isError).toBe(true);
+    expect(refused.result.content[0].text).toContain(PHONE_RECOVERY.trim());
   });
 
   it("sends the cloud computer's calls to its own harness route", async () => {
@@ -112,6 +128,15 @@ describe("harness MCP capability proxy", () => {
       const late = textOf(await harnessMcpRequest(click, connection()));
       expect(late).toMatch(new RegExp(`^OpenMausBot did not answer this browser call within ${HARNESS_PROXY_TIMEOUT_MS / 1_000} seconds\\. It may still be running`));
       expect(late).not.toMatch(/restart/i);
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("reports the device call's own timeout, not the default: the send hold, the send's phone job, the reconnect window and a margin", async () => {
+    expect(DEVICE_PROXY_TIMEOUT_MS).toBe(OUTBOUND_HOLD_MS + PHONE_SEND_TIMEOUT_MS + PHONE_RECONNECT_WAIT_MS + 30_000);
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); }));
+    try {
+      const answer = await harnessMcpRequest(frame("tools/call", { name: "phone_send", arguments: {} }), connection("device")) as { result: { content: Array<{ text: string }> } };
+      expect(answer.result.content[0]!.text).toContain("within 705 seconds");
     } finally { vi.unstubAllGlobals(); }
   });
 

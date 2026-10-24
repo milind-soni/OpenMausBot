@@ -48,6 +48,7 @@ export type BotPatch = Partial<
   computer?: Bot["computer"] | null;
   connectorTools?: Bot["connectorTools"] | null;
   connectorScopes?: Bot["connectorScopes"] | null;
+  phoneApps?: Bot["phoneApps"] | null;
   acknowledgeLocalAuto?: boolean;
   acknowledgePeerScope?: boolean;
 };

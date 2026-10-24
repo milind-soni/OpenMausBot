@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { z } from "zod";
 
@@ -117,6 +118,10 @@ export interface BotMessageRouteDeps {
   relayedReaction(threadId: string, messageId: string, person: { email?: string; name?: string }, emoji: string): void;
   /** The conversation an answer to this card belongs to: a run's own, for the copy its automation posted in a chat. */
   answeredIn(threadId: string, requestId: string): string;
+  /** The request came from one of the owner's registered phones. */
+  fromPhone(auth: RequestAuth): boolean;
+  /** Records a send a registered phone made, so the turn it starts knows the person is talking from the phone. */
+  notePhoneSend(sendId: string): void;
 }
 
 /** External interfaces (the Slack worker) opt in. `onBehalfOf`, advertised by /api/health as
@@ -147,7 +152,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup,
     resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
     deliverLateQuestionAnswer, interruptDirectThread, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
-    cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, pressRecords, serverPress, relayedReaction, answeredIn,
+    cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, pressRecords, serverPress, relayedReaction, answeredIn, fromPhone, notePhoneSend,
   } = deps;
   const pinnedClientThread = pinnedClientThreadGuard(store);
   /** widget -> sendId of a press on its way in: a second tap before acceptance must not send a second answer. */
@@ -200,7 +205,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         : usageTriggerFor(auth);
       // Security invariant: another bot's thread answers like a missing one, before anything reads a widget in it.
       if (pressed && !store.taskByThread(bot.id, threadId)) return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
-      const sendId = parseSendId(body.sendId);
+      const phone = fromPhone(auth);
+      // A phone's send without an id gets one, so the turn it starts can be known as the phone's.
+      const sendId = parseSendId(body.sendId) ?? (phone ? randomUUID() : undefined);
       const press = pressed ? prepareWidgetPress(store, threadId, body.widgetAction, sendId) : null;
       if (press && !press.ok) return json(res, press.status, { error: press.error });
       const answered = press ? serverPress(bot, threadId, press.messageId, press.action, auth) : null;
@@ -265,6 +272,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
             return { ok: true as const, threadId, message };
           }
         : undefined;
+      if (phone && sendId) notePhoneSend(sendId);
       if (pressKey) pressesInFlight.set(pressKey, sendId);
       try {
         const receipt = await acceptDirectSend({

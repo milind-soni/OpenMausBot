@@ -10,7 +10,7 @@ const EXACT: Record<string, number> = {
   // Every PR that moves routes into server/routes lowers these to the counts this test prints.
   'path === "/': 95,
   "path.match(": 26,
-  "path.startsWith(": 7,
+  "path.startsWith(": 6,
   ".exec(path)": 1,
   ".test(path)": 0,
   ".includes(path)": 2,

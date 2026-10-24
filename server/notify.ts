@@ -25,7 +25,7 @@ export function buildSpendNotification(
 
 export function buildNotification(
   kind: NotifyKind,
-  bot: NotifyBot,
+  bot: Omit<NotifyBot, "threadId"> & { threadId?: string },
   threadId: string,
   detail: string,
   extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string },
