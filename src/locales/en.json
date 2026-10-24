@@ -4883,6 +4883,8 @@
   "skills.learned.hintOff": "Skill authoring is off, but skills you already enabled stay under your control here.",
   "skills.origin.imported": "this computer",
   "skills.origin.importedHint": "Brought in from this computer for every bot. Switch it off here for this bot only.",
+  "skills.origin.native": "engine",
+  "skills.origin.nativeHint": "The bot's engine loads this from the folder under Source. Edit or remove it there.",
   "skills.write.title": "Write a command",
   "skills.write.hint": "Give the bot a short command for something you ask often. Type /name in a chat to run it. Anything after the name fills in {input}.",
   "skills.write.name": "Command name",

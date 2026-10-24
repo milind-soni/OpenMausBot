@@ -17,8 +17,9 @@ export interface ManagedSkill {
   enabled: boolean;
   source: string;
   warnings: string[];
-  /** "imported": one copy brought in from this computer for every bot, switched per bot and never removed from one. */
-  origin?: "private" | "library" | "imported";
+  /** "imported": one copy brought in from this computer for every bot, switched per bot and never removed from one.
+   * "native": loaded by the bot's engine from a skills folder of its own; changed only there. */
+  origin?: "private" | "library" | "imported" | "native";
 }
 
 interface LibraryPoolSkill {
@@ -462,24 +463,26 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     className="min-w-0 flex-1 text-left"
                   >
                     <div className="truncate font-mono text-[12.5px] text-ink">{skill.name}</div>
-                    {(libraryOn || skill.origin === "imported") && (
+                    {(libraryOn || skill.origin === "imported" || skill.origin === "native") && (
                       <span
                         className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[9.5px] uppercase tracking-wide text-ink-secondary"
-                        title={skill.origin === "imported" ? t("skills.origin.importedHint") : undefined}
+                        title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : undefined}
                       >
-                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "library" ? "library" : "private"}
+                        {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "library" ? "library" : "private"}
                       </span>
                     )}
                     <div className="mt-0.5 line-clamp-2 text-[11.5px] text-ink-secondary">{skill.description}</div>
                     <div className="mt-0.5 text-[10.5px] text-ink-secondary">Used when the bot decides it's relevant</div>
                   </button>
-                  <Switch
-                    checked={skill.enabled}
-                    aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
-                    disabled={Boolean(working)}
-                    onClick={() => void toggle(skill)}
-                  />
-                  {skill.origin !== "imported" && (
+                  {skill.origin !== "native" && (
+                    <Switch
+                      checked={skill.enabled}
+                      aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
+                      disabled={Boolean(working)}
+                      onClick={() => void toggle(skill)}
+                    />
+                  )}
+                  {skill.origin !== "imported" && skill.origin !== "native" && (
                     <button
                       aria-label={`Remove ${skill.name}`}
                       title="Remove skill"
