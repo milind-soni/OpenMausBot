@@ -234,6 +234,15 @@ describe("needs you", () => {
     ]);
   });
 
+  it.each(["Send the draft", ""])("codes approval titles without changing the English for %j", (title) => {
+    const w = world();
+    w.say(w.atlas.threadId, { role: "bot", kind: "options", at: at(12), card: { title, subtitle: "", options: ["Allow", "Deny"], requestType: "permission", requestId: "permission" } });
+    const items = todayReport(w.sources(), { ...ADMIN, asks: () => true }, MIDNIGHT, NOW).needsYou;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject(title ? { text: `Approve: ${title}`, textCode: "chat.notice.approve", textParams: { what: title } } : { text: "Approve:" });
+    if (!title) expect(items[0]).not.toHaveProperty("textCode");
+  });
+
   it("keeps a question nobody answered after its turn ends, until the person answers it, within the week", () => {
     const w = world();
     const mia = w.store.createBot({ name: "Mia" });

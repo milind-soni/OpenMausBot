@@ -545,9 +545,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           Array.isArray(currentPeers) &&
           (nextPeers === undefined || nextPeers.some((peerId) => !currentPeers.includes(peerId)));
         if (widensReach && body.acknowledgePeerScope !== true) {
-          return json(res, 400, {
-            error: "Letting a bot talk to more bots requires confirming it first (acknowledgePeerScope)",
-          });
+          return json(res, 400, userError("serverError.department.confirmPeers"));
         }
         patch.peers = nextPeers;
       }
@@ -560,10 +558,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           return json(res, 400, userError("serverError.department.createFirst"));
         }
         if (sections.length && !(body.chiefOfStaff === true || (existingBot?.chiefOfStaff && body.chiefOfStaff !== false))) {
-          return json(res, 400, { error: "Only a Chief of Staff can be made responsible for additional departments" });
+          return json(res, 400, userError("serverError.department.chiefResponsibility"));
         }
         if (newSections.length && body.acknowledgePeerScope !== true) {
-          return json(res, 400, { error: "Confirm which additional departments this Chief is responsible for (acknowledgePeerScope)" });
+          return json(res, 400, userError("serverError.department.confirmResponsibility"));
         }
         patch.managedSections = sections;
       }

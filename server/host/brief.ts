@@ -1,3 +1,4 @@
+import type { ServerText } from "../../shared/server-text.ts";
 // The main agent's brief: one server-built card a day in a fixed chat of the proactive bot's, edited in place, rendered
 // with no AI from what the checks found and what the watch run sorted. It exists only once it has something for the person, opens
 // on the first open of the day and after three hours away, and tells the person once per update. Presence, the brief's home and its rows live in brief.json,
@@ -140,7 +141,7 @@ export function createBrief(deps: BriefDeps) {
   let waiting: CheckReport["waiting"];
   let unfenced = false;
   let helpersSort = false;
-  const headers = new Map<string, EmailHeader & { why?: string }>();
+  const headers = new Map<string, EmailHeader & { why?: string; whyText?: ServerText }>();
   let dirty = false;
   let rendering = false;
   /** The card last written, so a check that changed nothing leaves it (and a press on it) alone. */
@@ -253,7 +254,7 @@ export function createBrief(deps: BriefDeps) {
       .map((meeting) => ({ title: meeting.title, start: meeting.start, ...(meeting.joinUrl ? { joinUrl: meeting.joinUrl } : {}) }));
     const emails = liveImportant(at).flatMap((row): BriefEmail[] => {
       const header = headers.get(row.messageId);
-      return header ? [{ messageId: row.messageId, threadId: row.threadId, from: header.from, subject: header.subject, needsReply: row.needsReply, ...(header.why ? { why: header.why } : {}) }] : [];
+      return header ? [{ messageId: row.messageId, threadId: row.threadId, from: header.from, subject: header.subject, needsReply: row.needsReply, ...(header.why ? { why: header.why, ...(header.whyText ? { whyText: header.whyText } : {}) } : {}) }] : [];
     });
     return {
       now: at, ...(zone ? { timeZone: zone } : {}), ...(language ? { language } : {}), intro: state.introducedOn === undefined || state.introducedOn === day,
@@ -362,8 +363,8 @@ export function createBrief(deps: BriefDeps) {
   }
 
   /** An email picked for the brief, by a watch run or by the helper models: its row, with the why kept for this process. */
-  function keepImportant(email: EmailHeader, why: string, needsReply: boolean, at: number): void {
-    headers.set(email.id, { ...email, why });
+  function keepImportant(email: EmailHeader, why: string, needsReply: boolean, at: number, whyText?: ServerText): void {
+    headers.set(email.id, { ...email, why, ...(whyText ? { whyText } : {}) });
     state.important = [...state.important.filter((row) => row.messageId !== email.id), { messageId: email.id, threadId: email.threadId, at: email.at, judgedAt: at, needsReply }].slice(-MAX_ROWS);
   }
 
@@ -378,7 +379,7 @@ export function createBrief(deps: BriefDeps) {
     helpersSort = found.helpersSort === true;
     for (const event of found.remind ?? []) postCard(reminderCard({ event, timeZone: timeZone(), now: now() }));
     const picked = found.picked ?? [];
-    for (const pick of picked) keepImportant(pick.email, pick.why, pick.needsReply, found.at);
+    for (const pick of picked) keepImportant(pick.email, pick.why, pick.needsReply, found.at, pick.whyText);
     if (picked.length) save();
     await followUpReplies(found.session);
     if (picked.length) await render({ create: true, notify: true });

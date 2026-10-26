@@ -206,7 +206,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (body.mode !== undefined && body.mode !== "chat" && body.mode !== "goal") return json(res, 400, { error: "mode must be chat or goal" });
       if (body.mode === "goal") {
         if (guarded || pressed || fromAnApp || pointing) return json(res, 400, { error: "a goal is a plain typed message" });
-        if (!store.taskByThread(bot.id, threadId)) return json(res, 404, { error: "no such conversation" });
+        if (!store.taskByThread(bot.id, threadId)) return json(res, 404, userError("serverError.chat.missingConversation"));
         const goalRefused = directSendRefusal(bot.id, threadId);
         if (goalRefused) return json(res, goalRefused.status, goalRefused.body);
         const goalSendId = parseSendId(body.sendId);

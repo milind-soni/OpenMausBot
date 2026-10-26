@@ -18,7 +18,7 @@ import type { MessagePage } from "./channels.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { sawThread } from "../thread-presence.ts";
-import { refusalBody } from "../user-errors.ts";
+import { refusalBody, userError } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import { readThreadNotifications } from "./notifications.ts";
 
@@ -253,7 +253,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
         return json(res, 403, { error: "On this Cloud only its owner can change how a bot asks for approval, or its default model." });
       }
       if (body.updateBotDefault === true && !ownerOrAdmin(auth)) {
-        return json(res, 403, { error: "forbidden: this session may change this thread's model, not the bot's default (needs the admin scope)" });
+        return json(res, 403, userError("serverError.model.defaultAdmin"));
       }
       for (const key of ["requireAvailableModel", "acknowledgeLocalAuto", "updateBotDefault", "resetApprovalToAsk"] as const) {
         if (body[key] !== undefined && typeof body[key] !== "boolean") return json(res, 400, { error: `${key} must be a boolean` });

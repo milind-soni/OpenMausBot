@@ -3,6 +3,7 @@
 import type { AppConfig } from "../config.ts";
 import * as tts from "../tts/index.ts";
 import { toUtterances } from "../tts/speech-text.ts";
+import { userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface TtsRouteDeps {
@@ -49,7 +50,7 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
       // A hard ceiling, so an arbitrary local request cannot turn the hosted voice account into an unbounded billable job.
-      if (text.length > 500) return json(res, 413, { error: "voice utterances are limited to 500 characters" });
+      if (text.length > 500) return json(res, 413, userError("serverError.voice.utteranceTooLong"));
       try {
         const audio = await tts.speak(cfg, text, typeof body.voiceId === "string" ? body.voiceId : undefined);
         res.writeHead(200, {

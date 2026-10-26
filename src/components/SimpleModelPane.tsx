@@ -1,3 +1,4 @@
+import { modelOptionLabel } from "@/lib/model-label";
 import type { ReactNode } from "react";
 import { Check, ChevronDown, ChevronRight, KeyRound, Loader2 } from "lucide-react";
 import type { InstanceInfo } from "@/state/store";
@@ -157,6 +158,7 @@ export function SimpleModelPane({
                 <div className="flex flex-col gap-0.5" role="group" aria-label={t("model.simple.model")}>
                   {models.map((option) => {
                     const current = option.id === currentModelId;
+                    const label = modelOptionLabel(option);
                     const blurb = modelBlurb(option);
                     const route = option.provider && repeatedLabels?.has(option.label) ? option.provider : undefined;
                     return (
@@ -164,12 +166,12 @@ export function SimpleModelPane({
                         key={option.id}
                         type="button"
                         aria-pressed={current}
-                        aria-label={option.provider ? `${option.label} · ${option.provider}` : undefined}
-                        title={[option.label, option.provider, blurb].filter(Boolean).join(" · ")}
+                        aria-label={option.provider ? `${label} · ${option.provider}` : undefined}
+                        title={[label, option.provider, blurb].filter(Boolean).join(" · ")}
                         onClick={() => onPick(option.id)}
                         className={cn(row, "font-medium text-ink", current ? "bg-raised-hover" : "hover:bg-control/60")}
                       >
-                        <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                        <span className="min-w-0 flex-1 truncate">{label}</span>
                         {route && (
                           <span data-simple-route className="max-w-[45%] shrink-0 truncate text-[11.5px] font-normal text-ink-secondary">{route}</span>
                         )}

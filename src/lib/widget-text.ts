@@ -31,6 +31,9 @@ function wordsOf(text: WidgetText): string {
   }
   if (!text.key.startsWith("brief.") || !Object.hasOwn(en, text.key)) throw new Error(`unknown card text ${text.key}`);
   const params = Object.fromEntries(Object.entries(text.params ?? {}).map(([name, value]) => [name, paramText(value)]));
+  if (text.key.startsWith("brief.inbox.") && typeof params.amountValue === "string" && Number.isFinite(Number(params.amountValue))) {
+    params.amount = new Intl.NumberFormat(intlLocale()).format(Number(params.amountValue));
+  }
   const template = t(text.key as LocaleKey);
   const unfilled = [...template.matchAll(/\{(\w+)\}/g)].some(([, name]) => !Object.hasOwn(params, name!));
   if (unfilled) throw new Error(`card text ${text.key} lacks a param`);

@@ -1,3 +1,4 @@
+import { noticeLine } from "./chat-notices.ts";
 // What a person's bots finished in a window, what only the person can fix,
 // and the time it saved, computed on each read from the transcript rows and
 // routine runs the server already keeps.
@@ -121,8 +122,9 @@ function runEnd(run: RunRecord, now: number): number | null {
   return run.status === "cancelled" ? null : now;
 }
 
-function approvalText(card: QuestionCard & { tool?: string }): string {
-  return plainTitle(`Approve: ${card.subtitle || card.tool || card.title || ""}`);
+function approvalText(card: QuestionCard & { tool?: string }) {
+  const text = plainTitle(`Approve: ${card.subtitle || card.tool || card.title || ""}`);
+  return text === "Approve:" ? { text } : noticeLine("chat.notice.approve", { what: text.slice("Approve: ".length) });
 }
 
 function questionText(card: QuestionCard): string {
@@ -283,7 +285,7 @@ function needsYou(sources: TodaySources, viewer: TodayViewer, owners: Map<string
       const earlier = card.requestId ? askedIn.get(card.requestId) : undefined;
       if (earlier && earlier !== `question:${row.threadId}`) items.delete(earlier);
       if (card.requestId) askedIn.set(card.requestId, `question:${row.threadId}`);
-      keep(`question:${row.threadId}`, { kind: "question", id: row.id, at: row.at, botId, threadId: row.threadId, text: approval ? approvalText(card) : questionText(card) });
+      keep(`question:${row.threadId}`, { kind: "question", id: row.id, at: row.at, botId, threadId: row.threadId, ...(approval ? approvalText(card) : { text: questionText(card) }) });
       continue;
     }
     if (!viewer.admin || row.kind !== "activity" || !row.name) continue;

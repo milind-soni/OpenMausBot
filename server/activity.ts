@@ -84,7 +84,9 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   create_bot: "activity.tool.team.createBot",
   create_room: "activity.tool.team.createRoom",
   create_trigger: "activity.tool.team.createTrigger",
+  decide: "activity.tool.team.decide",
   delegate_bot: "activity.tool.team.delegateBot",
+  extract: "activity.tool.team.extract",
   fill_login: "activity.tool.team.fillLogin",
   find_tool: "activity.tool.team.findTool",
   list_bots: "activity.tool.team.listBots",
@@ -249,14 +251,14 @@ function foldDecisions(rows: DecisionRow[]): ActivityRow[] {
   for (const group of byRequest.values()) {
     const opened = group[0];
     const latest = group[group.length - 1];
-    const summary = group.find((row) => row.summary)?.summary;
+    const summary = group.find((row) => row.summary);
     folded.push(
       describeRow({
         at: opened.at,
         threadId: opened.threadId,
         requestId: opened.requestId,
         tool: latest.tool ?? opened.tool ?? "unknown",
-        ...(summary ? { summary } : {}),
+        ...(summary ? { summary: summary.summary, summaryCode: summary.summaryCode, summaryParams: summary.summaryParams } : {}),
         outcome: OUTCOME_OF_DECISION[latest.decision],
       }),
     );
@@ -318,7 +320,7 @@ export function readBotActivity(input: {
     }
     if (best) {
       matched.add(best);
-      if (decision.summary) best.summary = decision.summary;
+      if (decision.summary) Object.assign(best, { summary: decision.summary, summaryCode: decision.summaryCode, summaryParams: decision.summaryParams });
       if (decision.requestId) best.requestId = decision.requestId;
     } else {
       rows.push(decision);

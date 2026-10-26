@@ -502,6 +502,9 @@ export interface WireMessage extends ServerTextLine, HelperIntroField {
     nameCode?: string;
     /** Values for the placeholders of `nameCode`. */
     nameParams?: ServerTextParams;
+    /** Fixed summary words, only while they rebuild `summary`. */
+    summaryCode?: string;
+    summaryParams?: ServerTextParams;
     /** Provider item identity, scoped to the owning turn. */
     itemId?: string;
     /** Whether the harness captured the full redacted result. Private

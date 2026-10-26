@@ -4356,16 +4356,16 @@ function finishGroupGoalRun(
   groupId: string,
   operation: GroupTurnOperation,
   status: Exclude<GroupGoalRunStatus, "working">,
-  detail: string,
+  detail: string, text?: Parameters<typeof goalCards.progress>[3],
 ): void {
   goalCards.finish(operation.threadId, operation.goalRun, status, detail, () => {
     const group = store.group(groupId);
     return group?.dm ? group.threadId === operation.threadId : Boolean(group && store.groupTaskByThread(group.id, operation.threadId));
-  });
+  }, text);
 }
 
-function updateGroupGoalRunProgress(operation: GroupTurnOperation, detail: string): void {
-  goalCards.progress(operation.threadId, operation.goalRun, detail);
+function updateGroupGoalRunProgress(operation: GroupTurnOperation, detail: string, text?: Parameters<typeof goalCards.progress>[3]): void {
+  goalCards.progress(operation.threadId, operation.goalRun, detail, text);
 }
 
 type GroupMemberBotAvailability = "ready" | "busy" | "unavailable" | "cancelled" | "timed_out";
@@ -11004,8 +11004,8 @@ async function runGroupGoalOperation(args: {
     cancelled: () => args.operation.cancelled,
     current: (botId) => store.bot(botId) ?? undefined,
     step: (bot, coordinator, instructions) => runGroupGoalStep({ ...args, bot, skillAuthoringClaim, coordinator, instructions }),
-    finish: (status, detail) => finishGroupGoalRun(args.groupId, args.operation, status, detail),
-    progress: (detail) => updateGroupGoalRunProgress(args.operation, detail),
+    finish: (status, detail, text) => finishGroupGoalRun(args.groupId, args.operation, status, detail, text),
+    progress: (detail, text) => updateGroupGoalRunProgress(args.operation, detail, text),
     note: (text) => store.appendMessage(args.threadId, {
       role: "bot",
       kind: "activity",

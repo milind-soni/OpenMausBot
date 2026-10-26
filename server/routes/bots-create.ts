@@ -148,10 +148,10 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       const creator = auth.kind === "session" && auth.session.membershipAuthority === "team" ? auth.session.email : undefined;
       let reportsTo: string | undefined;
       if (body.reportsTo !== undefined && body.reportsTo !== null) {
-        if (!deps.team) return json(res, 400, { error: "Only a team's bots report to someone." });
+        if (!deps.team) return json(res, 400, userError("serverError.owner.teamOnly"));
         if (typeof body.reportsTo !== "string" || !body.reportsTo.trim()) return json(res, 400, { error: "reportsTo must be an email" });
         const email = body.reportsTo.trim().toLowerCase();
-        if (email !== creator?.toLowerCase() && !deps.team.people.has(email)) return json(res, 400, { error: `Choose someone in ${deps.team.name}.` });
+        if (email !== creator?.toLowerCase() && !deps.team.people.has(email)) return json(res, 400, userError("serverError.owner.choose", { team: deps.team.name }));
         reportsTo = email;
       }
       let selection: ModelSelection;

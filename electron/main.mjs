@@ -2870,7 +2870,7 @@ async function saveWorkspaceCredential(name, value) {
       body: JSON.stringify(patchFor(secret)),
     });
     const body = await response.json().catch(() => null);
-    if (!response.ok) throw credentialSaveError(response.status, body);
+    if (!response.ok) throw credentialSaveError(response.status, body, nativeT);
     return body;
   };
   if (!app.isPackaged) return applyToHarness();

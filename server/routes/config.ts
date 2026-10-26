@@ -18,7 +18,6 @@ import {
   loadConfig,
   localVmMode,
   mergeOpenCodeProviderKeys,
-  parseConfigPatch,
   saveConfig,
   syncCredentialEnv,
   vpsSshAlias,
@@ -26,7 +25,8 @@ import {
 } from "../config.ts";
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { DECIDER_KEY_REJECTED, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
+import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
+import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
@@ -117,7 +117,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
       if (hostedModels && ["instances", "anthropic", "openai", "openrouter", "openaiCompat", "xai", "mistral", "cerebras", "groq", "meta", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
-      const patch = parseConfigPatch(body);
+      const patch = parseConfigPatchForPerson(body);
       if (patch.profile && ownProfile) {
         // The address is the verified claim's; a profile names no other.
         const { email: _email, ...own } = patch.profile;
@@ -158,7 +158,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (!Object.keys(patch).length) return json(res, 400, { error: "nothing to save" });
       if (patch.decider) {
         const planned = deciderSavePatch(patch.decider, cfg.decider, { included: deciderIncludedHere(), shared: deciderSharedKeyUsable(cfg) });
-        if (!planned.ok) return json(res, 400, { error: planned.error });
+        if (!planned.ok) return json(res, 400, refusalBody(planned));
         patch.decider = planned.patch;
       }
       const changingVoiceProvider = patch.tts?.provider !== undefined
@@ -448,8 +448,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (deciderKey) {
         const check = await decider.testKey(deciderKey.check);
         if (!check.ok && check.reason === "rejected") {
-          const error = DECIDER_KEY_REJECTED[deciderKey.provider];
-          return json(res, 400, { error, code: "decider_rejected" });
+          return json(res, 400, { ...userError(DECIDER_KEY_ERROR[deciderKey.provider]), code: "decider_rejected" });
         }
       }
       if (patch.browserProfiles !== undefined) {

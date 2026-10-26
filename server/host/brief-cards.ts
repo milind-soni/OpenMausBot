@@ -1,3 +1,5 @@
+import type { ServerText } from "../../shared/server-text.ts";
+import { inboxNoteWords } from "./inbox-words.ts";
 // The server-built cards of the brief: the daily brief itself, meeting prep and the 10-minute reminder. Each is a widget
 // the server writes and only the server may edit. Text from mail and invites is untrusted, so it is shown as plain Text
 // and Caption nodes only, and a link becomes a button only when it is an https link with no username or password.
@@ -130,7 +132,7 @@ export const BRIEF_ROWS = 6;
 export const DISMISS_ACTION = "dismiss_row";
 export const DRAFT_ACTION = "draft_reply";
 
-export interface BriefEmail { messageId: string; threadId: string; from: string; subject: string; why?: string; needsReply: boolean }
+export interface BriefEmail { messageId: string; threadId: string; from: string; subject: string; why?: string; whyText?: ServerText; needsReply: boolean }
 /** `page`: the live page a routine's run published; its row's Open page opens it, while Open opens the run's chat. */
 export interface BriefRow { text: string; note: string; open?: OpenTarget; page?: string; said?: { text?: WidgetText; note?: WidgetText } }
 /** A row that needs the person. `key` names what it is about in no particular language, so a new language is not news. */
@@ -181,7 +183,7 @@ function emailRow(email: BriefEmail, w: BriefWords): Node {
   const note = email.needsReply ? (email.why ? `${w.waitingOnReply} · ${email.why}` : w.waitingOnReply) : email.why ?? w.important;
   const whoWords = senderName(email.from).trim() ? who : words("brief.part.noSender");
   const line = words("brief.card.emailLine", { sender: senderName(email.from).trim() ? sender(email, BRIEF_TEXT.sender, w) : words("brief.part.noSender"), subject: email.subject || words("brief.part.noSubject") });
-  const noteWords = email.needsReply ? (email.why ? words("brief.card.waitingReplyWhy", { why: email.why }) : words("brief.card.waitingReply")) : email.why ? undefined : words("brief.card.important");
+  const noteWords = inboxNoteWords(email.why, email.whyText, email.needsReply) ?? (email.needsReply ? (email.why ? words("brief.card.waitingReplyWhy", { why: email.why }) : words("brief.card.waitingReply")) : email.why ? undefined : words("brief.card.important"));
   return rowUnder(`${sender(email, BRIEF_TEXT.sender, w)}: ${email.subject || w.noSubject}`, note, [
     button(w.draftReply(who), { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true, words("brief.card.draftReply", { who: whoWords })),
     ...(gmail ? [button(w.openInGmail, gmail, false, words("brief.card.openGmail"))] : []),

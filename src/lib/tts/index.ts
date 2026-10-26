@@ -3,6 +3,8 @@
 import { localSystemVoiceActive, remoteSystemVoice, resolveLocalSystemVoice } from "@/lib/local-voice";
 import { recordBlockTiming, recordPrepared, recordSpeakEnter } from "../voice-latency-probe";
 import { t } from "@/lib/i18n";
+import { serverErrorText } from "@/lib/server-error";
+import type { ServerErrorBody } from "../../../shared/server-text";
 
 export type SpeechStatus = "idle" | "preparing" | "speaking";
 
@@ -20,8 +22,8 @@ interface SpeakOptions {
   messageId?: string;
 }
 
-type TtsPrepareBody = { ready?: boolean; utterances?: string[]; error?: string };
-type TtsErrorBody = { error?: string };
+type TtsErrorBody = Partial<ServerErrorBody>;
+type TtsPrepareBody = TtsErrorBody & { ready?: boolean; utterances?: string[] };
 
 const IDLE: SpeechSnapshot = { status: "idle" };
 const PREFETCH_WINDOW = 3;
@@ -237,7 +239,7 @@ export class Speaker {
       signal,
     });
     const body: TtsPrepareBody = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error ?? t("voice.error.service", { status: res.status }));
+    if (!res.ok) throw new Error(serverErrorText(body, body.error ?? t("voice.error.service", { status: res.status })));
     if (!body.ready) {
       throw new Error(t("voice.error.notReady"));
     }
@@ -253,7 +255,7 @@ export class Speaker {
     });
     if (!res.ok) {
       const body: TtsErrorBody = await res.json().catch(() => ({}));
-      throw new Error(body.error ?? t("voice.error.service", { status: res.status }));
+      throw new Error(serverErrorText(body, body.error ?? t("voice.error.service", { status: res.status })));
     }
     return res.blob();
   }

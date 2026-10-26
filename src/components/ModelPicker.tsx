@@ -1,3 +1,4 @@
+import { modelLabel, modelProvider, modelOptionLabel } from "@/lib/model-label";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, KeyRound, Loader2, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
@@ -26,13 +27,6 @@ import { Select } from "./Select";
 type ModelOption = InstanceInfo["models"]["options"][number];
 const COMPACT_MODEL_COUNT = 5;
 
-function modelLabel(instance: InstanceInfo | undefined, model: string): string {
-  return instance?.models.options.find((option) => option.id === model)?.label ?? model;
-}
-
-function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
-  return instance?.models.options.find((option) => option.id === model)?.provider;
-}
 
 export function engineStatus(instance: InstanceInfo): string {
   if (needsCli(instance)) return t("model.setupRequired");
@@ -255,7 +249,7 @@ function ModelRow({
       )}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <span className="truncate">{option.label}</span>
+        <span className="truncate">{modelOptionLabel(option)}</span>
         {option.provider && (
           <span
             className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary"

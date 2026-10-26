@@ -1,3 +1,4 @@
+import { routineLineText } from "@/lib/activity-text";
 import {
   CheckCircle2,
   CircleAlert,
@@ -68,7 +69,7 @@ export function GoalRunCard({ message, solo = false, onStop }: { message: Messag
 
   const copy = COPY[run.status];
   const goal = compact(run.goal, 180);
-  const detail = compact(run.detail, DETAIL_LIMIT);
+  const detail = compact(routineLineText(run.detailCode, run.detail ?? "", run.detailParams), DETAIL_LIMIT);
   const turns = run.status === "working"
     ? t("routines.goal.turnOf", { turn: Math.min(run.turnCount + 1, run.maxTurns), max: run.maxTurns })
     : run.turnCount === 1 ? t("routines.goal.turnsOne") : t("routines.goal.turnsMany", { count: run.turnCount });

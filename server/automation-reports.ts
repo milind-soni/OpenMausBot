@@ -1,3 +1,4 @@
+import { noticeLine } from "./chat-notices.ts";
 // A bot's automations report into the chat they belong to. A run still works in its own hidden conversation with a
 // fresh session; when it ends with something to say, its last reply lands in that chat as one bot message named after
 // the automation, and a run with nothing to tell writes nothing. A card a run waits on is copied there, and answering
@@ -167,9 +168,11 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       deps.routines()?.noteReport(run.id, { state: "quiet" });
       return true;
     }
-    const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recoveredText(run.routineName, run.finishedAt ?? Date.now()) } : said;
+    const recoveredAt = run.finishedAt ?? Date.now();
+    const recovery = recovered ? noticeLine("chat.notice.automationRecovered", { name: run.routineName, time: clockTime(recoveredAt), recoveredAt: String(recoveredAt), timeZone: hostTimeZone() }) : undefined;
+    const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recovery!.text } : said;
     const posted = store.appendMessage(target.threadId, {
-      role: "bot", kind: "text", text: reply.text,
+      role: "bot", kind: "text", text: reply.text, ...recovery,
       ...(source?.attachments?.length && !recovered ? { attachments: source.attachments } : {}),
       automation: lineOf(run, line.kind === "failure" ? { failed: true } : recovered ? { recovered: true } : reply.question ? { needsYou: true } : {}),
     });

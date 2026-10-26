@@ -83,6 +83,14 @@ describe("describeTool", () => {
       .toEqual(["activity.app.team", "activity.app.computer", "activity.app.research", undefined, undefined]);
   });
 
+  it.each([
+    ["decide", "Decide", "activity.tool.team.decide"],
+    ["extract", "Extract", "activity.tool.team.extract"],
+  ])("names %s with its own activity key and unchanged English", (tool, label, labelKey) => {
+    expect(describedTool(`mcp__agents__${tool}`)).toEqual({ app: "Team", appKey: "activity.app.team", label, labelKey });
+    expect(describeTool(`mcp__agents__${tool}`)).toEqual({ app: "Team", label });
+  });
+
   it("keeps an unknown or third-party tool in its own words, with no key", () => {
     for (const name of ["GMAIL_SEND_EMAIL", "mcp__composio__GITHUB_CREATE_AN_ISSUE", "mcp__claude_ai_Gmail__search_threads", "mcp__highlevel__HIGHLEVEL_ADD_NOTE",
       "mcp__agents__brand_new_tool", "mcp__computer__teleport", "mcp__some_server__do_thing", "TaskUpdate", "constructor"]) {
@@ -174,6 +182,14 @@ describe("readBotActivity", () => {
     const rows = read();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ tool: "Bash", summary: "git status", outcome: "ran", requestId: "r1" });
+  });
+
+  it("keeps summary metadata from the same decision as the words when folding and matching a run", () => {
+    const summary = { summary: "allowed PHONE_CREATE_EVENT", summaryCode: "chat.notice.phone.allowed", summaryParams: { tool: "PHONE_CREATE_EVENT" } };
+    decision({ at: "2026-09-07T09:00:00.000Z", requestId: "phone", tool: "PHONE_CREATE_EVENT", decision: "card-shown", source: "question", ...summary });
+    decision({ at: "2026-09-07T09:00:01.000Z", requestId: "phone", tool: "PHONE_CREATE_EVENT", decision: "user-approved", source: "user", summary: "changed", summaryCode: "chat.notice.phone.notOwner" });
+    toolRun("t1", "phone", "PHONE_CREATE_EVENT", "2026-09-07T09:00:01.400Z", true);
+    expect(read()).toEqual([expect.objectContaining({ ...summary, outcome: "ran" })]);
   });
 
   it("keeps a denied request as its own row, since nothing ran", () => {

@@ -63,6 +63,16 @@ describe("groupActivityByDay", () => {
 
 describe("activityLabel", () => {
   afterEach(() => { setLocale("en"); });
+
+  it.each([
+    ["decide", "Decide", "Decidir"],
+    ["extract", "Extract", "Extrair"],
+  ])("words %s in pt-BR and keeps its English label unchanged", (tool, label, portuguese) => {
+    const entry = row({ tool: `mcp__agents__${tool}`, app: "Team", label, labelKey: `activity.tool.team.${tool}` });
+    expect(activityLabel(entry)).toBe(label);
+    setLocale("pt-br");
+    expect(activityLabel(entry)).toBe(portuguese);
+  });
   it("says a known tool's action in the app language, and keeps the server's words for any other key", () => {
     expect(activityLabel(row({ labelKey: "activity.tool.ranCommand" }))).toBe("Ran a command");
     setLocale("pt-br");

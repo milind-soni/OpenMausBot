@@ -18,6 +18,7 @@ export function redactBotAuthored<T extends Omit<WireMessage, "id" | "at"> & { a
   if (out.tool?.name) {
     out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name), ...(out.tool.nameParams ? { nameParams: redactParams(out.tool.nameParams) } : {}) };
     if (out.tool.summary) out.tool.summary = redactSecretsInText(out.tool.summary);
+    if (out.tool.summaryParams) out.tool.summaryParams = redactParams(out.tool.summaryParams);
   }
   if (out.routineRun) {
     const routineRun = { ...out.routineRun };
@@ -32,6 +33,7 @@ export function redactBotAuthored<T extends Omit<WireMessage, "id" | "at"> & { a
       goal: redactSecretsInText(out.goalRun.goal),
       coordinatorName: redactSecretsInText(out.goalRun.coordinatorName),
       detail: out.goalRun.detail ? redactSecretsInText(out.goalRun.detail) : undefined,
+      ...(out.goalRun.detailParams ? { detailParams: redactParams(out.goalRun.detailParams) } : {}),
     };
   }
   if (out.call?.title) out.call = { ...out.call, title: redactSecretsInText(out.call.title) };

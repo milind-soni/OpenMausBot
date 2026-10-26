@@ -1,3 +1,6 @@
+import type { ServerText } from "../../shared/server-text.ts";
+import { noticeFailure } from "../chat-notices.ts";
+import { userErrorThrown } from "../user-errors.ts";
 // A goal in a one-on-one chat, run as a room of one: the bot leads and does the work itself, one turn at a time.
 import { randomUUID } from "node:crypto";
 
@@ -48,8 +51,8 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
   const { store } = deps;
   const live = new Map<string, LiveGoal>();
 
-  function finish(threadId: string, goal: LiveGoal, status: GoalRunEnd, detail: string): void {
-    deps.cards.finish(threadId, goal.run, status, detail, () => Boolean(store.taskByThread(goal.botId, threadId)));
+  function finish(threadId: string, goal: LiveGoal, status: GoalRunEnd, detail: string, text?: ServerText): void {
+    deps.cards.finish(threadId, goal.run, status, detail, () => Boolean(store.taskByThread(goal.botId, threadId)), text);
   }
 
   function availability(goal: LiveGoal, botId: string, threadId: string): Availability | null {
@@ -61,7 +64,8 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
   function waitUntilFree(goal: LiveGoal, bot: BotRecord, threadId: string): Promise<Availability> {
     const now = availability(goal, bot.id, threadId);
     if (now) return Promise.resolve(now);
-    deps.cards.progress(threadId, goal.run, `${bot.name} is finishing what it is doing. This goal will continue when it is free.`);
+    const waiting = noticeFailure("chat.notice.goalWaiting", { name: bot.name });
+    deps.cards.progress(threadId, goal.run, waiting.message, waiting.text);
     return new Promise((resolve) => {
       let settled = false;
       const check = () => {
@@ -97,7 +101,8 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
       if (free === "unavailable") return { ran: false, replyText: "", outcome: "unavailable", stopReason: `${bot.name} is no longer available` };
       if (free === "timed_out") {
         const minutes = Math.max(1, Math.round(GROUP_GOAL_WAIT_MAX_MS / 60_000));
-        return { ran: false, replyText: "", outcome: "busy", stopReason: `${bot.name} stayed busy for ${minutes} minute${minutes === 1 ? "" : "s"}` };
+        const busy = noticeFailure(minutes === 1 ? "chat.notice.goalBusyOne" : "chat.notice.goalBusyMany", { name: bot.name, minutes: String(minutes) });
+        return { ran: false, replyText: "", outcome: "busy", stopReason: busy.message, stopReasonText: busy.text };
       }
       let settle!: (outcome: HostTurnResult) => void;
       const settled = new Promise<HostTurnResult>((resolve) => { settle = resolve; });
@@ -130,7 +135,8 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
           return { ran: false, replyText: "", outcome, stopReason: message };
         }
         run.turnCount += 1;
-        deps.cards.progress(threadId, run, `${bot.name} is working on turn ${run.turnCount} of ${run.maxTurns}.`);
+        const working = noticeFailure("chat.notice.goalWorking", { name: bot.name, turn: String(run.turnCount), max: String(run.maxTurns) });
+        deps.cards.progress(threadId, run, working.message, working.text);
         const result = await settled;
         if (goal.cancelled) {
           outcome = "cancelled";
@@ -152,9 +158,9 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
   /** Appends the person's goal line and its run card, then works until the bot reports an outcome or the turns run out. */
   function start(botId: string, threadId: string, text: string, options: OneOnOneGoalStart = {}): Message {
     const bot = store.bot(botId);
-    if (!bot || !store.taskByThread(botId, threadId)) throw Object.assign(new Error("no such conversation"), { status: 404 });
+    if (!bot || !store.taskByThread(botId, threadId)) throw Object.assign(userErrorThrown("serverError.chat.missingConversation"), { status: 404 });
     if (live.has(threadId)) {
-      throw Object.assign(new Error("A goal is already running in this chat. Stop it before starting another."), { status: 409 });
+      throw Object.assign(userErrorThrown("serverError.goal.alreadyRunning"), { status: 409 });
     }
     const message = store.appendMessage(threadId, {
       role: "user",
@@ -180,13 +186,14 @@ export function createOneOnOneGoals(deps: OneOnOneGoalDeps) {
       cancelled: () => goal.cancelled,
       current: (id) => store.bot(id) ?? undefined,
       step: (member, _coordinator, instructions) => step(goal, threadId, request, member, instructions),
-      finish: (status, detail) => finish(threadId, goal, status, detail),
-      progress: (detail) => deps.cards.progress(threadId, goal.run, detail),
+      finish: (status, detail, text) => finish(threadId, goal, status, detail, text),
+      progress: (detail, text) => deps.cards.progress(threadId, goal.run, detail, text),
       note: (line) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: line, ok: false } }),
     })
       .catch((error: unknown) => finish(threadId, goal, "failed", error instanceof Error ? error.message : String(error)))
       .finally(() => {
-        finish(threadId, goal, "failed", "The goal run ended before the bot reported an outcome.");
+        const ended = noticeFailure("chat.notice.goalEnded");
+        finish(threadId, goal, "failed", ended.message, ended.text);
         if (live.get(threadId) === goal) live.delete(threadId);
       });
     return message;

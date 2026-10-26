@@ -1,3 +1,4 @@
+import { routineLineText } from "@/lib/activity-text";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ListChecks, RefreshCw, X } from "lucide-react";
 import { useStore, type Bot } from "@/state/store";
@@ -165,7 +166,7 @@ function ActivityLine({ row, current, onJump }: { row: ActivityRow; current: boo
           <span className="truncate">{activityLabel(row)}</span>
         </span>
         {row.summary && (
-          <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-secondary">{row.summary}</span>
+          <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-secondary">{routineLineText(row.summaryCode, row.summary, row.summaryParams)}</span>
         )}
       </span>
       <span className={cn("mt-[2px] shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium", TONE_CLASS[chip.tone])}>

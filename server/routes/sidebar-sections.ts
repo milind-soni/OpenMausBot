@@ -6,7 +6,8 @@ import type { TeamComputers } from "../team-computers.ts";
 import { USER_ERROR, userError, type UserErrorKey } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
-const STORE_REFUSALS: readonly UserErrorKey[] = ["serverError.department.notFound", "serverError.department.nameRule"];
+const STORE_REFUSALS: readonly UserErrorKey[] = ["serverError.department.notFound", "serverError.department.nameRule",
+  "serverError.department.duplicate", "serverError.department.renameBusy", "serverError.department.emptyFirst", "serverError.department.deleteBusy", "serverError.department.generalChief"];
 
 export function storeRefusal(error: string): { error: string; errorKey?: UserErrorKey } {
   const key = STORE_REFUSALS.find((candidate) => USER_ERROR[candidate] === error);

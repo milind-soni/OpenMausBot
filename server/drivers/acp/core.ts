@@ -61,6 +61,7 @@ import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts";
 import type { AcpAskFinish, AcpSession, AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
+import { noticeFailure } from "../../chat-notices.ts";
 import { engineIdleMs, sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
 import { engineFailure, engineFailureKind } from "../engine-errors.ts";
@@ -442,14 +443,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const running = other.current;
           closeSession(link.threadId, "cancel-timeout");
           if (running) {
-            emit({ ...base(link.threadId, running.turnId), type: "runtime.error",
-              message: `${support.displayName} was restarted because a session sharing its process ignored Stop` });
+            emit({ ...base(link.threadId, running.turnId), type: "runtime.error", ...noticeFailure("chat.notice.acpRestarted", { provider: support.displayName }) });
             settle(link.threadId, other, false, "exit_before_result");
           }
         }
         if (!await killCliTree(host.child) && session.current) {
-          emit({ ...base(threadId, session.current.turnId), type: "runtime.error",
-            message: `${support.displayName} ignored Stop and its process could not be ended` });
+          emit({ ...base(threadId, session.current.turnId), type: "runtime.error", ...noticeFailure("chat.notice.acpStopFailed", { provider: support.displayName }) });
         }
       };
       // A shared process holding closed sessions gives their memory back only by exiting: once none of its sessions has

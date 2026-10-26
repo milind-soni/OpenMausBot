@@ -26,6 +26,15 @@ describe("voice routes", () => {
     }
   });
 
+  it("keeps the 413 and English refusal when prepared short sentences merge past the ceiling", async () => {
+    const prepared = await call("POST", "/api/tts/prepare", { text: "Tudo bem. ".repeat(80) });
+    const { utterances } = prepared.answers[0]![1] as { utterances: string[] };
+    expect(utterances.some((text) => text.length > 500)).toBe(true);
+    expect((await call("POST", "/api/tts/speak", { text: utterances[0] })).answers).toEqual([[413, {
+      error: "voice utterances are limited to 500 characters", errorKey: "serverError.voice.utteranceTooLong",
+    }]]);
+  });
+
   it("list no voices, and say why, when no voice provider is set up", async () => {
     const { answers } = await call("GET", "/api/tts/voices?q=calm");
     expect(answers).toHaveLength(1);

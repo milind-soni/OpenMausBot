@@ -15,6 +15,8 @@ export type ActivityEntry =
       bot?: string;
       tool?: string;
       summary?: string;
+      summaryCode?: string;
+      summaryParams?: ActivityRow["summaryParams"];
       threadId: string;
       requestId?: string;
     }
