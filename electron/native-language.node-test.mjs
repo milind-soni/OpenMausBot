@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import test from "node:test";
 import vm from "node:vm";
+import { createCloudAccountClient as cloudAccountClient } from "./cloud-account.mjs";
+import { createDesktopPrefs, createDesktopText } from "./desktop-prefs.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 
@@ -10,6 +12,25 @@ const require = createRequire(import.meta.url);
 const environments = require("./environments.cjs");
 const { createNativeText } = require("./native-text.cjs");
 const MAIN = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+
+test("main's Cloud account factory keeps the same client in the current app language", async () => {
+  const prefs = createDesktopPrefs({ read: () => ({ language: "en" }), write: () => assert.fail("unexpected preference write") });
+  const initialization = MAIN.match(/^const nativeText = .+$/m)?.[0];
+  assert.ok(initialization, "main initializes its native text and Cloud account factory");
+  const { text, createClient } = vm.runInNewContext(`${initialization}\n({ text: nativeText, createClient: createCloudAccountClient })`, {
+    app: { isReady: () => true, getLocale: () => "en" },
+    createDesktopText: app => createDesktopText(app, prefs), cloudAccountClient,
+  });
+  const client = createClient({
+    store: {}, platform: "darwin", deviceName: "Test computer", appVersion: "1.0.0",
+    fetch: () => assert.fail("unexpected Cloud request"),
+  });
+  await assert.rejects(client.pairHome(), { message: "My Cloud is not ready to connect yet." });
+  text.set("pt-br");
+  await assert.rejects(client.pairHome(), { message: "O Cloud ainda não está pronto para conectar." });
+  text.set("en");
+  await assert.rejects(client.pairHome(), { message: "My Cloud is not ready to connect yet." });
+});
 
 test("a new language redraws main's menu, both trays, the window title and the badge", () => {
   const text = createNativeText({ saved: "en" });

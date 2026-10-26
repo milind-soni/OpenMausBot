@@ -89,7 +89,7 @@ import { createComputerSharing, isHomeFolder, sharedCuaConnection, validateShare
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { switchLocalEnvironment } from "./environment-switch.mjs";
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
-import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudTarget, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
+import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudTarget, createCloudAccountClient as cloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
 import { installCloudPlanIpc } from "./cloud-plan-ipc.mjs";
 import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice, installCloudBuy, lookFile } from "./cloud-buy.mjs";
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
@@ -409,7 +409,7 @@ let desktopCompanionRelay = null;
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
-const nativeText = createDesktopText(app), nativeT = nativeText.t;
+const nativeText = createDesktopText(app), nativeT = nativeText.t; const createCloudAccountClient = options => cloudAccountClient({ ...options, t: nativeT });
 /** True when the store could not be read, which is not the same as nothing saved. */
 let credentialStoreUnavailable = false;
 
@@ -877,7 +877,7 @@ function ensureCloudAccount() {
       encrypt: value => safeStorage.encryptStringAsync(value), decrypt: value => safeStorage.decryptStringAsync(value),
     } }),
     platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer", appVersion: app.getVersion(), origin: cloudTarget(process.env).origin,
-    openBrowser: url => shell.openExternal(url), awaitingWake: () => cloudPower.awaiting(), t: nativeT,
+    openBrowser: url => shell.openExternal(url), awaitingWake: () => cloudPower.awaiting(),
     onState: state => {
       rememberCloudHome(state);
       rememberedHome = rememberedCloudHome(rememberedHome, state);
