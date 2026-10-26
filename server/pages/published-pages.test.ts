@@ -8,7 +8,7 @@ import { applyIncludedPagesMessage, pagesHomeSignature } from "./access.ts";
 import { PageBundleError, readPageBundle } from "./bundle.ts";
 import { PublishedPagesStore } from "./store.ts";
 import { createPublishedPages } from "./service.ts";
-import { createPublishedPageRoutes, type AppPages } from "../routes/published-pages.ts";
+import { createPagesInternalRoutes, createPublishedPageRoutes, type AppPages } from "../routes/published-pages.ts";
 import { PASS } from "../routes/table.ts";
 
 const SITE = { "index.html": "<!doctype html><h1>Bake sale</h1>", "style.css": "h1{color:red}" };
@@ -35,7 +35,7 @@ function setup(options: { home?: boolean; quota?: number } = {}) {
   mkdirSync(work, { recursive: true });
   const cards: Array<{ threadId: string; id: string; text: string; card: PublishedPageCard }> = [];
   let ids = 0;
-  const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, fetch: service.fetch,
+  const pages = createPublishedPages({ dataDir: data, cloudHome: options.home ? FAKE_HOME : null, fetch: (input, init) => service.fetch(input, init),
     patch: (threadId, messageId, text, card) => { const shown = cards.find((each) => each.id === messageId && each.threadId === threadId); if (shown) Object.assign(shown, { text, card }); } });
   const post = (threadId: string) => (text: string, card: PublishedPageCard) => { const id = `m${++ids}`; cards.push({ threadId, id, text, card }); return id; };
   const publish = (input: { path: string; title?: string; pageId?: string; botId?: string; threadId?: string }) => pages.publisher.publish({
@@ -190,12 +190,93 @@ describe("publishing a page", () => {
     expect(f.service.minted).toEqual([]);
   });
 
+  it("publishes one page when the same folder is published twice at once", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const outcomes = await Promise.all([f.publish({ path: "site" }), f.publish({ path: "site", threadId: "thread-2" })]);
+    expect(outcomes.map((outcome) => outcome.status)).toEqual([200, 200]);
+    expect(f.service.pages.size).toBe(1);
+    expect(f.service.minted.map((call) => call.action)).toEqual(["create", "update"]);
+    expect(f.pages.store.list()).toHaveLength(1);
+    expect(f.pages.store.list()[0]!.cards).toHaveLength(2);
+  });
+
   it("says plainly when publishing can't be reached", async () => {
     const f = setup();
     signIn();
     writeSite(join(f.work, "site"));
     f.service.state.down = true;
     expect(await f.publish({ path: "site" })).toEqual({ status: 503, text: "Publishing isn't available right now. Try again in a few minutes." });
+  });
+});
+
+describe("a page tool call whose turn ends", () => {
+  function tool(f: ReturnType<typeof setup>, options: { stopDuringFolders?: boolean; stopAfterToken?: boolean; signal?: AbortSignal } = {}) {
+    const turn = { active: true };
+    const fetch = f.service.fetch;
+    const handler = createPagesInternalRoutes(f.pages.publisher);
+    if (options.stopAfterToken) {
+      f.service.fetch = async (input, init) => {
+        const response = await fetch(input, init);
+        if (new Request(input, init).url === FAKE_TOKEN_URL) turn.active = false;
+        return response;
+      };
+    }
+    const sent: { status?: number } = {};
+    const call = (path: string, body: unknown) => handler({ method: "POST", path, res: {} as never, botId: "bot-1", threadId: "thread-1",
+      json: ((_res: unknown, status: number) => { sent.status = status; }) as never,
+      readBody: async () => body,
+      folders: async () => { if (options.stopDuringFolders) turn.active = false; return { roots: [f.work], vmWorkspace: null }; },
+      requireActive: () => { if (!turn.active) throw Object.assign(new Error("the internal turn capability has expired"), { status: 401 }); },
+      signal: options.signal ?? new AbortController().signal,
+      post: () => "m1" });
+    return { call, sent };
+  }
+
+  it("publishes nothing when Stop ends the turn while its folders are resolved", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const { call, sent } = tool(f, { stopDuringFolders: true });
+    await expect(call("/api/internal/pages/publish", { path: "site", title: "Bake sale" })).rejects.toMatchObject({ status: 401 });
+    expect(sent.status).toBeUndefined();
+    expect(f.service.minted).toEqual([]);
+    expect(f.service.pages.size).toBe(0);
+  });
+
+  it("uploads nothing when the turn ends after the upload token was minted", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const { call } = tool(f, { stopAfterToken: true });
+    await expect(call("/api/internal/pages/publish", { path: "site", title: "Bake sale" })).rejects.toMatchObject({ status: 401 });
+    expect(f.service.minted).toHaveLength(1);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.list()).toEqual([]);
+  });
+
+  it("takes nothing down when the turn ends before unpublish_page reaches the service", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    await f.publish({ path: "site" });
+    const { call } = tool(f, { stopDuringFolders: true });
+    await expect(call("/api/internal/pages/unpublish", { path: "site" })).rejects.toMatchObject({ status: 401 });
+    expect(f.service.minted.map((each) => each.action)).toEqual(["create"]);
+    expect(f.service.pages.size).toBe(1);
+  });
+
+  it("asks the pages service for nothing once the tool call's request is gone", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const gone = new AbortController();
+    gone.abort();
+    const { call } = tool(f, { signal: gone.signal });
+    await call("/api/internal/pages/publish", { path: "site", title: "Bake sale" }).catch(() => undefined);
+    expect(f.service.minted).toEqual([]);
+    expect(f.service.pages.size).toBe(0);
   });
 });
 

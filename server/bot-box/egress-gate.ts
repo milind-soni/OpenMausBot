@@ -2,7 +2,7 @@
 // loopback port inside the box is bridged to. Like the browser's SOCKS gate (server/browser/egress/gate.ts) it resolves
 // names itself and connects only to public addresses, so a bot's shell reaches neither this server's loopback routes,
 // the local network, the cloud metadata service nor Fly's private network, whatever name it uses.
-import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { createServer, request as httpRequest, type ClientRequest, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { connect, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 
@@ -47,8 +47,8 @@ function parseConnectTarget(raw: string | undefined): { host: string; port: numb
 export function openBoxEgressGate(options: EgressGateOptions): Promise<BoxEgressGate> {
   const decide = options.decide ?? boxRefusal;
   const resolve = options.resolve ?? resolveTarget;
-  const sockets = new Set<Socket | Duplex>();
-  const track = <T extends Socket | Duplex>(socket: T): T => {
+  const sockets = new Set<Socket | Duplex | ClientRequest>();
+  const track = <T extends Socket | Duplex | ClientRequest>(socket: T): T => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
     socket.on("error", () => socket.destroy());
@@ -81,17 +81,19 @@ export function openBoxEgressGate(options: EgressGateOptions): Promise<BoxEgress
     }
     const target = { host: url.hostname.replace(/^\[|\]$/g, ""), port: Number(url.port || 80) };
     const verdict = await check(target);
+    if (req.socket.destroyed) return;
     if ("refused" in verdict) { res.writeHead(403, { "content-type": "text/plain" }).end(`Blocked by the box's network gate: ${verdict.refused}.\n`); return; }
     if ("unresolved" in verdict) { res.writeHead(502, { "content-type": "text/plain" }).end("The name could not be resolved.\n"); return; }
     const headers: Record<string, string | string[]> = {};
     for (const [name, value] of Object.entries(req.headers)) if (value !== undefined && !HOP_BY_HOP.has(name)) headers[name] = value;
-    const upstream = httpRequest({
+    const upstream = track(httpRequest({
       host: target.host, port: target.port, method: req.method, path: `${url.pathname}${url.search}`, headers,
       lookup: pinnedLookup(verdict.addresses) as never,
     }, (answer) => {
       res.writeHead(answer.statusCode ?? 502, answer.headers);
       answer.pipe(res);
-    });
+    }));
+    res.on("close", () => { if (!res.writableFinished) upstream.destroy(); });
     upstream.on("error", () => { if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" }).end("The connection failed.\n"); else res.destroy(); });
     req.pipe(upstream);
   });

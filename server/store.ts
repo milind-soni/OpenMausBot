@@ -5,6 +5,7 @@ import { writeFileAtomic, writeFileAtomicIfChanged } from "./atomic.ts";
 import { commitRegistryChange, keptRevocation, saveRegistryFor } from "./registry-save.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts";
 import { reorderStable } from "../shared/bot-order.ts";
+import { botOwner, chiefConflict, chiefScope, ownerEmail } from "../shared/bot-owner.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
 import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
@@ -447,7 +448,7 @@ export class Store {
     }
     for (const b of this.bots) {
       if (!b.chiefOfStaff) continue;
-      const key = sectionKey(b.section);
+      const key = chiefScope(b);
       if (!chiefSectionsSeen.has(key)) {
         chiefSectionsSeen.add(key);
         if (b.hidden) {
@@ -743,12 +744,12 @@ export class Store {
     nextName = nextName.trim();
     if (!nextName || nextName.length > 60 || [...nextName].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) return "Department name must be 1 to 60 characters without control characters";
     if (name === nextName) return undefined;
-    if (this.sections.includes(nextName) || computers?.forSection(nextName)) return "A team with that name already exists";
+    if (this.sections.includes(nextName) || computers?.forSection(nextName)) return "A department with that name already exists";
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
     const rooms = this.groups.filter(group => sectionKey(group.section) === name);
     const affected = this.bots.filter(bot => members.includes(bot) || bot.managedSections?.some(section => sectionKey(section) === name));
     if (affected.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
-      return "Stop this team's active work before renaming the team";
+      return "Stop this department's active work before renaming it";
     }
     // Removing an empty identity revokes its old grants, so recreating it cannot restore access.
     if (!members.length && !rooms.length && !computers?.forSection(name)) return this.changeEmptySection(name, nextName);
@@ -782,10 +783,10 @@ export class Store {
   changeEmptySection(name: string, nextName: string | null): string | undefined {
     if (!this.sections.includes(name)) return "No such department";
     if ([...this.bots, ...this.groups].some((record) => sectionKey(record.section) === name)) {
-      return "Move all bots (including archived bots) and group chats out of this team first";
+      return "Move all bots (including archived bots) and group chats out of this department first";
     }
     if (nextName !== null && nextName !== name && this.sections.includes(nextName)) {
-      return "A team with that name already exists";
+      return "A department with that name already exists";
     }
     if (nextName === name) return undefined;
     const revoked = this.bots.filter((bot) => bot.managedSections?.some((section) => sectionKey(section) === name));
@@ -806,15 +807,15 @@ export class Store {
     const members = this.bots.filter(bot => sectionKey(bot.section) === name);
     const rooms = this.groups.filter(group => sectionKey(group.section) === name);
     if (members.some(bot => bot.busy || bot.tasks?.some(task => task.busy)) || rooms.some(group => group.busyBotId)) {
-      return "Stop this team's active work before deleting the team";
-    }
-    if (this.bots.filter(bot => bot.chiefOfStaff && (!sectionKey(bot.section) || sectionKey(bot.section) === name)).length > 1) {
-      return "General already has a Chief of Staff. Move or change this team's Chief before deleting the team";
+      return "Stop this department's active work before deleting it";
     }
     const nextBots = this.bots.map(bot => ({ ...bot,
       ...(sectionKey(bot.section) === name ? { section: undefined } : {}),
       ...(bot.managedSections ? { managedSections: bot.managedSections.filter(section => sectionKey(section) !== name) } : {}),
     }));
+    if (chiefConflict(nextBots)) {
+      return "General already has a Chief of Staff. Move or change this department's Chief before deleting it";
+    }
     const nextGroups = this.groups.map(group => sectionKey(group.section) === name ? { ...group, section: undefined } : group);
     try {
       this.saveBots(nextBots);
@@ -973,7 +974,7 @@ export class Store {
     fallbackDetail = "OpenMausBot restarted before this goal finished.",
     fallbackFinishedAt = Date.now(),
   ): number {
-    const ownedThreadIds = new Set<string>();
+    const ownedThreadIds = new Set<string>(this.bots.flatMap((bot) => (bot.tasks ?? []).map((task) => task.threadId)));
     for (const group of this.groups) {
       ownedThreadIds.add(group.threadId);
       for (const task of group.tasks ?? []) ownedThreadIds.add(task.threadId);
@@ -1330,7 +1331,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section" | "cwd" | "visibility" | "toolScope"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section" | "cwd" | "visibility" | "toolScope" | "createdBy" | "reportsTo"
       >
     > = {},
     opts: {
@@ -1363,6 +1364,8 @@ export class Store {
       createdAt: Date.now(),
     };
     if (section) bot.section = section;
+    if (profile.createdBy?.trim()) bot.createdBy = ownerEmail(profile.createdBy);
+    if (profile.reportsTo?.trim()) bot.reportsTo = ownerEmail(profile.reportsTo);
     if (profile.cwd) bot.cwd = profile.cwd;
     bot.tasks = [{
       threadId: bot.threadId,
@@ -1414,6 +1417,8 @@ export class Store {
           connectorTools: {},
           // A restricted Chief never creates a bot everyone sees.
           ...(chief.visibility && chief.visibility !== "everyone" ? { visibility: structuredClone(chief.visibility) } : {}),
+          // A Chief's new specialist reports to the Chief's own person.
+          ...(botOwner(chief) ? { createdBy: botOwner(chief)! } : {}),
           tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
             unread: false, activity: "idle", busy: false }],
         };
@@ -1614,18 +1619,11 @@ export class Store {
 
     const targetSection = sectionKey(section);
     const selected = targets as BotRecord[];
-    const destinationChiefIds = new Set([
-      ...selected.filter((bot) => bot.chiefOfStaff).map((bot) => bot.id),
-      ...this.bots
-        .filter((bot) => bot.chiefOfStaff && sectionKey(bot.section) === targetSection)
-        .map((bot) => bot.id),
-    ]);
-    if (destinationChiefIds.size > 1) return { ok: false, reason: "chief-conflict" };
-
     const patches = new Map<string, Partial<BotRecord>>();
     for (const bot of selected) {
       patches.set(bot.id, { section: targetSection || undefined });
     }
+    if (chiefConflict(this.bots.map((bot) => ({ ...bot, ...patches.get(bot.id) })))) return { ok: false, reason: "chief-conflict" };
 
     const changedIds = new Set<string>();
     const nextBots = this.bots.map((bot) => {
@@ -1661,11 +1659,7 @@ export class Store {
     }
     const next = this.bots.map(bot => ids.has(bot.id)
       ? { ...bot, section: adds.has(bot.id) ? key : undefined } : bot);
-    for (const destination of [key, ""]) {
-      if (next.filter(bot => bot.chiefOfStaff && sectionKey(bot.section) === destination).length > 1) {
-        return { ok: false, reason: "chief-conflict" };
-      }
-    }
+    if (chiefConflict(next)) return { ok: false, reason: "chief-conflict" };
     if (ids.size) {
       this.saveBots(next);
       for (let i = 0; i < next.length; i++) if (ids.has(next[i].id)) Object.assign(this.bots[i], next[i]);
@@ -1711,13 +1705,15 @@ export class Store {
     bot.busy = ACTIVITY_BUSY.has(bot.activity);
   }
 
+  /** Makes `id` its scope's one Chief (its owner's on a Team Cloud, else its department's), or with no `id` leaves
+   * `section` without one. */
   setChiefOfStaff(id: string | null, section?: string | null): BotRecord[] | null {
     const selected = id ? this.bot(id) : null;
     if (id && !selected) return null;
-    const targetSection = sectionKey(selected?.section ?? section);
+    const scope = selected ? chiefScope(selected) : chiefScope({ section: section ?? undefined });
     const changed: BotRecord[] = [];
     for (const bot of this.bots) {
-      if (sectionKey(bot.section) !== targetSection) continue;
+      if (chiefScope(bot) !== scope) continue;
       const next = bot.id === id;
       if (Boolean(bot.chiefOfStaff) === next && !(next && bot.hidden)) continue;
       if (next) {

@@ -4,14 +4,34 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, procHidepid, writeSeccompFile } from "./box.ts";
+import { visibleInBox } from "./plan.ts";
 import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
+import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
 import { spawnCli } from "../procs.ts";
 import { waitForExit } from "../procs.ts";
 
 const bridge = { socat: "/usr/bin/socat", bridgeScript: "/app/dist-server/bot-box/box-bridge.js", node: "/usr/local/bin/node" };
 
 describe("BoxRunner.wrap", () => {
-  const setup = { dataDir: "/data/.openmausbot", home: "/data", codeRoots: ["/app"], bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: "/data/.openmausbot/box/egress.sock" }, { name: "harness", port: 8799, socket: "/data/.openmausbot/box/harness.sock" }] };
+  const setup = { dataDir: "/data/.openmausbot", home: "/data", codeRoots: ["/app"], engineRoots: engineInstallRoots("/data/.openmausbot"), bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: "/data/.openmausbot/box/egress.sock" }, { name: "harness", port: 8799, socket: "/data/.openmausbot/box/harness.sock" }] };
+
+  // An engine installed in the app's npm prefix: the absolute path the driver resolved, or the bare name looked up on the
+  // PATH it was handed (the prefix's bin first), both read through the bin link's relative target.
+  it.skipIf(process.platform === "win32")("an engine OpenMausBot installed runs inside: its path, the bin folder on PATH and the package the link points at are there, read-only", () => {
+    const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
+    const bin = join(npmEnginesPrefix(setup.dataDir), "bin");
+    const target = join(bin, "..", "lib", "node_modules", "opencode-ai", "bin", "opencode.exe");
+    for (const command of [join(bin, "opencode"), "opencode"]) {
+      const wrapped = runner.wrap({ command, args: ["acp"], cwd: "/data/.openmausbot/task-workspaces/b1/t1", env: { PATH: `${bin}:/usr/local/bin:/usr/bin`, HOME: "/data" } });
+      const inner = wrapped.args.slice(wrapped.args.indexOf("--") + 1);
+      expect(inner.slice(-2)).toEqual([command, "acp"]);
+      expect(wrapped.env.PATH!.split(":")[0]).toBe(bin);
+      const resolved = command.startsWith("/") ? command : join(wrapped.env.PATH!.split(":").find((dir) => visibleInBox(wrapped.plan, dir) !== "none")!, command);
+      expect(resolved).toBe(join(bin, "opencode"));
+      expect(visibleInBox(wrapped.plan, resolved)).toBe("ro");
+      expect(visibleInBox(wrapped.plan, target)).toBe("ro");
+    }
+  });
 
   it("runs the engine under bwrap with the plan, the allow-listed environment and the proxy pointed at the gate", () => {
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set(["COMPOSIO_API_KEY"]) });
@@ -50,7 +70,7 @@ describe("the box's hardening (T0c)", () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-seccomp-"));
     const file = join(dir, "seccomp.bpf");
     writeFileSync(file, seccompBytes());
-    const setup = { dataDir: "/data/.openmausbot", home: "/data", codeRoots: ["/app"], bridges: [] };
+    const setup = { dataDir: "/data/.openmausbot", home: "/data", codeRoots: ["/app"], engineRoots: [], bridges: [] };
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set(), seccompFile: file });
     const wrapped = runner.wrap({ command: "/usr/bin/x", args: [], env: {} });
     expect(wrapped.args).toContain("--seccomp");
@@ -166,6 +186,7 @@ describe("the box a bot's Chrome runs in", () => {
     const bind = (target: string) => browser.options.some((arg, i) => arg === "--bind" && browser.options[i + 2] === target);
     expect(bind(home), "HOME is not the browser's").toBe(false);
     expect(browser.options.join(" ")).not.toContain(`--tmpfs ${dataDir}`);
+    expect(browser.options.join(" "), "the engines are the turns' only").not.toContain(join(dataDir, "tools"));
     expect(browser.options).not.toContain("--unshare-net");
     expect(browser.options).toEqual(expect.arrayContaining(["--unshare-user", "--unshare-pid", "--die-with-parent"]));
     expect(browser.options.join(" ")).toContain(`${uploads} ${uploads}`);
@@ -208,6 +229,8 @@ describe("spawnCli goes through the box", () => {
     expect(boxed.out).toBe("ran");
     expect(boxed.argv).toContain("--unshare-net");
     expect(boxed.argv).toContain("/run/omb/egress.sock");
+    const engines = npmEnginesPrefix(join(dir, "data"));
+    expect(boxed.argv, "the engines OpenMausBot installed, read-only").toContain(`--ro-bind-try\n${engines}\n${engines}\n`);
     expect((await run("openmausbot")).boxed).toBe(false);
     expect((await run("bot", false)).boxed).toBe(false);
     expect(botBox.report().boxed).toBe(1);
@@ -218,7 +241,7 @@ describe("BoxRunner.lend", () => {
   // A plan over the Linux box's POSIX paths, which Windows' path module would join with backslashes.
   it.skipIf(process.platform === "win32")("puts a conversation's lent folders (a memory layer) back read-write in its boxes only, until they are taken back", () => {
     const dataDir = "/data/.openmausbot";
-    const setup = { dataDir, home: "/data", codeRoots: ["/app"], bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }] };
+    const setup = { dataDir, home: "/data", codeRoots: ["/app"], engineRoots: [], bridges: [{ name: "egress", port: BOX_EGRESS_PORT, socket: `${dataDir}/box/egress.sock` }, { name: "harness", port: 8799, socket: `${dataDir}/box/harness.sock` }] };
     const runner = new BoxRunner({ bwrap: "/usr/bin/bwrap", bridge, setup, denyEnv: new Set() });
     const layer = join(dataDir, "workspaces", "bot-a--member-p_ada");
     const request = { command: "/usr/bin/x", args: [], cwd: join(dataDir, "task-workspaces", "bot-a", "thread-1"), env: { PATH: "/usr/bin", HOME: "/data" } };

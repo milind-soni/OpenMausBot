@@ -5,6 +5,19 @@
 import { execFile } from "node:child_process";
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 
+// Prompt silence guard (0 disables). Healthy agents go quiet for minutes: Qwen Code 0.24 sends
+// nothing while it compresses history, backs off a rate limit (60 s up to 5 min per wait) or runs
+// one model request (its SDK waits up to 600 s); a wedged OpenCode turn goes silent forever.
+export const DEFAULT_ACP_PROMPT_IDLE_MS = 15 * 60_000;
+export const promptIdleTimeoutMs = (): number => {
+  const raw = process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_ACP_PROMPT_IDLE_MS;
+  const ms = Number(raw);
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+};
+export const formatQuietLimit = (ms: number): string =>
+  ms >= 120_000 && ms % 60_000 === 0 ? `${ms / 60_000} min` : `${Math.round(ms / 1000)} s`;
+
 export type LogSignal =
   | { kind: "retry"; status: number | null; delayMs: number | null; attempt: number | null }
   | { kind: "compressing" }

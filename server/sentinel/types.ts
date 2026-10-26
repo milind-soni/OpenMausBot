@@ -33,7 +33,7 @@ export interface Observation {
   threadId?: string;
   turnId?: string;
   at: number;
-  /** Stable across scans, so an occurrence is counted once. */
+  /** Stable across scans, so an occurrence is counted once per kind. */
   occurrence: string;
   evidence: EvidenceRef;
 }

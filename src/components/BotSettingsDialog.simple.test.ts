@@ -550,7 +550,8 @@ describe("the Bot tab", () => {
     expect(pressed(rendered.html, "data-thinking-choice")).toEqual(effort ? [effort] : []);
   });
 
-  it("sends a Thinking step to this conversation and the bot's default, and leaves the model's own default unpressed", () => {
+  it("sends a Thinking step to this conversation and, for an owner or admin, the bot's default, and leaves the model's own default unpressed", () => {
+    fixture.ownerOrAdmin = true;
     const rendered = botTab(makeBot());
     expect(pressed(rendered.html, "data-thinking-choice")).toEqual([]);
     segment(rendered, "data-thinking-choice").onChange("high");
@@ -558,9 +559,12 @@ describe("the Bot tab", () => {
       type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
       selection: { instanceId: "claude", model: "claude-opus-5-5", effort: "high" },
     });
-    fixture.storeState = { ...fixture.storeState, config: { cloudHome: true } };
-    segment(botTab(makeBot()), "data-thinking-choice").onChange("low");
-    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.not.objectContaining({ updateBotDefault: true }));
+    fixture.ownerOrAdmin = false;
+    for (const cloudHome of [false, true]) {
+      fixture.storeState = { ...fixture.storeState, config: { cloudHome } };
+      segment(botTab(makeBot()), "data-thinking-choice").onChange("low");
+      expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.not.objectContaining({ updateBotDefault: true }));
+    }
   });
 
   it("shows no Thinking row for an engine without levels, and the variants row for an OpenCode-style one", () => {

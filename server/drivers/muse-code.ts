@@ -8,8 +8,9 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { MspError, spawnMspConnection, type Connection } from "@muse-code/sdk";
+import { Connection, MspError, type DuplexTransport } from "@muse-code/sdk";
 import { z } from "zod";
+import { instanceEnvNames } from "../bot-box/env.ts";
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../config.ts";
 import type {
   ModelCatalog, ProviderDriver, ProviderInstance, ProviderSnapshot, RequestOutcome, RuntimeEvent,
@@ -17,7 +18,7 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { augmentedPath } from "../env-path.ts";
-import { execCli } from "../procs.ts";
+import { describeSpawnFailure, execCli, killCliTree, spawnCli, type CliOwner } from "../procs.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { answersAlone } from "./permission-command.ts";
 import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
@@ -34,6 +35,9 @@ const MUSE_CONTEXT_WINDOW = 1_048_576;
 const RE_ANCHOR_TURNS = 8;
 const STARTUP_TIMEOUT_MS = 30_000;
 const MODEL_LIST_TIMEOUT_MS = 20_000;
+const INTERRUPT_CONFIRM_MS = 5_000;
+const SHUTDOWN_DRAIN_MS = 10_000;
+const SHUTDOWN_KILL_GRACE_MS = 2_000;
 const MAX_TOOL_OUTPUT = 4_000;
 
 // Muse's catalog for a signed-in account (`model/list`), until the live list answers.
@@ -195,6 +199,8 @@ interface ActiveTurn {
   items: Map<string, MuseItem>;
   streamed: Map<string, string>;
   finished: boolean;
+  /** Set once Stop ends the host: a later Stop waits for the same shutdown. */
+  stopping?: Promise<void>;
   receipt?: { key: string; receipt: PromptSplitReceipt };
 }
 
@@ -219,6 +225,26 @@ interface ThreadState {
 }
 
 const asRecord = (value: unknown): Record<string, unknown> => value && typeof value === "object" ? value as Record<string, unknown> : {};
+
+/** Security: @muse-code/sdk 1.4.6's spawnMspConnection starts `muse serve` with its own child_process.spawn, outside
+ * the bot box and the conversation's engine home. MSP runs over the stdio of a spawnCli process instead. */
+function stdioTransport(child: ReturnType<typeof spawnCli>, exited: Promise<void>): DuplexTransport {
+  child.stdout.setEncoding("utf8");
+  child.stderr.resume();
+  return {
+    incoming: child.stdout,
+    write: (chunk) => new Promise((resolve, reject) => {
+      child.stdin.write(chunk, "utf8", (error) => error ? reject(error) : resolve());
+    }),
+    async close(flushed) {
+      const drained = new Promise<void>((resolve) => setTimeout(resolve, SHUTDOWN_DRAIN_MS).unref?.());
+      await Promise.race([flushed?.catch(() => {}), drained]);
+      child.stdin.end();
+      await Promise.race([exited, drained]);
+      await killCliTree(child, SHUTDOWN_KILL_GRACE_MS);
+    },
+  };
+}
 
 export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
   driverKind: DRIVER_KIND,
@@ -257,38 +283,46 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
       return env;
     };
 
-    /** The SDK spawns without a shell; Windows runs Muse's .cmd launcher through cmd.exe. */
+    /** Node's spawn runs no shell; Windows runs Muse's .cmd launcher through cmd.exe. */
     const launch = (args: string[]) => process.platform === "win32"
       ? { command: process.env.ComSpec ?? "cmd.exe", args: ["/d", "/c", config.cli, ...args] }
       : { command: config.cli, args };
 
-    const startHost = async (args: string[], cwd: string, key: string, requestMcp: boolean): Promise<Host> => {
+    const startHost = async (args: string[], cwd: string, key: string, requestMcp: boolean, owner: CliOwner): Promise<Host> => {
       const { command, args: argv } = launch(args);
-      const handshake = spawnMspConnection({ command, args: argv, cwd, env: childEnv(), shutdownTimeoutMs: 10_000 });
+      const env = childEnv();
+      const child = spawnCli(command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"],
+        ...(owner === "bot" ? { box: { allowEnv: instanceEnvNames(input.environment, env) } } : {}) }, owner);
+      let spawnError: NodeJS.ErrnoException | undefined;
+      child.once("error", (error) => { spawnError = error; });
+      const exited = new Promise<void>((resolve) => child.once("close", () => resolve()));
+      const connection = new Connection(stdioTransport(child, exited));
       let timer: NodeJS.Timeout | undefined;
       try {
-        const spawned = await Promise.race([
-          handshake.initialize({ clientInfo: CLIENT_INFO, capabilities: { requestedCapabilities: requestMcp ? ["sessionMcp"] : [] } }),
+        const initialized = await Promise.race([
+          connection.request("initialize", { clientInfo: CLIENT_INFO, capabilities: { requestedCapabilities: requestMcp ? ["sessionMcp"] : [] } }),
           new Promise<never>((_resolve, reject) => {
             timer = setTimeout(() => reject(new Error("Muse Code did not start within 30 seconds.")), STARTUP_TIMEOUT_MS);
             timer.unref?.();
           }),
         ]);
-        const granted = asRecord(spawned.initializeResult).grantedCapabilities;
+        connection.notify("initialized");
+        await connection.flush();
+        const granted = initialized.grantedCapabilities;
         const host: Host = {
-          connection: spawned.connection, exited: spawned.exited, key, closed: false,
+          connection, exited, key, closed: false,
           grantedMcp: Array.isArray(granted) && granted.includes("sessionMcp"),
-          close: () => { host.closed = true; return spawned.close(); },
+          close: () => { host.closed = true; return connection.close(); },
         };
         // Approval and question requests are receipts only: notifications open the cards, answers go as commands.
-        spawned.connection.onServerRequest(async (request) => {
+        connection.onServerRequest(async (request) => {
           if (request.method === "approval/request" || request.method === "userInput/request") return {};
           throw new Error(`Unsupported Muse request: ${request.method}`);
         });
         return host;
       } catch (error) {
-        await handshake.close().catch(() => {});
-        throw error;
+        await connection.close().catch(() => {});
+        throw spawnError ? new Error(describeSpawnFailure(spawnError, config.cli, cwd).message) : error;
       } finally {
         if (timer) clearTimeout(timer);
       }
@@ -298,7 +332,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
       const cwd = mkdtempSync(join(tmpdir(), "omb-muse-models-"));
       let host: Host | undefined;
       try {
-        host = await startHost(["serve", "--disable-shell", "--disable-write", "--no-session-log"], cwd, "models", false);
+        host = await startHost(["serve", "--disable-shell", "--disable-write", "--no-session-log"], cwd, "models", false, "openmausbot");
         const result = await Promise.race([
           host.connection.request("model/list", {}),
           new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("Muse Code did not list its models.")), MODEL_LIST_TIMEOUT_MS).unref?.()),
@@ -499,6 +533,12 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
       await host?.close().catch(() => {});
     };
 
+    /** Muse goes on working until it confirms the interrupt; a turn it does not confirm stops only with its host. */
+    const endUnconfirmed = (state: ThreadState, active: ActiveTurn): Promise<void> => {
+      if (active.finished || state.active !== active) return Promise.resolve();
+      return active.stopping ??= closeHost(state).then(() => finishTurn(state, active, { ok: false, stopReason: "interrupted" }));
+    };
+
     const ensureSession = async (state: ThreadState, turn: SendTurnInput, turnId: string): Promise<{ text: string; rebuilt: boolean; started: boolean }> => {
       const cwd = turn.cwd ?? process.cwd();
       const servers = turnStdioMcpServers(turn);
@@ -519,7 +559,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
         return { text: turn.text, rebuilt: false, started: false };
       }
       await closeHost(state);
-      const host = await startHost(museServeArgs(turn.approvalMode), cwd, key, servers.length > 0);
+      const host = await startHost(museServeArgs(turn.approvalMode), cwd, key, servers.length > 0, "bot");
       state.host = host;
       attach(state, host);
       if (servers.length && !host.grantedMcp) {
@@ -603,7 +643,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
         composioMcp: true,
         browserMcp: true,
         dataMcp: true,
-        highlevelMcp: true,
+        highlevelMcp: true, deviceMcp: true,
         images: true,
         nativeImageInput: true,
         effortLevels: EFFORT_LEVELS,
@@ -624,11 +664,15 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
         const state = threads.get(threadId);
         const active = state?.active;
         if (!state || !active || active.finished) return;
+        if (active.stopping) return active.stopping;
         if (state.host && state.sessionId && active.nativeTurnId) {
           try {
             await state.host.connection.command("turn/interrupt", { sessionId: state.sessionId, turnId: active.nativeTurnId });
-            return; // turn/completed (cancelled) settles it
-          } catch {}
+          } catch {
+            return endUnconfirmed(state, active);
+          }
+          setTimeout(() => void endUnconfirmed(state, active), INTERRUPT_CONFIRM_MS).unref?.();
+          return; // turn/completed (cancelled) settles it
         }
         finishTurn(state, active, { ok: false, stopReason: "interrupted" });
       },
@@ -687,6 +731,7 @@ export const MuseCodeDriver: ProviderDriver<MuseConfig> = {
       hasSession: (threadId) => Boolean(threads.get(threadId)?.sessionId),
       async stopAll() {
         await Promise.all([...threads.values()].map(async (state) => {
+          await state.active?.stopping;
           if (state.active) finishTurn(state, state.active, { ok: false, stopReason: "interrupted" });
           await closeHost(state);
         }));

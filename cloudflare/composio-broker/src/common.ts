@@ -73,13 +73,37 @@ export async function sha256(value: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/** The body's bytes, or null once it passes `limit` bytes: the rest of the stream is cancelled unread. */
+export async function readBoundedBody(request: Request, limit: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (Number(request.headers.get("content-length") ?? "0") > limit) return null;
+  if (!request.body) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
 /** Reads a JSON body of at most `limit` bytes; a bad or oversized body is thrown as the 4xx Response. */
 export async function readJsonBody(request: Request, limit: number): Promise<unknown> {
-  if (Number(request.headers.get("content-length") ?? "0") > limit) {
-    throw json({ error: "request body is too large" }, 413);
-  }
-  const raw = await request.text();
-  if (utf8(raw).byteLength > limit) throw json({ error: "request body is too large" }, 413);
+  const body = await readBoundedBody(request, limit);
+  if (!body) throw json({ error: "request body is too large" }, 413);
+  const raw = new TextDecoder().decode(body);
   try {
     return JSON.parse(raw);
   } catch {

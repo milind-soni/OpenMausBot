@@ -29,6 +29,8 @@ export interface CloudSendSources {
   greetingOnly(threadId: string, name: string): boolean;
   /** The bot is in a room, whose chats go to My Cloud only with their bots. */
   inRoom?(botId: string): boolean;
+  /** The bot has routines here the person set up or changed, which a move takes to My Cloud only with their bot. */
+  automated?(botId: string): boolean;
   skills(bot: BotRecord): ReadonlyArray<{ name: string; description?: string; sha256: string; enabled: boolean }>;
   /** The stored picture's bytes, or null when it is gone. */
   picture(avatarUrl: string): Uint8Array | null;
@@ -85,9 +87,10 @@ export function botParts(bot: BotRecord, picture: (avatarUrl: string) => Uint8Ar
 
 /** A bot nobody has touched since it was made (a fresh install's starter): left out, so it never lands beside My Cloud's
  * own starter. A bot sent from another computer arrives without a greeting, so it never reads as unused. */
-export function unused(bot: BotRecord, skills: number, greetingOnly: (threadId: string, name: string) => boolean, inRoom: (botId: string) => boolean = () => false): boolean {
+export function unused(bot: BotRecord, skills: number, greetingOnly: (threadId: string, name: string) => boolean, inRoom: (botId: string) => boolean = () => false,
+  automated: (botId: string) => boolean = () => false): boolean {
   return !bot.soul?.trim() && !bot.title && !bot.description && !bot.avatarUrl && !bot.sidebarHidden && !bot.welcomed && skills === 0 && (bot.tasks?.length ?? 1) <= 1 && greetingOnly(bot.threadId, bot.name)
-    && !inRoom(bot.id);
+    && !inRoom(bot.id) && !automated(bot.id);
 }
 
 /** `move`: a move's comparison, with what only a move carries. `bot`: a move of that one bot into a team: the bot, its
@@ -98,7 +101,7 @@ export function cloudSendSummary(sources: CloudSendSources, { move = false, bot:
   for (const bot of sources.bots()) {
     if (only !== undefined && bot.id !== only) continue;
     const skills = sources.skills(bot);
-    if (only === undefined && unused(bot, skills.length, sources.greetingOnly, sources.inRoom)) continue;
+    if (only === undefined && unused(bot, skills.length, sources.greetingOnly, sources.inRoom, move ? sources.automated : undefined)) continue;
     carried.add(bot.id);
     const parts: Record<string, string> = { ...botParts(bot, sources.picture), ...(move && sources.move ? sources.move.botParts(bot) : {}) };
     if (only !== undefined) for (const part of TEAM_HELD_PARTS) delete parts[part];

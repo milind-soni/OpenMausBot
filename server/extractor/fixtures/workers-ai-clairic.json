@@ -1,0 +1,177 @@
+{
+  "about": [
+    "Workers AI wire for one extraction on the person's own account, from developers.cloudflare.com/workers-ai/models/clairic and clef-flash (Oct 2026).",
+    "Clairic's answer below is the documented example's, trimmed to these fields; Clef's follows its output schema."
+  ],
+  "referenceDate": "2026-10-23",
+  "fields": {
+    "invoice_number": {
+      "type": "string"
+    },
+    "due_date": {
+      "type": "date",
+      "description": "Issue date plus the net payment days"
+    },
+    "total": {
+      "type": "number",
+      "description": "Amount due including shipping"
+    },
+    "po_number": {
+      "type": "string",
+      "description": "Purchase order number"
+    },
+    "paid": {
+      "type": "boolean",
+      "description": "Has the invoice been paid?"
+    },
+    "currency": {
+      "type": "enum",
+      "options": [
+        "USD",
+        "EUR",
+        "GBP"
+      ]
+    }
+  },
+  "input": {
+    "text": "Invoice INV-2291 from Northwind Supply, issued 2026-09-02, net 30. 4 pallets at $250.00 each, shipping $80.00. Paid in full. Contact: Dana Ruiz."
+  },
+  "clairic": {
+    "url": "https://api.cloudflare.com/client/v4/accounts/<account id>/ai/run/@cf/cloudflare/clairic",
+    "request": {
+      "model": "clairic",
+      "state": "Invoice INV-2291 from Northwind Supply, issued 2026-09-02, net 30. 4 pallets at $250.00 each, shipping $80.00. Paid in full. Contact: Dana Ruiz.",
+      "fields": {
+        "invoice_number": {
+          "type": "text"
+        },
+        "due_date": {
+          "type": "date",
+          "instructions": "Issue date plus the net payment days"
+        },
+        "total": {
+          "type": "number",
+          "instructions": "Amount due including shipping"
+        },
+        "po_number": {
+          "type": "text",
+          "instructions": "Purchase order number"
+        }
+      },
+      "reference_date": "2026-10-23"
+    },
+    "response": {
+      "result": {
+        "model": "clairic",
+        "answers": {
+          "invoice_number": {
+            "type": "text",
+            "p_null": 3.8e-10,
+            "span": [
+              8,
+              16
+            ],
+            "guess": "INV-2291",
+            "confidence": 1,
+            "value": "INV-2291"
+          },
+          "due_date": {
+            "type": "date",
+            "p_null": 1.9e-8,
+            "guess": "2026-10-02",
+            "confidence": 0.9999,
+            "value": "2026-10-02"
+          },
+          "total": {
+            "type": "number",
+            "p_null": 2.3e-8,
+            "guess": 1080,
+            "confidence": 0.9999,
+            "value": 1080
+          },
+          "po_number": {
+            "type": "text",
+            "p_null": 1,
+            "span": [
+              8,
+              16
+            ],
+            "guess": "INV-2291",
+            "confidence": 0.9995,
+            "value": null
+          }
+        },
+        "truncated": false,
+        "usage": {
+          "state_tokens": 61,
+          "image_tokens": 0,
+          "schema_tokens": 210,
+          "input_tokens": 271,
+          "output_tokens": 0,
+          "passes": 1
+        }
+      },
+      "success": true,
+      "errors": [],
+      "messages": []
+    }
+  },
+  "clef": {
+    "url": "https://api.cloudflare.com/client/v4/accounts/<account id>/ai/run/@cf/cloudflare/clef-flash",
+    "request": {
+      "state": "Invoice INV-2291 from Northwind Supply, issued 2026-09-02, net 30. 4 pallets at $250.00 each, shipping $80.00. Paid in full. Contact: Dana Ruiz.",
+      "model": "clef-flash",
+      "questions": {
+        "paid": {
+          "type": "noul",
+          "instructions": "Has the invoice been paid?"
+        },
+        "currency": {
+          "type": "choice",
+          "instructions": "Which currency is it?",
+          "criteria": {
+            "USD": "USD",
+            "EUR": "EUR",
+            "GBP": "GBP"
+          }
+        }
+      }
+    },
+    "response": {
+      "result": {
+        "model": "clef-flash",
+        "answers": {
+          "paid": {
+            "type": "noul",
+            "noul": 0.91
+          },
+          "currency": {
+            "type": "choice",
+            "choice": "USD",
+            "probabilities": {
+              "USD": 0.97,
+              "EUR": 0.02,
+              "GBP": 0.01
+            },
+            "confidence": 0.95
+          }
+        },
+        "usage": {
+          "input_tokens": 96,
+          "output_tokens": 0
+        }
+      },
+      "success": true,
+      "errors": [],
+      "messages": []
+    }
+  },
+  "values": {
+    "invoice_number": "INV-2291",
+    "due_date": "2026-10-02",
+    "total": 1080,
+    "po_number": null,
+    "paid": true,
+    "currency": "USD"
+  }
+}

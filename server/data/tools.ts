@@ -142,6 +142,7 @@ type Token = { kind: "word" | "ident" | "punct" | "block"; text: string; raw: st
 function topLevelTokens(sql: string): { tokens: Token[]; statements: number } {
   const tokens: Token[] = [];
   let statements = 1;
+  let ended = false;
   let depth = 0;
   let i = 0;
   const n = sql.length;
@@ -149,24 +150,24 @@ function topLevelTokens(sql: string): { tokens: Token[]; statements: number } {
   while (i < n) {
     const ch = sql[i]!;
     const next = sql[i + 1];
-    if (ch === "-" && next === "-") { const end = sql.indexOf("\n", i); i = end === -1 ? n : end + 1; continue; }
-    if (ch === "/" && next === "*") { const end = sql.indexOf("*/", i + 2); if (end === -1) throw fail("invalid_input", "Unterminated comment."); i = end + 2; continue; }
+    if (ch === "-" && next === "-") { const end = sql.slice(i).search(/[\n\r]/); i = end === -1 ? n : i + end + 1; continue; }
+    if (ch === "/" && next === "*") { i = blockCommentEnd(sql, i); continue; }
+    if (ch === ";") { ended = true; i++; continue; }
+    if (ended && /\S/.test(ch)) { statements++; ended = false; }
     if (ch === "'") {
-      let j = i + 1;
-      for (;;) {
-        const q = sql.indexOf("'", j);
-        if (q === -1) throw fail("invalid_input", "Unterminated string literal.");
-        if (sql[q + 1] === "'") { j = q + 2; continue; }
-        j = q + 1; break;
-      }
       push("word", "'…'");
-      i = j; continue;
+      i = stringEnd(sql, i); continue;
     }
-    if (ch === "$" && next === "$") {
-      const end = sql.indexOf("$$", i + 2);
-      if (end === -1) throw fail("invalid_input", "Unterminated dollar-quoted string.");
-      push("word", "'…'");
-      i = end + 2; continue;
+    if (ch === "$") {
+      const delimiter = /\$(?:[A-Za-z_\u0080-\uffff][\w\u0080-\uffff]*)?\$/y;
+      delimiter.lastIndex = i;
+      const open = delimiter.exec(sql)?.[0];
+      if (open) {
+        const end = sql.indexOf(open, i + open.length);
+        if (end === -1) throw fail("invalid_input", "Unterminated dollar-quoted string.");
+        push("word", "'…'");
+        i = end + open.length; continue;
+      }
     }
     if (ch === '"') {
       let j = i + 1;
@@ -181,13 +182,9 @@ function topLevelTokens(sql: string): { tokens: Token[]; statements: number } {
     }
     if (ch === "(") { push("block", "(…)"); depth++; i++; continue; }
     if (ch === ")") { depth = Math.max(0, depth - 1); i++; continue; }
-    if (ch === ";") {
-      if (depth === 0 && /\S/.test(sql.slice(i + 1).replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, "").replace(/[;\s]+$/, ""))) statements++;
-      i++; continue;
-    }
-    if (/[A-Za-z_]/.test(ch)) {
+    if (/[A-Za-z_\u0080-\uffff]/.test(ch)) {
       let j = i + 1;
-      while (j < n && /[A-Za-z0-9_$.]/.test(sql[j]!)) j++;
+      while (j < n && /[A-Za-z0-9_$.\u0080-\uffff]/.test(sql[j]!)) j++;
       push("word", sql.slice(i, j), sql.slice(i, j).toUpperCase());
       i = j; continue;
     }
@@ -195,6 +192,45 @@ function topLevelTokens(sql: string): { tokens: Token[]; statements: number } {
     i++;
   }
   return { tokens, statements };
+}
+
+/** DuckDB 1.5 nests block comments: `/* a /* b *\/ c *\/` is one comment. */
+function blockCommentEnd(sql: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < sql.length - 1;) {
+    if (sql[i] === "/" && sql[i + 1] === "*") { depth++; i += 2; continue; }
+    if (sql[i] === "*" && sql[i + 1] === "/") { depth--; i += 2; if (!depth) return i; continue; }
+    i++;
+  }
+  throw fail("invalid_input", "Unterminated comment.");
+}
+
+/**
+ * DuckDB 1.5 reads backslash escapes in E'…' unless the E ends an identifier. After a digit the E may
+ * end a number (`1E'…'`), so a literal the two readings end in different places is refused.
+ */
+function stringEnd(sql: string, quote: number): number {
+  if (!/[eE]/.test(sql[quote - 1] ?? "")) return literalEnd(sql, quote, false);
+  const before = sql[quote - 2] ?? "";
+  if (!/[0-9]/.test(before)) return literalEnd(sql, quote, !/[A-Za-z_$\u0080-\uffff]/.test(before));
+  const end = literalEnd(sql, quote, false);
+  if (end !== literalEnd(sql, quote, true)) throw fail("invalid_input", "Put a space before E'…' so the string reads one way.");
+  return end;
+}
+
+/** DuckDB 1.5 joins 'a' and 'b' separated by a line break into one literal that keeps the first one's escapes. */
+const STRING_CONTINUES = /[ \t\f]*(?:--[^\n\r]*)?[\n\r](?:[ \t\n\r\f]|--[^\n\r]*[\n\r])*'/y;
+
+function literalEnd(sql: string, quote: number, escapes: boolean): number {
+  for (let j = quote + 1; j < sql.length; j++) {
+    if (escapes && sql[j] === "\\") { j++; continue; }
+    if (sql[j] !== "'") continue;
+    if (sql[j + 1] === "'") { j++; continue; }
+    STRING_CONTINUES.lastIndex = j + 1;
+    if (!STRING_CONTINUES.test(sql)) return j + 1;
+    j = STRING_CONTINUES.lastIndex - 1;
+  }
+  throw fail("invalid_input", "Unterminated string literal.");
 }
 
 const READ_VERBS = new Set(["SELECT", "WITH", "FROM", "PIVOT", "UNPIVOT", "VALUES", "SUMMARIZE", "DESCRIBE", "EXPLAIN", "SHOW"]);
@@ -206,10 +242,18 @@ export type SqlClass =
   | { kind: "refused"; verb: string };
 
 /** Judged by the verb (and the verb after a CTE list), so a `WITH … DELETE` never passes as a read. */
+/** DuckDB 1.5 parses a failed statement again with these spaces removed, so the second reading splits tokens the first one joined. */
+const REPARSED_SPACES = /[\u00a0\u2000-\u200b\u202f\u205f\u2060\u3000\ufeff]/;
+
 export function classifySql(sql: string): SqlClass {
+  if (REPARSED_SPACES.test(sql)) throw fail("invalid_input", "Replace non-ASCII spaces with plain spaces.", { hint: "In a string, write chr(160) and similar instead." });
   const { tokens, statements } = topLevelTokens(sql);
   if (statements > 1) throw fail("invalid_input", "One statement per call.", { hint: "Send each statement in its own data_sql call." });
   if (!tokens.length || tokens[0]!.kind !== "word") throw fail("invalid_input", "The statement is empty.");
+  return classifyTokens(tokens);
+}
+
+function classifyTokens(tokens: Token[]): SqlClass {
   let i = 0;
   let verb = tokens[0]!.text;
   const withClause = verb === "WITH";
@@ -233,8 +277,11 @@ export function classifySql(sql: string): SqlClass {
   }
   if (verb === "EXPLAIN") {
     // EXPLAIN plans without running; EXPLAIN ANALYZE runs the statement.
-    const planned = tokens[i + 1]?.text === "ANALYZE" ? tokens[i + 2]?.text : tokens[i + 1]?.text;
-    if (planned && !READ_VERBS.has(planned)) return { kind: "refused", verb: planned };
+    const operand = tokens.slice(tokens[i + 1]?.text === "ANALYZE" ? i + 2 : i + 1);
+    if (!operand.length) return { kind: "refused", verb };
+    const planned = classifyTokens(operand);
+    if (planned.kind === "refused") return planned;
+    if (planned.kind === "create") return { kind: "refused", verb: "CREATE" };
     return { kind: "read", materialisable: false };
   }
   if (READ_VERBS.has(verb)) return { kind: "read", materialisable: withClause || MATERIALISABLE.has(verb) };
@@ -505,7 +552,7 @@ export async function loadData(ctx: DataContext, input: LoadInput): Promise<Load
   const unique = (base: string): string => {
     const stem = tableNameFrom(base);
     let name = stem;
-    for (let n = 2; !replace && existing.has(name.toLowerCase()); n++) name = `${stem}_${n}`.slice(0, 63);
+    for (let n = 2; !replace && existing.has(name.toLowerCase()); n++) name = `${stem.slice(0, 62 - String(n).length)}_${n}`;
     existing.add(name.toLowerCase());
     return name;
   };

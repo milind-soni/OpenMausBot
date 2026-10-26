@@ -29,6 +29,8 @@ export interface CloudAccountState {
   credit?: import("./cloud-home.mjs").CloudCredit;
   /** Connected: what this account may buy now (the session's `offer`), for wording only. */
   offer?: import("./cloud-home.mjs").CloudOffer;
+  /** Connected with an active plan: its allowances and this month's use of them, and the bigger plans the app can move to (display only). */
+  usage?: import("./cloud-home.mjs").CloudUsage;
   /** A checkout this app opened (or a sign-in it started on the way to
    * one: `signIn`) in the last 24 hours: the plan, and when (Reopen checkout
    * starts the 30-minute watch again). `link`: main keeps its page, so Reopen
@@ -58,6 +60,25 @@ export interface CloudHomeLook { name: string; color: import("./cloud-buy.mjs").
  * again); `rate-limited`; or `failed` (nothing was opened). */
 export type CloudCheckoutOutcome = "opened" | "signing-in" | "conflict" | "rate-limited" | "failed";
 export interface CloudCheckoutResult { outcome: CloudCheckoutOutcome; state: CloudAccountState }
+/** What moving up to a bigger plan would cost now, from Dodo's own preview (US cents): `price` a month before tax, `chargeNow`
+ * today with its `tax` (0 for a free trial, whose first charge becomes `price` on `nextBillingAt`). The confirmation stays in main. */
+export interface CloudUpgradePreview { plan: string; from?: string; trial: boolean; price: number; chargeNow: number; tax: number; nextBillingAt?: number; expiresAt: number }
+/** The Admin's refusals the app words itself. */
+export type CloudUpgradeRefusal = "payment_failed" | "not_subscribed" | "already_on_plan" | "plan_change_unavailable" | "confirmation_required" | "price_changed" | "rate_limited";
+/** `preview`: show it and ask; `settled`: a change already going through, where it is now; `browser`: this Admin doesn't change
+ * plans from the app, so the Cloud page opened instead; `refused` with its code; `failed`: nothing changed. */
+export type CloudUpgradePreviewResult =
+  | { outcome: "preview"; preview: CloudUpgradePreview }
+  | { outcome: "settled"; status: "upgraded" | "pending"; tier: string }
+  | { outcome: "browser" }
+  | { outcome: "refused"; code: CloudUpgradeRefusal }
+  | { outcome: "failed" };
+/** `upgraded`: on the new plan; `pending`: Dodo is still taking the payment; `unconfirmed`: no answer, so the session will say. */
+export type CloudUpgradeResult =
+  | { outcome: "upgraded" | "pending"; tier: string }
+  | { outcome: "unconfirmed" }
+  | { outcome: "refused"; code: CloudUpgradeRefusal }
+  | { outcome: "failed" };
 export interface CloudAccountBridge {
   state(): Promise<CloudAccountState>;
   begin(): Promise<CloudAccountState>;
@@ -82,6 +103,9 @@ export interface CloudAccountBridge {
   copyCheckoutLink?(): Promise<boolean>;
   /** "Email me when I can add another". */
   interest?(): Promise<void>;
+  /** Moving up to a bigger plan: what it costs now (changes nothing), then the change, only after this app's own preview of it. Absent on an older app. */
+  upgradePreview?(plan: string, source: string): Promise<CloudUpgradePreviewResult>;
+  upgrade?(plan: string, source: string): Promise<CloudUpgradeResult>;
   /** The Cloud's name and colour (chosen while it is set up), and saving them. */
   look?(): Promise<CloudHomeLook>;
   setLook?(name: string, color: string): Promise<CloudHomeLook>;
@@ -115,6 +139,8 @@ export interface CloudPlanSnapshot {
   sleeps?: true;
   /** This window's home is this Cloud: the person's bots moved here (home-window.mjs). */
   home?: true;
+  /** Verified, with an active plan: its allowances and their use this month (the usage meter). */
+  usage?: import("./cloud-home.mjs").CloudUsage;
 }
 export interface CloudPlanBridge {
   state(): Promise<CloudPlanSnapshot>;
@@ -123,6 +149,9 @@ export interface CloudPlanBridge {
   signIn?(): Promise<void>;
   /** The trial's popup due now was shown: main shows it no more today. Absent on an older app. */
   noticeSeen?(): Promise<void>;
+  /** The usage meter's Upgrade: the preview, then the change (only from the person's click). Absent on an older app. */
+  upgradePreview?(plan: string, source: string): Promise<CloudUpgradePreviewResult>;
+  upgrade?(plan: string, source: string): Promise<CloudUpgradeResult>;
 }
 
 export declare const CLOUD_ORIGIN: string;
@@ -133,6 +162,7 @@ export declare function cloudTarget(env?: Record<string, string | undefined>): {
   file: string; environments: string; sync: string; look: string;
 };
 export declare const CHECKOUT_SOURCES: readonly string[];
+export declare const UPGRADE_SOURCES: readonly string[];
 export declare function checkoutDestination(value: unknown, options?: { fixture?: boolean; staging?: boolean }): string | null;
 export declare function cloudOrigin(value?: string, fixture?: boolean): string;
 export interface CloudAccountStore {
@@ -172,6 +202,10 @@ export interface CloudAccountClient {
   /** Waiting on a checkout this app opened (the first 30 minutes). */
   checkoutPending(): boolean;
   interest(kind: "another_cloud"): Promise<void>;
+  /** POST /api/cloud/desktop/upgrade/preview; keeps the confirmation in main. */
+  upgradePreview(plan: string, source: string): Promise<CloudUpgradePreviewResult>;
+  /** POST /api/cloud/desktop/upgrade with this app's own preview's confirmation, or nothing is asked. */
+  upgrade(plan: string, source: string): Promise<CloudUpgradeResult>;
   homeTarget(): { origin: string } | null;
   /** The Admin's last word on a Cloud whose plan sleeps; null for any other. */
   power(): import("./cloud-power.mjs").CloudPower | null;

@@ -10,6 +10,7 @@ import { useStore, type Bot, type Task } from "@/state/store";
 import type { PlaceView } from "../../shared/place-view";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { PlaceIcon } from "./PlaceIcon";
+import type { SidebarMenuItem } from "./SidebarPopoverMenu";
 
 export type PlaceAvailability = Record<Place, boolean>;
 
@@ -36,6 +37,56 @@ export function usePlaceViews(bot: Bot): Record<Place, { view: PlaceView; reacha
 export function usePlaceAvailability(bot: Bot): PlaceAvailability {
   const views = usePlaceViews(bot);
   return { cloud: views.cloud.reachable, vm: views.vm.reachable, local: views.local.reachable, browser: views.browser.reachable };
+}
+
+/** The place chip as one + menu entry with the same choices, for a phone composer that has no room for the chip. */
+export function usePlaceMenuItem({ bot, task, disabled = false, onPin }: {
+  bot: Bot;
+  task?: Pick<Task, "surface"> | null;
+  disabled?: boolean;
+  onPin: (surface: Place | null) => void;
+}): SidebarMenuItem {
+  const { state } = useStore();
+  const places = usePlaceViews(bot);
+  const effective = effectivePlace(bot, task);
+  const pinned = Boolean(task?.surface);
+  const off = effective === "off";
+  const botDefault = bot.computer ?? "auto";
+  const followsAuto = botDefault === "auto";
+  const check = <Check size={14} className="text-accent" aria-hidden="true" />;
+  const choose = (surface: Place | null) => { if (surface !== (task?.surface ?? null)) onPin(surface); };
+  return {
+    key: "place",
+    label: t("computer.worksOn"),
+    subtitle: t(placeLabelKey(effective)),
+    icon: <PlaceIcon place={effective} size={16} aria-hidden="true" />,
+    disabled: disabled || off,
+    onSelect: () => {},
+    submenu: [
+      {
+        key: "place:follow",
+        label: followsAuto ? t("place.auto") : t("place.followBot"),
+        note: followsAuto ? t("place.autoDetail") : t("place.followBotDetail", { place: t(placeLabelKey(botDefault)) }),
+        icon: <PlaceIcon place={botDefault} size={16} aria-hidden="true" />,
+        active: !pinned,
+        trailing: !pinned ? check : undefined,
+        onSelect: () => choose(null),
+      },
+      ...PLACES.filter((place) => placeOffered(place, state.config)).map((place): SidebarMenuItem => {
+        const { view, reachable, policy } = places[place];
+        return {
+          key: `place:${place}`,
+          label: t(placeLabelKey(place)),
+          note: !policy ? t("place.unavailable") : placeHasIssue(view) ? view.short : t(DESCRIPTION[place]),
+          icon: <PlaceIcon place={place} size={16} aria-hidden="true" />,
+          active: task?.surface === place,
+          trailing: task?.surface === place ? check : undefined,
+          disabled: !reachable,
+          onSelect: () => choose(place),
+        };
+      }),
+    ],
+  };
 }
 
 const DESCRIPTION: Record<Place, "computer.dest.cloudDesc" | "computer.dest.vmDesc" | "computer.dest.localDesc" | "computer.dest.browserDesc"> = {

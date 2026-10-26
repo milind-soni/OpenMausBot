@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import type { SendTurnInput } from "../contracts.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
 import { AGENTS_ENV_HEADER } from "../routes/own-mcp-http-path.ts";
+import { TOOL_LIMIT_ENV, TOOL_LIMIT_HEADER } from "../tool-count-limit.ts";
 import { TOOL_SCHEMA_PROFILE_ENV } from "../tool-schema-profile.ts";
+import { agentsToolList } from "./agents-mcp.ts";
 import { acpMcpServers, ownMcpOverHttp } from "./turn-mcp.ts";
 
 const HARNESS = "http://127.0.0.1:8799";
@@ -86,6 +88,38 @@ describe("the MCP servers a Kimi Code turn gets", () => {
       const servers = acpMcpServers(withRemote(), { engine });
       expect(servers.some((server) => TOOL_SCHEMA_PROFILE_ENV in env(server))).toBe(false);
       expect(servers.find((server) => server.name === "notes")).toEqual({ name: "notes", command: "npx", args: ["-y", "notes-mcp"], env: [{ name: "NOTES_KEY", value: "k" }] });
+    }
+  });
+});
+
+describe("the MCP servers of a turn whose model takes a limited number of tools", () => {
+  const env = (server: ReturnType<typeof acpMcpServers>[number]) =>
+    Object.fromEntries(("env" in server ? server.env : []).map(({ name, value }) => [name, value]));
+  const header = (server: ReturnType<typeof acpMcpServers>[number], name: string) =>
+    ("headers" in server ? server.headers : []).find((entry) => entry.name === name)?.value;
+  const agentsTools = agentsToolList(turn().integrations!.agents!.env).listed.length;
+
+  it("keeps the agents server's whole list and shares the rest evenly, each over the way that server reads it", () => {
+    const servers = acpMcpServers(turn(), { http: true, toolBudget: agentsTools + 10 });
+    expect(servers.map((server) => server.name)).toEqual(["agents", "browser", "data", "notes"]);
+    const agents = JSON.parse(Buffer.from(header(servers[0]!, AGENTS_ENV_HEADER)!, "base64url").toString("utf8"));
+    expect(agents[TOOL_LIMIT_ENV]).toBe(String(agentsTools));
+    expect([header(servers[1]!, TOOL_LIMIT_HEADER), header(servers[2]!, TOOL_LIMIT_HEADER)]).toEqual(["4", "3"]);
+    const notes = servers[3] as { args: string[] };
+    expect(notes.args).toEqual([SPAWNED_PROXIES.mcpGate]);
+    expect(env(servers[3]!)[TOOL_LIMIT_ENV]).toBe("3");
+    expect(JSON.parse(env(servers[3]!).OMB_GATE_UPSTREAM!)).toEqual({ command: "npx", args: ["-y", "notes-mcp"], env: { NOTES_KEY: "k" } });
+  });
+
+  it("trims the agents server too when the budget is smaller than its list", () => {
+    const servers = acpMcpServers(turn(), { toolBudget: 5 });
+    expect(servers.map((server) => env(server)[TOOL_LIMIT_ENV])).toEqual(["5", "0", "0", "0"]);
+  });
+
+  it("leaves every server as it was without a limit", () => {
+    for (const server of acpMcpServers(turn(), { http: true })) {
+      expect(env(server)[TOOL_LIMIT_ENV]).toBeUndefined();
+      expect(header(server, TOOL_LIMIT_HEADER)).toBeUndefined();
     }
   });
 });

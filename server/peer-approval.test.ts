@@ -66,16 +66,15 @@ describe("peer approval card lifecycle", () => {
     expect(store.messagesFor(from.threadId).find((m) => m.id === card.id)?.card?.answered).toBe("deny");
   });
 
-  it("expires without attributing a decision to the user, and rejects late answers", async () => {
+  it("keeps the card pending for days and still takes the person's answer", async () => {
     vi.useFakeTimers();
     const verdict = requestPeerApproval(bus, from, target, "ping", "delegate_bot");
     const card = pendingCard(store, from)!;
-    await vi.advanceTimersByTimeAsync(15 * 60_000);
-    expect(await verdict).toBe("expired");
-    expect(store.messagesFor(from.threadId).find(m => m.id === card.id)?.card)
-      .toMatchObject({ answered: "deny", dismissed: true });
-    expect(resolvePeerComms(bus, card.card!.requestId!, "allow")).toBe(false);
-    expect(pendingCard(store, from)).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+    expect(pendingCard(store, from)?.id).toBe(card.id);
+    expect(resolvePeerComms(bus, card.card!.requestId!, "allow")).toBe(true);
+    expect(await verdict).toBe("allow");
+    expect(resolvePeerComms(bus, card.card!.requestId!, "deny")).toBe(false);
   });
 
   it("tells the person the bot is waiting on them: a waiting state and a notification", async () => {

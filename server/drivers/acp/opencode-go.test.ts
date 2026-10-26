@@ -38,6 +38,16 @@ const catalog = (...ids: string[]): ModelCatalog => ({
 });
 
 describe("OpenCode catalog", () => {
+  // `opencode models opencode-go --verbose` from opencode 1.18.27, trimmed to four of its entries.
+  it("lists MiniMax M3.1 Flash from OpenCode Go's real model list, with its window and effort levels", () => {
+    const verbose = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fixtures", "opencode-1.18.27-models-verbose-go.txt"), "utf8");
+    const parsed = parseOpenCodeModelsOutput(verbose);
+    expect(parsed?.options.map((option) => option.id)).toEqual(["opencode-go/glm-5.3", "opencode-go/minimax-m3", "opencode-go/minimax-m3.1-flash", "opencode-go/qwen3.8-flash"]);
+    expect(parsed?.options[2]).toEqual({
+      id: "opencode-go/minimax-m3.1-flash", label: "Go · MiniMax M3.1 Flash", contextWindow: 1_000_000,
+      variants: ["low", "medium", "high", "xhigh", "max"].map((id) => ({ id, label: expect.any(String) })),
+    });
+  });
   it("keeps advertised opaque variants without inventing default or mapping minimal", () => {
     const parsed = parseOpenCodeModelsOutput([
       "opencode/reasoner",

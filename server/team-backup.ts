@@ -41,7 +41,7 @@ function messageText(message: Message): string {
   if (message.kind === "secret") parts.push("[Secret request — not restored]");
   if (message.kind === "signin") parts.push("[Sign-in request — not restored]");
   if (message.routineRun) parts.push(`[Routine: ${message.routineRun.routineName} — ${message.routineRun.status}]`, message.routineRun.summary ?? "", message.routineRun.error ?? "");
-  if (message.goalRun) parts.push(`[Room goal: ${message.goalRun.status}]`, message.goalRun.goal, message.goalRun.detail ?? "");
+  if (message.goalRun) parts.push(`[Goal: ${message.goalRun.status}]`, message.goalRun.goal, message.goalRun.detail ?? "");
   if (message.kind === "screen" || message.attachments?.length) parts.push("[Image or attachment — file not included in this backup]");
   return parts.filter(Boolean).join("\n");
 }
@@ -94,7 +94,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
   });
   const validRoutines = routines.filter((routine) => {
     const room = groups.find((group) => group.key === routine.groupId);
-    const valid = botIds.has(routine.botId) && (routine.target !== "room-goal" || (room && !room.dm && room.memberIds.includes(routine.botId)));
+    const valid = botIds.has(routine.botId) && (routine.target !== "room-goal" || !routine.groupId || (room && !room.dm && room.memberIds.includes(routine.botId)));
     if (!valid) warnings.push(`Routine “${routine.name}” is not included because its bot, room or coordinator was deleted.`);
     return valid;
   });
@@ -241,7 +241,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
     }
     for (const source of backup.routines) {
       createdRoutines.push(routines.create({ ...source, botId: botIds.get(source.botId)!,
-        groupId: source.target === "room-goal" ? groupIds.get(source.groupId!) : undefined, enabled: false }));
+        groupId: source.target === "room-goal" && source.groupId ? groupIds.get(source.groupId) : undefined, enabled: false }));
     }
     return { name: backup.name, bots, groups, routines: createdRoutines };
   } catch (error) {

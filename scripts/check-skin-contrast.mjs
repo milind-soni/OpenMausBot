@@ -31,12 +31,35 @@ function parseBase(source) {
 /** Every `[data-skin="x"] { … }` block, as id → {token: value}, over the
  * inherited base so a skin is measured as it actually renders. */
 function parseSkins(source) {
-  const base = parseBase(source);
+  const { desktop, phone } = splitPhone(source);
+  const base = parseBase(desktop);
   const skins = new Map();
-  for (const [, id, body] of source.matchAll(/\[data-skin="([a-z-]+)"\]\s*\{([^}]*)\}/g)) {
+  for (const [, id, body] of desktop.matchAll(/\[data-skin="([a-z-]+)"\]\s*\{([^}]*)\}/g)) {
     skins.set(id, { ...base, ...declarations(body) });
   }
+  // The phone block re-declares some tokens of a skin under a width query, so
+  // that skin is measured twice: as it renders on desktop and as "<id> (phone)".
+  for (const [, id, body] of phone.matchAll(/\[data-skin="([a-z-]+)"\]\)?\s*\{([^}]*)\}/g)) {
+    skins.set(`${id} (phone)`, { ...skins.get(id), ...declarations(body) });
+  }
   return skins;
+}
+
+/** The `@media (max-width: 767.98px) { … }` block, cut out of the source so its
+ * skin selectors are not mistaken for a second definition of the skin. */
+function splitPhone(source) {
+  const start = source.search(/@media \(max-width: 767\.98px\)\s*\{/);
+  if (start < 0) return { desktop: source, phone: "" };
+  let depth = 0;
+  let end = source.indexOf("{", start);
+  for (let i = end; i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}" && --depth === 0) {
+      end = i + 1;
+      break;
+    }
+  }
+  return { desktop: source.slice(0, start) + source.slice(end), phone: source.slice(start, end) };
 }
 
 function parseHex(value) {
@@ -167,12 +190,12 @@ for (const [id, tokens] of skins) {
     continue;
   }
   for (const { fg, bg, ratio } of problems) {
-    const floor = BASELINE_FLOORS.get(`${id}|${fg}|${bg}`);
+    const floor = BASELINE_FLOORS.get(`${id.replace(/ \(phone\)$/, "")}|${fg}|${bg}`);
     if (floor === undefined || ratio < floor - BASELINE_DRIFT) skinFailed = true;
   }
   console.log(`${skinFailed ? "✗" : "~"} ${id}${skinFailed ? "" : " (known upstream gaps)"}`);
   for (const { fg, bg, ratio, min } of problems) {
-    const floor = BASELINE_FLOORS.get(`${id}|${fg}|${bg}`);
+    const floor = BASELINE_FLOORS.get(`${id.replace(/ \(phone\)$/, "")}|${fg}|${bg}`);
     const baseline = floor === undefined ? "" : `; baseline ${floor.toFixed(2)}:1`;
     console.log(`    ${fg} on ${bg}: ${ratio.toFixed(2)}:1 (needs ${min}:1${baseline})`);
   }

@@ -8,7 +8,7 @@ import { fitPage, pageLimit, type BrowserMode, type HostKind, type ScreenSpec } 
 import { launchChrome, type ChromeProcess, type LaunchOptions } from "./chrome/launch.ts";
 import { clearSingleton, staleSingletonLock, type ProcessRegistry } from "./chrome/processes.ts";
 import { languageList } from "./chrome/wrapper.ts";
-import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.ts";
+import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileDir, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.ts";
 
 export type BackendKind = "local" | "my-chrome" | "cdp-url";
 
@@ -93,6 +93,16 @@ export class LocalBackend implements Backend {
   async open(request: OpenRequest): Promise<OpenedBrowser> {
     const options = this.#options;
     const platform = options.platform ?? process.platform;
+    const release = options.registry?.reserve(profileDir(options.dataDir, request.key));
+    try {
+      return await this.#open(request, platform);
+    } finally {
+      release?.();
+    }
+  }
+
+  async #open(request: OpenRequest, platform: NodeJS.Platform): Promise<OpenedBrowser> {
+    const options = this.#options;
     const binary = await options.binary();
     const { dir, record, created } = ensureProfile(options.dataDir, request.key, { acceptLanguages: options.acceptLanguages?.() ?? "en-US,en" });
     const binaryVersion = versionOf(binary.identity.product);

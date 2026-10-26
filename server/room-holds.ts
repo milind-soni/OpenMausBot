@@ -10,6 +10,8 @@ const STOP_WINDOW = 2;
 const STOP_WORDS = new Set(["stop", "halt", "pause"]);
 const OBJECT_STARTERS = new Set(["this", "that", "these", "those", "the", "a", "an", "my", "our", "your", "his", "her", "their", "its"]);
 const OWN_WORK_OR_URGENCY = new Set(["now", "please", "right", "immediately", "asap", "work", "task", "job", "turn", "run", "reply"]);
+const STOP_COMMANDS = new Set(["stop", "halt", "cancel", "abort"]);
+const STOP_FILLERS = new Set(["now", "please", "right", "immediately", "asap", "it", "that", "this", "everything", "all"]);
 export const MAX_HELD_MESSAGES = 20;
 
 export type HoldDirective = {
@@ -83,6 +85,11 @@ const RESUME_TAIL = new Set(["all", "everyone", "please", "todos", "por", "favor
 function isBareResume(text: string): boolean {
   const words = maskQuotedAndCode(text).toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
   return words.length > 0 && RESUME_WORDS.has(words[0]!) && words.slice(1).every((word) => RESUME_TAIL.has(word));
+}
+
+export function isStopCommand(text: string): boolean {
+  const words = maskQuotedAndCode(text).toLowerCase().match(/[\p{L}\p{N}_-]+/gu) ?? [];
+  return words.some((word) => STOP_COMMANDS.has(word)) && words.every((word) => STOP_COMMANDS.has(word) || STOP_FILLERS.has(word));
 }
 
 /** A stop word far from every mention changes nothing: re-dispatching a bot the person just stopped is the one mistake to avoid. */

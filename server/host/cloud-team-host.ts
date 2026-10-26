@@ -8,11 +8,13 @@ import type { CloudTeam, TeamRole } from "../cloud-team.ts";
 import { createPeopleAbout, type PeopleAbout, type PersonProfilePatch, type SeedField } from "../people-about.ts";
 import { personKey } from "../person-key.ts";
 import { ensureWorkspace, loadMemory, workspaceDir } from "../workspace.ts";
+import type { EngineHomes } from "../engine-homes/engine-homes.ts";
+import { storeThreads, type StoreBotThreads } from "../engine-homes/migrate.ts";
 
 export interface CloudTeamHostDeps {
   team: CloudTeam | null;
   dataDir: string;
-  store: { groupByThread(threadId: string): { id: string } | undefined };
+  store: { groupByThread(threadId: string): { id: string } | undefined; readonly bots?: StoreBotThreads };
   starters: { get(threadId: string): string | undefined };
   /** Keys that name no person (nobody, outside). */
   markers: ReadonlySet<string>;
@@ -20,6 +22,8 @@ export interface CloudTeamHostDeps {
   /** config.json's one profile. On a team it is nobody's: it is handed to the member whose address it names, then
    * cleared. */
   serverProfile?: { read(): ServerProfile | undefined; clear(): void };
+  /** Started on a team: each audience's engines get their own home (server/engine-homes). */
+  engineHomes?: Pick<EngineHomes, "start">;
 }
 
 export interface TeamSessionInfo { id: string; name: string; role: TeamRole }
@@ -38,6 +42,7 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
   const people: PeopleAbout = createPeopleAbout(deps.dataDir);
   const audienceOf = (threadId: string): Audience =>
     threadAudienceFrom({ room: deps.store.groupByThread(threadId)?.id, starter: deps.starters.get(threadId), markers: deps.markers });
+  if (team) deps.engineHomes?.start({ dataDir: deps.dataDir, audienceOf, threads: () => storeThreads(deps.store.bots ?? []) });
   /** The layer a turn in this conversation writes into: the bot's own folder off a team or for the team's conversations,
    * a sibling folder for a room's or a member's. The folder exists before the turn starts, so the box can bind it. */
   const layer = (botId: string, threadId: string): string => {

@@ -20,6 +20,7 @@ import { pipeline } from "node:stream/promises";
 import { createInflateRaw } from "node:zlib";
 
 import { DATA_DIR } from "../config.ts";
+import { antigravityRuntimesRoot } from "../engine-roots.ts";
 import { augmentedPath } from "../env-path.ts";
 import {
   resolveAntigravityReleaseAsset,
@@ -92,7 +93,7 @@ export interface AntigravityInstallOptions {
 const installs = new Map<string, Promise<AntigravityRuntime>>();
 
 function runtimeRoot(baseDir = DATA_DIR): string {
-  return join(baseDir, "tools", "antigravity-acp", `${process.platform}-${process.arch}`);
+  return join(antigravityRuntimesRoot(baseDir), `${process.platform}-${process.arch}`);
 }
 
 function executableNames(platform: NodeJS.Platform = process.platform) {

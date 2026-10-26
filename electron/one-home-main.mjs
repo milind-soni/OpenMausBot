@@ -28,6 +28,14 @@ export function installationOf(environmentId) {
 
 /** One home's view of the person's Cloud, from the Admin's last verified word; null while nobody is signed in. An ended
  * Cloud's `homecoming` is the computer its things come home to; `signIn`, this app's sign-in. */
+/** This computer's server's answer to the move's freeze: frozen, or what still holds the move, by name ("" when it has
+ * none) and what it is (server/routes/move-freeze.ts). */
+export function freezeAnswer(got) {
+  if (got.status === 409 && typeof got.body?.busy === "string") return { busy: got.body.busy, ...(typeof got.body.what === "string" ? { what: got.body.what } : {}) };
+  if (!got.ok || got.body?.frozen !== true) throw Object.assign(new Error("OpenMausBot on this computer could not pause."), { status: got.status });
+  return { frozen: true };
+}
+
 export function oneHomeCloud(state) {
   const account = state?.account?.id;
   if (typeof account !== "string" || !account) return null;
@@ -177,12 +185,7 @@ export function installOneHome({ localRequest, account, journalFile, tempRoot, l
     send,
     local: {
       ...local,
-      async freeze(origin) {
-        const got = await local.call("POST", "/api/move/freeze", { cloud: origin });
-        if (got.status === 409 && typeof got.body?.busy === "string") return { busy: got.body.busy };
-        if (!got.ok || got.body?.frozen !== true) throw Object.assign(new Error("OpenMausBot on this computer could not pause."), { status: got.status });
-        return { frozen: true };
-      },
+      freeze: async (origin) => freezeAnswer(await local.call("POST", "/api/move/freeze", { cloud: origin })),
       async unfreeze(options) {
         const got = await local.call("DELETE", "/api/move/freeze", options?.automations === "off" ? { automations: "off" } : undefined);
         if (!got.ok) throw Object.assign(new Error("OpenMausBot on this computer could not go on again."), { status: got.status });

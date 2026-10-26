@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { enqueue, runHourly, WAKE_EVERY_MS } from "./app-events";
+import { enqueue, MAX_WEBHOOK_BODY, runHourly, WAKE_EVERY_MS } from "./app-events";
 import { DAY_MS, QUEUE_MAX_BYTES } from "./common";
 import {
   brokerHarness,
@@ -12,6 +12,7 @@ import {
   GMAIL_TYPE,
   message,
   STATS_TOKEN,
+  streamedBody,
   WEBHOOK_SECRET,
   type Installation,
 } from "./test-harness";
@@ -136,12 +137,65 @@ describe("Composio webhook signature", () => {
     expect(response.status).toBe(401);
   });
 
+  it("reads none of a streamed delivery without the signature headers", async () => {
+    const stream = streamedBody(64 * 1024, 64);
+    const response = await h.fetch("/v1/composio/webhook", stream.init);
+    expect(response.status).toBe(401);
+    expect(stream.read.bytes).toBe(0);
+  });
+
+  it("stops reading a streamed delivery without a Content-Length once it passes 1 MB", async () => {
+    const stream = streamedBody(64 * 1024, 64);
+    const headers = { "webhook-id": "msg_big", "webhook-timestamp": String(Math.floor(Date.now() / 1000)), "webhook-signature": "v1,AAAA" };
+    const response = await h.fetch("/v1/composio/webhook", { ...stream.init, headers });
+    expect(response.status).toBe(413);
+    expect(stream.read.cancelled).toBe(true);
+    expect(stream.read.bytes).toBeLessThanOrEqual(MAX_WEBHOOK_BODY + 2 * 64 * 1024);
+  });
+
+  it("checks the timestamp again once a slow body has arrived", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { owner, triggerId } = await withTrigger();
+    const id = "msg_slow";
+    const raw = JSON.stringify({ ...message(triggerId, owner.userId), id });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        vi.setSystemTime(Date.now() + 360_000);
+        controller.enqueue(new TextEncoder().encode(raw));
+        controller.close();
+      },
+    }, { highWaterMark: 0 });
+    const response = await h.fetch("/v1/composio/webhook", {
+      method: "POST",
+      body,
+      duplex: "half",
+      headers: { "webhook-id": id, "webhook-timestamp": String(timestamp), "webhook-signature": `v1,${composioSignature(WEBHOOK_SECRET, id, timestamp, raw)}` },
+    } as RequestInit);
+    expect(response.status).toBe(401);
+    expect(h.queued()).toEqual([]);
+  });
+
   it("answers 503 until the owner sets COMPOSIO_WEBHOOK_SECRET, and 413 past 1 MB", async () => {
     const { owner, triggerId } = await withTrigger();
     expect((await h.deliver(message(triggerId, owner.userId), { tamper: (body) => body.padEnd(1024 * 1024 + 1, " ") })).status).toBe(413);
     h.env.COMPOSIO_WEBHOOK_SECRET = undefined;
     expect((await h.deliver(message(triggerId, owner.userId))).status).toBe(503);
     expect(h.queued()).toEqual([]);
+  });
+});
+
+describe("streamed request bodies", () => {
+  it("stops reading an installation's oversized MCP or JSON body once it passes the limit", async () => {
+    const owner = await h.install();
+    for (const [path, method] of [["/v1/mcp", "POST"], ["/v1/triggers", "POST"], ["/v1/triggers/ti_1", "PATCH"], ["/v1/installation/cloud", "PUT"]]) {
+      const stream = streamedBody(64 * 1024, 64);
+      const response = await h.call(owner, path, { ...stream.init, method });
+      expect(response.status, path).toBe(413);
+      expect(stream.read.cancelled, path).toBe(true);
+      expect(stream.read.bytes, path).toBeLessThan(64 * 64 * 1024);
+    }
+    expect(h.composio.callsTo("/")).toEqual([]);
   });
 });
 
@@ -465,6 +519,37 @@ describe("hourly job", () => {
     expect(h.d1.rows("SELECT triggers_swept_at FROM installations WHERE id = ?", idle.owner.id)).toEqual([{ triggers_swept_at: null }]);
   });
 
+  it("sweeps an installation with more triggers than one run may disable over several runs, then the next one", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const start = Date.parse("2026-10-01T12:00:00Z");
+    vi.setSystemTime(start);
+    const big = await h.install();
+    const bigAccount = h.account(big);
+    const bigTriggers: string[] = [];
+    for (let index = 0; index < 45; index += 1) {
+      const { response, body } = await h.createTrigger(big, bigAccount, { query: `subject:order-${index}` });
+      expect(response.status).toBe(201);
+      bigTriggers.push(body.triggerId);
+    }
+    const small = await withTrigger({ query: "label:inbox" });
+    const changes = (status: string) => h.composio.callsTo("/trigger_instances/manage/")
+      .filter((call) => call.method === "PATCH" && call.body?.status === status).map((call) => call.path.split("/").at(-1)!);
+
+    for (let hour = 1; hour <= 3; hour += 1) await runHourly(h.env as never, start + 14 * DAY_MS + hour * 60 * 60_000);
+    expect(changes("disable").sort()).toEqual([...bigTriggers, small.triggerId].sort());
+    expect([...h.composio.instances.values()].filter((instance) => !instance.disabled_at)).toEqual([]);
+    expect(h.d1.rows("SELECT disabled_at FROM trigger_bindings WHERE disabled_at IS NOT NULL")).toEqual([]);
+
+    vi.setSystemTime(start + 15 * DAY_MS);
+    await pollBody(big);
+    await Promise.all(h.background);
+    await pollBody(big);
+    await Promise.all(h.background);
+    expect(changes("enable").sort()).toEqual([...bigTriggers].sort());
+    expect(bigTriggers.filter((id) => h.composio.instances.get(id)?.disabled_at)).toEqual([]);
+    expect(h.composio.instances.get(small.triggerId)?.disabled_at).not.toBeNull();
+  });
+
   it("keeps daily counts for 90 days", async () => {
     h.d1.db.exec("INSERT INTO app_event_days (day, installation_id, queued) VALUES ('2026-07-01', 'x', 1), ('2026-09-30', 'x', 1)");
     await runHourly(h.env as never, Date.parse("2026-10-17T12:00:00Z"));
@@ -545,7 +630,7 @@ describe("trigger bindings", () => {
   it("changes a shared instance at Composio only for the last binding", async () => {
     const { owner, triggerId } = await withTrigger();
     const other = await h.install();
-    h.d1.db.prepare("INSERT INTO trigger_bindings VALUES (?, ?, 'gmail', ?, 'ca_x', 1, NULL)").run(other.id, triggerId, GMAIL_TYPE.slug);
+    h.d1.db.prepare("INSERT INTO trigger_bindings VALUES (?, ?, 'gmail', ?, 'ca_x', 1, NULL, NULL)").run(other.id, triggerId, GMAIL_TYPE.slug);
     await h.call(owner, `/v1/triggers/${triggerId}`, { method: "PATCH", body: JSON.stringify({ enabled: false }) });
     expect(h.composio.callsTo("/trigger_instances/manage/").map((call) => call.body?.status)).toEqual(["enable"]);
     expect(h.composio.instances.get(triggerId)?.disabled_at).toBeNull();
@@ -854,6 +939,18 @@ describe("deploy order", () => {
     expect(h.queued(owner.id)).toHaveLength(1);
     expect(admin).toEqual([]);
     expect(vi.mocked(console.warn).mock.calls.some(([line]) => String(line).includes("cloud wake failed"))).toBe(true);
+  });
+
+  it("still answers polls and expires events on a database without migration 0005", async () => {
+    h = brokerHarness({ migrations: 4 });
+    vi.stubGlobal("fetch", h.composio.fetchImpl);
+    const { owner, triggerId } = await withTrigger();
+    await h.deliver(message(triggerId, owner.userId));
+    h.d1.db.prepare("UPDATE installations SET triggers_swept_at = 1 WHERE id = ?").run(owner.id);
+    expect((await h.poll(owner)).status).toBe(200);
+    await Promise.allSettled(h.background);
+    await expect(runHourly(h.env as never, Date.now() + 15 * DAY_MS)).rejects.toThrow(/swept_at/);
+    expect(h.queued()).toEqual([]);
   });
 
   it("keeps the existing routes working on a database that has not run migration 0002", async () => {

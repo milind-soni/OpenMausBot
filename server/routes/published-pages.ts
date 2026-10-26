@@ -24,6 +24,10 @@ export interface PagesInternalContext {
   threadId: string;
   /** index.ts's readInternalBody: re-checks the capability after the read. */
   readBody: () => Promise<unknown>;
+  /** Throws once the turn that owns the capability has ended (Stop, or the turn settled). */
+  requireActive: () => void;
+  /** Aborts once the tool call's request is gone. */
+  signal: AbortSignal;
   /** The bot's own folders for this turn, and its Local VM's workspace on this computer when it has one. */
   folders: () => Promise<{ roots: readonly string[]; vmWorkspace: string | null }>;
   /** Puts a card in the conversation the tool was called from; null when that conversation is gone. A live card comes
@@ -48,17 +52,19 @@ export function createPagesInternalRoutes(publisher: PagePublisher) {
     const raw = await ctx.readBody();
     const { roots, vmWorkspace } = await ctx.folders();
     const folders = vmWorkspace ? [vmWorkspace, ...roots] : roots;
+    ctx.requireActive();
+    const call = { assertActive: ctx.requireActive, signal: ctx.signal };
     let outcome;
     if (ctx.path === PUBLISH) {
       const body = publishBody.safeParse(raw ?? {});
       if (!body.success) return void ctx.json(ctx.res, 400, { error: "publish_page takes path, title and optionally page_id, as text." });
       outcome = await publisher.publish({ botId: ctx.botId, threadId: ctx.threadId, path: hostPath(body.data.path, vmWorkspace), title: body.data.title,
-        ...(body.data.page_id ? { pageId: body.data.page_id } : {}), roots: folders, post: ctx.post });
+        ...(body.data.page_id ? { pageId: body.data.page_id } : {}), roots: folders, post: ctx.post, call });
     } else {
       const body = unpublishBody.safeParse(raw ?? {});
       if (!body.success) return void ctx.json(ctx.res, 400, { error: "unpublish_page takes page_id, or the path the page was published from." });
       outcome = await publisher.unpublish({ ...(body.data.page_id ? { pageId: body.data.page_id } : {}),
-        ...(body.data.path ? { path: hostPath(body.data.path, vmWorkspace) } : {}), botId: ctx.botId, roots: folders });
+        ...(body.data.path ? { path: hostPath(body.data.path, vmWorkspace) } : {}), botId: ctx.botId, roots: folders, call });
     }
     ctx.json(ctx.res, outcome.status, outcome.status === 200 ? { ok: true, text: outcome.text } : { error: outcome.text });
   };

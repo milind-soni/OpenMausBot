@@ -10,7 +10,7 @@ import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import type { VerbContext } from "./context.ts";
 import { Output } from "./output.ts";
-import { botPatch, reconcile, skillFilePath, teamExportVerb, type ApplyOptions } from "./team-apply.ts";
+import { botPatch, botSkillDirs, reconcile, skillFilePath, teamExportVerb, type ApplyOptions } from "./team-apply.ts";
 import { loadTeamFile, type DesiredBot, type TeamFile } from "./team-file.ts";
 
 type Rec = Record<string, any>;
@@ -306,8 +306,30 @@ describe("botPatch", () => {
 
 describe("team export", () => {
   it("names a skill's file with /, so a file exported on Windows applies on Linux", () => {
-    expect(skillFilePath("Room Lead", "launch-report")).toBe("skills/room-lead/launch-report/SKILL.md");
-    expect(skillFilePath("!!!", "notes")).toBe("skills/bot/notes/SKILL.md");
+    expect(skillFilePath("room-lead", "launch-report")).toBe("skills/room-lead/launch-report/SKILL.md");
+  });
+
+  it("gives bots whose names make the same folder name their own skill folders", async () => {
+    expect(botSkillDirs(["Room Lead", "!!!", "Room-Lead", "Room Lead 2"])).toEqual(["room-lead", "bot", "room-lead-2", "room-lead-2-2"]);
+    const skill = (body: string) => `---\nname: common\ndescription: Shared.\n---\n${body}\n`;
+    const { client, state } = workspace({ bots: [{ id: "bot-a", name: "Dev A" }, { id: "bot-b", name: "Dev-A" }, { id: "bot-c", name: "Dev A 2" }] });
+    state.skills["bot-a"] = { common: { text: skill("first"), enabled: true } };
+    state.skills["bot-b"] = { common: { text: skill("second"), enabled: true } };
+    state.skills["bot-c"] = { common: { text: skill("third"), enabled: true } };
+    const dir = mkdtempSync(join(tmpdir(), "omb-team-export-"));
+    try {
+      const out = join(dir, "team.yaml");
+      const ctx = { verb: "team export", flags: { out }, positionals: [], env: {}, io: { out: () => undefined, err: () => undefined, readStdin: async () => "" },
+        output: new Output({ out: () => undefined, err: () => undefined, readStdin: async () => "" }, {}), client: async () => client,
+        signal: new AbortController().signal, defaultWaitMs: 1_000 } as VerbContext;
+      await teamExportVerb(ctx);
+      const back = loadTeamFile(out);
+      expect(back.bots.map((bot) => [bot.name, bot.skills.map((s) => s.text.trim().split("\n").at(-1))])).toEqual([
+        ["Dev A", ["first"]], ["Dev-A", ["second"]], ["Dev A 2", ["third"]],
+      ]);
+    } finally {
+      await removeTempDir(dir);
+    }
   });
 
   it("takes a key written into a soul, a brief or a skill out of the file, and apply leaves those as they are", async () => {

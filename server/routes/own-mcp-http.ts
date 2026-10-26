@@ -8,6 +8,7 @@ import { agentsMcp } from "../drivers/agents-mcp.ts";
 import { AGENTS_MCP_ENV } from "../drivers/agents-mcp-env.ts";
 import type { Json } from "../drivers/agents-client.ts";
 import { harnessMcpRequest, MAX_INPUT_BYTES, parseHarnessMcpKind } from "../harness-mcp-request.ts";
+import { parseToolLimit, TOOL_LIMIT_HEADER } from "../tool-count-limit.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH } from "./own-mcp-http-path.ts";
@@ -41,7 +42,7 @@ export async function ownMcpHttpRoutes({ req, res, path, method, json, readBody 
   const harness = `http://127.0.0.1:${req.socket.localPort}/`;
   const answer: (frame: Json) => Promise<unknown> = kind === "agents"
     ? agentsMcp(agentsEnv(req.headers, token, harness.slice(0, -1)))
-    : (frame) => harnessMcpRequest(frame, { url: harness, token, kind });
+    : (frame) => harnessMcpRequest(frame, { url: harness, token, kind, toolLimit: parseToolLimit(req.headers[TOOL_LIMIT_HEADER]) });
   const frames: Json[] = Array.isArray(body) ? body : [body];
   const replies = (await Promise.all(frames.map(async (frame) => {
     const reply = await answer(frame) as { result?: { protocolVersion?: unknown } } | undefined;

@@ -53,7 +53,7 @@ const LEAD_NOUNS = new Set([
 const LEAD_VERBS = new Set(["CREATE", "ADD", "UPDATE", "UPSERT", "ENRICH", "SEARCH", "FIND", "LOOKUP", "MATCH", "DISCOVER"]);
 
 /** The app's own MCP servers: coordination, computers and the permission bridge, never a business outcome. */
-const OWN_SERVERS = new Set(["agents", "computer", "localComputer", "phone", "browser", "dweb", "ogb"]);
+const OWN_SERVERS = new Set(["agents", "computer", "localComputer", "phone", "device", "browser", "dweb", "ogb"]);
 const COMPOSIO_META = new Set(["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_GET_TOOL_SCHEMAS", "COMPOSIO_MANAGE_CONNECTIONS", "COMPOSIO_WAIT_FOR_CONNECTIONS", "COMPOSIO_CHECK_ACTIVE_CONNECTION", "COMPOSIO_INITIATE_CONNECTION"]);
 const MULTI_EXECUTE = "COMPOSIO_MULTI_EXECUTE_TOOL";
 const APP_TOOL = /^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/;

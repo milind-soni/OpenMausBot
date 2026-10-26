@@ -41,8 +41,7 @@ describe("roomTalks", () => {
     expect(roomTalks(bots.insider!, room())).toEqual({ ok: true });
     expect(roomTalks(bots.insider!, room({ dm: true, threadId: "dm-thread" }))).toEqual({ ok: false, problem: "dm" });
     expect(roomTalks(bots.stranger!, room({ memberIds: ["insider"] }))).toEqual({ ok: false, problem: "not-member" });
-    expect(roomTalks(bots.insider!, room({ memberIds: ["insider", "stranger"] })))
-      .toEqual({ ok: false, problem: "outsider", name: "Stranger" });
+    expect(roomTalks(bots.insider!, room({ memberIds: ["insider", "stranger"] }))).toEqual({ ok: true });
     expect(roomTalks(bots.insider!, room({ setupCompletedAt: null, setupSkippedAt: null })))
       .toEqual({ ok: false, problem: "setup" });
     expect(roomTalks(bots.insider!, room({ setupCompletedAt: 1 }))).toEqual({ ok: true });

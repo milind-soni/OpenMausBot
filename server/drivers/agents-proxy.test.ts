@@ -649,6 +649,8 @@ describe("agents-proxy MCP surface", () => {
       "request_credential",
       "request_sign_in",
       "fill_login",
+      "decide",
+      "extract",
       "memory_update",
       "retry_thread",
       "memory_log",
@@ -671,7 +673,7 @@ describe("agents-proxy MCP surface", () => {
     expect(coordinate.description).toContain("consult true asks a question");
     expect(coordinate.description).toContain('reply "none" is a one-way notice');
     expect(coordinate.description).toContain("never call assignment_status in the same turn");
-    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "in_my_folder", "reply", "consult", "done_when"]);
+    expect(Object.keys(coordinate.inputSchema.properties)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when"]);
     expect(coordinate.inputSchema.properties.thread.enum).toEqual(["standing", "new"]);
     expect(coordinate.inputSchema.properties.reply.enum).toEqual(["resume", "none"]);
     expect(coordinate.inputSchema.properties.consult.type).toBe("boolean");
@@ -857,12 +859,12 @@ describe("agents-proxy MCP surface", () => {
   it("names a room the bot is in but cannot post into, with the reason and no id", async () => {
     roomsResponse = {
       rooms: [],
-      unpostable: [{ name: "Planning", reason: "that room includes @Scout, who is outside your section — tell the user what you wanted to post there instead" }],
+      unpostable: [{ name: "Planning", reason: "that room is still being set up — it cannot receive messages yet" }],
     };
     const res = await callTool("list_rooms", {});
     const text = res.result.content[0].text;
     expect(text).toContain("cannot post into");
-    expect(text).toContain("- Planning: that room includes @Scout, who is outside your section");
+    expect(text).toContain("- Planning: that room is still being set up");
     expect(text).toContain("nothing to retry");
     expect(text).not.toContain("[id:");
     roomsResponse = { rooms: [{ id: "room-launch", name: "Launch", members: ["Asker", "Helper"] }] };

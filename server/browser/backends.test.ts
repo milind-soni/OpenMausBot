@@ -6,6 +6,8 @@ import { afterAll, describe, expect, it } from "vitest";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { LocalBackend } from "./backends.ts";
 import type { ChromeProcess } from "./chrome/launch.ts";
+import { ProcessRegistry } from "./chrome/processes.ts";
+import { browserRoot, profileDir } from "./chrome/profile.ts";
 import { FAKE_IDENTITY, FakeChrome } from "./testing/fake-chrome.ts";
 
 const folders: string[] = [];
@@ -64,5 +66,27 @@ describe("a fresh profile's first navigation on Windows", () => {
     expect(mac.chromes[0]!.sent.some((sent) => sent.method === "Target.createTarget" || sent.method === "Page.navigate")).toBe(false);
     await expect(opened.browser.pages()[0]!.navigate("http://example.test/first")).rejects.toThrow(/ERR_ABORTED/);
     await opened.close();
+  });
+});
+
+describe("a local browser's profile folder", () => {
+  it("is held from the sweep while Chrome starts, and let go when the start fails", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-backends-test-"));
+    folders.push(dataDir);
+    const registry = new ProcessRegistry(browserRoot(dataDir));
+    const dir = profileDir(dataDir, "temp:a");
+    const held: boolean[] = [];
+    const local = new LocalBackend({
+      dataDir,
+      host: "desktop",
+      binary: async () => ({ path: "/fake/chrome", identity: { ...FAKE_IDENTITY } }),
+      screen: async () => ({ width: 1920, height: 1080, deviceScaleFactor: 1 }),
+      egressPort: async () => { held.push(registry.reserved(dir)); return null; },
+      registry,
+      launch: async () => { held.push(registry.reserved(dir)); throw new Error("Chrome did not start"); },
+    });
+    await expect(local.open({ key: "temp:a", mode: "headless", fresh: false, viewport: { width: 1280, height: 800 }, downloadDir: join(dataDir, "downloads") })).rejects.toThrow("Chrome did not start");
+    expect(held).toEqual([true, true]);
+    expect(registry.reserved(dir)).toBe(false);
   });
 });

@@ -15,7 +15,6 @@ import { closeMessageDb,
   latestPersonLineAts,
   logNotification,
   latestSaidByBot,
-  markAllNotificationLogRead,
   markNotificationLogRead,
   markThreadNotificationLogRead,
   readMessageText,
@@ -513,19 +512,20 @@ describe("notification_log", () => {
     expect(recentNotificationLog().map((r) => r.id)).toEqual(["n2"]);
   });
 
-  it("marking read never deletes a row: read-one and read-all only flip the flag", () => {
+  it("marking read never deletes a row: it flips only the named entries' flag", () => {
     insertNotificationLog(entry("n1", 1000));
     insertNotificationLog(entry("n2", 2000));
-    markNotificationLogRead("n1");
+    insertNotificationLog(entry("n3", 3000));
+    markNotificationLogRead(["n1"]);
     let rows = recentNotificationLog();
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows.find((r) => r.id === "n1")?.read).toBe(true);
     expect(rows.find((r) => r.id === "n2")?.read).toBe(false);
 
-    markAllNotificationLogRead();
+    markNotificationLogRead(["n1", "n2"]);
     rows = recentNotificationLog();
-    expect(rows).toHaveLength(2);
-    expect(rows.every((r) => r.read)).toBe(true);
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
   });
 
   it("reading a conversation reads only its own notifications, a pending question's included", () => {

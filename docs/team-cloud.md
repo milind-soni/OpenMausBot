@@ -207,14 +207,46 @@ else's, the main chat is named instead, without the other's messages, and its un
 Search, SSE (live and replayed), attachments, notifications, usage traces, routine runs, the activity and decision rows
 (kept as when, bot, tool and outcome, without their words), a bot's activity, synced folders and a team backup go
 through the same check, a deleted private chat included. Incidents and escalations from a private chat go to its person,
-never into a Chief's thread; a conversation a bot opens from a shared chat is the team's, never the last speaker's;
-`retry_thread`, `close_thread` and `session_read` reach only what the turn may read; and team memory is never published
-from a private chat. Then the memory system prompt
+never into a Chief's thread; work handed on from a private chat runs in a thread of that same person's, and nothing
+from a private chat is handed into a room or posted in one; a conversation a bot opens from a shared chat is the
+team's, never the last speaker's; `retry_thread`, `close_thread` and `session_read` reach only what the turn may read;
+and team memory is never published from a private chat. Then the memory system prompt
 (the turn's layer, plus the team's notes read-only), recall (`buildRecall.memoryIds`: the layer and the team's), recent
 work, `session_search` (memory of the layer and the team's; conversations the turn may read), memory writes
 (`/api/internal/memory`, `/memory/log`, the turn-outcome line, capture), "About the user", and the bot box, which puts the
 turn's layer folder back read-write for that conversation's boxes only (`botBox.lend`). Member layers are sibling
 folders of the bot's own, never inside it, so no other turn of that bot can read them.
+
+### Engine homes
+
+The engines keep each conversation's transcript and session files in their HOME (`~/.claude/projects`,
+`~/.codex/sessions`, prompt history, file snapshots). On a Team Cloud each audience has its own engine home,
+`engine-homes/<key>` in the data folder, keyed like its browser: `team`, `room-<hash>` or `member-<hash>` (16 hex
+characters of the room id's or person key's SHA-256). Every engine a turn starts runs with HOME set to its
+conversation's home (`server/engine-homes`): the drivers' spawns know their conversation (each adapter's `sendTurn` and
+keep-warm ping run inside it), and an engine folder the environment names (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+`GROK_HOME`, the XDG folders, a ChatGPT plan's or a hosted model's folder) moves into that home too. Engines that share
+one process between conversations (OpenCode) never share it across audiences.
+
+In the bot box the turn's engine home is bound read-write **in place of** the server's HOME, after the data folder is
+emptied: a shell in that turn finds its own audience's transcripts, and neither the server's HOME nor another audience's
+home exists for it, by any path. Only the engines' sign-ins are the team's: each sign-in file (Claude's
+`.credentials.json`, Codex's and Grok's `auth.json` and `config.toml`, and the other engines' named in
+`engine-homes/layout.ts`) is kept in the home as a copy of the server's, and inside a box the server's own file is bound
+over that copy read-write, so a token an engine refreshes there lands in the team's file (Claude Code 2.1.294 renames a
+temp file over its credentials and, refused on a bind, writes in place; Codex writes in place). Outside a box an
+engine writes its copy, and the next spawn in any audience takes the newest settled copy back for the team. Signing in
+or out from the app still happens in the server's HOME and reaches every audience's next turn. Session resume works
+within an audience: its home is the same at each turn. A member who leaves takes their engine home with them.
+
+**The move.** The first turn after a Team Cloud starts with engine homes moves what the engines kept in the server's
+HOME. A Claude Code project's session (`projects/<folder>/<session>.jsonl` and its session folder, `file-history`,
+`session-env`, `todos`, `debug`) or a Codex rollout (`sessions/…/rollout-…-<id>.jsonl`, `archived_sessions`) goes to
+the home of the conversation whose saved resume session id it is, or, for Claude, the conversation that alone runs in
+that project's folder. What matches no conversation (a group chat's session, which the server keeps only in memory,
+one of a deleted conversation, the prompt history, shell snapshots, Codex's logs) goes to the **held folder**,
+`engine-homes/.held/<time>`: no route serves it, no box binds it, no backup carries it (the workspace backup leaves out
+all of `engine-homes`), and it is deleted 30 days later. `engine-homes/.migrated` marks the move done.
 
 Browsers follow the same rule (`server/browser/audience.ts`). A non-team audience adds a fixed suffix to the browser's
 name, `--member-<hash>` or `--room-<hash>` (16 hex characters of the person key's or the room id's SHA-256: agent-browser
@@ -231,7 +263,53 @@ turn uploads is linked into that profile's `omb-uploads/` first. The agent-brows
 holds the session's saved-state key and talks to the server's runtime by its own socket and pid files.
 
 On a My Cloud and on a desktop there is one person: every audience is the team's, every layer is the bot's own folder,
-every browser keeps its old name and Chrome its old launcher, and nothing here changes what those do.
+every browser keeps its old name and Chrome its old launcher, every engine keeps the server's HOME, and nothing here
+changes what those do.
+
+## Who a bot reports to
+
+Every team bot has an **owner**: the member it reports to. `reportsTo` (an email) names them; without it the bot
+reports to `createdBy`, the member who created it or moved it in (a bot a Chief creates gets the Chief's owner). Bots
+made before owners were recorded have none until someone picks one, and their asks go to the Admins. The sidebar shows
+the owner's face at the end of each bot's row and "→ Ada" beside a department whose bots all report to Ada. The Team map's
+"Who reports to whom" (also "See who reports to whom" in a department's menu) shows each person with their Chief and
+the bots that report to them by department; dragging a bot onto a person changes its owner.
+
+| Route | Who | What |
+|---|---|---|
+| `GET /api/team/people` | any member | the members the Admin has paired here (`team-people.json`), each `{email, name, role, you?}` |
+| `PUT /api/bots/<id>/reports-to {email}` | an Admin, or the bot's owner handing it over | one bot's owner; `null` hands it back to its creator |
+| `PUT /api/team/reports-to {botIds, email}` | an Admin | "Set owner for all bots…" on a department |
+| `GET /api/needs-you` | any member | what bots ask of this person now |
+
+**Routing** (`server/ask-routing.ts`). A bot's ask is a question or approval card, a sign-in, a failure, or a routine's
+result. In a member's private chat it is that member's alone: never the owner's, never an Admin's. Anywhere else (the
+bot's shared chats, a group chat, a routine nobody opened) it is the owner's, or the Admins' when nobody owns the bot.
+The asked person alone gets it in their Needs you (`/api/needs-you`, `/api/today`), in their notifications (live and in
+the feed) and in their brief. The card itself stays in its conversation, where everyone who sees it may answer it, and
+says "Asking Ada". Everyone can still chat with every shared bot: routing decides only whose inbox a bot's own asks reach.
+
+**One Chief of Staff per person.** A crowned bot that someone owns is that person's Chief; a team has at most one per
+person (crowning a second hands the role over, and moving a Chief to someone who has one is refused). Its authority is
+exactly the bots that person owns, in every department: they are its team in its roster, their incidents and
+escalations come to it (into a notices chat of the person's own; a notice from someone else's private chat goes to
+that person instead), and it retries their threads and changes their setup. Each person with a Chief gets a brief of
+their own (`server/host/team-briefs.ts`): one card a day in their private chat with their Chief listing their Needs you
+and the runs routed to them, opened on their first arrival of the day. Without a Chief, the same asks wait in their
+Needs you. A crowned bot nobody owns stays its department's Chief, as on any other server.
+
+**Every bot reaches every bot.** Departments are folders, not walls. Any bot can ask, hand work to or @mention any
+other bot on the team, in any department, someone's Chief included, with nothing to set up (`canReach` in
+`server/peer-roster.ts`). Each bot's roster lists them all, its own department first; a Chief's lists its own team
+first and everyone else as reachable. Reaching a bot gives no authority over it: supervision, incidents, escalations,
+the brief, setup changes and automations follow ownership and departments as above (`hasAuthority`, `canManage`).
+Only three things narrow reach: a bot's own peers list (a person can open it again in the bot's settings, under
+Permissions), archived bots, and the audience rule below (a bot shared with different people). A turn in someone's
+private chat may ask any bot, and the work it hands on stays in that person's audience; it never hands work into a room
+or posts in one.
+
+On a My Cloud and on a desktop no bot has an owner: nothing is routed, and one Chief per department holds as before.
+Every bot still reaches every bot there.
 
 ## What is not closed here
 
@@ -240,13 +318,16 @@ every browser keeps its old name and Chrome its old launcher, and nothing here c
 - **The new browser engine and temporary browsers in a box.** The new engine (`browserEngine.engine: "chrome"`, off by
   default) starts Chrome itself over a pipe and is not boxed; a temporary browser is boxed, but a file a turn uploads
   into it is not reachable from its box.
-- **Per-member engine state.** A Team Cloud's engines use the team's key through the broker, so the engine's config dir
-  (`~/.claude`, `~/.codex`) holds no member's login; it is the team's, by design.
+- **Per-member engine sign-ins.** Every audience's engine signs in as the team (its key through the broker, or the
+  team's sign-in files in each engine home, above); a member cannot sign an engine in as themselves, by design.
 - **A roster read from the Admin.** Without the Admin's `member-left` request (above), removal takes effect within the
   hour, and nothing is deleted.
-- **Engine transcripts in the shared home.** The engines keep each conversation's transcript in the server user's home
-  (`~/.claude/projects`, `~/.codex/sessions`), which every turn's box binds read-write: a turn with a shell could read
-  another conversation's transcript there. Splitting the engines' homes per audience is the next slice.
+- **Engine homes without a box, and engines outside the list.** Without the bot box (bubblewrap refused, or switched
+  off) a shell reaches every file of the server's user, engine homes included; only the box keeps them apart. An engine
+  whose sign-in file is not named in `engine-homes/layout.ts` starts signed out in every audience's home. Engines
+  installed into the server's HOME by hand are not reachable from a team turn's box; the image's are.
+- **An engine that replaces its sign-in file by renaming.** Inside a box the rename is refused (the team's file is bound
+  there); an engine that does not then write in place keeps a refreshed token for that process only.
 - **What a bot keeps per bot, not per audience.** Its data sheet, the skills it stages and its own profile are the bot's
   (the team's), whichever chat wrote them; so are a routine's definition and schedule (its runs and results are the
   conversation's). The Owner's whole-machine export (`OMB_CLOUD_EXPORT_ONLY`, the workspace backup) still carries every

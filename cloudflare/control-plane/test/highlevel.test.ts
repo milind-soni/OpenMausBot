@@ -354,6 +354,65 @@ describe("HighLevel OAuth relay", () => {
     expect((await callback(worker, testEnv, { code: CODE, state: flow.state })).status).toBe(400);
   });
 
+  it("of two callbacks with the same code, only one exchanges it, and the other cannot wipe the saved tokens", async () => {
+    let finish!: () => void;
+    const firstDone = new Promise<void>((resolve) => { finish = resolve; });
+    let secondArrived!: () => void;
+    const second = new Promise<void>((resolve) => { secondArrived = resolve; });
+    const calls: number[] = [];
+    // HighLevel redeems the code once: the first exchange waits until the
+    // second callback has either reached HighLevel too or answered, and the
+    // second is refused only after the first has finished.
+    const highLevelFetch = (async () => {
+      calls.push(calls.length);
+      if (calls.length === 1) {
+        await Promise.race([second, firstDone]);
+        return new Response(JSON.stringify(tokenAnswer().body), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      secondArrived();
+      await firstDone;
+      return new Response(JSON.stringify({ error: "invalid_grant" }), { status: 400, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const worker = createWorker(fetch, fetch, highLevelFetch);
+    const testEnv = highLevelEnv();
+    const flow = await started(worker, testEnv);
+
+    const pages = [callback(worker, testEnv, { code: CODE, state: flow.state }), callback(worker, testEnv, { code: CODE, state: flow.state })];
+    await Promise.race(pages);
+    finish();
+    const statuses = (await Promise.all(pages)).map((page) => page.status).sort();
+    expect(statuses).toEqual([200, 400]);
+    expect(calls).toHaveLength(1);
+    const claimed = await claim(worker, testEnv, flow.state);
+    expect(claimed.status).toBe(200);
+    expect(await claimed.json()).toEqual(expectedPayload);
+  });
+
+  it("a denied consent that arrives during the exchange does not end the flow", async () => {
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let exchanging!: () => void;
+    const inExchange = new Promise<void>((resolve) => { exchanging = resolve; });
+    const highLevelFetch = (async () => {
+      exchanging();
+      await released;
+      return new Response(JSON.stringify(tokenAnswer().body), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const worker = createWorker(fetch, fetch, highLevelFetch);
+    const testEnv = highLevelEnv();
+    const flow = await started(worker, testEnv);
+
+    const connected = callback(worker, testEnv, { code: CODE, state: flow.state });
+    await inExchange;
+    const denied = await callback(worker, testEnv, { error: "access_denied", state: flow.state });
+    expect(denied.status).toBe(400);
+    release();
+    expect((await connected).status).toBe(200);
+    const claimed = await claim(worker, testEnv, flow.state);
+    expect(claimed.status).toBe(200);
+    expect(await claimed.json()).toEqual(expectedPayload);
+  });
+
   it("a failed exchange shows the failed page, logs only a status, and the claim stays 404", async () => {
     const highLevel = fakeHighLevel([{ status: 400, body: { message: `invalid code ${CODE}`, statusCode: 400 } }]);
     const worker = createWorker(fetch, fetch, highLevel.fetch);

@@ -12,7 +12,11 @@ import { denyReason as companionDenial, isCompanionNotice } from "../companion/s
 export type LoopbackTrust = "owner" | "service";
 
 export type RequestAuth =
-  | { kind: "loopback"; scopes: readonly Scope[]; trust?: "service" }
+  | {
+    kind: "loopback"; scopes: readonly Scope[]; trust?: "service";
+    /** Set only on the verified companion-token path: the sidecar's id for the phone that authenticated. */
+    companionDevice?: string;
+  }
   | { kind: "session"; session: SessionRecord; via: "bearer" | "cookie" | "ticket"; scopes: readonly Scope[] };
 
 export interface RequestAuthResult {
@@ -276,6 +280,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/shared-computers$/, feature: "sharedComputers" },
   // The same desktop's device link: a WebSocket bound to that secret too.
   { methods: ["GET"], path: /^\/api\/shared-computers\/[\w-]+\/link$/, feature: "sharedComputers" },
+  // This phone's own apps, keyed by its session (routes/phones.ts): register, poll, lease, answer.
+  { methods: ["GET", "PUT", "DELETE"], path: /^\/api\/phones\/self$/ },
+  { methods: ["GET"], path: /^\/api\/phones\/self\/jobs$/ },
+  { methods: ["POST"], path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
   { methods: ["GET"], path: /^\/api\/health$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
   { methods: ["GET"], path: /^\/api\/brand$/ },
@@ -292,7 +300,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/app$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/export$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/evidence(?:\.tar|\/[A-Za-z0-9-]{8,64}\/step-\d{6,12}\.jpg)?$/ },
-  { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/ },
+  { methods: ["GET", "POST"], path: /^\/api\/threads\/[\w-]+\/messages\/[\w-]+\/file$/ },
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/job$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
@@ -369,6 +377,13 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["POST"], path: /^\/api\/team\/my-connections\/(?:apps\/[\w-]{1,64}\/connect|mcp\/[a-z][a-z0-9_-]{0,31}\/sign-in)$/ },
   { methods: ["PUT"], path: /^\/api\/team\/my-connections\/mcp\/[a-z][a-z0-9_-]{0,31}\/key$/ },
   { methods: ["DELETE"], path: /^\/api\/team\/my-connections\/(?:apps\/[\w-]{1,64}|mcp\/[a-z][a-z0-9_-]{0,31})$/ },
+  // the person opened the app: their own brief on a Team Cloud, nothing recorded for anyone else
+  { methods: ["POST"], path: /^\/api\/presence\/active$/ },
+  // what a bot asks of this person: their own questions and approvals only
+  { methods: ["GET"], path: /^\/api\/needs-you$/ },
+  // who a Team Cloud bot can report to, and handing over a bot the member owns: the handler checks who may
+  { methods: ["GET"], path: /^\/api\/team\/people$/ },
+  { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/reports-to$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
@@ -506,7 +521,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
         !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-openmausbot-companion-device"]) ?? "") ||
         (companionDenial({ path, method, authenticated: true }) && !isCompanionNotice(method, path))
       ) return deny(403, "forbidden: invalid companion request");
-      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+      return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-openmausbot-companion-device"]) }, status: 401, error: "" };
     }
     const desktopOwner = options.loopbackMutationToken !== undefined &&
       secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken);

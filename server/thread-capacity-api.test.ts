@@ -120,7 +120,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
 
   it("defaults to three, runs ten real turns after raising the limit, and safely queues and cancels overflow", async () => {
     expect((await api("GET", "/api/config")).body.threads).toEqual({ maxConcurrentPerBot: 3 });
-    for (const maxConcurrentPerBot of [0, 11, 1.5, "2", null]) {
+    for (const maxConcurrentPerBot of [0, 17, 1.5, "2", null]) {
       expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot } })).status).toBe(400);
     }
     expect((await api("GET", "/api/config")).body.threads.maxConcurrentPerBot).toBe(3);
@@ -220,6 +220,36 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     } finally {
       for (const threadId of await busyThreads(botId)) finish(threadId);
       await expect.poll(async () => (await busyThreads(botId)).length, { timeout: 15_000 }).toBe(0);
+      await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+    }
+  }, 90_000);
+
+  it("runs the person's message in the main chat at once while task threads hold every slot", async () => {
+    await limit(1);
+    const { botId, threads: [main, task] } = await botWithThreads(2);
+    expect((await send(botId, main, "MAIN_WARM_UP")).body.queued).toBeUndefined();
+    await dump(main);
+    finish(main);
+    await expect.poll(() => busyThreads(botId), { timeout: 10_000 }).toEqual([]);
+    const created = await api("POST", "/api/routines", {
+      name: "Slot holder", prompt: "Write the scheduled digest.", target: "bot", botId, runOn: "maus", enabled: true,
+      schedule: { type: "daily", time: "23:00" },
+    });
+    expect(created.status).toBe(201);
+    const routineId = created.body.routine.id;
+    try {
+      const run = (await api("POST", `/api/routines/${routineId}/run`)).body.run;
+      await expect.poll(async () => (await api("GET", "/api/routines")).body.runs.find((entry: any) => entry.id === run.id)?.status, { timeout: 15_000 }).toBe("running");
+      expect(await busyThreads(botId)).toHaveLength(1);
+      expect((await send(botId, task, "TASK_THREAD_WAITS")).body).toMatchObject({ queued: true, reason: "capacity", threadId: task });
+      const direct = await send(botId, main, "MAIN_CHAT_RUNS");
+      expect(direct.status).toBe(202);
+      expect(direct.body.queued).toBeUndefined();
+      await expect.poll(() => busyThreads(botId), { timeout: 10_000 }).toContain(main);
+      expect(await busyThreads(botId)).not.toContain(task);
+    } finally {
+      for (const threadId of await busyThreads(botId)) finish(threadId);
       await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
     }

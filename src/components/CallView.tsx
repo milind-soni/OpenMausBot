@@ -37,12 +37,14 @@ const CALL_ENDPOINT_MS = 850;
 export type CallButtonPlacement = "header" | "composer" | "panel";
 
 /** `fill` (Simple composer): a round button in that colour, with no chevron; the + menu picks the call mode. */
-export function CallButton({ bot, placement = "header", fill }: { bot: Bot; placement?: CallButtonPlacement; fill?: string }) {
+/** `inverse` (phone composer): a round ink-coloured button with an app-coloured glyph: white on Midnight, dark on Meadow. */
+export function CallButton({ bot, placement = "header", fill, inverse }: { bot: Bot; placement?: CallButtonPlacement; fill?: string; inverse?: boolean }) {
   const { state } = useStore();
   return (
     <CallTargetButton
       placement={placement}
       fill={fill}
+      inverse={inverse}
       targetId={bot.id}
       targetName={bot.name}
       threadId={bot.threadId}
@@ -66,9 +68,11 @@ export function CallTargetButton({
   onStart,
   placement = "header",
   fill,
+  inverse,
 }: {
   placement?: CallButtonPlacement;
   fill?: string;
+  inverse?: boolean;
   targetId: string;
   targetName: string;
   threadId?: string;
@@ -127,7 +131,7 @@ export function CallTargetButton({
   const keyId = useId();
   const elsewhereName = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId)?.name : undefined;
   const composer = placement === "composer";
-  const round = Boolean(fill) || placement === "panel";
+  const round = Boolean(fill) || Boolean(inverse) || placement === "panel";
   const label = active
     ? t("call.hangUpOn", { name: targetName })
     : liveElsewhere
@@ -253,6 +257,8 @@ export function CallTargetButton({
           composer || placement === "panel" ? "size-8" : "size-9",
           active
             ? "bg-danger text-white hover:brightness-110"
+            : inverse
+              ? "bg-ink text-app hover:opacity-90 max-md:size-9"
             : fill
               ? "text-white hover:brightness-110"
             : placement === "panel"

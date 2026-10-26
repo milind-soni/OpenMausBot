@@ -103,8 +103,12 @@ it("adds independent accounts, switches a bot between their models, and preserve
   expect(readFileSync(tokenPath("google-original"), "utf8")).toBe("{}");
   await waitForExit(child, { signal: "SIGTERM" });
   await launch(Number(new URL(base).port));
-  const list = await api("GET", "/api/instances");
-  for (const id of ids) expect(list.body.instances.find((row: any) => row.instanceId === id).snapshot.authenticated).toBe(true);
+  // Until the start-up read reaches an engine, the list answers from the last run's recorded status, which kill() on
+  // Windows (no exit handlers) leaves up to a second behind.
+  await vi.waitFor(async () => {
+    const list = await api("GET", "/api/instances");
+    for (const id of ids) expect(list.body.instances.find((row: any) => row.instanceId === id).snapshot.authenticated).toBe(true);
+  }, { timeout: 15_000, interval: 250 });
   const bots = await api("GET", "/api/bots");
   expect(bots.body.bots.find((bot: any) => bot.id === created.body.bot.id).modelSelection).toMatchObject({ instanceId: ids[1], model: "gemini-fixture" });
 }, 40_000);

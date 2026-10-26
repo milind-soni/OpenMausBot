@@ -332,10 +332,10 @@ export function SidebarPopoverMenu({
         if (subTimer.current) clearTimeout(subTimer.current);
         subTimer.current = setTimeout(() => setSubmenu((key) => (subRef.current?.matches(":hover") ? key : null)), CLOSE_DELAY_MS);
       }}
-      style={anchored ? { position: "fixed", left: position?.left ?? 0, top: position?.top ?? 0, width: ANCHORED_MENU_WIDTH, maxWidth: `calc(100vw - ${EDGE_MARGIN * 2}px)`, visibility: position ? undefined : "hidden" } : undefined}
+      style={anchored ? { position: "fixed", left: position?.left ?? 0, top: position?.top ?? 0, width: ANCHORED_MENU_WIDTH, maxWidth: `calc(100vw - ${EDGE_MARGIN * 2}px)`, maxHeight: `calc(100vh - ${EDGE_MARGIN * 2}px)`, visibility: position ? undefined : "hidden" } : undefined}
       className={cn(
         sheetClass,
-        anchored ? "z-[60]" : "absolute z-40",
+        anchored ? "z-[60] overflow-y-auto" : "absolute z-40",
         placement === "below" && "top-full right-0 mt-1 w-72 max-w-[calc(100vw-2rem)]",
         motion.className,
       )}

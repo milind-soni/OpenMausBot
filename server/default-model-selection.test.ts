@@ -3,7 +3,7 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineAccess, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
-import { readyToRun, selectDefaultModelSelection, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
+import { readyToRun, selectDefaultModelSelection, withInstanceConfig, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
 import { ManagedDesktopPolicy } from "./managed-policy.ts";
 
 const codex = {
@@ -216,9 +216,9 @@ describe("new bot default model selection wiring in index.ts", () => {
     const managedDesktop = { owns: (instanceId: string) => enrolled && instanceId.startsWith("company.") };
     const cloudCredit = credit ? { owns: (instanceId: string) => instanceId === credit } : null;
     const describe = vi.fn(async () => instances);
-    const defaultSelection = new Function("hostedModels", "cfg", "registry", "managedDesktop", "managedPolicy", "BUILT_IN_DRIVERS", "selectDefaultModelSelection", "cloudCredit", "providerConfigs", "heldKeys",
+    const defaultSelection = new Function("hostedModels", "cfg", "registry", "managedDesktop", "managedPolicy", "BUILT_IN_DRIVERS", "selectDefaultModelSelection", "cloudCredit", "providerConfigs", "heldKeys", "withInstanceConfig",
       `${code}; return defaultSelection;`)(undefined, { defaultModelSelection: saved }, { describe }, managedDesktop, managedPolicy,
-      [{ driverKind: "claudeAgent", metadata: { displayName: "Claude" } }], selectDefaultModelSelection, cloudCredit, () => configs, null) as (saved?: ModelSelection | null, instances?: readonly SelectableInstance[]) => Promise<ModelSelection>;
+      [{ driverKind: "claudeAgent", metadata: { displayName: "Claude" } }], selectDefaultModelSelection, cloudCredit, () => configs, null, withInstanceConfig) as (saved?: ModelSelection | null, instances?: readonly SelectableInstance[]) => Promise<ModelSelection>;
     return { defaultSelection, describe, close: () => managedPolicy.close() };
   }
 

@@ -1,7 +1,8 @@
 // Runs INSIDE a bot box (self-check.ts starts it) and tries what a hostile bot would: the server's database and settings,
-// another bot's folders, another turn's process and environment, the server's own loopback routes, the local network and
-// the cloud metadata service; and what a legitimate turn needs: its own folders, the harness routes and the public
-// internet. Prints one JSON line of results. Every check is named here once, so the report's `checks: n/n` means these.
+// another bot's folders, another turn's process and environment, the server's own loopback routes, the local network,
+// the cloud metadata service and the engines every turn runs; and what a legitimate turn needs: its own folders, an
+// engine OpenMausBot installed, the harness routes and the public internet. Prints one JSON line of results. Every
+// check is named here once, so the report's `checks: n/n` means these.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
@@ -21,6 +22,8 @@ export interface ProbeSpec {
   serverFiles: string[];
   otherWorkspace: string;
   otherTaskWorkspace: string;
+  /** An engine installed like OpenMausBot installs one: `name` on PATH, linked from `bin`, printing `says`. */
+  engine: { bin: string; name: string; says: string };
   marker: string;
   canaryPid: number;
   serverPid: number;
@@ -121,6 +124,10 @@ export async function runProbe(spec: ProbeSpec, env: Record<string, string | und
   add("own-cwd-rw", !own.failed, own.code);
   const folder = fails(() => writeFileSync(join(spec.botFolder, ".box-probe"), "ok"));
   add("bot-folder-rw", !folder.failed, folder.code);
+  const engine = spawnSync(spec.engine.name, [], { encoding: "utf8", timeout: 10_000, env: env as NodeJS.ProcessEnv });
+  add("engine-runs", engine.stdout?.trim() === spec.engine.says, engine.error ? (engine.error as NodeJS.ErrnoException).code ?? "error" : `exit ${engine.status}`);
+  const tamper = fails(() => writeFileSync(join(spec.engine.bin, ".box-probe"), "#!/bin/sh\n"));
+  add("engine-read-only", existsSync(join(spec.engine.bin, spec.engine.name)) && tamper.failed, tamper.code);
   add("tmp-private", !existsSync(spec.hostTmpFile), existsSync(spec.hostTmpFile) ? "host /tmp visible" : "private");
   add("hostname-private", hostname() === "omb-box", hostname() === "omb-box" ? "omb-box" : "host name visible");
 

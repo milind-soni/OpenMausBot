@@ -10,7 +10,7 @@ import { postWebhookToRoom } from "./webhook-room-post.ts";
 export interface WebhookRoomDeps {
   store: Store;
   cfg: AppConfig;
-  /** The same membership and section verdict a bot's own post_to_room call gets. */
+  /** The same membership verdict a bot's own post_to_room call gets. */
   roomTalks(bot: BotRecord, group: GroupRecord): RoomTalksVerdict;
 }
 
@@ -22,7 +22,6 @@ function fail(status: number, message: string): never {
 function roomPostProblem(bot: BotRecord, group: GroupRecord, verdict: Exclude<RoomTalksVerdict, { ok: true }>): string {
   if (verdict.problem === "dm") return `@${bot.name} reaches that bot in a one-to-one channel; a webhook room post needs a room`;
   if (verdict.problem === "not-member") return `@${bot.name} is not a member of the room “${group.name}”. Add @${bot.name} to the room, or point the webhook at a room it is in.`;
-  if (verdict.problem === "outsider") return `the room “${group.name}” includes @${verdict.name}, who is outside @${bot.name}'s section, so @${bot.name} cannot post there`;
   return `the room “${group.name}” is still being set up — it cannot receive messages yet`;
 }
 

@@ -18,7 +18,7 @@ const ACME = { id: "team-acme-1", name: "Acme" };
 // Facts only Ada's notes on My Cloud hold: they must never reach Acme.
 const NOTE = "Ada drinks oolong-7731 every morning.";
 const ABOUT = "Ada's partner is Fernando-4471.";
-const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.HOME + "/dump.json";`;
+const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/dump.json";`;
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
 const tokens: Record<string, string> = {};

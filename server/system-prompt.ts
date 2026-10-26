@@ -22,11 +22,12 @@ export function userProfileSystemPrompt(profile?: { aboutMe?: string; person?: s
 
 /** Sections that change between turns of one conversation. A driver keys its per-thread CLI process on the rest;
  * otherwise every change relaunches it and the provider re-uploads the conversation at the cache-write rate. */
-// The last five describe one turn, not the conversation: where it came from and what its words switched on.
+// The last six describe one turn, not the conversation: where it came from, where the person is (on their phone,
+// at the computer, or not there) and what its words switched on.
 // Two per-turn sections stay stable on purpose: "setup" sits right after the standing instructions it overrides,
 // and "webhook" keeps its untrusted-data rule in the system prompt, out of reach of the payload it guards.
 const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "recent", "availability",
-  "plan", "assignment", "routine-execution", "skill-instructions", "playbooks"]);
+  "plan", "assignment", "routine-execution", "skill-instructions", "playbooks", "device-place"]);
 
 /** Its id is what puts it in the volatile half. */
 export function teamAvailabilityPart(team: readonly RosterMember[]): PromptPart {

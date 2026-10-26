@@ -13,6 +13,9 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { botCreated } from "@/lib/product-events";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { departmentOwner } from "./TeamOwner";
+import { openServerMenu } from "./DesktopWorkspaceSwitcher";
+import { useTeamPeople, type TeamPeople } from "@/state/team-people";
 import { teamChats } from "@/state/team-chats";
 import { openBot } from "@/state/thread-navigation";
 import { visibilityFromForm, type VisibilityMode } from "./bot-settings/VisibilitySection";
@@ -97,6 +100,9 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
   const [warning, setWarning] = useState<"local" | null>(null);
   const [audience, setAudience] = useState<VisibilityMode>("everyone");
   const [people, setPeople] = useState("");
+  const team = useTeamPeople();
+  const teamName = parent.state.config?.team?.name;
+  const [chosenOwner, setChosenOwner] = useState<string | null>(null);
   const ownerOrAdmin = useOwnerOrAdmin();
   const showThreads = useShowThreads();
   const sections = useAdvancedMode() ? SECTIONS : SECTIONS.filter((section) => section !== "Model");
@@ -161,7 +167,8 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
     try {
       if (defaultsMode) await api("/api/config", { method: "PATCH", body: JSON.stringify({ newBotDefaults: await preparedBotTemplate(draft) }) });
       else {
-        const { bot, warnings } = await createConfiguredBot(draft, undefined, undefined, undefined, visibility?.ok ? visibility.visibility : undefined);
+        const { bot, warnings } = await createConfiguredBot(draft, undefined, undefined, undefined, visibility?.ok ? visibility.visibility : undefined,
+          team ? reportsToFor(chosenOwner, draft.bot.section, parent.state.bots, team) ?? undefined : undefined);
         botCreated(draft.preset ? "preset" : draft.role ? "template" : "blank", draft.role);
         parent.dispatch({ type: "botAdded", bot, preserveSelection });
         if (!preserveSelection && teamChats()) openBot(parent.dispatch, bot, showThreads);
@@ -201,6 +208,7 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
         <button type="button" onClick={() => closeRef.current()} aria-label={t("common.close")}
           className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"><X size={18} className="pointer-events-none" /></button>
       </div>
+        {team && !defaultsMode && teamName && <SharedInTeam team={teamName} />}
         {choosesVisibility && (
           <div className="flex flex-wrap items-center gap-2 px-5 pt-3 text-[13px] text-ink-secondary" data-new-bot-visibility>
             <label className="flex items-center gap-2">
@@ -236,7 +244,8 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
           {!ready && !error && <div role="status" className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={16} className="animate-spin" />{t("newBot.loading")}</div>}
           {ready && <fieldset disabled={saving} className="min-w-0">
             <BotEditorStore value={scopedStore}><BotEditorContext.Provider value={{ request: draft.request, draft: true, uploadAvatar: draft.uploadAvatar }}>
-              <DraftSection active={active} draft={draft} defaultsMode={defaultsMode} />
+              <DraftSection active={active} draft={draft} defaultsMode={defaultsMode}
+                owner={team && !defaultsMode ? { value: reportsToFor(chosenOwner, bot.section, parent.state.bots, team), choose: setChosenOwner } : undefined} />
             </BotEditorContext.Provider></BotEditorStore>
           </fieldset>}
         </div>
@@ -254,9 +263,29 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
   </div>;
 }
 
-function DraftSection({ active, draft, defaultsMode }: { active: Section; draft: BotCreationDraft; defaultsMode: boolean }) {
+/** Who a new team bot reports to: the person chosen, else whoever every bot of its department reports to, else this
+ * person. */
+function reportsToFor(chosen: string | null, section: string | undefined, bots: readonly Bot[], team: TeamPeople): string | null {
+  if (chosen) return chosen;
+  const department = bots.filter((bot) => !bot.hidden && (bot.section?.trim() || "") === (section?.trim() || ""));
+  return departmentOwner(department, team)?.email ?? team.me?.email ?? null;
+}
+
+function SharedInTeam({ team }: { team: string }) {
+  const bridge = typeof window === "undefined" ? undefined : window.ogb?.workspaces;
+  return <div data-new-bot-shared className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline/40 bg-raised/30 px-5 py-2.5 text-[13px] text-ink-secondary">
+    <span>{t("newBot.sharedWith", { team })}</span>
+    {bridge
+      ? <button type="button" onClick={() => void openServerMenu(bridge).catch(() => {})} className="font-medium text-accent hover:underline">{t("newBot.justForYou")}</button>
+      : <span>{t("newBot.justForYou").replace(/\s*→$/, "")}</span>}
+  </div>;
+}
+
+function DraftSection({ active, draft, defaultsMode, owner }: { active: Section; draft: BotCreationDraft; defaultsMode: boolean;
+  owner?: { value: string | null; choose(email: string): void } }) {
   const bot = draft.bot;
   const { state } = useStore();
+  const team = useTeamPeople();
   const derived = useBotSettingsDerived(bot);
   if (active === "Identity") return <div className="space-y-4">
     <StartingRole draft={draft} defaultsMode={defaultsMode} />
@@ -267,6 +296,12 @@ function DraftSection({ active, draft, defaultsMode }: { active: Section; draft:
         <option value="">{t("teamSettings.general")}</option>{[...new Set([...(state.sections ?? []), ...state.bots.map(bot => bot.section ?? "")])].filter(Boolean).map(name => <option key={name}>{name}</option>)}
       </Select>
     </label>
+    {owner && team && <label className="block text-[13px] text-ink-secondary" data-new-bot-reports-to>{t("newBot.reportsTo")}
+      <Select size="lg" className="mt-1.5 w-full" value={owner.value ?? ""} onChange={event => owner.choose(event.target.value)}>
+        {team.people.map(person => <option key={person.email} value={person.email}>{person.you ? t("owner.you", { name: person.name }) : person.name}</option>)}
+      </Select>
+      <span className="mt-1 block text-[12px]">{t("owner.pickHint")}</span>
+    </label>}
   </div>;
   if (active === "Soul") return <SoulSection bot={bot} patch={derived.patch} />;
   if (active === "Skills") return <SkillsSection bot={bot} />;

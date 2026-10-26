@@ -171,6 +171,39 @@ describe("the browser panel's connection", () => {
   });
 });
 
+describe("while nobody can see the panel", () => {
+  it("stops the stream while the page is hidden and reopens it when the page is back", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const socket = await streaming("unclaimed");
+    await act(async () => {
+      visibility.mockReturnValue("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flush();
+    expect(socket.readyState).toBe(3);
+    expect(FakeSocket.instances).toEqual([socket]);
+    await act(async () => {
+      visibility.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flush();
+    expect(FakeSocket.instances).toHaveLength(2);
+    expect(FakeSocket.instances[1]).not.toBe(socket);
+  });
+
+  it("keeps streaming for the viewer the page left holding the browser", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const socket = await streaming("you");
+    await act(async () => {
+      visibility.mockReturnValue("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flush();
+    expect(FakeSocket.instances).toEqual([socket]);
+    expect(socket.readyState).not.toBe(3);
+  });
+});
+
 describe("a v1 live view whose stream dropped", () => {
   const live = () => FixtureEventSource.instances.at(-1)!;
   const emit = (name: string, data: unknown) => act(async () => live().emit(name, data));

@@ -163,6 +163,7 @@ describe.skipIf(process.platform === "win32")("direct final-screen settlement", 
       { headers: { origin: session.info.url } });
     expect(image.status).toBe(200);
     expect(image.headers.get("content-type")).toBe("image/jpeg");
+    expect(image.headers.get("cache-control")).toBe("private, no-store");
     expect(Buffer.from(await image.arrayBuffer()).toString("base64")).toBe(JPEG);
   }, 30_000);
 

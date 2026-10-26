@@ -52,7 +52,7 @@ export const USER_ERROR = {
   "serverError.department.shareNoBots": "Add a bot to this department before sharing it.",
   "serverError.department.shareSkillLimit": "A department can share at most {count} skills. Choose fewer skills and try again.",
   "serverError.department.shareBotSkillLimit": "{name} has more than {count} skills. Choose fewer skills and try again.",
-  "serverError.department.createFirst": "Create the named department before giving a Chief access to it",
+  "serverError.department.createFirst": "Create the named department before making a Chief responsible for it",
   "serverError.department.chiefOnlyExtra": "Only a Chief may manage existing additional departments",
   "serverError.department.confirmExtra": "Confirm additional department access (acknowledgePeerScope)",
   "serverError.department.stopBots": "Stop running bots before granting access to another department, or use the desktop app or a paired Full-access session.",

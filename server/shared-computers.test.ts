@@ -252,6 +252,14 @@ describe("server-side scope check (audit M1)", () => {
     expect(sharedComputerScopeRefusal(lent, { action: "read_file", folder_id: readOnly.id })).toBeNull();
     expect(sharedComputerScopeRefusal(lent, { action: "write_file", folder_id: writable.id })).toBeNull();
   });
+  it("names the computer and the exact switch when its terminal is off", () => {
+    const refusal = sharedComputerScopeRefusal({ ...lent, name: "Ubuntu NUC", platform: "linux" }, { action: "run_command" });
+    expect(refusal).toContain("Ubuntu NUC");
+    expect(refusal).toContain("Settings \u2192 MausBot Cloud \u2192 Terminal");
+    expect(refusal).not.toContain("This computer \u2192");
+    expect(refusal).toMatch(/only the person can/i);
+    expect(sharedComputerScopeRefusal({ ...lent, terminal: true }, { action: "run_command" })).toBeNull();
+  });
   it("says where the person lends apps and screen, in the refusal and in the list a bot reads", () => {
     const steps = "give the person [Use my Mac](openmausbot://use-my-computer) to press in OpenMausBot on that Mac: it asks them once and turns on its apps and screen.";
     expect(sharedComputerScopeRefusal({ ...lent, platform: "darwin" }, { action: "computer_call" })).toBe(`Apps and screen are not lent to this server. To lend them, ${steps}`);

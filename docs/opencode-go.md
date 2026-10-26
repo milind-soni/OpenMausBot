@@ -54,6 +54,16 @@ successful catalog is used, followed by a small anonymous-model fallback.
 Before every prompt, ACP receives `session/set_config_option` with
 `configId: "model"` and the exact selected provider-qualified model ID.
 
+A model OpenCode hides through a `whitelist` (or `blacklist`) under its
+provider in `opencode.json` is missing from the picker too; add its id to
+that list to see it.
+
+Some models take a limited number of tools per request (OpenCode Zen's free
+models refuse more than 128). When a model refuses a turn for that,
+OpenMausBot retries it once with each MCP server listing only its share of
+what OpenCode's own tools leave, keeps doing so for that model until it
+restarts, and logs how many tools each server left out.
+
 ## Testing
 
 Normal unit and ACP protocol tests do not require a subscription. Live tests

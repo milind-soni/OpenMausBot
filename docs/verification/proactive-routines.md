@@ -18,8 +18,9 @@ result picked by a marker in its prompt (`FAKE_CLAUDE_MARKER_REPLIES`).
 
 Expected:
 
-- The Chief has one default routine, "Keep an eye on my day", with checks,
-  `read-and-draft` and `deliver: brief`.
+- MausBot, hidden from the sidebar for the whole scenario, has the one default
+  routine, "Keep an eye on my day", with checks, `read-and-draft` and
+  `deliver: brief`.
 - The first open of the day, with nothing for the person yet, posts no brief,
   opens nothing and starts no AI turn. The first brief, posted by the watch's
   run, carries the intro line, and every later change edits it in place.
@@ -29,8 +30,9 @@ Expected:
   defused. It runs at `--permission-mode default`, and its system prompt has no
   recent work. Only Gmail and Calendar reads reach the service, and none names
   an account.
-- The 10-minute reminder, the prep card and the brief rows appear. The brief is
-  edited in place, not posted twice.
+- The 10-minute reminder, the prep card and the brief rows appear in MausBot's
+  chat, and the brief's notification names that chat. The brief is edited in
+  place, not posted twice.
 - The same mail again is nothing new: there is no second turn.
 - Dismiss removes the row with no turn, and the next sort's prompt holds the
   dismissed sender as records.
@@ -45,6 +47,40 @@ Expected:
   and OpenMausBot's answerer, and Gmail's answer reaches it as records. A later
   ordinary turn's conversation search does not find the run.
 
+## MausBot as the owner
+
+```sh
+pnpm exec vitest run server/host/proactive-mausbot.test.ts
+```
+
+Each step starts the store, the routines and the proactive side from the files
+on disk, as a restart does, with a stand-in for connected apps and no model.
+Expected:
+
+- A new install's MausBot is its Chief and gets the one watch. On an install
+  where MausBot came after the Chief, the watch is made on MausBot.
+- An existing install's watch moves from the Chief to MausBot once: same id,
+  paused if it was paused, the edited instructions, the checks' state file
+  unchanged, the day's run count kept. The brief's home becomes MausBot's chat,
+  its intro shows again, and the Chief keeps its past card. Starting again
+  changes nothing, and a routine the person puts back on the Chief stays there.
+  A `watch.json` from before the handover still hands over once.
+- A restart after the routine moved but before the brief and `watch.json`
+  followed finishes the handover with no second watch.
+- With a watch already on MausBot, the Chief's is kept and MausBot's own is
+  paused; a paused watch stays paused and nothing else is left on. A queued run
+  holds the handover until it ends. A frozen computer hands nothing over.
+- MausBot hidden from the sidebar gets the brief card, its notification, the
+  first-open answer and the add-a-key card; today's earlier card stays in the
+  Chief's chat.
+- On a Team Cloud there is no watch and nothing is handed over, and a member's
+  MausBot is never the proactive bot, so its briefing routine reads nothing.
+- A move to My Cloud leaves an untouched MausBot behind while its watch is
+  exactly as the server made it, and carries MausBot with the watch once the
+  person changed it, even when nobody opened MausBot. A send that carries no
+  routines is unchanged. On My Cloud the arrived watch is the only one on, and
+  My Cloud's own is paused.
+
 ## Unit tests
 
 `server/routine-checks-engine.test.ts` covers the routine engine with checks:
@@ -53,8 +89,9 @@ cap, busy bots, and Run now. The others:
 
 - `server/host/routine-checks.test.ts`, `server/host/check-plan.test.ts` and
   `server/host/check-prompts.test.ts`: the checks, planner and prompts;
-- `server/host/brief.test.ts` and `server/host/proactive.test.ts`: the brief and
-  the default routine;
+- `server/host/brief.test.ts`, `server/host/proactive.test.ts` and
+  `server/host/proactive-mausbot.test.ts`: the brief, the default routine and
+  its owner;
 - `server/connected-reads.test.ts` and `server/records-block.test.ts`: the
   readers and the sanitiser;
 - `server/read-and-draft.test.ts`: the fence;
@@ -72,7 +109,7 @@ cap, busy bots, and Run now. The others:
 2. Serve the renderer against it:
    `OMB_PORT=<fixture port> pnpm exec vite --port 19872 --strictPort`.
 3. Open `http://127.0.0.1:19872/` in a headless Chromium. Dismiss the welcome
-   tour, then open the Chief's chat and Automations. In the chat, the cards are
+   tour, then open MausBot's chat and Automations. In the chat, the cards are
    `[data-widget]` elements.
 
 Not verified this way: a real Google account. The Composio slugs and answer

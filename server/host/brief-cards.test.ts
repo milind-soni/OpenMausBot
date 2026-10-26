@@ -15,7 +15,7 @@ const event = {
 const facts: BriefFacts = {
   now: NOW, timeZone: "America/Sao_Paulo", intro: true, meetings: [{ title: "Standup", start: NOW + 3_600_000, joinUrl: "https://meet.example.com/abc" }],
   emails: [{ messageId: "m1", threadId: "t1", from: "Ada <ada@x.test>", subject: "", needsReply: true, why: "deadline" }],
-  waiting: 2, routines: [], needs: [{ text: "Scout asked you", note: "Which file?", said: { text: { key: "brief.row.asked", params: { name: "Scout" } } } }],
+  waiting: 2, routines: [], needs: [{ key: "question:Scout", text: "Scout asked you", note: "Which file?", said: { text: { key: "brief.row.asked", params: { name: "Scout" } } } }],
 };
 
 function texts(node: unknown, found: WidgetText[] = []): WidgetText[] {

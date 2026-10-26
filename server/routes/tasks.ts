@@ -7,7 +7,7 @@ import type { Coordinator } from "../coordinator.ts";
 import type { Handoffs } from "../delta-context.ts";
 import type { hostedModelPolicy } from "../hosted-models.ts";
 import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
-import type { RequestAuth } from "../request-auth.ts";
+import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import type { SkillReview } from "../skill-review.ts";
 import { isProjectEmoji, type BotRecord, type Store, type TaskRecord } from "../store.ts";
@@ -251,6 +251,9 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       if (CLOUD_HOME && !cloudOwnerSession(auth) &&
         (body.approvalMode !== undefined || body.autoApprove !== undefined || body.acknowledgeLocalAuto !== undefined || body.updateBotDefault === true || body.refreshPermissions === true)) {
         return json(res, 403, { error: "On this Cloud only its owner can change how a bot asks for approval, or its default model." });
+      }
+      if (body.updateBotDefault === true && !ownerOrAdmin(auth)) {
+        return json(res, 403, { error: "forbidden: this session may change this thread's model, not the bot's default (needs the admin scope)" });
       }
       for (const key of ["requireAvailableModel", "acknowledgeLocalAuto", "updateBotDefault", "resetApprovalToAsk"] as const) {
         if (body[key] !== undefined && typeof body[key] !== "boolean") return json(res, 400, { error: `${key} must be a boolean` });

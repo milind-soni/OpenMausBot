@@ -131,12 +131,12 @@ describe("decider config", () => {
     }
   });
 
-  it("an existing Jev-only config file keeps resolving to Jev, and picking OpenRouter leaves the Jev key in place", () => {
+  it("an existing Jev-only config file keeps resolving to Jev, and an old OpenRouter choice never moves it off the own Jev key", () => {
     writeFileSync(join(DATA_DIR, "config.json"), JSON.stringify({ decider: { enabled: true, key: KEY } }));
     expect(describeDecider(loadConfig())).toEqual({ provider: "jev", configured: true, enabled: true, jobs: { roomRouting: true } });
     saveConfig({ decider: { provider: "openrouter" } });
     expect(loadConfig().decider).toMatchObject({ provider: "openrouter", key: KEY, enabled: true });
-    expect(describeDecider(loadConfig())).toMatchObject({ provider: "openrouter", configured: false, enabled: false });
+    expect(describeDecider(loadConfig())).toMatchObject({ provider: "jev", configured: true, enabled: true });
     saveConfig({ decider: { provider: "jev" } });
     expect(describeDecider(loadConfig())).toMatchObject({ provider: "jev", configured: true, enabled: true });
   });

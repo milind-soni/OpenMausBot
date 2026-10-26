@@ -1,4 +1,5 @@
 import { APP_LIMITS, type AppPayload } from "../../shared/app.ts";
+import { APP_RPC_METHODS, type AppRpcMethod } from "../../shared/app-frame/bridge.ts";
 import { webOrigin } from "../../shared/app-frame/csp.ts";
 import { appRow, createChatApps, rowRate, type ChatApps } from "../chat-apps.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -9,14 +10,12 @@ import { PASS, type RouteHandler } from "./table.ts";
 export { createChatApps };
 export { createChatAppsMcp } from "../chat-apps-mcp.ts";
 
-export const APP_RPC_METHODS = ["tools/call", "tools/list", "resources/read", "resources/list"] as const;
-
 export interface McpRpcRequest {
   auth: RequestAuth;
   bot: BotRecord;
   threadId: string;
   row: Message & { app: AppPayload };
-  method: (typeof APP_RPC_METHODS)[number];
+  method: AppRpcMethod;
   params: Record<string, unknown>;
 }
 

@@ -56,13 +56,13 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Open Clive's profile");
     await clickRole("button", "Open Clive's profile");
     await click("Permissions");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Additional departments");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Also in charge of");
     await toggleTeams();
     await clickRole("checkbox", "Engineering");
     await clickRole("checkbox", "Research");
     await clickRole("checkbox", "Empty delivery");
     expect((await saved()).managedSections ?? []).toEqual([]);
-    await click("Save department access");
+    await click("Save departments");
     await expect.poll(async () => (await saved()).managedSections?.toSorted(), { timeout: 10_000 }).toEqual(["Empty delivery", "Engineering", "Research"]);
     // The server update remounts the controlled list so another bot's old
     // selection can never be saved from a stale dialog.
@@ -76,7 +76,7 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
     const screenshot = info.logPath + ".team-access.png";
     await ui("screenshot", "--out", screenshot);
     await clickRole("checkbox", "Engineering");
-    await click("Save department access");
+    await click("Save departments");
     await expect.poll(async () => (await saved()).managedSections?.toSorted(), { timeout: 10_000 }).toEqual(["Empty delivery", "Research"]);
     await api("/api/sidebar-sections?section=Empty%20delivery", { name: "Empty delivery" });
     expect((await saved()).managedSections?.toSorted()).toEqual(["Empty delivery", "Research"]);

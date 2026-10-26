@@ -5,13 +5,14 @@
 import { z } from "zod";
 
 import type { MoveFreeze } from "../move-freeze.ts";
+import type { MoveWait } from "../move-waits.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface MoveFreezeRouteDeps {
   freeze: MoveFreeze;
-  /** Who is still answering, queued, or in a card or sign-in: a bot's or room's name, "" when it has none; null when
-   * nothing is. */
-  busy(): string | null;
+  /** What the move still waits for (move-waits.ts): `busy` is its name, "" when it has none, and `what` says what it
+   * is; null when nothing holds the move. */
+  busy(): MoveWait | null;
   /** Starts this server again, as a restored workspace does. */
   restart(): void;
   /** Switches off every automation here (move-freeze.ts `switchAutomationsOff`). */
@@ -36,14 +37,14 @@ export function createMoveFreezeRoutes({ freeze, busy, restart, automationsOff }
       if (method === "GET") {
         const who = busy();
         const cloud = freeze.cloud();
-        return json(res, 200, { frozen: freeze.frozen(), ...(freeze.frozen() && cloud ? { cloud } : {}), ...(who === null ? {} : { busy: who }) });
+        return json(res, 200, { frozen: freeze.frozen(), ...(freeze.frozen() && cloud ? { cloud } : {}), ...(who === null ? {} : { busy: who.name, what: who.what }) });
       }
       if (method === "POST") {
         const body = freezeBody.safeParse(await readBody(req, 4096));
         if (!body.success) return json(res, 400, { error: "send { cloud }: My Cloud's address" });
         if (!freeze.frozen()) {
           const who = busy();
-          if (who !== null) return json(res, 409, { error: "A bot is still working.", busy: who });
+          if (who !== null) return json(res, 409, { error: "A bot is still working.", busy: who.name, what: who.what });
           freeze.freeze(body.data.cloud ?? null);
         }
         return json(res, 200, { frozen: true });

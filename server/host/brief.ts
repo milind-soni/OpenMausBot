@@ -1,5 +1,5 @@
-// The main agent's brief: one server-built card a day in a fixed chat of the Chief's, edited in place, rendered with no
-// AI from what the checks found and what the watch run sorted. It exists only once it has something for the person, opens
+// The main agent's brief: one server-built card a day in a fixed chat of the proactive bot's, edited in place, rendered
+// with no AI from what the checks found and what the watch run sorted. It exists only once it has something for the person, opens
 // on the first open of the day and after three hours away, and tells the person once per update. Presence, the brief's home and its rows live in brief.json,
 // ids and times only; the senders and subjects it shows are read back from Gmail by id after a restart.
 import { readFileSync } from "node:fs";
@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import type { NeedsYouItem } from "../../shared/today.ts";
+import type { WidgetText } from "../../shared/widget-text.ts";
 import type { WidgetAction, WidgetRoot } from "../../shared/widget.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import { createAgentCard } from "../chat-widgets.ts";
@@ -14,11 +15,12 @@ import type { CalendarEvent, EmailHeader, ReadSession } from "../connected-reads
 import { recordsBlock, clean } from "../records-block.ts";
 import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import type { RoutineRun } from "../routines.ts";
-import { sectionKey, type BotRecord, type Message, type Store } from "../store.ts";
+import type { BotRecord, Message, Store } from "../store.ts";
 import { answered, localDate, qualifies, validZone } from "./check-plan.ts";
 import { parseWatchResult } from "./check-prompts.ts";
-import type { WidgetText } from "../../shared/widget-text.ts";
-import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, moment, prepCard, reminderCard, words, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard } from "./brief-cards.ts";
+import { briefCard, clockTime, DISMISS_ACTION, DRAFT_ACTION, moment, prepCard, reminderCard, words, type BriefEmail, type BriefFacts, type BriefRow, type BuiltCard, type NeedRow } from "./brief-cards.ts";
+import { briefWords, type BriefWords } from "./brief-words.ts";
+import { proactiveOwner } from "./proactive-owner.ts";
 import type { CheckReport } from "./routine-checks.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
@@ -39,6 +41,8 @@ const id = z.string().min(1).max(512);
 const stateSchema = z.object({
   version: z.literal(1),
   timeZone: z.string().max(128).optional(),
+  /** The language the person's app shows, from their last open. */
+  language: z.string().max(35).optional(),
   lastActiveAt: at.optional(),
   home: z.object({ botId: id, threadId: id }).optional(),
   /** The day the first brief was posted: that day's card says what it does. */
@@ -58,7 +62,7 @@ export interface BriefDeps {
   now?: () => number;
   /** A hosted team workspace or a Team Cloud: the people there are not one person, so there is no brief. */
   hosted: boolean;
-  /** The Chief's briefing routine is on; with it paused or deleted there is no brief. */
+  /** The proactive bot's briefing routine is on; with it paused or deleted there is no brief. */
   watching(): boolean;
   mainThread(botId: string): string | undefined;
   threadBusy(botId: string, threadId: string): boolean;
@@ -68,6 +72,8 @@ export interface BriefDeps {
   engineName(instanceId: string): string;
   /** The computer's own zone; undefined on a Cloud home, whose zone of record comes from the person's device. */
   hostTimeZone(): string | undefined;
+  /** The server's configured language, for a brief no app has opened with a language yet. */
+  language(): string | undefined;
   /** Reads for the brief's own follow-ups: an email's sender and subject after a restart, a reply already sent. */
   session(): ReadSession | null;
   /** The person's own Gmail address, once a check has read it. */
@@ -133,6 +139,7 @@ export function createBrief(deps: BriefDeps) {
   let trouble: CheckReport["trouble"] = [];
   let waiting: CheckReport["waiting"];
   let unfenced = false;
+  let helpersSort = false;
   const headers = new Map<string, EmailHeader & { why?: string }>();
   let dirty = false;
   let rendering = false;
@@ -150,13 +157,10 @@ export function createBrief(deps: BriefDeps) {
     return start;
   };
 
-  /** The main agent: the Chief of the whole workspace, or the first Chief there is. */
-  function chief(): BotRecord | null {
-    const chiefs = deps.store.bots.filter((bot) => bot.chiefOfStaff && !bot.hidden);
-    return chiefs.find((bot) => sectionKey(bot.section) === "") ?? chiefs[0] ?? null;
-  }
+  /** The bot the brief belongs to: proactiveOwner decides. */
+  const chief = (): BotRecord | null => proactiveOwner(deps.store);
 
-  /** The brief's chat: chosen once, the Chief's main chat at the time, and chosen again only if it is gone. */
+  /** The brief's chat: chosen once, the bot's main chat at the time, and chosen again only if it is gone. */
   function home(bot: BotRecord): string | undefined {
     if (state.home?.botId === bot.id && deps.store.taskByThread(bot.id, state.home.threadId)) return state.home.threadId;
     const threadId = deps.mainThread(bot.id);
@@ -166,9 +170,10 @@ export function createBrief(deps: BriefDeps) {
     return threadId;
   }
 
-  const currentCard = (): { row: Message; card: NonNullable<BriefState["card"]> } | null => {
+  /** Today's card, while it is this bot's: one the brief's earlier bot posted stays where it is. */
+  const currentCard = (bot: BotRecord): { row: Message; card: NonNullable<BriefState["card"]> } | null => {
     const card = state.card;
-    if (!card || card.day !== today()) return null;
+    if (!card || card.day !== today() || card.botId !== bot.id) return null;
     const row = deps.store.messagesFor(card.threadId).find((message) => message.id === card.messageId);
     return row?.serverCard ? { row, card } : null;
   };
@@ -185,8 +190,8 @@ export function createBrief(deps: BriefDeps) {
     return deps.store.messagesFor(run.threadId).findLast((row) => row.publishedPage?.state === "live" && row.at >= from && row.at <= to)?.publishedPage?.url;
   }
 
-  function routineRows(since: number): { needs: BriefRow[]; done: BriefRow[] } {
-    const needs: BriefRow[] = [], done: BriefRow[] = [];
+  function routineRows(since: number, w: BriefWords): { needs: NeedRow[]; done: BriefRow[] } {
+    const needs: NeedRow[] = [], done: BriefRow[] = [];
     const latest = new Map<string, RoutineRun>();
     for (const run of deps.runs()) {
       const end = run.finishedAt ?? run.createdAt;
@@ -201,53 +206,47 @@ export function createBrief(deps: BriefDeps) {
       const open = run.threadId && deps.store.taskByThread(run.botId, run.threadId) ? { botId: run.botId, threadId: run.threadId } : undefined;
       const name = oneLine(run.routineName, 80), note = run.status === "completed" ? firstSentence(run.output ?? "") : oneLine(run.error ?? "", 140);
       const page = run.status === "completed" && open ? publishedPage(run) : undefined;
-      if (run.status === "completed") done.push({ text: name, note: clip(note || "Finished", 140), ...(open ? { open } : {}), ...(page ? { page } : {}), ...(note ? {} : { said: { note: words("brief.row.finished") } }) });
-      else needs.push({ text: `${name} ${run.status === "missed" ? "was missed" : "failed"}`, note: clip(note || "It did not finish", 140), ...(open ? { open } : {}),
+      if (run.status === "completed") done.push({ text: name, note: clip(firstSentence(run.output ?? "") || w.finished, 140), ...(open ? { open } : {}), ...(page ? { page } : {}), ...(note ? {} : { said: { note: words("brief.row.finished") } }) });
+      else needs.push({ key: `routine:${name}:${run.status}`, text: run.status === "missed" ? w.missed(name) : w.failed(name), note: clip(oneLine(run.error ?? "", 140) || w.didNotFinish, 140), ...(open ? { open } : {}),
         said: { text: words(run.status === "missed" ? "brief.row.missed" : "brief.row.failed", { name }), ...(note ? watchFailureWords(note) : { note: words("brief.row.didNotFinish") }) } });
     }
     return { needs, done };
   }
 
-  function needsYouRows(): BriefRow[] {
-    return deps.needsYou().map((item): BriefRow => {
+  function needsYouRows(w: BriefWords): NeedRow[] {
+    return deps.needsYou().map((item): NeedRow => {
       const open = item.threadId ? { botId: "botId" in item ? item.botId : item.botIds[0]!, threadId: item.threadId } : undefined;
-      const row = (text: string, note: string, said: BriefRow["said"]): BriefRow => ({ text, note, said, ...(open && deps.store.taskByThread(open.botId, open.threadId) ? { open } : {}) });
+      const row = (about: string, text: string, note: string, said: BriefRow["said"]): NeedRow =>
+        ({ key: `${item.kind}:${about}`, text, note, said, ...(open && deps.store.taskByThread(open.botId, open.threadId) ? { open } : {}) });
       switch (item.kind) {
-        case "signed-out": {
-          const engine = deps.engineName(item.instanceId);
-          return row(`${engine} is signed out`, "Sign in again in Settings, Model providers.", { text: words("brief.row.signedOut", { engine }), note: words("brief.row.signInAgain") });
-        }
-        case "usage-limit": return row("An AI reached its usage limit", clip(item.text, 140),
-          { text: words("brief.row.usageLimit"), ...(item.textCode ? { note: words(item.textCode, item.textParams) } : {}) });
-        case "out-of-credit": return row("The trial credit can't run this", "Sign in with your own AI account, or add a key.", { text: words("brief.row.trialCredit"), note: words("brief.row.trialCreditNote") });
-        case "connection": return row(`${item.app} needs reconnecting`, clip(item.text, 140), { text: words("brief.row.reconnect", { app: item.app }) });
-        case "place": return row("A bot couldn't reach its computer", "Open it to choose another place.", { text: words("brief.row.place"), note: words("brief.row.placeNote") });
-        case "question": {
-          const name = deps.store.bot(item.botId)?.name;
-          return row(`${name ?? "A bot"} asked you`, clip(item.text, 140), { text: words("brief.row.asked", { name: name ?? words("brief.part.aBot") }) });
-        }
+        case "signed-out": { const engine = deps.engineName(item.instanceId); return row(engine, w.signedOut(engine), w.signInAgain, { text: words("brief.row.signedOut", { engine }), note: words("brief.row.signInAgain") }); }
+        case "usage-limit": return row("", w.usageLimit, clip(item.text, 140), { text: words("brief.row.usageLimit"), ...(item.textCode ? { note: words(item.textCode, item.textParams) } : {}) });
+        case "out-of-credit": return row("", w.outOfCredit, w.ownAccount, { text: words("brief.row.trialCredit"), note: words("brief.row.trialCreditNote") });
+        case "connection": return row(item.app, w.reconnecting(item.app), clip(item.text, 140), { text: words("brief.row.reconnect", { app: item.app }) });
+        case "place": return row("", w.unreachable, w.chooseAnother, { text: words("brief.row.place"), note: words("brief.row.placeNote") });
+        case "question": { const bot = deps.store.bot(item.botId)?.name; return row(bot ?? "", w.asked(bot ?? w.aBot), clip(item.text, 140), { text: words("brief.row.asked", { name: bot ?? words("brief.part.aBot") }) }); }
       }
     });
   }
 
   function facts(chiefBot: BotRecord): BriefFacts {
-    const at = now(), zone = timeZone(), day = today();
-    const { needs: failed, done } = routineRows(dayStart());
-    const clashRows: BriefRow[] = (calendar?.clashes ?? []).map(([first, second]) => ({
-      text: `${oneLine(first.title, 52)} and ${oneLine(second.title, 52)} overlap`,
-      note: `${clockTime(first.start, zone)} and ${clockTime(second.start, zone)}`,
-      said: { text: words("brief.row.clash", { first: oneLine(first.title, 52), second: oneLine(second.title, 52) }),
-        note: words("brief.row.clashNote", { first: moment(first.start, "clock", zone), second: moment(second.start, "clock", zone) }) },
+    const at = now(), zone = timeZone(), day = today(), language = state.language ?? deps.language(), w = briefWords(language);
+    const { needs: failed, done } = routineRows(dayStart(), w);
+    const clashRows: NeedRow[] = (calendar?.clashes ?? []).map(([first, second]) => ({
+      key: `clash:${oneLine(first.title, 52)}:${oneLine(second.title, 52)}`,
+      text: w.overlap(oneLine(first.title, 52), oneLine(second.title, 52)),
+      note: w.both(clockTime(first.start, zone, language), clockTime(second.start, zone, language)),
+      said: { text: words("brief.row.clash", { first: oneLine(first.title, 52), second: oneLine(second.title, 52) }), note: words("brief.row.clashNote", { first: moment(first.start, "clock", zone), second: moment(second.start, "clock", zone) }) },
     }));
-    const troubleRows: BriefRow[] = (trouble ?? []).map((one) => {
+    const troubleRows: NeedRow[] = (trouble ?? []).map((one) => {
       const app = one.app === "gmail" ? "Gmail" : "Google Calendar";
-      return { text: `Couldn't read ${app}`, note: one.signedOut ? `Reconnect ${app} in Connected apps.` : "I'll try again soon.",
+      return { key: `trouble:${one.app}`, text: w.couldNotRead(app), note: one.signedOut ? w.reconnect(app) : w.tryAgainSoon,
         said: { text: words("brief.row.cantRead", { app }), note: one.signedOut ? words("brief.row.reconnectIn", { app }) : words("brief.row.tryAgainSoon") } };
     });
-    const unfencedRows: BriefRow[] = unfenced
-      ? [{ text: "I didn't sort email or prepare meetings", note: `That needs a Claude model as ${chiefBot.name}'s AI. Your day, reminders and clashes still show here.`,
-        said: { text: words("brief.row.unfenced"), note: words("brief.row.unfencedNote", { name: chiefBot.name }) } }]
-      : [];
+    const unfencedRows: NeedRow[] = !unfenced ? []
+      : helpersSort
+        ? [{ key: "unfenced:meetings", text: w.unpreparedMeetings, note: w.unpreparedNote(chiefBot.name), said: { text: words("brief.row.unpreparedMeetings"), note: words("brief.row.unpreparedNote", { name: chiefBot.name }) } }]
+        : [{ key: "unfenced:all", text: w.unsorted, note: w.unsortedNote(chiefBot.name), said: { text: words("brief.row.unfenced"), note: words("brief.row.unfencedNote", { name: chiefBot.name }) } }];
     const meetings = calendar === undefined ? null : calendar.meetings
       .filter((meeting) => qualifies(meeting) || (meeting.ownedCalendar === true && meeting.status !== "cancelled" && !meeting.allDay && !meeting.selfDeclined))
       .filter((meeting) => meeting.end > at && localDate(meeting.start, zone) === day)
@@ -257,15 +256,15 @@ export function createBrief(deps: BriefDeps) {
       return header ? [{ messageId: row.messageId, threadId: row.threadId, from: header.from, subject: header.subject, needsReply: row.needsReply, ...(header.why ? { why: header.why } : {}) }] : [];
     });
     return {
-      now: at, ...(zone ? { timeZone: zone } : {}), intro: state.introducedOn === undefined || state.introducedOn === day,
-      needs: [...troubleRows, ...failed, ...clashRows, ...needsYouRows(), ...unfencedRows],
+      now: at, ...(zone ? { timeZone: zone } : {}), ...(language ? { language } : {}), intro: state.introducedOn === undefined || state.introducedOn === day,
+      needs: [...troubleRows, ...failed, ...clashRows, ...needsYouRows(w), ...unfencedRows],
       meetings, emails, ...(waiting !== undefined ? { waiting } : {}), routines: done,
     };
   }
 
   /** The rows a person would be told about: a new one among them is worth one notification. */
   const signature = (built: BriefFacts): string[] => [
-    ...built.needs.map((row) => `need:${row.text}`),
+    ...built.needs.map((row) => `need:${row.key}`),
     ...built.emails.map((email) => `email:${email.messageId}`),
   ];
 
@@ -299,7 +298,7 @@ export function createBrief(deps: BriefDeps) {
     rendering = true;
     try {
       await rereadHeaders();
-      const existing = currentCard();
+      const existing = currentCard(bot);
       const built = facts(bot);
       const threadId = existing?.card.threadId ?? home(bot);
       if (!threadId) return null;
@@ -351,7 +350,7 @@ export function createBrief(deps: BriefDeps) {
     return edited.messageId;
   }
 
-  /** A server card of its own in the brief's chat: a prep or a reminder. Null when there is no Chief or chat. */
+  /** A server card of its own in the brief's chat: a prep or a reminder. Null when there is no proactive bot or chat. */
   function postCard(built: BuiltCard): { bot: BotRecord; threadId: string; messageId: string } | null {
     const bot = chief();
     const threadId = bot ? home(bot) : undefined;
@@ -362,16 +361,28 @@ export function createBrief(deps: BriefDeps) {
     return { bot, threadId, messageId };
   }
 
-  /** What the checks found that needs no AI: today's meetings, clashes, reminders, other routines, trouble. */
+  /** An email picked for the brief, by a watch run or by the helper models: its row, with the why kept for this process. */
+  function keepImportant(email: EmailHeader, why: string, needsReply: boolean, at: number): void {
+    headers.set(email.id, { ...email, why });
+    state.important = [...state.important.filter((row) => row.messageId !== email.id), { messageId: email.id, threadId: email.threadId, at: email.at, judgedAt: at, needsReply }].slice(-MAX_ROWS);
+  }
+
+  /** What the checks found that needs no AI: today's meetings, clashes, reminders, other routines, trouble, and the
+   * emails the helper models picked. */
   async function report(found: CheckReport): Promise<void> {
     if (deps.hosted) return;
     if (found.meetings) calendar = { meetings: found.meetings, clashes: found.clashes ?? [] };
     trouble = found.trouble ?? [];
     waiting = found.waiting;
     unfenced = found.unfenced === true;
+    helpersSort = found.helpersSort === true;
     for (const event of found.remind ?? []) postCard(reminderCard({ event, timeZone: timeZone(), now: now() }));
+    const picked = found.picked ?? [];
+    for (const pick of picked) keepImportant(pick.email, pick.why, pick.needsReply, found.at);
+    if (picked.length) save();
     await followUpReplies(found.session);
-    if (state.lastActiveAt !== undefined) await render({ create: false, notify: true });
+    if (picked.length) await render({ create: true, notify: true });
+    else if (state.lastActiveAt !== undefined) await render({ create: false, notify: true });
   }
 
   /** An email waiting on a reply leaves the brief once the person has replied in its thread. */
@@ -402,11 +413,7 @@ export function createBrief(deps: BriefDeps) {
     }
     const at = now();
     if (!result.quiet) {
-      for (const pick of result.important) {
-        const email = items.mail.find((one) => one.id === pick.id)!;
-        headers.set(email.id, { ...email, why: pick.why });
-        state.important = [...state.important.filter((row) => row.messageId !== email.id), { messageId: email.id, threadId: email.threadId, at: email.at, judgedAt: at, needsReply: pick.needsReply }].slice(-MAX_ROWS);
-      }
+      for (const pick of result.important) keepImportant(items.mail.find((one) => one.id === pick.id)!, pick.why, pick.needsReply, at);
       for (const prep of result.prep) {
         const meeting = items.prep.find((one) => one.key === prep.id)!;
         if (state.preps.some((one) => one.key === meeting.key && one.at > at - DAY)) continue;
@@ -420,18 +427,24 @@ export function createBrief(deps: BriefDeps) {
 
   /** The person arrived: the first open of a day, or a return after 3 hours away, shows today's brief when it has anything
    * in it. Any other ping only records the time, so the brief never takes the screen from a chat in use. */
-  async function active(source: "desktop" | "phone", zone?: string): Promise<PresenceAnswer> {
+  async function active(source: "desktop" | "phone", zone?: string, language?: string): Promise<PresenceAnswer> {
     if (deps.hosted) return { returned: false };
     const at = now();
     if (zone && validZone(zone) && zone !== state.timeZone) state.timeZone = zone;
+    const relabel = language !== undefined && language !== state.language;
+    if (relabel) state.language = language;
     const previous = state.lastActiveAt;
     state.lastActiveAt = at;
     const skewed = previous !== undefined && previous > at + CLOCK_SKEW_MS;
     const returned = previous !== undefined && !skewed && at - previous >= AWAY_MS;
     const firstToday = previous === undefined || (!skewed && localDate(previous, timeZone()) !== today());
-    if (returned || firstToday || persistedAt === undefined || at - persistedAt >= PERSIST_EVERY_MS) save();
+    if (relabel || returned || firstToday || persistedAt === undefined || at - persistedAt >= PERSIST_EVERY_MS) save();
     void source;
-    if (!returned && !firstToday) return { returned: false };
+    if (!returned && !firstToday) {
+      const owner = relabel ? chief() : null;
+      if (owner && currentCard(owner)) await render({ create: false, notify: false });
+      return { returned: false };
+    }
     const shown = await render({ create: true, notify: false });
     return shown?.worth ? { returned, open: { botId: shown.botId, threadId: shown.threadId } } : { returned };
   }
@@ -479,8 +492,18 @@ export function createBrief(deps: BriefDeps) {
     /** Each minute: an edit a busy chat held back. */
     tick: (): void => { if (dirty) void render({ create: false, notify: false }); },
     card: (): WidgetRoot | undefined => {
-      const shown = currentCard();
-      return shown?.row.widget?.root;
+      const bot = chief();
+      return bot ? currentCard(bot)?.row.widget?.root : undefined;
+    },
+    /** The brief moved to another bot: from now on it lives in that bot's main chat, and its next card says what it
+     * does. Cards already posted stay where they are. */
+    moveTo: (botId: string): void => {
+      if (state.home?.botId === botId) return;
+      const threadId = deps.mainThread(botId);
+      if (threadId) state.home = { botId, threadId };
+      else delete state.home;
+      delete state.introducedOn;
+      save();
     },
   };
 }

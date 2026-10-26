@@ -1,9 +1,10 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
-import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Sparkles, Square, Target, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type SetStateAction } from "react";
+import { ArrowUp, Clock, Mic, Paperclip, Square, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { useMenuMotion } from "./MenuMotion";
 import { activeLocale, t } from "@/lib/i18n";
 import { intakeFilesWithNotice } from "@/lib/attach-notice";
@@ -30,13 +31,14 @@ import {
   type FailedComposerSend,
 } from "@/lib/drafts";
 import { MentionMenu, type MentionChoice } from "./MentionMenu";
+import { SlashCommandMenu } from "./SlashCommandMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { PointedChips } from "./app/PointedChips";
 import { takePointedChips } from "@/lib/pointed-chips";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
-import { PlaceChip } from "./PlaceChip";
+import { PlaceChip, usePlaceMenuItem } from "./PlaceChip";
 import { ApprovalModeSelector } from "./ApprovalModeSelector";
 import { CommandAllowlistDialog } from "./CommandAllowlistDialog";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
@@ -91,6 +93,18 @@ interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
 }
 
+type PhonePlusProps = Pick<ComponentProps<typeof ComposerPlusMenu>, "onAttach" | "goal" | "approval" | "callBotId">;
+
+function PhonePlusWithPlace({ place, ...rest }: PhonePlusProps & { place: Parameters<typeof usePlaceMenuItem>[0] }) {
+  const item = usePlaceMenuItem(place);
+  return <ComposerPlusMenu {...rest} extraItems={[item]} circle />;
+}
+
+/** The phone composer's round +: attach, Finish together, where the bot works, approval level and call mode. */
+function PhonePlus({ place, ...rest }: PhonePlusProps & { place?: Parameters<typeof usePlaceMenuItem>[0] }) {
+  return place ? <PhonePlusWithPlace place={place} {...rest} /> : <ComposerPlusMenu {...rest} circle />;
+}
+
 export function Composer({
   bot: profile,
   group,
@@ -119,6 +133,8 @@ export function Composer({
   const { threads, currentBotId } = useThreadRefs();
   const { capabilities } = useDesktopCapabilities();
   const advanced = useAdvancedMode();
+  // On a phone the composer is a dock: a round + (attach and every other tool), then one pill with the field, the mic and the voice button.
+  const singleRow = useMediaQuery(PHONE_LAYOUT);
   const sendKey = useSendKey();
   const sendLabel = sendKeyLabel(sendKey);
   const remoteClient = window.ogb?.remoteClient?.active === true;
@@ -267,14 +283,14 @@ export function Composer({
     const responders = roomRespondersForComposer(message, members ?? [], group);
     return responders.length > 0 && responders.every(botSupportsImages);
   };
-  const typedGoalText = group && !group.dm ? goalTextFromComposer(text) : null;
+  const typedGoalText = !group?.dm ? goalTextFromComposer(text) : null;
   const effectiveText = typedGoalText ?? text;
   const effectiveChannelMode = typedGoalText !== null ? "goal" : channelMode;
   const engineSupportsImages = imageTargetsSupport(effectiveText, effectiveChannelMode);
 
   const slash = composerSlashTrigger(text, caret);
   const locale = activeLocale();
-  const slashSkills = useSlashSkills(group ? undefined : bot?.id, Boolean(slash) && slash?.start !== dismissedSlashAt);
+  const slashSkills = useSlashSkills(group ? undefined : bot?.id, threadId, Boolean(slash) && slash?.start !== dismissedSlashAt);
   const commandCandidates = useMemo(() => {
     if (!slash || slash.start === dismissedSlashAt) return [];
     const supportsAgents = (candidate?: Bot) =>
@@ -285,11 +301,11 @@ export function Composer({
           )?.capabilities?.agentsMcp,
       );
     const available: ComposerSlashCommand[] = [];
-    if (group && !group.dm) available.push({
+    if (!group?.dm) available.push({
       kind: "command",
       id: "goal",
       label: "/goal",
-      description: t("composer.command.goalDesc"),
+      description: t(group ? "composer.command.goalDesc" : "composer.command.goalBotDesc"),
     });
     if (
       skillAuthoringEnabled(state.config) &&
@@ -542,7 +558,7 @@ export function Composer({
     if (group) {
       dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, ...retry });
+      dispatch({ type: "send", botId: bot.id, mode: failedMode, ...retry });
     }
   };
   const send = () => {
@@ -569,7 +585,7 @@ export function Composer({
       reply: replyTo ?? null,
       replyToId: replyTo?.id,
       threadId,
-      channelMode: group ? effectiveChannelMode : undefined,
+      channelMode: effectiveChannelMode,
     };
     if (group) {
       dispatch({
@@ -584,9 +600,9 @@ export function Composer({
       });
       roomMessageSent(effectiveChannelMode, busy);
     } else if (bot) {
-      const points = takePointedChips(threadId);
+      const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
       dispatch({
-        type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext,
+        type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, mode: effectiveChannelMode,
         ...(points ? { pointed: points.pointed } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
@@ -595,7 +611,7 @@ export function Composer({
     setText("");
     setAttachments([]);
     onConsumeReply?.();
-    if (group) setChannelMode("chat");
+    setChannelMode("chat");
   };
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -676,7 +692,7 @@ export function Composer({
     }
     setChannelMode((current) => current === "goal" ? "chat" : "goal");
   };
-  const goal = group && !group.dm ? { on: effectiveChannelMode === "goal", onToggle: toggleGoal } : undefined;
+  const goal = !group?.dm ? { on: effectiveChannelMode === "goal", onToggle: toggleGoal, solo: !group } : undefined;
   const approvalChoice = modeBot && approvalEngine && !remoteClient ? {
     approvalMode: modeBot.approvalMode,
     autoApprove: modeBot.autoApprove,
@@ -724,55 +740,8 @@ export function Composer({
             </button>
           </div>
         ))}
-        {commandMotion.shown && (
-          <div
-            ref={commandListRef}
-            role="listbox"
-            aria-label={t("composer.commands.aria")}
-            className={cn("absolute bottom-full left-2 z-20 mb-2 max-h-80 w-80 max-w-[calc(100%-1rem)] overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", commandMotion.className)} {...commandMotion.exitProps}
-          >
-            <div className="border-b border-hairline/20 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">
-              {t("composer.commands.title")}
-            </div>
-            {commandCandidates.map((command, index) => (
-              <button
-                key={`${command.kind}:${command.id}`}
-                data-command-index={index}
-                type="button"
-                role="option"
-                aria-selected={index === highlight}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => pickCommand(command)}
-                onMouseEnter={() => setHighlight(index)}
-                className={cn(
-                  "flex w-full items-center gap-3 px-3 py-2.5 text-left",
-                  index === highlight ? "bg-raised-hover" : "",
-                )}
-              >
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
-                  {command.kind === "skill" ? (
-                    <Sparkles size={15} aria-hidden="true" />
-                  ) : command.id === "goal" ? (
-                    <Target size={15} aria-hidden="true" />
-                  ) : (
-                    <BookOpen size={15} aria-hidden="true" />
-                  )}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-[14px] font-medium text-accent">{command.label}</span>
-                    {command.kind === "skill" && (
-                      <span className="shrink-0 rounded-full bg-accent/10 px-1.5 text-[11px] font-medium leading-4 text-accent">{t("composer.command.skillTag")}</span>
-                    )}
-                  </span>
-                  <span className="block truncate text-xs text-ink-secondary">
-                    {command.description}
-                  </span>
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+        <SlashCommandMenu listRef={commandListRef} motion={commandMotion} commands={commandCandidates} highlight={highlight}
+          onPick={pickCommand} onHighlight={setHighlight} />
         <MentionMenu listRef={mentionListRef} motion={mentionMotion} choices={candidates} highlight={highlight}
           everyoneCount={mentionEveryoneCount} onPick={pickMention} onHighlight={setHighlight} />
         {approval && (
@@ -820,9 +789,26 @@ export function Composer({
             data-composer-backdrop
             className="pointer-events-none absolute -left-5 -right-5 -bottom-3 top-1/2 bg-app"
           />}
-        <div data-tour="composer" className="@container/composer relative z-[1] rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring">
+        <div data-tour="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : "rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring")}>
+        {singleRow && !locked && (
+          <div className="flex shrink-0 items-center">
+            <PhonePlus
+              onAttach={() => fileInput.current?.click()}
+              goal={goal}
+              approval={approvalChoice && modeBot && { name: modeBot.name, choice: approvalChoice }}
+              callBotId={bot && !group ? bot.id : undefined}
+              place={modeBot && !remoteClient && advanced ? {
+                bot: modeBot,
+                task: composerTask,
+                disabled: Boolean(modeBot.busy),
+                onPin: (surface) => dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } }),
+              } : undefined}
+            />
+          </div>
+        )}
+        <div className={singleRow ? "min-w-0 flex-1 rounded-[26px] bg-composer px-3 py-1.5 ring-1 ring-composer-ring" : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
-        <div data-composer-row className="flex items-end gap-1 @max-[30rem]/composer:flex-wrap">
+        <div data-composer-row className={cn("flex items-end gap-1", !singleRow && "@max-[30rem]/composer:flex-wrap")}>
           <input
             ref={fileInput}
             type="file"
@@ -834,7 +820,7 @@ export function Composer({
               e.target.value = "";
             }}
           />
-          {!locked && (
+          {!locked && !singleRow && (
             <div className="flex flex-wrap items-center gap-1">
               {!advanced && <ComposerPlusMenu
                 onAttach={() => fileInput.current?.click()}
@@ -852,7 +838,7 @@ export function Composer({
                 <Paperclip size={17} />
               </button>}
               {/* Simple mode keeps the chip only while Finish together is on, so the + menu's choice stays visible. */}
-              {goal && (advanced || goal.on) && <GoalToggle on={goal.on} onToggle={goal.onToggle} />}
+              {goal && (advanced || goal.on) && <GoalToggle {...goal} />}
               {advanced && approvalChoice && <ApprovalModeSelector {...approvalChoice} />}
               {modeBot && !remoteClient && advanced && (
                 <PlaceChip
@@ -866,7 +852,7 @@ export function Composer({
             </div>
           )}
           <MentionTextarea
-          wrapperClassName="@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full"
+          wrapperClassName={singleRow ? undefined : "@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full"}
           inputRef={inputRef}
           peers={group ? members ?? [] : state.bots.filter((member) => member.id !== bot?.id)}
           everyone={Boolean(group && !group.dm)}
@@ -978,12 +964,12 @@ export function Composer({
                         name: group.name,
                         hint: groupComposerHint(group, members ?? [], { jevOn: jevRoomRoutingOn(state.config) }),
                       })
-                  : t("composer.placeholder.bot", { name: bot?.name ?? "" })
+                  : t(channelMode === "goal" ? "composer.placeholder.goalSolo" : "composer.placeholder.bot", { name: bot?.name ?? "" })
           }
           aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
             className="block max-h-[9rem] min-h-6 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-[15px] leading-6 placeholder:text-ink-secondary focus:outline-none"
           />
-          <div data-composer-actions className="flex items-center gap-1 @max-[30rem]/composer:ml-auto">
+          <div data-composer-actions className={cn("flex items-center gap-1", !singleRow && "@max-[30rem]/composer:ml-auto")}>
           {busy && !locked && (
           <button
             onClick={interruptTurn}
@@ -1002,14 +988,14 @@ export function Composer({
               "flex size-8 shrink-0 items-center justify-center rounded-full",
               recording
                 ? "animate-pulse bg-danger/20 text-danger"
-                : advanced ? "text-ink-secondary hover:bg-raised hover:text-ink" : "bg-ink/[0.07] text-ink hover:bg-ink/[0.12]",
+                : advanced || singleRow ? "text-ink-secondary hover:bg-raised hover:text-ink" : "bg-ink/[0.07] text-ink hover:bg-ink/[0.12]",
             )}
             title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
           >
-            <Mic size={advanced ? 18 : 16} />
+            <Mic size={advanced || singleRow ? 18 : 16} />
           </button>
         )}
-        {bot && !group && <CallButton bot={bot} placement="composer" fill={advanced ? undefined : MAUS_COLORS[bot.color] ?? MAUS_COLORS.green} />}
+        {bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : MAUS_COLORS[bot.color] ?? MAUS_COLORS.green} inverse={singleRow} />}
         {group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill="var(--color-accent)" />}
         {hasContent && !locked && (
           <button
@@ -1040,6 +1026,7 @@ export function Composer({
           </button>
           )}
           </div>
+        </div>
         </div>
         </div>
         </div>

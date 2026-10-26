@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
-import { chromeForTestingDirectory, chromeForTestingExecutable, chromeForTestingPin, chromeForTestingUrl, installChromeForTesting, type ChromeForTestingPin, type DownloadProgress, type Extract } from "./install.ts";
+import { chromeForTestingDirectory, chromeForTestingExecutable, chromeForTestingPin, chromeForTestingUrl, downloadArchive, installChromeForTesting, type ChromeForTestingPin, type DownloadProgress, type Extract } from "./install.ts";
 
 const ARCHIVE = Buffer.from("not a real zip, but the bytes the pin names ".repeat(4_000));
 const SHA256 = createHash("sha256").update(ARCHIVE).digest("hex");
@@ -79,6 +79,41 @@ describe("downloading Chrome for Testing", () => {
     await expect(installChromeForTesting({ dataDir: root, pin: pin(), url: `${base}/missing.zip`, extract })).rejects.toThrow(/HTTP 404/);
     expect(existsSync(chromeForTestingDirectory(root, pin()))).toBe(false);
     expect(leftovers(root)).toEqual([]);
+  });
+
+  it("fails the download, without an unhandled rejection, when the archive cannot be written while the request is pending", async () => {
+    const unhandled: unknown[] = [];
+    const note = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", note);
+    try {
+      const signals: AbortSignal[] = [];
+      const fetchImpl = ((_url: string, init: RequestInit) => new Promise<Response>((resolve) => {
+        signals.push(init.signal!);
+        setTimeout(() => resolve(new Response(ARCHIVE, { headers: { "content-length": String(ARCHIVE.length) } })), 50);
+      })) as typeof fetch;
+      const destination = join(dataDir(), "no-such-folder", "chrome.zip.part");
+      await expect(downloadArchive(`${base}/ok.zip`, destination, ARCHIVE.length, { fetchImpl })).rejects.toMatchObject({ code: "ENOENT" });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(unhandled).toEqual([]);
+      expect(signals.every((signal) => signal.aborted)).toBe(true);
+    } finally {
+      process.off("unhandledRejection", note);
+    }
+  });
+
+  it("fails at once, aborting the request, when the archive cannot be written while the body stalls", async () => {
+    let aborted = false;
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(stream) { init.signal!.addEventListener("abort", () => { aborted = true; stream.error(init.signal!.reason); }); },
+      });
+      return new Response(body, { headers: { "content-length": String(ARCHIVE.length) } });
+    }) as typeof fetch;
+    const destination = join(dataDir(), "no-such-folder", "chrome.zip.part");
+    const started = Date.now();
+    await expect(downloadArchive(`${base}/ok.zip`, destination, ARCHIVE.length, { fetchImpl, timeoutMs: 5_000 })).rejects.toMatchObject({ code: "ENOENT" });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(aborted).toBe(true);
   });
 
   it("refuses an archive that does not hold the browser where its layout says", async () => {

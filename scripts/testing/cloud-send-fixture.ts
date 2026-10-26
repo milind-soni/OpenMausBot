@@ -192,6 +192,7 @@ export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswor
     writeFileSync(cli, `#!/usr/bin/env node
 if (process.argv[2] === "auth") { console.log(JSON.stringify(${signedIn ? '{ loggedIn: true, email: "person@example.test" }' : '{ loggedIn: false, authMethod: "none" }'})); process.exit(0); }
 process.env.FAKE_CLAUDE_VERSION = "2.1.284";
+process.env.FAKE_CLAUDE_FIXTURE_DIR = ${JSON.stringify(home)};
 ${tools ? `process.env.FAKE_CLAUDE_TOOL_CALLS = ${JSON.stringify(tools)};` : ""}
 ${engine}
 await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-claude-cli.ts")).href)});

@@ -75,13 +75,11 @@ export function createChatToolApproval(options: {
       if (closed || options.signal.aborted) return Promise.resolve(null);
       const ask = { id: newId(), tool, summary };
       return new Promise((resolve) => {
-        let timer: ReturnType<typeof setTimeout>;
         const card: Card = {
           kind: "question",
           ask,
           finish(source, decision) {
             if (!pending.delete(ask.id)) return;
-            clearTimeout(timer);
             options.signal.removeEventListener("abort", abort);
             // A timeout or abort resolves null: no system note may occupy the slot the model reads as the person's words.
             const reply = typeof decision?.message === "string" && decision.message.length > 0 ? decision.message : null;
@@ -90,8 +88,6 @@ export function createChatToolApproval(options: {
           },
         };
         const abort = () => card.finish("system");
-        timer = setTimeout(() => card.finish("timeout"), options.timeoutMs ?? 15 * 60_000);
-        timer.unref?.();
         pending.set(ask.id, card);
         options.signal.addEventListener("abort", abort, { once: true });
         options.openQuestion(ask, questions);

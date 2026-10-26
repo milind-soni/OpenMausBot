@@ -3,6 +3,7 @@ import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
+import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 
 /** Which tools a turn is shown. Presentation only: the server still authenticates and scopes every call. */
@@ -53,7 +54,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
   type: "object",
   additionalProperties: false,
   description:
-    'Use {"type":"cron","expression":"0 9 1 * *","timeZone":"Asia/Kolkata"} for 09:00 on the first of each month, once with at for one future run, weekly with time + weekdays, daily with time, or interval with every_minutes for elapsed-time repetition. Intervals can optionally be limited with weekdays, window_start + window_end, and ends_at.',
+    'Use {"type":"cron","expression":"0 9 1 * *","timeZone":"Asia/Kolkata"} for 09:00 on the first of each month, once with at for one future run, weekly with time + weekdays, daily with time, or interval with every_minutes for elapsed-time repetition.',
   properties: {
     type: {
       type: "string",
@@ -68,7 +69,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
     timeZone: {
       type: "string",
       maxLength: 128,
-      description: "Required for cron: explicit IANA timezone, for example Asia/Kolkata, America/New_York, or UTC. Use the user's requested zone; resolve ambiguity before proposing. Do not send a numeric offset or local-time abbreviation.",
+      description: "Required for cron: the person's IANA timezone, such as Asia/Kolkata or UTC; never a numeric offset or an abbreviation.",
     },
     at: {
       type: "string",
@@ -94,7 +95,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
     starts_at: {
       type: "string",
       description:
-        "Optional for type interval: RFC3339 date-time with an explicit timezone offset that anchors the cadence. Omit to start one interval after the routine is applied.",
+        "Optional for type interval: RFC3339 date-time with an explicit offset that anchors the cadence; omit to start one interval after the routine applies.",
     },
     window_start: {
       type: "string",
@@ -104,7 +105,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
     window_end: {
       type: "string",
       description:
-        "Optional for type interval, together with window_start: local 24-hour HH:MM when the allowed window ends, exclusive. It must be later on the same day.",
+        "Optional for type interval, together with window_start: local 24-hour HH:MM when the allowed window ends, exclusive, later the same day.",
     },
     ends_at: {
       type: "string",
@@ -129,7 +130,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
 
 // Written out in full on each tool: $ref/$defs do not survive provider conversions.
 const TRIGGER_FIELDS_SCHEMA = {
-  name: { type: "string", minLength: 1, maxLength: 80, description: "Short name shown on the automation's card and the Automations page." },
+  name: { type: "string", minLength: 1, maxLength: 80, description: "Short name shown on the automation's card." },
   instructions: {
     type: "string",
     minLength: 1,
@@ -162,7 +163,7 @@ const TRIGGER_FIELDS_SCHEMA = {
     type: "string",
     // "box" is Boat's historical run_on destination id (agents wire contract).
     enum: ["maus", "box"],
-    description: "Default maus keeps the bot's selected model and configured computer, INCLUDING a self-hosted VPS. Omit this field normally. box runs on the bot's cloud computer, same model; it needs cloud computers set up and is not the generic cloud/VPS option. Legacy cloud values from list_triggers mean box, not VPS.",
+    description: "Omit normally: maus (default) keeps the bot's model and configured computer, INCLUDING a self-hosted VPS. box runs on the bot's cloud computer, same model, once cloud computers are set up; a legacy cloud value from list_triggers means box.",
   },
   timeout_minutes: {
     type: "integer",
@@ -177,16 +178,16 @@ const TRIGGER_FIELDS_SCHEMA = {
   },
   continuity: {
     type: "boolean",
-    description: "Schedules only: opt in to using the latest completed run's bounded report as historical context. Use it for recurring work that builds on last time, such as QA passes, monitoring or follow-ups. Defaults to false; set false in an update to start fresh again.",
+    description: "Schedules only: give each run the last completed run's report, for work that builds on last time (QA passes, monitoring, follow-ups). Default false; false in an update starts fresh.",
   },
   overlap: {
     type: "string",
     enum: ["skip", "queue"],
-    description: "Schedules only: while a run is still working, skip scheduled occurrences (default) or queue at most one run. Queue skips further occurrences until the pending run starts; it never builds an unlimited backlog.",
+    description: "Schedules only: while a run is still working, skip new occurrences (default) or queue at most one run.",
   },
   run_on_startup: {
     type: "boolean",
-    description: "Repeating schedules only: also run once each time OpenMausBot starts, besides the schedule, for a computer often off when it is due. Defaults to false.",
+    description: "Repeating schedules only: also run once whenever OpenMausBot starts, for a computer often off when it is due.",
   },
 } as const;
 
@@ -245,7 +246,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "list_room_targets",
-    description: "Discover actual OpenMausBot teammates and rooms in your allowed teams. Works in a normal bot conversation too; no room is required. Returns bot and room IDs, roles and working folders, never other conversations' history. Use these bots, not native coding helpers with similar names, when the user asks their team to work together.",
+    description: "Discover actual OpenMausBot teammates you can reach, in every department, and rooms. Works in a normal bot conversation too; no room is required. Returns bot and room IDs, roles and working folders, never other conversations' history. Use these bots, not native coding helpers with similar names, when the user asks their team to work together.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -257,8 +258,8 @@ const TOOL_DEFINITIONS = [
       message: { type: "string", minLength: 1, maxLength: 4000, description: "Question or task for these teammates; later requests in the same conversation can build on earlier ones. Send separate requests when responsibilities differ." },
       reason: { type: "string", maxLength: 200, description: "Optional one line for the person about why this goes to them (shown as a chip)." },
       rework: { type: "boolean", description: "True only to send concrete work again to someone whose request already finished or failed: a correction, a re-check or a retry." },
-      thread: { type: "string", enum: ["standing", "new"], description: "standing (default): this conversation's one work thread with each teammate. new: a new thread on the teammate, its own history and run (in_my_folder: in your folder); its result still returns here." },
-      in_my_folder: { type: "boolean" },
+      thread: { type: "string", enum: ["standing", "new"], description: "standing (default): this conversation's one work thread with each teammate. new: a new thread on the teammate, its own history and run; its result still returns here." },
+      title: { type: "string", maxLength: 80, description: "With thread \"new\": the new thread's sidebar name, short and specific (e.g. \"Launch: Reddit draft\"). Defaults to the start of message." }, in_my_folder: { type: "boolean", description: "Default true." },
       reply: { type: "string", enum: ["resume", "none"], description: "resume (default): the result resumes you. none: a one-way notice that is never awaited; nothing comes back and nothing resumes you." },
       consult: { type: "boolean", description: "True for a question: the teammate answers from what it knows, acting on nothing, and you are resumed with the answer. Leave out for work." },
       done_when: { type: "string", maxLength: 1000, description: "Optional: what must be true for this to count as done, in one or two sentences; the teammate is held to it." },
@@ -282,7 +283,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "list_bots",
     description:
-      "List the other bots (agents) you may contact in your own team and any additional teams the owner has explicitly allowed you to coordinate, with their team, model and current status. Call this to discover exact teammate IDs before assigning work or asking advice with coordinate_bots.",
+      "List every other bot (agent) you can contact, in every department, with its department, model and current status. Call this to discover exact teammate IDs before assigning work or asking advice with coordinate_bots.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -449,7 +450,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "create_room",
     description:
-      "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically as the default responder. This creates no turns or messages. Section moves stay with the user. Follow the tool result under the effective access level; if permission is refused, ask the user to make the room change instead, without trying another route.",
+      "Create a room in your own department when the user asks for one (maximum four per turn). Chiefs only. Choose active bots from list_bots, from any department; you are included automatically as the default responder. This creates no turns or messages. Moving a room to another department stays with the user. Follow the tool result under the effective access level; if permission is refused, ask the user to make the room change instead, without trying another route.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -474,7 +475,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "manage_room",
     description:
-      "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, within your own section and allowed peers; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between sections. Follow the tool result under the effective access level; if the change is refused, report the blocker and ask the user to make the change instead, without trying another route.",
+      "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, for rooms in your own department, with any bots you can reach; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between departments. Follow the tool result under the effective access level; if the change is refused, report the blocker and ask the user to make the change instead, without trying another route.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -561,7 +562,7 @@ const TOOL_DEFINITIONS = [
       required: ["text"],
     },
   },
-  ...RESEARCH_TOOL_DEFINITIONS,
+  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS,
   {
     name: "memory_update",
     description:
@@ -676,7 +677,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "create_trigger",
     description:
-      "Set up work that happens on its own: when <something happens>, a bot does <instructions>. Call it in this turn whenever the person describes recurring or event-based work (\"every morning send me…\", \"whenever I get an email from…\", \"when another app calls…\"); never ask for confirmation first. It applies at once and the person sees a card with Edit, Pause and Undo. when=schedule runs on a time rule (call list_triggers first for relative dates: it has the authoritative time and timezone); when=app_event runs when something happens in a connected app (list_trigger_events first; prefer it to a schedule that keeps checking); when=webhook gives an address another app sends to: the result carries its private address, so you can paste it into that app's setup yourself (never anywhere else). when=limit_reset runs when an AI's usage limit resets (\"run this when my limit resets\", or to finish work your own limit stopped). To the person these are automations: write name and instructions as they would say them. Something to do once, now, is not a trigger. for_bot_id: a trigger for ANOTHER bot in your section, which keeps that bot's engine and permissions.",
+      "Set up work that happens on its own: when <something happens>, a bot does <instructions>. Call it in this turn whenever the person describes recurring or event-based work (\"every morning send me…\", \"whenever I get an email from…\", \"when another app calls…\"); never ask for confirmation first. It applies at once and the person sees a card with Edit, Pause and Undo. when=schedule runs on a time rule, cron included (call list_triggers first for relative dates: it has the authoritative time and timezone); when=app_event runs when something happens in a connected app (list_trigger_events first; prefer it to a schedule that keeps checking); when=webhook gives an address another app sends to: the result carries its private address, so you can paste it into that app's setup yourself (never anywhere else). when=limit_reset runs when an AI's usage limit resets (\"run this when my limit resets\", or to finish work your own limit stopped). To the person these are automations: write name and instructions as they would say them. Something to do once, now, is not a trigger. for_bot_id: a trigger for ANOTHER bot in your section, which keeps that bot's engine and permissions.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

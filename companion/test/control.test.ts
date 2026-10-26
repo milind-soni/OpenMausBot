@@ -1,4 +1,4 @@
-import { type Server } from "node:http";
+import { request, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createControlServer, hostCandidates, initialControlToken, originIsLoopback } from "../src/control.ts";
@@ -106,6 +106,21 @@ describe("the per-launch control token", () => {
       controlToken = CONTROL_TOKEN;
     }
     expect(devices.pairing()).toBeNull();
+  });
+});
+
+describe("malformed requests", () => {
+  it("answers a request target that is not a URL with 400", async () => {
+    const status = await new Promise<number>((resolve, reject) => {
+      const sent = request({ hostname: "127.0.0.1", port, path: "//[", headers: withToken }, (response) => {
+        response.resume();
+        resolve(response.statusCode ?? 0);
+      });
+      sent.on("error", reject);
+      sent.end();
+    });
+    expect(status).toBe(400);
+    expect((await ask("GET", "/state")).status).toBe(200);
   });
 });
 
@@ -270,6 +285,34 @@ describe("hostCandidates", () => {
     expect(revoked.status).toBe(200);
     expect(disconnectedDeviceIds).toEqual([paired.device.id]);
     expect(revoked.body.connectedDeviceIds).toEqual([]);
+  });
+
+  it("keeps a device whose removal cannot be saved, says so, and removes it on retry", async () => {
+    const { code } = devices.openPairing();
+    const paired = devices.redeem(code, "Stubborn phone");
+    if ("error" in paired) throw new Error(paired.error);
+    disconnectedDeviceIds = [];
+    revokedDeviceIds = [];
+    const writable = devices as unknown as { persist: () => void };
+    const persist = writable.persist;
+    writable.persist = () => {
+      throw new Error("ENOSPC: no space left on device");
+    };
+    try {
+      expect(await ask("DELETE", `/devices/${paired.device.id}`)).toEqual({
+        status: 500,
+        body: { error: "could not save the device removal" },
+      });
+    } finally {
+      writable.persist = persist;
+    }
+    expect(devices.list().some((device) => device.id === paired.device.id)).toBe(true);
+    expect(disconnectedDeviceIds).toEqual([]);
+    expect(revokedDeviceIds).toEqual([]);
+
+    expect((await ask("DELETE", `/devices/${paired.device.id}`)).status).toBe(200);
+    expect(devices.authenticate(paired.token)).toBeNull();
+    expect(revokedDeviceIds).toEqual([paired.device.id]);
   });
 
   it("tells the harness about a revoked device, and only about a revoke", async () => {

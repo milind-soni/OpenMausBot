@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { RuntimeEvent } from "../../contracts.ts";
 import { ensureDirs } from "../../config.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
@@ -437,20 +438,20 @@ describe("CursorAgentDriver", () => {
       expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
     });
 
-    it("cancels an unanswered card after 15 minutes", async () => {
+    it("keeps an unanswered card open for days and still takes the person's answer", async () => {
       vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      let opened: RuntimeEvent;
       try {
-        await start("t-cursor-ask-timeout");
-        const opened = await recorder.until((e) => e.type === "request.opened");
-        await vi.advanceTimersByTimeAsync(15 * 60_000);
-        expect(await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId)).toMatchObject({
-          behavior: "deny", source: "timeout",
-        });
+        await start("t-cursor-ask-no-timeout");
+        opened = await recorder.until((e) => e.type === "request.opened");
+        await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+        expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(false);
       } finally {
         vi.useRealTimers();
       }
+      await instance.adapter.respondToRequest("t-cursor-ask-no-timeout", opened.requestId!, { behavior: "answer", message: "Blue" });
       await recorder.until((e) => e.type === "turn.completed");
-      expect(reply()).toEqual({ result: { outcome: { outcome: "cancelled" } } });
+      expect(reply()).toEqual({ result: { outcome: { outcome: "answered", answers: [{ questionId: "color", selectedOptionIds: ["blue-id"] }] } } });
     });
   });
 

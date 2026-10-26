@@ -88,8 +88,11 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
   const failing = "failing" in move ? move.failing : undefined;
   if (failing) return { kind: "failed", text: failing.error ? t("cloudSend.move.failing", { error: serverErrorText(failing, failing.error) }) : t("cloudSend.move.failingPlain"), extra: [], retry: true };
   if (move.phase === "finishing") return { kind: "sending", text: t("cloudSend.move.finishing"), extra: [] };
-  if (move.phase === "wait") {
-    return { kind: "sending", text: move.waitingFor ? t("cloudSend.move.waiting", { name: move.waitingFor }) : t("cloudSend.move.waitingAny"), extra: [] };
+  // Who holds the move, by name, or what it is; nothing is claimed while it only waits for a quiet moment.
+  if (move.phase === "wait" && move.waitingFor !== undefined) {
+    const text = move.waitingFor ? t("cloudSend.move.waiting", { name: move.waitingFor })
+      : move.waitingWhat === "sign-in" ? t("cloudSend.move.waitingSignIn") : t("cloudSend.move.waitingAny");
+    return { kind: "sending", text, extra: [] };
   }
   const chats = move.phase === "copy" ? move.chats : undefined;
   const key = page === "cloud" ? (chats ? "cloudSend.move.bringingChats" : "cloudSend.move.bringing") : (chats ? "cloudSend.move.copyChats" : "cloudSend.move.copy");

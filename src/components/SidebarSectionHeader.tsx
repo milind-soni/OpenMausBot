@@ -24,6 +24,7 @@ export function SidebarSectionHeader({
   line = false,
   onMenu,
   menuOpen = false,
+  lead,
 }: {
   name: string;
   collapsed: boolean;
@@ -40,8 +41,12 @@ export function SidebarSectionHeader({
   line?: boolean;
   onMenu?: (button: HTMLButtonElement) => void;
   menuOpen?: boolean;
+  /** On a Team Cloud, the person every bot in this department reports to. */
+  lead?: string;
 }) {
   const Chevron = collapsed ? ChevronRight : ChevronDown;
+  const leadLabel = lead ? <span data-department-lead={lead} title={t("owner.departmentLeadAria", { department: name, name: lead })}
+    className="shrink-0 truncate text-[11px] font-normal text-ink-tertiary">{t("owner.departmentLead", { name: lead })}<span className="sr-only">{`, ${t("owner.departmentLeadAria", { department: name, name: lead })}`}</span></span> : null;
   const attentionLabel = attention ? sidebarAttentionLabel(attention) : "";
   const onHeaderKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (!reorderable || !event.altKey) return;
@@ -94,6 +99,7 @@ export function SidebarSectionHeader({
           </div>
         )}
         <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-hairline/60" />
+        {leadLabel}
         {onMenu && (
           <button
             type="button"
@@ -137,6 +143,7 @@ export function SidebarSectionHeader({
           {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
         </div>
       )}
+      {leadLabel}
       {onDelete && (
         <button
           type="button"

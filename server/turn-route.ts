@@ -37,12 +37,12 @@ export function classifyTurn(signals: TurnSignals): TurnTier {
 const FAST = /(^|[-_/. ])(haiku|flash|mini|nano|lite|small|fast|instant|spark|turbo|air)(?=$|[-_/. \d])/i;
 
 /** Same upstream provider only; among several, the first listed wins since engines list their newest first. */
-export function fastModelFor(catalog: ModelCatalog | undefined, current: string): string | undefined {
+export function fastModelFor(catalog: ModelCatalog | undefined, current: string, refused: ReadonlySet<string> = new Set()): string | undefined {
   if (!catalog) return undefined;
   if (FAST.test(current)) return current;
   const provider = catalog.options.find((option) => option.id === current)?.provider;
-  const pick = catalog.options.find((option) =>
-    !option.custom && FAST.test(option.id) && (option.provider ?? undefined) === (provider ?? undefined));
+  const pick = catalog.options.find((option) => !option.custom && !refused.has(option.id) &&
+    FAST.test(option.id) && (option.provider ?? undefined) === (provider ?? undefined));
   return pick?.id;
 }
 
@@ -58,6 +58,8 @@ export interface RouteInput {
   effort?: EffortLevel;
   variant?: string;
   catalog?: ModelCatalog;
+  /** Quick models this engine instance refused before. */
+  refused?: ReadonlySet<string>;
   effortLevels?: readonly EffortLevel[];
 }
 
@@ -75,7 +77,7 @@ export function routeTurn(input: RouteInput): RouteResult {
   if (!input.conversational || !input.followsBotModel || input.automated) return keep;
   const tier = classifyTurn(input.signals);
   if (tier === "complex") return { ...keep, tier };
-  const fast = fastModelFor(input.catalog, input.model);
+  const fast = fastModelFor(input.catalog, input.model, input.refused);
   if (!fast || fast === input.model) {
     const low = input.effortLevels?.includes("low") ? "low" : input.effortLevels?.includes("none") ? "none" : undefined;
     return { ...keep, tier, effort: input.effort && low ? low : input.effort };
@@ -92,8 +94,9 @@ export function routeDirectTurn(
   task: { modelSelection?: ModelSelection; usage?: { context?: { tokens: number } } },
   path: readonly { role: string; kind?: string }[],
   message: { text: string; images: readonly unknown[] },
-  instance: { models?: ModelCatalog; adapter: { capabilities: { effortLevels?: readonly EffortLevel[] } } },
+  instance: { models?: ModelCatalog; quickModelsUsable?: () => boolean; adapter: { capabilities: { effortLevels?: readonly EffortLevel[] } } },
   automated: boolean,
+  refused?: ReadonlySet<string>,
 ): RouteResult {
   const lastAsk = path.findLastIndex((m) => m.role === "user" && m.kind === "text");
   return routeTurn({
@@ -108,7 +111,8 @@ export function routeDirectTurn(
     model: bot.modelSelection.model,
     effort: bot.modelSelection.effort,
     variant: bot.modelSelection.variant,
-    catalog: instance.models,
+    catalog: instance.quickModelsUsable?.() === false ? undefined : instance.models,
+    refused,
     effortLevels: instance.adapter.capabilities.effortLevels,
     contextTokens: task.usage?.context?.tokens,
   });

@@ -243,13 +243,15 @@ function reachesLines(facts: OverviewFacts): string[] {
     lines.push("Connected apps could not be checked.");
   }
   if (facts.browserEnabled && facts.engine?.browserMcp && facts.bot.browser !== false && facts.bot.computer !== "off") lines.push("Has the built-in browser.");
-  if (facts.engine?.agentsMcp && facts.sectionPeers > 0 && facts.bot.peers?.length !== 0) {
-    const scope = facts.bot.chiefOfStaff && facts.bot.managedSections?.length ? "its allowed departments" : "its department";
-    lines.push(`Can talk to ${facts.sectionPeers} other bot${facts.sectionPeers === 1 ? "" : "s"} in ${scope}.`);
+  const peers = facts.sectionPeers;
+  if (facts.engine?.agentsMcp && peers > 0 && facts.bot.peers?.length !== 0) {
+    lines.push(Array.isArray(facts.bot.peers)
+      ? "Talks only to the bots chosen for it."
+      : peers === 1 ? "Can talk to the other bot." : `Can talk to all ${peers} other bots, in any department.`);
   }
   if (facts.bot.chiefOfStaff) lines.push("Coordinates its department as Chief of Staff.");
   if (facts.bot.chiefOfStaff && facts.bot.managedSections?.length) {
-    lines.push(`May also coordinate these departments: ${facts.bot.managedSections.map(name => name || "General").join(", ")}.`);
+    lines.push(`Also in charge of these departments: ${facts.bot.managedSections.map(name => name || "General").join(", ")}.`);
   }
   return lines;
 }

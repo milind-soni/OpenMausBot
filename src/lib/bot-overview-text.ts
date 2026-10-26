@@ -30,6 +30,8 @@ const EXACT: Record<string, LocaleKey> = {
   "Has the built-in browser.": "botOverview.line.browser",
   "Has no connected apps.": "botOverview.line.noApps",
   "Won't act on a schedule.": "botOverview.line.noSchedule",
+  "Can talk to the other bot.": "botOverview.line.talksToOne",
+  "Talks only to the bots chosen for it.": "botOverview.line.talksToChosen",
   "Cannot initiate contact with other bots.": "botOverview.line.noPeerContact",
   "Command approvals use Ask mode; saved permissions and provider rules still apply.": "botOverview.line.askMode",
   "Command approvals follow the provider's custom configuration.": "botOverview.line.customApprovals",
@@ -64,6 +66,8 @@ const byCount = (count: string | undefined, single: LocaleKey, plural: LocaleKey
 
 /** Each meaning in both wordings a server of any version sends: section and teams, or department and departments. */
 const COORDINATION: readonly Coordination[] = [
+  { line: /^Can talk to all (\d+) other bots, in any department\.$/, key: () => "botOverview.line.talksToAll", params: ([, count]) => ({ count: Number(count) }) },
+  { line: /^Also in charge of these departments: (.+)\.$/, key: () => "botOverview.line.alsoInCharge", params: ([, names], managedSections) => ({ departments: managedTeams(names!, managedSections) }) },
   { line: /^Can talk to (\d+) other bots? in its (?:section|department)\.$/, key: ([, count]) => byCount(count, "botOverview.line.peersSectionOne", "botOverview.line.peersSectionMany"), params: ([, count]) => ({ count: Number(count) }) },
   { line: /^Can talk to (\d+) other bots? in its allowed (?:teams|departments)\.$/, key: ([, count]) => byCount(count, "botOverview.line.peersTeamsOne", "botOverview.line.peersTeamsMany"), params: ([, count]) => ({ count: Number(count) }) },
   { line: /^Coordinates its (?:section|department) as Chief of Staff\.$/, key: () => "botOverview.line.chief", params: () => ({ role: t("sidebar.bot.chiefOfStaff") }) },

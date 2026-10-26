@@ -270,7 +270,7 @@ describe("official Antigravity runtime", () => {
   it("pins Google's release metadata for this supported host", () => {
     const asset = resolveAntigravityReleaseAsset();
     if (!asset) return;
-    expect(ANTIGRAVITY_RELEASE_VERSION).toBe("agy_acp_server_1.1.1");
+    expect(ANTIGRAVITY_RELEASE_VERSION).toBe("1.4.3");
     expect(asset.version).toBe(ANTIGRAVITY_RELEASE_VERSION);
     expect(asset.url).toMatch(/^https:\/\/dl\.google\.com\/agy-extensions\/releases\//u);
     expect(asset.sha256).toMatch(/^[a-f0-9]{64}$/u);
@@ -339,10 +339,10 @@ describe("official Antigravity runtime", () => {
 
   it("validates ACP initialize results from official Antigravity releases", testValidatesAcpInitializeResults);
 
-  // Captured from the SHA-256-pinned Google 1.1.1 macOS arm64 binary, unauthenticated: optional operations are objects.
+  // Captured from the SHA-256-pinned Google 1.4.3 Windows x64 binary, unauthenticated: optional operations are objects.
   const officialInitialize = {
     protocolVersion: 1,
-    agentInfo: { name: "antigravity-acp", title: "Google Antigravity", version: "agy_acp_server_1.1.1" },
+    agentInfo: { name: "antigravity-acp", title: "Google Antigravity", version: "1.4.3" },
     agentCapabilities: {
       loadSession: true,
       sessionCapabilities: { list: {}, resume: {} },

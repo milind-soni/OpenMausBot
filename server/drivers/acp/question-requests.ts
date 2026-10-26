@@ -6,7 +6,7 @@ import { askQuestionSummary, MAX_QUESTIONS, questionChoices, type AskQuestion } 
 export interface AcpQuestionRequest {
   /** null when the params carry no answerable question; `answered` returns null when the reply maps to no answer. */
   parse(params: unknown): { questions: AskQuestion[]; answered(message: string): unknown } | null;
-  /** The reply when nobody answered: the turn ended, the ask timed out, or it arrived between turns. */
+  /** The reply when nobody answered: the turn ended or it arrived between turns. */
   cancelled: unknown;
 }
 
@@ -20,7 +20,7 @@ export function questionRequestFor(
   return typeof method === "string" && requests && Object.hasOwn(requests, method) ? requests[method] : undefined;
 }
 
-/** One question card for the whole set. Only the person's own reply answers it; anything else sends the vendor's
+/** One question card for the whole set, open until the person answers or the turn ends. Only the person's own reply answers it; anything else sends the vendor's
  * cancelled reply, so the agent is never left blocked and no system note reads as an answer. */
 export function openQuestionRequest(
   msg: { id?: unknown; params?: unknown },
@@ -39,7 +39,6 @@ export function openQuestionRequest(
   const requestId = newId();
   const finish: QuestionFinish = (behavior, source = "user", message) => {
     if (!turn.asks.delete(requestId)) return "unavailable";
-    clearTimeout(timer);
     const reply = behavior === "answer" && source === "user" && typeof message === "string" && message.trim()
       ? parsed.answered(message)
       : null;
@@ -48,8 +47,6 @@ export function openQuestionRequest(
     emit({ ...base(), type: "request.resolved", requestId, behavior: answered ? "answer" : "deny", source });
     return answered ? "answered" : "rejected";
   };
-  const timer = setTimeout(() => finish("deny", "timeout"), 15 * 60_000);
-  timer.unref?.();
   turn.asks.set(requestId, finish);
   const choices = questionChoices(parsed.questions);
   emit({

@@ -26,7 +26,7 @@ import {
 } from "../config.ts";
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
+import { DECIDER_KEY_REJECTED, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderSharedKeyUsable, type Decider } from "../decider/index.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { forgetKey } from "../key-rejections.ts";
@@ -448,9 +448,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       if (deciderKey) {
         const check = await decider.testKey(deciderKey.check);
         if (!check.ok && check.reason === "rejected") {
-          const error = deciderKey.provider === "openrouter"
-            ? "OpenRouter rejected this key. Check it at openrouter.ai/keys and paste it again."
-            : "Jev rejected this key. Check it at typesafe.ai and paste it again.";
+          const error = DECIDER_KEY_REJECTED[deciderKey.provider];
           return json(res, 400, { error, code: "decider_rejected" });
         }
       }
@@ -524,6 +522,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.tts?.fishKey !== undefined) persisted.tts.fishKey = "";
           if (persisted.decider?.key !== undefined) persisted.decider.key = "";
           if (persisted.decider?.openrouterKey !== undefined) persisted.decider.openrouterKey = "";
+          if (persisted.decider?.workersAiToken !== undefined) persisted.decider.workersAiToken = "";
           if (persisted.imageGen?.key !== undefined) persisted.imageGen.key = "";
           if (persisted.imageGen?.customApiKey !== undefined) persisted.imageGen.customApiKey = "";
           if (persisted.live?.key !== undefined) persisted.live.key = "";

@@ -40,7 +40,7 @@ export function BotTab({ bot, derived, editingInstructions, onEditInstructions, 
   onEditInstructions: (open: boolean) => void;
   onOpen: (page: SimplePageId) => void;
 }) {
-  const { state, dispatch } = useStore();
+  const { dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const ownerOrAdmin = useOwnerOrAdmin();
   const apps = useBotApps(bot);
@@ -71,7 +71,7 @@ export function BotTab({ bot, derived, editingInstructions, onEditInstructions, 
   // The Simple picker's own Thinking steps, so the row and the picker never disagree.
   const selection = bot.modelSelection;
   const levels = engine?.capabilities?.effortLevels ?? [];
-  const updatesBotDefault = !state.config?.cloudHome || ownerOrAdmin === true;
+  const updatesBotDefault = ownerOrAdmin === true;
   const thinking = engine?.capabilities?.modelVariants ? (
     <ColRow data-panel-row="thinking">
       <RowText title={t("botSettings.simple.thinking")} />

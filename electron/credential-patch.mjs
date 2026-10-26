@@ -8,6 +8,7 @@ export const CREDENTIAL_PATCH = {
   fishAudioKey: (value) => ({ tts: { fishKey: value } }),
   jevApiKey: (value) => ({ decider: { key: value } }),
   openrouterDeciderKey: (value) => ({ decider: { openrouterKey: value } }),
+  workersAiToken: (value) => ({ decider: { workersAiToken: value } }),
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
   customImageApiKey: (value) => ({ imageGen: { customApiKey: value } }),
   openaiLiveKey: (value) => ({ live: { key: value } }),

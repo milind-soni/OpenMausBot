@@ -117,6 +117,8 @@ export function createCloudRoutineAuthors(file: string) {
     },
     authored(id: string, routine: RoutineShape) { return Object.hasOwn(routines, id) && routines[id] === routineFingerprint(routine); },
     recorded(id: string): boolean { return Object.hasOwn(routines, id); },
+    /** Writes the file even when nothing changed: its presence says records are being kept. */
+    persist() { save(); },
     people(): Set<string> { return new Set(Object.values(writers)); },
     reassign(move: (person: string) => boolean, to: string): string[] {
       const moved: string[] = [];

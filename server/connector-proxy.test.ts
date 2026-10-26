@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createPageSchema } from "./testing/oversized-tool-schema.ts";
 import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
+import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
 
 const ENTRY = join(dirname(fileURLToPath(import.meta.url)), "connector-proxy.ts");
 let child: ChildProcessWithoutNullStreams | null = null;
@@ -295,6 +296,17 @@ describe("connector MCP bridge", () => {
     expect(search).toEqual(tools[0]);
     expect(schemaBytes(page.inputSchema)).toBeLessThanOrEqual(12_000);
     expect(page.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
+  });
+
+  it("lists no more connected-app tools than its share of the model's tool limit", async () => {
+    const tools = ["COMPOSIO_SEARCH_TOOLS", "GMAIL_SEND", "GMAIL_FETCH"].map((name) => ({ name, inputSchema: { type: "object" } }));
+    const upstream = await listen((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: 4, result: { tools } }));
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream, [TOOL_LIMIT_ENV]: "2" });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/list", params: {} })}\n`);
+    expect((await nextJson(lines)).result.tools).toEqual(tools.slice(0, 2));
   });
 
   it("tells the bot to reconnect an app whose sign-in ended, and leaves successful results alone", async () => {

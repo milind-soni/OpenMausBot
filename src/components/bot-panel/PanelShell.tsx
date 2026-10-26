@@ -16,7 +16,7 @@ import { linkTarget, usePanelLink, type PanelLink } from "./panel-link";
 import { PanelHero } from "./PanelHero";
 import { PageHeader } from "./rows";
 
-const roundButtonCls = "flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.06] text-ink hover:bg-ink/[0.11]";
+const roundButtonCls = "flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.06] text-ink hover:bg-ink/[0.11] max-md:size-9 max-md:border max-md:border-hairline max-md:bg-card";
 
 function initialTarget(section: BotSettingsSection | null, link: PanelLink | null): PanelTarget {
   return section ? linkTarget(section, link) : { tab: "bot" };

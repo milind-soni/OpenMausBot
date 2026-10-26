@@ -182,7 +182,7 @@ export function parseTeamBackup(input: unknown): TeamBackup {
     if (routine.target === "room-goal") {
       if (routine.runOn !== "maus") throw new Error("Invalid backup: room goals must run on this computer");
       const group = backup.groups.find((candidate) => candidate.key === routine.groupId);
-      if (!groups.has(routine.groupId ?? "") || !group || group.dm || !group.memberIds.includes(routine.botId)) {
+      if (routine.groupId !== undefined && (!groups.has(routine.groupId) || !group || group.dm || !group.memberIds.includes(routine.botId))) {
         throw new Error("Invalid backup: unknown routine room or coordinator");
       }
     }

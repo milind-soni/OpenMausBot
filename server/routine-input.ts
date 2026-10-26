@@ -16,7 +16,6 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
   const target = input.target ?? "bot";
   if (target !== "bot" && target !== "room-goal") throw new Error("Choose a valid routine target");
   const groupId = typeof input.groupId === "string" ? input.groupId.trim() : "";
-  if (target === "room-goal" && !groupId) throw new Error("Choose a room for this goal");
   const runOn = input.runOn ?? "maus";
   if (runOn !== "maus" && runOn !== "cloud") throw new Error("Choose where this routine runs");
   const attachments = cleanAttachments(input.attachments);
@@ -49,7 +48,7 @@ export function sanitizeInput(input: RoutineInput, after: number): Omit<Routine,
     prompt,
     target,
     botId,
-    groupId: target === "room-goal" ? groupId : undefined,
+    groupId: target === "room-goal" && groupId ? groupId : undefined,
     runOn,
     enabled: input.enabled !== false,
     schedule,

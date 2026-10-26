@@ -58,6 +58,8 @@ const CASES: ReadonlyArray<[string, OutcomeCategory | null]> = [
   ["post_to_room", null],
   ["mcp__agents__post_to_room", null],
   ["mcp__computer__screenshot", null],
+  ["mcp__device__PHONE_CREATE_EVENT", null],
+  ["mcp__device__PHONE_SEND_MESSAGE", null],
   ["error: Your ChatGPT sign-in has expired", null],
 ];
 

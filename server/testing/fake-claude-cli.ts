@@ -61,12 +61,18 @@
 //     input_json_delta frames (2.1.306 with --include-partial-messages) before its tool_use, runs it and replies.
 //     FAKE_CLAUDE_WRITE_BYTES (default 16384) is the file's size, sent 512 bytes every FAKE_CLAUDE_WRITE_STEP_MS
 //     (default 100); FAKE_CLAUDE_WRITE_HOLD  path: the call's input stays open once written until it exists
+//   FAKE_CLAUDE_HOME_FILES  1: keep the CLI's own files in <CLAUDE_CONFIG_DIR or ~/.claude> as 2.1.294 does: a turn is
+//     signed out without .credentials.json's claudeAiOauth.accessToken, refreshes an expired one (a temp file renamed over
+//     it, written in place where the rename is refused), appends each prompt to projects/<cwd slug>/<session>.jsonl,
+//     and --resume answers "No conversation found" without that file; the dump's signedInAs is the token used
+//   FAKE_CLAUDE_RUN_BASH  1: a scripted Bash call without `output` runs its command (sh -c, in the CLI's folder and
+//     environment); FAKE_CLAUDE_SHELL_LOG  path: each such call appends {command, output}
 // total_cost_usd and modelUsage are running totals (0.01 per result), as the real CLI reports them.
 import { splitLaunchNote } from "./launch-note.ts";
 import { spawnSync } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
@@ -620,6 +626,35 @@ const volatileNoteIn = (prompt: JsonValue): string | null => {
   return parsed ? (JSON.parse(`"${parsed[1]}"`) as string) : null;
 };
 
+const claudeFolder = () => process.env.CLAUDE_CONFIG_DIR || join(process.env.HOME || homedir(), ".claude");
+const transcriptFile = () => join(claudeFolder(), "projects", process.cwd().replace(/[^a-zA-Z0-9]/g, "-"), `${sessionId}.jsonl`);
+/** The access token this turn signs in with, refreshed first when expired; null when signed out. */
+const homeSignIn = (): string | null => {
+  const file = join(claudeFolder(), ".credentials.json");
+  let oauth: { accessToken?: unknown; expiresAt?: unknown; [key: string]: unknown } | undefined;
+  try { oauth = JSON.parse(readFileSync(file, "utf8")).claudeAiOauth; } catch { return null; }
+  if (!oauth || typeof oauth.accessToken !== "string" || !oauth.accessToken) return null;
+  if (typeof oauth.expiresAt !== "number" || oauth.expiresAt > Date.now()) return oauth.accessToken;
+  const refreshed = { ...oauth, accessToken: `${oauth.accessToken}+`, expiresAt: Date.now() + 3_600_000 };
+  const text = JSON.stringify({ claudeAiOauth: refreshed });
+  const temporary = join(dirname(file), `.credentials.json.${process.pid}.tmp`);
+  writeFileSync(temporary, text, { mode: 0o600 });
+  try {
+    renameSync(temporary, file);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    if (!["EXDEV", "EPERM", "EEXIST", "EBUSY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+    writeFileSync(file, text);
+  }
+  return refreshed.accessToken;
+};
+const runBash = (command: string): { ok: boolean; content: string } => {
+  const ran = spawnSync("/bin/sh", ["-c", command], { encoding: "utf8", timeout: 30_000 });
+  const output = `${ran.stdout ?? ""}${ran.stderr ?? ""}`;
+  if (process.env.FAKE_CLAUDE_SHELL_LOG) appendFileSync(process.env.FAKE_CLAUDE_SHELL_LOG, `${JSON.stringify({ command, output })}\n`);
+  return { ok: ran.status === 0, content: output };
+};
+
 const playTurn = (prompt: JsonValue, late = false) => {
   turnRunning = true;
   lateContinuation = late;
@@ -628,6 +663,8 @@ const playTurn = (prompt: JsonValue, late = false) => {
   // FAKE_CLAUDE_PROMPTS: every prompt this process receives, one JSON line each.
   if (process.env.FAKE_CLAUDE_PROMPTS) appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `${JSON.stringify(prompt)}\n`);
   volatileNote = volatileNoteIn(prompt) ?? volatileNote;
+  const homeFiles = process.env.FAKE_CLAUDE_HOME_FILES === "1";
+  const signedInAs = homeFiles ? homeSignIn() : undefined;
   if (!late && process.env.FAKE_CLAUDE_DUMP) {
     launchFiles ??= readLaunchFiles();
     // systemPrompt: what the model is instructed with, the system prompt file plus the
@@ -635,7 +672,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
     const systemPrompt = volatileNote && typeof launchFiles.systemPrompt === "string" ? `${launchFiles.systemPrompt}\n\n${volatileNote}` : launchFiles.systemPrompt;
     writeDumpAtomic(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, cwd: process.cwd(), prompt, ...launchFiles, systemPrompt, systemPromptFile: launchFiles.systemPrompt }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, cwd: process.cwd(), prompt, ...launchFiles, systemPrompt, systemPromptFile: launchFiles.systemPrompt, ...(homeFiles ? { signedInAs } : {}) }, null, 2),
     );
   }
 
@@ -654,6 +691,19 @@ const playTurn = (prompt: JsonValue, late = false) => {
   if (mode === "dead-session" && argv.includes("--resume")) {
     process.stderr.write(`fake-claude: No conversation found with session ID: ${argAfter("--resume")}\n`);
     process.exit(1);
+  }
+  if (homeFiles && !late) {
+    if (argv.includes("--resume") && turnsPlayed === 0 && !existsSync(transcriptFile())) {
+      out({
+        type: "result", subtype: "error_during_execution", duration_ms: 0, is_error: true, num_turns: 0, stop_reason: null,
+        session_id: sessionId, total_cost_usd: 0, errors: [`No conversation found with session ID: ${sessionId}`],
+      });
+      turnRunning = false;
+      finishIfDone();
+      return;
+    }
+    mkdirSync(dirname(transcriptFile()), { recursive: true });
+    appendFileSync(transcriptFile(), `${JSON.stringify({ type: "user", sessionId, message: promptText(prompt) })}\n`);
   }
   if ((mode === "stale-session" && argv.includes("--resume")) || mode === "error-result") {
     out({
@@ -769,7 +819,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
   }
 
   // A signed-out CLI's frames, as Claude Code 2.1.296 sends them: only the frame's own error fields mark the failure.
-  if (mode === "not-logged-in" || process.env.FAKE_CLAUDE_AUTH_AFTER_TURN === "1" && turnsPlayed > 0) {
+  if (mode === "not-logged-in" || process.env.FAKE_CLAUDE_AUTH_AFTER_TURN === "1" && turnsPlayed > 0 || signedInAs === null) {
     if (process.env.FAKE_CLAUDE_AUTH_AFTER_WORK === "1") out({
       type: "assistant", message: { model: "claude-fixture", content: [{ type: "tool_use", id: "before-sign-out", name: "Bash", input: { command: "pwd" } }] },
     });
@@ -922,6 +972,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
       const id = call.id ?? `tu-${process.pid}-${++toolUseCount}`;
       out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: call.name, input: call.input }], usage } });
       const reply = call.server ? mcpToolCall(call.server, call.name, call.input)
+        : call.name === "Bash" && call.output === undefined && process.env.FAKE_CLAUDE_RUN_BASH === "1" ? runBash(String((call.input as { command?: unknown } | undefined)?.command ?? ""))
         : { ok: call.ok, content: call.output };
       out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !reply.ok, content: reply.content }] } });
       if (!reply.ok) {

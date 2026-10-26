@@ -34,8 +34,9 @@ pnpm exec vitest run server/default-bot.test.ts server/default-bot.e2e.test.ts \
   by the new row's height, the avatar lands in the new slot and leaves nothing
   behind, reduced motion only fades the row in, and a hidden sidebar just adds it.
 - `server/default-bot.test.ts` also: a place with no Chief gets MausBot as its
-  Chief and the daily brief comes from it (hidden from the sidebar or not); a
-  place with a Chief keeps it.
+  Chief; a place with a Chief keeps it. Either way the daily brief comes from
+  MausBot, hidden from the sidebar or not, and its intro says so. How the watch
+  moves to MausBot is in [Proactive routines and the brief](proactive-routines.md).
 
 ## By hand
 

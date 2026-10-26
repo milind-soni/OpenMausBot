@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from "react";
 
-const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]';
 
 /** The dialog element needs `tabIndex={-1}` so it can take focus when it has no field to start in. */
 export function useModalDialog(dialogRef: RefObject<HTMLElement | null>, onClose: () => void) {
@@ -12,7 +12,7 @@ export function useModalDialog(dialogRef: RefObject<HTMLElement | null>, onClose
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     if (!dialog.contains(document.activeElement)) dialog.focus();
     const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE))
-      .filter((element) => !element.hasAttribute("hidden"));
+      .filter((element) => element.getAttribute("tabindex") !== "-1" && !element.closest("[hidden], [inert]"));
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       if (event.key === "Escape") {

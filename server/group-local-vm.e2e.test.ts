@@ -876,7 +876,25 @@ describe("Group Local VM ownership on the real isolated server", () => {
     await idle(bots[0].id);
     await stop(group.id); await idle(bots[0].id);
   });
-  it("records a stall during VM readiness as stalled, though setup ends before the turn has an outcome", async () => {
+  it("says which limit stopped a rerun room turn that stalled during delayed room setup", async () => {
+    const { bots, group } = await room();
+    await send(group.id);
+    await dump();
+    // A restart cuts the running turn; its rerun parks in the pre-id quarantine wait and stalls there.
+    await waitForExit(child, { signal: "SIGTERM" });
+    vmState({ wedgeClear: true }); rmSync(stateFile + ".clearwait", { force: true }); rmSync(dumpFile, { force: true });
+    await startServer();
+    await until(() => existsSync(stateFile + ".clearwait"), Boolean);
+    vmState({ wedgeClear: true, stall: true });
+    await until(() => api("GET", "/api/bots?messages=30"), r => JSON.stringify(r).includes("the turn was stopped"));
+    vmState();
+    await idle(bots[0].id);
+    expect(existsSync(dumpFile)).toBe(false);
+    const root = await until(() => readHandoffs(join(fixtureHome, "data")).findLast(node => node.groupId === group.id), node => node?.outcome !== undefined);
+    expect(root).toMatchObject({ outcome: "stalled", restarts: 1 });
+    expect(root?.result).toContain("No activity for 20 minutes — the turn was stopped");
+  });
+  it("says which limit stopped a room turn that stalled during VM readiness, though setup ends before the turn has an outcome", async () => {
     const { bots, group } = await room();
     // Park setup in Local VM readiness, before dispatch: the stall revokes the turn's generation, so readiness returns
     // to a setup that is no longer current and ends it without any room outcome.
@@ -888,7 +906,9 @@ describe("Group Local VM ownership on the real isolated server", () => {
     vmState();
     await idle(bots[0].id);
     expect(existsSync(dumpFile)).toBe(false);
-    expect(await roomOutcome(group.id)).toBe("stalled");
+    const root = await until(() => readHandoffs(join(fixtureHome, "data")).findLast(node => node.groupId === group.id), node => node?.outcome !== undefined);
+    expect(root).toMatchObject({ outcome: "stalled" });
+    expect(root?.result).toContain("No activity for 20 minutes — the turn was stopped");
   });
   it("revokes the previous member and rejects cross-bot control after a shared desktop handoff", async () => {
     const { bots, group } = await room();

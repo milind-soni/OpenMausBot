@@ -608,7 +608,10 @@ Setup, once:
 2. Put the client id in `vars.HIGHLEVEL_CLIENT_ID` (it is public: it appears in the
    authorization URL). Keep `HIGHLEVEL_REDIRECT_URL` and `HIGHLEVEL_SCOPES` in step
    with the app.
-3. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0009).
+3. `wrangler d1 migrations apply DB --config wrangler.jsonc` (0009 and 0010).
+   On a running Worker, apply 0010 before deploying a Worker built from this
+   code: its callback marks the flow in `callback_at`. An older Worker
+   ignores the column.
 4. `wrangler secret put HIGHLEVEL_CLIENT_SECRET --config wrangler.jsonc`. It is
    deliberately not in `secrets.required`: until it exists the routes answer
    `503 highlevel_unavailable`.

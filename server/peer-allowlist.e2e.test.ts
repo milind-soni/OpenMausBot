@@ -12,7 +12,7 @@ import { freePortBlock } from "./testing/ports.ts";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
-const REFUSED = "not an allowed peer";
+const REFUSED = "is not one of the bots";
 const TEST_CAPABILITY_KEY = "peer-allowlist-fixture-capability";
 
 let child: ChildProcess;
@@ -149,10 +149,12 @@ const mintCapability = async (botId: string, threadId: string): Promise<string> 
   return String(minted.body.token);
 };
 
+let seededId = "";
 const hideSeededBot = async () => {
-  // Otherwise the seeded bot joins the unsectioned team and the roster assertions depend on install order. It is that
-  // team's Chief and the install's MausBot, which is never archived, so it steps down into a department of its own.
+  // The seeded bot is the unsectioned team's Chief and the install's MausBot, which is never archived: it steps down into
+  // a department of its own, and the roster checks below leave it out, since every bot can reach it.
   const seeded = (await api("GET", "/api/bots?messages=0")).body.bots[0];
+  seededId = seeded.id;
   expect((await api("PATCH", `/api/bots/${seeded.id}`, { chiefOfStaff: false, section: "Starter" })).status).toBe(200);
 };
 
@@ -164,11 +166,18 @@ const peerNames = async (selfId: string, token: string) => {
     { authorization: `Bearer ${token}` },
   );
   expect(listed.status).toBe(200);
-  return (listed.body.bots as Array<{ name: string }>).map((bot) => bot.name).sort();
+  return (listed.body.bots as Array<{ id: string; name: string }>).filter((bot) => bot.id !== seededId).map((bot) => bot.name).sort();
+};
+
+/** What a Chief may set up: its own department's and its granted departments' teams and bots. */
+const setupScope = async (token: string) => {
+  const catalog = await api("GET", "/api/internal/team-setup-catalog", undefined, { authorization: `Bearer ${token}` });
+  expect(catalog.status, JSON.stringify(catalog.body)).toBe(200);
+  return { teams: catalog.body.teams as string[], bots: (catalog.body.bots as Array<{ id: string }>).map((bot) => bot.id) };
 };
 
 describe("peer allow-list", () => {
-  it.each(["rename", "delete"])("requires existing teams and never revives grants after %s and recreation", async mode => {
+  it.each(["rename", "delete"])("requires existing departments and never revives a Chief's authority after %s and recreation", async mode => {
     await hideSeededBot();
     const clive = await createBot(`Chief ${mode}`, "plain");
     const engineer = await createBot(`Engineer ${mode}`, "plain");
@@ -192,9 +201,10 @@ describe("peer allow-list", () => {
       expect(changed.status).toBe(200);
       expect((await state()).managedSections).toEqual([]);
       expect((await api("POST", "/api/sidebar-sections", { name: team, botIds: [engineer.id] })).status).toBe(200);
-      expect(await peerNames(clive.id, token)).toEqual([]);
-      const refused = await api("POST", "/api/internal/coordinate-bots", { botIds: [engineer.id], message: "Old grants must not return", consult: true }, { authorization: `Bearer ${token}` });
-      expect(refused.status).toBe(403);
+      const scope = await setupScope(token);
+      expect(scope.teams).not.toContain(team);
+      expect(scope.bots).not.toContain(engineer.id);
+      expect(await peerNames(clive.id, token), "reach never depended on the grant").toContain(engineer.name);
     } finally {
       for (const bot of [clive, engineer]) {
         await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
@@ -203,17 +213,13 @@ describe("peer allow-list", () => {
     }
   }, 45_000);
 
-  it("requires an explicit Chief grant for a consultation and revokes it on demotion", async () => {
+  it("consults another department with no grant, and a Chief's grant is authority it loses on demotion", async () => {
     await hideSeededBot();
     const clive = await createBot("Clive", "plain");
     const specialist = await createBot("Engineer", "plain");
     try {
       await api("PATCH", `/api/bots/${clive.id}`, { section: "Office" });
       await api("PATCH", `/api/bots/${specialist.id}`, { section: "Engineering" });
-      expect((await api("PATCH", `/api/bots/${clive.id}`, { managedSections: ["Engineering"], acknowledgePeerScope: true })).status).toBe(400);
-      await api("PATCH", `/api/bots/${clive.id}`, { chiefOfStaff: true });
-      expect((await api("PATCH", `/api/bots/${clive.id}`, { managedSections: ["Engineering"] })).status).toBe(400);
-      expect((await api("PATCH", `/api/bots/${clive.id}`, { managedSections: ["Engineering"], acknowledgePeerScope: true })).status).toBe(200);
       await warmUp(clive.id);
       const token = await mintCapability(clive.id, clive.threadId);
       expect(await peerNames(clive.id, token)).toEqual(["Engineer"]);
@@ -221,9 +227,16 @@ describe("peer allow-list", () => {
       expect(outcome.status, JSON.stringify(outcome.body)).toBe(200);
       expect(outcome.body.error).toBeUndefined();
       expect(outcome.body.receipts).toEqual([expect.objectContaining({ botId: specialist.id, outcome: "queued" })]);
+      await expect.poll(() => botBusy(specialist.id), { timeout: 15_000 }).toBe(false);
+      expect((await api("PATCH", `/api/bots/${clive.id}`, { managedSections: ["Engineering"], acknowledgePeerScope: true })).status).toBe(400);
+      await api("PATCH", `/api/bots/${clive.id}`, { chiefOfStaff: true });
+      expect((await api("PATCH", `/api/bots/${clive.id}`, { managedSections: ["Engineering"] })).status).toBe(400);
+      expect((await api("PATCH", `/api/bots/${clive.id}`, { managedSections: ["Engineering"], acknowledgePeerScope: true })).status).toBe(200);
+      expect((await setupScope(token)).bots).toContain(specialist.id);
       await api("PATCH", `/api/bots/${clive.id}`, { chiefOfStaff: false });
       await api("PATCH", `/api/bots/${clive.id}`, { chiefOfStaff: true });
-      expect(await peerNames(clive.id, token)).toEqual([]);
+      expect((await setupScope(token)).bots).not.toContain(specialist.id);
+      expect(await peerNames(clive.id, token)).toEqual(["Engineer"]);
       const state = (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: any) => bot.id === clive.id);
       expect(state.managedSections ?? []).toEqual([]);
     } finally {
@@ -248,8 +261,9 @@ describe("peer allow-list", () => {
 
       const systemPrompt = String(dump.systemPrompt);
       expect(systemPrompt).toContain("[TEAM ROSTER]");
-      expect(systemPrompt).toContain(`- Quill — General assistant [id: ${quill.id}]`);
-      expect(systemPrompt).toContain(`- Patch — General assistant [id: ${patch.id}]`);
+      expect(systemPrompt).toContain(`- Quill — General assistant (General) [id: ${quill.id}]`);
+      expect(systemPrompt).toContain(`- Patch — General assistant (General) [id: ${patch.id}]`);
+      expect(systemPrompt).toContain("(Starter) [id: ");
       expect(systemPrompt).toContain("Team availability: every teammate is available.");
       expect(systemPrompt).toContain("Use coordinate_bots");
       expect(systemPrompt).toContain("Each recipient runs with its own model and permissions");

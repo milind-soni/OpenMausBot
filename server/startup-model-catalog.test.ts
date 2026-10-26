@@ -7,6 +7,7 @@ import type { ModelCatalog, ProviderDriver, ProviderInstance, SendTurnInput } fr
 import { createAcpDriver, type AcpSupport } from "./drivers/acp/core.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import * as procs from "./procs.ts";
+import { holdUntilFirstEngineRead } from "./first-engine-read.ts";
 import { openStartupModelCatalog, writeStartupModelCache } from "./startup-model-catalog.ts";
 
 const CACHED: ModelCatalog = {
@@ -123,6 +124,31 @@ describe("startup model catalogs", () => {
     gate.release(FRESH);
     await registry.get("slow")!.startupModelRefresh;
     expect(registry.get("slow")!.models).toEqual(FRESH);
+  });
+
+  it("holds a later start's refresh behind the first engine read only while a saved list stands in, and a first run's never", async () => {
+    seedBots();
+    let refreshes = 0;
+    const open = (instanceId = "held") => openStartupModelCatalog({ instanceId, use: () => {}, current: () => CACHED, refresh: async () => { refreshes += 1; } });
+    writeStartupModelCache("held", CACHED);
+    const release = holdUntilFirstEngineRead();
+    const opened = open() as { pending: Promise<void> };
+    for (let i = 0; i < 12; i += 1) await Promise.resolve();
+    expect(refreshes).toBe(0);
+    await (open("nothing-saved") as { pending: Promise<void> }).pending;
+    expect(refreshes).toBe(1);
+    refreshes = 0;
+    release();
+    await opened.pending;
+    expect(refreshes).toBe(1);
+    await (open() as { pending: Promise<void> }).pending;
+    expect(refreshes).toBe(2);
+
+    rmSync(join(DATA_DIR, "bots.json"), { force: true });
+    const releaseAgain = holdUntilFirstEngineRead();
+    await open();
+    expect(refreshes).toBe(3);
+    releaseAgain();
   });
 
   it("still waits for discovery on the first run, when nothing is cached", async () => {

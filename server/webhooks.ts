@@ -327,8 +327,8 @@ export class WebhookManager {
   private readonly options: WebhookManagerOptions;
   private webhooks: StoredWebhookTrigger[] = [];
   private deliveries: DeliveryReceipt[] = [];
-  /** Room deliveries between admit() and their receipt; a concurrent retry of the same id must not post again. */
-  private roomInFlight = new Set<string>();
+  /** Room deliveries between admit() and their receipt; a concurrent retry of the same id waits for the outcome. */
+  private roomInFlight = new Map<string, Promise<unknown>>();
   private attempts: WebhookAttempt[] = [];
   private deleted: Array<z.output<typeof deletedWebhookSchema>> = [];
   private rate = new Map<string, number[]>();
@@ -568,10 +568,7 @@ export class WebhookManager {
     if (!trigger || !secretMatches(secret, trigger.secretHash)) fail(401, "Invalid webhook URL or secret");
     if (trigger.verificationPending && !trigger.enabled) return this.captureVerification(trigger, event);
     try {
-      // A room post synthesizes audio, so only that branch is a Promise; every other delivery stays synchronous.
-      const delivery = trigger.delivery === "post" && trigger.groupId
-        ? this.deliverRoom(trigger, event, false)
-        : this.dispatch(trigger, event);
+      const delivery = this.deliver(trigger, event, false);
       if (!(delivery instanceof Promise)) return delivery;
       return delivery.catch((asyncError: unknown) => {
         this.rejectAttempt(trigger, event, asyncError);
@@ -581,6 +578,11 @@ export class WebhookManager {
       this.rejectAttempt(trigger, event, error);
       throw error;
     }
+  }
+
+  /** A room post synthesizes audio, so only that branch is a Promise; every other delivery stays synchronous. */
+  private deliver(trigger: StoredWebhookTrigger, event: WebhookEvent, byPerson: boolean): WebhookReceiveResult | Promise<WebhookReceiveResult> {
+    return trigger.delivery === "post" && trigger.groupId ? this.deliverRoom(trigger, event, byPerson) : this.dispatch(trigger, event, byPerson);
   }
 
   private rejectAttempt(trigger: StoredWebhookTrigger, event: WebhookEvent, error: unknown): void {
@@ -634,10 +636,7 @@ export class WebhookManager {
     if (requestedDeliveryId) {
       const key = `${trigger.endpointId}:${requestedDeliveryId}`;
       const committed = this.options.findRun?.(trigger.id, requestedDeliveryId);
-      const duplicate = committed
-        ? { runId: committed.id }
-        : this.deliveries.find((delivery) => delivery.key === key)
-          ?? (this.roomInFlight.has(key) ? { runId: "post" } : undefined);
+      const duplicate = committed ? { runId: committed.id } : this.deliveries.find((delivery) => delivery.key === key);
       if (duplicate) {
         this.appendAttempt(trigger, event, {
           outcome: "duplicate",
@@ -649,6 +648,7 @@ export class WebhookManager {
         this.save();
         return { receipt: { runId: duplicate.runId, deliveryId: requestedDeliveryId, duplicate: true } };
       }
+      if (this.roomInFlight.has(key)) fail(409, "This delivery is still being posted; retry shortly");
     }
 
     // A retry of an accepted delivery stays idempotent even while the queue is full.
@@ -669,18 +669,26 @@ export class WebhookManager {
   /** A room post never starts a turn: it stages the whole message — voice note and images included — and only then
    *  appends once. The receipt is written after the append, so a failed synthesis retries cleanly. */
   private async deliverRoom(trigger: StoredWebhookTrigger, event: WebhookEvent, byPerson: boolean): Promise<WebhookReceiveResult> {
+    const inFlight = this.roomInFlight.get(`${trigger.endpointId}:${String(event.deliveryId ?? "").trim().slice(0, 200)}`);
+    if (inFlight) {
+      await inFlight.catch(() => undefined);
+      const current = this.webhooks.find((candidate) => candidate.id === trigger.id && candidate.endpointId === trigger.endpointId);
+      if (!current) fail(401, "Invalid webhook URL or secret");
+      return this.deliver(current, event, byPerson);
+    }
     const now = this.now();
     const admitted = this.admit(trigger, event, byPerson, now);
     if ("receipt" in admitted) return admitted.receipt;
     const { deliveryId } = admitted;
     if (!this.options.roomPost) fail(503, "This server cannot post webhook messages to rooms");
     const key = `${trigger.endpointId}:${deliveryId}`;
-    this.roomInFlight.add(key);
-    let outcome: Awaited<ReturnType<NonNullable<WebhookManagerOptions["roomPost"]>>>;
+    const posting = this.options.roomPost(publicTrigger(trigger), event.payload);
+    this.roomInFlight.set(key, posting);
+    let outcome: Awaited<typeof posting>;
     try {
-      outcome = await this.options.roomPost(publicTrigger(trigger), event.payload);
+      outcome = await posting;
     } finally {
-      this.roomInFlight.delete(key);
+      if (this.roomInFlight.get(key) === posting) this.roomInFlight.delete(key);
     }
     this.deliveries.push({ key, runId: "post", threadId: outcome.threadId, at: now });
     if (this.deliveries.length > MAX_DELIVERIES) this.deliveries.splice(0, this.deliveries.length - MAX_DELIVERIES);

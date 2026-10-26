@@ -186,7 +186,12 @@ export function companionState(options: Omit<ControlOptions, "controlToken">) {
 
 export function createControlServer(options: ControlOptions): Server {
   return createServer((req, res) => {
-    const requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+    let requestUrl: URL;
+    try {
+      requestUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+    } catch {
+      return json(res, 400, { error: "invalid request target" });
+    }
     const path = requestUrl.pathname;
     const method = req.method ?? "GET";
 
@@ -278,7 +283,11 @@ export function createControlServer(options: ControlOptions): Server {
     }
     const revoke = path.match(/^\/devices\/([\w-]+)$/);
     if (revoke && method === "DELETE") {
-      if (!options.devices.revoke(revoke[1])) return json(res, 404, { error: "no such device" });
+      try {
+        if (!options.devices.revoke(revoke[1])) return json(res, 404, { error: "no such device" });
+      } catch {
+        return json(res, 500, { error: "could not save the device removal" });
+      }
       options.disconnectDevice?.(revoke[1]);
       options.revoked?.(revoke[1]);
       return json(res, 200, companionState(options));

@@ -28,6 +28,7 @@ export function fakePagesService(options: { quota?: number; plan?: string; admin
 
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = new Request(input, init), url = new URL(request.url);
+    request.signal.throwIfAborted();
     if (state.down) throw new TypeError("fetch failed");
     if (url.href === tokenUrl) {
       const body = await request.text(), who = caller(request, body);

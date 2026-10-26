@@ -60,6 +60,7 @@ function fixture() {
     createManagedDesktopClient: options => { f.onState = options.onState; f.clientOptions = options; return client; },
     createOrgLibrary: options => { f.libraryOptions = options; return f.library; },
     managedDesktopRelay: { sendLibrary: async (proc, library) => { f.librarySent.push({ proc, library }); } },
+    installCloudPlanIpc: () => {},
     createCompanyBackupSchedule: options => {
       f.scheduleOptions = options;
       return createCompanyBackupSchedule({ ...options, now: () => f.now,

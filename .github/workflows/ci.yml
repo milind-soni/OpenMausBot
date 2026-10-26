@@ -398,9 +398,13 @@ jobs:
           cache: pnpm
       - if: steps.token.outputs.present == 'true'
         run: pnpm install --frozen-lockfile
+      - if: steps.token.outputs.present == 'true'
+        run: pnpm broker:check
+      - if: steps.token.outputs.present == 'true'
+        run: pnpm broker:test
       - name: Deploy the composio broker Worker via Wrangler
         if: steps.token.outputs.present == 'true'
-        uses: cloudflare/wrangler-action@v3
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           # Mirrors the local `pnpm broker:deploy` script so CI is the same

@@ -1,14 +1,16 @@
 // The proactive main agent, wired from ordinary routines: the checks a routine runs before any AI turn, the
-// read-and-draft fence its runs work inside, the brief its results become, and the Chief's default "Keep an eye on my
-// day" routine, created once with no button on a personal install or a personal Cloud that can reach connected apps,
-// and never on a team's. The brief is there only while that routine is on.
+// read-and-draft fence its runs work inside, the brief its results become, and the proactive bot's default "Keep an eye
+// on my day" routine, created once with no button on a personal install or a personal Cloud that can reach connected
+// apps, and never on a team's. The brief is there only while that routine is on.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { z } from "zod";
 
 import type { NeedsYouItem } from "../../shared/today.ts";
 import type { RuntimeEvent } from "../../shared/runtime-events.ts";
 import { connectorAccessDecision } from "../../shared/connector-scopes.ts";
 import type { Notification } from "../../shared/notification.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import { writeFileAtomic } from "../atomic.ts";
 import type { AppConfig } from "../config.ts";
 import { createConnectedReads, READ_APPS, type ReadApp } from "../connected-reads.ts";
@@ -18,19 +20,33 @@ import type { ProviderAdapter } from "../contracts.ts";
 import { createReadAndDraft } from "../read-and-draft.ts";
 import type { Routine, RoutineChecks, RoutineManager, RoutineRun } from "../routines.ts";
 import type { BotRecord, Store } from "../store.ts";
+import { deciderEnabled, type Decider } from "../decider/index.ts";
+import type { Extractor } from "../extractor/index.ts";
 import { createBrief, type BriefDeps } from "./brief.ts";
+import { WATCH_EVERY_MINUTES, WATCH_INSTRUCTIONS, WATCH_NAME } from "./default-watch.ts";
+import { createHelperSuggestion } from "./helper-suggestion.ts";
+import { createInboxTriage } from "./inbox-triage.ts";
+import { mainChief, proactiveOwner } from "./proactive-owner.ts";
 import { createRoutineChecks } from "./routine-checks.ts";
 
-export const WATCH_NAME = "Keep an eye on my day";
-export const WATCH_INSTRUCTIONS = [
-  "Keep an eye on my day for me.",
-  "- Email: pick what I must not miss: mail that needs my reply, mail from someone I meet today, and anything with a deadline. Leave out newsletters, receipts and notifications.",
-  "- Meetings: before a meeting with other people, prepare me in a few lines: who they are, why we are meeting, what is still open, and one next step.",
-].join("\n");
-const WATCH_FILE = "watch.json";
+export { WATCH_INSTRUCTIONS, WATCH_NAME } from "./default-watch.ts";
+export const WATCH_FILE = "watch.json";
 /** The engines whose every tool use outside a run's allowlist reaches OpenMausBot's answerer and is refused there. */
 const FENCED_ENGINES = new Set(["claudeAgent"]);
 const READ_SLUG: Record<ReadApp, string> = { gmail: "GMAIL_FETCH_EMAILS", googlecalendar: "GOOGLECALENDAR_EVENTS_LIST" };
+const ACTIVE = new Set(["queued", "running", "waiting"]);
+const MAX_HANDED = 50;
+const watchSchema = z.object({
+  version: z.literal(1),
+  routineId: z.string().max(512).optional(),
+  /** The default routine was made here: it is never made again. */
+  createdAt: z.number().finite().nonnegative().optional(),
+  /** Each briefing routine, by id, and the proactive bot it was placed on: it is handed to a bot once, so one the person
+   * moves off it later is left where they put it. */
+  handed: z.record(z.string().max(512), z.string().max(512)).optional(),
+});
+type WatchRecord = Omit<z.infer<typeof watchSchema>, "version">;
+const isWatch = (routine: Routine): boolean => routine.target === "bot" && routine.deliver === "brief" && Boolean(routine.checks?.length);
 
 type RequestOpened = Extract<RuntimeEvent, { type: "request.opened" }>;
 
@@ -46,6 +62,10 @@ export interface ProactiveDeps {
   dataDir: string;
   /** A hosted team workspace or a Team Cloud. */
   team: boolean;
+  /** This computer's bots moved to My Cloud: nothing here is changed. */
+  frozen?: () => boolean;
+  /** Any Cloud (a Cloud home included): the add-a-key suggestion is never shown there. */
+  cloud?: boolean;
   routines(): RoutineManager | null;
   mainThread: BriefDeps["mainThread"];
   threadBusy: BriefDeps["threadBusy"];
@@ -58,6 +78,8 @@ export interface ProactiveDeps {
   release(threadId: string): void;
   /** A routine the server made for the owner is the owner's, as one they made here. */
   owned(routine: Routine): void;
+  /** The decision and extraction models: with them on, they sort the inbox on any engine. */
+  helpers?: { decider: Pick<Decider, "choose">; extractor: Pick<Extractor, "extract"> };
 }
 
 export function createProactive(deps: ProactiveDeps) {
@@ -83,15 +105,16 @@ export function createProactive(deps: ProactiveDeps) {
     return Boolean(bot && FENCED_ENGINES.has(deps.registry.get(bot.modelSelection.instanceId)?.driverKind ?? ""));
   };
   const runs = (): RoutineRun[] => [...(deps.routines()?.listRuns() ?? [])].reverse();
-  /** The Chief's briefing routine is on: pausing or deleting it switches the brief off. */
+  const owner = () => proactiveOwner(store);
+  /** The owner's briefing routine is on: pausing or deleting it switches the brief off. */
   const watching = (): boolean => {
-    const chief = brief.chief();
-    return Boolean(chief && deps.routines()?.listRoutines().some((routine) => routine.botId === chief.id && routine.deliver === "brief" && routine.enabled));
+    const bot = owner();
+    return Boolean(bot && deps.routines()?.listRoutines().some((routine) => routine.botId === bot.id && routine.deliver === "brief" && routine.enabled));
   };
 
   const brief = createBrief({
     store, dataDir: deps.dataDir, hosted: deps.team, watching, mainThread: deps.mainThread, threadBusy: deps.threadBusy, runs,
-    needsYou: deps.needsYou, engineName: deps.engineName, hostTimeZone: deps.hostTimeZone,
+    needsYou: deps.needsYou, engineName: deps.engineName, hostTimeZone: deps.hostTimeZone, language: () => cfg.language,
     notify: (bot, threadId, detail) => deps.notify(briefNotification(bot, threadId, detail)),
     session: () => (composio.configured(cfg) ? reads.session() : null),
     address: () => checks.address(),
@@ -99,12 +122,23 @@ export function createProactive(deps: ProactiveDeps) {
     keep: (key) => checks.commit(key),
     items: (key) => checks.items(key),
   });
+  const inbox = deps.helpers ? createInboxTriage({ ...deps.helpers, config: () => cfg }) : undefined;
+  const suggestion = createHelperSuggestion({
+    store, dataDir: deps.dataDir, cloud: deps.cloud !== false || deps.team, owner, mainThread: deps.mainThread, threadBusy: deps.threadBusy,
+    // Set up and on, or switched off on purpose: either way there is nothing to suggest.
+    settled: () => deciderEnabled(cfg) || cfg.decider?.enabled === false || cfg.decider?.provider === "off",
+  });
   const checks = createRoutineChecks({
-    dataDir: deps.dataDir, reads, mayRead, fenced, runs, timeZone: brief.timeZone, dismissedFrom: brief.dismissedFrom, report: brief.report,
+    dataDir: deps.dataDir, reads, mayRead, fenced, runs, timeZone: brief.timeZone, dismissedFrom: brief.dismissedFrom,
+    report: async (found) => {
+      await brief.report(found);
+      if (found.gmail) suggestion.consider({ gmailConnected: found.gmail.connected, ...(found.gmail.address ? { inbox: found.gmail.address } : {}) });
+    },
+    ...(inbox ? { inbox } : {}),
   });
   /** One brief, the main agent's: a briefing routine of any other bot finds nothing to do. */
   const routineChecks: RoutineChecks = {
-    check: (routine, context) => (deps.team || (routine.deliver === "brief" && routine.botId !== brief.chief()?.id) ? Promise.resolve({}) : checks.check(routine, context)),
+    check: (routine, context) => (deps.team || (routine.deliver === "brief" && routine.botId !== owner()?.id) ? Promise.resolve({}) : checks.check(routine, context)),
     release: checks.release,
     settled: (run) => {
       checks.settled(run);
@@ -119,38 +153,85 @@ export function createProactive(deps: ProactiveDeps) {
   });
 
   const watchFile = join(deps.dataDir, WATCH_FILE);
-  let made: boolean | undefined;
-  const watchMade = (): boolean => {
-    if (made === undefined) {
-      try { made = Boolean(JSON.parse(readFileSync(watchFile, "utf8")).createdAt); } catch { made = false; }
+  let record: WatchRecord | undefined;
+  const watchRecord = (): WatchRecord => {
+    if (!record) {
+      try {
+        const parsed = watchSchema.safeParse(JSON.parse(readFileSync(watchFile, "utf8")));
+        record = parsed.success ? { ...parsed.data } : {};
+      } catch {
+        record = {};
+      }
     }
-    return made;
+    return record;
   };
-  /** The Chief's default routine, once, when connected apps are there to read: pausing or deleting it is how it is
-   * switched off, so it is never made again. Asked at start and every minute, since a Cloud's access arrives later. */
-  function ensureWatch(): Routine | null {
-    const manager = deps.routines();
-    const chief = brief.chief();
-    if (deps.team || !composio.configured(cfg) || !manager || !chief || watchMade()) return null;
-    const existing = manager.listRoutines().find((routine) => routine.botId === chief.id && routine.deliver === "brief" && routine.checks?.length);
-    const routine = existing ?? manager.create({
-      name: WATCH_NAME, prompt: WATCH_INSTRUCTIONS, botId: chief.id, enabled: true, timeoutMinutes: 15,
-      schedule: { type: "interval", everyMinutes: 15, anchorAt: Date.now() + 15 * 60_000 },
-      checks: ["calendar", "mail", "runs"], access: "read-and-draft", deliver: "brief",
-    });
-    if (!existing) deps.owned(routine);
-    made = true;
+  const remember = (next: WatchRecord): void => {
+    record = next;
     try {
-      writeFileAtomic(watchFile, `${JSON.stringify({ version: 1, routineId: routine.id, createdAt: Date.now() })}\n`, { mode: 0o600 });
+      writeFileAtomic(watchFile, `${JSON.stringify({ version: 1, ...next })}\n`, { mode: 0o600 });
     } catch (error) {
       console.warn(`watch: could not save ${watchFile}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  };
+
+  /** The watch the main Chief holds becomes the proactive bot's, once: the same routine, so its switch, the instructions
+   * the person edited, its checks' cursors and seen ids and its daily cap stay as they are. Never while one of its runs
+   * is queued or working. A briefing routine newly on the bot, handed over or arrived with it, is the one: every other is
+   * paused, never deleted, and the brief moves to the bot's chat. A restart between the steps finishes them. */
+  function handOver(manager: RoutineManager, bot: BotRecord): void {
+    const kept = watchRecord();
+    const handed = { ...kept.handed };
+    const watches = manager.listRoutines().filter(isWatch);
+    const chief = mainChief(store);
+    const before = chief && chief.id !== bot.id ? watches.filter((routine) => routine.botId === chief.id && handed[routine.id] !== bot.id) : [];
+    const runs = before.length ? manager.listRuns() : [];
+    if (before.some((routine) => runs.some((run) => run.routineId === routine.id && ACTIVE.has(run.status)))) return;
+    const placed = watches.filter((routine) => routine.botId === bot.id && handed[routine.id] !== bot.id).sort((a, b) => a.updatedAt - b.updatedAt);
+    for (const routine of before) {
+      const moved = manager.update(routine.id, { botId: bot.id });
+      if (moved) placed.push(moved);
+    }
+    const watch = placed.at(-1);
+    if (!watch) return;
+    for (const other of manager.listRoutines()) if (isWatch(other) && other.id !== watch.id && other.enabled) manager.update(other.id, { enabled: false });
+    brief.moveTo(bot.id);
+    for (const routine of placed) handed[routine.id] = bot.id;
+    remember({ ...kept, handed: Object.fromEntries(Object.entries(handed).slice(-MAX_HANDED)) });
+  }
+
+  /** The proactive bot's default routine, once, when connected apps are there to read: pausing or deleting it is how it
+   * is switched off, so it is never made again. Asked at start and every minute, since a Cloud's access arrives later,
+   * and a MausBot can arrive after the routine was made. */
+  function ensureWatch(): Routine | null {
+    const manager = deps.routines();
+    const bot = owner();
+    if (deps.team || deps.frozen?.() || !manager || !bot) return null;
+    try {
+      handOver(manager, bot);
+    } catch (error) {
+      console.warn(`watch: not handed over yet: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+    if (!composio.configured(cfg) || watchRecord().createdAt) return null;
+    const existing = manager.listRoutines().find((routine) => routine.botId === bot.id && isWatch(routine));
+    const routine = existing ?? manager.create({
+      name: WATCH_NAME, prompt: WATCH_INSTRUCTIONS, botId: bot.id, enabled: true, timeoutMinutes: 15,
+      schedule: { type: "interval", everyMinutes: WATCH_EVERY_MINUTES, anchorAt: Date.now() + WATCH_EVERY_MINUTES * 60_000 },
+      checks: ["calendar", "mail", "runs"], access: "read-and-draft", deliver: "brief",
+    });
+    if (!existing) deps.owned(routine);
+    remember({ ...watchRecord(), routineId: routine.id, createdAt: Date.now(), handed: { ...watchRecord().handed, [routine.id]: bot.id } });
     return routine;
   }
 
   let timer: ReturnType<typeof setInterval> | null = null;
   return {
     checks: routineChecks, fence, brief,
+    /** Not now on the add-a-key suggestion; the inbox connected now is remembered with it. */
+    suggestionNotNow: (threadId: string, messageId: string, auth: RequestAuth) => {
+      const address = checks.address();
+      return suggestion.notNow(threadId, messageId, auth, address ? [address] : []);
+    },
     ensureWatch,
     /** A routine run's turn ended: a briefing run's answer becomes the brief's rows. */
     runSettled: (run: RoutineRun, turnId: string | undefined): void => void brief.consume(run, turnId).catch((error: unknown) => console.warn("brief: a run's answer was not kept", error)),

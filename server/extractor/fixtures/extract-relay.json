@@ -1,0 +1,1099 @@
+{
+  "about": [
+    "Shared contract between OpenMausBot (server/extractor/contract.ts) and the openmaus-cloud Admin's relay.",
+    "OMB sends POST <OMB_CLOUD_DECIDER_URL>/v1/extract with Authorization: Bearer <OMB_CLOUD_DECIDER_TOKEN>, the x-omb-seam header naming the seam, and `body` as JSON: { seam, fields, input } (the seam in both).",
+    "The relay answers { values: { [field]: value | null }, model }, refuses any request whose `accepts` would be false, and answers 413 for one over the caps; OMB never sends one, and never retries a 413.",
+    "Body cap: 256 KB counting each image's data as empty; then at most 4 images of at most 1 MB decoded each (so a raw body can reach about 6 MB).",
+    "Clairic handles string, number and date fields only: on the person's own key OMB sends boolean fields to Clef-flash as yes/no questions (true at p >= 0.6, false at p <= 0.4, else null) and enum fields as choice questions over the same input, and sends Clairic a reference_date of today (workers-ai-clairic.json). The relay does the same on its side.",
+    "Regenerate from the real contract code when it changes, and copy this file to the Admin."
+  ],
+  "endpoint": "/v1/extract",
+  "header": "x-omb-seam",
+  "limits": {
+    "bodyBytesWithoutImages": 262144,
+    "images": 4,
+    "imageBytes": 1048576,
+    "fields": 30,
+    "fieldName": "^[A-Za-z_][A-Za-z0-9_]{0,63}$",
+    "description": 300,
+    "options": 50,
+    "option": 100,
+    "text": 200000,
+    "imageMimes": [
+      "image/png",
+      "image/jpeg",
+      "image/webp"
+    ],
+    "rawBodyBytes": 6291456
+  },
+  "seams": {
+    "keyCheck": {
+      "fields": {
+        "ok": {
+          "type": "boolean",
+          "description": "Is this a connection check?"
+        }
+      },
+      "input": {
+        "text": "OpenMausBot is checking that an extraction-model key works."
+      }
+    },
+    "inboxTriage": {
+      "fields": {
+        "sender": {
+          "type": "string",
+          "description": "Who sent it: the person's or the company's name."
+        },
+        "ask": {
+          "type": "string",
+          "description": "What the sender asks the reader to do, in a few words."
+        },
+        "deadline": {
+          "type": "date",
+          "description": "When what is asked for is due, if a date is given."
+        },
+        "amount": {
+          "type": "number",
+          "description": "An amount of money the email is about, if any."
+        },
+        "needs_reply": {
+          "type": "boolean",
+          "description": "Does the sender wait on a written reply from the reader?"
+        },
+        "kind": {
+          "type": "enum",
+          "description": "What kind of email this is.",
+          "options": [
+            "personal",
+            "work",
+            "newsletter",
+            "receipt",
+            "notification",
+            "marketing",
+            "other"
+          ]
+        }
+      },
+      "input": "text only, at most 8,000 characters, no images",
+      "textMax": 8000
+    },
+    "botExtract": {
+      "note": "A bot's own extract tool: any request within `limits`. Counted per machine per day."
+    }
+  },
+  "requests": [
+    {
+      "name": "the key check",
+      "seam": "keyCheck",
+      "accepts": true,
+      "body": {
+        "seam": "keyCheck",
+        "fields": {
+          "ok": {
+            "type": "boolean",
+            "description": "Is this a connection check?"
+          }
+        },
+        "input": {
+          "text": "OpenMausBot is checking that an extraction-model key works."
+        }
+      }
+    },
+    {
+      "name": "a key check with other text",
+      "seam": "keyCheck",
+      "accepts": false,
+      "body": {
+        "seam": "keyCheck",
+        "fields": {
+          "ok": {
+            "type": "boolean",
+            "description": "Is this a connection check?"
+          }
+        },
+        "input": {
+          "text": "Read my email."
+        }
+      }
+    },
+    {
+      "name": "inbox triage of one email",
+      "seam": "inboxTriage",
+      "accepts": true,
+      "body": {
+        "seam": "inboxTriage",
+        "fields": {
+          "sender": {
+            "type": "string",
+            "description": "Who sent it: the person's or the company's name."
+          },
+          "ask": {
+            "type": "string",
+            "description": "What the sender asks the reader to do, in a few words."
+          },
+          "deadline": {
+            "type": "date",
+            "description": "When what is asked for is due, if a date is given."
+          },
+          "amount": {
+            "type": "number",
+            "description": "An amount of money the email is about, if any."
+          },
+          "needs_reply": {
+            "type": "boolean",
+            "description": "Does the sender wait on a written reply from the reader?"
+          },
+          "kind": {
+            "type": "enum",
+            "description": "What kind of email this is.",
+            "options": [
+              "personal",
+              "work",
+              "newsletter",
+              "receipt",
+              "notification",
+              "marketing",
+              "other"
+            ]
+          }
+        },
+        "input": {
+          "text": "From: Dana Ruiz <dana@northwind.example>\nSubject: Invoice INV-2291 due Friday\n\nHi, could you confirm the PO number before Friday so we can release the shipment?"
+        }
+      }
+    },
+    {
+      "name": "inbox triage with an extra field",
+      "seam": "inboxTriage",
+      "accepts": false,
+      "body": {
+        "seam": "inboxTriage",
+        "fields": {
+          "sender": {
+            "type": "string",
+            "description": "Who sent it: the person's or the company's name."
+          },
+          "ask": {
+            "type": "string",
+            "description": "What the sender asks the reader to do, in a few words."
+          },
+          "deadline": {
+            "type": "date",
+            "description": "When what is asked for is due, if a date is given."
+          },
+          "amount": {
+            "type": "number",
+            "description": "An amount of money the email is about, if any."
+          },
+          "needs_reply": {
+            "type": "boolean",
+            "description": "Does the sender wait on a written reply from the reader?"
+          },
+          "kind": {
+            "type": "enum",
+            "description": "What kind of email this is.",
+            "options": [
+              "personal",
+              "work",
+              "newsletter",
+              "receipt",
+              "notification",
+              "marketing",
+              "other"
+            ]
+          },
+          "body": {
+            "type": "string"
+          }
+        },
+        "input": {
+          "text": "From: Dana Ruiz <dana@northwind.example>\nSubject: Invoice INV-2291 due Friday\n\nHi, could you confirm the PO number before Friday so we can release the shipment?"
+        }
+      }
+    },
+    {
+      "name": "inbox triage with a changed description",
+      "seam": "inboxTriage",
+      "accepts": false,
+      "body": {
+        "seam": "inboxTriage",
+        "fields": {
+          "sender": {
+            "type": "string",
+            "description": "Who sent it: the person's or the company's name."
+          },
+          "ask": {
+            "type": "string",
+            "description": "Anything."
+          },
+          "deadline": {
+            "type": "date",
+            "description": "When what is asked for is due, if a date is given."
+          },
+          "amount": {
+            "type": "number",
+            "description": "An amount of money the email is about, if any."
+          },
+          "needs_reply": {
+            "type": "boolean",
+            "description": "Does the sender wait on a written reply from the reader?"
+          },
+          "kind": {
+            "type": "enum",
+            "description": "What kind of email this is.",
+            "options": [
+              "personal",
+              "work",
+              "newsletter",
+              "receipt",
+              "notification",
+              "marketing",
+              "other"
+            ]
+          }
+        },
+        "input": {
+          "text": "From: Dana Ruiz <dana@northwind.example>\nSubject: Invoice INV-2291 due Friday\n\nHi, could you confirm the PO number before Friday so we can release the shipment?"
+        }
+      }
+    },
+    {
+      "name": "inbox triage with an image",
+      "seam": "inboxTriage",
+      "accepts": false,
+      "body": {
+        "seam": "inboxTriage",
+        "fields": {
+          "sender": {
+            "type": "string",
+            "description": "Who sent it: the person's or the company's name."
+          },
+          "ask": {
+            "type": "string",
+            "description": "What the sender asks the reader to do, in a few words."
+          },
+          "deadline": {
+            "type": "date",
+            "description": "When what is asked for is due, if a date is given."
+          },
+          "amount": {
+            "type": "number",
+            "description": "An amount of money the email is about, if any."
+          },
+          "needs_reply": {
+            "type": "boolean",
+            "description": "Does the sender wait on a written reply from the reader?"
+          },
+          "kind": {
+            "type": "enum",
+            "description": "What kind of email this is.",
+            "options": [
+              "personal",
+              "work",
+              "newsletter",
+              "receipt",
+              "notification",
+              "marketing",
+              "other"
+            ]
+          }
+        },
+        "input": {
+          "text": "From: Dana Ruiz <dana@northwind.example>\nSubject: Invoice INV-2291 due Friday\n\nHi, could you confirm the PO number before Friday so we can release the shipment?",
+          "images": [
+            {
+              "mime": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "inbox triage over 8,000 characters",
+      "seam": "inboxTriage",
+      "accepts": false,
+      "body": {
+        "seam": "inboxTriage",
+        "fields": {
+          "sender": {
+            "type": "string",
+            "description": "Who sent it: the person's or the company's name."
+          },
+          "ask": {
+            "type": "string",
+            "description": "What the sender asks the reader to do, in a few words."
+          },
+          "deadline": {
+            "type": "date",
+            "description": "When what is asked for is due, if a date is given."
+          },
+          "amount": {
+            "type": "number",
+            "description": "An amount of money the email is about, if any."
+          },
+          "needs_reply": {
+            "type": "boolean",
+            "description": "Does the sender wait on a written reply from the reader?"
+          },
+          "kind": {
+            "type": "enum",
+            "description": "What kind of email this is.",
+            "options": [
+              "personal",
+              "work",
+              "newsletter",
+              "receipt",
+              "notification",
+              "marketing",
+              "other"
+            ]
+          }
+        },
+        "input": {
+          "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      }
+    },
+    {
+      "name": "a bot's invoice, every field type",
+      "seam": "botExtract",
+      "accepts": true,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "invoice_number": {
+            "type": "string"
+          },
+          "due_date": {
+            "type": "date",
+            "description": "Issue date plus the net payment days"
+          },
+          "total": {
+            "type": "number",
+            "description": "Amount due including shipping"
+          },
+          "po_number": {
+            "type": "string",
+            "description": "Purchase order number"
+          },
+          "paid": {
+            "type": "boolean",
+            "description": "Has the invoice been paid?"
+          },
+          "currency": {
+            "type": "enum",
+            "options": [
+              "USD",
+              "EUR",
+              "GBP"
+            ]
+          }
+        },
+        "input": {
+          "text": "Invoice INV-2291 from Northwind Supply, issued 2026-09-02, net 30. 4 pallets at $250.00 each, shipping $80.00. Paid in full. Contact: Dana Ruiz."
+        }
+      }
+    },
+    {
+      "name": "a bot's image with no text",
+      "seam": "botExtract",
+      "accepts": true,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "input": {
+          "images": [
+            {
+              "mime": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a bot's 31 fields",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "f0": {
+            "type": "string"
+          },
+          "f1": {
+            "type": "string"
+          },
+          "f2": {
+            "type": "string"
+          },
+          "f3": {
+            "type": "string"
+          },
+          "f4": {
+            "type": "string"
+          },
+          "f5": {
+            "type": "string"
+          },
+          "f6": {
+            "type": "string"
+          },
+          "f7": {
+            "type": "string"
+          },
+          "f8": {
+            "type": "string"
+          },
+          "f9": {
+            "type": "string"
+          },
+          "f10": {
+            "type": "string"
+          },
+          "f11": {
+            "type": "string"
+          },
+          "f12": {
+            "type": "string"
+          },
+          "f13": {
+            "type": "string"
+          },
+          "f14": {
+            "type": "string"
+          },
+          "f15": {
+            "type": "string"
+          },
+          "f16": {
+            "type": "string"
+          },
+          "f17": {
+            "type": "string"
+          },
+          "f18": {
+            "type": "string"
+          },
+          "f19": {
+            "type": "string"
+          },
+          "f20": {
+            "type": "string"
+          },
+          "f21": {
+            "type": "string"
+          },
+          "f22": {
+            "type": "string"
+          },
+          "f23": {
+            "type": "string"
+          },
+          "f24": {
+            "type": "string"
+          },
+          "f25": {
+            "type": "string"
+          },
+          "f26": {
+            "type": "string"
+          },
+          "f27": {
+            "type": "string"
+          },
+          "f28": {
+            "type": "string"
+          },
+          "f29": {
+            "type": "string"
+          },
+          "f30": {
+            "type": "string"
+          }
+        },
+        "input": {
+          "text": "x"
+        }
+      }
+    },
+    {
+      "name": "a bot's 30 fields",
+      "seam": "botExtract",
+      "accepts": true,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "f0": {
+            "type": "string"
+          },
+          "f1": {
+            "type": "string"
+          },
+          "f2": {
+            "type": "string"
+          },
+          "f3": {
+            "type": "string"
+          },
+          "f4": {
+            "type": "string"
+          },
+          "f5": {
+            "type": "string"
+          },
+          "f6": {
+            "type": "string"
+          },
+          "f7": {
+            "type": "string"
+          },
+          "f8": {
+            "type": "string"
+          },
+          "f9": {
+            "type": "string"
+          },
+          "f10": {
+            "type": "string"
+          },
+          "f11": {
+            "type": "string"
+          },
+          "f12": {
+            "type": "string"
+          },
+          "f13": {
+            "type": "string"
+          },
+          "f14": {
+            "type": "string"
+          },
+          "f15": {
+            "type": "string"
+          },
+          "f16": {
+            "type": "string"
+          },
+          "f17": {
+            "type": "string"
+          },
+          "f18": {
+            "type": "string"
+          },
+          "f19": {
+            "type": "string"
+          },
+          "f20": {
+            "type": "string"
+          },
+          "f21": {
+            "type": "string"
+          },
+          "f22": {
+            "type": "string"
+          },
+          "f23": {
+            "type": "string"
+          },
+          "f24": {
+            "type": "string"
+          },
+          "f25": {
+            "type": "string"
+          },
+          "f26": {
+            "type": "string"
+          },
+          "f27": {
+            "type": "string"
+          },
+          "f28": {
+            "type": "string"
+          },
+          "f29": {
+            "type": "string"
+          }
+        },
+        "input": {
+          "text": "x"
+        }
+      }
+    },
+    {
+      "name": "a field name with a dash",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "due-date": {
+            "type": "date"
+          }
+        },
+        "input": {
+          "text": "x"
+        }
+      }
+    },
+    {
+      "name": "an enum with one option",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "currency": {
+            "type": "enum",
+            "options": [
+              "USD"
+            ]
+          }
+        },
+        "input": {
+          "text": "x"
+        }
+      }
+    },
+    {
+      "name": "an enum with repeated options",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "currency": {
+            "type": "enum",
+            "options": [
+              "USD",
+              "USD"
+            ]
+          }
+        },
+        "input": {
+          "text": "x"
+        }
+      }
+    },
+    {
+      "name": "options on a string field",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "name": {
+            "type": "string",
+            "options": [
+              "a",
+              "b"
+            ]
+          }
+        },
+        "input": {
+          "text": "x"
+        }
+      }
+    },
+    {
+      "name": "a type Clairic has but the contract does not",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "names": {
+            "type": "list"
+          }
+        },
+        "input": {
+          "text": "x"
+        }
+      }
+    },
+    {
+      "name": "a field with an unknown key",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "name": {
+            "type": "string",
+            "unit": "USD"
+          }
+        },
+        "input": {
+          "text": "x"
+        }
+      }
+    },
+    {
+      "name": "a description over 300 characters",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "name": {
+            "type": "string",
+            "description": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          }
+        },
+        "input": {
+          "text": "x"
+        }
+      }
+    },
+    {
+      "name": "no text and no image",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "input": {
+          "text": "  "
+        }
+      }
+    },
+    {
+      "name": "five images",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "input": {
+          "images": [
+            {
+              "mime": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+            },
+            {
+              "mime": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+            },
+            {
+              "mime": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+            },
+            {
+              "mime": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+            },
+            {
+              "mime": "image/png",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a GIF",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "input": {
+          "images": [
+            {
+              "mime": "image/gif",
+              "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "an image that is not base64",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "input": {
+          "images": [
+            {
+              "mime": "image/png",
+              "data": "not base64!"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "an image given by URL",
+      "seam": "botExtract",
+      "accepts": false,
+      "body": {
+        "seam": "botExtract",
+        "fields": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "input": {
+          "images": [
+            {
+              "mime": "image/png",
+              "url": "https://example.com/a.png"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a seam the relay does not know",
+      "seam": "inboxSummary",
+      "accepts": false,
+      "body": {
+        "seam": "inboxSummary",
+        "fields": {
+          "sender": {
+            "type": "string",
+            "description": "Who sent it: the person's or the company's name."
+          },
+          "ask": {
+            "type": "string",
+            "description": "What the sender asks the reader to do, in a few words."
+          },
+          "deadline": {
+            "type": "date",
+            "description": "When what is asked for is due, if a date is given."
+          },
+          "amount": {
+            "type": "number",
+            "description": "An amount of money the email is about, if any."
+          },
+          "needs_reply": {
+            "type": "boolean",
+            "description": "Does the sender wait on a written reply from the reader?"
+          },
+          "kind": {
+            "type": "enum",
+            "description": "What kind of email this is.",
+            "options": [
+              "personal",
+              "work",
+              "newsletter",
+              "receipt",
+              "notification",
+              "marketing",
+              "other"
+            ]
+          }
+        },
+        "input": {
+          "text": "From: Dana Ruiz <dana@northwind.example>\nSubject: Invoice INV-2291 due Friday\n\nHi, could you confirm the PO number before Friday so we can release the shipment?"
+        }
+      }
+    }
+  ],
+  "responses": [
+    {
+      "name": "typed values",
+      "fields": {
+        "invoice_number": {
+          "type": "string"
+        },
+        "due_date": {
+          "type": "date",
+          "description": "Issue date plus the net payment days"
+        },
+        "total": {
+          "type": "number",
+          "description": "Amount due including shipping"
+        },
+        "po_number": {
+          "type": "string",
+          "description": "Purchase order number"
+        },
+        "paid": {
+          "type": "boolean",
+          "description": "Has the invoice been paid?"
+        },
+        "currency": {
+          "type": "enum",
+          "options": [
+            "USD",
+            "EUR",
+            "GBP"
+          ]
+        }
+      },
+      "body": {
+        "values": {
+          "invoice_number": "INV-2291",
+          "due_date": "2026-10-02",
+          "total": 1080,
+          "po_number": null,
+          "paid": true,
+          "currency": "USD"
+        },
+        "model": "clairic+clef-flash"
+      },
+      "values": {
+        "invoice_number": "INV-2291",
+        "due_date": "2026-10-02",
+        "total": 1080,
+        "po_number": null,
+        "paid": true,
+        "currency": "USD"
+      }
+    },
+    {
+      "name": "a field left out is null",
+      "fields": {
+        "total": {
+          "type": "number"
+        },
+        "po_number": {
+          "type": "string"
+        }
+      },
+      "body": {
+        "values": {
+          "total": 1080
+        },
+        "model": "clairic"
+      },
+      "values": {
+        "total": 1080,
+        "po_number": null
+      }
+    },
+    {
+      "name": "extra values are dropped",
+      "fields": {
+        "total": {
+          "type": "number"
+        }
+      },
+      "body": {
+        "values": {
+          "total": 1080,
+          "secret": "x"
+        },
+        "model": "clairic"
+      },
+      "values": {
+        "total": 1080
+      }
+    },
+    {
+      "name": "an enum value outside its options",
+      "fields": {
+        "currency": {
+          "type": "enum",
+          "options": [
+            "USD",
+            "EUR"
+          ]
+        }
+      },
+      "body": {
+        "values": {
+          "currency": "JPY"
+        },
+        "model": "clef-flash"
+      },
+      "malformed": true
+    },
+    {
+      "name": "a date not written YYYY-MM-DD",
+      "fields": {
+        "due_date": {
+          "type": "date"
+        }
+      },
+      "body": {
+        "values": {
+          "due_date": "Oct 2"
+        },
+        "model": "clairic"
+      },
+      "malformed": true
+    },
+    {
+      "name": "an impossible date",
+      "fields": {
+        "due_date": {
+          "type": "date"
+        }
+      },
+      "body": {
+        "values": {
+          "due_date": "2026-13-45"
+        },
+        "model": "clairic"
+      },
+      "malformed": true
+    },
+    {
+      "name": "a number sent as text",
+      "fields": {
+        "total": {
+          "type": "number"
+        }
+      },
+      "body": {
+        "values": {
+          "total": "1080"
+        },
+        "model": "clairic"
+      },
+      "malformed": true
+    },
+    {
+      "name": "a boolean sent as text",
+      "fields": {
+        "paid": {
+          "type": "boolean"
+        }
+      },
+      "body": {
+        "values": {
+          "paid": "yes"
+        },
+        "model": "clef-flash"
+      },
+      "malformed": true
+    },
+    {
+      "name": "no values object",
+      "fields": {
+        "total": {
+          "type": "number"
+        }
+      },
+      "body": {
+        "model": "clairic"
+      },
+      "malformed": true
+    }
+  ]
+}

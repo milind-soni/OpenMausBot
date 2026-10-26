@@ -467,6 +467,36 @@ describe("createOpenAIChatRuntime mid-turn steer", () => {
     await instance.dispose();
   });
 
+  it("answers an aside parked while the final answer streamed instead of dropping it", async () => {
+    const answer = (text: string) => new Response(`data: {"choices":[{"index":0,"delta":{"content":"${text}"}}]}\n\n`
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n', { status: 200, headers: { "content-type": "text/event-stream" } });
+    const bodies: string[] = [];
+    let release!: (response: Response) => void;
+    const gate = new Promise<Response>((resolve) => { release = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      bodies.push(String(init?.body));
+      return bodies.length === 1 ? await gate : answer("noted the follow-up.");
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "t", text: "hi", approvalMode: "full" });
+    await vi.waitFor(() => expect(bodies).toHaveLength(1), { timeout: 10_000 });
+    await expect(instance.adapter.steer!("t", "one more thing")).resolves.toBe("steered");
+    release(answer("first answer."));
+    await vi.waitFor(() => expect(events.some((event) => event.type === "turn.completed")).toBe(true), { timeout: 10_000 });
+    await instance.dispose();
+    expect(bodies).toHaveLength(2);
+    const second = JSON.parse(bodies[1]!).messages as Array<{ role: string; content?: unknown }>;
+    expect(second.slice(-2)).toEqual([{ role: "assistant", content: "first answer." }, { role: "user", content: "one more thing" }]);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 20_000);
+
   it("delivers mid-turn asides into the next completion request after the tool round", async () => {
     const toolCallBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","type":"function","function":{"name":"fx_write","arguments":"{}"}}]}}]}\n\n'
       + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';

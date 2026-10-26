@@ -21,9 +21,18 @@ export interface HarnessGate {
   close(): Promise<void>;
 }
 
-export function harnessPathAllowed(path: string, allow: readonly string[] = [HARNESS_GATE_PREFIX]): boolean {
-  if (!path.startsWith("/") || path.includes("..") || path.includes("\\")) return false;
-  return allow.some((prefix) => path.startsWith(prefix));
+/** The path and query to forward for a request target, or null to refuse it. The prefix check runs on the WHATWG-parsed
+ * pathname, the form the server routes on (`%2e%2e` is a dot segment there), and only that form is forwarded. */
+export function harnessTarget(url: string, allow: readonly string[] = [HARNESS_GATE_PREFIX]): string | null {
+  const raw = url.split("?")[0]!;
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("..") || raw.includes("\\")) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url, "http://127.0.0.1");
+  } catch {
+    return null;
+  }
+  return allow.some((prefix) => parsed.pathname.startsWith(prefix)) ? parsed.pathname + parsed.search : null;
 }
 
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "transfer-encoding", "te", "trailer", "upgrade", "proxy-connection"]);
@@ -35,8 +44,8 @@ export function openHarnessGate(options: HarnessGateOptions): Promise<HarnessGat
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const socket = req.socket;
     if (!sockets.has(socket)) { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); }
-    const path = (req.url ?? "").split("?")[0]!;
-    if (!harnessPathAllowed(path, allow)) {
+    const target = harnessTarget(req.url ?? "", allow);
+    if (target === null) {
       gate.refused += 1;
       res.writeHead(403, { "content-type": "application/json" }).end(JSON.stringify({ error: "not_a_harness_route" }));
       req.resume();
@@ -45,7 +54,7 @@ export function openHarnessGate(options: HarnessGateOptions): Promise<HarnessGat
     const headers: Record<string, string | string[]> = {};
     for (const [name, value] of Object.entries(req.headers)) if (value !== undefined && !HOP_BY_HOP.has(name)) headers[name] = value;
     headers.host = `127.0.0.1:${options.port}`;
-    const upstream = httpRequest({ host: "127.0.0.1", port: options.port, method: req.method, path: req.url, headers }, (answer) => {
+    const upstream = httpRequest({ host: "127.0.0.1", port: options.port, method: req.method, path: target, headers }, (answer) => {
       const out: Record<string, string | string[]> = {};
       for (const [name, value] of Object.entries(answer.headers)) if (value !== undefined && !HOP_BY_HOP.has(name)) out[name] = value;
       res.writeHead(answer.statusCode ?? 502, out);

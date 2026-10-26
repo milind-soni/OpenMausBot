@@ -18,6 +18,7 @@ import { makeTestTls, TEST_TLS_HOST } from "./testing/test-tls.ts";
 import { createPageSchema } from "./testing/oversized-tool-schema.ts";
 import { whopLikeCatalog } from "./testing/whop-like-catalog.ts";
 import { schemaBytes, TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
+import { TOOL_LIMIT_ENV } from "./tool-count-limit.ts";
 
 const TOKEN = "disposable-remote-fixture-token";
 type Frame = { id?: string | number; method?: string; params?: Record<string, unknown> };
@@ -345,6 +346,14 @@ describe("remote MCP tool directory", () => {
     start(mcpStdioServer(spec(fake.url))!);
     await initialize();
     expect((await request("tools/list")).result.tools).toEqual(tools);
+  });
+
+  it("lists no more of a remote server's tools than its share of the model's tool limit", async () => {
+    const tools = ["a", "b", "c"].map((name) => ({ name, inputSchema: { type: "object" } }));
+    fake = await startFakeHttpMcp({ tools });
+    start(mcpStdioServer(spec(fake.url))!, { ...process.env, [TOOL_LIMIT_ENV]: "1" });
+    await initialize();
+    expect((await request("tools/list")).result.tools).toEqual(tools.slice(0, 1));
   });
 
   it("reads every page of a paginated catalog, once", async () => {

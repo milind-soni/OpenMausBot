@@ -376,7 +376,7 @@ describe("WebhookManager", () => {
       expect(h.roomPosts).toHaveLength(1);
     });
 
-    it("treats a retry that arrives while a room post is still in flight as a duplicate", async () => {
+    it("answers a retry that arrives while a room post is still in flight only once the post is committed", async () => {
       const h = harness();
       let release: () => void = () => {};
       const gate = new Promise<void>((resolve) => (release = resolve));
@@ -391,15 +391,92 @@ describe("WebhookManager", () => {
       const { webhook, secret } = manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
       const event = { payload: { text: "once" }, deliveryId: "room-inflight" };
       const first = manager.receive(webhook.endpointId, secret, event);
-      const retry = await manager.receive(webhook.endpointId, secret, event);
+      let answered = false;
+      const retry = Promise.resolve(manager.receive(webhook.endpointId, secret, event)).finally(() => (answered = true));
+      await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(retry).toMatchObject({ duplicate: true, runId: "post" });
+      expect(answered).toBe(false);
       expect(h.roomPosts).toHaveLength(0);
       release();
       expect(await first).toMatchObject({ duplicate: false, threadId: "room-1-thread" });
+      expect(await retry).toMatchObject({ duplicate: true, runId: "post" });
       expect(h.roomPosts).toHaveLength(1);
       expect(manager.list()[0]?.deliveryCount).toBe(1);
-      expect(manager.listAttempts().slice(-2).map((attempt) => attempt.outcome)).toEqual(["duplicate", "accepted"]);
+      expect(manager.listAttempts().slice(-2).map((attempt) => attempt.outcome)).toEqual(["accepted", "duplicate"]);
+    });
+
+    it("posts a retry that waited on an in-flight room post when that post fails", async () => {
+      const h = harness();
+      let fail: () => void = () => {};
+      const gate = new Promise<void>((_resolve, reject) => (fail = () => reject(new Error("voice engine down"))));
+      let calls = 0;
+      const manager = new WebhookManager({
+        ...h.options,
+        roomPost: async (trigger) => {
+          if (calls++ === 0) await gate;
+          h.roomPosts.push({ webhookId: trigger.id, payload: null });
+          return { posted: true as const, attachments: 0, threadId: `${trigger.groupId}-thread` };
+        },
+      });
+      const { webhook, secret } = manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const event = { payload: { text: "once" }, deliveryId: "room-inflight-fails" };
+      const first = Promise.resolve(manager.receive(webhook.endpointId, secret, event));
+      const retry = manager.receive(webhook.endpointId, secret, event);
+      fail();
+
+      await expect(first).rejects.toThrow("voice engine down");
+      expect(await retry).toMatchObject({ duplicate: false, threadId: "room-1-thread" });
+      expect(h.roomPosts).toHaveLength(1);
+      expect(manager.list()[0]?.deliveryCount).toBe(1);
+      expect(manager.listAttempts().slice(-2).map((attempt) => attempt.outcome)).toEqual(["rejected", "accepted"]);
+    });
+
+    it("refuses a retry that waited on an in-flight room post when the webhook was deleted meanwhile", async () => {
+      const h = harness();
+      let fail: () => void = () => {};
+      const gate = new Promise<void>((_resolve, reject) => (fail = () => reject(new Error("voice engine down"))));
+      let calls = 0;
+      const manager = new WebhookManager({
+        ...h.options,
+        roomPost: async (trigger) => {
+          if (calls++ === 0) await gate;
+          h.roomPosts.push({ webhookId: trigger.id, payload: null });
+          return { posted: true as const, attachments: 0, threadId: `${trigger.groupId}-thread` };
+        },
+      });
+      const { webhook, secret } = manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const event = { payload: { text: "once" }, deliveryId: "room-inflight-deleted" };
+      const first = Promise.resolve(manager.receive(webhook.endpointId, secret, event));
+      const retry = Promise.resolve(manager.receive(webhook.endpointId, secret, event));
+      expect(manager.remove(webhook.id)).toBe(true);
+      fail();
+
+      await expect(first).rejects.toThrow("voice engine down");
+      await expect(retry).rejects.toMatchObject({ status: 401 });
+      expect(h.roomPosts).toHaveLength(0);
+    });
+
+    it("runs a retry that waited on an in-flight room post as a task when the webhook was switched to runs meanwhile", async () => {
+      const h = harness();
+      let fail: () => void = () => {};
+      const gate = new Promise<void>((_resolve, reject) => (fail = () => reject(new Error("voice engine down"))));
+      const manager = new WebhookManager({
+        ...h.options,
+        roomPost: async () => {
+          await gate;
+          throw new Error("unreachable");
+        },
+      });
+      const { webhook, secret } = manager.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-1" });
+      const event = { payload: { text: "once" }, deliveryId: "room-inflight-switched" };
+      const first = Promise.resolve(manager.receive(webhook.endpointId, secret, event));
+      const retry = Promise.resolve(manager.receive(webhook.endpointId, secret, event));
+      manager.update(webhook.id, { delivery: "run", groupId: null });
+      fail();
+
+      await expect(first).rejects.toThrow("voice engine down");
+      expect(await retry).toMatchObject({ duplicate: false, deliveryId: "room-inflight-switched" });
+      expect(h.queued).toHaveLength(1);
     });
 
     it("fails a room delivery with 503 instead of downgrading to a thread post when there is no room sink", async () => {

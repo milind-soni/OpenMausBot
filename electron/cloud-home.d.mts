@@ -57,6 +57,17 @@ export interface CloudTrial {
 }
 /** The trial's AI credit, in US dollars. */
 export interface CloudCredit { grantedUsd: number; remainingUsd: number; state: "active" | "used_up" }
+/** One allowance of the plan: `used` of `max` this month in its own unit (hours, characters, calls, US dollars; GB for
+ * `storage`, the one that isn't monthly). `usedUp`: none left, whichever limit was reached. */
+export type CloudUsageKind = "computerHours" | "voice" | "decisions" | "x" | "research" | "storage";
+export interface CloudUsageMeter { kind: CloudUsageKind; used: number; max: number; usedUp?: true }
+/** The plan's allowances and their use (the session's `cloud.usage`): display only. `resetsAt`: when the monthly ones start
+ * over; `trialEndsAt`: a free trial's share until its first payment; `upgrades`: the bigger plans the app can move to
+ * itself now, cheapest first (empty: none, so Upgrade opens the Cloud page). */
+export interface CloudUsage {
+  tier: string; resetsAt: number; trialEndsAt?: number; meters: CloudUsageMeter[];
+  upgrades: { tier: "starter" | "personal" | "pro" | "max"; amount: number }[];
+}
 /** What a plan includes, as the Admin's catalog says. */
 export interface CloudPlanAllowances {
   cpus: number; memoryMb: number;
@@ -116,6 +127,8 @@ export declare function parseCloudPurchase(input: unknown): CloudPurchase | null
 export declare const CLOUD_TRIAL_STATES: readonly CloudTrialState[];
 export declare function parseCloudTrial(input: unknown): CloudTrial | null;
 export declare function parseCloudCredit(input: unknown): CloudCredit | null;
+export declare const CLOUD_USAGE_KINDS: readonly CloudUsageKind[];
+export declare function parseCloudUsage(input: unknown): CloudUsage | null;
 export declare function parseCloudOffer(input: unknown): CloudOffer | null;
 export declare function parsePublicOffer(config: unknown): CloudOffer | null;
 export declare function withoutTrial(offer: CloudOffer | null): CloudOffer | null;

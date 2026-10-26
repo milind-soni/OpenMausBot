@@ -14,14 +14,14 @@ function call(auth: RequestAuth, body: unknown, active = vi.fn(async () => ({ re
 }
 
 describe("POST /api/presence/active", () => {
-  it("records only the owner's activation, with a time zone it can read", async () => {
-    const owner = call({ kind: "loopback", scopes: ["admin", "client"] }, { source: "phone", timeZone: "Asia/Kolkata" });
+  it("records only the owner's activation, with a time zone and language it can read", async () => {
+    const owner = call({ kind: "loopback", scopes: ["admin", "client"] }, { source: "phone", timeZone: "Asia/Kolkata", language: "pt-BR" });
     await owner.done;
-    expect(owner.active).toHaveBeenCalledWith("phone", "Asia/Kolkata");
+    expect(owner.active).toHaveBeenCalledWith("phone", "Asia/Kolkata", "pt-br");
     expect(owner.answers).toEqual([[200, { ok: true, returned: true }]]);
-    const odd = call({ kind: "loopback", scopes: ["admin", "client"] }, { timeZone: "Not/A Zone; drop" });
+    const odd = call({ kind: "loopback", scopes: ["admin", "client"] }, { timeZone: "Not/A Zone; drop", language: "<script>" });
     await odd.done;
-    expect(odd.active).toHaveBeenCalledWith("desktop", undefined);
+    expect(odd.active).toHaveBeenCalledWith("desktop", undefined, undefined);
   });
 
   it("answers a guest without recording anything", async () => {

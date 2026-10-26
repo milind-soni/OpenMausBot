@@ -146,6 +146,16 @@ describe("LimitResetClock", () => {
     await fixture.refresh(true);
     expect(fixture.limit("claude")).toMatchObject({ usedPercent: 91, resetsAt: NOW + 5 * HOUR });
   });
+
+  it("reads usage once an account is added after a refresh that had none", async () => {
+    const load = vi.fn(async () => report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR])));
+    let current: typeof accounts = [];
+    const instance = new LimitResetClock({ accounts: () => current, now: () => NOW, loadUsage: load });
+    await instance.refresh(true);
+    current = accounts;
+    await instance.refresh(true);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("codexLimitResetsAt", () => {

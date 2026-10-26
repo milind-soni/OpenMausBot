@@ -71,7 +71,7 @@ Use only mapped, tested commands:
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [In-chat team coordination](room-coordination.md)
-- [Chief access to additional departments](team-access.md)
+- [Chief authority over additional departments](team-access.md)
 - [Engines and Doctor](engines.md)
 - [Cline engine and native loopback qualification](cline.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
@@ -221,6 +221,10 @@ keyless local generation, saved-key handling, and safe errors with a local fake 
 
 The [independent threads fixture](threads.md) checks nested sidebar navigation,
 per-thread models, simultaneous direct conversations and thread-scoped Stop.
+
+The [custom ACP model fixture](custom-acp-models.md) checks native model and
+thinking choices, independent bot defaults and thread overrides, and retained
+settings and catalogs after restart with an offline ACP engine.
 
 The [mobile generated-image checks](mobile-generated-images.md) cover native image
 attachments and message-scoped download authorization using isolated fixtures.

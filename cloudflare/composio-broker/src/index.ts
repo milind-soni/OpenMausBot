@@ -10,6 +10,7 @@ import {
   json,
   JSON_HEADERS,
   listConnectedAccounts,
+  readBoundedBody,
   sha256,
   upstreamError,
   type ConnectedAccountResponse,
@@ -358,10 +359,8 @@ async function register(request: Request, env: Env) {
 }
 
 async function proxyMcp(request: Request, installation: InstallationRow, env: Env, ctx: ExecutionContext) {
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (declared > MAX_MCP_BODY) return json({ error: "MCP request is too large" }, 413);
-  const body = await request.arrayBuffer();
-  if (body.byteLength > MAX_MCP_BODY) return json({ error: "MCP request is too large" }, 413);
+  const body = await readBoundedBody(request, MAX_MCP_BODY);
+  if (!body) return json({ error: "MCP request is too large" }, 413);
   await limitSessionRequests(installation, env);
   const reused = verifiedSession(installation.session_id);
   if (reused) touchLastSeen(installation, env, ctx);
@@ -640,14 +639,11 @@ async function disconnectAccount(
 
 async function requestAlias(request: Request) {
   if (!request.body) return undefined;
-  const declared = Number(request.headers.get("content-length") ?? "0");
-  if (declared > 2048) throw new Response(JSON.stringify({ error: "request body is too large" }), { status: 413, headers: JSON_HEADERS });
+  const bytes = await readBoundedBody(request, 2048);
+  if (!bytes) throw new Response(JSON.stringify({ error: "request body is too large" }), { status: 413, headers: JSON_HEADERS });
   let body: z.infer<typeof aliasRequestSchema>;
   try {
-    const raw = await request.text();
-    if (new TextEncoder().encode(raw).byteLength > 2048) {
-      throw new Response(JSON.stringify({ error: "request body is too large" }), { status: 413, headers: JSON_HEADERS });
-    }
+    const raw = new TextDecoder().decode(bytes);
     // Some Fetch implementations expose a zero-length POST as a non-null
     // ReadableStream. First-account authorization intentionally has no alias,
     // so accept that wire representation exactly like a missing body.

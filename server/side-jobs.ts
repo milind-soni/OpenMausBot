@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 
 import { helperModelAllowed } from "../shared/wire.ts";
-import type { ProviderAdapter, ProviderInstance, TextGenerationOptions } from "./contracts.ts";
+import type { ProviderAdapter, ProviderInstance, SmallModelFallback, TextGenerationOptions } from "./contracts.ts";
 import type { UsageRow, UsageTrigger } from "./usage-ledger.ts";
 
 /** config.json `helper`: a connected instance and optionally one of its models. Stored config only, so a settings
@@ -43,7 +43,7 @@ export interface SideJobBot {
   name: string;
   /** Where a spend alert a call raises is shown. */
   threadId: string;
-  modelSelection: { instanceId: string };
+  modelSelection: { instanceId: string; model?: string };
   helperModel?: boolean;
 }
 
@@ -57,6 +57,8 @@ export interface SideJobsDeps {
   instance: (instanceId: string) => SideJobInstance | null | undefined;
   refusal: (instance: SideJobInstance) => string | undefined;
   helper: () => { instanceId: string; model?: string } | null;
+  /** Small models each engine instance refused, kept across restarts. */
+  smallModels: { refused(instanceId: string): ReadonlySet<string>; remember(instanceId: string, model: string): void };
   /** Hosted workspaces only. */
   modelAllowed?: (selection: { instanceId: string; model: string }) => boolean;
   assertWithinBudget: () => void;
@@ -85,14 +87,23 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
     said = line;
   };
 
+  const ownFallback = (bot: SideJobBot, instance: SideJobInstance): SmallModelFallback => ({
+    ...(bot.modelSelection.instanceId === instance.instanceId && bot.modelSelection.model ? { model: bot.modelSelection.model } : {}),
+    refused: deps.smallModels.refused(instance.instanceId),
+    onRefused: (model) => {
+      deps.log?.(`small model ${model} refused on ${instance.instanceId}: background text runs on the bot's own model`);
+      deps.smallModels.remember(instance.instanceId, model);
+    },
+  });
+
   /** Every call checks the spend limit: one upkeep pass makes several in a row. */
-  const booked = (job: SideJob, bot: SideJobBot, instance: SideJobInstance, call: TextCall, trigger: UsageTrigger, model?: string): SideJobText["generateText"] =>
+  const booked = (job: SideJob, bot: SideJobBot, instance: SideJobInstance, call: TextCall, trigger: UsageTrigger, fixed: () => TextGenerationOptions): SideJobText["generateText"] =>
     async (prompt, options) => {
       deps.assertWithinBudget();
       const threadId = `${job}-${randomUUID()}`;
       return call(prompt, {
         ...options,
-        ...(model ? { model } : {}),
+        ...fixed(),
         onUsage: (usage) => deps.book({
           botId: bot.id,
           botName: bot.name,
@@ -156,12 +167,12 @@ export function createSideJobs(deps: SideJobsDeps): SideJobs {
       if (call) {
         // The summary belongs to a turn that already passed the spend limit and is not booked on its own.
         if (job === "compaction") return { via: "engine", generateText: call };
-        return { via: "engine", generateText: booked(job, bot, own, call, { kind: "bot", botId: bot.id }) };
+        return { via: "engine", generateText: booked(job, bot, own, call, { kind: "bot", botId: bot.id }, () => ({ fallback: ownFallback(bot, own) })) };
       }
       if (!helperModelAllowed(bot)) return null;
       const helper = usableHelper();
       if (!helper) return null;
-      return { via: "helper", generateText: booked(job, bot, helper.instance, helper.call, { kind: "helper", botId: bot.id, job }, helper.model) };
+      return { via: "helper", generateText: booked(job, bot, helper.instance, helper.call, { kind: "helper", botId: bot.id, job }, () => (helper.model ? { model: helper.model } : {})) };
     },
   };
 }

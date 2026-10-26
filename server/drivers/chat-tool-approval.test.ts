@@ -154,7 +154,7 @@ describe("chat tool question lifecycle", () => {
     expect(gate.answer(request.id, "answer", "a late reply")).toBe("unavailable");
   });
 
-  it("resolves null when its deadline expires and rejects a late answer", async () => {
+  it("keeps a question open past the permission deadline and takes the late answer", async () => {
     vi.useFakeTimers();
     const openQuestion = vi.fn();
     const resolvedQuestion = vi.fn();
@@ -164,12 +164,13 @@ describe("chat tool question lifecycle", () => {
     const answer = gate.question("ask_user", "Ship the fixture?", questionFixtures);
     const request = openQuestion.mock.calls[0][0];
 
-    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
 
-    await expect(answer).resolves.toBeNull();
-    expect(resolvedQuestion).toHaveBeenCalledExactlyOnceWith(request, false, "timeout");
-    expect(gate.answer(request.id, "answer", "late")).toBe("unavailable");
+    expect(resolvedQuestion).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
+    expect(gate.answer(request.id, "answer", "Yes")).toBe("answered");
+    await expect(answer).resolves.toBe("Yes");
+    expect(resolvedQuestion).toHaveBeenCalledExactlyOnceWith(request, true, "user");
   });
 
   it("resolves null when the turn aborts and never opens another ask", async () => {

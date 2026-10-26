@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../testing/cleanup.ts";
-import { emptyState, ISSUES_FILE, pruneSeen, readIssues, readState, STATE_FILE, upsertIssues, writeSentinelFiles } from "./store.ts";
-import type { Observation } from "./types.ts";
+import { emptyState, ISSUES_FILE, pruneSeen, readIssues, readState, STATE_FILE, STATE_VERSION, upsertIssues, writeSentinelFiles } from "./store.ts";
+import { DETECTORS } from "./detectors/index.ts";
+import type { Observation, SentinelRecord } from "./types.ts";
 
 function observation(occurrence: string, at: number, extra: Partial<Observation> = {}): Observation {
   return {
@@ -42,11 +43,19 @@ describe("sentinel issue store", () => {
     expect(again.get(issue.sig)!.turnId).toBeUndefined();
   });
 
+  it("keeps every detector's issue for one record", () => {
+    const issues = new Map();
+    const timedOutAndCostly: SentinelRecord = { type: "turn", id: "e1", threadId: "t1", turnId: "u1", botId: "b1", at: 2_000, ok: false, stopReason: "timeout", cost: 9 };
+    const observations = DETECTORS.flatMap((detector) => detector.detect([timedOutAndCostly], { queueWaitMs: 300_000, costUsd: 5, retryLoopMin: 3, now: 10_000 }));
+    expect(upsertIssues(issues, emptyState(), observations).added).toBe(2);
+    expect([...issues.values()].map((issue) => issue.kind).sort()).toEqual(["cost", "turn_timeout"]);
+  });
+
   it("forgets occurrences only once no scan can see them again", () => {
     const state = emptyState();
     upsertIssues(new Map(), state, [observation("old", 1_000), observation("new", 9_000)]);
     pruneSeen(state, 5_000);
-    expect(Object.keys(state.seen)).toEqual(["new"]);
+    expect(Object.keys(state.seen)).toEqual(["tool_error:new"]);
   });
 
   it("writes owner-only files that hold references, not text", () => {
@@ -74,7 +83,7 @@ describe("sentinel issue store", () => {
       expect(readState(dir)).toEqual(emptyState());
     }
     // 1e309 parses to Infinity: no finite scan window can start there
-    for (const damaged of ["null", "[]", "1", '{"version":1,"lastScanAt":1e309,"fingerprint":null,"logs":{},"seen":{}}']) {
+    for (const damaged of ["null", "[]", "1", `{"version":${STATE_VERSION},"lastScanAt":1e309,"fingerprint":null,"logs":{},"seen":{}}`]) {
       writeFileSync(join(dir, STATE_FILE), damaged);
       expect(readState(dir)).toEqual(emptyState());
     }

@@ -5,6 +5,8 @@ import os from "node:os";
 import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { createSharedCua, executeSharedOperation, personalSecretPaths, sharedComputerError } from "./shared-computer-access.mjs";
+import { sharedCuaConnection } from "./shared-cua-connection.mjs";
+export { sharedCuaConnection };
 import { createLendingActivity, describeSharedOperation } from "./lending-activity.mjs";
 import { cuaUnavailable, SCREEN_LOCKED } from "./lent-screen-failures.mjs";
 import { BACKGROUND_HEADERS, CloudAsleepError, asleepAnswer, createCloudPowerGate } from "./cloud-power.mjs";
@@ -368,8 +370,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
                 if (!live.cua) {
                   const connection = await cuaConnection();
                   jobSignal.throwIfAborted();
-                  if (!connection?.mcpCommand || !Array.isArray(connection.mcpArgs)) throw new Error(cuaUnavailable(connection?.reason));
-                  live.cua = createSharedCua(connection);
+                  const mcp = sharedCuaConnection(connection);
+                  if (!mcp) throw new Error(cuaUnavailable(connection?.reason));
+                  live.cua = createSharedCua(mcp);
                 }
                 return live.cua;
               });

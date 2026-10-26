@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { initialState, StoreProvider, type Bot, type Group } from "@/state/store";
-import { BotThreadList, botRowProps, GroupThreadList } from "./Sidebar";
+import { BotThreadList, botRowProps } from "./Sidebar";
+import { GroupThreadList } from "./SidebarGroupThreadList";
 import { formatUpdatedAt } from "./SidebarThreadRow";
 import { GroupTaskPicker, TaskPicker } from "./TaskPicker";
 

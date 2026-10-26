@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderInstance, RuntimeEvent, SendTurnInput } from "../../contracts.ts";
 import { TurnNotStartedError } from "../../contracts.ts";
+import { engineHomes } from "../../engine-homes/engine-homes.ts";
 import * as procs from "../../procs.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
@@ -32,6 +33,7 @@ interface Fixture {
   instance: ProviderInstance;
   recorder: EventRecorder;
   spawned: ChildProcess[];
+  scratch: string;
   methods: () => string[];
   run: (threadId: string, input?: Partial<SendTurnInput>) => Promise<{ done: RuntimeEvent; events: RuntimeEvent[] }>;
 }
@@ -72,7 +74,7 @@ async function fixture(support: Partial<AcpSupport> = {}, environment: Record<st
     return { done, events: recorder.events.filter((event) => event.turnId === turnId) };
   };
   const methods = () => existsSync(join(scratch, "methods.json")) ? JSON.parse(readFileSync(join(scratch, "methods.json"), "utf8")) as string[] : [];
-  return { instance, recorder, spawned, methods, run };
+  return { instance, recorder, spawned, scratch, methods, run };
 }
 
 const exited = (child: ChildProcess) => new Promise<void>((resolve) => {
@@ -111,6 +113,21 @@ describe("ACP threads sharing one agent process", () => {
     const g = await fixture({ shareProcess: false });
     await Promise.all([g.run("thread-a"), g.run("thread-b")]);
     expect(g.spawned).toHaveLength(2);
+  });
+
+  it("on a Team Cloud never shares a process between two audiences, whose engines have homes of their own", async () => {
+    const f = await fixture();
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-acp-homes-"));
+    scratches.push(dataDir);
+    engineHomes.start({ dataDir, serverHome: dataDir, audienceOf: (threadId) => (threadId === "thread-c" ? "member:p_cleo" : "member:p_ada"), threads: () => [], log: () => {} });
+    try {
+      await Promise.all(["thread-a", "thread-b"].map((threadId) => engineHomes.within(threadId, () => f.run(threadId))));
+      expect(f.spawned).toHaveLength(1);
+      expect((await engineHomes.within("thread-c", () => f.run("thread-c"))).done).toMatchObject({ ok: true });
+      expect(f.spawned).toHaveLength(2);
+    } finally {
+      engineHomes.stop();
+    }
   });
 
   it("closes only the leaving thread's session while others use the process, and ends the process with the last one", async () => {
@@ -212,6 +229,70 @@ describe("ACP threads sharing one agent process", () => {
       expect(result.done).toMatchObject({ ok: false });
       expect(result.events.some((event) => event.type === "runtime.error" && /exited/.test(event.message))).toBe(true);
     }
+  });
+
+  describe("a session that ignores session/cancel", () => {
+    const promptsSent = async (f: Fixture, count: number) => {
+      const sent = () => { try { return f.methods().filter((method) => method === "session/prompt").length; } catch { return 0; } };
+      while (sent() < count) await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+
+    it.each([
+      ["advertises no session/close", ""],
+      ["fails session/close", "error"],
+    ])("ends the shared process before Stop settles when the agent %s, and fails the other threads' turns", async (_, close) => {
+      const f = await fixture({}, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_IGNORE_CANCEL: "1", FAKE_ACP_SESSION_CLOSE: close });
+      const other = f.run("thread-a", { text: "HANG" });
+      await promptsSent(f, 1);
+      const stopped = f.run("thread-b", { text: "HANG" });
+      await promptsSent(f, 2);
+      const [child] = f.spawned;
+      // A listener may start the next turn synchronously on the turn.completed of the turn this Stop ends.
+      let next: Promise<{ turnId: string }> | undefined;
+      f.instance.adapter.onEvent((event) => {
+        if (event.type !== "turn.completed" || event.threadId !== "thread-a" || next) return;
+        next = f.instance.adapter.sendTurn({ threadId: "thread-a", text: "fixture", cwd: join(f.scratch, "thread-a"), approvalMode: "full" });
+      });
+      await f.instance.adapter.interruptTurn("thread-b");
+      expect((await stopped).done).toMatchObject({ ok: true, stopReason: "cancelled" });
+      expect(child!.exitCode !== null || child!.signalCode !== null).toBe(true);
+      expect((await other).done).toMatchObject({ ok: false });
+      const { turnId } = await next!;
+      expect(await f.recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+      expect(f.spawned).toHaveLength(2);
+    });
+
+    it("ends the shared process before Stop settles when the last session leaves while another awaits session/close", async () => {
+      const f = await fixture({}, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_IGNORE_CANCEL: "1", FAKE_ACP_SESSION_CLOSE_MS: "2000" });
+      void f.run("thread-a", { text: "HANG" }).catch(() => undefined);
+      await promptsSent(f, 1);
+      const second = f.run("thread-b", { text: "HANG" });
+      await promptsSent(f, 2);
+      const [child] = f.spawned;
+      await f.instance.adapter.interruptTurn("thread-a");
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await f.instance.adapter.interruptTurn("thread-b");
+      expect((await second).done).toMatchObject({ ok: true, stopReason: "cancelled" });
+      expect(child!.exitCode !== null || child!.signalCode !== null).toBe(true);
+      // Its session/close went unanswered when the process ended, so it settles once that request times out.
+      expect(await f.recorder.until((event) => event.type === "turn.completed" && event.threadId === "thread-a", 15_000))
+        .toMatchObject({ ok: true, stopReason: "cancelled" });
+    });
+
+    it("settles Stop only once the agent confirms session/close, and keeps the process for the other threads", async () => {
+      const f = await fixture({}, { FAKE_ACP_HANG_ON: "HANG", FAKE_ACP_IGNORE_CANCEL: "1", FAKE_ACP_SESSION_CLOSE_MS: "600" });
+      await f.run("thread-a");
+      const stopped = f.run("thread-b", { text: "HANG" });
+      await promptsSent(f, 2);
+      const [child] = f.spawned;
+      const start = Date.now();
+      await f.instance.adapter.interruptTurn("thread-b");
+      expect((await stopped).done).toMatchObject({ ok: true, stopReason: "cancelled" });
+      expect(Date.now() - start).toBeGreaterThanOrEqual(5_500);
+      expect(child!.exitCode).toBeNull();
+      expect((await f.run("thread-a")).done).toMatchObject({ ok: true });
+      expect(f.spawned).toHaveLength(1);
+    });
   });
 
   it("asks for admission before it starts a process or adds a session, never for a thread already running", async () => {

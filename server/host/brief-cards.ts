@@ -4,6 +4,8 @@
 import { WEB_URL_MAX, WIDGET_LIMITS, type WidgetRoot } from "../../shared/widget.ts";
 import type { WidgetMoment, WidgetText, WidgetTextFields } from "../../shared/widget-text.ts";
 import type { CalendarEvent } from "../connected-reads.ts";
+import { intlLocale } from "../language.ts";
+import { briefWords, type BriefWords } from "./brief-words.ts";
 import { localDate, validZone } from "./check-plan.ts";
 import { clip, oneLine } from "./text-clip.ts";
 
@@ -20,12 +22,12 @@ const summary = (value: string): string => oneLine(value, SUMMARY_MAX);
 const zoneOf = (timeZone: string | undefined): string => validZone(timeZone) ?? "UTC";
 // ICU puts a narrow no-break space before AM/PM; cards and tests read plain spaces.
 const plain = (text: string): string => text.replace(/\s/g, " ");
-const bareClock = (ms: number, timeZone: string | undefined): string =>
-  plain(new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: zoneOf(timeZone) }));
+const bareClock = (ms: number, timeZone: string | undefined, language?: string): string =>
+  plain(new Date(ms).toLocaleTimeString(intlLocale(language), { hour: "numeric", minute: "2-digit", timeZone: zoneOf(timeZone) }));
 
 /** Labelled UTC when no zone is known. */
-export function clockTime(ms: number, timeZone: string | undefined): string {
-  return validZone(timeZone) ? bareClock(ms, timeZone) : `${bareClock(ms, timeZone)} UTC`;
+export function clockTime(ms: number, timeZone: string | undefined, language?: string): string {
+  return validZone(timeZone) ? bareClock(ms, timeZone, language) : `${bareClock(ms, timeZone, language)} UTC`;
 }
 
 export const moment = (at: number, style: WidgetMoment["style"], timeZone: string | undefined): WidgetMoment =>
@@ -82,10 +84,10 @@ export function httpsLink(url: string | undefined): string | undefined {
     return undefined;
   }
 }
-const joinButton = (event: Pick<CalendarEvent, "joinUrl">): Node[] => {
+const joinButton = (event: Pick<CalendarEvent, "joinUrl">, label = "Join"): Node[] => {
   const link = httpsLink(event.joinUrl);
   const action = link ? openUrl(link) : undefined;
-  return action ? [button("Join", action, true, words("brief.card.join"))] : [];
+  return action ? [button(label, action, true, words("brief.card.join"))] : [];
 };
 const buttons = (items: Node[]): Node[] => (items.length ? [{ type: "Row", gap: 2, wrap: true, children: items }] : []);
 const text = (value: string, said?: WidgetText): Node => ({ type: "Text", value: clip(value, WIDGET_LIMITS.text), ...(said ? i18n({ value: said }) : {}) });
@@ -124,22 +126,24 @@ export function reminderCard(input: { event: CalendarEvent; timeZone?: string; n
   return { card: root(title, meetingWhen(event.start, event.end, input.timeZone, input.now), buttons(joinButton(event)), said), summary: summary(title) };
 }
 
-export const BRIEF_TITLE = "Your brief";
 export const BRIEF_ROWS = 6;
 export const DISMISS_ACTION = "dismiss_row";
 export const DRAFT_ACTION = "draft_reply";
-export const BRIEF_INTRO = "I keep an eye on your calendar and email and put what needs you here, once a day and when you come back. Tell me to stop, or what to watch for.";
 
 export interface BriefEmail { messageId: string; threadId: string; from: string; subject: string; why?: string; needsReply: boolean }
 /** `page`: the live page a routine's run published; its row's Open page opens it, while Open opens the run's chat. */
 export interface BriefRow { text: string; note: string; open?: OpenTarget; page?: string; said?: { text?: WidgetText; note?: WidgetText } }
+/** A row that needs the person. `key` names what it is about in no particular language, so a new language is not news. */
+export type NeedRow = BriefRow & { key: string };
 export interface BriefMeeting { title: string; start: number; joinUrl?: string }
 export interface BriefFacts {
   now: number;
   timeZone?: string;
+  /** The language set in Settings; absent, the brief is in English. */
+  language?: string;
   intro: boolean;
   /** Things only the person can fix: failed routines, clashes, a read that failed, a signed-out AI, a question waiting. */
-  needs: BriefRow[];
+  needs: NeedRow[];
   /** null: no calendar is read, so Your day is left out. */
   meetings: BriefMeeting[] | null;
   emails: BriefEmail[];
@@ -149,77 +153,70 @@ export interface BriefFacts {
 }
 
 const BRIEF_TEXT = { line: 120, note: 160, sender: 40, label: 32, link: 600 } as const;
-const NOTHING_NEEDS_YOU = "Nothing needs you right now.";
-const NEEDS_YOU = "Needs you";
 
 function senderName(rawFrom: string): string {
   const from = rawFrom.slice(0, 300);
   const match = /^\s*"?([^"<]*?)"?\s*<([^>]*)>\s*$/.exec(from);
   return match ? match[1]!.trim() || match[2]!.trim() : from.trim();
 }
-const sender = (email: BriefEmail, max: number): string => oneLine(senderName(email.from), max) || "(no sender)";
+const sender = (email: BriefEmail, max: number, w: BriefWords): string => oneLine(senderName(email.from), max) || w.noSender;
 type RowWords = BriefRow["said"];
-const rowLines = (value: string, note: string, said: RowWords = {}): Node[] =>
-  [{ type: "Text", value: clip(value, BRIEF_TEXT.line), weight: "medium", ...(said.text ? i18n({ value: said.text }) : {}) }, ...(note ? [caption(note, said.note)] : [])];
+const rowLines = (value: string, note: string, said: RowWords = {}): Node[] => [{ type: "Text", value: clip(value, BRIEF_TEXT.line), weight: "medium", ...(said.text ? i18n({ value: said.text }) : {}) }, ...(note ? [caption(note, said.note)] : [])];
 const rowBeside = (value: string, note: string, presses: Node[], said?: RowWords): Node =>
   ({ type: "Row", gap: 3, align: "center", children: [{ type: "Col", flex: 1, children: rowLines(value, note, said) }, ...presses] });
 const rowUnder = (value: string, note: string, presses: Node[], said?: RowWords): Node =>
   ({ type: "Col", gap: 1, children: [...rowLines(value, note, said), ...buttons(presses)] });
-function capped(rows: Node[], total: number): Node[] {
+function capped(rows: Node[], w: BriefWords): Node[] {
   const shown = rows.slice(0, BRIEF_ROWS);
-  const more = total - shown.length;
-  return more > 0 ? [...shown, caption(`and ${more} more`, words("brief.card.more", { count: more }))] : shown;
+  return rows.length > shown.length ? [...shown, caption(w.more(rows.length - shown.length), words("brief.card.more", { count: rows.length - shown.length }))] : shown;
 }
-const section = (title: [string, string], rows: Node[], total: number, empty?: [string, string]): Node[] =>
-  [{ type: "Title", value: title[0], size: "sm", ...i18n({ value: words(title[1]) }) }, ...(rows.length ? capped(rows, total) : empty ? [text(empty[0], words(empty[1]))] : [])];
-const openButton = (target: OpenTarget | undefined): Node[] => (target ? [button("Open", { type: "open_thread", payload: target }, false, words("brief.card.open"))] : []);
-const pageButton = (url: string | undefined): Node[] => { const link = httpsLink(url), open = link ? openUrl(link) : undefined; return open ? [button("Open page", open, false, words("brief.card.openPage"))] : []; };
+const section = (title: [string, string], rows: Node[], w: BriefWords, empty?: [string, string], after: Node[] = []): Node[] =>
+  [{ type: "Title", value: title[0], size: "sm", ...i18n({ value: words(title[1]) }) }, ...(rows.length ? capped(rows, w) : empty ? [text(empty[0], words(empty[1]))] : []), ...after];
+const openButton = (target: OpenTarget | undefined, w: BriefWords): Node[] => (target ? [button(w.open, { type: "open_thread", payload: target }, false, words("brief.card.open"))] : []);
+const pageButton = (url: string | undefined, w: BriefWords): Node[] => { const link = httpsLink(url), open = link ? openUrl(link) : undefined; return open ? [button(w.openPage, open, false, words("brief.card.openPage"))] : []; };
 
-function emailRow(email: BriefEmail): Node {
-  const who = sender(email, BRIEF_TEXT.label);
+function emailRow(email: BriefEmail, w: BriefWords): Node {
+  const who = sender(email, BRIEF_TEXT.label, w);
   const gmail = email.threadId.length <= BRIEF_TEXT.link ? openUrl(gmailUrl(email.threadId)) : undefined;
-  const note = email.needsReply ? (email.why ? `Waiting on your reply · ${email.why}` : "Waiting on your reply") : email.why ?? "Important";
-  const noteWords = email.needsReply ? (email.why ? words("brief.card.waitingReplyWhy", { why: email.why }) : words("brief.card.waitingReply")) : email.why ? undefined : words("brief.card.important");
+  const note = email.needsReply ? (email.why ? `${w.waitingOnReply} · ${email.why}` : w.waitingOnReply) : email.why ?? w.important;
   const whoWords = senderName(email.from).trim() ? who : words("brief.part.noSender");
-  const line = words("brief.card.emailLine", { sender: senderName(email.from).trim() ? sender(email, BRIEF_TEXT.sender) : words("brief.part.noSender"), subject: email.subject || words("brief.part.noSubject") });
-  return rowUnder(`${sender(email, BRIEF_TEXT.sender)}: ${email.subject || "(no subject)"}`, note, [
-    button(`Draft a reply to ${who}`, { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true, words("brief.card.draftReply", { who: whoWords })),
-    ...(gmail ? [button("Open in Gmail", gmail, false, words("brief.card.openGmail"))] : []),
-    button(`Dismiss ${who}'s email`, { type: DISMISS_ACTION, payload: { messageId: email.messageId } }, false, words("brief.card.dismissEmail", { who: whoWords })),
+  const line = words("brief.card.emailLine", { sender: senderName(email.from).trim() ? sender(email, BRIEF_TEXT.sender, w) : words("brief.part.noSender"), subject: email.subject || words("brief.part.noSubject") });
+  const noteWords = email.needsReply ? (email.why ? words("brief.card.waitingReplyWhy", { why: email.why }) : words("brief.card.waitingReply")) : email.why ? undefined : words("brief.card.important");
+  return rowUnder(`${sender(email, BRIEF_TEXT.sender, w)}: ${email.subject || w.noSubject}`, note, [
+    button(w.draftReply(who), { type: DRAFT_ACTION, payload: { messageId: email.messageId } }, true, words("brief.card.draftReply", { who: whoWords })),
+    ...(gmail ? [button(w.openInGmail, gmail, false, words("brief.card.openGmail"))] : []),
+    button(w.dismiss(who), { type: DISMISS_ACTION, payload: { messageId: email.messageId } }, false, words("brief.card.dismissEmail", { who: whoWords })),
   ], { text: line, ...(noteWords ? { note: noteWords } : {}) });
 }
 
-const longDate = (now: number, timeZone: string | undefined): string =>
-  plain(new Date(now).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: zoneOf(timeZone) }));
-const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? "" : "s"}`;
+const longDate = (now: number, timeZone: string | undefined, language: string | undefined): string =>
+  plain(new Date(now).toLocaleDateString(intlLocale(language), { weekday: "long", month: "long", day: "numeric", timeZone: zoneOf(timeZone) }));
 
 export function briefCard(facts: BriefFacts): BuiltCard {
-  const zone = facts.timeZone;
+  const { timeZone: zone, language } = facts;
+  const w = briefWords(language);
   const replies = facts.emails.filter((email) => email.needsReply);
   const important = facts.emails.filter((email) => !email.needsReply);
-  const needRows = [...replies.map(emailRow), ...facts.needs.map((row) => rowBeside(row.text, row.note, openButton(row.open), row.said))];
+  const needRows = [...replies.map((email) => emailRow(email, w)), ...facts.needs.map((row) => rowBeside(row.text, row.note, openButton(row.open, w), row.said))];
   const meetings = [...(facts.meetings ?? [])].sort((a, b) => a.start - b.start);
-  const meetingRows = meetings.map((meeting) => rowBeside(`${clockTime(meeting.start, zone)} · ${meeting.title}`, "", joinButton(meeting),
+  const meetingRows = meetings.map((meeting) => rowBeside(`${clockTime(meeting.start, zone, language)} · ${meeting.title}`, "", joinButton(meeting, w.join),
     { text: words("brief.card.meetingLine", { time: moment(meeting.start, "clock", zone), title: meeting.title }) }));
-  const waiting = facts.waiting === true ? "More new emails than one check reads; I'll sort the rest next."
-    : facts.waiting ? `${plural(facts.waiting, "more new email")} since you were away; I'll sort them next.` : undefined;
-  const waitingWords = facts.waiting === true ? words("brief.card.waitingMany")
-    : words(facts.waiting === 1 ? "brief.card.waitingOne" : "brief.card.waitingOther", { count: facts.waiting || 0 });
-  const importantRows = [...important.map(emailRow), ...(waiting ? [caption(waiting, waitingWords)] : [])];
-  const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, [...pageButton(row.page), ...openButton(row.open)], row.said));
+  const waiting = facts.waiting === true ? w.waitingMany : facts.waiting ? w.waitingCount(facts.waiting) : undefined;
+  const importantRows = important.map((email) => emailRow(email, w));
+  const waitingNotice = waiting ? [caption(waiting, facts.waiting === true ? words("brief.card.waitingMany") : words(facts.waiting === 1 ? "brief.card.waitingOne" : "brief.card.waitingOther", { count: facts.waiting || 0 }))] : [];
+  const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, [...pageButton(row.page, w), ...openButton(row.open, w)], row.said));
   const children: Node[] = [
-    ...(facts.intro ? [caption(BRIEF_INTRO, words("brief.card.intro"))] : []),
-    ...section([NEEDS_YOU, "brief.card.needsYou"], needRows, needRows.length, [NOTHING_NEEDS_YOU, "brief.card.nothingNeedsYou"]),
-    ...(facts.meetings === null ? [] : section(["Your day", "brief.card.yourDay"], meetingRows, meetingRows.length, ["No more meetings today.", "brief.card.noMeetings"])),
-    ...(importantRows.length ? section(["Important emails", "brief.card.importantEmails"], importantRows, importantRows.length) : []),
-    ...(routineRows.length ? section(["Routines", "brief.card.routines"], routineRows, routineRows.length) : []),
+    ...(facts.intro ? [caption(w.intro, words("brief.card.intro"))] : []),
+    ...section([w.needsYou, "brief.card.needsYou"], needRows, w, [w.nothingNeedsYou, "brief.card.nothingNeedsYou"]),
+    ...(facts.meetings === null ? [] : section([w.yourDay, "brief.card.yourDay"], meetingRows, w, [w.noMoreMeetings, "brief.card.noMeetings"])),
+    ...(importantRows.length || waitingNotice.length ? section([w.importantEmails, "brief.card.importantEmails"], importantRows, w, undefined, waitingNotice) : []),
+    ...(routineRows.length ? section([w.routines, "brief.card.routines"], routineRows, w) : []),
   ];
-  const needCount = needRows.length;
   const parts = [
-    needCount && `${needCount} ${needCount === 1 ? "needs" : "need"} you`,
-    facts.meetings && facts.meetings.length && plural(facts.meetings.length, "meeting"),
-    important.length && plural(important.length, "important email"),
-    facts.routines.length && plural(facts.routines.length, "routine result"),
+    needRows.length && w.summary.needs(needRows.length),
+    facts.meetings && facts.meetings.length && w.summary.meetings(facts.meetings.length),
+    important.length && w.summary.emails(important.length),
+    facts.routines.length && w.summary.routines(facts.routines.length),
   ].filter(Boolean);
-  return { card: root(BRIEF_TITLE, longDate(facts.now, zone), children, { title: words("brief.card.title"), caption: words("brief.card.date", { date: { at: Date.parse(`${localDate(facts.now, zone)}T12:00:00Z`), style: "longDate", zone: "UTC" } }) }), summary: summary(`${BRIEF_TITLE}: ${parts.length ? parts.join(", ") : "nothing needs you right now"}`) };
+  return { card: root(w.title, longDate(facts.now, zone, language), children, { title: words("brief.card.title"), caption: words("brief.card.date", { date: { at: Date.parse(`${localDate(facts.now, zone)}T12:00:00Z`), style: "longDate", zone: "UTC" } }) }), summary: summary(`${w.title}: ${parts.length ? parts.join(", ") : w.summary.nothing}`) };
 }

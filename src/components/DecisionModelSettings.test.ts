@@ -2,7 +2,8 @@ import { Children, createElement, isValidElement, type ReactElement, type ReactN
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigStatus } from "@/state/store";
-import { DecisionModelSettings, deciderFailureText } from "./DecisionModelSettings";
+import { setLocale } from "@/lib/i18n";
+import { DecisionModelSettings, deciderFailureText, helpersStatusLine } from "./DecisionModelSettings";
 import { Switch } from "./SettingsPrimitives";
 
 const fixture = vi.hoisted(() => ({
@@ -79,12 +80,13 @@ beforeEach(() => {
   vi.stubGlobal("window", {});
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { setLocale("en"); vi.unstubAllGlobals(); });
 
 describe("DecisionModelSettings", () => {
   it("explains itself, then the switch, the key, and what it decides", () => {
     const view = render();
-    const order = ["A fast decision model that picks things for your bots", "Use Jev for fast decisions", "Jev API key", "What it decides", "Who answers in rooms"]
+    const order = ["Small, fast models that sort and read things for your bots", "Decisions: not set up · Extraction: not set up", "Cloudflare Workers AI (free tier)",
+      "Use fast decisions and extraction", "Jev API key", "What it decides", "Who answers in rooms"]
       .map((text) => view.html.indexOf(text));
     expect(order.every((at) => at >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
@@ -93,6 +95,11 @@ describe("DecisionModelSettings", () => {
     expect(view.master.props.checked).toBe(false);
     expect(view.master.props.disabled).toBe(true);
     expect(view.html).toContain("Save a key below to turn this on.");
+  });
+
+  it("uses an invariable status for missing decisions and extraction in pt-BR", () => {
+    setLocale("pt-br");
+    expect(helpersStatusLine(null)).toBe("Decisões: sem configuração · Extração: sem configuração");
   });
 
   it("offers both providers, with Jev selected for an existing install and no model picker", () => {

@@ -37,6 +37,15 @@ describe("configured bot creation", () => {
     expect(f.bodies[0]).toMatchObject({ visibility: "admins", useDefaults: false });
   });
 
+  it("names who a new team bot reports to in the creation request, and nobody anywhere else", async () => {
+    const team = fixture("ask");
+    await createConfiguredBot(team.draft, team.request, persistBotUpdate, team.approvals, undefined, "bob@acme.test");
+    expect(team.bodies[0]).toMatchObject({ reportsTo: "bob@acme.test" });
+    const solo = fixture("ask");
+    await createConfiguredBot(solo.draft, solo.request, persistBotUpdate, solo.approvals);
+    expect(solo.bodies[0]).not.toHaveProperty("reportsTo");
+  });
+
   it("applies tool restrictions atomically before a new bot is published", async () => {
     const f = fixture("ask");
     f.draft.patch({ toolScope: { allow: [], deny: ["mcp:mail:send"] } });

@@ -21,6 +21,8 @@ import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, type Ch
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { plainFailureMessage } from "./engine-errors.ts";
+import { refusesRequestSize, RequestTooLargeError, sizeChange, smallerResend } from "./chat-size-limit.ts";
+import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
@@ -282,6 +284,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     approval: ReturnType<typeof createChatToolApproval>;
     /** Mid-turn input parked by adapter.steer, spliced in at the next round, never mid-tool-batch. */
     asides: string[];
+    /** Set once the turn stops taking rounds: a later steer goes to the next turn instead. */
+    ending: boolean;
   }>();
   const reasoningReplayRejected = new Set<string>();
   const delivered = new Map<string, DeliveredUserMessage[]>();
@@ -324,20 +328,22 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ? AbortSignal.any([signal, timeoutController.signal])
         : timeoutController.signal;
 
+      const payload = JSON.stringify({
+        ...options.requestBody(model, messages, stream),
+        ...(tools.length ? { tools } : {}),
+      });
       const response = await fetch(`${options.apiUrl}/chat/completions`, {
         method: "POST",
         ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          ...options.requestBody(model, messages, stream),
-          ...(tools.length ? { tools } : {}),
-        }),
+        body: payload,
         signal: activeSignal,
       });
       if (!response.ok) {
         const body = await response.text().catch(() => "");
         if (rejectsKey(response.status, body)) noteKeyRejected(options.apiUrl, options.apiKey);
         const message = `${options.httpErrorLabel} HTTP ${response.status}${body ? `: ${httpErrorDetail(body)}` : ""}`;
+        if (refusesRequestSize(response.status, body)) throw new RequestTooLargeError(message, Buffer.byteLength(payload));
         if (rejectsToolsParameter(response.status, body)) throw new UnsupportedChatToolsError(message);
         const refusal = refusedToolCall(response.status, body);
         if (refusal) throw new RejectedToolCallError(message, refusal);
@@ -524,6 +530,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const turnId = newId();
     const abort = new AbortController();
     const messages = messagesFor(turn);
+    const request = messages.at(-1)!;
     const retainImages = chatImageBudget();
     for (const message of messages) retainImages(message.content);
     const model = turn.model || options.models().default;
@@ -579,7 +586,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     });
     let resolveDone!: () => void;
     const done = new Promise<void>((resolve) => { resolveDone = resolve; });
-    const turnEntry = { abort, turnId, done, approval, asides: [] as string[] };
+    const turnEntry = { abort, turnId, done, approval, asides: [] as string[], ending: false };
     active.set(turn.threadId, turnEntry);
     emit({ ...base(turn.threadId, turnId), type: "turn.started" });
     emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
@@ -619,6 +626,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           if (parked.length) messages.push({ role: "user", content: parked.join("\n\n") });
           native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
           let attempt = 0;
+          let resized = false;
           let completion: Completion;
           for (;;) {
             let streamed = false;
@@ -655,6 +663,17 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               if (error instanceof UnsupportedReasoningReplayError && !streamed && !abort.signal.aborted) {
                 reasoningReplayRejected.add(model);
                 for (const message of messages) delete message.reasoning_content;
+                continue;
+              }
+              // A provider refuses an oversized request before running anything, so one smaller copy may go again.
+              if (error instanceof RequestTooLargeError && !abort.signal.aborted) {
+                const resend = resized ? null : smallerResend(messages, request, error.bytes);
+                native("out", { refused: "request_too_large", bytes: error.bytes, ...(resend ? { before: resend.before, after: resend.after } : {}) });
+                console.warn(`${options.driverKind}: ${model} refused a ${error.bytes}-byte request as too large; ${resend ? `resending smaller (${sizeChange(resend.before, resend.after)})` : "not resending"}`);
+                if (!resend) throw new ChatProtocolError(requestTooLargeMessage(options.models().options.find((option) => option.id === model)?.label ?? model));
+                messages.splice(0, messages.length, ...resend.messages);
+                resized = true;
+                emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt: 1, delayMs: 0, reason: "request_too_large" });
                 continue;
               }
               // A refused tool call ran nothing, so the request goes again, but not once answer text streamed.
@@ -720,6 +739,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               nudges += 1;
               callsAtNudge = seenCalls.size;
               messages.push({ role: "assistant", content: completion.text }, { role: "user", content: NUDGE_ANNOUNCED_ACTION });
+              continue;
+            }
+            if (turnEntry.asides.length) {
+              messages.push({ role: "assistant", content: reply });
               continue;
             }
             ok = true;
@@ -826,6 +849,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         stopReason = abort.signal.aborted ? "interrupted" : stopReason ?? "error";
         failure = safeText(asError(value).message).slice(0, 2_000);
       } finally {
+        turnEntry.ending = true;
         approval.close();
         let cleanupFailed = false;
         try { await tools?.close(); }
@@ -890,6 +914,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false,
         dataMcp: options.tools !== false,
         highlevelMcp: options.tools !== false,
+        deviceMcp: options.tools !== false,
         queueing: true,
         guestTurns: "confined" },
       sendTurn,
@@ -903,7 +928,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         active.get(threadId)?.approval.answer(requestId, decision.behavior, decision.message, decision.always) ?? "unavailable",
       steer: async (threadId, text) => {
         const running = active.get(threadId);
-        if (!running) return "refused";
+        if (!running || running.ending) return "refused";
         running.asides.push(text);
         return "steered";
       },

@@ -10,6 +10,7 @@ import {
   CLOUD_SECRETS_FD_ENV, cloudHomeConfiguration, cloudHomeHost, cloudHomeSecrets, prepareCloudHomeVolume,
   withoutCloudSecrets, withoutIgnoredCloudKeys, type CloudHomeConfig,
 } from "./cloud-home.ts";
+import { clearRecordsFromOtherMachines } from "./data-dir-lease.ts";
 import { OOM_SCORE, spawnWithOomScore } from "./oom-score.ts";
 import { restartPolicy } from "./restart.ts";
 
@@ -49,12 +50,32 @@ export function edgeHold(raw: string | undefined): string {
   return match && Number(match[1]) <= 120 ? `${Number(match[1])}s` : "0s";
 }
 
+/** The server's data directory on the volume. */
+export function cloudHomeDataDir(env: NodeJS.ProcessEnv, home: string): string {
+  return env.OMB_DATA_DIR || posix.join(home, ".openmausbot");
+}
+
+/**
+ * Confirms the volume is this Cloud's (`prepareCloudHomeVolume`), then clears the data-directory records another machine
+ * left on it. A Fly volume mounts on one machine at a time, and every home the Admin makes on a kept volume (a resume, a
+ * restore, an export) is a new machine with a new hostname, so a lease from another machine is always stale here: one a
+ * home destroyed mid-boot left (seen live Oct 23 2026) made every later home exit at once refusing it. A lease from this
+ * machine is the server's own to refuse or recover. Returns what was cleared, for the log.
+ */
+export function prepareCloudHomeData(home: string, dataDir: string, machineId: string) {
+  const volume = prepareCloudHomeVolume(home, machineId);
+  return { volume, cleared: clearRecordsFromOtherMachines(dataDir) };
+}
+
 export function cloudHomeChildEnvironments(config: CloudHomeConfig, env: NodeJS.ProcessEnv, home: string) {
   const offered = withoutCloudSecrets(withoutIgnoredCloudKeys(env));
   const allowed = Object.fromEntries(Object.entries(offered).filter(([name, value]) => value !== undefined && serverEnvironmentAllowed(name)));
   const dropped = Object.keys(offered).filter((name) => !serverEnvironmentAllowed(name) && name !== "HOME").sort();
+  const dataDir = cloudHomeDataDir(env, home);
   const server: NodeJS.ProcessEnv = {
-    ...allowed, HOME: home, OMB_DATA_DIR: env.OMB_DATA_DIR || posix.join(home, ".openmausbot"),
+    ...allowed, HOME: home, OMB_DATA_DIR: dataDir,
+    // Node keys the entries by its own version and the file's hash, so a stale entry is never used after an image upgrade.
+    NODE_COMPILE_CACHE: posix.join(dataDir, "cache", "node-compile"),
     OMB_PORT: "8799", OMB_WEBHOOK_PORT: "8800", OMB_PUBLIC_URL: config.publicOrigin,
     OMB_WEBHOOK_PUBLIC_URL: env.OMB_WEBHOOK_PUBLIC_URL || config.publicOrigin,
     [CLOUD_SECRETS_FD_ENV]: String(SECRETS_FD),
@@ -122,6 +143,8 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
   // Logged here once: the server child never sees what they are about.
   for (const warning of config.warnings) console.warn(`cloud home: ${warning}`);
   const home = env.HOME || "/data";
+  const prepare = () => prepareCloudHomeData(home, cloudHomeDataDir(env, home), config.machineId);
+  let prepared: ReturnType<typeof prepare>;
   let ids: { uid: number; gid: number } | null = null;
   if (process.getuid?.() === 0) {
     ids = passwdIds(readFileSync("/etc/passwd", "utf8"), SERVICE_USER);
@@ -134,13 +157,14 @@ export function startCloudHome(env: NodeJS.ProcessEnv = process.env) {
     // The volume is prepared as `maus`, so what it creates is theirs.
     process.setegid!(ids.gid);
     process.seteuid!(ids.uid);
-    try { prepareCloudHomeVolume(home, config.machineId); } finally {
+    try { prepared = prepare(); } finally {
       process.seteuid!(0);
       process.setegid!(0);
     }
   } else {
-    prepareCloudHomeVolume(home, config.machineId);
+    prepared = prepare();
   }
+  for (const record of prepared.cleared) console.log(`cloud home: cleared a stale data-directory record machine ${record.host} (process ${record.pid}) left on this volume: ${record.path}`);
   const here = dirname(fileURLToPath(import.meta.url));
   const edgeBin = env.OMB_CLOUD_EDGE_BIN || "/usr/local/bin/caddy";
   const edgeConfig = env.OMB_CLOUD_EDGE_CONFIG || "/app/cloud/Caddyfile";

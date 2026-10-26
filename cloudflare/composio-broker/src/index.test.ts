@@ -13,6 +13,7 @@ import worker, {
   requestAlias,
   sha256,
 } from "./index";
+import { streamedBody } from "./test-harness";
 
 const multiAccount = {
   enable: true,
@@ -64,6 +65,15 @@ describe("connected-apps broker boundaries", () => {
       method: "POST",
       body: "  \n",
     }))).resolves.toBeUndefined();
+  });
+
+  it("stops reading a streamed authorize body once it passes 2 KiB", async () => {
+    const stream = streamedBody(1024, 64);
+    const refused = await requestAlias(new Request("https://broker.test/v1/connectors/gmail/authorize", stream.init)).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(Response);
+    expect((refused as Response).status).toBe(413);
+    expect(stream.read.cancelled).toBe(true);
+    expect(stream.read.bytes).toBeLessThanOrEqual(4 * 1024);
   });
 
   it("accepts only HTTPS Composio MCP endpoints", () => {

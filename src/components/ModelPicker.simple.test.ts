@@ -427,8 +427,9 @@ describe("the model picker in Simple mode", () => {
     }));
   });
 
-  it.each([false, null])("keeps a Cloud guest's model and effort changes thread-only while owner status is %s", (ownerOrAdmin) => {
-    fixture.cloudHome = true;
+  it.each([[true, false], [true, null], [false, false], [false, null]] as const)(
+    "keeps a guest's model and effort changes thread-only (Cloud: %s, owner status: %s)", (cloudHome, ownerOrAdmin) => {
+    fixture.cloudHome = cloudHome;
     fixture.ownerOrAdmin = ownerOrAdmin;
     const opened = open(bot());
     pane(opened)!.props.onPick("claude-sonnet-5-5");

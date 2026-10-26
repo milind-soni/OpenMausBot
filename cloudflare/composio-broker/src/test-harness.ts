@@ -242,6 +242,24 @@ export function cloudGrant(machineId: string, secret = CLOUD_GRANT_SECRET) {
   return `v1.${machineId}.${createHmac("sha256", secret).update(`omb-connected-apps-cloud:v1\n${machineId}`).digest("base64url")}`;
 }
 
+/** A request body of `chunks` chunks of `chunkBytes` spaces, streamed without a Content-Length, that counts how much
+ *  of it was read and whether the reader cancelled it. */
+export function streamedBody(chunkBytes: number, chunks: number) {
+  const read = { bytes: 0, cancelled: false };
+  let left = chunks;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (left-- <= 0) return controller.close();
+      read.bytes += chunkBytes;
+      controller.enqueue(new Uint8Array(chunkBytes).fill(0x20));
+    },
+    cancel() {
+      read.cancelled = true;
+    },
+  }, { highWaterMark: 0 });
+  return { read, init: { method: "POST", body, duplex: "half" } as RequestInit };
+}
+
 export interface Installation { id: string; token: string; userId: string }
 
 export function brokerHarness(options: { migrations?: number } = {}) {

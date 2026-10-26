@@ -37,7 +37,7 @@ export function helperIntroMessage(bot: Pick<BotRecord, "name" | "chiefOfStaff">
   const title = `Hi, I'm ${bot.name}, your helper for everything here.`;
   const subtitle = [
     "I know this app inside out, so ask me how to do anything. I can set up new bots, apps and routines with you, and tell you what your bots are up to.",
-    bot.chiefOfStaff ? "As your Chief of Staff, I also keep an eye on your day and send you a short brief." : "",
+    bot.chiefOfStaff ? "As your Chief of Staff, I also keep an eye on your day and send you a short brief." : team ? "" : "I also keep an eye on your day and send you a short brief.",
     team ? `On ${team}, I'm here for you and look after your own bots.` : "",
     "Try one of these, or just say what you need.",
   ].filter(Boolean).join(" ");

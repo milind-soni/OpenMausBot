@@ -90,7 +90,7 @@ it("gives the address to the owning bot and its Chief, never to a teammate, anot
 
     // 6. A Chief whose audience differs cannot reach that bot at all.
     const hidden = await turn(vera, "Get Courier's watcher address.", [{ ...ask(webhookId, courier.id), expectError: true }]);
-    expect(said(hidden, "list_triggers")).toContain("different section or is unavailable");
+    expect(said(hidden, "list_triggers")).toContain("set up by bots in its own department or by its Chief, or it is unavailable");
     expect(JSON.stringify(hidden)).not.toContain(secret);
 
     // 7. The person's Copy address is that same address.

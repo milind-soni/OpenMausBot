@@ -19,7 +19,7 @@ import {
 import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
-import { canAccessTeam } from "./peer-roster.ts";
+import { hasTeamAuthority } from "./peer-roster.ts";
 import { Store, toWireTask, type BotRecord } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
@@ -172,7 +172,7 @@ describe("Store", () => {
     const manager = store.createBot({ section: "Office" });
     store.setChiefOfStaff(manager.id);
     store.patchBot(manager.id, { managedSections: ["Delivery", " Delivery ", "Other"] });
-    expect(canAccessTeam(manager, "Delivery")).toBe(true);
+    expect(hasTeamAuthority(manager, "Delivery")).toBe(true);
     const room = store.createGroup("Room", [chief.id], false, "Delivery");
     const message = store.appendMessage(chief.threadId, { role: "user", kind: "text", text: "Keep this conversation" });
     writeSectionContext("Delivery", "Shared team instructions");
@@ -184,19 +184,19 @@ describe("Store", () => {
     expect(chief).toMatchObject({ section: "Launch", chiefOfStaff: true });
     expect(archived).toMatchObject({ section: "Launch", hidden: true });
     expect(manager.managedSections).toEqual(["Launch", "Other"]);
-    expect(canAccessTeam(manager, "Launch")).toBe(true);
+    expect(hasTeamAuthority(manager, "Launch")).toBe(true);
     expect(room.section).toBe("Launch");
     expect(readSectionContext("Launch")?.text).toBe("Shared team instructions");
     expect(readSectionContext("Delivery")).toBeNull();
     expect(computers.forSection("Launch")?.id).toBe(computer.id);
     const restored = new Store(selection);
     expect(restored.bot(chief.id)?.section).toBe("Launch");
-    expect(canAccessTeam(restored.bot(manager.id)!, "Launch")).toBe(true);
+    expect(hasTeamAuthority(restored.bot(manager.id)!, "Launch")).toBe(true);
     expect(restored.group(room.id)?.section).toBe("Launch");
     expect(restored.messagesFor(chief.threadId)).toContainEqual(message);
     expect(restored.sections).not.toContain("Delivery");
     store.setBotsSection([], "Delivery");
-    expect(canAccessTeam(manager, "Delivery")).toBe(false);
+    expect(hasTeamAuthority(manager, "Delivery")).toBe(false);
   });
 
   it("rejects rename conflicts and active work without changing teams", () => {
@@ -1395,14 +1395,14 @@ describe("Store", () => {
 
     expect(store.changeEmptySection("Delivery", nextName)).toBeUndefined();
     expect(chief.managedSections).toEqual(["Delivery East", ""]);
-    expect(canAccessTeam(chief, "Delivery")).toBe(false);
+    expect(hasTeamAuthority(chief, "Delivery")).toBe(false);
     expect(announcements).toEqual([chief.id]);
     store.setBotsSection([], "Delivery");
     const reloaded = new Store(selection);
     expect(reloaded.sections).toContain("Delivery");
-    expect(canAccessTeam(reloaded.bot(chief.id)!, "Delivery")).toBe(false);
-    expect(canAccessTeam(reloaded.bot(chief.id)!, "Delivery East")).toBe(true);
-    expect(canAccessTeam(reloaded.bot(chief.id)!, "")).toBe(true);
+    expect(hasTeamAuthority(reloaded.bot(chief.id)!, "Delivery")).toBe(false);
+    expect(hasTeamAuthority(reloaded.bot(chief.id)!, "Delivery East")).toBe(true);
+    expect(hasTeamAuthority(reloaded.bot(chief.id)!, "")).toBe(true);
   });
 
   it("keeps grants when an empty-team rename is a no-op or rejected", () => {

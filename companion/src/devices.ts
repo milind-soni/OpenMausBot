@@ -280,11 +280,16 @@ export class DeviceRegistry {
 
   /** False when nothing matched, so the page cannot report a no-op as success. */
   revoke(id: string): boolean {
-    const before = this.devices.length;
-    this.devices = this.devices.filter((d) => d.id !== id);
-    if (this.devices.length === before) return false;
+    const previous = this.devices;
+    this.devices = previous.filter((d) => d.id !== id);
+    if (this.devices.length === previous.length) return false;
+    try {
+      this.persist();
+    } catch (error) {
+      this.devices = previous;
+      throw error;
+    }
     this.lastSeenWrites.delete(id);
-    this.persist();
     return true;
   }
 

@@ -16,6 +16,8 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { placeOffered } from "@/lib/place";
 import { TeamCanvas } from "./TeamCanvas";
+import { MapModeToggle, TeamOrgChart, useMapMode } from "./TeamOrgChart";
+import { useTeamPeople } from "@/state/team-people";
 import { TeamDialog } from "./TeamDialog";
 import { TeamMemoryDialog } from "./TeamMemoryDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -267,6 +269,8 @@ export function TeamMapPage() {
   const { state, dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  const teamPeople = useTeamPeople();
+  const reportsChart = useMapMode() === "people" && teamPeople !== null;
   const [snapshot, setSnapshot] = useState<TeamMapSnapshot>(EMPTY_TEAM_MAP_SNAPSHOT);
   const [error, setError] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -356,6 +360,7 @@ export function TeamMapPage() {
           </div>
           <p className="mt-1 text-[12px] text-ink-secondary">{t("canvas.description")}</p>
         </div>
+        {teamPeople && <MapModeToggle />}
         {!remoteClient && <div className="flex items-center gap-2">
           <button onClick={() => setShowComputers(!showComputers)} aria-pressed={showComputers} title={t("canvas.showComputersHint")}
             className={cn("flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-medium transition-colors", showComputers ? "border-accent/40 bg-accent/10 text-ink" : "border-hairline/60 bg-panel text-ink-secondary hover:bg-control hover:text-ink")}>
@@ -385,7 +390,7 @@ export function TeamMapPage() {
       </div>}
       <div className="relative flex min-h-0 flex-1">
       <div className="relative flex min-h-0 min-w-0 flex-1">
-      <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={bots.length ? 96 : 0}
+      {reportsChart ? <TeamOrgChart bots={bots} /> : <TeamCanvas sections={sections} canManage={!remoteClient} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={bots.length ? 96 : 0}
         connectedBotIds={state.settingsOpen ? edges.flatMap((edge) => edge.sourceBotId === state.selectedId ? [edge.targetBotId] : edge.targetBotId === state.selectedId ? [edge.sourceBotId] : []) : []}
         onComputer={(bot) => openBotSettings(dispatch, "access", { botId: bot.id })}
         computers={showComputers && computersChoiceLoaded && !remoteClient ? mapComputers.computers : undefined} computerFrames={mapComputers.frames}
@@ -397,7 +402,7 @@ export function TeamMapPage() {
         onMemory={(section, label) => setMemoryEditor({ section, label })}
         onEditTeam={(section, rename) => setTeamEditor({ section, rename })}
         onDeleteTeam={setDeletingTeam}
-        isEmpty={(key) => ![...state.bots, ...state.groups].some((record) => record.section?.trim() === key)} />
+        isEmpty={(key) => ![...state.bots, ...state.groups].some((record) => record.section?.trim() === key)} />}
       {bots.length > 0 && <MapComposer bots={bots} teams={composerTeams} onTagged={setTaggedBotIds} onSent={acknowledgeSent} />}
       </div>
       {!remoteClient && <CanvasComputers open={computersOpen} createRequest={createComputerRequest} drop={computerDrop} sections={sections}

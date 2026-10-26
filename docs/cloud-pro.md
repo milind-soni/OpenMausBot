@@ -1532,8 +1532,9 @@ resume, someone's use, or 120 s (a sleep the Admin never carried out):
 **The edge on a cold wake.** `OMB_CLOUD_EDGE_HOLD` (whole seconds, at most
 120, such as `30s`; unset: `0s`, today's edge) makes Caddy hold a request while
 the server starts instead of answering 502, so a webhook or the app's first
-request after a stop is answered late rather than refused. The Admin sets it
-only for a plan that sleeps.
+request after a stop is answered late rather than refused; Caddy dials the
+server again every 50 ms, so a held request reaches it within 50 ms of its
+listening. The Admin sets it only for a plan that sleeps.
 
 ## What the desktop reads from the Admin
 
@@ -1817,6 +1818,42 @@ sleeps: true}`; `cloud.state` stays `ready`. Without `cloud.power`, nothing belo
   shows the line for a plan whose allowances say `sleeps`.
 - **App events:** the connected-apps broker asks the Admin to wake a Cloud when it queues an event for one that isn't
   polling (`cloudflare/composio-broker`, off until `CLOUD_ADMIN_URL` and `CLOUD_GRANT_SECRET` are set).
+
+### Usage meter: how close the plan is to its limits, and Upgrade
+
+The session's `cloud.usage` (additive; the Admin's `server/cloud-usage.ts`) says, for an active plan whose Cloud is
+ready: the plan (`tier`), when the monthly allowances start over (`resetsAt`, the first of next month UTC; `trialEndsAt`
+during a free trial), each included allowance as `{kind, used, max, usedUp?}` (`computerHours` in hours, `voice` in
+characters, `decisions`, `x` in calls, `research` in dollars, `storage` in GB of the most the disk grows to), and the bigger
+plans the app can move to itself (`upgrades: [{tier, amount}]`, US cents a month; empty on Max, a team's plan, or while
+the Admin's `OMB_CLOUD_APP_UPGRADES` is off). `electron/cloud-home.mjs` `parseCloudUsage` drops anything malformed (an
+unknown kind, an allowance of nothing, a plan it doesn't know); it is display only and never grants or limits anything.
+Main keeps it on the account's state, and `cloudPlanSnapshot` hands it to this computer's page and the person's own Cloud
+page alike (`ogb.cloudPlan`), so the meter reads the same on both (`src/components/CloudUsageMeter.tsx`,
+`src/lib/usage-meter.ts`).
+
+- **The sidebar card**, above the person's name (not in the icon rail), only while an allowance is at 80% or more: the
+  one or two fullest, used of included with a bar (amber from 80%, red at 100%), when they start over, **Upgrade to
+  <next plan>**, and **See all usage** (Settings → General). **Hide for now** keeps it hidden on this computer for this
+  month at this level: it comes back when one reaches 100%, and next month. Never shown in a browser, without a paid plan,
+  or on a Team Cloud unless the plan whose usage it is is that team's (only the person who pays for a team sees its usage;
+  its members never do).
+- **Settings → General → MausBot Cloud usage**, while there is a paid plan: every allowance with its meter, when they
+  start over, and Upgrade to the next plan (the others as links), "You're on the top plan" on Max, or "To change your
+  team's plan, write to us" on a team's plan.
+- **Upgrade, one tap and a confirm.** Upgrade asks main for a preview (`ogb.cloudPlan.upgradePreview(plan, source)`,
+  only from a click, only for a plan the verified session lists), which asks the Admin
+  (`POST /api/cloud/desktop/upgrade/preview`): Dodo's own numbers for this change, nothing changed. The confirm says them
+  in plain words: "Max is $99 a month and starts right away. Today you pay $23.40, the difference for the rest of this
+  billing month. From Nov 18 it's $99 a month, plus any tax." (a free trial: nothing today, the new price at its first
+  payment). The preview's confirmation stays in main, never in a page. Only the confirm's own **Upgrade to Max**
+  (`ogb.cloudPlan.upgrade(plan, source)`, which needs a click) sends `POST /api/cloud/desktop/upgrade` with it; without a
+  preview of that very plan, still good (ten minutes), main sends nothing. The Admin changes the plan in Dodo (the prorated
+  difference now, the billing date kept; `on_payment_failure: prevent_change`), refuses if Dodo would now charge more than
+  the confirm said, and reads the plan back, so the session (read again at once) shows the new plan and allowances. Plain
+  lines for what happened: on the new plan; still going through; the card was declined, nothing changed; the price
+  changed, nothing charged; couldn't, nothing charged. Where the Admin can't change plans from the app (off, or an older
+  Admin), Upgrade opens the Cloud page instead. Funnel source `app_usage` (the card) or `app_settings`.
 
 ## Add a Cloud
 

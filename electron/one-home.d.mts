@@ -5,8 +5,9 @@ export type OneHomeView =
   /** `chats`: conversations gone of those to go; `failing`: it has failed for a day, with why; `updating`: My Cloud is too old
    * to take a move and updates first. */
   | { phase: "copy"; chats?: { done: number; total: number }; failing?: OneHomeFailing; updating?: true }
-  /** `waitingFor`: the bot or room still working here ("" when it has no name). */
-  | { phase: "wait"; waitingFor?: string; failing?: OneHomeFailing }
+  /** `waitingFor`: the bot or room whose work holds the move ("" when it has no name), and `waitingWhat` what it is;
+   * neither while it waits for a quiet moment or has not asked yet. */
+  | { phase: "wait"; waitingFor?: string; waitingWhat?: "bot" | "room" | "sign-in"; failing?: OneHomeFailing }
   | { phase: "finishing"; failing?: OneHomeFailing }
   /** What arrived, checked on both sides; `at`: when the move was done; `phone`: a phone was paired with this computer; `held`: keys a trial's Cloud keeps unused while its Claude credit lasts. */
   | { phase: "done"; at?: number; counts?: OneHomeCounts; phone: boolean; held: string[] }
@@ -50,7 +51,7 @@ export function createOneHome(deps: {
   cloud(): OneHomeCloud | null;
   send: { move(options?: { final?: boolean }): Promise<unknown>; check(): Promise<{ ok: boolean }>; switches(): Record<string, boolean>; snapshot(): any };
   local: {
-    freeze(origin: string): Promise<{ frozen: true } | { busy: string }>;
+    freeze(origin: string): Promise<{ frozen: true } | { busy: string; what?: string }>;
     unfreeze(options?: { automations?: "off" }): Promise<void>;
     frozen(): Promise<boolean>;
     json(route: string): Promise<any>;

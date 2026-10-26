@@ -23,9 +23,9 @@ to the Chief by hand.
 
 Now the team's coordinator hears first, exactly as for a broken run
 (docs/team-incidents.md). When a bot parks on a gate and its section has a
-**Chief of Staff** (or one a Chief was allowed to coordinate, and the same
-reach `retry_thread` demands — an escalation never widens what a Chief may
-see), OpenMausBot:
+**Chief of Staff** (or one a Chief was put in charge of, and the same
+authority `retry_thread` demands — an escalation never widens what a Chief may
+see; that every bot can reach every bot changes none of this), OpenMausBot:
 
 1. opens — once — a **Team escalations** thread on the Chief and leaves a
    chip there naming the gate, linked to the gated thread;

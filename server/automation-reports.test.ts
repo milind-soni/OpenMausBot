@@ -2,7 +2,7 @@ import { rmSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import type { RoutineRunReport } from "../shared/routines.ts";
-import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply } from "./automation-reports.ts";
+import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply, recoveredText } from "./automation-reports.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRun } from "./routines.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
@@ -37,6 +37,7 @@ describe("what the chat's own session reads", () => {
     expect(automationContextText(line, Date.UTC(2026, 9, 21, 9, 0), "Acme replied.")).toMatch(/^\[Your automation "Inbox brief" reported at 2026-10-21 \d\d:\d\d:\]\nAcme replied\.$/);
     expect(automationContextText({ ...line, needsYou: true }, 0, "Send it?")).toContain('"Inbox brief" asked at');
     expect(automationContextText({ ...line, failed: true }, 0, "Signed out.")).toContain('"Inbox brief" could not finish at');
+    expect(automationContextText({ ...line, recovered: true }, 0, "Recovered.")).toContain('"Inbox brief" recovered at');
   });
 
   it("always carries the newest line of each automation", () => {
@@ -218,6 +219,99 @@ describe("automation reports", () => {
     f.reports.runSettled(quietly, `turn-${quietly.id}`);
     expect(f.lines()).toHaveLength(1);
     expect(f.notified.map((entry) => entry.threadId)).toEqual([f.main, nowhere.threadId]);
+  });
+
+  it("posts one recovered line when a run with nothing new follows a failed run, and stays quiet after that", () => {
+    const f = fixture();
+    const failed = f.finished(null, "Inbox brief", { status: "failed", error: "Timed out" });
+    f.reports.runFailed(failed, "it ran past its 25-minute limit.");
+    const finishedAt = Date.UTC(2026, 9, 26, 2, 40);
+    const ok = f.finished("Checked 14 emails.\nNOTHING NEW", "Inbox brief", { finishedAt });
+    f.reports.runSettled(ok, `turn-${ok.id}`);
+    for (let i = 0; i < 3; i++) {
+      const later = f.finished("NOTHING NEW");
+      f.reports.runSettled(later, `turn-${later.id}`);
+      expect(f.runs.get(later.id)!.report).toEqual({ state: "quiet" });
+    }
+    expect(f.lines().map((line) => [line.text, line.automation?.runId, line.automation?.failed, line.automation?.recovered])).toEqual([
+      ["This run didn't finish: it ran past its 25-minute limit.", failed.id, true, undefined],
+      [recoveredText("Inbox brief", finishedAt), ok.id, undefined, true],
+    ]);
+    expect(f.runs.get(ok.id)!.report).toEqual({ state: "posted", threadId: f.main, messageId: f.lines()[1]!.id });
+    expect(f.wrote).toEqual([f.main, f.main]);
+    expect(f.notified).toEqual([]);
+  });
+
+  it("says when a recovered run finished, in the host's clock", () => {
+    expect(recoveredText("PAC flow driver", Date.UTC(2026, 9, 26, 2, 40))).toMatch(/^Recovered: PAC flow driver finished OK at \d{1,2}:\d\d [AP]M \S+$/);
+  });
+
+  it("posts no recovered line after another automation's failure, nor for a run with something to say, which posts only its reply", () => {
+    const f = fixture();
+    const other = f.finished(null, "Ops sweep", { status: "failed" });
+    f.reports.runFailed(other, "");
+    const quiet = f.finished("NOTHING NEW");
+    f.reports.runSettled(quiet, `turn-${quiet.id}`);
+    const failed = f.finished(null, "Inbox brief", { status: "failed" });
+    f.reports.runFailed(failed, "");
+    const spoke = f.finished("Acme replied.");
+    f.reports.runSettled(spoke, `turn-${spoke.id}`);
+    const after = f.finished("NOTHING NEW");
+    f.reports.runSettled(after, `turn-${after.id}`);
+    expect(f.lines().map((line) => line.text)).toEqual(["This run didn't finish.", "This run didn't finish.", "Acme replied."]);
+    expect(f.lines().some((line) => line.automation?.recovered)).toBe(false);
+  });
+
+  it("still recovers when a card a later run copied into the chat came after the failure", () => {
+    const f = fixture();
+    const failed = f.finished(null, "Inbox brief", { status: "failed" });
+    f.reports.runFailed(failed, "");
+    const run = f.finished(null, "Inbox brief", { status: "running" });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "options", card: { title: "Q", subtitle: "Which?", options: ["A"], requestId: "ask-1", requestType: "question" } });
+    f.runs.get(run.id)!.status = "completed";
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "text", text: "NOTHING NEW", turnId: "last", turnTerminal: true });
+    f.reports.runSettled(f.runs.get(run.id)!, "last");
+    expect(f.lines().map((line) => line.automation?.recovered ?? line.automation?.failed ?? line.automation?.needsYou)).toEqual([true, true, true]);
+    expect(f.lines().at(-1)!.text).toMatch(/^Recovered: Inbox brief finished OK at /);
+  });
+
+  it("recovers from a failure of an overlapping run queued behind this run's own card copy", () => {
+    const f = fixture();
+    f.busy.add(f.main);
+    const slow = f.finished(null, "Inbox brief", { status: "running" });
+    f.store.appendMessage(slow.threadId!, { role: "bot", kind: "options", card: { title: "Q", subtitle: "Which?", options: ["A"], requestId: "ask-1", requestType: "question" } });
+    const failed = f.finished(null, "Inbox brief", { status: "failed" });
+    f.reports.runFailed(failed, "");
+    f.runs.get(slow.id)!.status = "completed";
+    f.store.appendMessage(slow.threadId!, { role: "bot", kind: "text", text: "NOTHING NEW", turnId: "last", turnTerminal: true });
+    f.reports.runSettled(f.runs.get(slow.id)!, "last");
+    f.busy.delete(f.main);
+    f.reports.flush();
+    expect(f.lines().map((line) => [line.automation?.runId, line.kind, line.automation?.failed ?? false, line.automation?.recovered ?? false])).toEqual([
+      [slow.id, "options", false, false], [failed.id, "text", true, false], [slow.id, "text", false, true],
+    ]);
+  });
+
+  it("recovers after a failure that is still waiting on a busy chat, in order, and after a restart", () => {
+    const f = fixture();
+    f.busy.add(f.main);
+    const failed = f.finished(null, "Inbox brief", { status: "failed" });
+    f.reports.runFailed(failed, "");
+    const ok = f.finished("NOTHING NEW");
+    f.reports.runSettled(ok, `turn-${ok.id}`);
+    const failedAgain = f.finished(null, "Inbox brief", { status: "failed" });
+    f.reports.runFailed(failedAgain, "");
+    expect(f.runs.get(ok.id)!.report).toEqual({ state: "pending" });
+    f.busy.delete(f.main);
+    f.reports.flush();
+    expect(f.lines().map((line) => [line.automation?.runId, line.automation?.failed ?? false, line.automation?.recovered ?? false])).toEqual([
+      [failed.id, true, false], [ok.id, false, true], [failedAgain.id, true, false],
+    ]);
+    const quiet = f.finished("NOTHING NEW");
+    f.runs.get(quiet.id)!.report = { state: "pending" };
+    f.create().flush();
+    expect(f.lines().at(-1)).toMatchObject({ automation: { runId: quiet.id, recovered: true } });
+    expect(f.lines()).toHaveLength(4);
   });
 
   it("copies a card the run waits on into the chat, routes the answer to the run, and keeps the copy in step", () => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Globe, Hand, Loader2, LockKeyhole, Moon, X } from "lucide-react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
+import { usePageVisible } from "@/lib/page-visible";
 import { api, useStore, type Bot } from "@/state/store";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { ChromeRow, type BrowserNav, type BrowserTab } from "./browser/ChromeRow";
@@ -59,6 +60,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const [fullscreen, setFullscreen] = useState(false);
   const [passkeyDismissed, setPasskeyDismissed] = useState("");
   const floating = useBrowserPictureInPicture();
+  const pageVisible = usePageVisible();
   const panel = useRef<HTMLDivElement>(null);
   const address = useRef<HTMLInputElement>(null);
   const surface = useRef<StreamSurfaceHandle>(null);
@@ -239,6 +241,14 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const heldElsewhere = control?.controller === "another-viewer";
   const commandsReady = connected && !heldElsewhere;
   const you = control?.controller === "you";
+  // A page nobody can see keeps the stream off. A viewer holding the browser keeps it: their hold pauses the bot, so
+  // closing the view to save frames would hand the browser over while nobody watches.
+  const shown = pageVisible || you;
+  useEffect(() => {
+    if (shown) return;
+    setConnected(false);
+    setError("");
+  }, [shown]);
   const typingReady = connected && you;
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
@@ -284,23 +294,25 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     {takeStatus === "stale" && <div role="status" className="shrink-0 border-b border-hairline/30 px-3 py-1.5 text-[12px] text-accent-text">{t("browser.control.stale", { name: bot.name })}</div>}
     {passkeyWall && passkeyDismissed !== nav.url && <PasskeyNotice wall={passkeyWall} botName={bot.name} onDismiss={() => setPasskeyDismissed(nav.url)} />}
     <div className="relative flex min-h-0 flex-1 flex-col bg-inset/40">
-      <StreamSurface
-        key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}`}
-        ref={surface}
-        connect={connect}
-        input={interact}
-        followSize={stream}
-        label={t("browser.panel.pageLabel", { name: bot.name })}
-        onClient={onClient}
-        onControl={onControl}
-        onMessage={onMessage}
-        onConnectedChange={(next) => { setConnected(next); if (next) { setStarting(false); setGone(false); setError(""); } }}
-        onFirstFrame={() => setStarting(false)}
-        onUnauthorized={() => { if (stream) setFallback(true); else setGone(true); }}
-        onGone={() => setGone(true)}
-        onClose={(code, reason) => { if (code === 1013 && reason) setError(reason); }}
-        onLeave={() => address.current?.focus()}
-      />
+      {shown ? (
+        <StreamSurface
+          key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}`}
+          ref={surface}
+          connect={connect}
+          input={interact}
+          followSize={stream}
+          label={t("browser.panel.pageLabel", { name: bot.name })}
+          onClient={onClient}
+          onControl={onControl}
+          onMessage={onMessage}
+          onConnectedChange={(next) => { setConnected(next); if (next) { setStarting(false); setGone(false); setError(""); } }}
+          onFirstFrame={() => setStarting(false)}
+          onUnauthorized={() => { if (stream) setFallback(true); else setGone(true); }}
+          onGone={() => setGone(true)}
+          onClose={(code, reason) => { if (code === 1013 && reason) setError(reason); }}
+          onLeave={() => address.current?.focus()}
+        />
+      ) : null}
       {asleep || heldElsewhere || gone || !connected || starting ? (
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-card/95 p-6 text-center text-[13px] text-ink-secondary">
           {asleep ? <Moon size={24} /> : heldElsewhere ? <Hand size={24} /> : gone ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}

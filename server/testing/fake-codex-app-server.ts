@@ -18,6 +18,7 @@
 //   FAKE_CODEX_ASYNC_QUESTIONS  async-question mode: JSON replacing the message's `questions`
 //   FAKE_CODEX_ASYNC_QUESTION_GATE  async-question mode: the turn keeps running until this file exists (default 300 ms)
 //   FAKE_CODEX_DUMP  path for {pid, argv, env, calls, decision}
+//   FAKE_CODEX_ECHO_INPUT  "1": echo turn/start's input back as a userMessage item, as codex-cli 0.164.0 does
 //   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
 //     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
@@ -43,6 +44,7 @@
 //   FAKE_CODEX_TEXT_REPLY  `codex exec` reply when no route matches (default "fake background answer")
 //   FAKE_CODEX_TEXT_LOG  `codex exec`: append {argv, cwd, prompt, env} per call
 //   FAKE_CODEX_TEXT_MODE  `codex exec`: ok (default) | fail | exit | hang | tool | noisy
+//   FAKE_CODEX_TEXT_REFUSE  `codex exec`: comma-separated models answered with the 400 a ChatGPT account gets for gpt-5.4-mini
 //   FAKE_CODEX_LUNA  "1": model/list also offers gpt-6-luna
 //   FAKE_CODEX_UPDATED_FILE  while this file exists, the CLI was updated in place: --version answers codex-cli 0.162.1
 //     and model/list also offers gpt-6.1-sol
@@ -118,6 +120,13 @@ if (process.argv[2] === "exec") {
   }
   event({ type: "thread.started", thread_id: "fake-exec-thread" });
   event({ type: "turn.started" });
+  const model = process.argv[process.argv.indexOf("--model") + 1] ?? "";
+  if (process.env.FAKE_CODEX_TEXT_REFUSE?.split(",").includes(model)) {
+    const message = `unexpected status 400 Bad Request: {"type":"invalid_request_error","message":"The '${model}' model is not supported when using Codex with a ChatGPT account."}`;
+    event({ type: "error", message });
+    event({ type: "turn.failed", error: { message } });
+    process.exit(1);
+  }
   if (textMode === "fail") {
     event({ type: "error", message: "unexpected status 401 Unauthorized" });
     event({ type: "turn.failed", error: { message: "unexpected status 401 Unauthorized" } });
@@ -778,6 +787,11 @@ process.stdin.on("data", (chunk) => {
         if (mode === "early-turn-events") finishTurn();
         out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
         if (mode === "early-turn-events") break;
+        if (process.env.FAKE_CODEX_ECHO_INPUT === "1") {
+          const prompt = { type: "userMessage", id: "u1", content: msg.params?.input ?? [] };
+          notify("item/started", { item: prompt });
+          notify("item/completed", { item: prompt });
+        }
         if (mode === "helper-events") {
           for (const scope of [
             { threadId: "helper-thread", turnId: "helper-turn" },

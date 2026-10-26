@@ -1,6 +1,8 @@
 # Departments and shared instructions
 
-A department (the sidebar's bot group; `section` in the data and API) is a named membership group. It can be empty. Group chats are
+A department (the sidebar's bot group; `section` in the data and API) is a named membership group. It can be empty, and it
+never limits which bots work together: every bot reaches every other bot, and a department only decides which Chief is in
+charge ([Chief authority](team-access.md)). Group chats are
 conversations, and Templates is the catalog that creates new teams and bots.
 The sidebar and Team map use the same persisted team list. Existing bot and
 group-chat labels migrate automatically; clearing a team's shared instructions

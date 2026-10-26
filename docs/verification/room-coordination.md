@@ -99,8 +99,9 @@ handoff loop inside those turns.
 The tools are `list_room_targets` and `coordinate_bots`. Discovery includes
 reachable bots as well as rooms. The latter addresses 1–4 existing bots in this
 room (default), or — in ordinary direct chat without a room — the sender's one
-thread with each recipient for that conversation. A Chief can reach additional teams only
-after the owner grants that access in [team settings](team-access.md).
+thread with each recipient for that conversation. Every bot can reach every
+other bot, in any department; a Chief's authority over other departments is a
+separate grant ([Chief authority](team-access.md)).
 A multi-recipient room request posts its brief once, addressed to all accepted
 recipients. Each recipient still has a separate execution and result. An
 identical retry does not post again; different briefs remain separate. Requests
@@ -109,7 +110,7 @@ in direct conversations keep their individual messages.
 Recipients run sequentially per room, with their own models, permissions and
 working environments. Busy recipients queue. Once all requested results arrive,
 the sender resumes in the original conversation. A lead can consult its own
-specialists; it never inherits the parent Chief's cross-team access or permissions.
+specialists; it never inherits the parent Chief's authority or permissions.
 Advice is not a verification
 receipt: the lead must ask the reviewer to run the requested checks.
 
@@ -154,7 +155,8 @@ receiving conversation. Same-room receipts have no unnecessary navigation.
 Receipts remain visible when tool calls are hidden. Files are not copied between
 computers: briefs must include accessible absolute paths or the required content.
 Returned reports stay available to subsequent model turns behind the compact
-receipt, subject to the bounded retention and fresh peer/section access checks.
+receipt, subject to the bounded retention and a fresh reach check (peers list,
+archived bots, audiences).
 Direct-chat receipts use the existing avatar/thread pill, opening the exact
 recipient task without changing other tasks.
 
@@ -254,19 +256,17 @@ with the second job queued in the first member's thread. After release it
 checks three result cards and three "Sent to" lines in the room, the
 first member's two turns in one thread, and one resume of the Lead.
 
-### Rooms containing a supervising Chief
+### Rooms that mix departments
 
-A section bot can list and post to its room when an out-of-section Chief in
-that room has an owner-reviewed `managedSections` grant for the bot's section.
-This includes a Chief in General (no section). In that same conversation,
-`list_room_targets` advertises the Chief and section peers, and `coordinate_bots`
-can address them by ID. The exception does not grant direct-chat access or
-access to the Chief in another room. Other cross-section members, unmanaged
-Chiefs, and peer restrictions still block work. Revoking supervision before
-queued work starts prevents dispatch.
+A room's members can come from any department, a Chief that manages none of
+them included: they list each other with `list_room_targets` and hand each
+other work with `coordinate_bots` like any room. A bot's own peers list still
+narrows what it can address, and a revoked peer is refused before queued work
+starts. On a Team Cloud, nothing from a member's private chat is handed into a
+room or posted in one.
 
 ```sh
-pnpm exec vitest run server/peer-roster.test.ts server/post-to-room.test.ts server/room-coordination.e2e.test.ts server/direct-coordination.e2e.test.ts server/runtime-coordinator.test.ts server/peer-allowlist.e2e.test.ts
+pnpm exec vitest run server/peer-roster.test.ts server/post-to-room.test.ts server/room-coordination.e2e.test.ts server/direct-coordination.e2e.test.ts server/runtime-coordinator.test.ts server/peer-allowlist.e2e.test.ts server/cloud-team-open-reach.e2e.test.ts
 ```
 
 The coordination suites use `launchVerificationServer`, `control-omb`, and the
@@ -386,7 +386,7 @@ preview/server processes afterward; retain evidence without credentials.
 
 ## Limits and safety
 
-Existing peer allow-lists/approvals and every room reader's section still apply.
+Peer lists and peer approvals still apply; departments never limit who works with whom.
 Every turn — a chat, a room, a routine run, a webhook run, a goal run, a Cloud
 guest's turn, a standing external runtime — hands teammate work on with the
 one `coordinate_bots` tool (work, a question with `consult`, a one-way notice

@@ -3,7 +3,8 @@
 Long direct conversations can summarize older exchanges before the next turn.
 The full transcript, its branches and attachments are retained. The new session
 gets a bounded summary plus recent exchanges; later turns resume that session.
-A visible, expandable note explains what was summarized, even with tool chips off.
+A visible, expandable note explains what was summarized, even with tool chips off;
+when no model wrote the summary, it says the agent continues from recent excerpts only.
 
 ## Exercise the real path
 

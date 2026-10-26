@@ -11,7 +11,7 @@ import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
 import { readAttachment } from "../attachments.ts";
 import { arrivedRoute, automationsOffRoute, homeRoute } from "../cloud-send-arrived.ts";
 import { moveFilesRoute } from "../cloud-send-files.ts";
-import { moveBotParts, moveItems, moveKindsRoute, type MoveKindsDeps } from "../cloud-send-kinds.ts";
+import { automatedBot, moveBotParts, moveItems, moveKindsRoute, type MoveKindsDeps } from "../cloud-send-kinds.ts";
 import { cloudSendManifest } from "../cloud-send-manifest.ts";
 import { moveMemoryRoute, type MoveMemoryDeps } from "../cloud-send-memory.ts";
 import { cloudSendSummary, partHash, type CloudSendSources } from "../cloud-send.ts";
@@ -56,6 +56,7 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
       return !tail.hasMore && tail.messages.length === 1 && tail.messages[0]!.role === "bot" && Boolean(tail.messages[0]!.text?.includes(name));
     },
     inRoom: (botId) => (deps.chats?.store.groups ?? []).some((group) => !group.dm && group.memberIds.includes(botId)),
+    automated: (botId) => Boolean(deps.move && automatedBot(deps.move, botId)),
     skills: deps.skills,
     picture: (avatarUrl) => botAvatarUrlSchema.safeParse(avatarUrl).success ? readAttachment(avatarUrl.slice("/api/attachments/".length))?.bytes ?? null : null,
     logins: () => deps.logins.changes(),

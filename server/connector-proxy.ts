@@ -14,6 +14,7 @@ import { withSignedOutHint } from "./connector-signed-out-hint.ts";
 import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
 import { fitToolListResult } from "./mcp-tool-schema.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
+import { capToolListResult, toolLimitFromEnv } from "./tool-count-limit.ts";
 
 type Json = Record<string, unknown>;
 
@@ -25,6 +26,7 @@ const TOKEN = process.env.OMB_CONNECTOR_TOKEN ?? process.env.OMB_COMMS_TOKEN ?? 
 const ALLOWED_TOOLS = parseConnectorAllowedToolsEnv(process.env[CONNECTOR_ALLOWED_TOOLS_ENV]);
 const SERVICE_SLUGS = parseConnectorServiceSlugsEnv(process.env[CONNECTOR_SERVICE_SLUGS_ENV]);
 const SCHEMA_PROFILE = toolSchemaProfileFromEnv(process.env);
+const TOOL_LIMIT = toolLimitFromEnv(process.env);
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
@@ -206,8 +208,9 @@ async function showConnectorCards(items: ConnectorRequest[]): Promise<void> {
 }
 
 function fittedList(frame: Json): Json {
-  if (!SCHEMA_PROFILE || !("result" in frame)) return frame;
-  return { ...frame, result: fitToolListResult(frame.result, SCHEMA_PROFILE, (line) => process.stderr.write(`connector-proxy: ${line}\n`)) };
+  if ((!SCHEMA_PROFILE && TOOL_LIMIT === undefined) || !("result" in frame)) return frame;
+  const log = (line: string) => process.stderr.write(`connector-proxy: ${line}\n`);
+  return { ...frame, result: capToolListResult(fitToolListResult(frame.result, SCHEMA_PROFILE, log), TOOL_LIMIT, log) };
 }
 
 async function handle(message: Json): Promise<void> {

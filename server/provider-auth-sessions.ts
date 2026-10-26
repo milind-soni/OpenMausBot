@@ -17,8 +17,9 @@ const failure = (message: string, status: number) => Object.assign(new Error(mes
 export class ProviderAuthSessions {
   private readonly flows = new Map<string, Flow>();
 
+  /** A sign-in under way, until it expires: one whose provider call never returns stops counting then too. */
   get active(): boolean {
-    return [...this.flows.values()].some((flow) => flow.busy || (!flow.revoked && flow.expiresAt > Date.now()));
+    return [...this.flows.values()].some((flow) => flow.expiresAt > Date.now() && (flow.busy || !flow.revoked));
   }
 
   async start(instance: LoginInstance, owner: string): Promise<ProviderAuthenticationStart> {

@@ -55,7 +55,7 @@ function backgroundEngine(instanceId: string, driverKind: string) {
 
 const bot = (id: string, instanceId: string): SideJobBot => ({ id, name: `Bot ${id}`, threadId: `main-${id}`, modelSelection: { instanceId } });
 
-function setup(options: { helper?: { instanceId: string; model?: string } | null; modelAllowed?: SideJobsDeps["modelAllowed"] } = {}) {
+function setup(options: { helper?: { instanceId: string; model?: string } | null; modelAllowed?: SideJobsDeps["modelAllowed"]; smallModels?: SideJobsDeps["smallModels"] } = {}) {
   const claude = textEngine("claude", "claudeAgent");
   const openrouter = textEngine("openrouter", "openai-compat");
   const acp = backgroundEngine("grok", "grokAgent");
@@ -82,6 +82,7 @@ function setup(options: { helper?: { instanceId: string; model?: string } | null
     refusal: (instance) => (state.refused.has(instance.instanceId) ? "the organisation does not allow this engine" : undefined),
     helper: () => state.helper,
     ...(options.modelAllowed ? { modelAllowed: options.modelAllowed } : {}),
+    smallModels: options.smallModels ?? { refused: () => new Set(), remember: () => {} },
     assertWithinBudget: () => {
       if (state.overBudget) throw new Error("this workspace has reached its monthly spend limit");
     },
@@ -229,6 +230,41 @@ describe("who writes a small job", () => {
   });
 });
 
+describe("the small model a bot's own engine writes on", () => {
+  const refusals = () => {
+    const refused = new Map<string, Set<string>>();
+    return {
+      refused: (instanceId: string): ReadonlySet<string> => refused.get(instanceId) ?? new Set(),
+      remember: (instanceId: string, model: string) => { refused.set(instanceId, new Set([...refused.get(instanceId) ?? [], model])); },
+    };
+  };
+
+  it("comes with the bot's own model and the small models its engine refused, read at every call", async () => {
+    const smallModels = refusals();
+    const { jobs, state, codex } = setup({ smallModels });
+    state.bots.set("codex", { ...bot("codex", "codex"), modelSelection: { instanceId: "codex", model: "gpt-6-astra" } });
+    const memory = jobs.text("memory", "codex")!;
+    await memory.generateText("first");
+    codex.calls[0]!.options!.fallback!.onRefused("gpt-5.4-mini");
+    await memory.generateText("second");
+    expect(codex.calls.map((call) => call.options?.fallback)).toEqual([
+      expect.objectContaining({ model: "gpt-6-astra", refused: new Set() }),
+      expect.objectContaining({ model: "gpt-6-astra", refused: new Set(["gpt-5.4-mini"]) }),
+    ]);
+    expect(smallModels.refused("codex")).toEqual(new Set(["gpt-5.4-mini"]));
+    expect(state.logs).toContain("small model gpt-5.4-mini refused on codex: background text runs on the bot's own model");
+  });
+
+  it("names no model of the bot's on another engine, and is never sent to a helper", async () => {
+    const { jobs, state, claude, codex } = setup({ smallModels: refusals() });
+    state.bots.set("pi", { ...bot("pi", "pi"), modelSelection: { instanceId: "pi", model: "pi-large" } });
+    await jobs.text("memory", "pi", { instance: state.instances.get("codex")! })!.generateText("p");
+    expect(codex.calls[0]!.options?.fallback).not.toHaveProperty("model");
+    await jobs.text("memory", "pi")!.generateText("p");
+    expect(claude.calls[0]!.options).not.toHaveProperty("fallback");
+  });
+});
+
 describe("what a helper call is booked as", () => {
   it("is its own usage row: the bot it was for, the helper's instance and model, and a trigger that says helper", async () => {
     const { jobs, state } = setup();
@@ -345,6 +381,7 @@ describe("when the helper is not used", () => {
         instance: (id) => engines[id] ?? null,
         refusal: () => undefined,
         helper: () => ({ instanceId: "claude" }),
+        smallModels: { refused: () => new Set(), remember: () => {} },
         assertWithinBudget: () => {},
         book: () => {},
         log: (line) => logs.push(line),

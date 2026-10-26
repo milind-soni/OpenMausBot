@@ -5,6 +5,7 @@ export const WORKSPACE_CREDENTIALS = [
   { section: "tts", field: "fishKey", name: "fishAudioKey", env: "OMB_FISH_AUDIO_API_KEY" },
   { section: "decider", field: "key", name: "jevApiKey", env: "OMB_JEV_API_KEY" },
   { section: "decider", field: "openrouterKey", name: "openrouterDeciderKey", env: "OMB_OPENROUTER_DECIDER_KEY" },
+  { section: "decider", field: "workersAiToken", name: "workersAiToken", env: "OMB_WORKERS_AI_TOKEN" },
   { section: "imageGen", field: "key", name: "openaiImageApiKey", env: "OMB_OPENAI_IMAGE_KEY" },
   { section: "imageGen", field: "customApiKey", name: "customImageApiKey", env: "OMB_CUSTOM_IMAGE_KEY" },
   { section: "live", field: "key", name: "openaiLiveKey", env: "OMB_OPENAI_LIVE_KEY" },

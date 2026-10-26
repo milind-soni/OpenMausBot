@@ -86,16 +86,9 @@ export function yamlFrontmatterValue(value: string): string {
  * every skill the spec's own examples show, and a parser that cannot
  * evaluate anchors or tags cannot be surprised by them. */
 export function parseSkillMd(raw: string): ParsedSkill | { error: string } {
-  // A byte order mark (Notepad, PowerShell) would hide the opening ---.
-  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) return { error: "SKILL.md has no YAML frontmatter (--- block) at the top" };
-  const fields: Record<string, string> = {};
-  for (const line of match[1]!.split(/\r?\n/)) {
-    const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
-    if (!kv) continue;
-    fields[kv[1]!.toLowerCase()] = unquoteScalar(kv[2]!);
-  }
+  const frontmatter = readSkillFrontmatter(raw);
+  if (!frontmatter) return { error: "SKILL.md has no YAML frontmatter (--- block) at the top" };
+  const { fields } = frontmatter;
   const name = fields.name ?? "";
   const description = fields.description ?? "";
   if (!isSkillName(name)) {
@@ -110,8 +103,23 @@ export function parseSkillMd(raw: string): ParsedSkill | { error: string } {
     license: fields.license || undefined,
     compatibility: fields.compatibility || undefined,
     tags: parseSkillTags(fields.tags),
-    body: match[2] ?? "",
+    body: frontmatter.body,
   };
+}
+
+/** The single-line `key: value` fields of a SKILL.md's frontmatter, keys lowercased; null without a frontmatter block. */
+export function readSkillFrontmatter(raw: string): { fields: Record<string, string>; body: string } | null {
+  // A byte order mark (Notepad, PowerShell) would hide the opening ---.
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) return null;
+  const fields: Record<string, string> = {};
+  for (const line of match[1]!.split(/\r?\n/)) {
+    const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
+    if (!kv) continue;
+    fields[kv[1]!.toLowerCase()] = unquoteScalar(kv[2]!);
+  }
+  return { fields, body: match[2] ?? "" };
 }
 
 /** Static red flags before a human review. Presence is a warning shown in

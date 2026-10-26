@@ -1,5 +1,5 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
-import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudTrial, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
+import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 import nativeText from "./native-text.cjs";
@@ -33,6 +33,10 @@ const MAX_ENROLL_SECONDS = 1800;
 const OFFER_MS = 10 * 60_000, OFFER_RETRY_MS = 30_000;
 const CHECKOUT_WATCH_MS = 30 * 60_000, CHECKOUT_KEPT_MS = 24 * 3600_000;
 export const CHECKOUT_SOURCES = Object.freeze(["app_card", "app_howto", "app_menu", "app_settings", "app_routines", "app_pages", "update_popup", "app_onboarding"]);
+export const UPGRADE_SOURCES = Object.freeze(["app_usage", "app_settings"]);
+const UPGRADE_TIERS = Object.freeze(["starter", "personal", "pro", "max"]);
+const UPGRADE_REFUSALS = Object.freeze(["payment_failed", "not_subscribed", "already_on_plan", "plan_change_unavailable", "confirmation_required", "price_changed", "rate_limited"]);
+const CONFIRMATION = /^[A-Za-z0-9_-]{43}$/;
 const CHECKOUT_ORIGIN = "https://checkout.dodopayments.com", TEST_CHECKOUT_ORIGIN = "https://test.checkout.dodopayments.com";
 /** Only Dodo's own HTTPS checkout origin, with no credentials and no fragment; anything else is never opened. Staging's
  * Admin sells in Dodo's test mode, so its checkouts are only Dodo's test page. */
@@ -111,11 +115,11 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   const reset = () => { generation++; stopTimer(); controller.abort(); controller = new AbortController(); pending = null; emailed = null; verifiedUntil = 0; failures = 0; return generation; };
   const current = stamp => !closed && generation === stamp;
   const versionHeader = text(appVersion, 40) && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(appVersion) ? { "x-openmausbot-version": appVersion } : {};
-  async function request(route, { method = "GET", body, token, signal = controller.signal, path = `/api/cloud/desktop/${route}` } = {}) {
+  async function request(route, { method = "GET", body, token, signal = controller.signal, path = `/api/cloud/desktop/${route}`, timeoutMs = 20_000 } = {}) {
     const response = await fetcher(`${origin}${path}`, {
       method, redirect: "error", credentials: "omit", cache: "no-store",
       headers: { accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }), ...(token ? { authorization: `Bearer ${token}`, ...versionHeader } : {}) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
     });
     const reader = response.body?.getReader(), chunks = []; let size = 0;
     try {
@@ -154,6 +158,18 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     const tier = typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : newer ? input.plan : undefined;
     return { plan, ...(tier ? { tier } : {}), status: input.status,
       expiresAt: input.expiresAt, version: input.version };
+  }
+  // Security: an upgrade preview's confirmation stays here, never in a page, and is used once.
+  const confirmations = new Map();
+  async function upgradeFailure(error, signedIn, browser = true) {
+    if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
+    if (!browser && (!error?.status || error.opaque || error.status === 504)) return { outcome: "unconfirmed" };
+    if (!error?.opaque && UPGRADE_REFUSALS.includes(error?.code)) return { outcome: "refused", code: error.code };
+    if (browser && grant === signedIn && !error?.opaque && ([404, 405, 501].includes(error?.status) || (error?.status === 503 && error.code === "temporarily_unavailable"))) {
+      await openBrowser(`${origin}/cloud`);
+      return { outcome: "browser" };
+    }
+    return { outcome: "failed" };
   }
   async function revoke(previous) {
     try { await request("session", { method: "DELETE", body: {}, token: previous.token, signal: AbortSignal.timeout(20_000) }); }
@@ -194,6 +210,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const machine = parseCloudSummary(result.cloud), teams = parseCloudTeams(result.teams);
       const purchase = parseCloudPurchase(result.cloud?.purchase);
       const trial = parseCloudTrial(result.cloud?.trial), credit = parseCloudCredit(result.cloud?.credit), offer = parseCloudOffer(result.offer);
+      const usage = access.status === "active" ? parseCloudUsage(result.cloud?.usage) : null;
       const hint = access.plan === "pro" ? { ...(access.tier ? { tier: access.tier } : {}), active: access.status === "active" } : null;
       if (next.expiresAt !== previous.expiresAt) {
         const replacement = { ...previous, expiresAt: next.expiresAt };
@@ -214,7 +231,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       verifiedUntil = Math.min(grant.expiresAt, now() + STEADY_MS,
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
       publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(teams.length ? { teams } : {}), ...(purchase ? { purchase } : {}),
-        ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), verifiedAt: now(), verifiedUntil });
+        ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), ...(usage ? { usage } : {}), verifiedAt: now(), verifiedUntil });
       const planCloud = teamPlan(value) ? planTeam(value)?.machine ?? null : machine;
       const settingUp = planCloud?.status === "provisioning" || (access.status === "active" && !planCloud) || Boolean(purchase);
       const delay = watching() && planCloud?.status !== "ready" ? WATCH_REFRESH_MS : settingUp ? SETUP_REFRESH_MS : awaitingWake() ? ASLEEP_REFRESH_MS : REFRESH_MS;
@@ -428,6 +445,35 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     cancel: () => { if (!pending && value.status !== "connecting") return Promise.resolve(state()); opened = null; return signOut(); },
     refresh, signOut,
     async openDashboard() { await openBrowser(`${origin}/cloud`); return state(); },
+    async upgradePreview(plan, source) {
+      if (!UPGRADE_TIERS.includes(plan) || !UPGRADE_SOURCES.includes(source)) throw new Error("Invalid Cloud upgrade.");
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      let result;
+      try { result = await request("upgrade/preview", { method: "POST", body: { plan, source }, token: signedIn.token, timeoutMs: 60_000 }); }
+      catch (error) { return upgradeFailure(error, signedIn); }
+      if (grant !== signedIn || result?.cloudContractVersion !== 1) return { outcome: "failed" };
+      if (["upgraded", "pending"].includes(result.status)) { await refresh(); return { outcome: "settled", status: result.status, tier: TIER.test(result.tier) ? result.tier : plan }; }
+      const cents = value => Number.isSafeInteger(value) && value >= 0 && value <= 10_000_000;
+      if (result.tier !== plan || !cents(result.price) || result.price < 1 || !cents(result.chargeNow) || !cents(result.tax ?? 0) || result.currency !== "USD"
+        || typeof result.trial !== "boolean" || !CONFIRMATION.test(result.confirmation ?? "") || !timestamp(result.expiresAt)) return { outcome: "failed" };
+      confirmations.set(plan, { token: result.confirmation, expiresAt: Math.min(result.expiresAt, now() + 10 * 60_000), account: signedIn.account.id });
+      return { outcome: "preview", preview: { plan, ...(TIER.test(result.from ?? "") ? { from: result.from } : {}), trial: result.trial, price: result.price,
+        chargeNow: result.chargeNow, tax: result.tax ?? 0, ...(timestamp(result.nextBillingAt) ? { nextBillingAt: result.nextBillingAt } : {}), expiresAt: result.expiresAt } };
+    },
+    async upgrade(plan, source) {
+      if (!UPGRADE_TIERS.includes(plan) || !UPGRADE_SOURCES.includes(source)) throw new Error("Invalid Cloud upgrade.");
+      const signedIn = grant, agreed = confirmations.get(plan);
+      confirmations.delete(plan);
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      if (!agreed || agreed.account !== signedIn.account.id || agreed.expiresAt <= now()) return { outcome: "refused", code: "confirmation_required" };
+      let result;
+      try { result = await request("upgrade", { method: "POST", body: { plan, confirmation: agreed.token, source }, token: signedIn.token, timeoutMs: 120_000 }); }
+      catch (error) { const failure = await upgradeFailure(error, signedIn, false); await refresh().catch(() => {}); return failure; }
+      await refresh().catch(() => {});
+      if (result?.cloudContractVersion !== 1 || !["upgraded", "pending"].includes(result.status)) return { outcome: "failed" };
+      return { outcome: result.status, tier: TIER.test(result.tier ?? "") ? result.tier : plan };
+    },
     async offer() {
       const current = state();
       if (current.status === "connected" && current.offer) return current.offer;
@@ -623,7 +669,7 @@ export function cloudPlanSnapshot(state, { notice = null } = {}) {
   const named = typeof tier === "string" ? { tier } : {};
   const trial = state?.status === "connected"
     ? { ...(state.trial ? { trial: state.trial } : {}), ...(state.credit ? { credit: state.credit } : {}), ...(notice && state.trial ? { notice } : {}),
-      ...(state.machine?.power?.sleeps ? { sleeps: true } : {}) } : {};
+      ...(state.machine?.power?.sleeps ? { sleeps: true } : {}), ...(state.usage ? { usage: state.usage } : {}) } : {};
   if (state?.status === "connected" && state.entitlement?.plan === "pro") return { status: state.entitlement.status === "active" ? "paid" : "attention", ...named, ...trial };
   if (state?.status === "reauth-required") return { status: "signin", ...(state.lastPlan ? { tier: state.lastPlan.tier ?? "pro" } : {}) };
   if (state?.status !== "connected" && state?.lastPlan) return { status: "checking", ...named };

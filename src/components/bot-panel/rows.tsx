@@ -37,7 +37,7 @@ export function Card({ label, action, anchor, children }: { label?: ReactNode; a
   return (
     <section data-panel-card={anchor}>
       {label ? <CardLabel action={action}>{label}</CardLabel> : <div className="h-3.5" />}
-      <div className="divide-y divide-ink/[0.05] overflow-hidden rounded-[14px] border border-ink/[0.04] bg-ink/[0.03]">{children}</div>
+      <div className="divide-y divide-ink/[0.05] overflow-hidden rounded-[14px] border border-ink/[0.04] bg-ink/[0.03] max-md:rounded-[20px] max-md:border-hairline max-md:bg-card">{children}</div>
     </section>
   );
 }
@@ -53,7 +53,7 @@ export function RowText({ title, hint }: { title: ReactNode; hint?: ReactNode })
 
 function RowIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
-    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary" aria-hidden="true">
+    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-ink/[0.05] text-ink-secondary max-md:size-8 max-md:rounded-full" aria-hidden="true">
       <Icon size={15} />
     </span>
   );

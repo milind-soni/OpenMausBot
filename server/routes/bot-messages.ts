@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { z } from "zod";
 
@@ -14,6 +15,7 @@ import type { ModelSelection, RequestOutcome, SteerOutcome } from "../contracts.
 import { parseDataContext, type DataContext } from "../data-context.ts";
 import { preparePointed } from "../pointed.ts";
 import type { Handoffs } from "../delta-context.ts";
+import type { OneOnOneGoals } from "../host/one-on-one-goals.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { spokenLineFields } from "../live-call-record.ts";
 import type { PhoneSecretSubmissionRegistry } from "../phone-secret.ts";
@@ -104,6 +106,7 @@ export interface BotMessageRouteDeps {
   ): Promise<RequestOutcome>;
   deliverLateQuestionAnswer(auth: RequestAuth, threadId: string, requestId: string, answer: string, cardMessage: Message, owner: BotRecord): Promise<{ queued: boolean }>;
   interruptDirectThread(botId: string, threadId: string): Promise<void>;
+  stopThreadForPerson(botId: string, threadId: string): Promise<void>;
   cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): unknown;
   revokeInternalCapabilitiesForThread(threadId: string): void;
   cancelGroupTurnOperations(groupId: string, threadId: string): void;
@@ -118,6 +121,11 @@ export interface BotMessageRouteDeps {
   relayedReaction(threadId: string, messageId: string, person: { email?: string; name?: string }, emoji: string): void;
   /** The conversation an answer to this card belongs to: a run's own, for the copy its automation posted in a chat. */
   answeredIn(threadId: string, requestId: string): string;
+  /** The request came from one of the owner's registered phones. */
+  fromPhone(auth: RequestAuth): boolean;
+  /** Records a send a registered phone made, so the turn it starts knows the person is talking from the phone. */
+  notePhoneSend(sendId: string): void;
+  goals: Pick<OneOnOneGoals, "start">;
 }
 
 /** External interfaces (the Slack worker) opt in. `onBehalfOf`, advertised by /api/health as
@@ -147,8 +155,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
     botAtThreadCapacity, parksBehindCoordination, activeGroupTurnForBot, runningTurnInstance, engineSteersImages, resolveReplyTarget,
     turnSelection, policyModelRefusal, clearUnattended, drainQueuedSends, answeringCardAs, resolveAndSendTrust, resolveAndSendTeamSetup,
     resolveAndSendRoutine, resolveAndSendProfile, resolveAndSendModel, resolveSkillRequest, sendSkillResolution, answerRequest,
-    deliverLateQuestionAnswer, interruptDirectThread, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
-    cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, pressRecords, serverPress, relayedReaction, answeredIn,
+    deliverLateQuestionAnswer, interruptDirectThread, stopThreadForPerson, cancelDirectTurnDispatch, revokeInternalCapabilitiesForThread,
+    cancelGroupTurnOperations, closeOpenApprovals, harnessCardOutcome, pressRecords, serverPress, relayedReaction, answeredIn, fromPhone, notePhoneSend, goals,
   } = deps;
   const pinnedClientThread = pinnedClientThreadGuard(store);
   /** widget -> sendId of a press on its way in: a second tap before acceptance must not send a second answer. */
@@ -195,13 +203,28 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const threadId = body.threadId ?? bot.threadId;
       const notYours = cloudGuestSendRefusal(auth, threadId);
       if (notYours) return json(res, 403, { error: notYours });
+      if (body.mode !== undefined && body.mode !== "chat" && body.mode !== "goal") return json(res, 400, { error: "mode must be chat or goal" });
+      if (body.mode === "goal") {
+        if (guarded || pressed || fromAnApp || pointing) return json(res, 400, { error: "a goal is a plain typed message" });
+        if (!store.taskByThread(bot.id, threadId)) return json(res, 404, { error: "no such conversation" });
+        const goalRefused = directSendRefusal(bot.id, threadId);
+        if (goalRefused) return json(res, goalRefused.status, goalRefused.body);
+        const goalSendId = parseSendId(body.sendId);
+        const accepted = goalSendId ? acceptedSendMatch(store.messagesFor(threadId), goalSendId, typed, undefined, "goal") : null;
+        if (accepted?.kind === "conflict") return json(res, 409, { error: "sendId already belongs to another message" });
+        if (accepted?.kind === "match") return json(res, 202, { ok: true, threadId, message: accepted.message });
+        const message = goals.start(bot.id, threadId, typed, { sendId: goalSendId, sender: messageSender(auth) });
+        return json(res, 202, { ok: true, threadId, message });
+      }
       const onBehalfOf = guardedBody?.data?.onBehalfOf;
       const trigger: UsageTrigger = onBehalfOf
         ? { kind: "user", ...(onBehalfOf.email ? { email: onBehalfOf.email } : {}), ...(onBehalfOf.name ? { label: onBehalfOf.name } : {}) }
         : usageTriggerFor(auth);
       // Security invariant: another bot's thread answers like a missing one, before anything reads a widget in it.
       if (pressed && !store.taskByThread(bot.id, threadId)) return json(res, 409, { error: "the bot switched tasks before it could receive the message" });
-      const sendId = parseSendId(body.sendId);
+      const phone = fromPhone(auth);
+      // A phone's send without an id gets one, so the turn it starts can be known as the phone's.
+      const sendId = parseSendId(body.sendId) ?? (phone ? randomUUID() : undefined);
       const press = pressed ? prepareWidgetPress(store, threadId, body.widgetAction, sendId) : null;
       if (press && !press.ok) return json(res, press.status, { error: press.error });
       const answered = press ? serverPress(bot, threadId, press.messageId, press.action, auth) : null;
@@ -266,6 +289,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
             return { ok: true as const, threadId, message };
           }
         : undefined;
+      if (phone && sendId) notePhoneSend(sendId);
       if (pressKey) pressesInFlight.set(pressKey, sendId);
       try {
         const receipt = await acceptDirectSend({
@@ -655,12 +679,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         return json(res, 400, { error: "threadId must be a task id" });
       }
       if (typeof expectedThreadId === "string" && store.taskByThread(bot.id, expectedThreadId)) {
-        const routine = routines!.activeBotRunForBot(bot.id);
-        if (routine?.threadId === expectedThreadId) await routines!.cancelRun(routine.id);
-        else {
-          handoffs.stoppedByPerson(expectedThreadId);
-          await interruptDirectThread(bot.id, expectedThreadId);
-        }
+        await stopThreadForPerson(bot.id, expectedThreadId);
         return json(res, 200, { ok: true });
       }
       const directClaim = directTurnDispatchClaims.get(bot.threadId);

@@ -8,9 +8,12 @@ import { launchVerificationServer } from "../scripts/control-omb.ts";
 import { startFakeConnectedApps, type FakeConnectedApps } from "./testing/fake-connected-apps.ts";
 
 // The proactive main agent end to end on a real server (temporary home, the fake Claude CLI) against a stand-in for the
-// connected-apps service: the Chief's default watch, its checks, the one batched run, the brief, Dismiss, presence and
+// connected-apps service: MausBot's default watch, its checks, the one batched run, the brief, Dismiss, presence and
 // the read-and-draft fence. Nothing here reaches a real Google account or a model.
 const MINUTE = 60_000;
+// The brief lists only the person's meetings today. Their zone is one where it is midday when the suite starts, so the
+// meeting 8 minutes from now is always today: in UTC, a run from 23:52 on would put it tomorrow.
+const MIDDAY_ZONE = (() => { const offset = 12 - new Date().getUTCHours(); return `Etc/GMT${offset > 0 ? "-" : "+"}${Math.abs(offset)}`; })();
 const WATCH_REPLY = JSON.stringify({
   important: [{ id: "important-1", why: "Ada needs the Q3 numbers from you by Friday.", needsReply: true }],
   prep: [{ id: "standup-uid", brief: "Ada leads the standup.\nOpen: the Q3 numbers.\nNext step: bring the draft." }],
@@ -44,7 +47,7 @@ function inbox(apps: FakeConnectedApps, now: number) {
   }];
 }
 
-describe("the Chief keeps an eye on the day", () => {
+describe("MausBot keeps an eye on the day, hidden from the sidebar", () => {
   let apps: FakeConnectedApps;
   let fixture: Fixture;
   let api: ReturnType<typeof client>;
@@ -56,10 +59,11 @@ describe("the Chief keeps an eye on the day", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     apps = await startFakeConnectedApps();
     writeFileSync(markers, JSON.stringify({ "Your checks found what is below": WATCH_REPLY }));
-    fixture = await launchVerificationServer({ ...process.env, OMB_COMPOSIO_BROKER_URL: apps.url, OMB_COMPOSIO_BROKER_TOKEN: apps.token, FAKE_CLAUDE_MARKER_REPLIES: markers });
+    fixture = await launchVerificationServer({ ...process.env, TZ: MIDDAY_ZONE, OMB_COMPOSIO_BROKER_URL: apps.url, OMB_COMPOSIO_BROKER_TOKEN: apps.token, FAKE_CLAUDE_MARKER_REPLIES: markers });
     api = client(fixture);
     const bots = (await api("GET", "/api/bots")).bots as any[];
-    const found = bots.find((bot) => bot.chiefOfStaff);
+    const found = bots.find((bot) => bot.defaultBot && !bot.defaultBot.person);
+    await api("PATCH", `/api/bots/${found.id}`, { sidebarHidden: true });
     chief = { id: found.id, threadId: found.mainThreadId ?? found.threadId };
     watch = (await api("GET", "/api/routines")).routines.find((routine: any) => routine.botId === chief.id && routine.deliver === "brief");
   }, 120_000);
@@ -79,13 +83,14 @@ describe("the Chief keeps an eye on the day", () => {
     return (await runs()).find((run) => run.id === id);
   };
 
-  it("a personal install's Chief has one default watch: checks, reads and drafts only, delivered to the brief", () => {
+  it("a personal install's MausBot has the one default watch: checks, reads and drafts only, delivered to the brief", async () => {
+    expect((await api("GET", "/api/routines")).routines.filter((routine: any) => routine.deliver === "brief")).toHaveLength(1);
     expect(watch).toMatchObject({ name: "Keep an eye on my day", enabled: true, checks: ["calendar", "mail", "runs"], access: "read-and-draft", deliver: "brief",
       schedule: { type: "interval", everyMinutes: 15 } });
   });
 
   it("the first open of the day, with nothing for the person yet, posts no brief, opens nothing and starts no AI turn", async () => {
-    const answer = await api("POST", "/api/presence/active", { source: "desktop", timeZone: "UTC" });
+    const answer = await api("POST", "/api/presence/active", { source: "desktop", timeZone: MIDDAY_ZONE });
     expect(answer).toEqual({ ok: true, returned: false });
     expect(await brief()).toBeUndefined();
     expect(existsSync(fixture.fixtureDumpPath)).toBe(false);
@@ -127,6 +132,8 @@ describe("the Chief keeps an eye on the day", () => {
     expect(shown).toContain("Ada needs the Q3 numbers from you by Friday.");
     expect(widgetActions(card.widget.root as WidgetRoot).map((entry) => entry.label)).toEqual(expect.arrayContaining(["Draft a reply to Ada", "Dismiss Ada's email", "Join"]));
     expect(rows.some((message) => message.automation?.runId === run.id)).toBe(false);
+    const told = (await api("GET", "/api/notifications")).notifications as any[];
+    expect(told.findLast((entry) => entry.kind === "brief"), "the notification opens MausBot's chat").toMatchObject({ botId: chief.id, threadId: chief.threadId });
   });
 
   it("the same mail again is nothing new: no second turn", async () => {
@@ -170,6 +177,18 @@ describe("the Chief keeps an eye on the day", () => {
     expect(String(dump.systemPrompt)).toContain("MEMORY.md");
     await expect.poll(async () => (await messages()).some((message) => message.automation?.runId === run.id && message.text === "hello from fake claude"), { timeout: 10_000 }).toBe(true);
   });
+
+  it("the brief follows the language set in Settings", async () => {
+    await api("PATCH", "/api/config", { language: "pt-br" });
+    apps.gmailError = "Connected account is not ACTIVE: token expired";
+    await settled((await runNow()).id);
+    const portuguese = async () => (await messages()).findLast((message) => message.serverCard && message.widget?.root.title === "Seu resumo");
+    await expect.poll(async () => JSON.stringify((await portuguese())?.widget.root ?? null), { timeout: 10_000 }).toContain("Reconecte Gmail em Apps conectados.");
+    const shown = JSON.stringify((await portuguese()).widget.root);
+    expect(shown).toContain("Precisa da sua atenção");
+    expect(shown).not.toMatch(/Needs you|Your day|Reconnect Gmail/);
+    delete apps.gmailError;
+  });
 });
 
 describe("a read-and-draft run", () => {
@@ -201,7 +220,7 @@ describe("a read-and-draft run", () => {
   it("refuses sends, other apps and drafts to anyone but the thread's sender, outright and with no card; one reply draft gets through once", async () => {
     const api = client(fixture);
     const bots = (await api("GET", "/api/bots")).bots as any[];
-    const chief = bots.find((bot) => bot.chiefOfStaff);
+    const chief = bots.find((bot) => bot.defaultBot && !bot.defaultBot.person);
     const watch = (await api("GET", "/api/routines")).routines.find((routine: any) => routine.deliver === "brief");
     inbox(apps, Date.now());
     const { run } = await api("POST", `/api/routines/${watch.id}/run`, undefined, 201);

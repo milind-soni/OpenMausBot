@@ -377,7 +377,7 @@ describe("a room turn and the teammates outside the room", () => {
 });
 
 describe("list_rooms discovery", () => {
-  it("lists only the rooms the caller belongs to, and never one with a member outside its section", async () => {
+  it("lists the rooms the caller belongs to, whichever departments their members are in", async () => {
     const scout = await makeBot("Scout", "Discovery");
     const mate = await makeBot("Scout Mate", "Discovery");
     const stranger = await makeBot("Stranger", "Elsewhere");
@@ -391,12 +391,8 @@ describe("list_rooms discovery", () => {
     const ids = rooms.map((room) => str(field(room as Record<string, unknown>, "id")));
     expect(ids).toContain(mine.id);
     expect(ids, "a room the caller is not in was listed").not.toContain(theirs.id);
-    expect(ids, "a cross-section room was listed").not.toContain(mixed.id);
-    const unpostable = Array.isArray(listed.body.unpostable) ? listed.body.unpostable : [];
-    expect(unpostable).toHaveLength(1);
-    expect(field(unpostable[0] as Record<string, unknown>, "name")).toBe("Mixed room");
-    expect(str(field(unpostable[0] as Record<string, unknown>, "reason"))).toContain("@Stranger, who is outside your section");
-    expect(field(unpostable[0] as Record<string, unknown>, "id")).toBeUndefined();
+    expect(ids, "a room mixing departments is a room like any other").toContain(mixed.id);
+    expect(listed.body.unpostable).toEqual([]);
 
     const listedRoom = rooms.find((room) => str(field(room as Record<string, unknown>, "id")) === mine.id);
     expect(field(listedRoom as Record<string, unknown>, "members")).toEqual(["Scout", "Scout Mate"]);
@@ -514,15 +510,16 @@ describe("post_to_room", () => {
     expect(await messagesOf(closed.threadId)).toHaveLength(0);
   }, 40_000);
 
-  it("refuses a room holding anyone outside the sender's section", async () => {
+  it("posts into a room whose members are in other departments, with or without a Chief that manages them", async () => {
     const inside = await makeBot("Section Inside", "Section A");
     const outside = await makeBot("Section Outside", "Section B");
-    const mixed = await makeRoom("Cross section", [inside.id, outside.id], "Section A");
+    await makeBot("Finance Bot", "Finance");
+    const unmanaging = await makeCoordinator("Finance Chief", "Coordinators", ["Finance"]);
+    const mixed = await makeRoom("Cross section", [inside.id, outside.id, unmanaging.id], "Section A");
 
-    const refused = await post(inside.id, inside.threadId, mixed.id, "hello other section");
-    expect(refused.status).toBe(403);
-    expect(str(refused.body.error)).toContain("outside your section");
-    expect(await messagesOf(mixed.threadId)).toHaveLength(0);
+    const posted = await post(inside.id, inside.threadId, mixed.id, "hello other section");
+    expect(posted.status, JSON.stringify(posted.body)).toBe(201);
+    expect((await messagesOf(mixed.threadId)).some((m) => m.text === "hello other section" && m.from?.botId === inside.id)).toBe(true);
   }, 40_000);
 
   it.each(["Coordinators", ""])("allows a section bot to post to and list a room holding its supervising coordinator in section %j", async (section) => {
@@ -539,36 +536,6 @@ describe("post_to_room", () => {
     expect(posted.status, JSON.stringify(posted.body)).toBe(201);
     const roomMessages = await messagesOf(room.threadId);
     expect(roomMessages.some((m) => m.text === "ready for review" && m.from?.botId === member.id)).toBe(true);
-  }, 40_000);
-
-  it("refuses a section bot if the room includes a coordinator who does not manage its section", async () => {
-    await makeBot("Finance Bot", "Finance");
-    const member = await makeBot("Build Worker", "Build");
-    const coordinator = await makeCoordinator("Finance Chief", "Coordinators", ["Finance"]);
-    const room = await makeRoom("Unsupervised Room", [member.id, coordinator.id], "Build");
-
-    const listed = await internal("GET", `/api/internal/rooms?fromBotId=${member.id}&fromThreadId=${member.threadId}`);
-    expect(listed.status).toBe(200);
-    const rooms = Array.isArray(listed.body.rooms) ? listed.body.rooms : [];
-    expect(rooms.some((r) => field(r as Record<string, unknown>, "id") === room.id)).toBe(false);
-
-    const refused = await post(member.id, member.threadId, room.id, "hello");
-    expect(refused.status).toBe(403);
-    expect(str(refused.body.error)).toContain("outside your section");
-    expect(await messagesOf(room.threadId)).toHaveLength(0);
-  }, 40_000);
-
-  it("still refuses a room holding both a supervising coordinator and an outside bot", async () => {
-    const member = await makeBot("Team Member", "Build");
-    const coordinator = await makeCoordinator("Team Chief", "Coordinators", ["Build"]);
-    const stranger = await makeBot("Finance Stranger", "Finance");
-    const mixed = await makeRoom("Mixed Room", [member.id, coordinator.id, stranger.id], "Build");
-
-    const refused = await post(member.id, member.threadId, mixed.id, "hello everyone");
-    expect(refused.status).toBe(403);
-    expect(str(refused.body.error)).toContain("outside your section");
-    expect(str(refused.body.error)).toContain("@Finance Stranger");
-    expect(await messagesOf(mixed.threadId)).toHaveLength(0);
   }, 40_000);
 
   it("refuses the room the sender is already speaking in", async () => {

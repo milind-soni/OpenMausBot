@@ -316,6 +316,19 @@ function expired(row: FlowRow, now: number): boolean {
   return row.created_at + HIGHLEVEL_FLOW_TTL_MS <= now;
 }
 
+/** Marks the flow as taken by this callback at `now`, or false when another callback, a claim or the TTL got there first. */
+async function takeForCallback(env: Env, lookup: string, now: number): Promise<boolean> {
+  const taken = await env.DB.prepare(
+    `UPDATE highlevel_flows SET callback_at = ?1
+     WHERE lookup = ?2 AND callback_at IS NULL AND ciphertext IS NULL AND claimed_at IS NULL AND created_at > ?3`,
+  ).bind(now, lookup, now - HIGHLEVEL_FLOW_TTL_MS).run();
+  return taken.meta.changes === 1;
+}
+
+function endTakenFlow(env: Env, lookup: string, now: number) {
+  return env.DB.prepare("DELETE FROM highlevel_flows WHERE lookup = ? AND callback_at = ?").bind(lookup, now).run();
+}
+
 /** HighLevel sends the person's browser here: a top-level GET with no Origin
  * header and no credential. Every answer is a fixed page; query values are
  * never echoed or logged. */
@@ -340,23 +353,26 @@ export async function highLevelCallback(
   if (url.searchParams.has("error")) {
     // The person declined, or HighLevel refused before issuing a code. The
     // flow ends here: a claim finds nothing and the harness times out cleanly.
-    await env.DB.prepare("DELETE FROM highlevel_flows WHERE lookup = ?").bind(lookup).run();
+    if (!(await takeForCallback(env, lookup, now))) return PAGES.expired();
+    await endTakenFlow(env, lookup, now);
     console.log(JSON.stringify({ message: "highlevel flow cancelled", requestId }));
     return PAGES.cancelled();
   }
   const code = url.searchParams.get("code") ?? "";
   if (!CODE.test(code)) return PAGES.failed();
 
+  if (!(await takeForCallback(env, lookup, now))) return PAGES.expired();
   const outcome = await exchange(config, { grant_type: "authorization_code", code }, highLevelFetch);
   if (outcome.kind !== "ok") {
     // The code is single-use: nothing to retry with, so the flow ends.
-    await env.DB.prepare("DELETE FROM highlevel_flows WHERE lookup = ?").bind(lookup).run();
+    await endTakenFlow(env, lookup, now);
     console.error(JSON.stringify({ message: "highlevel exchange failed", requestId, status: outcome.status, errorCode: "highlevel_exchange_failed" }));
     return PAGES.failed();
   }
   const stored = await env.DB.prepare(
-    "UPDATE highlevel_flows SET ciphertext = ? WHERE lookup = ? AND ciphertext IS NULL AND claimed_at IS NULL AND created_at > ?",
-  ).bind(await seal(state, outcome.payload), lookup, now - HIGHLEVEL_FLOW_TTL_MS).run();
+    `UPDATE highlevel_flows SET ciphertext = ?
+     WHERE lookup = ? AND callback_at = ? AND ciphertext IS NULL AND claimed_at IS NULL AND created_at > ?`,
+  ).bind(await seal(state, outcome.payload), lookup, now, now - HIGHLEVEL_FLOW_TTL_MS).run();
   if (stored.meta.changes === 0) return PAGES.expired();
   console.log(JSON.stringify({ message: "highlevel flow connected", requestId }));
   return PAGES.connected();

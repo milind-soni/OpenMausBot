@@ -749,6 +749,8 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   },
   modelVariants: true,
   ownMcpOverHttp: true,
+  // OpenCode 1.18.27's build agent lists 13 tools of its own (bash, read, edit, task, skill…); room for a newer CLI's.
+  engineTools: 24,
   resolveTurnModel: (model, env) => model ? ensureOpenCodeInjectModel(model, env) : model,
   transformEnv: withholdProviderKeysWhenManaged,
   spawnFingerprint: openCodeLoginsFingerprint,

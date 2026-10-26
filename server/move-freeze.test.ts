@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createMoveFreeze, ENDED_REFUSAL, HOME_SCREEN, MOVED_REFUSAL } from "./move-freeze.ts";
+import type { MoveWait } from "./move-waits.ts";
 import { createMoveFreezeRoutes } from "./routes/move-freeze.ts";
 import { PASS } from "./routes/table.ts";
 
@@ -93,18 +94,20 @@ describe("/api/move/freeze", () => {
   };
 
   it("freezes only at a quiet moment, names who is still working, and lifts", async () => {
-    let busy: string | null = "Scout";
+    let busy: MoveWait | null = { name: "Scout", what: "bot" };
     const freeze = createMoveFreeze({ dataDir: dataDir() });
     const route = createMoveFreezeRoutes({ freeze, busy: () => busy, restart() {} });
-    expect(await ask(route, "GET")).toEqual({ status: 200, body: { frozen: false, busy: "Scout" } });
-    expect(await ask(route, "POST", undefined, { cloud: "https://omb-t-1.fly.dev" })).toMatchObject({ status: 409, body: { busy: "Scout" } });
+    expect(await ask(route, "GET")).toEqual({ status: 200, body: { frozen: false, busy: "Scout", what: "bot" } });
+    expect(await ask(route, "POST", undefined, { cloud: "https://omb-t-1.fly.dev" })).toMatchObject({ status: 409, body: { busy: "Scout", what: "bot" } });
     expect(freeze.frozen()).toBe(false);
+    busy = { name: "", what: "sign-in" };
+    expect(await ask(route, "POST", undefined, { cloud: "https://omb-t-1.fly.dev" }), "no name: what it is").toMatchObject({ status: 409, body: { busy: "", what: "sign-in" } });
     busy = null;
     expect(await ask(route, "POST", undefined, { cloud: "https://omb-t-1.fly.dev" })).toEqual({ status: 200, body: { frozen: true } });
     expect(await ask(route, "GET"), "the desktop learns which Cloud, even with its journal lost").toEqual({ status: 200, body: { frozen: true, cloud: "https://omb-t-1.fly.dev" } });
     expect(await ask(route, "POST", "/api/bots/b1/messages")).toEqual({ status: 409, body: { error: MOVED_REFUSAL, code: "moved" } });
     expect(await ask(route, "GET", "/api/bots")).toBe("pass");
-    busy = "Scout";
+    busy = { name: "Scout", what: "bot" };
     expect(await ask(route, "POST"), "freezing again is a no-op, however busy").toEqual({ status: 200, body: { frozen: true } });
     expect(await ask(route, "DELETE")).toEqual({ status: 200, body: { frozen: false } });
     expect(await ask(route, "POST", "/api/bots/b1/messages")).toBe("pass");

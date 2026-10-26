@@ -306,6 +306,22 @@ describe("routine editor", () => {
     expect(editor(routine)).toContain("Each run starts with the previous run&#x27;s report");
   });
 
+  it("schedules a goal in the bot's own chat when no group is chosen", () => {
+    const ownGoal: Routine = { ...routine, id: "own-goal", name: "Ship the fix", target: "room-goal", groupId: undefined, resultsThreadId: undefined };
+    const html = editor(ownGoal);
+    expect(html).toContain("Where it runs");
+    expect(html).toMatch(/<option value="" selected="">Just the bot, in its own chat<\/option>/);
+    expect(html).toContain("The bot works on the goal in its own chat until it is done.");
+    expect(html).toContain("Runner");
+    expect(html).not.toContain("Create a group from the sidebar first");
+
+    fixture.values = [];
+    const props = { seed: { kind: "routine" as const, at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [bot.id], routine: ownGoal }, bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn() };
+    click(buttons(capture(() => EventEditor(props))).get("Save"));
+    const [, init] = fixture.api.mock.calls.at(-1) as unknown as [string, { body: string }];
+    expect(JSON.parse(init.body)).toMatchObject({ target: "room-goal", botId: bot.id, groupId: null });
+  });
+
   it("hides Remember the last run for a one-time routine", () => {
     expect(editor()).not.toContain("Remember the last run");
   });

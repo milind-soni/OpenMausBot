@@ -446,6 +446,28 @@ describe("browsers on one computer", () => {
     expect(backend.chromes.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("closes a browser that was still starting when its profile was erased or every browser closed, before either finishes", async () => {
+    for (const stop of ["erase", "closeAll"] as const) {
+      let real: FakeBackend | null = null;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const slow: Backend = { kind: "local", get caps() { return real!.caps; }, open: async (request) => { await gate; return real!.open(request); } };
+      const { service, call, backend } = setup({ backend: () => slow });
+      real = backend;
+      const pending = call("agent_browser_open", { url: "https://example.com/a" });
+      await sleep(10);
+      const stopped = stop === "erase" ? service.erase("bot:a") : service.closeAll();
+      await sleep(10);
+      release();
+      await stopped;
+      let closed = false;
+      backend.chrome.onClose(() => { closed = true; });
+      expect(closed).toBe(true);
+      expect(service.profiles().some((profile) => profile.run)).toBe(false);
+      expect((await pending).isError).toBe(true);
+    }
+  });
+
   it("erases a deleted bot's profile folder and downloads", async () => {
     const { service, call, dataDir } = setup();
     await call("agent_browser_open", { url: "https://example.com/form" });

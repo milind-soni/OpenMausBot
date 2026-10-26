@@ -217,11 +217,25 @@ describe("CI concurrency", () => {
         expect(check.env).toEqual({ CLOUDFLARE_API_TOKEN: "${{ secrets.CLOUDFLARE_API_TOKEN }}" });
         expect(check.run).toContain("::warning");
         for (const step of rest) expect(step.if).toBe("steps.token.outputs.present == 'true'");
+        // The broker is typechecked and tested in the same checkout it deploys.
+        const runs = rest.map((step) => step.run);
+        const deploy = rest.findIndex((step) => (step as { uses?: string }).uses?.startsWith("cloudflare/wrangler-action@"));
+        expect(runs.indexOf("pnpm broker:check")).toBeGreaterThan(-1);
+        expect(runs.indexOf("pnpm broker:check")).toBeLessThan(deploy);
+        expect(runs.indexOf("pnpm broker:test")).toBeGreaterThan(-1);
+        expect(runs.indexOf("pnpm broker:test")).toBeLessThan(deploy);
         continue;
       }
       expect(job.needs).toBe("static");
       expect(job.if).toBe("needs.static.outputs.runtime == 'true'");
     }
+  });
+
+  it("pins every external action to a full commit SHA", () => {
+    const uses = (Object.values(workflow.jobs) as { steps?: { uses?: string }[] }[])
+      .flatMap((job) => job.steps ?? []).flatMap((step) => (step.uses && !step.uses.startsWith("./") ? [step.uses] : []));
+    expect(uses.length).toBeGreaterThan(0);
+    for (const action of uses) expect(action).toMatch(/^[\w.-]+\/[\w./-]+@[0-9a-f]{40}$/);
   });
 
   it("keeps the redundant Windows workflow available only for manual debugging", () => {

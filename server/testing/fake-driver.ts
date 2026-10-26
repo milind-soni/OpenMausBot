@@ -19,6 +19,8 @@ export interface FakeDriverOptions {
   hangSnapshot?: boolean;
   /** snapshot() answers only once this settles, so a test can hold a probe in flight. */
   holdSnapshot?: Promise<unknown>;
+  /** What snapshot() answers instead of an available engine. */
+  answer?: ProviderSnapshot;
   /** effort levels this fake driver declares, forwarded onto capabilities. */
   effortLevels?: readonly EffortLevel[];
 }
@@ -69,7 +71,7 @@ export function makeFakeDriver(opts: FakeDriverOptions = {}): FakeDriverHandle {
             if (opts.failSnapshot) throw new Error(opts.failSnapshot);
             if (opts.hangSnapshot) await new Promise<never>(() => {});
             if (opts.holdSnapshot) await opts.holdSnapshot;
-            return { state: "available", version: "0.0.0-fake" };
+            return opts.answer ?? { state: "available", version: "0.0.0-fake" };
           },
           adapter: {
             provider: kind,

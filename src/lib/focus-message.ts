@@ -1,14 +1,38 @@
 // Rows are `display: contents` wrappers with no box, so their last child is what gets scrolled and highlighted.
 import { useEffect } from "react";
-import { api, useStore, type Action, type AppState } from "@/state/store";
+import { api, MESSAGE_PAGE_SIZE, useStore, type Action, type AppState, type Message } from "@/state/store";
 import type { SearchHit } from "@/lib/search-hit";
 import { t } from "@/lib/i18n";
 
 const FLASH_CLASSES = ["ring-2", "ring-accent/70", "rounded-2xl", "transition-shadow"];
 
+async function loadThroughMessage(
+  owner: { threadId: string; messages: Message[]; hasMore?: boolean },
+  messageId: string,
+  generation: number,
+  dispatch: React.Dispatch<Action>,
+): Promise<void> {
+  if (!owner.hasMore || owner.messages.some((message) => message.id === messageId)) return;
+  const older: Message[] = [];
+  let before = owner.messages[0]?.id;
+  let hasMore = true;
+  let found = false;
+  while (before && hasMore && !found) {
+    const page = await api<{ messages?: Message[]; hasMore?: boolean }>(
+      `/api/threads/${owner.threadId}/messages?limit=${MESSAGE_PAGE_SIZE}&before=${encodeURIComponent(before)}`,
+    );
+    const messages = page.messages ?? [];
+    older.unshift(...messages);
+    found = messages.some((message) => message.id === messageId);
+    hasMore = Boolean(page.hasMore) && messages.length > 0;
+    before = messages[0]?.id;
+  }
+  if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, messages: older, hasMore });
+}
+
 export async function landOnSearchHit(
   hit: SearchHit,
-  state: Pick<AppState, "bots" | "groups">,
+  state: Pick<AppState, "bots" | "groups" | "transcriptGeneration">,
   dispatch: React.Dispatch<Action>,
   threadsShown: boolean,
 ): Promise<void> {
@@ -27,6 +51,8 @@ export async function landOnSearchHit(
     const result = await api(`/api/groups/${group.id}/tasks/${hit.threadId}`, { method: "POST" });
     if (result?.group) dispatch({ type: "groupPatched", group: result.group });
   }
+  const open = bot?.threadId === hit.threadId ? bot : group?.threadId === hit.threadId ? group : undefined;
+  if (open) await loadThroughMessage(open, hit.messageId, state.transcriptGeneration[hit.threadId] ?? 0, dispatch);
   if (bot && !hit.onActivePath) {
     const branch = await api(`/api/bots/${bot.id}/active-branch`, {
       method: "POST",

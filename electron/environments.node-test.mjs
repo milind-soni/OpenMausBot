@@ -465,3 +465,12 @@ test("the session's teams become saved places, named and roled as the Admin says
   const saved = { environments: [{ id: "s", kind: "remote", name: "Acme (saved by hand)", origin: TEAM }], activeId: "s" };
   assert.deepEqual(env.reconcileTeams(saved, [acme()], makeId, home).state.environments, [{ id: "s", kind: "remote", name: "Acme", origin: TEAM, team: { id: "team-acme", role: "admin" } }], "a server saved by hand at the team's address becomes the team's entry");
 });
+
+test("with My Cloud as home, the menu still folds its status line into the name where menus show no sublabels", async () => {
+  const state = { activeId: "c", environments: [{ id: "c", kind: "remote", name: "My Cloud", origin: "https://me.example" }] };
+  for (const [platform, folded] of [["linux", true], ["win32", true], ["darwin", false]]) {
+    const options = await env.placesMenuOptions({ homeOrigin: "https://me.example", cloud: state.environments[0], platform, localBots: async () => { throw new Error("home lists no local bots"); } });
+    const [item] = env.workspaceMenuTemplate(state, { onSwitch() {}, sublabels: { c: "Always on" }, ...options });
+    assert.equal(item.label, folded ? "My Cloud · Always on" : "My Cloud", platform);
+  }
+});

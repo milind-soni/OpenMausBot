@@ -115,6 +115,7 @@ export interface Routine {
   prompt: string;
   target: RoutineTarget;
   botId: string;
+  /** The room a "room-goal" runs in; none runs the goal in the bot's own one-on-one chat, a room of one. */
   groupId?: string;
   runOn: RoutineRunOn;
   enabled: boolean;

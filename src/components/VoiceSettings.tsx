@@ -1,10 +1,11 @@
 // Security: the harness holds the cloud provider keys; the renderer never talks to ElevenLabs or Fish Audio itself.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Loader2, Volume2 } from "lucide-react";
 
 import { api, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { speaker } from "@/lib/tts";
+import { useSpeech } from "@/lib/tts/useSpeech";
 import {
   listLocalSystemVoices,
   localSystemVoicesAvailable,
@@ -17,6 +18,7 @@ import {
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { voiceKeyDraftValue, type VoiceKeyDraft } from "@/lib/voice-key-draft";
+import { VoicePicker, type PickerVoice } from "./VoicePicker";
 import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
 
@@ -49,13 +51,23 @@ export function VoiceSettings({
   const [error, setError] = useState<string | null>(null);
   const [voices, setVoices] = useState<Array<{ id: string; label: string; description?: string }>>([]);
   const [loadingVoices, setLoadingVoices] = useState(false);
+  const [addingVoice, setAddingVoice] = useState<PickerVoice | null>(null);
+  const addGeneration = useRef(0);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [voiceQuery, setVoiceQuery] = useState("");
+  const [searchedQuery, setSearchedQuery] = useState("");
 
   const { capabilities } = useDesktopCapabilities();
+  const speech = useSpeech();
+  const preparingSample = speech.status === "preparing" && speech.botId === bot.id && !speech.messageId;
   const localMacClient = workspaceConfigurationLocked && localSystemVoicesAvailable();
   const [deviceProvider, setDeviceProvider] = useState<RemoteVoiceProvider>(() => remoteVoiceProvider());
   const [deviceVoice, setDeviceVoice] = useState(() => remoteSystemVoice(bot.id));
   const usesLocalSystem = localMacClient && deviceProvider === "system";
   const provider = tts?.provider ?? "elevenlabs";
+  const searchable = (provider === "fish" || provider === "elevenlabs") && !usesLocalSystem;
+  const voiceSearch = searchable ? searchedQuery : "";
+  const pickedVoice = searchable ? (bot.voice ?? "") : "";
   const cloudProvider = provider === "fish"
     ? {
         id: "fish" as const,
@@ -92,6 +104,19 @@ export function VoiceSettings({
     setDeviceVoice(remoteSystemVoice(bot.id));
   }, [bot.id]);
 
+  const sampleVoice = usesLocalSystem ? deviceVoice : bot.voice;
+  useEffect(() => () => {
+    const playing = speaker.state;
+    if (playing.status !== "idle" && playing.botId === bot.id && !playing.messageId) speaker.stop();
+  }, [bot.id, sampleVoice, provider]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchedQuery(voiceQuery.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [voiceQuery]);
+
+  useEffect(() => setVoiceQuery(""), [provider]);
+
   useEffect(() => {
     setServerUrl(tts?.baseUrl ?? "");
     setModel(tts?.model ?? "");
@@ -102,6 +127,8 @@ export function VoiceSettings({
   useEffect(() => {
     setKeyDraft({ provider: null, value: "" });
   }, [provider]);
+
+  useEffect(() => setVoices([]), [provider, usesLocalSystem]);
 
   useEffect(() => {
     if (usesLocalSystem) {
@@ -116,7 +143,11 @@ export function VoiceSettings({
     }
     let alive = true;
     setLoadingVoices(true);
-    api("/api/tts/voices")
+    const params = new URLSearchParams();
+    if (voiceSearch) params.set("q", voiceSearch);
+    if (provider === "fish" && pickedVoice) params.set("current", pickedVoice);
+    const query = params.toString();
+    api(`/api/tts/voices${query ? `?${query}` : ""}`)
       .then((r: { voices?: typeof voices; error?: string }) => {
         if (!alive) return;
         setVoices(r.voices ?? []);
@@ -127,7 +158,7 @@ export function VoiceSettings({
     return () => {
       alive = false;
     };
-  }, [hostConfigured, provider, usesLocalSystem]);
+  }, [hostConfigured, provider, usesLocalSystem, voiceSearch, pickedVoice]);
 
   const chooseDeviceProvider = (next: RemoteVoiceProvider) => {
     setRemoteVoiceProvider(next);
@@ -142,6 +173,28 @@ export function VoiceSettings({
       return;
     }
     onPatch({ voice: voiceId });
+  };
+
+  // An add that settles after the bot or the provider changed belongs to neither: it must not set this voice.
+  useEffect(() => {
+    addGeneration.current += 1;
+    setAddingVoice(null);
+    setAddError(null);
+  }, [bot.id, provider]);
+
+  const pickVoice = (voice: PickerVoice) => {
+    setAddError(null);
+    if (!voice.publicOwnerId) return chooseVoice(voice.id);
+    const generation = ++addGeneration.current;
+    const current = () => generation === addGeneration.current;
+    setAddingVoice(voice);
+    api("/api/tts/voices/add", {
+      method: "POST",
+      body: JSON.stringify({ publicOwnerId: voice.publicOwnerId, voiceId: voice.id, name: voice.label }),
+    })
+      .then((r: { voiceId: string }) => current() && chooseVoice(r.voiceId))
+      .catch((e: Error) => current() && setAddError(e.message))
+      .finally(() => current() && setAddingVoice(null));
   };
 
   const setProvider = (next: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai") => {
@@ -204,6 +257,7 @@ export function VoiceSettings({
 
   const selectedVoice = usesLocalSystem ? deviceVoice : (bot.voice ?? "");
   const ready = usesLocalSystem || (hostConfigured && Boolean(selectedVoice || tts.voice));
+  const selectedDescription = voices.find((voice) => voice.id === selectedVoice)?.description;
 
   return (
     <div className="rounded-xl bg-card p-4">
@@ -256,13 +310,14 @@ export function VoiceSettings({
       {!workspaceConfigurationLocked && (
         <div className="mt-4">
           <div className="mb-2 text-[13px] text-ink-secondary">{t("voice.engine")}</div>
-          <div className="grid grid-cols-2 gap-1 rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("voice.engine")}>
+          {/* Six columns: the three online services share the top row, the two on this computer the bottom one. */}
+          <div className="grid grid-cols-6 gap-1 rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("voice.engine")}>
             {([
-              { value: "elevenlabs", label: t("voice.elevenlabs.label"), available: true },
-              { value: "fish", label: t("voice.fish.label"), available: true },
-              { value: "system", label: t("voice.macBuiltIn"), available: systemVoicesAvailable },
-              { value: "chatterbox", label: t("voice.chatterboxLocal"), available: true },
-              { value: "xai", label: t("voice.grok.label"), available: true },
+              { value: "elevenlabs", label: t("voice.elevenlabs.label"), available: true, span: "col-span-2" },
+              { value: "fish", label: t("voice.fish.label"), available: true, span: "col-span-2" },
+              { value: "xai", label: t("voice.grok.label"), available: true, span: "col-span-2" },
+              { value: "system", label: t("voice.macBuiltIn"), available: systemVoicesAvailable, span: "col-span-3" },
+              { value: "chatterbox", label: t("voice.chatterboxLocal"), available: true, span: "col-span-3" },
             ] as const).map((option) => (
               <button
                 key={option.value}
@@ -273,7 +328,8 @@ export function VoiceSettings({
                 title={!option.available ? t("voice.macOnly") : undefined}
                 onClick={() => setProvider(option.value)}
                 className={cn(
-                  "rounded-lg px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50",
+                  "min-w-0 rounded-lg px-2 py-1.5 text-[12.5px] leading-tight transition-colors disabled:opacity-50",
+                  option.span,
                   provider === option.value ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink",
                 )}
               >
@@ -405,42 +461,61 @@ export function VoiceSettings({
         <div className="mt-4">
           <div className="mb-1.5 text-[13px] text-ink-secondary">{t("voice.title")}</div>
           <div className="flex gap-2">
-            <Select
-              value={selectedVoice}
-              onChange={(e) => chooseVoice(e.target.value)}
-              aria-label={t("voice.pickerLabel", { name: bot.name })}
-              data-voice-picker
-              className="w-full"
-            >
-              <option value="">
-                {loadingVoices
-                  ? t("voice.loading")
-                  : usesLocalSystem
-                    ? t("voice.macDefault")
-                    : tts.voice
-                      ? t("voice.installDefault")
-                      : t("voice.pick")}
-              </option>
-              {selectedVoice && !voices.some((voice) => voice.id === selectedVoice) && (
-                <option value={selectedVoice}>{t("voice.current")}</option>
-              )}
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.label}
-                  {v.description ? ` — ${v.description}` : ""}
+            {searchable ? (
+              <VoicePicker
+                key={provider}
+                value={selectedVoice}
+                voices={voices}
+                loading={loadingVoices || voiceQuery.trim() !== searchedQuery}
+                query={voiceQuery}
+                onQuery={setVoiceQuery}
+                onPick={pickVoice}
+                pending={addingVoice ?? undefined}
+                defaultLabel={tts.voice ? t("voice.installDefault") : t("voice.pick")}
+                ariaLabel={t("voice.pickerLabel", { name: bot.name })}
+              />
+            ) : (
+              <Select
+                value={selectedVoice}
+                onChange={(e) => chooseVoice(e.target.value)}
+                aria-label={t("voice.pickerLabel", { name: bot.name })}
+                data-voice-picker
+                className="w-full"
+              >
+                <option value="">
+                  {loadingVoices
+                    ? t("voice.loading")
+                    : usesLocalSystem
+                      ? t("voice.macDefault")
+                      : tts.voice
+                        ? t("voice.installDefault")
+                        : t("voice.pick")}
                 </option>
-              ))}
-            </Select>
+                {selectedVoice && !voices.some((voice) => voice.id === selectedVoice) && (
+                  <option value={selectedVoice}>{t("voice.current")}</option>
+                )}
+                {voices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.label}
+                  </option>
+                ))}
+              </Select>
+            )}
             <button
               onClick={() => void speaker.speak(SAMPLE, { voiceId: bot.voice, botId: bot.id })}
-              disabled={!ready}
+              disabled={!ready || preparingSample}
+              aria-busy={preparingSample}
               title={ready ? t("voice.hear") : t("voice.pickFirst")}
               aria-label={t("voice.hear")}
               className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Volume2 size={14} /> {t("voice.try")}
+              {preparingSample ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />} {t("voice.try")}
             </button>
           </div>
+          {addError && <div role="alert" className="mt-1.5 text-[12px] text-danger">{addError}</div>}
+          {!searchable && selectedDescription && (
+            <div className="mt-1.5 text-[11.5px] leading-relaxed text-ink-secondary">{selectedDescription}</div>
+          )}
         </div>
       )}
 

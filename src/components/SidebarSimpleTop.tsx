@@ -7,6 +7,9 @@ import { t } from "@/lib/i18n";
 
 export const SIMPLE_TOP_BUTTON = "flex size-[30px] shrink-0 items-center justify-center rounded-full bg-raised/50 text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
+/** The round control at either end of the phone bot list's top row. */
+export const PHONE_TOP_BUTTON = "flex size-10 shrink-0 items-center justify-center rounded-full border border-hairline bg-card text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+
 export const SIMPLE_RAIL_BUTTON = "flex size-9 shrink-0 items-center justify-center rounded-xl text-ink-secondary hover:bg-raised/60 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 /** The small bump on the sidebar's right edge that collapses it to the rail and back (Simple mode).

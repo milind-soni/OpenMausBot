@@ -17,8 +17,8 @@ const ADMIN = { email: "ben@acme.test", role: "admin" as const };
 const MEMBER_A = { email: "ada@acme.test", role: "member" as const };
 const MEMBER_C = { email: "cleo@acme.test", role: "member" as const };
 const ENGINE = `import { readFileSync as readToolCalls } from "node:fs";
-process.env.FAKE_CLAUDE_DUMP = process.env.HOME + "/dump.json";
-try { process.env.FAKE_CLAUDE_TOOL_CALLS = readToolCalls(process.env.HOME + "/tool-calls.json", "utf8"); } catch {}`;
+process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/dump.json";
+try { process.env.FAKE_CLAUDE_TOOL_CALLS = readToolCalls(process.env.FAKE_CLAUDE_FIXTURE_DIR + "/tool-calls.json", "utf8"); } catch {}`;
 
 let fx: CloudSendFixture, team: CloudTeamFixture, broker: BrokerFake;
 let owner = "", admin = "", ada = "", cleo = "";

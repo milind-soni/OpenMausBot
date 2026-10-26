@@ -350,6 +350,11 @@ export interface WireBot extends DefaultBotFields {
   chiefOfStaff?: boolean;
   /** Owner-selected additional teams this Chief may coordinate. */
   managedSections?: string[];
+  /** Team Cloud only: the lowercased email of the member who created the bot (or moved it in). */
+  createdBy?: string;
+  /** Team Cloud only: the lowercased email of the member the bot reports to, whose inbox its questions, approvals,
+   * failures and routine results reach. Absent: it reports to `createdBy`. */
+  reportsTo?: string;
   /** Pause for human approval before this bot talks to a peer. */
   approvePeerComms?: boolean;
   /** Bot ids this bot is allowed to contact. */
@@ -362,6 +367,8 @@ export interface WireBot extends DefaultBotFields {
   connectorTools?: Record<string, ConnectorToolGrant>;
   connectorScopes?: { apps: Record<string, "read" | "write"> };
   outbound?: { policy: "ask" | "allow"; dailyCap: number };
+  /** Which of a paired phone's apps this bot may use; absent: every bot may use what the phone allows (shared/phone-apps.ts). */
+  phoneApps?: import("./phone-apps.ts").PhoneApps;
   /** Ordered backups used only by opt-in, pre-prompt startup recovery. */
   fallback?: Array<{ instanceId: string; model: string }>;
   /** Whether this bot gets the app's built-in browser. */
@@ -414,8 +421,8 @@ export interface ResolvedSender {
  * owner on this machine, or a session-less local caller on a shared server
  * (`worker`: the Slack worker, or any other process on that machine). */
 export type CardAnswerer = (
-  /** `person`: the answering session's opaque person key, recorded on an OMB
-   * Cloud home only. */
+  /** `person`: the answering session's opaque person key, so the owner checks
+   * can tell whose answer it was. */
   | { kind: "session"; name: string; person?: string }
   | { kind: "loopback" }
   | { kind: "worker" }
@@ -424,6 +431,9 @@ export type CardAnswerer = (
    * card. Absent: tapped. */
   via?: "call" | "reaction";
 };
+
+/** Opens every compaction summary written without a model (recent excerpts only); the chat labels stored records by it. */
+export const EXCERPT_SUMMARY_HEADER = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
 
 /** One transcript line, serialized as stored. */
 export interface WireMessage extends ServerTextLine, HelperIntroField {
@@ -457,6 +467,8 @@ export interface WireMessage extends ServerTextLine, HelperIntroField {
    * bots' work) rather than the bot: replayed to the bot only as labelled
    * data, never as its own words, and never edited by a bot. */
   serverCard?: true;
+  /** A setup suggestion the device renders in its own words (server/host/helper-suggestion.ts); `text` is the English. */
+  setupSuggestion?: { kind: "helperKey"; answer?: "notNow" };
   /** app rows (kind "app"): bot HTML or an MCP server's UI. `text` is always the readable fallback. */
   app?: AppPayload;
   /** user rows sent by an app's ui/message: the app row that sent them. Every client draws "Sent from <title>". */
@@ -554,7 +566,7 @@ export interface WireMessage extends ServerTextLine, HelperIntroField {
   /** A room reply whose speaker the decision model picked (an Auto room),
    * with how sure it was. Absent on every other message; clients that do
    * not know it ignore it. */
-  routedBy?: { provider: "jev" | "openrouter"; probability: number };
+  routedBy?: { provider: "jev" | "workersai" | "openrouter"; probability: number };
   /** On a conversational bot's user line: the picker label of the quick model its reply ran on. */
   quickModel?: string;
   /** Set on the user-role line another bot delivered into this bot's own
@@ -952,5 +964,7 @@ export type ServerFrame =
   /** The whole fleet in its new order (PUT /api/bots/order); a member is sent only the bots they see. */
   | { kind: "bots.order"; botIds: string[] }
   | { kind: "live.call"; botId: string; threadId: string; call: LiveCallState | null }
+  /** A job is waiting for the phone whose registry key this is; it polls now. */
+  | { kind: "device.job"; phone: string; id: string }
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

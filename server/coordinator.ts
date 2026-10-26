@@ -124,9 +124,10 @@ export interface CoordinatorHost {
   names(node: HandoffView, parent?: HandoffView): EnvelopeNames;
   /** `restored` shows the question again only if the first showing never happened; a root parked on its own cards shows nothing more. */
   park(node: HandoffView, question: string, restored?: boolean): void;
-  /** The level the target thread will really run with, so the envelope states the truth. A Chief's level flows into a room
-   * with the hand-off, never onto the shared thread, so it resolves from `source`. */
-  levelOf(target: RoomAddress, source?: RoomAddress): { level: Level; driverKind?: string };
+  /** The level the target thread will really run with, so the envelope states the truth, and, when that came down a Chief's
+   * chain, the Chief conversation's level. A Chief's level flows into a room with the hand-off, never onto the shared thread,
+   * so it resolves from `source`, the requester's node, whose parents lead up the chain. */
+  levelOf(target: RoomAddress, source?: HandoffView): { level: Level; chief?: Level; driverKind?: string };
   chiefOf(address: RoomAddress): boolean;
   /** What the cut turn already did outward (sent, posted, paid): a turn that acted outward is not run again. */
   outward?(node: HandoffView): string[];

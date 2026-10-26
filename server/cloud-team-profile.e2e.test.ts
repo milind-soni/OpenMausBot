@@ -16,7 +16,7 @@ const CLEO = { email: "cleo@acme.test", role: "member" as const };
 const DEE = { email: "dee@acme.test", role: "member" as const };
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const ADA_PHOTO = "/api/attachments/ada-photo.png";
-const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.HOME + "/dump.json";`;
+const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/dump.json";`;
 
 let fx: CloudSendFixture, team: CloudTeamFixture;
 let ada = "", bob = "";

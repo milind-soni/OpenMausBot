@@ -16,6 +16,10 @@ let server: Server;
 const seen: Array<{ method: string; url: string; headers: Record<string, string>; body: string }> = [];
 let refuse: { status: number; body: unknown } | null = null;
 
+const SHARED_VOICE = "SharedVoiceId0000001";
+const FISH_LONG_TAIL = "0327fdb5da9e4fd782899a8058c8ae2b";
+// Someone else's private voice: Fish refuses to describe it to this key.
+const FISH_PRIVATE = "9f8e7d6c5b4a39281706f5e4d3c2b1a0";
 const MP3 = Buffer.from([0xff, 0xfb, 0x90, 0x00, 0x11, 0x22, 0x33, 0x44]);
 const WAV = Buffer.from("RIFF....WAVEfmt ");
 let modelsFail = false;
@@ -50,6 +54,23 @@ beforeAll(async () => {
           voices: [{ voice_id: "v-1", name: "Rachel", labels: { accent: "american", description: "calm" } }],
         });
       }
+      if (path === "/v1/shared-voices") {
+        const query = new URL(req.url ?? "/", "http://stub").searchParams;
+        if (query.get("owner_id") === "owner1") {
+          return send(200, {
+            has_more: false,
+            voices: [{ voice_id: SHARED_VOICE, public_owner_id: "owner1", name: "Deep Narrator", accent: "british", description: "Gravelly", is_added_by_user: false }],
+          });
+        }
+        return send(200, {
+          has_more: false,
+          voices: [
+            { voice_id: "lib-1", public_owner_id: "owner2", name: "Library Rachel", accent: "irish", is_added_by_user: false },
+            { voice_id: "v-1", public_owner_id: "owner3", name: "Rachel", is_added_by_user: true },
+          ],
+        });
+      }
+      if (path.startsWith("/v1/voices/add/")) return send(200, { voice_id: path.split("/").at(-1) });
       if (/^\/v1\/text-to-speech\/[^/]+\/stream$/.test(path)) {
         if (speakStreamed) {
           const { first, rest, release } = speakStreamed;
@@ -62,8 +83,25 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "audio/mpeg" });
         return res.end(MP3);
       }
+      if (path === `/model/${FISH_LONG_TAIL}`) {
+        return send(200, { _id: FISH_LONG_TAIL, type: "tts", state: "trained", title: "Calm Narrator", description: "British" });
+      }
+      if (path === `/model/${FISH_PRIVATE}`) return send(403, { message: "forbidden" });
+      if (path.startsWith("/model/")) return send(404, { message: "not found" });
       if (path === "/model") {
         const query = new URL(req.url ?? "/", "http://stub").searchParams;
+        if (query.get("title")) {
+          const title = query.get("title");
+          return send(200, {
+            has_more: false,
+            items: query.get("self") === "true"
+              ? [{ _id: "fish-own", type: "tts", state: "trained", title: `My ${title}` }]
+              : [
+                { _id: "fish-3", type: "tts", state: "trained", title: `Public ${title}` },
+                { _id: "fish-own", type: "tts", state: "trained", title: `My ${title}` },
+              ],
+          });
+        }
         if (query.get("self") === "true" && req.headers.authorization !== "Bearer fish-key") {
           return send(401, { message: "unauthorized" });
         }
@@ -202,6 +240,43 @@ describe("ElevenLabs", () => {
     ]);
   });
 
+  it("searches the account and the Voice Library, marking voices that are not in the account yet", async () => {
+    seen.length = 0;
+    const { listVoices } = await voice();
+    expect(await listVoices(cfg(ready), undefined, { query: "rachel" })).toEqual([
+      { id: "v-1", label: "Rachel", description: "american · calm" },
+      { id: "lib-1", label: "Library Rachel", description: "irish", publicOwnerId: "owner2" },
+    ]);
+    expect(seen.map((call) => call.url)).toContain("/v1/shared-voices?page_size=100&search=rachel");
+  });
+
+  it("resolves a pasted Voice Library share link through its owner", async () => {
+    seen.length = 0;
+    const { listVoices } = await voice();
+    expect(await listVoices(cfg(ready), undefined, { query: `https://elevenlabs.io/app/voice-lab/share/owner1/${SHARED_VOICE}` })).toEqual([
+      { id: SHARED_VOICE, label: "Deep Narrator", description: "british · Gravelly", publicOwnerId: "owner1" },
+    ]);
+    expect(seen.map((call) => call.url)).toEqual(["/v1/voices", "/v1/shared-voices?page_size=100&owner_id=owner1"]);
+  });
+
+  it("reads a voice id from a share link, a voiceId link or a bare id", () => {
+    expect(elevenlabs.pastedVoice(`elevenlabs.io/app/voice-lab/share/abc123/${SHARED_VOICE}/`)).toEqual({ owner: "abc123", id: SHARED_VOICE });
+    expect(elevenlabs.pastedVoice(`https://elevenlabs.io/app/voice-library?voiceId=${SHARED_VOICE}`)).toEqual({ id: SHARED_VOICE });
+    expect(elevenlabs.pastedVoice(` ${SHARED_VOICE} `)).toEqual({ id: SHARED_VOICE });
+    expect(elevenlabs.pastedVoice("calm british narrator")).toBeUndefined();
+  });
+
+  it("adds a shared voice to the account under its library name", async () => {
+    seen.length = 0;
+    const { addSharedVoice } = await voice();
+    expect(await addSharedVoice(cfg(ready), "owner1", SHARED_VOICE, "Deep Narrator")).toBe(SHARED_VOICE);
+    const call = seen.at(-1)!;
+    expect([call.method, call.url]).toEqual(["POST", `/v1/voices/add/owner1/${SHARED_VOICE}`]);
+    expect(JSON.parse(call.body)).toEqual({ new_name: "Deep Narrator" });
+    expect(call.headers["xi-api-key"]).toBe("el-key");
+    await expect(addSharedVoice(cfg({ ...ready, provider: "fish", fishKey: "fish-key" }), "owner1", SHARED_VOICE, "x")).rejects.toThrow();
+  });
+
   it("asks for mp3 and sends the key as a header, never in the URL", async () => {
     seen.length = 0;
     const { speak } = await voice();
@@ -314,6 +389,47 @@ describe("Fish Audio", () => {
     ]);
     expect(urls.indexOf("/model?page_size=100&self=true&sort_by=created_at&page_number=1"))
       .toBeLessThan(urls.indexOf("/model?page_size=100&self=true&sort_by=created_at&page_number=2"));
+  });
+
+  it("searches public and owned Fish voices by title", async () => {
+    seen.length = 0;
+    const { listVoices } = await voice();
+    expect(await listVoices(cfg(ready), undefined, { query: " calm voice " })).toEqual([
+      { id: "fish-3", label: "Public calm voice", description: undefined },
+      { id: "fish-own", label: "My calm voice", description: undefined },
+    ]);
+    expect(seen.map((call) => call.url).sort()).toEqual([
+      "/model?page_size=100&self=true&title=calm%20voice",
+      "/model?page_size=100&sort_by=task_count&title=calm%20voice",
+    ]);
+  });
+
+  it("looks up a pasted Fish voice id or link instead of searching", async () => {
+    const { listVoices } = await voice();
+    for (const query of [FISH_LONG_TAIL, `https://fish.audio/m/${FISH_LONG_TAIL}/`, `fish.audio/m/${FISH_LONG_TAIL.toUpperCase()}?x=1`]) {
+      seen.length = 0;
+      expect(await listVoices(cfg(ready), undefined, { query })).toEqual([
+        { id: FISH_LONG_TAIL, label: "Calm Narrator", description: "British" },
+      ]);
+      expect(seen.map((call) => call.url)).toEqual([`/model/${FISH_LONG_TAIL}`]);
+    }
+    expect(await listVoices(cfg(ready), undefined, { query: "f".repeat(32) })).toEqual([]);
+  });
+
+  it("names the selected Fish voice even when the popular list leaves it out", async () => {
+    const { listVoices } = await voice();
+    const voices = await listVoices(cfg(ready), undefined, { current: FISH_LONG_TAIL });
+    expect(voices[0]).toEqual({ id: FISH_LONG_TAIL, label: "Calm Narrator", description: "British" });
+    expect(voices.map((v) => v.id)).toContain("fish-1");
+    expect(await listVoices(cfg(ready), undefined, { query: "calm voice", current: FISH_LONG_TAIL }))
+      .not.toContainEqual(expect.objectContaining({ id: FISH_LONG_TAIL }));
+
+    const unreadable = await listVoices(cfg(ready), undefined, { current: FISH_PRIVATE });
+    expect(unreadable.map((v) => v.id)).toEqual(["fish-1", "fish-2"]);
+
+    seen.length = 0;
+    await listVoices(cfg(ready), undefined, { current: `../v1/tts?${FISH_LONG_TAIL}` });
+    expect(seen.some((call) => !call.url.startsWith("/model?"))).toBe(false);
   });
 
   it("requests s2.1-pro mp3 speech and returns its raw audio", async () => {

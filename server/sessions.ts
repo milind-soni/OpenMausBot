@@ -190,7 +190,7 @@ export class SessionRegistry {
   private failures = new Map<string, { count: number; windowStart: number; lockedUntil: number }>();
   private replays: Array<{ codeHash: string; attemptId: string; browser: boolean; result: ExchangeResult; expiresAt: number }> = [];
   private readonly onRevoked = new Set<(sessionId: string) => void>();
-  private readonly onIssued = new Set<(session: Pick<SessionRecord, "id" | "scopes">) => void>();
+  private readonly onIssued = new Set<(session: Pick<SessionRecord, "id" | "scopes" | "email" | "teamRole" | "membershipAuthority">) => void>();
   private lastSeenWrites = new Map<string, number>();
   private readonly now: () => number;
   private readonly options: SessionStoreOptions;
@@ -275,7 +275,7 @@ export class SessionRegistry {
   }
 
   /** Every session opened from now on, by pairing or sign-in. */
-  onSessionIssued(listener: (session: Pick<SessionRecord, "id" | "scopes">) => void): () => void {
+  onSessionIssued(listener: (session: Pick<SessionRecord, "id" | "scopes" | "email" | "teamRole" | "membershipAuthority">) => void): () => void {
     this.onIssued.add(listener);
     return () => this.onIssued.delete(listener);
   }

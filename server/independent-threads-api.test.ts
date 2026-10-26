@@ -621,6 +621,31 @@ describe("independent bot tasks through the isolated control surface", () => {
     evidence.push({ groupDefaultPreservedUntilStop: true, groupId: group.id, selectedTaskId: threadId });
   }, 30_000);
 
+  it("lets a chat-only session change its thread's model, never the bot's default", async () => {
+    const created = await tool("create_bot", { name: "Client default fixture", instance_id: "claude", model: models[0] });
+    const botId = created.bot.id;
+    const threadId = created.bot.activeTaskId;
+    const opened = await api("POST", "/api/auth/pairing", { scopes: ["client"] });
+    const token = (await api("POST", "/api/auth/pair", { code: opened.body.code })).body.token as string;
+    const asClient = async (method: string, path: string, body: unknown) => {
+      const response = await fetch(`${session.info.url}${path}`, {
+        method, headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body),
+      });
+      evidence.push({ authority: "client-only session", method, path, body, status: response.status });
+      return { status: response.status, body: await response.json() as any };
+    };
+    const selection = { instanceId: "claude", model: models[1] };
+    expect((await asClient("PATCH", `/api/bots/${botId}`, { modelSelection: selection })).status).toBe(403);
+    const refused = await asClient("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection, updateBotDefault: true });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect((await botState(botId)).modelSelection.model).toBe(models[0]);
+    expect((await botState(botId)).tasks.find((task: any) => task.taskId === threadId)?.modelSelection.model).toBe(models[0]);
+    const threadOnly = await asClient("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection });
+    expect(threadOnly.status, JSON.stringify(threadOnly.body)).toBe(200);
+    expect((await botState(botId)).tasks.find((task: any) => task.taskId === threadId)?.modelSelection).toEqual(selection);
+    expect((await botState(botId)).modelSelection.model).toBe(models[0]);
+  }, 30_000);
+
   it("runs a second engine of the same bot in the selected project folder at the same time", async () => {
     const created = await tool("create_bot", { name: "Shared project fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;

@@ -44,29 +44,50 @@ After a group participant finishes a turn, the group header shows the current th
 
 The figures come from the existing usage ledger and survive restarting the app. A missing cache figure is shown as an unknown split, not zero cached input. If some turns omit cost, the dollar amount sums only reported costs.
 
-## Renaming teams
+## Departments
 
-Right-click a named team heading in the sidebar and choose **Rename team**, or use the team's menu on the Team map. Enter the new name and save. Bots (including archived bots), group chats, shared instructions, and an assigned team computer stay together. Existing management access to a populated team follows its new name; an existing team's name cannot be used to merge teams. Finish active work before renaming.
+The sidebar groups bots into departments, such as "Product A" or "SEO/SEA". Bots outside any department are in General.
 
-## Deleting a team
+Departments are folders, not walls. Every bot can talk to every other bot, in any department, with nothing to set up: ask your Support bot to "check with @Bolt" and it asks Bolt, even when Bolt is in Dev or reports to someone else. Bots can also be in a group chat together whatever their departments.
 
-To delete a team, right-click its name in the sidebar and choose **Delete team**, or use its **Manage** menu in Team map. The confirmation explains that bots (including archived bots) and group chats move to General with their conversations intact. The team's shared instructions are removed; General's instructions stay unchanged. Stop active work and unassign any team computer first. If moving the team's Chief would conflict with General's Chief, move or change one of those Chiefs before deleting the team.
+What a department does decide is who is in charge. A Chief of Staff looks after its own department (and any others you put it in charge of under **Permissions → Also in charge of**): it hears about its bots' problems, can retry their work and can suggest changes to how they're set up. Talking to a bot never gives another bot that kind of say over it.
 
-## Team membership
+A bot talks to fewer bots only if it was set up with a list of the bots it may talk to, for example from a template. Its **Permissions** page then says so, with **Let it talk to every bot** to open it up again. An archived bot can't be reached, and on a shared workspace a bot only works with bots the same people can see.
 
-Every named team keeps an **Add bots** button in the sidebar. Once it has members, the button reads **Add or remove bots**. The dialog lists current members as checked alongside other available bots. Check a bot to move it into the team; uncheck one to move it to General, then save. Conversations stay with the bots. A move that would put two Chiefs of Staff in the same team is refused.
+### Renaming a department
 
-Choose **New bot** inside this dialog to open bot creation for that team. The new bot is created directly in the selected team and appears checked when you return to the membership list. Creating it does not discard your other unsaved checkbox edits.
+Right-click a named department heading in the sidebar and choose **Rename department**, or use the department's menu on the Team map. Enter the new name and save. Bots (including archived bots), group chats, shared instructions, and an assigned desktop stay together. Existing management access to a populated department follows its new name; an existing department's name cannot be used to merge departments. Finish active work before renaming.
+
+### Deleting a department
+
+To delete a department, right-click its name in the sidebar and choose **Delete department**, or use its **Manage** menu in Team map. The confirmation explains that bots (including archived bots) and group chats move to General with their conversations intact. The department's shared instructions are removed; General's instructions stay unchanged. Stop active work and unassign any desktop first. If moving the department's Chief would conflict with General's Chief, move or change one of those Chiefs before deleting the department.
+
+### Department membership
+
+Every named department keeps an **Add bots** button in the sidebar. Once it has members, the button reads **Add or remove bots**. The dialog lists current members as checked alongside other available bots. Check a bot to move it into the department; uncheck one to move it to General, then save. Conversations stay with the bots. A move that would put two Chiefs of Staff in the same department is refused.
+
+Choose **New bot** inside this dialog to open bot creation for that department. The new bot is created directly in the selected department and appears checked when you return to the membership list. Creating it does not discard your other unsaved checkbox edits.
+
+## Who a bot reports to (teams)
+
+On a team's Cloud, every bot reports to one person: whoever created it, unless someone chose another. That person gets the bot's questions, approvals, failures and routine results in their **Needs you** and their notifications. Everyone can still chat with every shared bot. In your own private chat with a bot, what it asks always comes to you.
+
+- The face at the end of a bot's row in the sidebar shows who it reports to. Admins, and the person it reports to, can click it to pick someone else.
+- Right-click a department and choose **Set owner for all bots…** to change every bot in it at once. When they all report to one person, the department shows "→ Name".
+- A question or approval in a shared chat says who it is asking.
+- Each person can have their own Chief of Staff: a crowned bot that reports to them. It is in charge of the bots that report to that person, and keeps their daily brief in their private chat with it. Like every bot, it can still talk to any other bot, and any bot can talk to it.
+- In your private chat, a bot can ask any other bot for you. That bot's work stays private to you too, and nothing from your private chat is posted into a group chat.
+- The Team map's **Who reports to whom** shows each person with their Chief and their bots. Drag a bot onto a person to change who it reports to, or open it from a department's menu with **See who reports to whom**.
 
 ## Delegation
 
-Bots can hand work to other bots. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation.
+Bots can hand work to other bots, in any department. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation: you see a "Sent to Bolt" line where the work went out, and the answer when it comes back.
 
 ### Creating a specialist with a chosen model
 
 A Chief also adds a specialist on its own when a job needs one: an ongoing area of work, a different skill set, or work to run in parallel. The bot is created at once, the Chief tells you in one line, and the change has an **Undo**. When what you want matches a ready-made team in the library, the Chief reads its roles with `list_team_library` and creates them the same way.
 
-A Chief of Staff can create a specialist in its own team with `create_bot`. Ask for a particular engine, model and reasoning effort if you want to choose them. The Chief can look up exact available choices with `list_team_setup` and pass `modelSelection` with `instanceId`, `model`, and optionally `effort` or a supported `variant` (not both).
+A Chief of Staff can create a specialist in its own department with `create_bot`. On a team, the new specialist reports to the Chief's own person. Ask for a particular engine, model and reasoning effort if you want to choose them. The Chief can look up exact available choices with `list_team_setup` and pass `modelSelection` with `instanceId`, `model`, and optionally `effort` or a supported `variant` (not both).
 
 When no model selection is supplied, the new bot uses the workspace's default model selection, including its reasoning effort; it does not copy the Chief's model. An invalid explicit choice is rejected rather than silently replaced. The new bot starts with connected apps disabled and at Full access, like any new bot, and existing bots keep their models. Combined team changes still use the reviewed team-setup flow.
 

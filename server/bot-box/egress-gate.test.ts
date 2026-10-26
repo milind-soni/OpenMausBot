@@ -1,6 +1,6 @@
 import { createServer, request } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
-import { connect } from "node:net";
+import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -33,6 +33,12 @@ function getVia(socketPath: string, url: string): Promise<{ status: number; body
     req.on("error", reject);
     req.end();
   });
+}
+
+function sendGet(socketPath: string, url: string): Socket {
+  const socket = connect(socketPath, () => socket.write(`GET ${url} HTTP/1.1\r\nHost: ${new URL(url).host}\r\n\r\n`));
+  socket.on("error", () => {});
+  return socket;
 }
 
 // The box runs only on a Linux Cloud home (detect.ts says "not-linux" anywhere else): its egress gate listens on a
@@ -79,6 +85,50 @@ linuxBox("the box's egress gate", () => {
     expect((await connectVia(opened.socketPath, `example.com:${port}`)).status).toBe("200");
     expect(await getVia(opened.socketPath, `http://example.com:${port}/page`)).toEqual({ status: 200, body: "served /page" });
     expect(opened.refused).toBe(0);
+  });
+
+  /** A loopback listener standing in for a public host that never answers, noting each connection, each request and when it ended. */
+  async function stalledUpstream() {
+    const requests: Array<{ url: string; closed: boolean }> = [];
+    let connections = 0;
+    const upstream = createServer((req) => {
+      const seen = { url: req.url ?? "", closed: false };
+      requests.push(seen);
+      req.socket.on("close", () => { seen.closed = true; });
+    });
+    upstream.on("connection", () => { connections += 1; });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    cleanup.push(() => new Promise<void>((resolve) => { upstream.closeAllConnections(); upstream.close(() => resolve()); }));
+    return { requests, connections: () => connections, url: `http://example.com:${(upstream.address() as { port: number }).port}/slow` };
+  }
+
+  it("sends nothing upstream for a plain HTTP client that left while its name resolved", async () => {
+    const { connections, url } = await stalledUpstream();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    let asked!: () => void;
+    const resolving = new Promise<void>((resolve) => { asked = resolve; });
+    const opened = await gate({ resolve: async () => { asked(); await released; return [{ address: "127.0.0.1", family: 4 }]; }, decide: async () => null });
+    const client = sendGet(opened.socketPath, url);
+    await resolving;
+    client.destroy();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(connections()).toBe(0);
+  });
+
+  it("ends the upstream request of a plain HTTP client that left, and every one still open when the gate closes", async () => {
+    const { requests, url } = await stalledUpstream();
+    const opened = await gate({ resolve: async () => [{ address: "127.0.0.1", family: 4 }], decide: async () => null });
+    const leaving = sendGet(opened.socketPath, url);
+    await expect.poll(() => requests.length).toBe(1);
+    leaving.destroy();
+    await expect.poll(() => requests[0]!.closed).toBe(true);
+    sendGet(opened.socketPath, url);
+    await expect.poll(() => requests.length).toBe(2);
+    await opened.close();
+    await expect.poll(() => requests[1]!.closed).toBe(true);
   });
 
   it("with the real policy a public address passes the decision and a loopback one does not", async () => {

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname, uptime } from "node:os";
 import { join } from "node:path";
 
@@ -472,6 +472,36 @@ function acquireDataDirLeaseInternal(dataDir, options = {}) {
 
 export function acquireDataDirLease(dataDir, options = {}) {
   return acquireDataDirLeaseInternal(dataDir, options);
+}
+
+/**
+ * For a data directory whose disk only ever mounts on one machine at a time (a Cloud home's volume: server/cloud-home-start.ts),
+ * where a record another machine wrote can never belong to a live process: removes every lease, delegated-child lease and
+ * recovery record held by another machine and returns their holders. Records from this machine are left as they are:
+ * acquireDataDirLease() refuses a live one and recovers a dead one. Never for a folder several computers share.
+ */
+export function clearRecordsFromOtherMachines(dataDir) {
+  validateDataDir(dataDir);
+  let entries;
+  try {
+    entries = readdirSync(dataDir);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw leaseError("OpenMausBot cannot read its data directory.", error);
+  }
+  const paths = [
+    join(dataDir, LEASE_NAME),
+    join(dataDir, DELEGATED_CHILD_DIR, LEASE_NAME),
+    ...entries.filter((name) => name.startsWith(`${LEASE_NAME}.reap-`)).map((name) => join(dataDir, name)),
+  ];
+  const cleared = [];
+  for (const path of paths) {
+    const record = readOwner(path);
+    if (!record || sameMachine(record)) continue;
+    unlinkExact(path, "OpenMausBot could not remove the data-directory record another machine left.");
+    cleared.push({ path, host: record.host, pid: record.pid });
+  }
+  return cleared;
 }
 
 export function acquireDataDirLeaseForProcess(dataDir, environment = process.env) {

@@ -137,6 +137,7 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/apps/m/rpc/extra"], ["DELETE", "/api/bots/x/apps/m/context"],
       ["PATCH", "/api/logins/1password/vaults/v1"], ["GET", "/api/bots/x/sign-in-cards/m/done"],
       ["GET", "/api/bots/x/queue/q/steer"], ["POST", "/api/bots/x/queue/q/steer/more"], ["POST", "/api/groups/g/queue/q/steer/more"],
+      ["POST", "/api/tts/voices/add"],
     ] as const) expect(requiredScope(method, path), `${method} ${path}`).toBe("admin");
   });
 
@@ -209,6 +210,12 @@ describe("resolveRequestAuth", () => {
       ["GET", "/api/events"], ["PATCH", "/api/bots/b/profile"],
       ["GET", "/api/bots/b/browser/live"], ["POST", "/api/bots/b/browser/action"],
     ]) expect(check(method, path).auth?.kind, path).toBe("loopback");
+    expect(check("GET", "/api/phones/self/jobs").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    const plain = resolveRequestAuth(request({ host: "127.0.0.1:8799", "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" }, "GET"), {
+      sessions, cookieName, streamPath: "/api/events", url: new URL("/api/phones/self/jobs", "http://localhost"),
+      loopbackMutationToken: "desktop-secret", companionMutationToken: "relay-secret",
+    });
+    expect(plain.auth).toEqual({ kind: "loopback", scopes: ["admin", "client"] });
     for (const [method, path] of [
       ["POST", "/api/bots/b/browser/live"], ["GET", "/api/bots/b/browser/action"],
       ["POST", "/api/bots/b/browser/restart"],

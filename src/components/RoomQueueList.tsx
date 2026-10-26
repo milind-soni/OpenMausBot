@@ -28,7 +28,7 @@ export function RoutedByLine({ routedBy }: { routedBy: NonNullable<Message["rout
   const percent = Math.round(Math.min(1, Math.max(0, routedBy.probability)) * 100);
   return (
     <div data-testid="routed-by" className="mt-1 px-1 text-[11px] text-ink-secondary">
-      {t(routedBy.provider === "openrouter" ? "room.routedBy.openrouter" : "room.routedBy", { percent: String(percent) })}
+      {t(routedBy.provider === "openrouter" ? "room.routedBy.openrouter" : routedBy.provider === "workersai" ? "room.routedBy.workersai" : "room.routedBy", { percent: String(percent) })}
     </div>
   );
 }

@@ -92,16 +92,17 @@ afterEach(() => {
 });
 
 describe("the Simple composer in a bot chat", () => {
-  it("puts attach and the approval level behind a round +, and fills the call button with the bot's colour", () => {
+  it("puts attach, work until done and the approval level behind a round +, and fills the call button with the bot's colour", () => {
     render({ bot });
     expect(plus()?.getAttribute("aria-label")).toBe("Add");
     expect(container.querySelector('button[aria-label="Attach a file"]')).toBeNull();
     expect(container.querySelector('[aria-label^="Ask for approval for"]')).toBeNull();
-    expect(container.querySelector('[aria-label="Finish together"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Work until done"]')).toBeNull();
     expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer", fill: MAUS_COLORS.purple });
     openPlus();
     expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key")))
-      .toEqual(["attach", "approval", "call:turns", "call:live"]);
+      .toEqual(["attach", "goal", "approval", "call:turns", "call:live"]);
+    expect(menu()!.textContent).toContain("Work until done");
     expect(menu()!.textContent).toContain("Before Atlas acts");
     expect(menu()!.textContent).toContain("Call mode");
   });

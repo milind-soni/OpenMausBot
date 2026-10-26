@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
+import { sharedCuaConnection } from "./shared-cua-connection.mjs";
 import { installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs";
 import { createLendingDialogs, serverAccessDetail } from "./lending-dialogs.mjs";
 import nativeText from "./native-text.cjs";
@@ -135,9 +136,9 @@ function mainLending({ response }) {
   let cloudState = { enabled: true, connected: true, folders: [], screen: false, internet: true };
   const passThrough = (_channel, handler) => handler;
   const context = vm.createContext({
-    createLendingDialogs, installCloudLending, usualFolders, usualFolderPaths, dialog, mainWindow: win, validateSharedFolders: named, isHomeFolder: async () => false,
+    createLendingDialogs, installCloudLending, usualFolders, usualFolderPaths, dialog, mainWindow: win, validateSharedFolders: named, sharedCuaConnection, isHomeFolder: async () => false,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: passThrough, cloudPageAsking: () => "cloud",
-    requireSharedComputers: async () => {}, savedWorkspace: () => team, lendingTarget: { environment: () => cloud }, cuaReady: Promise.resolve({ mcpCommand: "cua" }), localComputerReady: () => false, process: { platform: "darwin" },
+    requireSharedComputers: async () => {}, savedWorkspace: () => team, lendingTarget: { environment: () => cloud }, cuaReady: Promise.resolve({ mcpCommand: "cua", mcpArgs: ["mcp"] }), localComputerReady: () => false, process: { platform: "darwin" },
     stopLending: () => {}, app: { getPath: (name) => `/Users/me/${name}` }, os: { homedir: () => "/Users/me" }, nativeT: nativeText.englishText.t,
     sharingController: () => ({
       identity: async () => ({ id: "info" }),

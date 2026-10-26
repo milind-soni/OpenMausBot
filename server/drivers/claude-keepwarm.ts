@@ -152,7 +152,7 @@ export function runKeepWarmPing(opts: {
   return new Promise((resolve) => {
     let child: ReturnType<typeof spawnCli>;
     try {
-      child = spawnCli(opts.cli, args, { cwd: contract.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+      child = spawnCli(opts.cli, args, { cwd: contract.cwd, env, stdio: ["pipe", "pipe", "pipe"], engineHome: true });
     } catch (error) {
       cleanup();
       resolve({ ok: false, reason: `the ping could not start: ${(error as Error).message}` });

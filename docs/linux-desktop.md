@@ -168,8 +168,10 @@ Installed `.deb` and AppImage builds include the certified **Cua Driver 0.19.3**
 On GNOME Xorg, open Settings, choose **Enable local control (Beta)**, wait for **Ready**, then explicitly assign a bot
 to **This computer**. No driver download, terminal command, `chmod`, or daemon setup is required. The owned daemon
 starts with `--no-overlay`, so Cua's decorative full-screen X11 cursor surface is never created. OpenMausBot also
-uses Electron software rendering on Linux to avoid the reproduced NVIDIA/libGLES GPU-process failure that could
-leave an invisible focused app window receiving input.
+uses Electron software rendering when the NVIDIA driver is loaded, to avoid the reproduced NVIDIA/libGLES
+GPU-process failure that could leave an invisible focused app window receiving input. Other GPUs keep hardware
+acceleration, because software rendering costs about a CPU core while the window animates. Set `OMB_LINUX_GPU=off`
+to force software rendering or `OMB_LINUX_GPU=on` to force the GPU.
 
 Cua actions use a private logical cursor. With the decorative overlay disabled, `move_cursor` does not move the
 user's physical pointer; approved click and typing actions still target the requested window, while the user's own

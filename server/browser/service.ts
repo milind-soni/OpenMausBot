@@ -79,7 +79,11 @@ export class ProfileState {
   readonly shown = new WeakMap<Tab, HealthShown>();
   run: Running | null = null;
   starting: Promise<Running> | null = null;
+  /** The Chrome the pending start is opening; a stop waits for it. */
+  opening: Promise<Running> | null = null;
   stopping: Promise<void> | null = null;
+  /** Bumped by every stop: a start begun before it closes what it opened. */
+  epoch = 0;
   lastUsed = Date.now();
   calls = 0;
   reopened: Reopened = null;
@@ -169,16 +173,32 @@ export class BrowserService {
   running(profile: ProfileState): Promise<Running> {
     if (profile.run && !profile.run.closing && profile.run.browser.connected) return Promise.resolve(profile.run);
     if (profile.starting) return profile.starting;
+    const epoch = profile.epoch;
     const starting = (async () => {
       for (let stopping = profile.stopping; stopping; stopping = profile.stopping) await stopping;
-      return this.#start(profile);
+      return this.#start(profile, epoch);
     })().finally(() => { if (profile.starting === starting) profile.starting = null; });
     profile.starting = starting;
     return starting;
   }
 
-  async #start(profile: ProfileState): Promise<Running> {
+  async #start(profile: ProfileState, epoch: number): Promise<Running> {
     await this.#capacity(profile);
+    this.#stillWanted(profile, epoch);
+    const opening = this.#open(profile, epoch);
+    profile.opening = opening;
+    try {
+      return await opening;
+    } finally {
+      if (profile.opening === opening) profile.opening = null;
+    }
+  }
+
+  #stillWanted(profile: ProfileState, epoch: number): void {
+    if (profile.epoch !== epoch || this.#profiles.get(profile.key) !== profile) throw new Error("The browser was closed while it was starting.");
+  }
+
+  async #open(profile: ProfileState, epoch: number): Promise<Running> {
     const fresh = profile.fresh;
     profile.fresh = false;
     mkdirSync(profile.downloadDir, { recursive: true, mode: 0o700 });
@@ -215,9 +235,11 @@ export class BrowserService {
     }));
     if (browser.downloads) run.offs.push(browser.downloads.onChange((download) => profile.hub.downloaded(download)));
     try {
+      this.#stillWanted(profile, epoch);
       await browser.waitForPage(() => true, 15_000);
       for (const page of browser.pages()) await page.ready.then(() => adopt(page, "restored"), () => undefined);
       if (fresh) await this.#onlyBlankTab(profile, browser);
+      this.#stillWanted(profile, epoch);
     } catch (error) {
       run.closing = true;
       for (const off of run.offs) off();
@@ -257,7 +279,9 @@ export class BrowserService {
   /** Graceful: Chrome's own quit, so its next start reopens the tabs and keeps session cookies. */
   async #stop(profile: ProfileState, reopened: Reopened, { erase = false }: { erase?: boolean } = {}): Promise<void> {
     if (profile.stopping) return profile.stopping;
+    profile.epoch++;
     const run = profile.run;
+    const opening = profile.opening;
     const stopping = (async () => {
       profile.control.closing = true;
       profile.control.changed();
@@ -268,6 +292,7 @@ export class BrowserService {
           profile.hub.stopped(reopened?.kind === "idle" ? "asleep" : "closed");
           await run.opened.close().catch(() => undefined);
         }
+        await opening?.catch(() => undefined);
       } finally {
         if (profile.run === run) profile.run = null;
         profile.tabs.clear();

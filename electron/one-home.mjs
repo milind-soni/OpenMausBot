@@ -2,7 +2,7 @@
 // once, in phases, and keeps where it is in one journal (userData/one-home.json), so each launch goes on from there:
 //
 //   copy    everything goes while this computer stays home and fully usable
-//   wait    until a quiet moment: nothing answering, queued or in a card or sign-in here, and nobody typing for 30 s
+//   wait    until a quiet moment: no work under way here (server/move-waits.ts), and nobody typing for 30 s
 //   freeze  this computer's server stops (server/move-freeze.ts): no turns, schedules, webhooks or app events
 //   final   the same pass again, for what changed since, with the sign-ins that refresh themselves
 //   check   what arrived, against what is here; anything missing goes again, three passes at most
@@ -139,7 +139,7 @@ export function arrivedCounts(here, there) {
  *   cloud(): null | { origin: string | null, account: string, machine: string | null, ready: boolean, moves: boolean, ended: boolean, paid: boolean,
  *     homecoming?: { installationId: string, name: string }, signIn?: string },
  *   send: { move(options?: { final?: boolean }): Promise<unknown>, check(): Promise<{ ok: boolean }>, switches(): Record<string, boolean>, snapshot(): any },
- *   local: { freeze(origin: string): Promise<{ frozen: true } | { busy: string }>, unfreeze(options?: { automations?: "off" }): Promise<void>, frozen(): Promise<boolean>, json(route: string): Promise<any>,
+ *   local: { freeze(origin: string): Promise<{ frozen: true } | { busy: string, what?: string }>, unfreeze(options?: { automations?: "off" }): Promise<void>, frozen(): Promise<boolean>, json(route: string): Promise<any>,
  *     call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, forget?(): Promise<void> },
  *   session(): Promise<{ call(method: string, route: string, body?: unknown): Promise<{ ok: boolean, status: number, body: any }>, close(): Promise<void> }>,
  *   release?(): Promise<void>,
@@ -170,7 +170,7 @@ export function createOneHome(deps) {
   const timers = deps.timers ?? { set: (work, ms) => { const timer = setTimeout(work, ms); timer.unref?.(); return timer; }, clear: (timer) => clearTimeout(timer) };
   const log = deps.log ?? (() => {});
   const t = deps.t ?? nativeText.englishText.t;
-  let running = null, again = false, timer = null, closed = false, waitingFor = null, wasReady = null, reportFailedAt = -Infinity, keptFailedAt = -Infinity;
+  let running = null, again = false, timer = null, closed = false, waitingFor = null, waitingWhat = null, wasReady = null, reportFailedAt = -Infinity, keptFailedAt = -Infinity;
 
   const read = () => parseJournal(deps.journal.read());
   const kept = () => { try { return parseKeep(deps.keep?.read()).on; } catch { return false; } };
@@ -198,7 +198,8 @@ export function createOneHome(deps) {
     const failing = journal.failingSince && now() - journal.failingSince >= FAILING_LINE_MS
       ? { error: journal.error ?? null, ...(journal.error && journal.errorKey ? { errorKey: journal.errorKey, errorParams: journal.errorParams ?? {} } : {}) } : null;
     const phase = FROZEN.has(journal.phase) || journal.phase === "switch" ? "finishing" : journal.phase;
-    return { phase, ...(chats ? { chats } : {}), ...(phase === "wait" && waitingFor !== null ? { waitingFor } : {}), ...(failing ? { failing } : {}) };
+    const waits = phase === "wait" && waitingFor !== null ? { waitingFor, ...(waitingWhat ? { waitingWhat } : {}) } : {};
+    return { phase, ...(chats ? { chats } : {}), ...waits, ...(failing ? { failing } : {}) };
   }
 
   /** Lifts this computer's freeze; true once it is lifted. */
@@ -223,7 +224,7 @@ export function createOneHome(deps) {
   }
 
   async function copy(journal) {
-    waitingFor = null;
+    waitingFor = waitingWhat = null;
     try { await deps.send.move(); }
     catch (error) { return error?.code === "outdated" ? updating(journal, error) : failed({ ...journal, updating: undefined }, error, false); }
     return write({ ...journal, phase: "wait", retryAt: undefined, hourly: undefined, updating: undefined });
@@ -250,12 +251,15 @@ export function createOneHome(deps) {
     try { answer = await deps.local.freeze(journal.cloud.origin); }
     catch (error) { return failed(journal, error, true); }
     if (record(answer) && typeof answer.busy === "string") {
+      // The server names what holds the move, and lets go of anything that is not a turn answering now within half an
+      // hour (server/move-waits.ts), so this poll ends by itself.
       waitingFor = answer.busy;
+      waitingWhat = typeof answer.what === "string" ? answer.what : null;
       write({ ...journal, phase: "wait" });
       later(BUSY_POLL_MS);
       return null;
     }
-    waitingFor = null;
+    waitingFor = waitingWhat = null;
     return write({ ...journal, phase: "final", frozenAt: now() });
   }
 

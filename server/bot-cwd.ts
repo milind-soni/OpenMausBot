@@ -30,10 +30,11 @@ export function sharedProjectFolder(cwd: string | null | undefined, dataDir: str
   return inside === "" || (!inside.startsWith("..") && !isAbsolute(inside)) ? undefined : checked.cwd;
 }
 
-/** coordinate_bots' in_my_folder: the sender's project folder for a new thread outside a room, or why it cannot be used. */
-export function inMyFolderCwd(wanted: boolean | undefined, fresh: boolean, senderCwd: string | null | undefined, dataDir: string): { cwd?: string; error?: string } {
-  if (!wanted) return {};
-  if (!fresh) return { error: 'in_my_folder works only with thread "new", outside a room. Leave it out, or use thread "new".' };
+/** coordinate_bots' in_my_folder: the sender's project folder for the teammate threads it opens outside a room, or why an explicit true cannot be honoured. Omitted means on whenever there is a folder to share. */
+export function inMyFolderCwd(wanted: boolean | undefined, outsideRoom: boolean, senderCwd: string | null | undefined, dataDir: string): { cwd?: string; error?: string } {
+  if (wanted === false) return {};
+  if (!outsideRoom) return wanted ? { error: "in_my_folder does not apply in a room: the room's folder governs there. Leave it out." } : {};
   const cwd = sharedProjectFolder(senderCwd, dataDir);
-  return cwd ? { cwd } : { error: "This conversation has no project folder to share (it works in its own private folder), so in_my_folder cannot be used. Leave it out; do not retry it." };
+  if (cwd) return { cwd };
+  return wanted ? { error: "This conversation has no project folder to share (it works in its own private folder), so in_my_folder cannot be used. Leave it out; do not retry it." } : {};
 }

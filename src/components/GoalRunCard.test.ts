@@ -52,6 +52,17 @@ describe("GoalRunCard", () => {
     expect(markup).toContain("Sprout coordinating · 5 turns");
   });
 
+  it("shows a one-on-one run as the bot's own work, with Stop only while it works", () => {
+    const working = renderToStaticMarkup(createElement(GoalRunCard, { message: message("working"), solo: true, onStop: () => {} }));
+    expect(working).toContain("Sprout · Turn 3 of 12");
+    expect(working).not.toContain("coordinating");
+    expect(working).toContain(">Stop</button>");
+    const done = renderToStaticMarkup(createElement(GoalRunCard, { message: message("completed"), solo: true, onStop: () => {} }));
+    expect(done).toContain("Sprout · 5 turns");
+    expect(done).not.toContain("<button");
+    expect(renderToStaticMarkup(createElement(GoalRunCard, { message: message("working") }))).not.toContain("<button");
+  });
+
   it("keeps an incomplete payload readable", () => {
     const legacy: Message = {
       id: "goal-run-fallback",

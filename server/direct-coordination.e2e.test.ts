@@ -113,19 +113,27 @@ it("marks a failed one-way send so restart recovery cannot duplicate its notice"
   expect((await failureNotice())?.tool?.handoffId).toEqual(expect.any(String));
 }), 45_000);
 
-it("does not grant a specialist direct access to its supervising Chief", () => fixture(async f => {
+it("lets a bot ask a bot in another department directly, with nothing set up first", () => fixture(async f => {
+  // Engineering lead and Clive, the Chief in Leadership: different departments, no peers list, no grant either way.
+  await f.api(`/api/bots/${f.chief.id}`, { managedSections: [] }, "PATCH");
   f.plan[f.lead.id] = {
-    steps: [{ expectError: true, arguments: { bot_ids: [f.chief.id], message: "Contact the Chief without a shared room" } }],
-    reply: "The direct request was refused",
+    steps: [{ arguments: { bot_ids: ["Clive"], message: "Can we upgrade to the latest PHP version?", consult: true } }],
+    reply: "Asked Clive", resumeReply: "Clive says yes: the latest PHP is fine for us.",
   };
+  f.plan[f.chief.id] = { reply: "Yes, the latest PHP version is fine for us." };
   f.save();
-  await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Check the direct peer boundary");
+  await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Please ask Clive if we can upgrade to the latest PHP version");
   expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");
-  expect(f.nodes().filter((node: any) => node.parentId)).toEqual([]);
-  const response = f.evidence().find((turn: any) => turn.botId === f.lead.id).evidence.find((entry: any) => entry.step).response;
-  expect(response.result.isError).toBe(true);
-  expect(response.result.content[0].text).toContain("sender's section boundary");
-  expect((await f.api("/api/bots")).groups).toEqual([]);
+  const asked = f.evidence().find((turn: any) => turn.botId === f.lead.id);
+  expect(asked.system).toContain("You can reach every other bot on this team, in every department");
+  expect(asked.system).toContain("Clive — General assistant (Leadership) [Chief of Staff]");
+  const response = asked.evidence.find((entry: any) => entry.step).response;
+  expect(response.result.isError).toBeFalsy();
+  const child = f.nodes().find((node: any) => node.parentId);
+  expect(child).toMatchObject({ botId: f.chief.id, mode: "consult", status: "completed" });
+  const said = await f.messages(f.lead.activeTaskId);
+  expect(said.some((message: any) => message.tool?.name === "Sent to Clive")).toBe(true);
+  expect(said.some((message: any) => message.text === "Clive says yes: the latest PHP is fine for us.")).toBe(true);
 }), 45_000);
 
 it.each([false, true])("starts independent work immediately and frees the Chief while waiting (source fails: %s)", fail => fixture(async f => {
@@ -354,6 +362,19 @@ it("opens a fresh thread on a teammate with coordinate_bots thread \"new\" and g
   expect(await f.messages(f.lead.activeTaskId)).toEqual(originalLead);
   expect(f.evidence().map((turn: any) => turn.botId)).toEqual([f.chief.id, f.lead.id, f.chief.id]);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name === "Engineering lead replied" && message.tool.output === "NEW_THREAD_RESULT verified")).toBe(true);
+}), 45_000);
+
+it("names a fresh teammate thread with coordinate_bots title", () => fixture(async f => {
+  f.plan[f.chief.id] = { steps: [{ arguments: { bot_ids: [f.lead.id], message: "TITLED_BRIEF verify the CSV export yourself", thread: "new", title: "CSV export: verify" } }],
+    reply: "Opened a titled thread", resumeReply: "The titled thread reported back" };
+  f.plan[f.lead.id] = { reply: "TITLED_RESULT verified" };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const answered = f.evidence()[0].evidence.find((entry: any) => entry.step?.arguments?.title).response.result;
+  expect(answered.isError).toBeFalsy();
+  const child = f.nodes().find((node: any) => node.botId === f.lead.id);
+  const lead = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id);
+  expect(lead.tasks.find((task: any) => task.threadId === child.threadId)).toMatchObject({ title: "CSV export: verify", openedBy: { botId: f.chief.id, name: "Clive" } });
 }), 45_000);
 
 it("lets the opener find and close the completed task", () => fixture(async f => {
@@ -839,15 +860,15 @@ it("deleting the waiting source cancels its tree and never recreates the deleted
   }
 }), 45_000);
 
-it("withholds direct results when the owner's cross-team grant is revoked", () => fixture(async f => {
+it("withholds direct results when the sender's peers list cuts the teammate off mid-turn", () => fixture(async f => {
   // Revoke while the teammate's engine is inside its turn: a "running" record is written at dispatch, before setup.
   const ready = join(f.session.info.dataDir, "private-work.ready");
   const gate = join(f.session.info.dataDir, "private-work.gate");
   f.plan[f.lead.id] = { readyFile: ready, gateFile: gate, reply: "PRIVATE_ENGINEERING_RESULT" };
   await f.start();
   await expect.poll(() => existsSync(ready), { timeout: 15_000 }).toBe(true);
-  await f.api(`/api/bots/${f.chief.id}`, { managedSections: [] }, "PATCH");
-  writeFileSync(gate, "finish the private work after the grant went");
+  await f.api(`/api/bots/${f.chief.id}`, { peers: [] }, "PATCH");
+  writeFileSync(gate, "finish the private work after the teammate was cut off");
   expect((await f.wait()).status).toBe("settled");
   const resumed = f.evidence().find((turn: any) => turn.botId === f.chief.id && turn.resumed);
   expect(JSON.stringify(resumed), told(resumed).slice(-1_500)).not.toContain("PRIVATE_ENGINEERING_RESULT");
@@ -856,7 +877,7 @@ it("withholds direct results when the owner's cross-team grant is revoked", () =
   expect(resumed.prompt.message.content).toContain("Result withheld");
 }), 45_000);
 
-it("retains returned direct reports for follow-up turns but rechecks access before replay", () => fixture(async f => {
+it("retains returned direct reports for follow-up turns but rechecks reach before replay", () => fixture(async f => {
   f.plan[f.lead.id] = { reply: "PRIVATE_ENGINEERING_FACT_8347" };
   f.plan[f.chief.id].resumeReply = "Finished";
   await f.start(); expect((await f.wait()).status).toBe("settled");
@@ -871,7 +892,7 @@ it("retains returned direct reports for follow-up turns but rechecks access befo
   await f.api(`/api/bots/${f.chief.id}/messages/${followup.id}/edit`, { threadId: f.chief.activeTaskId, text: "Check the earlier engineering report" });
   expect((await f.wait()).status).toBe("settled");
   expect(f.evidence().filter((turn: any) => turn.botId === f.chief.id).at(-1).prompt.message.content).toContain("PRIVATE_ENGINEERING_FACT_8347");
-  await f.api(`/api/bots/${f.chief.id}`, { managedSections: [] }, "PATCH");
+  await f.api(`/api/bots/${f.chief.id}`, { peers: [] }, "PATCH");
   f.plan[f.chief.id] = { reply: "Access removed", expectContextIncludes: ["Teammate result withheld"] };
   f.save();
   const edited = (await f.messages(f.chief.activeTaskId)).findLast((message: any) => message.role === "user");

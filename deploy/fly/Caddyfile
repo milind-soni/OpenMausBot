@@ -7,7 +7,9 @@
 # OMB_CLOUD_EDGE_HOLD (a duration, unset: 0s, as before): how long a request
 # waits for the server while it starts, instead of a 502. The Admin sets it
 # only for a plan whose home sleeps, so the first request after a cold wake
-# is answered (docs/cloud-pro.md, "Sleeping homes").
+# is answered (docs/cloud-pro.md, "Sleeping homes"). Caddy retries the dial
+# every lb_try_interval, so a held request reaches the server at most 50 ms
+# after it listens.
 {
 	admin off
 	auto_https off
@@ -29,7 +31,7 @@
 	handle /api/health {
 		reverse_proxy 127.0.0.1:8799 {
 			lb_try_duration {$OMB_CLOUD_EDGE_HOLD:0s}
-			lb_try_interval 250ms
+			lb_try_interval 50ms
 			header_up X-Forwarded-Proto https
 			header_up X-Forwarded-For {client_ip}
 		}
@@ -42,7 +44,7 @@
 		handle /hooks/* {
 			reverse_proxy 127.0.0.1:8800 {
 				lb_try_duration {$OMB_CLOUD_EDGE_HOLD:0s}
-				lb_try_interval 250ms
+				lb_try_interval 50ms
 				header_up X-Forwarded-Proto https
 				header_up X-Forwarded-For {client_ip}
 			}
@@ -50,7 +52,7 @@
 		handle {
 			reverse_proxy 127.0.0.1:8799 {
 				lb_try_duration {$OMB_CLOUD_EDGE_HOLD:0s}
-				lb_try_interval 250ms
+				lb_try_interval 50ms
 				header_up X-Forwarded-Proto https
 				header_up X-Forwarded-For {client_ip}
 				# the event stream must not be buffered

@@ -159,6 +159,14 @@ describe("the chat", () => {
     expect(fixture.api).toHaveBeenCalledWith("/api/limit-resets?refresh=1");
   });
 
+  it("reads limits on its own as a background poll, so a sleeping Cloud home stays asleep", async () => {
+    fixture.api.mockClear();
+    mount(createElement(EngineLimitNotice, { engine: "claude" }));
+    await settle();
+    expect(fixture.api).toHaveBeenCalledWith("/api/limit-resets", { background: true });
+    expect(fixture.api).not.toHaveBeenCalledWith("/api/limit-resets");
+  });
+
   it("offers Continue on a turn its limit stopped, which sets up the automation in this conversation", async () => {
     const created = routine("continue", RESET + 60_000, { schedule: { type: "limit_reset", engine: "claude", repeat: "once", at: RESET + 60_000 } });
     fixture.api.mockImplementation(async (path: unknown) => String(path) === "/api/limit-resets/continue" ? { routine: created } : { checkedAt: NOW, engines: [claude(100, true)] });

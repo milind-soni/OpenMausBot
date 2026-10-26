@@ -31,7 +31,7 @@ export function rememberLimits(next: Partial<EngineLimitsReport> | null | undefi
 /** A person's refresh always asks again; a background read joins the one already on its way. */
 export function loadLimits(refresh = false): Promise<void> {
   if (refresh) return api<EngineLimitsReport>("/api/limit-resets?refresh=1").then(rememberLimits, () => undefined);
-  loading ??= api<EngineLimitsReport>("/api/limit-resets")
+  loading ??= api<EngineLimitsReport>("/api/limit-resets", { background: true })
     .then(rememberLimits, () => undefined)
     .finally(() => { loading = null; });
   return loading;

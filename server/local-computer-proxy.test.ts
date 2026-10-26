@@ -11,6 +11,7 @@ import { delimiter, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CONTROL_UNCONFIRMED } from "./control-client.ts";
 import { gatedLocalComputer } from "./local-computer.ts";
+import { OWN_PROFILE_UNAVAILABLE } from "./local-computer-guidance.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { wideSchema } from "./testing/oversized-tool-schema.ts";
 import { TOOL_SCHEMA_PROFILE_ENV } from "./tool-schema-profile.ts";
@@ -204,6 +205,40 @@ readline.createInterface({input: process.stdin}).on("line", (line) => {
     };
     expect(JSON.stringify(await listed({ [TOOL_SCHEMA_PROFILE_ENV]: "moonshot" })).length).toBeLessThanOrEqual(12_000);
     expect(await listed({})).toEqual(wide);
+  });
+
+  it("adds what to do instead to the driver's refusal to attach to the person's signed-in profile", async () => {
+    const refusal = {
+      content: [{ type: "text", text: "refused (browser_consent_required): existing-profile attachment in standard mode requires --grant existing-profile or an embedding authorization host; bounded mode requires a matching manifest" }],
+      structuredContent: { refusal: { code: "browser_consent_required", message: "existing-profile attachment in standard mode requires --grant existing-profile or an embedding authorization host; bounded mode requires a matching manifest" }, status: "refused" },
+    };
+    const driver = `
+const readline = require("node:readline");
+readline.createInterface({input: process.stdin}).on("line", (line) => {
+  const message = JSON.parse(line);
+  process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:message.id,result:${JSON.stringify(refusal)}}) + "\\n");
+});
+`;
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ held: false, helpOpen: false }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const connection = gatedLocalComputer(
+      { command: process.execPath, args: ["-e", driver], env: {}, platform: "darwin", scope: "local-computer" },
+      { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/control`, token: "guidance-fixture-token" },
+    );
+    const child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env }, stdio: ["pipe", "pipe", "pipe"] });
+    try {
+      const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+      child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "browser_prepare", arguments: { pid: 1, window_id: 1, strategy: { kind: "existing_profile" } } } }) + "\n");
+      const answer = JSON.parse((await lines.next()).value as string);
+      expect(answer.result.content).toEqual([...refusal.content, { type: "text", text: OWN_PROFILE_UNAVAILABLE }]);
+      expect(answer.result.structuredContent).toEqual(refusal.structuredContent);
+    } finally {
+      child.kill("SIGKILL");
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("rejects malformed environment and missing authority without printing connection secrets", () => {

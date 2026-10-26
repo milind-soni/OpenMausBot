@@ -10,7 +10,7 @@ its database, its settings, other bots' folders and other turns' processes are n
 | Inside the box | What it is |
 |---|---|
 | `/usr`, `/etc`, `/opt`, the server's own code folder, read-only | The image: engine CLIs, node, python, git, the bots' browser |
-| `HOME`, read-write | The engines' own logins and settings (`~/.claude`, `~/.codex`, `~/.grok`) |
+| `HOME`, read-write | The engines' own logins and settings (`~/.claude`, `~/.codex`, `~/.grok`). On a Team Cloud this is the turn's audience's engine home instead, with the team's engine sign-in files bound into it, and the server's HOME is not there at all ([team-cloud.md](team-cloud.md#engine-homes)) |
 | the data folder (`~/.openmausbot`), **an empty private folder** | `messages.db`, `config.json`, logins, the server's sockets, every other bot's folders are not there |
 | put back inside it: the turn's working folder and the bot's own folder (`workspaces/<bot>`), read-write | What the turn works on, and the bot's memory and skills |
 | put back: this turn's permission socket and the files its command line names (MCP config, system prompt), read-only | What the driver made for this one process |

@@ -139,7 +139,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       res.writeHead(200, {
         "content-type": message.mime ?? "image/png",
         "content-length": String(bytes.byteLength),
-        "cache-control": "private, max-age=31536000, immutable",
+        "cache-control": "private, no-store",
       });
       return res.end(bytes);
     }
@@ -240,7 +240,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         ...(streamsMessageImage
           ? { "content-disposition": "inline" }
           : { "content-disposition": messageFileDisposition(messageFileDownloadName(downloadName, file.name)) }),
-        "cache-control": streamsMessageImage ? "private, max-age=3600" : "private, no-store",
+        "cache-control": "private, no-store",
         "cdn-cache-control": "no-store",
         "cloudflare-cdn-cache-control": "no-store",
         pragma: "no-cache",

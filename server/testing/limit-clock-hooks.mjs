@@ -9,7 +9,7 @@ if (!dataDir || dataDir !== process.env.HOME || process.env.OMB_TEST_LIMIT_CLOCK
 }
 const seams = new Map([
   [new URL('../../shared/limit-reset.ts', import.meta.url).href, ['export const AFTER_RESET_MS = 60_000;', 'export const AFTER_RESET_MS = 1_000;']],
-  [new URL('../routines.ts', import.meta.url).href, ['setInterval(() => void this.tick(), 10_000)', 'setInterval(() => void this.tick(), 250)']],
+  [new URL('../routines.ts', import.meta.url).href, ['setInterval(() => this.tickInBackground(), 10_000)', 'setInterval(() => this.tickInBackground(), 250)']],
 ]);
 registerHooks({
   load(url, context, nextLoad) {

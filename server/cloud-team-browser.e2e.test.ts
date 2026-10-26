@@ -21,7 +21,7 @@ const ADMIN = { email: "ben@acme.test", role: "admin" as const };
 const MEMBER_A = { email: "ada@acme.test", role: "member" as const };
 const MEMBER_C = { email: "cleo@acme.test", role: "member" as const };
 const ENGINE = `import { readFileSync as readToolCalls } from "node:fs";
-try { process.env.FAKE_CLAUDE_TOOL_CALLS = readToolCalls(process.env.HOME + "/tool-calls.json", "utf8"); } catch {}`;
+try { process.env.FAKE_CLAUDE_TOOL_CALLS = readToolCalls(process.env.FAKE_CLAUDE_FIXTURE_DIR + "/tool-calls.json", "utf8"); } catch {}`;
 const REAL_BROWSER = process.env.OMB_TEAM_BROWSER_E2E === "1" || (process.platform === "linux" && Boolean(resolveAgentBrowserBinary({ env: process.env })));
 if (!REAL_BROWSER) console.log("skipping the Team Cloud sign-in check: it needs agent-browser and its Chrome on Linux (or OMB_TEAM_BROWSER_E2E=1)");
 

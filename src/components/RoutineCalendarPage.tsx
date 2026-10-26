@@ -121,8 +121,9 @@ export type EventSeed = {
   call?: CalendarCall;
 };
 
+/** No group is a goal in one bot's own chat, which any active bot can lead. */
 function activeRoomMembers(group: Group | undefined, bots: Bot[]): Bot[] {
-  if (!group) return [];
+  if (!group) return bots.filter((bot) => !bot.hidden);
   return group.memberIds.flatMap((id) => {
     const bot = bots.find((candidate) => candidate.id === id);
     return bot && !bot.hidden ? [bot] : [];
@@ -378,7 +379,7 @@ export function EventEditor({
   const cloudReady = Boolean(state.config?.box.configured && botIds.length > 0 && botIds.every(id => boatCapableEngine(state.instances, bots.find(bot => bot.id === id)?.modelSelection.instanceId)?.snapshot.state === "available"));
   const rooms = state.groups.filter(roomCanRunGoal);
   const selectedRoom = rooms.find((group) => group.id === groupId);
-  const roomMembers = activeRoomMembers(selectedRoom, state.bots);
+  const roomMembers = selectedRoom ? activeRoomMembers(selectedRoom, state.bots) : bots;
   const isRoomGoal = kind === "routine" && routineTarget === "room-goal";
   const cloudHome = state.config?.cloudHome === true;
   const at = fromLocalDateAndTime(date, startTime, existingRoutine || existingCall ? initialAt : undefined);
@@ -505,7 +506,7 @@ export function EventEditor({
           prompt: description,
           target: routineTarget,
           botId: lockedBotId ?? botIds[0] ?? "",
-          groupId: routineTarget === "room-goal" ? groupId : null,
+          groupId: routineTarget === "room-goal" && groupId ? groupId : null,
           runOn: routineTarget === "room-goal" ? "maus" : runOn,
           enabled: existingRoutine && (existingRoutine.enabled || !isDone(existingRoutine, savedAt)) ? undefined : true,
           schedule: nextSchedule,
@@ -551,7 +552,7 @@ export function EventEditor({
     && (kind === "call"
       ? botIds.length > 0
       : routineTarget === "room-goal"
-        ? groupId && botIds[0] && roomMembers.some((bot) => bot.id === botIds[0])
+        ? botIds[0] && roomMembers.some((bot) => bot.id === botIds[0])
         : botIds.length > 0)
     && !intervalInvalid
     && !intervalDaysInvalid
@@ -930,29 +931,23 @@ export function EventEditor({
               {isRoomGoal ? (
                 <div className="space-y-3">
                   <div>
-                    <label htmlFor="routine-goal-room" className="mb-2 block text-[12.5px] font-medium text-ink">{t("routines.goal.chooseGroup")}</label>
-                    {rooms.length > 0 ? (
-                      <Select id="routine-goal-room" value={groupId} onChange={(event) => selectRoom(event.target.value)} className="w-full">
-                        <option value="">{t("routines.goal.selectGroup")}</option>
-                        {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
-                      </Select>
+                    <label htmlFor="routine-goal-room" className="mb-2 block text-[12.5px] font-medium text-ink">{t("routines.editor.goalWhere")}</label>
+                    <Select id="routine-goal-room" value={groupId} onChange={(event) => selectRoom(event.target.value)} className="w-full">
+                      <option value="">{t("routines.editor.goalOneOnOne")}</option>
+                      {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
+                    </Select>
+                  </div>
+                  <div>
+                    <div className="mb-2 text-[12.5px] font-medium text-ink">{selectedRoom ? t("routines.goal.chooseLead") : t("routines.editor.who")}</div>
+                    {roomMembers.length > 0 ? (
+                      <>
+                        <BotPicker bots={roomMembers} selected={botIds} multiple={false} onChange={selectBots} />
+                        <div className="mt-2 text-[11.5px] text-ink-secondary">{selectedRoom ? t("routines.goal.leadHelp", { name: selectedRoom.name }) : t("routines.editor.goalOneOnOneHelp")}</div>
+                      </>
                     ) : (
-                      <div className="rounded-xl border border-dashed border-hairline/60 bg-inset px-3.5 py-3 text-[11.5px] leading-relaxed text-ink-secondary">{t("routines.goal.noGroups")}</div>
+                      <div className="rounded-xl border border-warning/30 bg-warning/10 px-3.5 py-3 text-[11.5px] text-warning">{t("routines.goal.noMembers")}</div>
                     )}
                   </div>
-                  {selectedRoom && (
-                    <div>
-                      <div className="mb-2 text-[12.5px] font-medium text-ink">{t("routines.goal.chooseLead")}</div>
-                      {roomMembers.length > 0 ? (
-                        <>
-                          <BotPicker bots={roomMembers} selected={botIds} multiple={false} onChange={selectBots} />
-                          <div className="mt-2 text-[11.5px] text-ink-secondary">{t("routines.goal.leadHelp", { name: selectedRoom.name })}</div>
-                        </>
-                      ) : (
-                        <div className="rounded-xl border border-warning/30 bg-warning/10 px-3.5 py-3 text-[11.5px] text-warning">{t("routines.goal.noMembers")}</div>
-                      )}
-                    </div>
-                  )}
                 </div>
               ) : (
                 <>
@@ -1198,9 +1193,8 @@ function CalendarEventCard({
   const routine = item.kind === "routine" ? item.routine : null;
   const run = item.kind === "routine" ? item.run : null;
   const isRoomGoal = !isCall && (run?.target ?? routine?.target) === "room-goal";
-  const room = isRoomGoal
-    ? groups.find((candidate) => candidate.id === (run?.groupId ?? routine?.groupId))
-    : undefined;
+  const roomId = isRoomGoal ? run?.groupId ?? routine?.groupId : undefined;
+  const room = roomId ? groups.find((candidate) => candidate.id === roomId) ?? { name: t("routines.group") } : undefined;
   const ownerIds = isCall ? item.call.botIds : [run?.botId ?? routine?.botId ?? ""];
   const ownerBots = ownerIds.flatMap((id) => bots.find((bot) => bot.id === id) ?? []);
   const primary = ownerBots[0];
@@ -1277,7 +1271,7 @@ function CalendarEventCard({
         {previewDuration >= 30 && (isCall ? <Video size={compact ? 11 : 13} className="mt-0.5 shrink-0" /> : primary ? <BotAvatar bot={primary} state={status ? statusState(status) : paused ? "sleeping" : "idle"} size={compact ? 18 : 22} animated={status === "running" || status === "waiting"} /> : null)}
         <div className="min-w-0 flex-1">
           <div className={cn("truncate text-[11px] font-semibold", previewDuration < 30 ? "leading-none" : "leading-tight")}>{name}</div>
-          {previewDuration >= 30 && <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px] opacity-80">{!isCall && <span data-event-status={paused ? "paused" : attention ? "needs-you" : "working"} className={cn("size-1.5 shrink-0 rounded-full", paused ? "bg-ink-tertiary" : attention ? "bg-warning" : "bg-success")} />}<span className="truncate">{niceTime(item.at)} · {isCall ? t(ownerBots.length === 1 ? "routines.botCountOne" : "routines.botCountMany", { count: ownerBots.length }) : isRoomGoal ? room?.name ?? t("routines.group") : intervalCadence ? `${primary?.name ?? ""} · ${intervalCadence}` : primary?.name}</span></div>}
+          {previewDuration >= 30 && <div className="mt-0.5 flex min-w-0 items-center gap-1 text-[9.5px] opacity-80">{!isCall && <span data-event-status={paused ? "paused" : attention ? "needs-you" : "working"} className={cn("size-1.5 shrink-0 rounded-full", paused ? "bg-ink-tertiary" : attention ? "bg-warning" : "bg-success")} />}<span className="truncate">{niceTime(item.at)} · {isCall ? t(ownerBots.length === 1 ? "routines.botCountOne" : "routines.botCountMany", { count: ownerBots.length }) : room ? room.name : intervalCadence ? `${primary?.name ?? ""} · ${intervalCadence}` : primary?.name}</span></div>}
         </div>
         {previewDuration >= 30 && ownerBots.length > 1 && <span className="rounded bg-inset/60 px-1 py-0.5 text-[8px]">+{ownerBots.length - 1}</span>}
       </div>
@@ -1451,7 +1445,7 @@ export function EventDetails({
   const botIds = call?.botIds ?? [run?.botId ?? routine?.botId ?? ""];
   const invited = botIds.flatMap((id) => bots.find((bot) => bot.id === id) ?? []);
   const primary = invited[0];
-  const executionOwner = isRoomGoal ? goalGroup : primary;
+  const executionOwner = isRoomGoal && goalGroupId ? goalGroup : primary;
   const canOpenExecution = Boolean(executionThreadId && (executionOwner?.threadId === executionThreadId || executionOwner?.tasks?.some((task) => task.threadId === executionThreadId)));
   const resultsThreadId = run ? run.resultsThreadId ?? run.sourceThreadId : routine?.resultsThreadId;
   const openResultsId = resultsThreadId ?? (!run && routine?.target === "bot" ? primary?.mainThreadId : undefined);
@@ -1579,7 +1573,7 @@ export function EventDetails({
             {invited.length === 0 && <span className="text-[12.5px] text-ink-secondary">{t("routines.unavailableBot")}</span>}
           </div>
         </DrawerField>
-        {isRoomGoal && <DrawerField label={t("routines.drawer.group")}><div className="text-[12.5px] text-ink">{goalGroup?.name ?? t("routines.drawer.groupUnavailable")}</div></DrawerField>}
+        {isRoomGoal && goalGroupId && <DrawerField label={t("routines.drawer.group")}><div className="text-[12.5px] text-ink">{goalGroup?.name ?? t("routines.drawer.groupUnavailable")}</div></DrawerField>}
         {(routine || call) && (
           <DrawerField label={t("routines.drawer.schedule")}>
             <div className="text-[12.5px] text-ink">{scheduleLabel((routine ?? call)!.schedule)}</div>
@@ -1617,7 +1611,7 @@ export function EventDetails({
           {roomId && <button onClick={() => onOpenRoom(roomId)} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-accent-ink hover:brightness-110"><ExternalLink size={13} />{t("routines.drawer.joinGroup")}</button>}
           {call && call.botIds.length > 1 && <button onClick={joinRoom} disabled={working} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-accent-ink hover:brightness-110 disabled:opacity-50"><ExternalLink size={13} />{t("routines.drawer.joinGroup")}</button>}
           {isRoomGoal && goalGroup && !executionThreadId && <button onClick={() => { onOpenRoom(goalGroup.id); onClose(); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />{t("routines.drawer.openGroup")}</button>}
-          {canOpenExecution && <button onClick={openRunTask} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />{t(isRoomGoal ? "routines.drawer.openGroupThread" : "routines.drawer.openThread")}</button>}
+          {canOpenExecution && <button onClick={openRunTask} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />{t(isRoomGoal && goalGroupId ? "routines.drawer.openGroupThread" : "routines.drawer.openThread")}</button>}
           {canOpenResults && openResultsId && <button type="button" onClick={() => { openNotificationTarget(dispatch, { botId: botIds[0], threadId: openResultsId }, state, showThreads); onClose(); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />{t("routines.results.open")}</button>}
           {run && ["queued", "running", "waiting"].includes(run.status) && <button onClick={() => void invoke(`/api/routine-runs/${run.id}/cancel`)} disabled={working} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"><X size={13} />{t("routines.drawer.cancelRun")}</button>}
           <div className="ml-auto flex items-center gap-1">

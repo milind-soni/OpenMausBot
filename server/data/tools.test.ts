@@ -106,10 +106,17 @@ describe("the statement gate", () => {
     ["SHOW TABLES", { kind: "read", materialisable: false }],
     ["EXPLAIN SELECT 1", { kind: "read", materialisable: false }],
     ["EXPLAIN ANALYZE SELECT 1", { kind: "read", materialisable: false }],
+    ["EXPLAIN ANALYZE WITH a AS (SELECT 1) SELECT * FROM a", { kind: "read", materialisable: false }],
     ["SELECT comment, load, \"set\", copy AS attach FROM t", { kind: "read", materialisable: true }],
     ["SELECT ';' AS semi, 'DROP TABLE t' AS s FROM t -- ; DELETE", { kind: "read", materialisable: true }],
     ["SELECT \"a;b\" FROM t /* ; INSERT */", { kind: "read", materialisable: true }],
     ["SELECT $$x;y$$", { kind: "read", materialisable: true }],
+    ["SELECT $tag$x;y$tag$, $a$ $$ $b$ $a$", { kind: "read", materialisable: true }],
+    ["SELECT E'it\\'s; DROP' AS s, 'a\\' AS plain", { kind: "read", materialisable: true }],
+    ["SELECT 1 /* a /* ; b */ DELETE */ AS x", { kind: "read", materialisable: true }],
+    ["SELECT 1; -- end\r", { kind: "read", materialisable: true }],
+    ["SELECT 1 AS α$a$, 'é' AS e", { kind: "read", materialisable: true }],
+    ["SELECT E'\\''\n'\\'', 'a' -- c\r\n  'b'", { kind: "read", materialisable: true }],
     ["CREATE TABLE x AS SELECT 1", { kind: "create", target: "x" }],
     ["CREATE OR REPLACE TABLE s.x AS SELECT 1", { kind: "create", target: "s.x" }],
     ["create or replace view \"My View\" as select 1", { kind: "create", target: "\"My View\"" }],
@@ -124,6 +131,14 @@ describe("the statement gate", () => {
     "SET threads = 1", "PRAGMA memory_limit = '1GB'", "ATTACH 'x.db' AS x", "COPY t TO 'out.csv'", "CALL something()",
     "INSTALL httpfs", "LOAD httpfs", "CREATE TABLE t (a INT)", "CREATE SCHEMA s", "CREATE INDEX i ON t(a)",
     "WITH a AS (SELECT 1) DELETE FROM t", "WITH a(x) AS (SELECT 1) INSERT INTO t SELECT * FROM a", "EXPLAIN ANALYZE DELETE FROM t",
+    "EXPLAIN ANALYZE WITH x AS (SELECT 1) DELETE FROM victim", "EXPLAIN WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x",
+    "EXPLAIN /* plan */ ANALYZE -- run\nWITH x AS (SELECT 1) UPDATE t SET a = 1", "EXPLAIN EXPLAIN ANALYZE DELETE FROM t",
+    "EXPLAIN ANALYZE (DELETE FROM t)", "EXPLAIN ANALYZE CREATE TABLE x AS SELECT 1", "EXPLAIN ANALYZE",
+    "EXPLAIN ANALYZE /* outer /* inner */ SELECT */ DELETE FROM t",
+    "EXPLAIN ANALYZE WITH x AS (SELECT E'\\') SELECT 1 --') DELETE FROM t",
+    "EXPLAIN ANALYZE WITH x AS (SELECT $a$ ) SELECT 1 -- $a$) DELETE FROM t",
+    "EXPLAIN ANALYZE WITH x AS (SELECT 1 AS α$a$ ) DELETE FROM t -- $a$) SELECT 1",
+    "EXPLAIN ANALYZE WITH x AS (SELECT E'\\''\n'\\') SELECT 1 --') DELETE FROM t",
     "BEGIN", "EXPORT DATABASE 'd'", "TRUNCATE t",
   ])("refuses %s", (sql) => {
     expect(classifySql(sql).kind).toBe("refused");
@@ -135,6 +150,17 @@ describe("the statement gate", () => {
     expect(await failure(Promise.resolve().then(() => classifySql("SELECT 'oops")))).toMatchObject({ code: "invalid_input" });
     expect(await failure(Promise.resolve().then(() => classifySql("   ")))).toMatchObject({ code: "invalid_input" });
     expect(classifySql("SELECT 1;")).toEqual({ kind: "read", materialisable: true });
+    for (const sql of ["SHOW TABLES; --x\rDELETE FROM t", "SHOW TABLES /* ; */; /* /* */ */ DELETE FROM t", "SELECT (1; DELETE FROM t)"]) {
+      expect(await failure(Promise.resolve().then(() => classifySql(sql)))).toMatchObject({ code: "invalid_input", message: "One statement per call." });
+    }
+    expect(await failure(Promise.resolve().then(() => classifySql("SELECT 1 /* a /* b */")))).toMatchObject({ code: "invalid_input", message: "Unterminated comment." });
+    expect(await failure(Promise.resolve().then(() => classifySql("SELECT $a$ x $b$")))).toMatchObject({ code: "invalid_input", message: "Unterminated dollar-quoted string." });
+    expect(await failure(Promise.resolve().then(() => classifySql("SELECT 1E'\\' --'")))).toMatchObject({ code: "invalid_input", message: "Put a space before E'…' so the string reads one way." });
+    expect(classifySql("SELECT 1E'a'")).toEqual({ kind: "read", materialisable: true });
+    for (const space of ["\u00a0", "\u200b", "\u3000", "\ufeff"]) {
+      expect(await failure(Promise.resolve().then(() => classifySql(`EXPLAIN ANALYZE WITH x AS (SELECT 1 AS ${space}$a$ ) SELECT 1 1 -- $a$) DELETE FROM t`))))
+        .toMatchObject({ code: "invalid_input", message: "Replace non-ASCII spaces with plain spaces." });
+    }
   });
 });
 
@@ -266,6 +292,18 @@ describe("data_load", () => {
     const again = await loadData(ctx, { source: join(dir, "Orders 2024.csv"), replace: false });
     expect(again.tables[0]!.name).toBe("orders_2024_2");
     expect(database.calls.at(-2)!.sql).toMatch(/^CREATE TABLE "orders_2024_2"/);
+  });
+
+  it("shortens a 63-character name to fit the suffix that keeps it unique", async () => {
+    const { ctx } = context();
+    const dir = freshDir();
+    writeFileSync(join(dir, "data.csv"), "id\n1\n");
+    const long = "t".repeat(63);
+    await loadData(ctx, { source: join(dir, "data.csv"), name: long });
+    const second = await loadData(ctx, { source: join(dir, "data.csv"), name: long, replace: false });
+    const third = await loadData(ctx, { source: join(dir, "data.csv"), name: long, replace: false });
+    expect(second.tables[0]!.name).toBe(`${"t".repeat(61)}_2`);
+    expect(third.tables[0]!.name).toBe(`${"t".repeat(61)}_3`);
   });
 
   it("snapshots a database read-only, detaches it even on failure, and never records the password", async () => {

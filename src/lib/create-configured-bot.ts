@@ -25,6 +25,7 @@ export async function createConfiguredBot(
   update: typeof persistBotUpdate = persistBotUpdate,
   approvals = desktopApprovalBridge(),
   visibility?: BotVisibility,
+  reportsTo?: string,
 ): Promise<{ bot: Bot; warnings: string[] }> {
   const template = await preparedBotTemplate(draft);
   const { chiefOfStaff, managedSections, toolScope, ...profile } = template.profile;
@@ -33,7 +34,7 @@ export async function createConfiguredBot(
   const response = await request<{ bot: Bot }>("/api/bots", {
     method: "POST", body: JSON.stringify({ name: profile.name, title: profile.title,
       description: profile.description, modelSelection: profile.modelSelection, section: profile.section,
-      requireAvailableModel: true, useDefaults: false, ...(visibility !== undefined ? { visibility } : {}),
+      requireAvailableModel: true, useDefaults: false, ...(visibility !== undefined ? { visibility } : {}), ...(reportsTo ? { reportsTo } : {}),
       ...(Object.hasOwn(template.profile, "toolScope") ? { settings: { toolScope } } : {}),
       ...(preset ? { preset: preset.id } : {}) }),
   });

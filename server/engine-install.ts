@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { EngineInstall } from "./contracts.ts";
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "./config.ts";
+import { npmEnginesPrefix } from "./engine-roots.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCache } from "./env-path.ts";
 import { execCli, killCliTree, spawnCli } from "./procs.ts";
 
@@ -13,7 +14,7 @@ const DEFAULT_TIMEOUT_MS = 10 * 60_000;
 export const PROBE_TIMEOUT_MS = 30_000;
 
 export function enginesPrefix(baseDir = DATA_DIR): string {
-  return join(baseDir, "tools", "npm");
+  return npmEnginesPrefix(baseDir);
 }
 
 /** Where that prefix puts executables: `bin/` on POSIX, the prefix itself on Windows. */

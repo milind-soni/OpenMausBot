@@ -3,6 +3,8 @@ import type { OneHomeCloud, OneHomeView, createOneHome } from "./one-home.mjs";
 import type { installTeamMove } from "./team-move-main.mjs";
 
 export function oneHomeCloud(state: unknown): OneHomeCloud | null;
+/** This computer's server's answer to the move's freeze: frozen, or what still holds the move. */
+export function freezeAnswer(got: { ok: boolean; status: number; body: any }): { frozen: true } | { busy: string; what?: string };
 export type KeepHereState = import("./cloud-send.mjs").KeepHereState;
 export function installationOf(environmentId: string): string;
 

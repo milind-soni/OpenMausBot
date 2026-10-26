@@ -270,7 +270,7 @@ bots:                                       # at least one
     title: Launch rehearsal lead
     description: TEXT
     chief: true                             # Chief of Staff of its team (one per team); false removes it
-    manages: [Support]                      # other teams this Chief may hand work to
+    manages: [Support]                      # other teams this Chief is also in charge of (every bot reaches every bot anyway)
     soul: TEXT | { file: PATH }             # standing instructions, at most 24,000 bytes
     model: claude/claude-sonnet-5-5         # INSTANCE/MODEL; openmausbot models lists them
     effort: none | low | medium | high | xhigh | max

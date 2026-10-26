@@ -198,7 +198,7 @@ export class RuntimeCoordinator implements Coordinator {
     const reply: Reply = wanted === "none" ? "none" : root.reply === "poll" ? "poll" : wanted;
     const requester: Requester = { kind: "bot_turn", botId: parent.assignee.botId, threadId: parent.assignee.destination.threadId,
       chief: this.host.chiefOf(address(parent)), ...(parent.id === root.id && root.requester.runId !== undefined ? { runId: root.requester.runId } : {}) };
-    const level = this.host.levelOf(target, address(parent));
+    const level = this.host.levelOf(target, this.project(parent));
     const result = this.runtime.enqueue({
       parentId: parent.id,
       origin: parent.origin,
@@ -207,7 +207,7 @@ export class RuntimeCoordinator implements Coordinator {
         threadId: target.threadId, ...(target.groupId ? { groupId: target.groupId } : {}) } },
       mode, reply, brief: text, rework,
       ...(options.doneWhen ? { doneWhen: options.doneWhen } : {}),
-      levels: { own: level.level },
+      levels: { own: level.level, ...(level.chief !== undefined ? { chief: level.chief } : {}) },
       ...(level.driverKind !== undefined ? { driverKind: level.driverKind } : {}),
       approved: approvalGranted,
       ...(target.groupId && requestBatchKey ? { batchKey: requestBatchKey } : {}),

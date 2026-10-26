@@ -63,7 +63,7 @@ export function responseGone(res: { once(event: "close", listener: () => void): 
 export function sharedComputerScopeRefusal(registration: Registration, operation: Pick<Operation, "action" | "folder_id">): string | null {
   switch (operation.action) {
     case "run_command":
-      return registration.terminal ? null : "Terminal access is not lent to this server.";
+      return registration.terminal ? null : `Terminal is off on ${registration.name}, so it cannot run commands. Terminal is lent per computer: tell the person in one sentence to turn it on in OpenMausBot on ${registration.name}, under Settings \u2192 MausBot Cloud \u2192 Terminal. Only the person can turn it on; do not try to enable it or run the command anywhere else.`;
     case "computer_tools":
     case "computer_call":
       return registration.computer ? null : `Apps and screen are not lent to this server. ${lendScreenSteps(deviceWord(registration.platform))}`;

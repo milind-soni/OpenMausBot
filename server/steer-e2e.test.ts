@@ -191,6 +191,42 @@ posixOnly("mid-turn steering e2e", () => {
     40_000,
   );
 
+  it("a typed stop during a Claude turn ends it like Stop, and a longer message that starts with stop is still steered", async () => {
+    rmSync(steerFinishGate, { force: true });
+    try {
+      const created = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
+      expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+      await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
+
+      const longer = await api("POST", `/api/bots/${created.id}/messages`, { text: "stop using tabs and indent with spaces" });
+      expect(longer.body.steered).toBe(true);
+      expect((await getBot(created.id)).busy).toBe(true);
+
+      const stop = await api("POST", `/api/bots/${created.id}/messages`, { text: "Stop now!" });
+      expect(stop.status).toBe(202);
+      await waitFor(async () => (await getBot(created.id)).busy === false, "the typed stop to end the turn", 10_000);
+      const bot = await getBot(created.id);
+      expect(bot.messages.some((m: any) => m.role === "user" && m.text === "Stop now!")).toBe(true);
+      expect(bot.messages.some((m: any) => m.role === "bot" && m.kind === "text" && m.text.includes("steered: Stop now!"))).toBe(false);
+    } finally {
+      writeFileSync(steerFinishGate, "finish");
+    }
+  }, 40_000);
+
+  it("a typed stop to an engine that cannot steer ends the turn instead of waiting in the queue", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "acp", model: "fake-model" } });
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true, "the hung turn to start");
+
+    const stop = await api("POST", `/api/bots/${created.id}/messages`, { text: "stop" });
+    expect(stop.status).toBe(202);
+    expect(stop.body.queued).toBeUndefined();
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the typed stop to end the hung turn", 10_000);
+    expect((await getBot(created.id)).messages.filter((m: any) => m.role === "user" && m.kind === "text").map((m: any) => m.text)).toEqual(["first", "stop"]);
+  }, 30_000);
+
   it("a steer the CLI runs as its next native turn keeps the turn, its busy state and its internal tool pass until that reply lands", async () => {
     rmSync(lateSteerFinishGate, { force: true });
     rmSync(lateSteerContinuationGate, { force: true });

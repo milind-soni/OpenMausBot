@@ -1,6 +1,6 @@
 // Real server, fake Claude CLI with a slow `auth status` (each probe may take up to its 8 s timeout).
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -21,12 +21,12 @@ afterEach(async () => {
   for (const home of homes.splice(0)) await removeTempDir(home);
 });
 
-function freshHome(): string {
+function freshHome(more: Record<string, unknown> = {}): string {
   const home = mkdtempSync(join(tmpdir(), "omb-boot-readiness-"));
   homes.push(home);
   mkdirSync(join(home, "tmp"), { recursive: true });
   writeFileSync(join(home, "config.json"), JSON.stringify({
-    instances: { claude: { driver: "claudeAgent", displayName: "Verification fixture", config: { cli: FAKE_CLI } } },
+    instances: { claude: { driver: "claudeAgent", displayName: "Verification fixture", config: { cli: FAKE_CLI } }, ...more },
   }));
   return home;
 }
@@ -99,6 +99,37 @@ it("answers on a later start while an engine CLI is still being probed, and runs
   const { instances } = await server.get("/api/instances");
   expect(instances.find((instance: { instanceId: string }) => instance.instanceId === "claude")?.snapshot)
     .toMatchObject({ state: "available", authenticated: true });
+}, 60_000);
+
+it.skipIf(process.platform === "win32")("runs a turn on a later start once its own engine has answered, while another engine's CLI is still being probed", async () => {
+  const scratch = mkdtempSync(join(tmpdir(), "omb-boot-slow-engine-"));
+  homes.push(scratch);
+  const slowProbes = join(scratch, "probes.log"), slowRelease = join(scratch, "release-version");
+  const slowCli = join(scratch, "slow-claude");
+  writeFileSync(slowCli, `#!/bin/sh\nFAKE_CLAUDE_PROBE_LOG='${slowProbes}' FAKE_CLAUDE_HOLD_VERSION='${slowRelease}' exec '${FAKE_CLI}' "$@"\n`, { mode: 0o755 });
+  writeFileSync(slowRelease, "");
+  const home = freshHome({ slow: { driver: "claudeAgent", displayName: "Slow fixture", config: { cli: slowCli } } });
+  const first = await boot(home);
+  const [starter] = (await first.get("/api/bots?messages=0")).bots;
+  expect(starter.modelSelection.instanceId).toBe("claude");
+  await first.stop();
+
+  rmSync(slowRelease);
+  rmSync(slowProbes, { force: true });
+  const dump = join(home, "fake-claude-dump.json");
+  const server = await boot(home);
+  let held = 0;
+  await expect.poll(() => {
+    held = existsSync(slowProbes) ? Number(/^version (\d+)$/m.exec(readFileSync(slowProbes, "utf8"))?.[1] ?? 0) : 0;
+    return held;
+  }, { timeout: 10_000 }).toBeGreaterThan(0);
+
+  await server.control("send", "--bot", starter.id, "--task", starter.threadId, "--text", "Right after the start");
+  expect((await server.control("wait", "--bot", starter.id, "--task", starter.threadId, "--timeout", "6")).status).toBe("settled");
+  expect(() => process.kill(held, 0)).not.toThrow();
+  const seen = JSON.parse(readFileSync(dump, "utf8"));
+  expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("200000");
+  writeFileSync(slowRelease, "");
 }, 60_000);
 
 it("starts the words a later start restored before a message sent while the engines are read", async () => {

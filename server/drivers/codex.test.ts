@@ -954,19 +954,23 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(recorder.events.some((event) => event.type === "runtime.error" && event.message.includes("cannot safely update bot instructions"))).toBe(true);
   });
 
-  it("sends current-turn images as native localImage inputs without logging their private paths", async () => {
+  it("sends current-turn images inline, so the boxed Codex never opens an attachments path", async () => {
+    vi.stubEnv("FAKE_CODEX_ECHO_INPUT", "1");
     await create();
     const dump = join(scratch, "images.json");
-    const imagePath = join(scratch, "private image.png");
+    const attachments = join(scratch, "attachments");
+    const imagePath = join(attachments, "private image.png");
+    const bytes = Buffer.from("\x89PNG private pixels");
     process.env.FAKE_CODEX_DUMP = dump;
     mkdirSync(NATIVE_DIR, { recursive: true });
-    writeFileSync(imagePath, "png");
+    mkdirSync(attachments, { recursive: true });
+    writeFileSync(imagePath, bytes);
 
     await instance.adapter.sendTurn({
       threadId: "t-native-input-image",
       text: "describe this",
       system: "You are Testy.",
-      images: [{ path: imagePath, mime: "image/png", bytes: 3 }],
+      images: [{ path: imagePath, mime: "image/png", bytes: bytes.length }],
     });
     await recorder.until((event) => event.type === "turn.completed");
 
@@ -974,12 +978,15 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     const turnStart = seen.calls.find((call: { method: string }) => call.method === "turn/start");
     expect(turnStart.params.input).toEqual([
       { type: "text", text: "describe this" },
-      { type: "localImage", path: imagePath },
+      { type: "image", url: `data:image/png;base64,${bytes.toString("base64")}` },
     ]);
+    expect(JSON.stringify(seen)).not.toContain(attachments);
 
     const nativeLog = readFileSync(join(NATIVE_DIR, "t-native-input-image.ndjson"), "utf8");
-    expect(nativeLog).toContain('"type":"localImage"');
-    expect(nativeLog).toContain("[private attachment path omitted]");
+    expect(nativeLog).toContain('"type":"image"');
+    expect(nativeLog).toContain("[inline image omitted");
+    expect(nativeLog).toMatch(/"dir":"in".*\[inline image omitted/);
+    expect(nativeLog).not.toContain(bytes.toString("base64"));
     expect(nativeLog).not.toContain(imagePath);
   });
 
@@ -2080,6 +2087,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     process.env.FAKE_CODEX_DUMP = dump;
     const recoveryText = "User: Remember ALPHA.\nAssistant: Remembered.\nUser: What did I say?";
     const imagePath = join(scratch, "current-image.png");
+    writeFileSync(imagePath, "i");
     await instance.adapter.sendTurn({
       threadId: "company-missing-thread", text: "What did I say?", resumeCursor: "gone-company-thread",
       recoveryText, model: "company-codex-model", system: "Keep current bot rules.", approvalMode: "full",
@@ -2097,7 +2105,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     });
     expect(seen.calls.find((call: { method: string }) => call.method === "turn/start").params).toMatchObject({
       threadId: "codex-thread-1",
-      input: [{ type: "text", text: recoveryText }, { type: "localImage", path: imagePath }],
+      input: [{ type: "text", text: recoveryText }, { type: "image", url: "data:image/png;base64,aQ==" }],
     });
     expect(seen.argv).toContain('model_provider="openmaus_company"');
     expect(JSON.stringify(seen.argv)).not.toContain("synthetic-company-fixture");
@@ -2538,36 +2546,28 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     }
   });
 
-  it("times out an ask with empty answers and a timeout-sourced resolve", async () => {
-    // A completed turn starts the driver's child-reap loop, whose 25ms poll would freeze on the fake clock.
-    process.env.FAKE_CODEX_ASK_HOLD = "1";
+  it("keeps a question open for days and still delivers the person's answer", async () => {
     await create({ mode: "multi-question" });
-    const dump = join(scratch, "question-timeout.json");
+    const dump = join(scratch, "question-no-timeout.json");
     process.env.FAKE_CODEX_DUMP = dump;
 
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let opened: RuntimeEvent;
     try {
-      await instance.adapter.sendTurn({ threadId: "t-question-timeout", text: "ask me" });
-      const opened = await recorder.until((e) => e.type === "request.opened");
-      await vi.advanceTimersByTimeAsync(15 * 60_000);
-
-      const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
-      expect(resolved).toMatchObject({ behavior: "deny", source: "timeout" });
+      await instance.adapter.sendTurn({ threadId: "t-question-no-timeout", text: "ask me" });
+      opened = await recorder.until((e) => e.type === "request.opened");
+      await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+      expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(false);
     } finally {
       vi.useRealTimers();
     }
 
-    // The held fake records the answers once real time lets the child parse the reply.
-    let decision: unknown = null;
-    for (let i = 0; i < 80 && (decision === null || decision === undefined); i++) {
-      try {
-        decision = JSON.parse(readFileSync(dump, "utf8")).decision;
-      } catch {}
-      if (decision === null || decision === undefined) {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-    }
-    expect(decision).toEqual({ answers: {} });
+    await instance.adapter.respondToRequest("t-question-no-timeout", opened.requestId!, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Ship today?\nA: Yes",
+    });
+    const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
+    expect(resolved).toMatchObject({ behavior: "answer", source: "user" });
   });
 
   it("answers Codex 0.149 MCP elicitation with the MCP result shape", async () => {
@@ -3126,6 +3126,20 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
       process.env.FAKE_CODEX_MODE = "happy";
       expect((await runTurn("t-provider-ok", "badprov::badmodel")).done).toMatchObject({ ok: true });
       await expect(instance.snapshot()).resolves.toMatchObject({ authenticated: false, reason: CODEX_SIGN_IN_EXPIRED });
+    });
+
+    it("offers no quick model while signed in with a ChatGPT account, which refuses models its catalog lists", async () => {
+      const environment = signedIn();
+      await create({ environment });
+      expect(instance.quickModelsUsable?.()).toBe(false);
+      writeFileSync(join(environment.CODEX_HOME, "auth.json"), JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: "sk-fixture", tokens: null }));
+      expect(instance.quickModelsUsable?.()).toBe(true);
+      await instance.dispose();
+      await create({ managed: true });
+      expect(instance.quickModelsUsable?.()).toBe(true);
+      await instance.dispose();
+      await create({ authMode: "chatgpt-plan" });
+      expect(instance.quickModelsUsable?.()).toBe(false);
     });
 
     it("does not call a refused API-key login an expired ChatGPT sign-in", async () => {

@@ -6,6 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { personKey } from "./person-key.ts";
@@ -15,8 +16,8 @@ const OWNER = { email: "olive@acme.test", role: "owner" as const };
 const ADMIN = { email: "ari@acme.test", role: "admin" as const };
 const BOB = { email: "bob@acme.test", role: "member" as const };
 const ENGINE = `import { readFileSync as readToolCalls } from "node:fs";
-process.env.FAKE_CLAUDE_DUMP = process.env.HOME + "/dump.json";
-try { process.env.FAKE_CLAUDE_TOOL_CALLS = readToolCalls(process.env.HOME + "/tool-calls.json", "utf8"); } catch {}`;
+process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/dump.json";
+try { process.env.FAKE_CLAUDE_TOOL_CALLS = readToolCalls(process.env.FAKE_CLAUDE_FIXTURE_DIR + "/tool-calls.json", "utf8"); } catch {}`;
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
 const bobKey = personKey({ id: "", email: BOB.email });
 
@@ -170,6 +171,25 @@ it("the Owner and an Admin cannot write in it, rename, delete, stop or answer an
   const bobs = (await team.as(bob, "GET", "/api/bots")).body.bots as Array<{ id: string; tasks: Array<{ threadId: string; title: string }> }>;
   expect(bobs.find((entry) => entry.id === bot.id)!.tasks.find((task) => task.threadId === bobThread)?.title).toBe("Bob's plans");
 }, hostTimeout(60_000));
+
+it("the Owner and an Admin cannot mark Bob's notifications read, one by one or all at once", async () => {
+  const bobsUnread = () => {
+    const db = new DatabaseSync(dataDir("messages.db"), { readOnly: true });
+    try {
+      return (db.prepare("SELECT id FROM notification_log WHERE thread_id = ? AND read = 0 ORDER BY id").all(bobThread) as Array<{ id: string }>).map((row) => row.id);
+    } finally {
+      db.close();
+    }
+  };
+  await turn(bob, bobThread, "Remind me to water the bees.");
+  await until(() => bobsUnread().length > 0);
+  const unread = bobsUnread();
+  for (const token of [owner, admin]) {
+    expect((await team.as(token, "POST", `/api/notifications/${unread[0]}/read`)).status).toBe(404);
+    expect((await team.as(token, "POST", "/api/notifications/read-all")).status).toBe(200);
+  }
+  expect(bobsUnread()).toEqual(unread);
+}, hostTimeout(90_000));
 
 it("never streams Bob's chat to the Owner or an Admin, live or replayed, while Bob's stream has it", async () => {
   const ownerStream = await listen(owner), adminStream = await listen(admin), bobStream = await listen(bob);

@@ -96,9 +96,13 @@ Approve for me, or Full access. The teammate's thread is switched to that
 level, keeps it, and opens with a line saying so ("Approve for me — delegated
 by Clive, a Chief of Staff on Approve for me"); you can still change it in
 that thread. Work a Chief hands out inside a room runs at the Chief's level
-for that turn. The level is computed once when the assignment is written and
-recorded on it (docs/runtime-contract.md §3); the turn runs with exactly that
-level.
+for that turn. It flows down every hop, not just the first: when Ada, working
+for Clive, hands part of it to Bea, Bea's work runs at Clive's level too
+("Approve for me — delegated by Ada, from Clive, a Chief of Staff on Approve
+for me"), in threads and rooms alike. Each hand-off looks up its chain to the
+nearest Chief conversation (`server/host/delegated-level.ts`). The level is
+computed once when the assignment is written and recorded on it
+(docs/runtime-contract.md §3); the turn runs with exactly that level.
 
 It only ever raises: a teammate already on a higher level keeps it, a teammate
 on Custom keeps its own configuration, and a Chief handing work out from an
@@ -106,7 +110,7 @@ Ask conversation passes nothing on. Every engine runs Full access, so only
 Auto-accept edits can be capped: a teammate on an engine without it (Codex,
 whose Ask already writes the workspace) stays on its own level. The teammate's
 own default and its other conversations do not change, and an ordinary bot's
-hand-off still uses the recipient's setting. A consultation (`consult: true`)
+hand-off, with no Chief up its chain, still uses the recipient's setting. A consultation (`consult: true`)
 answers from what the teammate knows and acts on nothing, so no level travels
 with it. Questions and missing credentials still reach you.
 

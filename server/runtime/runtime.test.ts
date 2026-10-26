@@ -565,16 +565,16 @@ describe("access rechecked while work runs", () => {
     w.runtime.tick();
     expect(w.store.get(child.id)?.status).toBe("running");
     const signal = w.runner.runs[0]!.signal;
-    w.runner.validate = a => a.id === child.id ? "Room work cannot cross the sender's section boundary" : undefined;
+    w.runner.validate = a => a.id === child.id ? "Destination room setup is unfinished" : undefined;
     w.runtime.tick();
-    expect(w.store.get(child.id)).toMatchObject({ status: "failed", outcome: "refused", result: "Room work cannot cross the sender's section boundary" });
+    expect(w.store.get(child.id)).toMatchObject({ status: "failed", outcome: "refused", result: "Destination room setup is unfinished" });
     expect(signal.aborted).toBe(true);
     await w.runner.release(child.id, { kind: "completed", text: "PRIVATE_RESULT" });
     expect(w.store.get(child.id)?.result).not.toContain("PRIVATE");
     w.runtime.end(root.id, { ok: true, text: "handed out" });
     w.runtime.tick();
     const resume = w.runner.runs.find(r => r.a.id === root.id && r.input.resumed);
-    expect(resume?.input.settled?.map(s => s.result)).toEqual(["Room work cannot cross the sender's section boundary"]);
+    expect(resume?.input.settled?.map(s => s.result)).toEqual(["Destination room setup is unfinished"]);
     invariants(w);
   });
 

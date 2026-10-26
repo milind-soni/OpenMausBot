@@ -9,6 +9,7 @@ import test from "node:test";
 import {
   acquireDataDirLease,
   acquireDataDirLeaseForProcess,
+  clearRecordsFromOtherMachines,
 } from "./data-dir-lease.mjs";
 
 const MODULE_URL = new URL("./data-dir-lease.mjs", import.meta.url).href;
@@ -636,4 +637,56 @@ test("a live but unrelated Windows pid reused within the same boot is treated as
   } finally {
     lease.release();
   }
+});
+
+// A Cloud home's volume mounts on one machine at a time, and each new home on it has a new hostname and boot.
+const otherMachine = (current) => ({ host: renamedHost(current), boot: randomUUID(), uptime: 1 });
+
+test("on request, the lease, delegated child and recovery record another machine left are cleared and their holder named; then the lease is free", async () => {
+  const { dataDir } = temporaryDirectory();
+  const current = recordWrittenByThisProcess(dataDir);
+  const foreign = { ...otherMachine(current), pid: await exitedPid(), token: randomUUID() };
+  const leasePath = plantOwner(dataDir, foreign);
+  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  mkdirSync(path.dirname(childPath));
+  writeFileSync(childPath, JSON.stringify({ ...current, ...foreign, token: randomUUID() }));
+  const reaperPath = path.join(dataDir, `${LEASE_NAME}.reap-${foreign.token}`);
+  writeFileSync(reaperPath, JSON.stringify({ ...current, ...foreign, token: randomUUID(), targetToken: foreign.token }));
+  assert.throws(() => acquireDataDirLease(dataDir), /another machine/);
+
+  const cleared = clearRecordsFromOtherMachines(dataDir);
+  assert.deepEqual(cleared.map((record) => record.path).sort(), [leasePath, childPath, reaperPath].sort());
+  for (const record of cleared) assert.deepEqual({ host: record.host, pid: record.pid }, { host: foreign.host, pid: foreign.pid });
+  for (const cleared of [leasePath, childPath, reaperPath]) assert.throws(() => readFileSync(cleared), /ENOENT/);
+  const lease = acquireDataDirLease(dataDir);
+  assert.equal(JSON.parse(readFileSync(leasePath, "utf8")).host, hostname());
+  assert.equal(lease.release(), true);
+  assert.deepEqual(clearRecordsFromOtherMachines(dataDir), []);
+  assert.deepEqual(clearRecordsFromOtherMachines(path.join(dataDir, "missing")), []);
+});
+
+test("clearing never touches this machine's records: a live owner still refuses a second instance, a dead one is recovered as usual", async () => {
+  const { dataDir } = temporaryDirectory();
+  const live = acquireDataDirLease(dataDir);
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  const planted = readFileSync(leasePath, "utf8");
+  try {
+    assert.deepEqual(clearRecordsFromOtherMachines(dataDir), []);
+    assert.equal(readFileSync(leasePath, "utf8"), planted);
+    assert.throws(() => acquireDataDirLease(dataDir), /already using this data directory/i);
+  } finally {
+    live.release();
+  }
+  const dead = plantOwner(dataDir, { pid: await exitedPid(), token: randomUUID() });
+  assert.deepEqual(clearRecordsFromOtherMachines(dataDir), []);
+  assert.ok(readFileSync(dead, "utf8"));
+  const recovered = acquireDataDirLease(dataDir);
+  assert.equal(recovered.release(), true);
+});
+
+test("clearing refuses an unreadable record rather than guess whose it is", () => {
+  const { dataDir } = temporaryDirectory();
+  writeFileSync(path.join(dataDir, LEASE_NAME), "not json");
+  assert.throws(() => clearRecordsFromOtherMachines(dataDir), /lease is invalid/);
+  assert.equal(readFileSync(path.join(dataDir, LEASE_NAME), "utf8"), "not json");
 });

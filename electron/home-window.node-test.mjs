@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 import { cloudPlanSnapshot } from "./cloud-account.mjs";
+import { installCloudPlanIpc } from "./cloud-plan-ipc.mjs";
 import { cloudPageSenderAllowed, myCloudOrigin } from "./cloud-home.mjs";
 import environments from "./environments.cjs";
 import localOrigin from "./local-origin.cjs";
@@ -489,9 +490,11 @@ function pageIpc(overrides = {}) {
     activeEnvironment: environments.activeEnvironment, rendererOrigin: () => LOCAL, desktopRemoteAccess: false,
     mainWindow: { isDestroyed: () => false, webContents: cloudContents },
     environmentsState: { environments: [{ id: "cloud", name: "My Cloud", origin: CLOUD }], activeId: "cloud" },
-    cloudAccount: { homeTarget: () => ({ origin: CLOUD }), state: () => account }, cloudPlanSnapshot, myCloudOrigin, rememberedHome: null,
+    cloudAccount: { homeTarget: () => ({ origin: CLOUD }), state: () => account }, cloudPlanSnapshot, installCloudPlanIpc, myCloudOrigin, rememberedHome: null,
     cloudTrialNotices: () => ({ due: () => null, seen: (...args) => { calls.push(["notice-seen", ...args]); } }),
-    ensureCloudAccount: () => ({ openDashboard: async () => { calls.push(["dashboard"]); return account; } }),
+    ensureCloudAccount: () => ({ openDashboard: async () => { calls.push(["dashboard"]); return account; }, state: () => account,
+      upgradePreview: async (...args) => { calls.push(["upgrade-preview", ...args]); return { outcome: "failed" }; },
+      upgrade: async (...args) => { calls.push(["upgrade", ...args]); return { outcome: "failed" }; } }),
     openLendingSettings: async () => { calls.push(["lending"]); },
     homeWindow: { homePage: () => false },
     ...overrides,
@@ -524,13 +527,14 @@ test("the Cloud's setup checklist can open the lending switch here, and nothing 
 
 test("Settings on the person's own Cloud shows the plan read only, says when it is home, and can open the Plan page or sign in again; never switch away", async () => {
   const page = preload(CLOUD);
-  assert.deepEqual(Object.keys(page.bridge.cloudPlan), ["state", "manage", "signIn", "noticeSeen"]);
+  assert.deepEqual(Object.keys(page.bridge.cloudPlan), ["state", "manage", "signIn", "noticeSeen", "upgradePreview", "upgrade"]);
   assert.equal(page.bridge.cloudAccount, undefined, "no account, credential or address reaches the Cloud's page");
   await page.bridge.cloudPlan.state({ origin: "https://evil.example.test" });
   await assert.rejects(page.bridge.cloudPlan.manage(), /Choose Manage/);
   const ipc = pageIpc();
   const event = { sender: ipc.cloudContents, senderFrame: ipc.cloudFrame };
-  assert.deepEqual(Object.keys(Object.fromEntries(ipc.handlers)), ["cloud-lending:open", "cloud-plan:state", "cloud-plan:notice-seen", "cloud-plan:manage"]);
+  assert.deepEqual(Object.keys(Object.fromEntries(ipc.handlers)), ["cloud-lending:open", "cloud-plan:state", "cloud-plan:notice-seen", "cloud-plan:manage",
+    "cloud-plan:upgrade-preview", "cloud-plan:upgrade"]);
   assert.deepEqual(plain(await ipc.handlers.get("cloud-plan:state")(event, { tier: "personal" })), { status: "paid", tier: "max" });
   ipc.context.homeWindow = { homePage: (asked) => asked === event };
   assert.deepEqual(plain(await ipc.handlers.get("cloud-plan:state")(event)), { status: "paid", tier: "max", home: true });
@@ -775,4 +779,29 @@ test("while the window is on the place's own sign-in page, its 401s start no sec
   mine.home.responded({ url: `${CLOUD}/api/auth/session`, statusCode: 401, webContentsId: 7 });
   await mine.later(0);
   assert.equal(mine.pairs, 1);
+});
+
+test("the usage meter's Upgrade: only from the person's click, only to a plan the verified session offers, only from this app's own pages", async () => {
+  for (const origin of [LOCAL, CLOUD]) {
+    const page = preload(origin);
+    await assert.rejects(page.bridge.cloudPlan.upgrade("max", "app_usage"), /Choose Upgrade/, "the change needs the confirm's own click on every page");
+    await assert.rejects(page.bridge.cloudPlan.upgradePreview("max", "app_usage"), /Choose Upgrade/, "so does the price");
+    const clicked = preload(origin, { activation: true });
+    await clicked.bridge.cloudPlan.upgradePreview("max", "app_usage");
+    await clicked.bridge.cloudPlan.upgrade("max", "app_usage");
+    assert.deepEqual(clicked.invoked, [["cloud-plan:upgrade-preview", "max", "app_usage"], ["cloud-plan:upgrade", "max", "app_usage"]]);
+  }
+  const ipc = pageIpc();
+  const event = { sender: ipc.cloudContents, senderFrame: ipc.cloudFrame };
+  ipc.account.usage = { tier: "pro", resetsAt: 1, meters: [], upgrades: [{ tier: "max", amount: 9900 }] };
+  await ipc.handlers.get("cloud-plan:upgrade-preview")(event, "max", "app_usage");
+  await ipc.handlers.get("cloud-plan:upgrade")(event, "max", "app_settings");
+  assert.deepEqual(ipc.calls, [["upgrade-preview", "max", "app_usage"], ["upgrade", "max", "app_settings"]]);
+  for (const [plan, source] of [["pro", "app_usage"], ["business", "app_usage"], ["max", "somewhere"], [{ tier: "max" }, "app_usage"]]) {
+    for (const channel of ["cloud-plan:upgrade-preview", "cloud-plan:upgrade"]) assert.throws(() => ipc.handlers.get(channel)(event, plan, source), /Choose a plan/);
+  }
+  for (const sender of [{ sender: ipc.cloudContents, senderFrame: { url: "https://other.example.test/" } }, { sender: {}, senderFrame: ipc.cloudFrame }]) {
+    for (const channel of ["cloud-plan:upgrade-preview", "cloud-plan:upgrade"]) assert.throws(() => ipc.handlers.get(channel)(sender, "max", "app_usage"), /only available/);
+  }
+  assert.equal(ipc.calls.length, 2);
 });

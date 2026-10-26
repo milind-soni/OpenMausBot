@@ -1,7 +1,8 @@
 // When a person leaves a Team Cloud (an admin removes them, or they leave), what was theirs alone goes with them: their
 // private chats with every bot (messages, notifications, the files only those chats used), their memory layers, their
-// "About you", their own connections, their own browsers, and every session and phone of theirs. Nothing of it is handed
-// to an admin. The Admin tells this machine with a signed request (`POST /api/cloud/team/member-left`, cloud-signed.ts).
+// engine home (its transcripts), their "About you", their own connections, their own browsers, and every session and
+// phone of theirs. Nothing of it is handed to an admin. The Admin tells this machine with a signed request
+// (`POST /api/cloud/team/member-left`, cloud-signed.ts).
 //
 // Each conversation keeps its starter (thread-starters.json, a hash): what other records still name it (a decision's
 // row, a usage trace) stays someone else's, so no admin ever reads it there either.
@@ -9,6 +10,7 @@ import { readdirSync, rmSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { memberAudience, type Audience } from "../audience.ts";
+import { audienceHome } from "../engine-homes/layout.ts";
 import { forgetBotMemoryJournal, journalFile } from "../memory-journal.ts";
 import { deleteBotMemoryFiles } from "../message-db.ts";
 import { personKey } from "../person-key.ts";
@@ -80,6 +82,7 @@ export function createTeamMemberLeft(deps: TeamMemberLeftDeps): (email: string) 
       layers++;
     }
     rmSync(join(deps.dataDir, "people", person), { recursive: true, force: true });
+    rmSync(audienceHome(deps.dataDir, memberAudience(person)), { recursive: true, force: true });
     deps.forgetConnections(person);
     const browsers = await deps.eraseBrowsers(memberAudience(person)).catch(() => false);
     return { chats, layers, sessions, files: removed, browsers };

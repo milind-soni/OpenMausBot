@@ -20,6 +20,7 @@ import type { CalendarCall, CalendarCallManager } from "./calendar-calls.ts";
 import type { CloudOwner } from "./cloud-owner-lines.ts";
 import type { CloudSendItem } from "./cloud-send.ts";
 import { retireUnusedStarter, takeArrivingDefaultBot } from "./default-bot.ts";
+import { watchAsMade } from "./host/default-watch.ts";
 import { IMPORTED_SKILLS_DIR, readImportedSkills, storeImportedSkills, type ImportedSkillInput } from "./imported-skills.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { withCheckFields } from "./routine-load.ts";
@@ -173,6 +174,11 @@ export function moveItems(deps: MoveKindsDeps, bots: ReadonlySet<string>, only?:
   return items;
 }
 
+/** The bot has a routine here the person set up or changed: a move counts it as in use, so the routine goes with it. */
+export function automatedBot(deps: Pick<MoveKindsDeps, "routines">, botId: string): boolean {
+  return (deps.routines()?.listRoutines() ?? []).some((routine) => routine.botId === botId && !watchAsMade(routine));
+}
+
 /** Each automation here and whether it is on, for the switch that turns on there what was on here; `bot`: that bot's
  * routines only. */
 export function automationSwitches(deps: MoveKindsDeps, bot?: string): Array<{ key: string; on: boolean }> {
@@ -299,7 +305,7 @@ function adoptRoutine(deps: MoveKindsDeps, raw: unknown, runs: unknown, from: st
   if (!parsed.success) refuse(400, "send the routine as this computer holds it");
   const routine = withCheckFields(rebased({ id: parsed.data!.id, ...pick(parsed.data!, ROUTINE_FIELDS) }, from, deps.dataDir) as unknown as Routine);
   if (!deps.store.bot(routine.botId)) refuse(409, "This routine's bot is not on My Cloud yet.");
-  if (routine.target === "room-goal" && (!routine.groupId || !deps.store.group(routine.groupId))) refuse(409, "This routine's room is not on My Cloud yet.");
+  if (routine.target === "room-goal" && routine.groupId && !deps.store.group(routine.groupId)) refuse(409, "This routine's room is not on My Cloud yet.");
   const arriving = (Array.isArray(runs) ? runs : []).flatMap((run) => {
     const checked = runSchema.safeParse(run);
     return checked.success && checked.data.routineId === routine.id && FINISHED.has(checked.data.status) ? [rebased(checked.data, from, deps.dataDir) as unknown as RoutineRun] : [];

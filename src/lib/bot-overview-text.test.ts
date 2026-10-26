@@ -113,6 +113,22 @@ describe("coordination lines from a server of any version", () => {
   });
 });
 
+describe("coordination across every department", () => {
+  const lines = ["Can talk to all 3 other bots, in any department.", "Also in charge of these departments: General, Research.", "Can talk to the other bot.", "Talks only to the bots chosen for it."];
+
+  it("keeps the server's English and translates the current coordination lines", () => {
+    for (const line of lines) expect(overviewLineText(line, ["", "Research"])).toBe(line);
+    setLocale("pt-br");
+    expect(lines.map(line => overviewLineText(line, ["", "Research"]))).toEqual([
+      "Pode falar com todos os outros 3 bots, de qualquer equipe.",
+      "Também é responsável por estas equipes: Geral, Research.",
+      "Pode falar com o outro bot.",
+      "Fala apenas com os bots escolhidos para ele.",
+    ]);
+    expect(overviewLineText(lines[1]!)).toBe("Também é responsável por estas equipes: General, Research.");
+  });
+});
+
 describe("a computer that is not on My Cloud, in English", () => {
   afterEach(() => vi.unstubAllGlobals());
 

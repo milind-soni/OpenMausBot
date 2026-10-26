@@ -13,7 +13,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check) { for (let i = 0; i < 200; i++) { if (check()) return; await sleep(5); } assert.fail("did not reach the expected state"); }
 
 async function world(t) {
-  const f = { now: 1_800_000_000_000, approved: false, supported: true, down: false, account: null, requests: [], saved: null, timer: null, available: true };
+  const f = { now: 1_800_000_000_000, approved: false, supported: true, down: false, account: null, requests: [], saved: null, timer: null, available: true, gate: null };
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "device-1" }, account: { id: "account-1", email: "person@example.test" } });
   const server = createServer(async (req, res) => {
     let raw = ""; for await (const chunk of req) raw += chunk;
@@ -25,6 +25,7 @@ async function world(t) {
     if (req.url === "/api/cloud/desktop/session" && bearer) return send(200, { ...identity(), entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 }, cloud: null });
     if (req.url === "/api/cloud/desktop/updates-consent" || req.url === "/api/updates-consent") {
       f.requests.push({ method: req.method, path: req.url, bearer, body });
+      await f.gate;
       if (f.down) return send(503, { error: "unavailable" });
       if (!f.supported) return send(404, { error: "Not found." });
       if (req.url === "/api/updates-consent") {
@@ -137,6 +138,34 @@ test("an answer given while signed out is carried over to an account that has no
   await g.signInNow();
   assert.equal((await g.consent.state()).status, "opted_in");
   assert.deepEqual(g.requests.filter(request => request.method === "POST"), []);
+});
+
+test("a new answer given while the previous one is still on its way wins on this computer and reaches the Admin", async t => {
+  /** Holds the Admin's reply to the first answer until the second answer is saved here. */
+  const overtake = async (f, first, second) => {
+    let release; f.gate = new Promise(resolve => { release = resolve; });
+    const sending = f.consent.choose(first);
+    await until(() => f.requests.length === 1);
+    const changing = f.consent.choose(second);
+    await until(() => f.saved.updatesConsent.status === second.status);
+    f.gate = null; release();
+    await Promise.all([sending, changing]);
+  };
+  const f = await world(t);
+  await f.signInNow();
+  await overtake(f, { status: "opted_in" }, { status: "withdrawn" });
+  assert.deepEqual(f.requests.filter(request => request.method === "POST").map(request => request.body),
+    [{ status: "opted_in", textVersion: UPDATES_CONSENT_VERSION }, { status: "withdrawn", textVersion: UPDATES_CONSENT_VERSION }]);
+  assert.equal(f.account.status, "withdrawn");
+  assert.deepEqual(f.saved.updatesConsent, { status: "withdrawn", version: UPDATES_CONSENT_VERSION, at: f.now, account: "account-1" });
+
+  // Signed out: the receipt that arrives for the earlier Yes is what withdraws it.
+  const g = await world(t);
+  await overtake(g, { status: "opted_in", email: "person@example.test" }, { status: "withdrawn" });
+  assert.deepEqual(g.requests.map(request => request.body), [
+    { status: "opted_in", email: "person@example.test", installId: g.saved.installId, textVersion: UPDATES_CONSENT_VERSION },
+    { status: "withdrawn", receipt: RECEIPT }]);
+  assert.deepEqual(g.saved.updatesConsent, { status: "withdrawn", version: UPDATES_CONSENT_VERSION, at: g.now, email: "person@example.test", receipt: RECEIPT });
 });
 
 test("nothing is asked or sent where it isn't available: a branded build, or no Cloud sign-in in this app", async t => {

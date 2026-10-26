@@ -187,6 +187,13 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/live\/call$/ },
   { method: "PATCH", path: /^\/api\/live\/settings$/ },
 
+  // The phone's own apps as bot tools: it registers, long-polls for jobs, leases and answers them.
+  { method: "PUT", path: /^\/api\/phones\/self$/ },
+  { method: "GET", path: /^\/api\/phones\/self$/ },
+  { method: "DELETE", path: /^\/api\/phones\/self$/ },
+  { method: "GET", path: /^\/api\/phones\/self\/jobs$/ },
+  { method: "POST", path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
+
   // The harness records only the owner's activation; a guest's is answered and
   // dropped.
   { method: "POST", path: /^\/api\/presence\/active$/ },

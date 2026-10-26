@@ -1,4 +1,4 @@
-import type { EffortLevel, EngineAccess, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
+import type { EffortLevel, EngineAccess, InstanceConfigMap, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 
 export interface SelectableInstance {
   instanceId: string;
@@ -17,6 +17,15 @@ export interface DefaultSelectionContext {
 
 const claudeFirst = (instances: readonly SelectableInstance[]) =>
   instances.find((instance) => instance.driverKind === "claudeAgent") ?? instances[0];
+
+/** The saved config's enabled switch and picker group win over what the driver reports. */
+export function withInstanceConfig<T extends SelectableInstance>(instances: readonly T[], configs: InstanceConfigMap): T[] {
+  return instances.map((instance) => ({
+    ...instance,
+    enabled: configs[instance.instanceId]?.enabled ?? instance.enabled,
+    ...(configs[instance.instanceId]?.access ? { access: configs[instance.instanceId].access } : {}),
+  }));
+}
 
 /** A custom endpoint brings its own credential, so its sign-in state does not count. */
 export function signedOut(instance: SelectableInstance): boolean {

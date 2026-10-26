@@ -228,6 +228,21 @@ describe("RuntimeCoordinator: the requesting turn and its tree", () => {
     expect(w.host.reports).toHaveLength(1);
   });
 
+  it("hands the host the requester's node, whose parents lead up the chain, and records the Chief level it passes on", () => {
+    const w = world(hold);
+    w.host.chiefs.add("chief-chat");
+    const sources: Array<HandoffView | undefined> = [];
+    w.host.levelOf = (target, source) => {
+      sources.push(source);
+      return target.botId === "tester" ? { level: "ask", chief: "auto", driverKind: "claudeAgent" } : { level: "auto" };
+    };
+    const first = send(w, chief, "gen-1", undefined, builder, "Have the tester check it").node;
+    w.coordinator.tick();
+    const second = send(w, builder, "gen-1", first.id, tester, "Check it").node;
+    expect(sources.at(-1)).toMatchObject({ id: first.id, botId: "builder", threadId: "builder-work", parentId: "gen-1" });
+    expect(w.coordinator.status(second.id)!.assignment).toMatchObject({ level: "auto", levelSource: "chief" });
+  });
+
   it("active() is all() without the ended nodes, with the same views", async () => {
     const w = world();
     const ended_ = new Set(["completed", "failed", "cancelled"]);

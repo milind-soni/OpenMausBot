@@ -5,14 +5,17 @@ import { z } from "zod";
  * offers only ids that match it. */
 export const OPENROUTER_MODEL_ID = /^[A-Za-z0-9][\w.-]*\/[\w.:-]+$/;
 export const OPENROUTER_MODEL_ID_MAX = 128;
+/** A Cloudflare account ID: 32 hex characters. Not a secret, so it is shown back to Settings. */
+export const WORKERS_AI_ACCOUNT_ID = /^[0-9a-f]{32}$/i;
 
 const optionalText = z.string().optional();
 
-/** The decision model (server/decider): a fast classifier that picks
- * things for bots, starting with who answers a room message. `key` is the
- * Jev key and `openrouterKey` the OpenRouter one: write-only like every
- * credential, and kept apart from each other and from the engine's
- * OpenRouter key. `baseUrl` / `openrouterBaseUrl` point at a compatible
+/** The decision and extraction models (server/decider, server/extractor):
+ * fast classifiers and extractors that pick and read things for bots, starting
+ * with who answers a room message. `key` is the Jev key, `workersAiToken` a
+ * Cloudflare Workers AI token for `workersAiAccountId` (Clef and Clairic), and
+ * `openrouterKey` the OpenRouter one: write-only like every credential, and
+ * kept apart from each other and from the engine's OpenRouter key. `baseUrl` / `openrouterBaseUrl` point at a compatible
  * server instead of the vendor's (operator settings with no UI);
  * `openrouterModel` is an OpenRouter model id and `openrouterApi` says
  * whether it is a chat model or one of OpenRouter's decisions models
@@ -24,6 +27,14 @@ export const deciderConfigSchema = z.object({
   provider: z.enum(["jev", "openrouter", "off"]).optional(),
   key: optionalText,
   openrouterKey: optionalText,
+  workersAiToken: optionalText,
+  workersAiAccountId: z.string().trim().refine((value) => !value || WORKERS_AI_ACCOUNT_ID.test(value), "a Cloudflare account ID is 32 letters and digits").optional(),
+  workersAiBaseUrl: z
+    .string()
+    .trim()
+    .max(2048)
+    .refine((value) => !value || /^https?:\/\//i.test(value), "the Workers AI address must start with http:// or https://")
+    .optional(),
   openrouterModel: z
     .string()
     .trim()
@@ -43,7 +54,7 @@ export const deciderConfigSchema = z.object({
     .max(2048)
     .refine((value) => !value || /^https?:\/\//i.test(value), "the OpenRouter address must start with http:// or https://")
     .optional(),
-  jobs: z.object({ roomRouting: z.boolean().optional() }).optional(),
+  jobs: z.object({ roomRouting: z.boolean().optional(), inboxTriage: z.boolean().optional() }).optional(),
 });
 
 /** The decision model; see `deciderConfigSchema`. */
@@ -57,5 +68,9 @@ export interface DeciderConfig {
   /** Which OpenRouter API `openrouterModel` is served by: absent is `chat`. */
   openrouterApi?: "chat" | "decisions";
   openrouterBaseUrl?: string;
-  jobs?: { roomRouting?: boolean };
+  workersAiToken?: string;
+  workersAiAccountId?: string;
+  /** An operator setting with no UI, like `baseUrl`: Workers AI's REST root, `/client/v4` included. */
+  workersAiBaseUrl?: string;
+  jobs?: { roomRouting?: boolean; inboxTriage?: boolean };
 }

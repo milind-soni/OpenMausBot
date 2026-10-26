@@ -3,8 +3,8 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
-import { once } from "node:events";
 import { dirname, join, win32 } from "node:path";
+import { pipeline } from "node:stream/promises";
 
 import { renameWithRetry } from "../../atomic.ts";
 
@@ -65,29 +65,30 @@ export async function downloadArchive(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DOWNLOAD_TIMEOUT_MS);
   timer.unref?.();
-  const file = createWriteStream(destination, { mode: 0o600 });
-  const closed = once(file, "close");
   const hash = createHash("sha256");
   let received = 0;
   try {
     const response = await (options.fetchImpl ?? fetch)(url, { redirect: "follow", signal: controller.signal });
-    if (!response.ok || !response.body) throw new Error(`the Chrome download failed (HTTP ${response.status})`);
+    const body = response.body;
+    if (!response.ok || !body) throw new Error(`the Chrome download failed (HTTP ${response.status})`);
     const declared = Number(response.headers.get("content-length") ?? NaN);
     if (Number.isFinite(declared) && declared !== bytes) throw new Error("the Chrome download did not match its pinned size; nothing was installed");
-    for await (const chunk of response.body) {
-      received += chunk.byteLength;
-      if (received > bytes) throw new Error("the Chrome download was larger than its pinned size; nothing was installed");
-      hash.update(chunk);
-      if (!file.write(chunk)) await once(file, "drain");
-      options.onProgress?.({ received, total: bytes });
-    }
+    const file = createWriteStream(destination, { mode: 0o600 });
+    file.once("error", () => controller.abort());
+    await pipeline(async function* () {
+      for await (const chunk of body) {
+        received += chunk.byteLength;
+        if (received > bytes) throw new Error("the Chrome download was larger than its pinned size; nothing was installed");
+        hash.update(chunk);
+        yield chunk;
+        options.onProgress?.({ received, total: bytes });
+      }
+    }, file);
   } catch (error) {
     controller.abort();
     throw error;
   } finally {
     clearTimeout(timer);
-    file.end();
-    await closed;
   }
   if (received !== bytes) throw new Error("the Chrome download ended early; nothing was installed");
   return hash.digest("hex");

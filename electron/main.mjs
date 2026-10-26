@@ -10,6 +10,7 @@ import { startCua, stopCua, registerCuaIpc, requestComputerUse, setCuaStateListe
 import { createAndroidDeviceController } from "./android-device.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
+import { linuxDisablesGpu } from "./linux-gpu.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
 import { attachUpdaterWindow, startUpdater, registerUpdaterIpc, sendUpdaterState } from "./updater.mjs";
 import {
@@ -84,11 +85,12 @@ import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
-import { createComputerSharing, isHomeFolder, validateSharedFolders } from "./computer-sharing.mjs";
+import { createComputerSharing, isHomeFolder, sharedCuaConnection, validateSharedFolders } from "./computer-sharing.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { switchLocalEnvironment } from "./environment-switch.mjs";
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
-import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudPlanSnapshot, cloudTarget, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
+import { CHECKOUT_SOURCES, cloudMenuSublabel, cloudTarget, createCloudAccountClient, createCloudAccountStore } from "./cloud-account.mjs";
+import { installCloudPlanIpc } from "./cloud-plan-ipc.mjs";
 import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNotice, installCloudBuy, lookFile } from "./cloud-buy.mjs";
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
 import { createDesktopText, DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
@@ -223,9 +225,8 @@ function applyUnreadBadge(win = mainWindow) {
 }
 
 // GNOME groups the window with its desktop entry only when both identities match; set before ready.
-// Chromium's GPU process crashed on NVIDIA/libGLES and left an invisible window intercepting input.
 if (process.platform === "linux") {
-  app.disableHardwareAcceleration();
+  if (linuxDisablesGpu()) app.disableHardwareAcceleration();
   app.setDesktopName("com.openmausbot.app.desktop");
 }
 
@@ -2696,12 +2697,7 @@ ipcMain.on("update:offered", event => {
   try { event.returnValue = updaterPageOffered(event) === true; } catch { event.returnValue = false; }
 });
 ipcMain.handle("cloud-lending:open", cloudPageSender("cloud-lending:open", () => openLendingSettings()));
-ipcMain.handle("cloud-plan:state", event => cloudPageSender("cloud-plan:state", () => {
-  const state = cloudAccount?.state();
-  return { ...cloudPlanSnapshot(state, { notice: cloudTrialNotices().due(state) }), ...(homeWindow.homePage(event) ? { home: true } : {}) };
-})(event));
-ipcMain.handle("cloud-plan:notice-seen", cloudPageSender("cloud-plan:notice-seen", () => { cloudTrialNotices().seen(cloudAccount?.state()); }));
-ipcMain.handle("cloud-plan:manage", cloudPageSender("cloud-plan:manage", async () => { await ensureCloudAccount().openDashboard(); }));
+installCloudPlanIpc({ ipcMain, pageSender: cloudPageSender, account: () => cloudAccount, client: () => ensureCloudAccount(), notices: () => cloudTrialNotices(), homePage: event => homeWindow.homePage(event) });
 
 const savedWorkspace = id => {
   const env = environmentsState.environments.find(entry => entry.id === id);
@@ -2767,7 +2763,7 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
 async function lendingSnapshot() {
   const env = lendingTarget.environment();
   const connection = await cuaReady.catch(() => null);
-  return { available: Boolean(env), screenAvailable: Boolean(connection?.mcpCommand), screenReady: localComputerReady(process.platform, connection), ...(env ? { state: sharingController().cloudState(env), activity: sharingController().activity(env.id, 30) } : {}) };
+  return { available: Boolean(env), screenAvailable: sharedCuaConnection(connection) !== null, screenReady: localComputerReady(process.platform, connection), ...(env ? { state: sharingController().cloudState(env), activity: sharingController().activity(env.id, 30) } : {}) };
 }
 const useMyMac = installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingTarget.environment, save: (env, choice) => sharingController().saveCloud(env, choice), stop: () => { sharingController(); stopLending(); },
   cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
@@ -2835,7 +2831,7 @@ ipcMain.handle("workspaces:menu", workspaceOnly(async (_event, from) => {
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
       ...cloudMenuOptions(from === "howto" ? "app_howto" : "app_menu"),
-      ...(homeWindow.cloudOrigin() ? { homeOrigin: homeWindow.cloudOrigin() } : await placesMenuOptions({ cloud: cloudHomeEntry(), home: oneHome.away(), platform: process.platform, port: SERVER_PORT, text: nativeText })), text: nativeText,
+      ...(await placesMenuOptions({ homeOrigin: homeWindow.cloudOrigin(), cloud: cloudHomeEntry(), home: oneHome.away(), platform: process.platform, port: SERVER_PORT, text: nativeText })), text: nativeText,
     }));
     await new Promise((resolve) => menu.popup({ window: mainWindow, callback: resolve }));
   } finally {

@@ -117,6 +117,19 @@ export function parseCloudCredit(input) {
   return { grantedUsd: input.grantedUsd, remainingUsd: input.remainingUsd, state: input.state };
 }
 
+export const CLOUD_USAGE_KINDS = Object.freeze(["computerHours", "voice", "decisions", "x", "research", "storage"]);
+const amount = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1e12;
+/** Display only, never an entitlement. */
+export function parseCloudUsage(input) {
+  if (!record(input) || typeof input.tier !== "string" || !TIER.test(input.tier) || !moment(input.resetsAt) || !Array.isArray(input.meters)) return null;
+  const meters = input.meters.slice(0, 20).flatMap(meter => record(meter) && CLOUD_USAGE_KINDS.includes(meter.kind) && amount(meter.used) && amount(meter.max) && meter.max > 0
+    ? [{ kind: meter.kind, used: meter.used, max: meter.max, ...(meter.usedUp === true ? { usedUp: true } : {}) }] : []);
+  const kinds = new Set(), unique = meters.filter(meter => !kinds.has(meter.kind) && kinds.add(meter.kind));
+  const upgrades = (Array.isArray(input.upgrades) ? input.upgrades.slice(0, 10) : []).flatMap(plan => record(plan) && PLAN_TIERS.includes(plan.tier) && plan.tier !== input.tier
+    && Number.isSafeInteger(plan.amount) && plan.amount >= 1 && plan.amount <= 10_000_000 ? [{ tier: plan.tier, amount: plan.amount }] : []);
+  return { tier: input.tier, resetsAt: input.resetsAt, ...(moment(input.trialEndsAt) ? { trialEndsAt: input.trialEndsAt } : {}), meters: unique, upgrades };
+}
+
 const days = (value, max) => Number.isSafeInteger(value) && value >= 1 && value <= max ? value : null;
 const count = value => Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000_000;
 // oxlint-disable-next-line no-control-regex

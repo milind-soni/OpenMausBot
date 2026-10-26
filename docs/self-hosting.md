@@ -720,10 +720,10 @@ alone.
   recorded in the admin activity log.
 - **Departments.** A department (sidebar section) is listed to a user only when it
   holds a bot or room they can see.
-- **Bots working together.** A bot reaches a teammate (`coordinate_bots`,
-  its roster and `list_bots`, @mentions, a Chief's team) only when exactly
-  the same people can see both: otherwise one bot's thread could carry the
-  other's answers to people who cannot see it. Bots nobody restricted all
+- **Bots working together.** A bot reaches any teammate, in any department
+  (`coordinate_bots`, its roster and `list_bots`, @mentions, a Chief's team),
+  but only when exactly the same people can see both: otherwise one bot's
+  thread could carry the other's answers to people who cannot see it. Bots nobody restricted all
   share "everyone", so nothing changes until an admin restricts one. A bot a
   Chief creates (directly, or in a reviewed team setup) gets exactly the
   Chief's audience.
@@ -1139,6 +1139,27 @@ the bot then answered. With the loop guard on, set `loopGuard.correctiveRounds`
 (0-5, default 0) and such a bot is sent back to re-run the failed call up to
 that many times first; the turn counts as done only if the tools it runs after
 that succeed. A tool call that was denied is never sent back.
+
+## A turn that goes silent
+
+The server stops a turn that has sent it nothing for 20 minutes
+(`OMB_TURN_STALL_MS`) and says why in the chat. Engines report a tool only
+when it starts and when it ends, so while one of the turn's tools is still
+running the turn may stay silent for up to `OMB_TOOL_STALL_MS` (default 2
+hours). Any event from the turn starts the silence over, and time spent waiting
+on a person or a computer never counts. Either way the turn stops with "no
+activity for N minutes".
+
+Both take whole milliseconds. `OMB_TURN_STALL_MS` is never below 60000 (one
+minute) and `OMB_TOOL_STALL_MS` never below `OMB_TURN_STALL_MS`. A value that
+is not a positive finite number (empty, `65m`, `0`, a negative number,
+`Infinity`, `1e309`) leaves the default. Set them in the server's environment
+and restart it; the restart stops every running turn.
+
+A turn in a room also has a work ceiling of its own, `rooms.turnTimeoutMinutes`
+in `config.json` (default 5 minutes, 1-1440, which one conversation can
+replace). It stops a member's turn even while its tool runs, and these two
+settings do not change it.
 
 ## Updating
 

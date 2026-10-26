@@ -14,6 +14,7 @@ import { clientBotPatchViolation, type RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { installOrgSkill, installSkill, parseSkillMd, setSkillEnabled } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
+import type { TeamPeople } from "../team-people.ts";
 import { writeMemoryFile, writeMemoryTopic } from "../workspace.ts";
 import { refusalBody, userError } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
@@ -40,6 +41,8 @@ export interface BotCreateRouteDeps {
   checkedModelSelection(raw: unknown, current?: { selection: ModelSelection; busy: boolean }, requireAvailableModel?: boolean): ModelSelectionCheck;
   cloudOwnerSession(auth: RequestAuth): boolean;
   wireBot(bot: BotRecord): WireBot;
+  /** A Team Cloud: a new bot records who created it, and may name who it reports to. */
+  team?: { name: string; people: Pick<TeamPeople, "has"> } | null;
 }
 
 const OWN_ID = /^[\w-]{8,128}$/;
@@ -142,6 +145,15 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           return json(res, 400, { error: "section must be at most 60 characters" });
         }
       }
+      const creator = auth.kind === "session" && auth.session.membershipAuthority === "team" ? auth.session.email : undefined;
+      let reportsTo: string | undefined;
+      if (body.reportsTo !== undefined && body.reportsTo !== null) {
+        if (!deps.team) return json(res, 400, { error: "Only a team's bots report to someone." });
+        if (typeof body.reportsTo !== "string" || !body.reportsTo.trim()) return json(res, 400, { error: "reportsTo must be an email" });
+        const email = body.reportsTo.trim().toLowerCase();
+        if (email !== creator?.toLowerCase() && !deps.team.people.has(email)) return json(res, 400, { error: `Choose someone in ${deps.team.name}.` });
+        reportsTo = email;
+      }
       let selection: ModelSelection;
       if (body.modelSelection === undefined) {
         selection = await defaultSelection();
@@ -162,6 +174,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (kept.id && "error" in keptBotIds(kept, store)) return json(res, 409, { error: "a bot with this id already exists here" });
       const bot = store.createBot({ ...profile.patch, soul: settings.soul, section, modelSelection: selection,
         toolScope: settings.toolScope ?? undefined,
+        ...(deps.team && creator ? { createdBy: creator } : {}), ...(reportsTo ? { reportsTo } : {}),
         ...(created?.ok ? { visibility: created.visibility } : {}) }, kept.id ? { ...kept, seedMessages: false } : {});
       const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
       try {

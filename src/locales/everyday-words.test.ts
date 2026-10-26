@@ -20,7 +20,7 @@ const EVERYDAY_PREFIXES: Record<string, readonly string[]> = {
   "MausBot Cloud: buying it, setting it up, moving to it and sharing with it": [
     "cloudBuy.", "cloudIntro.", "cloudTrial.", "cloudSetup.", "cloudIntent.", "cloudNotice.", "cloudHowTo.", "cloudScene.", "cloudProPopup.",
     "cloudCredit.", "cloudPower.", "cloudSignIn.", "cloudAdd.", "cloudHome.", "cloudPhone.", "cloudAccount.", "pro.", "lending.",
-    "files.",
+    "files.", "usageMeter.",
   ],
   "routines and automations": ["routines.", "automations."],
   "the team map": ["canvas.", "mapComputer.", "canvasComputers."],

@@ -124,6 +124,16 @@ describe("buildSystemPrompt", () => {
     expect(built.stable).toBe(`You are Kiwi. Set yourself up.${WEBHOOK_PROMPT}`);
   });
 
+  it("keeps the phone part stable and where the person is volatile, so a turn from the phone keeps the cached prefix", () => {
+    const at = (place: string) => buildSystemPrompt("You are Kiwi.", "", [
+      { id: "device", label: "Phone", text: " The phone." },
+      { id: "device-place", label: "Where the person is", text: place },
+    ]);
+    expect(at(" On the phone.").stable).toBe("You are Kiwi. The phone.");
+    expect(at(" At the computer.").stable).toBe(at(" On the phone.").stable);
+    expect(at(" On the phone.").volatile).toBe(" On the phone.");
+  });
+
   it("has an empty volatile half when nothing mid-conversation is present", () => {
     const built = buildSystemPrompt("You are Kiwi.", "", [{ id: "recall", label: "Recall", text: " Search." }]);
     expect(built.volatile).toBe("");

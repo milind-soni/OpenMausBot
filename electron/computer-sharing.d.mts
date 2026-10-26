@@ -104,3 +104,4 @@ export function createComputerSharing(options: {
   start(options?: { maintainer?: boolean }): void;
   close(): void;
 };
+export function sharedCuaConnection(connection: unknown): { mcpCommand: string; mcpArgs: string[]; mcpEnv?: Record<string, string> } | null;

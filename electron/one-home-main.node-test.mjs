@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { installOneHome } from "./one-home-main.mjs";
+import { freezeAnswer, installOneHome } from "./one-home-main.mjs";
 import nativeText from "./native-text.cjs";
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status });
@@ -98,4 +98,11 @@ test("the switch's refusal follows the app's language", () => {
   try {
     assert.throws(() => handlers.get("one-home:keep-set")({ page: "local" }, true), { message: "Este computador não tem um Cloud para onde os bots dele iriam." });
   } finally { main.close(); }
+});
+
+test("the freeze's answer carries what holds the move, by name or, with none, what it is", () => {
+  assert.deepEqual(freezeAnswer({ ok: false, status: 409, body: { error: "A bot is still working.", busy: "Scout", what: "bot" } }), { busy: "Scout", what: "bot" });
+  assert.deepEqual(freezeAnswer({ ok: false, status: 409, body: { busy: "", what: "sign-in" } }), { busy: "", what: "sign-in" });
+  assert.deepEqual(freezeAnswer({ ok: true, status: 200, body: { frozen: true } }), { frozen: true });
+  assert.throws(() => freezeAnswer({ ok: false, status: 500, body: {} }), /could not pause/u);
 });

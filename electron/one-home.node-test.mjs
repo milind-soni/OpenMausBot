@@ -51,6 +51,7 @@ function world({ cloud = {}, switches = { "routine:r1": true, "routine:r2": fals
           async freeze() {
             const who = busy.shift();
             if (typeof who === "string") return { busy: who };
+            if (who && typeof who === "object") return who;
             if (!w.server.frozen) w.server.freezes++;
             w.server.frozen = true;
             return { frozen: true };
@@ -180,6 +181,24 @@ test("the freeze waits for a quiet moment: nobody typing for 30 s, and no bot st
   await w.tick();
   assert.equal(w.journal.phase, "done");
   assert.equal(w.server.freezes, 1);
+});
+
+test("the wait says what holds the move as the server names it, and claims no one before it has", async () => {
+  // Each tick runs the move twice (its timer and the kick), so each answer comes twice.
+  const signIn = { busy: "", what: "sign-in" }, room = { busy: "Launch room", what: "room" };
+  const w = world({ busy: [signIn, signIn, room, room] });
+  w.type();
+  await w.home.kick();
+  assert.deepEqual(w.home.view(), { phase: "wait" }, "nobody named yet: the person typed a moment ago");
+  w.advance(QUIET_MS);
+  await w.tick();
+  assert.deepEqual(w.home.view(), { phase: "wait", waitingFor: "", waitingWhat: "sign-in" });
+  w.advance(5_000);
+  await w.tick();
+  assert.deepEqual(w.home.view(), { phase: "wait", waitingFor: "Launch room", waitingWhat: "room" });
+  w.advance(5_000);
+  await w.tick();
+  assert.equal(w.journal.phase, "done");
 });
 
 test("a check's log line names the rooms and conversations it found missing by id, never by name, and counts the rest", () => {

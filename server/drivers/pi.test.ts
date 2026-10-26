@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
-import type { ProviderInstance } from "../contracts.ts";
+import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
@@ -1020,49 +1020,22 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-select", cancelled: true });
   });
 
-  it("cancels an unanswered ask after 15 minutes", async () => {
+  it("keeps an unanswered question open for days and still takes the person's answer", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-pi-timeout-"));
     const dump = join(dir, "dump.jsonl");
     await create("question-select", { FAKE_PI_DUMP: dump });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let opened: RuntimeEvent;
     try {
       await instance.adapter.sendTurn({ threadId: "t-pi-timeout", text: "go" });
-      const opened = await recorder.until((e) => e.type === "request.opened");
-      await vi.advanceTimersByTimeAsync(15 * 60_000);
-      const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
-      expect(resolved).toMatchObject({ behavior: "deny", source: "timeout" });
-      await recorder.until((e) => e.type === "turn.completed");
-      const rows = readFileSync(dump, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((line) => JSON.parse(line) as { uiResponse?: { id?: string; cancelled?: boolean } });
-      expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-select", cancelled: true });
+      opened = await recorder.until((e) => e.type === "request.opened");
+      await vi.advanceTimersByTimeAsync(72 * 60 * 60_000);
+      expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(false);
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("cancels an ask's fail-safe timer when the turn is interrupted", async () => {
-    await create("question-select");
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const scheduled = vi.spyOn(globalThis, "setTimeout");
-    const cancelled = vi.spyOn(globalThis, "clearTimeout");
-    try {
-      await instance.adapter.sendTurn({ threadId: "t-ask-interrupt", text: "go" });
-      await recorder.until((e) => e.type === "request.opened");
-      const askIndex = scheduled.mock.calls.findIndex(([, delay]) => delay === 15 * 60_000);
-      expect(askIndex).toBeGreaterThanOrEqual(0);
-      const askTimer = scheduled.mock.results[askIndex].value;
-      expect(cancelled).not.toHaveBeenCalledWith(askTimer);
-      await instance.adapter.interruptTurn("t-ask-interrupt");
-      await recorder.until((e) => e.type === "turn.completed");
-      // This ask's timer, not all timers: killCliTree may still be polling for the real child.
-      expect(cancelled).toHaveBeenCalledWith(askTimer);
-    } finally {
-      scheduled.mockRestore();
-      cancelled.mockRestore();
-      vi.useRealTimers();
-    }
+    await instance.adapter.respondToRequest("t-pi-timeout", opened.requestId!, { behavior: "deny" });
+    expect(await recorder.until((e) => e.type === "request.resolved")).toMatchObject({ behavior: "deny", source: "user" });
   });
 
   it("respondToRequest is unavailable for an ask that is not pending", async () => {

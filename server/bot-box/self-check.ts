@@ -4,12 +4,13 @@
 // (plan.ts BoxMutation) must fail exactly the checks that protection guards.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
+import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
 import { BOX_PROBE_SCRIPT, BoxRunner, BOX_BROKER_PORT, BOX_EGRESS_PORT, defaultCodeRoots, type BoxChecks } from "./box.ts";
 import { closeSync, existsSync } from "node:fs";
 import type { BridgeTools } from "./bridge.ts";
@@ -69,7 +70,7 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   const cwd = join(data, "task-workspaces", "probe", "t1"), botFolder = join(data, "workspaces", "probe");
   const otherWorkspace = join(data, "workspaces", "other"), otherTask = join(data, "task-workspaces", "other", "t2");
   for (const dir of [cwd, botFolder, otherWorkspace, otherTask, join(data, "providers"), join(data, "tools"), sockets]) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const serverFiles = ["messages.db", "config.json", "logins.json", "providers", "tools"];
+  const serverFiles = ["messages.db", "config.json", "logins.json", "providers"];
   writeFileSync(join(data, "messages.db"), `SQLite format 3\u0000 ${marker}`);
   writeFileSync(join(data, "config.json"), JSON.stringify({ anthropic: { key: `sk-ant-${marker}` } }));
   writeFileSync(join(data, "logins.json"), JSON.stringify([{ password: marker }]));
@@ -78,6 +79,12 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   writeFileSync(join(otherWorkspace, "MEMORY.md"), `other bot ${marker}`);
   writeFileSync(join(otherTask, "notes.md"), `other turn ${marker}`);
   writeFileSync(join(botFolder, "MEMORY.md"), "own bot");
+  // An engine laid out as `npm install -g --prefix` leaves one: its bin entry a relative link into the package.
+  const engineBin = join(npmEnginesPrefix(data), "bin"), engineName = "omb-probe-engine", engineSays = "omb-probe-engine ran";
+  const enginePackage = join(npmEnginesPrefix(data), "lib", "node_modules", engineName, "bin");
+  for (const dir of [engineBin, enginePackage]) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(enginePackage, engineName), `#!/bin/sh\necho '${engineSays}'\n`, { mode: 0o755 });
+  symlinkSync(join("..", "lib", "node_modules", engineName, "bin", engineName), join(engineBin, engineName));
   // The box's private /tmp is what is checked, so the host file goes to /tmp itself where there is one.
   const hostTmpFile = join(existsSync("/tmp") ? "/tmp" : tmpdir(), `omb-box-check-${randomBytes(6).toString("hex")}`);
   writeFileSync(hostTmpFile, "host tmp");
@@ -115,14 +122,14 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   ];
   const runner = new BoxRunner({
     bwrap: options.bwrap, bridge: options.bridge, denyEnv: options.denyEnv,
-    setup: { dataDir: data, home, codeRoots: options.codeRoots ?? defaultCodeRoots(), bridges, mutate: options.mutate },
+    setup: { dataDir: data, home, codeRoots: options.codeRoots ?? defaultCodeRoots(), engineRoots: engineInstallRoots(data), bridges, mutate: options.mutate },
     broker: credentials ? { port: BOX_BROKER_PORT, mintForProcess: credentials.mintForProcess, revoke: credentials.revoke } : null,
     seccompFile: options.seccompFile ?? null,
   });
   const isolatedNet = !options.mutate?.has("share-net");
   const spec: ProbeSpec = {
     dataDir: data, cwd, botFolder, messagesDb: join(data, "messages.db"), configJson: join(data, "config.json"), serverFiles,
-    otherWorkspace, otherTaskWorkspace: otherTask, marker, canaryPid: canary.pid ?? 0, serverPid: process.pid, hostTmpFile,
+    otherWorkspace, otherTaskWorkspace: otherTask, engine: { bin: engineBin, name: engineName, says: engineSays }, marker, canaryPid: canary.pid ?? 0, serverPid: process.pid, hostTmpFile,
     harnessPort: serverPort, egressPort: BOX_EGRESS_PORT, privatePort, publicTarget, isolatedNet,
     // Checked whenever a filter is in the setup: the no-seccomp mutation leaves it out of the box, so the check must fail.
     seccomp: Boolean(options.seccompFile),
@@ -130,7 +137,7 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   const wrapped = runner.wrap({
     command: process.execPath, args: [options.probeScript ?? BOX_PROBE_SCRIPT], cwd, botId: "probe",
     env: {
-      PATH: process.env.PATH, HOME: home, LANG: process.env.LANG, TMPDIR: "/tmp",
+      PATH: [engineBin, process.env.PATH].filter(Boolean).join(delimiter), HOME: home, LANG: process.env.LANG, TMPDIR: "/tmp",
       // What must not get in: a control-plane secret, a workspace credential and an unlisted name, each holding the marker.
       OMB_CLOUD_BOOTSTRAP_SECRET: marker, COMPOSIO_API_KEY: marker, SOME_OTHER_SECRET: marker,
       // The real-looking key the broker takes over; its upstream is the fixture server, which answers 200 only to the real key.

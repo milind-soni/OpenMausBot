@@ -14,7 +14,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function setup(options: { team?: boolean; driver?: string; configured?: () => boolean } = {}) {
+function setup(options: { team?: boolean; driver?: string; configured?: () => boolean; cloud?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-proactive-"));
   dirs.push(dir);
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
@@ -33,6 +33,7 @@ function setup(options: { team?: boolean; driver?: string; configured?: () => bo
     registry: { get: () => ({ driverKind: options.driver ?? "claudeAgent", adapter: {} as never }) },
     mainThread: (botId) => store.bot(botId)?.threadId, threadBusy: () => false, notify: () => {}, engineName: () => "Claude", needsYou: () => [],
     hostTimeZone: () => "UTC", decide: () => {}, stale: () => false, release: () => {}, owned: () => {},
+    ...(options.cloud !== undefined ? { cloud: options.cloud } : {}),
   });
   const proactive = make();
   routines = new RoutineManager({ file: join(dir, "routines.json"), botState: () => "ready", createTask: () => ({ threadId: "t" }), startTurn: async () => {}, checks: proactive.checks });
@@ -99,5 +100,24 @@ describe("the watch's checks", () => {
       checks: ["mail"], deliver: "brief" });
     expect(await s.proactive.checks.check(routine, { manual: true })).toEqual({});
     expect(s.reads).toEqual([]);
+  });
+});
+
+describe("the suggestion to add a helper-model key", () => {
+  const suggested = async (options: { cloud?: boolean; team?: boolean }) => {
+    const s = setup(options);
+    const watch = s.proactive.ensureWatch() ?? { id: "none", botId: s.chief.id, deliver: "brief", checks: ["mail"] } as never;
+    await s.proactive.checks.check(watch, { manual: true });
+    return s.store.messagesFor(s.store.bot(s.chief.id)!.threadId).filter((message) => message.setupSuggestion);
+  };
+
+  it("is posted once on a desktop with Gmail connected and no helper model", async () => {
+    expect(await suggested({ cloud: false })).toHaveLength(1);
+  });
+
+  it("is never posted on Cloud, nor on a hosted team workspace or a Team Cloud", async () => {
+    expect(await suggested({ cloud: true })).toEqual([]);
+    expect(await suggested({ cloud: false, team: true })).toEqual([]);
+    expect(await suggested({})).toEqual([]);
   });
 });

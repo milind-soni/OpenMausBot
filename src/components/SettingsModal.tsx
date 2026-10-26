@@ -32,6 +32,7 @@ import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { CloudAccountSettings } from "./CloudAccountSettings";
 import { ProSettingsCard } from "./ProIntroduction";
+import { CloudUsageSettings } from "./CloudUsageMeter";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
 import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
 import { effortLabel } from "./ModelPicker";
@@ -83,12 +84,12 @@ export const SECTIONS: Array<{
   icon: typeof User;
   keywords: string[];
 }> = [
-  { id: "general", group: "you", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "about me", "about", "suggestions", "suggested", "memory", "analytics", "updates", "product updates", "newsletter", "email updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule"] },
+  { id: "general", group: "you", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "about me", "about", "suggestions", "suggested", "memory", "analytics", "updates", "product updates", "newsletter", "email updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule", "usage", "limit", "plan", "upgrade", "cloud desktop hours", "storage"] },
   { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "chat width", "width", "wide", "full width", "bubble", "bubbles", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "message color", "my messages", "toolbar", "tools layout", "footer", "routines", "triggers", "team map"] },
   { id: "companion", group: "you", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "engines", group: "ai", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "model providers", "engines", "claude", "codex", "grok", "providers", "cli", "sign in", "subscription"] },
   { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "meta", "muse", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "opencode", "deepseek", "provider"] },
-  { id: "decisionModel", group: "ai", labelKey: "settings.section.decisionModel", icon: Zap, keywords: ["decision", "jev", "typesafe", "routing", "auto", "rooms", "who answers"] },
+  { id: "decisionModel", group: "ai", labelKey: "settings.section.decisionModel", icon: Zap, keywords: ["decision", "extraction", "jev", "typesafe", "cloudflare", "workers ai", "clef", "clairic", "email", "routing", "auto", "rooms", "who answers"] },
   { id: "skills", group: "ai", labelKey: "settings.section.skills", icon: BookOpen, keywords: ["skills", "library", "assign", "agent skills", "skill md"] },
   { id: "desktopWorkspaces", group: "computers", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
   { id: "computer", group: "computers", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop", "browser", "built-in browser", "profiles", "browser profiles"] },
@@ -114,13 +115,13 @@ export type SimpleSettingsPage = {
 export const SIMPLE_PAGES: SimpleSettingsPage[] = [
   { id: "general", labelKey: "settings.section.general", icon: User, sections: ["general"] },
   { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, sections: ["appearance"] },
-  { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections", "decisionModel"] },
+  { id: "ai", labelKey: "settings.group.ai", icon: Sparkles, sections: ["engines", "connections"] },
   { id: "computers", labelKey: "settings.group.computers", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },
   { id: "cloud", labelKey: "settings.section.cloudAccount", icon: Cloud, sections: ["cloudAccount"] },
   { id: "account", labelKey: "settings.group.account", icon: CircleUser, sections: ["organization", "import", "people", "activity", "usage"] },
 ];
 
-export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["backups", "experimental", "workspaces", "skills"];
+export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["backups", "experimental", "workspaces", "skills", "decisionModel"];
 
 export function simpleSettingsPages(
   available: ReadonlyArray<(typeof SECTIONS)[number]>,
@@ -670,6 +671,7 @@ export function SettingsModal() {
             <DefaultBotSidebarRow />
 
             <ProSettingsCard />
+            <CloudUsageSettings />
             <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
               <ProfileFields />
             </Card>
@@ -811,6 +813,7 @@ export function SettingsModal() {
   return (
     <div
       className="glass-popup-frame"
+      data-settings-sheet
       style={glassPopupFrameStyle()}
       onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
     >
@@ -945,7 +948,7 @@ export function SettingsModal() {
               onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
               aria-label={t("settings.close")}
               title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
-              className="ui-icon-button cursor-pointer shrink-0"
+              className="ui-icon-button cursor-pointer shrink-0 max-md:size-9 max-md:rounded-full max-md:border max-md:border-hairline max-md:bg-card"
             >
               <X size={18} />
             </button>

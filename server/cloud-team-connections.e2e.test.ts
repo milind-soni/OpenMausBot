@@ -22,8 +22,8 @@ const CLEO = { email: "cleo@acme.test", role: "member" as const };
 const ADA_KEY = "ada-own-mail-key-5521";
 const TEAM_KEY = "team-mail-key-9034";
 // Each turn reads its scripted calls again: a conversation's engine stays warm across turns, as in production.
-const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.HOME + "/dump.json";
-process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = process.env.HOME + "/tool-calls.json";`;
+const ENGINE = `process.env.FAKE_CLAUDE_DUMP = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/dump.json";
+process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/tool-calls.json";`;
 const LINK = "https://cloud.example.test/cloud/team/team-acme-1";
 
 let fx: CloudSendFixture, team: CloudTeamFixture, broker: BrokerFake, mail: FakeHttpMcp, notes: FakeHttpMcp, oauth: FakeOAuth;

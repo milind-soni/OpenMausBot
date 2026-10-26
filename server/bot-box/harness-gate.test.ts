@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { harnessPathAllowed, openHarnessGate, type HarnessGate } from "./harness-gate.ts";
+import { harnessTarget, openHarnessGate, type HarnessGate } from "./harness-gate.ts";
 
 function call(socketPath: string, method: string, path: string, body?: string, headers: Record<string, string> = {}): Promise<{ status: number; body: string; headers: Record<string, string | string[] | undefined> }> {
   return new Promise((resolve, reject) => {
@@ -67,13 +67,22 @@ linuxBox("the harness gate", () => {
 
   it("answers 403 itself for every other route, so the server is never asked", async () => {
     await start();
-    for (const path of ["/api/bots", "/api/config", "/api/auth/session", "/", "/api/internal/../bots", "/api/internalx", "//api/internal/x"]) {
+    const refused = ["/api/bots", "/api/config", "/api/auth/session", "/", "/api/internal/../bots", "/api/internalx", "//api/internal/x",
+      "/api/internal/%2e%2e/bots", "/api/internal/%2E%2e/bots", "/api/internal/.%2e/bots", "/api/internal/%2e./bots", "/api/internal/x/%2e%2e/%2e%2e/threads/t/messages"];
+    for (const path of refused) {
       const answer = await call(gate.socketPath, "GET", path);
       expect(answer.status, path).toBe(403);
       expect(JSON.parse(answer.body)).toEqual({ error: "not_a_harness_route" });
     }
     expect(seen).toEqual([]);
-    expect(gate.refused).toBe(7);
+    expect(gate.refused).toBe(refused.length);
+  });
+
+  it("forwards the path as the server will read it, not as the box spelled it", async () => {
+    await start();
+    const answer = await call(gate.socketPath, "GET", "/api/internal/x/%2e/%2E%2e/agents?id=7");
+    expect(answer.status).toBe(200);
+    expect(seen.map((request) => request.url)).toEqual(["/api/internal/agents?id=7"]);
   });
 
   it("says 502 when the server is not listening", async () => {
@@ -87,13 +96,18 @@ linuxBox("the harness gate", () => {
     expect(answer.status).toBe(502);
   });
 
-  it("decides by path alone", () => {
-    expect(harnessPathAllowed("/api/internal/agents")).toBe(true);
-    expect(harnessPathAllowed("/api/internal/mcp-http/browser")).toBe(true);
-    expect(harnessPathAllowed("/api/internal/")).toBe(true);
-    expect(harnessPathAllowed("/api/internal")).toBe(false);
-    expect(harnessPathAllowed("/api/bots")).toBe(false);
-    expect(harnessPathAllowed("/api/internal/..\\x")).toBe(false);
-    expect(harnessPathAllowed("/api/bots", ["/api/bots"])).toBe(true);
+  it("decides by the path the server will route on", () => {
+    expect(harnessTarget("/api/internal/agents")).toBe("/api/internal/agents");
+    expect(harnessTarget("/api/internal/mcp-http/browser?x=1")).toBe("/api/internal/mcp-http/browser?x=1");
+    expect(harnessTarget("/api/internal/")).toBe("/api/internal/");
+    expect(harnessTarget("/api/internal")).toBeNull();
+    expect(harnessTarget("/api/bots")).toBeNull();
+    expect(harnessTarget("/api/internal/..\\x")).toBeNull();
+    expect(harnessTarget("/api/internal/%2e%2e/bots")).toBeNull();
+    expect(harnessTarget("/api/internal/%2e%2e%2fbots")).toBe("/api/internal/%2e%2e%2fbots");
+    expect(harnessTarget("/api/internal/x/%2e%2e/agents")).toBe("/api/internal/agents");
+    expect(harnessTarget("/api/internal/x?..")).toBe("/api/internal/x?..");
+    expect(harnessTarget("http://127.0.0.1/api/internal/x")).toBeNull();
+    expect(harnessTarget("/api/bots", ["/api/bots"])).toBe("/api/bots");
   });
 });

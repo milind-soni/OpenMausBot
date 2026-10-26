@@ -172,10 +172,10 @@ export class LimitResetClock {
         else this.checkedAt = this.now();
       } catch {
         this.checkedAt = this.now();
-      } finally {
-        this.loading = null;
       }
-    })();
+    })().finally(() => {
+      this.loading = null;
+    });
     return this.loading;
   }
 

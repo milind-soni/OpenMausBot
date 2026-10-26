@@ -6,6 +6,7 @@ import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { ownMcpHttpRoutes } from "./own-mcp-http.ts";
 import { AGENTS_ENV_HEADER, OWN_MCP_HTTP_PATH } from "./own-mcp-http-path.ts";
+import { TOOL_LIMIT_ENV, TOOL_LIMIT_HEADER } from "../tool-count-limit.ts";
 
 /** This server's own internal endpoints, as the stdio proxies reach them: the turn's capability is checked there. */
 const internalCalls: Array<{ path: string; authorization?: string; body?: unknown }> = [];
@@ -82,5 +83,16 @@ describe("OpenMausBot's own MCP servers over HTTP", () => {
       expect.objectContaining({ path: "/api/internal/agents?self=chief", authorization: "Bearer turn-capability" }),
       expect.objectContaining({ path: "/api/internal/tool-timing", authorization: "Bearer turn-capability", body: expect.objectContaining({ name: "list_bots", ok: true }) }),
     ]);
+  });
+
+  it("lists no more of a server's tools than the turn's tool limit allows", async () => {
+    const limited = await (await post("browser", { jsonrpc: "2.0", id: 5, method: "tools/list" },
+      { authorization: "Bearer turn-capability", [TOOL_LIMIT_HEADER]: "0" })).json();
+    expect(limited).toEqual({ jsonrpc: "2.0", id: 5, result: { tools: [] } });
+    const agents = async (settings: Record<string, string>) =>
+      ((await (await post("agents", { jsonrpc: "2.0", id: 6, method: "tools/list" }, agentsHeaders(settings))).json()) as { result: { tools: Array<{ name: string }> } })
+        .result.tools.map((tool) => tool.name);
+    const whole = await agents({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2" });
+    expect(await agents({ OMB_BOT_ID: "w2", OMB_THREAD_ID: "t2", [TOOL_LIMIT_ENV]: "3" })).toEqual(whole.slice(0, 3));
   });
 });

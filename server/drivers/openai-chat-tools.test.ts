@@ -566,6 +566,45 @@ describe("OpenAI-compatible computer images", () => {
     }
   });
 
+  it("resends a round the provider refuses as too large once, without the older screenshot and without running the tool again", async () => {
+    const screenshot = Buffer.concat([Buffer.from(png, "base64"), Buffer.alloc(150_000)]).toString("base64");
+    const limit = 100_000;
+    const sizes: number[] = [];
+    const f = await fixture((body, response, round) => {
+      sizes.push(Buffer.byteLength(JSON.stringify(body)));
+      if (sizes.at(-1)! > limit) {
+        response.writeHead(413, { "content-type": "text/html" });
+        response.end("<html><head><title>413 Request Entity Too Large</title></head><body>nginx</body></html>");
+      } else if (round === 1) sse(response, [chunk({ tool_calls: [{ ...toolCall(), function: { ...toolCall().function, name: "computer_write" } }] }, "tool_calls")]);
+      else answer(response, "Inspected the fixture screenshot.");
+    });
+    writeFileSync(join(f.directory, "mcp.mjs"), MCP_SCRIPT.replace(
+      'text: "Stored " + args.name + "=" + args.value',
+      `text: "Screenshot captured" }, { type: "image", mimeType: "image/png", data: ${JSON.stringify(screenshot)}`,
+    ));
+    const imagePath = join(f.directory, "input.png");
+    writeFileSync(imagePath, Buffer.from(png, "base64"));
+    const attached = [{ type: "text", text: "Store the synthetic receipt." }, { type: "image_url", image_url: { url: `data:image/png;base64,${png}` } }];
+    await f.start({
+      integrations: { localComputer: f.integrations!.custom!.audit as NonNullable<SendTurnInput["integrations"]>["localComputer"] },
+      images: [{ path: imagePath, mime: "image/png", bytes: Buffer.from(png, "base64").length }],
+    });
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.effects()).toHaveLength(1);
+    expect(f.requests).toHaveLength(3);
+    expect(sizes[1]).toBeGreaterThan(limit);
+    expect(sizes[2]).toBeLessThanOrEqual(limit);
+    expect(f.requests[2].messages.slice(0, -1)).toEqual(f.requests[1].messages.slice(0, -1));
+    expect(f.requests[2].messages.find((message) => message.role === "user")?.content).toEqual(attached);
+    expect(f.requests[2].messages.at(-2)).toMatchObject({ role: "tool", tool_call_id: "call_write" });
+    expect(f.requests[2].messages.at(-1)).toEqual({ role: "user", content: [
+      { type: "text", text: "Screenshot result from tool call call_write:" },
+      { type: "text", text: "[image omitted to fit the provider's size limit]" },
+    ] });
+    expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "turn.retrying", reason: "request_too_large" }));
+  });
+
   it("keeps every tool response ahead of screenshots in a multiple-call batch", async () => {
     const f = await fixture((_body, response, round) => {
       if (round === 1) sse(response, [chunk({ tool_calls: [

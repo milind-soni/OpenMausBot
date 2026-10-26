@@ -6,10 +6,18 @@ import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
 import { callTool, capResult, toolCallContextFromEnv } from "./agents-call.ts";
 import { sendToolReceipt } from "./agents-timing.ts";
 import type { Json } from "./agents-client.ts";
+import { capToolListResult, toolLimitFromEnv } from "../tool-count-limit.ts";
 
-export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json | undefined> {
+/** What the agents server lists for `env`, before any tool limit. */
+export function agentsToolList(env: NodeJS.ProcessEnv) {
   const available = availableTools(catalogProfileFromEnv(env));
   const bridge = env[TOOL_BRIDGE_ENV] === "1" ? createToolBridge(available) : undefined;
+  return { available, bridge, listed: bridge ? bridge.listed : available };
+}
+
+export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json | undefined> {
+  const { available, bridge, listed } = agentsToolList(env);
+  const limit = toolLimitFromEnv(env);
   const context = toolCallContextFromEnv(env);
   const ok = (id: unknown, result: unknown): Json => ({ jsonrpc: "2.0", id, result } as Json);
   const rpcErr = (id: unknown, code: number, message: string): Json => ({ jsonrpc: "2.0", id, error: { code, message } } as Json);
@@ -32,7 +40,7 @@ export function agentsMcp(env: NodeJS.ProcessEnv): (msg: Json) => Promise<Json |
       case "ping":
         return ok(id, {});
       case "tools/list":
-        return ok(id, { tools: bridge ? bridge.listed : available });
+        return ok(id, capToolListResult({ tools: listed }, limit, (line) => console.warn(`[agents] ${line}`)));
       case "tools/call": {
         const called = { name: params.name as string, arguments: (params.arguments ?? {}) as Json };
         // Security: past the bridge a use_tool call is a direct call: same unknown-tool check, callTool and result bounds.

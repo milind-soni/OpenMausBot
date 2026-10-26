@@ -99,6 +99,7 @@ export interface BridgeOptions {
   /** docker's ssh connection helper takes no ConnectTimeout/ServerAlive options, so a dropped VPS wedges silently without this. */
   liveness?: BridgeLiveness;
   gate?: { url: string; token: string };
+  rewriteResponse?: (line: string) => string;
 }
 
 /** MCP stdio is one JSON-RPC frame per line, so line boundaries are the only safe place to inspect or inject. */
@@ -235,7 +236,8 @@ export function runMcpBridge(options: BridgeOptions): void {
   });
 
   // Injected responses must never land inside one of the child's half-written frames.
-  const outbound = createLineSplitter((line) => process.stdout.write(textOnlyErrorResultLine(toolLists.rewriteResponse(line)) + "\n"));
+  const rewrite = options.rewriteResponse ?? ((line: string) => line);
+  const outbound = createLineSplitter((line) => process.stdout.write(textOnlyErrorResultLine(rewrite(toolLists.rewriteResponse(line))) + "\n"));
   child.stdout.on("data", (chunk) => outbound.push(chunk));
   child.stdout.on("end", () => outbound.flush());
 

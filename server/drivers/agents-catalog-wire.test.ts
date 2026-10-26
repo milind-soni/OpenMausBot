@@ -192,7 +192,7 @@ describe("agents proxy tools/list golden", () => {
       for (const alias of ["delegate_bot", "ask_bot", "send_to_bot", "check_delegation", "wait_delegation"]) expect(tools.has(alias), `${name}: ${alias}`).toBe(false);
       expect(JSON.stringify([...tools.values()])).not.toMatch(/Deprecated alias|works for this release/);
       const coordinate = tools.get("coordinate_bots")!.inputSchema.properties;
-      expect(Object.keys(coordinate)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "in_my_folder", "reply", "consult", "done_when"]);
+      expect(Object.keys(coordinate)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when"]);
       expect(coordinate.thread!.enum).toEqual(["standing", "new"]);
       expect(coordinate.reply!.enum).toEqual(["resume", "none"]);
       expect(Object.keys(tools.get("assignment_status")!.inputSchema.properties)).toEqual(["id", "wait_ms"]);

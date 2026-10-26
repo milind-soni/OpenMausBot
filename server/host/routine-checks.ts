@@ -14,6 +14,7 @@ import {
   clashes, emailSince, fingerprint, keepNewest, LOOKAHEAD_MS, mergeMeetings, nextMeetingDue, planMail, planMeetings, pruneMeetings, type MeetingRecord,
 } from "./check-plan.ts";
 import { checkedPrompt, watchPrompt, type CheckItems } from "./check-prompts.ts";
+import type { InboxTriage } from "./inbox-triage.ts";
 
 const MINUTE = 60_000;
 const CHECK_MS = 15 * MINUTE;
@@ -66,6 +67,12 @@ export interface CheckReport {
   waiting?: number | true;
   /** Mail and meetings that need an AI this bot's engine cannot fence, so they were not sorted. */
   unfenced?: boolean;
+  /** The helper models sort the mail here, whatever the engine: only meeting prep needs a fenced AI. */
+  helpersSort?: boolean;
+  /** Whether Gmail is connected, and the person's address once read: the add-a-key suggestion's cue. */
+  gmail?: { connected: boolean; address?: string };
+  /** Emails the helper models picked for the brief, with a why built in plain code. */
+  picked?: Array<{ email: EmailHeader; why: string; needsReply: boolean }>;
   /** The reads of this check, for the brief's own follow-ups (a reply already sent). */
   session?: ReadSession;
 }
@@ -84,6 +91,8 @@ export interface RoutineChecksDeps {
   /** The person's recent dismissals of mail from these senders, newest first. */
   dismissedFrom(): string[];
   report(report: CheckReport): void | Promise<void>;
+  /** The helper models' inbox triage (server/host/inbox-triage.ts); absent or not ready means an AI run sorts mail. */
+  inbox?: Pick<InboxTriage, "ready" | "triage">;
 }
 
 const ACTIVE = new Set(["queued", "running", "waiting"]);
@@ -254,7 +263,22 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
         const plan = planMail({ now: at, emails, judged });
         const waiting = plan.waiting.length;
         const advanced = waiting || more ? undefined : at;
-        if (plan.batch.length && aiAllowed) {
+        const helpers = brief && deps.inbox?.ready() === true;
+        if (helpers) report.helpersSort = true;
+        const picked = helpers && plan.batch.length ? await deps.inbox!.triage(plan.batch, deps.dismissedFrom()) : null;
+        if (picked) {
+          // Sorted with no AI turn: every email of the batch is judged, and the picks become brief rows.
+          report.picked = picked.flatMap((pick) => {
+            const email = plan.batch.find((one) => one.id === pick.id);
+            return email ? [{ email, why: pick.why, needsReply: pick.needsReply }] : [];
+          });
+          entry.judged = keepNewest([...new Set([...(entry.judged ?? []), ...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)])], MAX_JUDGED);
+          // Mail an earlier run still holds keeps the cursor back, so a failed run's mail is read again.
+          const heldMail = Object.values(entry.pending ?? {}).some((one) => one.mail.length > 0);
+          if (advanced !== undefined && !heldMail) entry.mailCursor = advanced;
+        } else if (helpers && plan.batch.length && !aiAllowed) {
+          // The helper models did not answer this time and no fenced AI may sort: the mail waits for the next check.
+        } else if (plan.batch.length && aiAllowed) {
           items.mail = plan.batch;
           pending.mail = [...plan.batch.map((email) => email.id), ...plan.quiet.map((email) => email.id)];
           pending.replies = plan.batch.map((email) => ({ threadId: email.threadId, to: addressOf(email.from) }));
@@ -283,6 +307,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
       } else if (!finished.length) entry.runsCursor = at;
     }
 
+    if (apps) report.gmail = { connected: apps.gmail === true, ...(entry.address ? { address: entry.address } : {}) };
     if (trouble.length) report.trouble = trouble;
     let run: RoutineCheckResult["run"];
     const work = brief ? items.mail.length + items.prep.length : items.mail.length + items.prep.length + items.runs.length;

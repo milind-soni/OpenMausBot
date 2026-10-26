@@ -18,8 +18,8 @@ function section(start: string, end: string) {
   return source.slice(from, to);
 }
 const code = ts.transpileModule([
-  section("async function interruptDirectThread(", "/** Stop left teammates"),
-  section("async function interruptParkedTurn(", "async function interruptAllDirectThreads("),
+  // noteTeammatesLeftRunning lives in host/person-stop.ts now and is stubbed below, so the two interrupts are one slice.
+  section("async function interruptDirectThread(", "async function interruptAllDirectThreads("),
   section("function releaseTurnResources(", "async function bindTurnComputer("),
   section("async function stopCompanyInstances(", "async function persistProviderInstance("),
 ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;

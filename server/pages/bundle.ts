@@ -126,3 +126,10 @@ export async function readBotPageBundle(requested: string, folders: BotFolders):
   const path = vmWorkspace ? guestWorkspaceToHost(requested, VM_WORKSPACE_GUEST, vmWorkspace) ?? requested : requested;
   return readPageBundle(path, vmWorkspace ? [vmWorkspace, ...roots] : roots);
 }
+
+/** A file inside a bot's own folders (or its Local VM's workspace), by the same rules as a page: the `extract` tool's. */
+export async function botFileSource(requested: string, folders: BotFolders): Promise<string> {
+  const { roots, vmWorkspace } = await folders();
+  const path = vmWorkspace ? guestWorkspaceToHost(requested, VM_WORKSPACE_GUEST, vmWorkspace) ?? requested : requested;
+  return pageSource(path, vmWorkspace ? [vmWorkspace, ...roots] : roots);
+}

@@ -14,7 +14,9 @@ describe("the one-time move's line", () => {
     expect(moveLine({ phase: "copy", chats: { done: 34, total: 120 } }, "local")?.text).toBe("Moving your bots to My Cloud… 34 of 120 chats");
     expect(moveLine({ phase: "copy", chats: { done: 34, total: 120 } }, "cloud")?.text).toBe("Bringing this computer's bots to My Cloud… 34 of 120 chats");
     expect(moveLine({ phase: "wait", waitingFor: "Scout" }, "local")?.text).toBe("Moving your bots to My Cloud… waiting for Scout to finish");
-    expect(moveLine({ phase: "wait", waitingFor: "" }, "local")?.text).toBe("Moving your bots to My Cloud… waiting for your bots to finish");
+    expect(moveLine({ phase: "wait", waitingFor: "Launch room", waitingWhat: "room" }, "cloud")?.text).toBe("Moving your bots to My Cloud… waiting for Launch room to finish");
+    expect(moveLine({ phase: "wait", waitingFor: "", waitingWhat: "sign-in" }, "local")?.text, "no name: what it is").toBe("Moving your bots to My Cloud… waiting for a sign-in to finish");
+    expect(moveLine({ phase: "wait" }, "local")?.text, "a quiet moment, nobody holding it").toBe("Moving your bots to My Cloud…");
     expect(moveLine({ phase: "finishing" }, "cloud")).toMatchObject({ kind: "sending", text: "Moving to My Cloud… almost done" });
   });
 
@@ -44,6 +46,7 @@ describe("the one-time move's line", () => {
     setLocale("de");
     expect(moveLine({ phase: "copy" }, "local")?.text).toBe("Deine Bots ziehen in die Cloud um…");
     expect(moveLine({ phase: "copy", updating: true }, "local")?.text).toBe("My Cloud wird gerade aktualisiert. Dein Umzug beginnt, sobald das erledigt ist.");
+    expect(moveLine({ phase: "wait", waitingFor: "", waitingWhat: "sign-in" }, "local")?.text).toBe("Deine Bots ziehen in die Cloud um… warte, bis eine Anmeldung fertig ist");
   });
 });
 

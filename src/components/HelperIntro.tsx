@@ -22,7 +22,7 @@ export function HelperIntro({ botId, threadId, message, asksDone }: { botId: str
       <div className="w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl bg-card px-4 py-2.5 text-[15px] leading-relaxed text-ink">
         <p className="font-medium">{t("helperIntro.title", { name })}</p>
         <p className="mt-1">{t("helperIntro.body")}</p>
-        {bot?.chiefOfStaff && <p className="mt-1">{t("helperIntro.chief")}</p>}
+        {bot?.chiefOfStaff ? <p className="mt-1">{t("helperIntro.chief")}</p> : bot?.defaultBot && !bot.defaultBot.person && <p className="mt-1">{t("helperIntro.watch")}</p>}
         {team && <p className="mt-1">{t("helperIntro.team", { team })}</p>}
         {!asksDone && <p className="mt-1 text-ink-secondary">{t("helperIntro.try")}</p>}
       </div>
