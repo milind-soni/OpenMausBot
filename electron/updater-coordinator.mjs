@@ -1,8 +1,9 @@
 import { UPDATE_TEXT, updateErrorCode, updateErrorMessage, updateErrorNeedsPerson } from "./update-errors.mjs";
+import { detailFields, updateWords } from "./update-words.mjs";
 
 const said = (error) => {
   const code = updateErrorCode(error);
-  return code ? { messageCode: code } : {};
+  return code ? { messageCode: code } : error?.messageKey ? { messageKey: error.messageKey, ...(error.messageParams ? { messageParams: error.messageParams } : {}) } : {};
 };
 
 /** electron-updater's GitHub provider gives the release body (HTML); a multi-release feed gives [{ version, note }]. */
@@ -97,7 +98,7 @@ export function createUpdaterCoordinator(
       quietFailures += 1;
       if (quietFailures >= QUIET_FAILURES_BEFORE_NOTICE) {
         // The notice does not own the state: hourly checks go on, and the first one that reaches the feed clears it.
-        setState({ status: "error", message: `Couldn't check for updates. ${updateErrorMessage(error)}` });
+        setState({ status: "error", ...updateWords("native.update.checkFailed", { error: updateErrorMessage(error) }), ...said(error) });
         return;
       }
       setState({ status: "idle" });
@@ -273,7 +274,7 @@ export function createUpdaterCoordinator(
   function elevate() {
     const operation = { failed: false, timer: null };
     installOperation = operation;
-    setState({ status: "installing", message: "Installing the update. Enter your password if asked." });
+    setState({ status: "installing", ...updateWords("native.update.installing") });
     Promise.resolve()
       .then(() => elevatedInstall(downloadedFiles, { sha512: updater.downloadedUpdateHelper?.downloadedFileInfo?.sha512 }))
       .then((result) => {
@@ -297,10 +298,11 @@ export function createUpdaterCoordinator(
           return;
         }
         if (result?.reason === "checksum" || !handOffInstall) {
-          routeError(true, new Error(result?.detail || "The update could not be installed."));
+          const words = result?.detail ? { message: result.detail, ...detailFields(result) } : updateWords("native.update.installFailedPlain");
+          routeError(true, Object.assign(new Error(words.message), words));
           return;
         }
-        handOff(result?.detail);
+        handOff(result?.detail, detailFields(result));
       })
       .catch((error) => {
         if (installOperation !== operation) return;
@@ -309,7 +311,7 @@ export function createUpdaterCoordinator(
   }
 
   // `note` says why the automatic install did not run, when that is why.
-  function handOff(note) {
+  function handOff(note, words = {}) {
     const operation = { failed: false, timer: null };
     installOperation = operation;
     setState({ status: "installing", message: undefined });
@@ -318,8 +320,8 @@ export function createUpdaterCoordinator(
       .then((patch) => {
         if (installOperation !== operation) return;
         installOperation = null;
-        if (staged) staged = { version: staged.version, patch: { status: "handed-off", version: staged.version, message: note, ...patch } };
-        setState({ status: "handed-off", message: note, ...patch });
+        if (staged) staged = { version: staged.version, patch: { status: "handed-off", version: staged.version, message: note, ...words, ...patch } };
+        setState({ status: "handed-off", message: note, ...words, ...patch });
       })
       .catch((error) => {
         if (installOperation !== operation) return;

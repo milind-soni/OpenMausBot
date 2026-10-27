@@ -14,6 +14,7 @@ import { linkUrl, runDeviceLink } from "./device-link.mjs";
 import { LINK_ASLEEP, linkPath } from "./device-link-protocol.mjs";
 import { existingFolders } from "./cloud-lending-ipc.mjs";
 import { shareableDrive } from "./shared-drives.mjs";
+import nativeText from "./native-text.cjs";
 
 const uuid = value => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(value);
 const DATA_VOLUME = "/System/Volumes/Data";
@@ -152,7 +153,7 @@ const BROWSE_NOTE_MS = 10 * 60_000;
  * carries it (the session cookie). `myCloud()`: the saved server that is the person's own My Cloud, which gets this
  * computer's internet connection by default (internetByDefault). */
 export function createComputerSharing({ file, fetch: fetchImpl, environments, cuaConnection, hostControl, screenLocked = () => false, protectedPaths = [], enabled = async () => false, home = os.homedir(), activityFile, cloud = () => null, onChange = () => {}, reconnect = null, now = Date.now, power = createCloudPowerGate(),
-  linkHeaders = () => ({}), WebSocket: linkSocket = globalThis.WebSocket, egress = {}, chrome = {}, myCloud = () => null }) {
+  linkHeaders = () => ({}), WebSocket: linkSocket = globalThis.WebSocket, egress = {}, chrome = {}, myCloud = () => null, t = nativeText.englishText.t }) {
   const protectedRoots = [path.dirname(file), ...protectedPaths.filter(entry => typeof entry === "string" && entry), ...personalSecretPaths(home)];
   const activity = createLendingActivity(activityFile ?? path.join(path.dirname(file), "lending-activity.jsonl"));
   let records = {};
@@ -541,7 +542,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       const current = verifiedCloud(env);
       if (!current) throw Object.assign(new Error("Open My Cloud first."), { problem: "connect-first" });
       const folders = await validateSharedFolders(input?.folders);
-      if (!folders.length && input?.screen !== true && input?.internet !== true && input?.chrome !== true && input?.terminal !== true) throw new Error("Choose at least one folder, apps and screen, the internet connection, your Chrome, or the terminal.");
+      if (!folders.length && input?.screen !== true && input?.internet !== true && input?.chrome !== true && input?.terminal !== true) throw new Error(t("native.lend.chooseCapability"));
       let info = { sessionId: null, environmentId: null };
       try { info = await cloudIdentity(env); } catch (error) { if (error.problem !== "connect-first") throw error; }
       const grant = cloudGrant(env, current, info, { ...input, folders });

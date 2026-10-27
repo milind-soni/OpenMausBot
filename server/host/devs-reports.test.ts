@@ -120,6 +120,7 @@ describe("a message that tags @devs", () => {
     expect(fx.sent).toHaveLength(1);
     expect(fx.sent[0]!.description).toContain("No summary from a bot: the bot did not call report_bug.");
     expect(fx.notices("scout-main")).toEqual([`notice: ${sentLine("report-1", "ada@example.com")}`]);
+    expect(fx.store.activePath("scout-main").at(-1)?.tool).toMatchObject({ nameCode: "chat.notice.reportSentContact", nameParams: { id: "report-1", contact: "ada@example.com" } });
     fx.stop();
   });
 

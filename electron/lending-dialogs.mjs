@@ -83,9 +83,9 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
       const parent = window();
       if (!parent || parent.isDestroyed()) return false;
       const { response } = await dialog.showMessageBox(parent, {
-        type: "warning", message: "Let My Cloud's bots run commands on this computer as you?",
-        detail: "There is no limit on what a command can do: they can read, change or delete anything you can, and install software. Only continue if you trust them with this computer. It turns off again whenever lending is turned off.",
-        buttons: ["Allow the terminal", "Cancel"], defaultId: 1, cancelId: 1,
+        type: "warning", message: t("native.lend.terminal.title"),
+        detail: t("native.lend.terminal.detail"),
+        buttons: [t("native.lend.terminal.button"), t("native.common.cancel")], defaultId: 1, cancelId: 1,
       });
       return response === 0;
     },

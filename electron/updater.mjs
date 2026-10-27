@@ -110,7 +110,7 @@ function relaunchAfterInstall() {
 }
 
 function setState(patch) {
-  const { messageCode: _stale, ...kept } = state;
+  const { messageCode: _stale, messageKey: _key, messageParams: _params, ...kept } = state;
   state = { ...(Object.hasOwn(patch, "message") ? kept : state), ...patch };
   if (quiet && patch.status === "error") installFailed(quietRecord());
   try {

@@ -100,6 +100,7 @@ describe("message_person", () => {
     expect(f.audiences.get("made-1")).toBe(memberAudience(key(BOB.email)));
     expect(f.lines("made-1").map((row) => row.text)).toEqual(["Ada asked me to pass this on: The launch moved to Friday."]);
     expect(f.lines("made-1")[0]!.relay).toEqual({ kind: "from", email: ADA.email, name: "Ada" });
+    expect(f.lines("made-1")[0]).toMatchObject({ textCode: "chat.notice.relayFrom", textParams: { name: "Ada", message: "The launch moved to Friday." } });
     expect(JSON.stringify(f.lines("made-1"))).not.toContain("salary");
     expect(f.lines("ada-private").at(-1)).toMatchObject({ kind: "activity", tool: { name: "Told Bob Stone", ok: true, output: "The launch moved to Friday." }, relay: { kind: "told", email: BOB.email } });
     expect(f.notified).toEqual([expect.objectContaining({ kind: "mention", threadId: "made-1", forPerson: key(BOB.email), title: "Message from Ada via Scout" })]);
@@ -125,7 +126,7 @@ describe("message_person", () => {
     f.said("made-1", "Yes, tell Ada I'll do it tonight", "Bob");
     const back = f.team.pass("scout", "made-1", "Ada", "Bob will review the deck tonight.");
     expect(back).toMatchObject({ status: 200, text: expect.stringContaining("Passed back to Ada") });
-    expect(f.lines("ada-private").at(-1)).toMatchObject({ role: "bot", kind: "text", text: "Bob Stone replied: Bob will review the deck tonight.", relay: { kind: "reply", email: BOB.email } });
+    expect(f.lines("ada-private").at(-1)).toMatchObject({ role: "bot", kind: "text", text: "Bob Stone replied: Bob will review the deck tonight.", textCode: "chat.notice.relayReply", textParams: { name: "Bob Stone", message: "Bob will review the deck tonight." }, relay: { kind: "reply", email: BOB.email } });
     expect(f.notified).toEqual([expect.objectContaining({ threadId: "ada-private", forPerson: key(ADA.email), title: "Bob Stone replied via Scout" })]);
     expect(f.lines("made-1").at(-1)).toMatchObject({ kind: "activity", relay: { kind: "told", email: ADA.email } });
     expect(f.bots[0]!.tasks.filter((task) => task.threadId.startsWith("made-"))).toHaveLength(1);

@@ -21,6 +21,24 @@ function fakeDialog({ response = 1, picked = { canceled: true, filePaths: [] } }
 const liveWindow = () => ({ isDestroyed: () => false });
 const named = async (folders) => folders.map((folder) => ({ ...folder, name: folder.path.split("/").pop() }));
 
+test("the unrestricted terminal warning follows language changes and keeps Cancel as the default", async () => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  for (const language of ["en", "pt-br"]) {
+    text.set(language);
+    for (const response of [0, 1, -1]) {
+      const { dialog, calls } = fakeDialog({ response });
+      const dialogs = createLendingDialogs({ dialog, window: liveWindow, validate: named, t: text.t });
+      assert.equal(await dialogs.confirmTerminal(), response === 0);
+      const options = calls[0][2];
+      assert.equal(options.message, text.t("native.lend.terminal.title"));
+      assert.equal(options.detail, text.t("native.lend.terminal.detail"));
+      assert.deepEqual(options.buttons, [text.t("native.lend.terminal.button"), text.t("native.common.cancel")]);
+      assert.deepEqual([options.defaultId, options.cancelId], [1, 1]);
+      assert.match(options.detail, language === "en" ? /read, change or delete anything/ : /ler, alterar ou excluir tudo/);
+    }
+  }
+});
+
 test("a picked folder is checked and lent read only; a cancelled picker lends nothing", async () => {
   const win = liveWindow(), checked = [];
   const validate = async (folders) => { checked.push(folders); return named(folders); };

@@ -186,7 +186,7 @@ export type RuntimeEvent = RuntimeEventBase &
         text?: ServerText }
     /** Something the person should know that did not fail the turn — for
      * example, a saved model the engine no longer offers was replaced. */
-    | { type: "runtime.notice"; message: string }
+    | { type: "runtime.notice"; message: string; text?: ServerText }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;

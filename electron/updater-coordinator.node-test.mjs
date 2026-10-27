@@ -3,6 +3,40 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 
 import { createUpdaterCoordinator } from "./updater-coordinator.mjs";
+import { installDetail } from "./update-words.mjs";
+
+test("elevated-install wording survives terminal handoff and its staged card", async () => {
+  const { h } = elevatedHarness(async () => ({ ok: false, reason: "refused", ...installDetail("native.update.noAdmin") }));
+  await downloadInto(h);
+  h.coordinator.install();
+  assert.equal(h.getState().messageKey, "native.update.installing");
+  assert.equal(h.getState().message, "Installing the update. Enter your password if asked.");
+  await settle();
+  assert.equal(h.getState().status, "handed-off");
+  assert.equal(h.getState().messageKey, "native.update.noAdmin");
+  assert.equal(h.getState().message, "This session could not ask for administrator rights.");
+  await h.coordinator.check();
+  assert.equal(h.getState().messageKey, "native.update.noAdmin");
+});
+
+test("unclassified install details carry their words, while checksum classification still wins", async () => {
+  for (const [reason, key] of [["failed", "native.update.installFailed"], ["checksum", "native.update.checksumMismatch"]]) {
+    const { h, calls } = elevatedHarness(async () => ({ ok: false, reason, ...installDetail(key, reason === "failed" ? { reason: "E: lock." } : undefined) }), { handOffInstall: null });
+    await downloadInto(h);
+    h.coordinator.install();
+    await settle();
+    assert.equal(h.getState().status, "error");
+    if (reason === "checksum") {
+      assert.equal(h.getState().messageCode, "integrity");
+      assert.match(h.getState().message, /failed verification/);
+    } else {
+      assert.equal(h.getState().messageKey, key);
+      assert.equal(h.getState().message, "The install did not finish: E: lock.");
+      assert.deepEqual(h.getState().messageParams, { reason: "E: lock." });
+    }
+    assert.deepEqual(calls.handOff, []);
+  }
+});
 
 function deferred() {
   let resolve;

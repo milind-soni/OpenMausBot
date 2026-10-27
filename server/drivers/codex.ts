@@ -1329,7 +1329,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               turnError({ message: state.retryError });
             }
             if (abandoned) break;
-            reportUnsupportedCalls(rolloutAt, (message) => emit({ ...base(threadId, turnId), type: "runtime.notice", message }));
+            reportUnsupportedCalls(rolloutAt, (message, text) => emit({ ...base(threadId, turnId), type: "runtime.notice", message, ...(text ? { text } : {}) }));
             void settle(t.status === "completed", t.status === "completed" ? null :
               (classifyError({ text: state.lastError }).reason === "provider_safety" ? "provider_safety" : (state.lastError || t.status || "failed")));
             break;

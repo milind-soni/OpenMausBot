@@ -136,29 +136,21 @@ export function plainFailure(provider: string, text: string): { message: string;
   return kind === "credits" || kind === "tool_schema" || kind === "tool_count" ? engineFailure(provider, text, { kind })! : { message: text };
 }
 
-/** ACP's StopReason values (protocol v1) that do say why a turn ended early, naming the AI when the caller knows it;
- * each carries the advice that fits it. */
-const STOP_REASON_WORDS: Record<string, { words: (ai: string) => string; hint: string }> = {
-  refusal: {
-    words: (ai) => `${ai} refused to go on with this request`,
-    hint: "Try again, reword the request, or switch this bot to another AI.",
-  },
-  max_tokens: {
-    words: (ai) => `${ai}'s reply reached its maximum length before it finished`,
-    hint: "Ask it to continue, or ask for a shorter answer.",
-  },
-  max_turn_requests: {
-    words: () => "The turn made as many model requests as one turn may before it finished",
-    hint: "Ask it to carry on from where it stopped, or split the task.",
-  },
-};
+/** ACP protocol v1's StopReason values that explain why a turn ended early. */
+export function stopFailure(stopReason: string | null | undefined, provider?: string): { message: string; text?: ServerText } | undefined {
+  const reason = stopReason?.trim();
+  if (!reason) return undefined;
+  const name = provider?.trim();
+  if (reason === "refusal") return name ? noticeFailure("chat.notice.stop.refusal", { provider: name, reason })
+    : noticeFailure("chat.notice.stop.refusalGeneric", { reason });
+  if (reason === "max_tokens") return name ? noticeFailure("chat.notice.stop.maxTokens", { provider: name, reason })
+    : noticeFailure("chat.notice.stop.maxTokensGeneric", { reason });
+  if (reason === "max_turn_requests") return noticeFailure("chat.notice.stop.maxRequests", { reason });
+  return { message: /^[a-z][a-z0-9_]*$/i.test(reason) ? `The engine stopped without saying why (stop reason: ${reason}).` : reason };
+}
 
 /** A failed turn's stop reason as its cause: a bare provider token ("stop_sequence", "rpc_error") is never the whole
  * message, and the token stays in it so its class still reads. */
 export function stopCause(stopReason: string | null | undefined, provider?: string): string | undefined {
-  const reason = stopReason?.trim();
-  if (!reason) return undefined;
-  const entry = Object.hasOwn(STOP_REASON_WORDS, reason) ? STOP_REASON_WORDS[reason] : undefined;
-  if (entry) return `${entry.words(provider?.trim() || "The AI")} (stop reason: ${reason}). ${entry.hint}`;
-  return /^[a-z][a-z0-9_]*$/i.test(reason) ? `The engine stopped without saying why (stop reason: ${reason}).` : reason;
+  return stopFailure(stopReason, provider)?.message;
 }

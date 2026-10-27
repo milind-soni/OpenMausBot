@@ -94,6 +94,16 @@ export const USER_ERROR = {
   "serverError.department.deleteBusy": "Stop this department's active work before deleting it",
   "serverError.department.generalChief": "General already has a Chief of Staff. Move or change this department's Chief before deleting it",
   "serverError.backup.recursiveLink": "Cannot back up a symbolic link to the folder that contains it: {path}",
+  "serverError.setup.noTools": "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead.",
+  "serverError.setup.missingConversation": "There is no such conversation.",
+  "serverError.setup.stopOwner": "Only the person who pressed Set me up, or an owner or admin, can stop it.",
+  "serverError.setup.hasInstructions": "This bot already has instructions. To change its job, type /setup and what you'd like it to do.",
+  "serverError.setup.started": "This chat has already started. Type /setup and what you'd like this bot to do.",
+  "serverError.setup.someoneElse": "Someone else is setting this bot up.",
+  "serverError.approval.allThreads": "Finish this bot's approval change first. Every thread's provider must support this approval level.",
+  "serverError.approval.pending": "Finish this bot's pending approval change first",
+  "serverError.approval.provider": "Use the bot's provider on this thread before applying its approval level",
+  "serverError.engineCheck.timeout": "{name} didn't answer within {seconds} seconds.",
 } as const;
 
 export type UserErrorKey = keyof typeof USER_ERROR;

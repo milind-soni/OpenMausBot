@@ -70,7 +70,7 @@ export async function signedInToolsCheck(
 /** Security: names the headers, never their values. */
 function failureReason(server: McpServerListing, result: ProbeResult): string {
   if (result.reason !== "keys" || !isRemoteMcpListing(server)) return result.error ?? "";
-  const reason = result.status ? `HTTP ${result.status}` : "unauthorized";
+  const reason = result.status ? `HTTP ${result.status}` : t("mcp.check.unauthorized");
   if (!server.headerKeys.length) return t("mcp.check.keysNeeded", { reason });
   return t("mcp.check.keysRefused", { reason, names: new Intl.ListFormat(activeLocale(), { style: "long", type: "conjunction" }).format(server.headerKeys) });
 }

@@ -13,6 +13,15 @@ const ORIGIN = "https://omb-u-fixture.fly.dev";
 const binding = { accountId: "acct_1", origin: ORIGIN };
 const env = { id: "my-cloud", name: "My Cloud", origin: ORIGIN };
 
+test("an empty Cloud grant follows the current native language without changing its English", async t => {
+  const text = nativeText.createNativeText({ saved: "en" });
+  const { sharing } = await lendingFixture(t, { t: text.t });
+  for (const language of ["en", "pt-br"]) {
+    text.set(language);
+    await assert.rejects(sharing.saveCloud(env, { folders: [], screen: false }), { message: text.t("native.lend.chooseCapability") });
+  }
+});
+
 test("the Cloud verdict: same account and machine run, anything else ends or pauses", () => {
   const connected = { status: "connected", accountId: "acct_1", origin: ORIGIN };
   assert.deepEqual(cloudLendingVerdict(binding, connected, env), { allow: true });
@@ -91,6 +100,7 @@ async function lendingFixture(t, options = {}) {
   const sharing = createComputerSharing({
     file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [env],
     ...(options.reconnect ? { reconnect: options.reconnect } : {}), ...(options.now ? { now: options.now } : {}),
+    ...(options.t ? { t: options.t } : {}),
     // The maintainer flag is off, as for every Cloud Pro user.
     enabled: async () => { maintainerChecks++; return false; },
     cloud: () => cloud, home: path.join(dir, "home"),

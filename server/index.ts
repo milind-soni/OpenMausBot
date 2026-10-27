@@ -91,7 +91,7 @@ import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinute
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
 import { applyHoldDirective, classifyHoldDirective, heldMemberLine, rememberHeldMessage, stopWordPlacement } from "./room-holds.ts";
 import { refusalBody, userError, userErrorFields } from "./user-errors.ts";
-import { chatNotice, failedNoticeTool, noticeTool, resumedTool } from "./chat-notices.ts";
+import { chatNotice, failedNoticeTool, noticeTool, resumedTool, runtimeNoticeTool } from "./chat-notices.ts";
 import type { ServerErrorBody } from "../shared/server-text.ts";
 import { emailSignInRoute } from "./routes/email-sign-in.ts";
 import { createPersonStop } from "./host/person-stop.ts";
@@ -3446,7 +3446,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
   }
   if (message.allThreads === true && (existing.approvalGrant || store.tasks(botId).some(task =>
       !supportsApprovalMode(task.modelSelection ?? existing.modelSelection, mode)))) {
-    respond({ ok: false, error: "Finish this bot's approval change first. Every thread's provider must support this approval level." });
+    respond({ ok: false, ...userError("serverError.approval.allThreads") });
     return true;
   }
   // Edits and Auto are not elevated: one write, no two-phase grant. Only this channel may move a team off Custom.
@@ -3480,7 +3480,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       return true;
     }
     if (existing.approvalGrant) {
-      respond({ ok: false, error: "Finish this bot's pending approval change first" });
+      respond({ ok: false, ...userError("serverError.approval.pending") });
       return true;
     }
     if (!supportsApprovalMode(target.modelSelection, mode)) {
@@ -3509,7 +3509,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     // An ambiguous scoped grant may be cleared, but never a different grant.
     const clearsOwnGrant = mode === "ask" && existing.approvalGrant?.threadOnly && existing.approvalGrant.threadId === threadId;
     if (existing.approvalGrant && !clearsOwnGrant) {
-      respond({ ok: false, error: "Finish this bot's pending approval change first" });
+      respond({ ok: false, ...userError("serverError.approval.pending") });
       return true;
     }
     if (!supportsApprovalMode(target.modelSelection, mode)) {
@@ -3556,7 +3556,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       return true;
     }
     if (registry.cliTarget(target.modelSelection.instanceId)?.driverKind !== registry.cliTarget(existing.modelSelection.instanceId)?.driverKind) {
-      respond({ ok: false, error: "Use the bot's provider on this thread before applying its approval level" });
+      respond({ ok: false, ...userError("serverError.approval.provider") });
       return true;
     }
   }
@@ -6823,7 +6823,7 @@ bus.subscribe((event: RuntimeEvent) => {
       });
       break;
     case "runtime.notice":
-      pushMessage({ role: "bot", kind: "activity", tool: { name: `notice: ${event.message.slice(0, 240)}`, ok: true } });
+      pushMessage({ role: "bot", kind: "activity", tool: runtimeNoticeTool(event) });
       break;
     case "runtime.error":
       // A turn the person stopped ends quietly, whatever error the stop cut it short with.

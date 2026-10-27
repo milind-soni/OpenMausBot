@@ -24,6 +24,7 @@ import { PASS } from "../routes/table.ts";
 import type { BotRecord, GroupRecord, Message, Store, StoreChange } from "../store.ts";
 import type { TeamPeople } from "../team-people.ts";
 import { oneLine } from "./text-clip.ts";
+import { noticeLine } from "../chat-notices.ts";
 
 export const TEAM_MESSAGES_FILE = "team-messages.json";
 export const MESSAGE_PERSON_PATH = "/api/internal/people/message";
@@ -196,7 +197,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
     const back = where(at.bot.id, origin);
     if (!back || !deps.sees(to).thread(origin)) return null;
     const posted = store.appendMessage(origin, {
-      role: "bot", kind: "text", text: `${replier.name} replied: ${message}`, relay: { kind: "reply", email: replier.email, name: replier.name },
+      role: "bot", kind: "text", ...noticeLine("chat.notice.relayReply", { name: replier.name, message }), relay: { kind: "reply", email: replier.email, name: replier.name },
       ...(back.group ? { from: from(at.bot) } : {}),
     });
     markUnread(at.bot.id, origin, back.group);
@@ -229,8 +230,8 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       relays.push({ threadId: target, botId: bot.id, originThreadId: threadId, from: asker?.key ?? null, fromName: sender.slice(0, 200), to: to.key, at: now() });
     }
     const posted = store.appendMessage(target, asker
-      ? { role: "bot", kind: "text", text: `${asker.name} asked me to pass this on: ${message}`, relay: { kind: "from", email: asker.email, name: asker.name } }
-      : { role: "bot", kind: "text", text: `A message for you from ${sender}: ${message}` });
+      ? { role: "bot", kind: "text", ...noticeLine("chat.notice.relayFrom", { name: asker.name, message }), relay: { kind: "from", email: asker.email, name: asker.name } }
+      : { role: "bot", kind: "text", ...noticeLine("chat.notice.relayMessage", { name: sender, message }) });
     store.patchTask(bot.id, target, { unread: true });
     tell(to, { where: { bot }, threadId: target, messageId: posted.id, title: `Message from ${sender} via ${bot.name}`, from: sender, fromPerson: asker, text: message });
     chip(threadId, at, to, message);

@@ -1,4 +1,5 @@
 import type { Message } from "../store.ts";
+import { noticeTool } from "../chat-notices.ts";
 
 type Who = { id: string; name: string; color: string };
 
@@ -21,10 +22,12 @@ export function sentRow(input: { sender: Who; recipient: Who; threadId: string; 
   return {
     role: "bot", kind: "activity",
     from: { botId: sender.id, name: sender.name, color: sender.color },
-    tool: {
-      name: outside ? `Sent to ${recipient.name} directly: it isn't in ${roomWords(outside)}.` : `Sent to ${recipient.name}${room && !room.here ? ` · ${room.name}` : ""}`,
+    tool: outside ? {
+      name: `Sent to ${recipient.name} directly: it isn't in ${roomWords(outside)}.`,
       ok: true, ...(input.reason ? { output: input.reason } : {}),
-    },
+    } : noticeTool(room && !room.here ? "chat.notice.handoffSentRoom" : "chat.notice.handoffSent",
+      { name: recipient.name, ...(room && !room.here ? { room: room.name } : {}) },
+      { ok: true, ...(input.reason ? { output: input.reason } : {}) }),
     ...(input.doneWhen ? { doneWhen: input.doneWhen } : {}),
     ...(outside ? { sentDirectly: { name: recipient.name, ...(outside.here ? {} : { room: outside.name }) } } : {}),
     ...(room && via === "room"

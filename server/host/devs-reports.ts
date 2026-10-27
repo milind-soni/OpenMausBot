@@ -24,6 +24,8 @@ import { PASS } from "../routes/table.ts";
 import type { PublicSession } from "../sessions.ts";
 import type { BotRecord, Message, Store, StoreChange } from "../store.ts";
 import { clip } from "./text-clip.ts";
+import type { ServerText } from "../../shared/server-text.ts";
+import { droppedReportLine, fullReportLine, notYetReportLine, refusedReportLine, sentReportLine } from "./devs-report-words.ts";
 
 export const DEVS_REPORTS_FILE = "devs-reports.json";
 const TICK_MS = 2_000;
@@ -54,7 +56,7 @@ const bodySchema = z.object({
 type Waiting = z.infer<typeof waitingSchema> & { answered?: boolean; offered?: boolean; restored?: boolean };
 type Queued = z.infer<typeof queuedSchema>;
 /** What the person is told, and the words in a bot's reply that show it already told them. */
-type Told = { ok: boolean; line: string; marker: string };
+type Told = { ok: boolean; line: string; marker: string; text?: ServerText };
 type Author = { bot: BotRecord; summary: BotSummary } | { why: string };
 
 export interface DevsReportsDeps {
@@ -94,19 +96,7 @@ export interface DevsReportContext {
   readBody: () => Promise<unknown>;
 }
 
-export const sentLine = (reportId: string, contact?: string) =>
-  `Sent to the MausBot team (report ${reportId}). Milind and Omkar get it by email${contact ? ` and will reply to ${contact}` : ""}.`;
-const laterLine = (reportId: string, contact?: string) =>
-  `Sent to the MausBot team (report ${reportId}) after an earlier try did not go through. Milind and Omkar get it by email${contact ? ` and will reply to ${contact}` : ""}.`;
-function notYetLine(outcome: Extract<SendOutcome, { retry: true }>): string {
-  const minutes = outcome.retryAfterMs ? Math.max(1, Math.ceil(outcome.retryAfterMs / 60_000)) : 0;
-  const why = outcome.why === "limited" ? "the MausBot team takes only a few reports an hour from each app"
-    : outcome.why === "offline" ? "the MausBot team's server could not be reached" : "the MausBot team's server could not take it right now";
-  return `Not sent yet: ${why}. The report is saved and goes on its own${minutes ? ` in about ${minutes} minute${minutes === 1 ? "" : "s"}` : " as soon as it can"}, so there is no need to send it again.`;
-}
-const refusedLine = (detail: string) => `The MausBot team's server refused this bug report, so nothing was sent: ${detail.replace(/[.\s]+$/, "")}.`;
-const fullLine = `Not sent: ${MAX_OUTBOX} bug reports are already waiting to go to the MausBot team. Type @devs again once they have gone.`;
-const droppedLine = "A bug report from this conversation could not reach the MausBot team for a week, so it was dropped. Type @devs again to send a new one.";
+export const sentLine = (reportId: string, contact?: string) => sentReportLine(reportId, contact).line;
 
 /** Rides on the turn that answers a @devs message. */
 const TURN_NOTE = "\n\n[From OpenMausBot, not the person: this message tags @devs, so it is a bug report for the MausBot team, OpenMausBot's developers. Call report_bug once, first: what the person says went wrong; what you saw yourself in this conversation (errors, failed tools, stuck steps), or that you saw nothing unusual; and steps to reproduce. Leave out passwords, keys, tokens and file contents; OpenMausBot adds the app's own diagnostics. Then tell the person, word for word, the line report_bug returns, and help with the problem if you can.]";
@@ -172,7 +162,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
     }
   };
   const notice = (threadId: string, said: Told) => {
-    try { store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${said.line}`, ok: said.ok } }); }
+    try { store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${said.line}`, ok: said.ok, ...(said.text ? { nameCode: said.text.key, nameParams: said.text.params } : {}) } }); }
     catch { /* the conversation is gone; the report still went */ }
   };
   const botNames = () => store.bots.map((bot) => bot.name);
@@ -231,13 +221,13 @@ export function createDevsReports(deps: DevsReportsDeps) {
   function settle(entry: { messageId: string; threadId: string }, payload: DevsReportPayload, outcome: SendOutcome, contact?: string): Told {
     if (outcome.ok) {
       lastSent.set(entry.threadId, { reportId: outcome.id, at: now() });
-      return { ok: true, line: sentLine(outcome.id, contact), marker: outcome.id };
+      return { ok: true, ...sentReportLine(outcome.id, contact), marker: outcome.id };
     }
-    if (!outcome.retry) return { ok: false, line: refusedLine(outcome.detail), marker: "MausBot team" };
-    if (outbox.length >= MAX_OUTBOX) return { ok: false, line: fullLine, marker: "MausBot team" };
+    if (!outcome.retry) return { ok: false, ...refusedReportLine(outcome.detail), marker: "MausBot team" };
+    if (outbox.length >= MAX_OUTBOX) return { ok: false, ...fullReportLine(MAX_OUTBOX), marker: "MausBot team" };
     outbox.push({ messageId: entry.messageId, threadId: entry.threadId, payload, firstAt: now(), attempts: 1,
       nextAt: now() + (outcome.retryAfterMs ?? RETRY_MS[0]) });
-    return { ok: false, line: notYetLine(outcome), marker: "MausBot team" };
+    return { ok: false, ...notYetReportLine(outcome), marker: "MausBot team" };
   }
 
   function deliver(entry: Waiting, author: Author): Promise<Told> {
@@ -273,13 +263,13 @@ export function createDevsReports(deps: DevsReportsDeps) {
     if (outcome.ok) {
       outbox = outbox.filter((one) => one !== queued);
       lastSent.set(queued.threadId, { reportId: outcome.id, at: now() });
-      notice(queued.threadId, { ok: true, line: laterLine(outcome.id, contact), marker: outcome.id });
+      notice(queued.threadId, { ok: true, ...sentReportLine(outcome.id, contact, true), marker: outcome.id });
     } else if (!outcome.retry) {
       outbox = outbox.filter((one) => one !== queued);
-      notice(queued.threadId, { ok: false, line: refusedLine(outcome.detail), marker: "" });
+      notice(queued.threadId, { ok: false, ...refusedReportLine(outcome.detail), marker: "" });
     } else if (now() - queued.firstAt > KEPT_MS) {
       outbox = outbox.filter((one) => one !== queued);
-      notice(queued.threadId, { ok: false, line: droppedLine, marker: "" });
+      notice(queued.threadId, { ok: false, ...droppedReportLine(), marker: "" });
     } else {
       queued.attempts += 1;
       queued.nextAt = now() + (outcome.retryAfterMs ?? RETRY_MS[Math.min(queued.attempts - 1, RETRY_MS.length - 1)]!);
@@ -330,7 +320,7 @@ export function createDevsReports(deps: DevsReportsDeps) {
     if (!tagsDevs(line.text, botNames())) return;
     seen.add(line.id);
     if (seen.size > 1_000) seen.delete(seen.values().next().value!);
-    if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, line: fullLine, marker: "" });
+    if (waiting.length >= MAX_WAITING) return notice(threadId, { ok: false, ...fullReportLine(MAX_OUTBOX), marker: "" });
     const redact = (text: string) => clip(redactReportText(text, secrets()), 3_000);
     waiting.push({ messageId: line.id, threadId, at: line.at, text: redact(line.text), words: redact(withoutDevsTags(line.text, botNames())),
       ...(line.sender ? { sender: { name: line.sender.name, ...(line.sender.id ? { id: line.sender.id } : {}) } } : {}) });

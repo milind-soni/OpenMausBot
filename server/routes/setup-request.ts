@@ -4,6 +4,7 @@
 import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import { askForSetup, cancelSetupRequest, type SetupRequestStore } from "../setup-request.ts";
 import { PASS, type RouteHandler } from "./table.ts";
+import { refusalBody, userError } from "../user-errors.ts";
 
 export interface SetupRequestRouteDeps {
   store: SetupRequestStore;
@@ -19,7 +20,6 @@ export interface SetupRequestRouteDeps {
 
 const PATH = /^\/api\/bots\/([\w-]+)\/setup-request$/;
 const ID = /^[\w-]{1,128}$/;
-const NO_TOOLS = "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead.";
 
 export function createSetupRequestRoutes(deps: SetupRequestRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
@@ -35,13 +35,13 @@ export function createSetupRequestRoutes(deps: SetupRequestRouteDeps): RouteHand
     if (method === "DELETE") {
       // An owner or admin may clear someone else's, so one never strands the chat.
       const outcome = cancelSetupRequest(deps.store, botId, threadId, deps.presser(auth), { admin: ownerOrAdmin(auth) });
-      if (outcome === "unknown") return json(res, 404, { error: "There is no such conversation." });
-      if (outcome === "refused") return json(res, 403, { error: "Only the person who pressed Set me up, or an owner or admin, can stop it." });
+      if (outcome === "unknown") return json(res, 404, userError("serverError.setup.missingConversation"));
+      if (outcome === "refused") return json(res, 403, userError("serverError.setup.stopOwner"));
       return json(res, 200, { ok: true });
     }
-    if (deps.store.taskByThread(botId, threadId) && !deps.canSetUp(botId, threadId)) return json(res, 409, { error: NO_TOOLS });
+    if (deps.store.taskByThread(botId, threadId) && !deps.canSetUp(botId, threadId)) return json(res, 409, userError("serverError.setup.noTools"));
     const asked = askForSetup(deps.store, botId, threadId, deps.language(), deps.presser(auth));
-    if (!asked.ok) return json(res, asked.status, { error: asked.error });
+    if (!asked.ok) return json(res, asked.status, refusalBody(asked));
     return json(res, 200, asked);
   };
 }

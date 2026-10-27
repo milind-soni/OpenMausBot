@@ -90,6 +90,35 @@ export const CHAT_NOTICE = {
   "chat.notice.phone.write.PHONE_RUN_SCENE": "Run scene on {phone}",
   "chat.notice.phone.write.PHONE_SEND_MESSAGE": "Send message on {phone}",
   "chat.notice.phone.write.PHONE_SEND_WHATSAPP": "Send whatsapp on {phone}",
+  "chat.notice.acpEmpty": "{provider} finished without replying.",
+  "chat.notice.acpNoReason": "{provider} stopped without saying why.",
+  "chat.notice.stop.refusal": "{provider} refused to go on with this request (stop reason: {reason}). Try again, reword the request, or switch this bot to another AI.",
+  "chat.notice.stop.refusalGeneric": "The AI refused to go on with this request (stop reason: {reason}). Try again, reword the request, or switch this bot to another AI.",
+  "chat.notice.stop.maxTokens": "{provider}'s reply reached its maximum length before it finished (stop reason: {reason}). Ask it to continue, or ask for a shorter answer.",
+  "chat.notice.stop.maxTokensGeneric": "The AI's reply reached its maximum length before it finished (stop reason: {reason}). Ask it to continue, or ask for a shorter answer.",
+  "chat.notice.stop.maxRequests": "The turn made as many model requests as one turn may before it finished (stop reason: {reason}). Ask it to carry on from where it stopped, or split the task.",
+  "chat.notice.unaskedStop": "The AI's request was cut off before it finished, and nobody stopped it (it said only \"{said}\"). Send the message again to try once more.",
+  "chat.notice.piSessionSlow": "Pi is taking longer than usual to start this conversation's session. The turn goes on when Pi answers. Press Stop to cancel it.",
+  "chat.notice.unreadMessage": "This turn ended before the model read a message sent while it ran. Send that message again.",
+  "chat.notice.codexUnsupportedOne": "Codex could not run the tool {tools} (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
+  "chat.notice.codexUnsupportedMany": "Codex could not run the tools {tools} (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
+  "chat.notice.codexUnsupportedMore": "Codex could not run the tools {tools} and {count} more (\"unsupported call\"): the AI provider sent the call back without the tool's app name, so it never reached the tool. Pick a model for this bot whose provider handles tool calls fully.",
+  "chat.notice.handoffSent": "Sent to {name}",
+  "chat.notice.handoffSentRoom": "Sent to {name} · {room}",
+  "chat.notice.relayReply": "{name} replied: {message}",
+  "chat.notice.relayFrom": "{name} asked me to pass this on: {message}",
+  "chat.notice.relayMessage": "A message for you from {name}: {message}",
+  "chat.notice.reportSent": "Sent to the MausBot team (report {id}). Milind and Omkar get it by email.",
+  "chat.notice.reportSentContact": "Sent to the MausBot team (report {id}). Milind and Omkar get it by email and will reply to {contact}.",
+  "chat.notice.reportLater": "Sent to the MausBot team (report {id}) after an earlier try did not go through. Milind and Omkar get it by email.",
+  "chat.notice.reportLaterContact": "Sent to the MausBot team (report {id}) after an earlier try did not go through. Milind and Omkar get it by email and will reply to {contact}.",
+  "chat.notice.part.reportLimited": "the MausBot team takes only a few reports an hour from each app",
+  "chat.notice.reportWaiting": "Not sent yet: {why}. The report is saved and goes on its own as soon as it can, so there is no need to send it again.",
+  "chat.notice.reportWaitingOne": "Not sent yet: {why}. The report is saved and goes on its own in about {minutes} minute, so there is no need to send it again.",
+  "chat.notice.reportWaitingMany": "Not sent yet: {why}. The report is saved and goes on its own in about {minutes} minutes, so there is no need to send it again.",
+  "chat.notice.reportFull": "Not sent: {count} bug reports are already waiting to go to the MausBot team. Type @devs again once they have gone.",
+  "chat.notice.reportDropped": "A bug report from this conversation could not reach the MausBot team for a week, so it was dropped. Type @devs again to send a new one.",
+
 } as const;
 
 export type ChatNoticeKey = keyof typeof CHAT_NOTICE;
@@ -103,6 +132,11 @@ export function chatNotice(key: ChatNoticeKey, params?: ServerTextParams): strin
 export function noticeLine<Key extends ChatNoticeKey>(key: Key, params?: Record<string, string>) {
   const safe = params && redactParams(params);
   return { text: chatNotice(key, safe), textCode: key, ...(safe ? { textParams: safe } : {}) };
+}
+
+export function runtimeNoticeTool(event: { message: string; text?: ServerText }) {
+  return { name: `notice: ${event.message.slice(0, 240)}`, ok: true,
+    ...(event.text ? { nameCode: event.text.key, ...(event.text.params ? { nameParams: redactParams(event.text.params) } : {}) } : {}) };
 }
 
 export function noticeSummary(key: ChatNoticeKey, params?: Record<string, string>) {
