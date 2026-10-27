@@ -537,13 +537,16 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
         title: "Product designer",
         description: "Design and review the user experience.",
         section: "Launch",
-        composio: false,
         autoApprove: false,
         approvePeerComms: false,
         approvalMode: "full",
         modelSelection: defaultSelection,
       });
       expect(operator.chiefOfStaff).toBeFalsy();
+      // A bot a Chief creates starts with the Chief's own connected apps, never more.
+      const atlas = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id);
+      expect(operator.composio).toEqual(atlas.composio);
+      expect(operator.mcpServers).toEqual(atlas.mcpServers);
       expect(notice.teamSetupRequest.undo.created).toEqual([operator.id]);
       expect(work.some((message: any) => message.text?.includes("Review the new onboarding flow."))).toBe(true);
     },
@@ -578,6 +581,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
       const sent = chip(askerBot.messages, "Sent to Helper");
       expect(sent).toBeTruthy();
       expect(sent.tool.output).toBe("followup");
+      expect(sent.doneWhen).toBe("the export opens in Numbers");
       expect(sent.threadRef).toMatchObject({ botId: helper.id, threadId: work.threadId });
       const replied = chip(askerBot.messages, "Helper replied");
       expect(replied.from?.botId).toBe(helper.id);

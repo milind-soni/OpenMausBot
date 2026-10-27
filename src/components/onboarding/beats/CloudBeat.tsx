@@ -74,14 +74,14 @@ export function CloudBeat({ offer, onNext, onSkip, setMascot }: BeatProps & { of
   };
   const notNow = () => { track("onboarding_cloud", { action: "not_now" }); onSkip(); };
   return <div data-cloud-beat className="flex flex-col">
-    <p className="animate-rise mt-1 text-[13.5px] leading-relaxed text-ink-secondary">{t("onboarding.cloud.body")}</p>
+    <p className="animate-rise mt-1 text-[14px] leading-relaxed text-ink-secondary">{t("onboarding.cloud.body")}</p>
     <div className="animate-rise mt-3" style={staggerIndex(1)}><CloudMascotScene variant="beat" paused={sheet !== null} /></div>
     <ul aria-label={t("onboarding.cloud.ticks")} className="stagger mt-3 flex flex-col gap-2">
-      {TICKS.map((key, index) => <li key={key} className="animate-rise flex items-center gap-2.5 text-[13.5px] text-ink" style={staggerIndex(index + 2)}>
+      {TICKS.map((key, index) => <li key={key} className="animate-rise flex items-center gap-2.5 text-[14px] text-ink" style={staggerIndex(index + 2)}>
         <span aria-hidden="true" className="grid size-5 shrink-0 place-items-center rounded-full bg-accent/12 text-accent-text"><Check size={13} strokeWidth={2.6} /></span>{t(key)}
       </li>)}
     </ul>
-    <p data-cloud-beat-terms className="animate-rise mt-4 rounded-xl border border-hairline/70 bg-card/70 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-ink-secondary" style={staggerIndex(5)}>{terms.line}</p>
+    <p data-cloud-beat-terms className="animate-rise mt-4 rounded-xl border border-hairline/70 bg-card/70 px-3.5 py-2.5 text-[13px] leading-relaxed text-ink-secondary" style={staggerIndex(5)}>{terms.line}</p>
     <button type="button" data-primary onClick={start} className="ui-button ui-button-primary mt-5 min-h-11 w-full rounded-xl text-[15px] font-semibold">{terms.action}</button>
     <QuietButton type="button" onClick={notNow} className="mt-2.5 self-center py-1 text-[13px]">{t("notice.notNow")}</QuietButton>
     <p className="mt-2 text-center text-[12px] text-ink-tertiary">{t("onboarding.cloud.later")}</p>

@@ -219,7 +219,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
             >
               {uploading ? <Loader2 size={22} className="animate-spin" /> : <ImagePlus size={22} />}
               <span>{t("botPanel.avatar.drop")}</span>
-              <span className="text-[11.5px] text-ink-tertiary">{t("botPanel.avatar.types")}</span>
+              <span className="text-[12px] text-ink-tertiary">{t("botPanel.avatar.types")}</span>
             </button>
             <div className="mt-2.5 flex items-center gap-2.5">
               <span className="shrink-0 text-[12px] text-ink-secondary">{t("botPanel.avatar.shape")}</span>
@@ -243,7 +243,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
                 </button>
               )}
             </div>
-            {!showsImage && <p className="mt-2 text-[11.5px] text-ink-tertiary">{t("botPanel.avatar.uploadHint")}</p>}
+            {!showsImage && <p className="mt-2 text-[12px] text-ink-tertiary">{t("botPanel.avatar.uploadHint")}</p>}
           </>
         )}
 

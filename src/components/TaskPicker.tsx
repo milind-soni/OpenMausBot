@@ -226,7 +226,7 @@ function ConversationTaskPicker({
         title={switchTitle}
         aria-label={t("task.switch")}
         className={cn(
-          "flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink",
+          "flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
           COMPACT_BUBBLE,
         )}
       >
@@ -274,7 +274,7 @@ function ConversationTaskPicker({
                 }}
                 placeholder={t("task.search")}
                 aria-label={t("task.search")}
-                className="w-full bg-transparent text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none"
+                className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
               />
             </div>
           </div>

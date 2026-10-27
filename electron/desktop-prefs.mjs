@@ -56,6 +56,13 @@ export function createDesktopText(app, prefs = createDesktopPrefs(jsonFile(path.
   return Object.assign(nativeText.createNativeText({ saved: prefs.language(), system: () => (app.isReady() ? app.getLocale() : "") }), { prefs });
 }
 
+export function relabelDesktop({ menu, trays, window, title, badge }) {
+  menu();
+  for (const tray of trays) tray?.relabel();
+  if (window && !window.isDestroyed()) window.setTitle(title());
+  badge();
+}
+
 /** A record that cannot be written is still kept for this launch. */
 export function createDesktopPrefs({ read, write, now = Date.now }) {
   let record = null;

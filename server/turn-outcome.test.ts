@@ -25,6 +25,15 @@ describe("TurnStops", () => {
     expect(stops.read("t1", "turn-1")).toBeUndefined();
   });
 
+  it("keeps the engine's own flags on the turn's error, which decide whether a retry could help", () => {
+    const stops = new TurnStops();
+    stops.note(event({ type: "turn.started", turnId: "turn-1" }));
+    stops.note(event({ type: "runtime.error", turnId: "turn-1", message: "The trial Claude credit is used up.", setup: true, trialCredit: "used_up" }));
+    expect(stops.read("t1", "turn-1")?.flags).toEqual({ setup: true, trialCredit: "used_up" });
+    stops.note(event({ type: "turn.started", turnId: "turn-2" }));
+    expect(stops.read("t1", "turn-2")).toBeUndefined();
+  });
+
   // Claude reports a usage limit or an overload as a reply its client wrote: that text is the cause, a model's words are not.
   it("takes a provider's error sent as a reply for the cause", () => {
     const stops = new TurnStops();

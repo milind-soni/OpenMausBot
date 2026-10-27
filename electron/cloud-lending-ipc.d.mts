@@ -10,12 +10,16 @@ export interface PageLending {
   screenAvailable: boolean;
   /** Its internet connection, for the bots' browsers on My Cloud. */
   internet: boolean;
+  /** Its Chrome, for the bots on My Cloud. */
+  chrome: boolean;
+  /** The terminal: bots run any command here as the person. */
+  terminal: boolean;
   /** Whether My Cloud's browsing goes through it yet. */
   link?: "on" | "connecting" | "unsupported";
 }
 export function pageLending(snapshot: unknown): PageLending;
 export interface LentFolder { id: string; path: string; name: string; write: boolean }
-export function defaultGrant(input: { kept?: { folders?: LentFolder[]; screen?: boolean }; usual: LentFolder[]; projects: LentFolder[]; screenAvailable?: boolean; screenReady?: boolean }): { folders: LentFolder[]; screen: boolean; internet: true };
+export function defaultGrant(input: { kept?: { folders?: LentFolder[]; screen?: boolean; internet?: boolean; chrome?: boolean }; usual: LentFolder[]; projects: LentFolder[]; screenAvailable?: boolean; screenReady?: boolean }): { folders: LentFolder[]; screen: boolean; internet: boolean; chrome: boolean };
 export function existingFolders<T>(folders: unknown[], validate: (folders: unknown[]) => Promise<T[]>): Promise<T[]>;
 /** A refusal the page says plainly, never with Try again: `lending-refused:<code>` in the IPC error's message. */
 export declare const LENDING_REFUSED: string;
@@ -37,4 +41,6 @@ export function installCloudLending(deps: Record<string, unknown>): {
   lendByDefault(input?: { projects?: string[]; asked?: boolean }): Promise<PageLending | null>;
   /** Apps and screen on top of what is lent; null while lending is off or computer control does not work yet. */
   lendScreen(): Promise<PageLending | null>;
+  /** The terminal on or off on top of what is lent; turning it on asks in main's own dialog first. */
+  lendTerminal(on: boolean): Promise<PageLending>;
 };

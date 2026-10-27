@@ -319,7 +319,7 @@ function SettledQuestion({ questions, answer }: { questions: readonly AskQuestio
         </button>
       )}
       detail={open && full && (
-        <div dir="auto" className="ms-[19px] mt-1.5 whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 text-[12.5px] leading-relaxed text-ink-secondary">
+        <div dir="auto" className="ms-[19px] mt-1.5 whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 text-[13px] leading-relaxed text-ink-secondary">
           {full}
         </div>
       )}

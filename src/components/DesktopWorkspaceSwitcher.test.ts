@@ -46,7 +46,7 @@ it("names whose Cloud a browser signed in to under My Cloud, quietly", () => {
   const browser = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { cloudHome: true, owner: "ada@example.test" }));
   expect(visibleText(browser)).toBe("My Cloudada@example.test’s Cloud");
   expect(browser).toContain('title="My Cloud · ada@example.test’s Cloud"');
-  expect(browser).toContain('<span class="block truncate text-[11.5px] font-normal text-ink-secondary">ada@example.test’s Cloud</span>');
+  expect(browser).toContain('<span class="block truncate text-[12px] font-normal text-ink-secondary">ada@example.test’s Cloud</span>');
   const compact = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { cloudHome: true, owner: "ada@example.test", compact: true }));
   expect(compact).toContain('<span class="sr-only">My Cloud · ada@example.test’s Cloud</span>');
   expect(renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { owner: "ada@example.test" }))).toBe("");
@@ -83,7 +83,7 @@ it("draws Simple mode's switcher as a rounded pill that names the server in full
   expect(pill).not.toContain("@max-[96px]");
   const inline = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true }));
   expect(inline).toContain("lucide-laptop");
-  expect(inline).toMatch(/class="[^"]*\bh-7\b[^"]*\brounded-md\b[^"]*\btext-\[12\.5px\]/);
+  expect(inline).toMatch(/class="[^"]*\bh-7\b[^"]*\brounded-md\b[^"]*\btext-\[13px\]/);
   expect(inline).not.toContain("rounded-full");
 
   vi.stubGlobal("window", {});

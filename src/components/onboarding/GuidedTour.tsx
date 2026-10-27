@@ -138,7 +138,8 @@ export function GuidedTour() {
     dispatch({ type: "toggleTour", open: false });
   }, [state.computerOpen, state.pluginsOpen, run, save, dispatch]);
 
-  const active = !dismissed && Boolean(record?.completedAt) && !state.welcomeOpen && step !== null;
+  // Only ever started from Settings (Replay app tour): the welcome no longer hands over to it, now or after a reload.
+  const active = !dismissed && state.tourOpen && Boolean(record?.completedAt) && !state.welcomeOpen && step !== null;
 
   useEffect(() => {
     if (!active || !step || entered.current === step.id) return;

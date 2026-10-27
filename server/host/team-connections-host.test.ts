@@ -9,6 +9,7 @@ import type { McpServerSpec } from "../contracts.ts";
 import { McpOAuthManager } from "../mcp-oauth.ts";
 import { personKey } from "../person-key.ts";
 import { excludedWorkspaceAuthPath } from "../workspace-backup-policy.ts";
+import { appsFromCreator } from "../inherited-apps.ts";
 import { createTeamConnectionsHost } from "./team-connections-host.ts";
 
 const ADA = personKey({ id: "", email: "ada@acme.test" });
@@ -115,6 +116,18 @@ describe("apps each person connects", () => {
     const admin = setup({ requester: { "ada-chat": BEN } });
     adaConnected(admin.host, admin.dataDir);
     expect(admin.host.relayActor({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }).refusal).toMatch(/one person's own apps/);
+  });
+
+  it("gives a bot a Chief made the Chief's grants, never a connection: each turn still gets only its own person's", async () => {
+    const { host, dataDir, composio } = setup();
+    adaConnected(host, dataDir);
+    const inherited = appsFromCreator({ createdBy: "ada@acme.test", connectorTools: { gmail: { tools: "*" } } }, { createdBy: "ada@acme.test" });
+    const made = { id: "scout-helper", name: "Scout's helper", ...inherited };
+    for (const thread of ["ada-chat", "cleo-chat", "main-chat"]) await host.appsIntegrations(made, thread, "gen-1");
+    const contexts = composio.mcpIntegration.mock.calls.map(([, context]) => context as typeof context & { threadId: string; connectorTools?: unknown });
+    expect(contexts.every((context) => JSON.stringify(context.connectorTools) === JSON.stringify({ gmail: { tools: "*" } }))).toBe(true);
+    expect(contexts.filter((context) => context.as).map((context) => [context.threadId, context.as])).toEqual([["ada-chat", ADA_ACCESS]]);
+    expect(await host.callRefusal({ threadId: "cleo-chat", generation: "gen-1" }, [{ slug: "GMAIL_FETCH_EMAILS" }]), "Cleo's chat never reaches Ada's Gmail").toMatch(/Connect your Gmail/);
   });
 
   it("refuses a person's app through the team's bridge, and a team app through her own", async () => {

@@ -41,8 +41,8 @@ export function Card({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl bg-card p-4 max-md:rounded-[20px]">
-      {title && <div className="text-[15px] font-medium text-ink">{title}</div>}
+    <div className="rounded-xl bg-card p-4 max-md:rounded-2xl">
+      {title && <div className="text-[16px] font-semibold text-ink">{title}</div>}
       {subtitle && <div className={title ? "mt-0.5 text-[13px] leading-relaxed text-ink-secondary" : "text-[13px] leading-relaxed text-ink-secondary"}>{subtitle}</div>}
       {children && <div className={title || subtitle ? "mt-4" : undefined}>{children}</div>}
     </div>
@@ -68,7 +68,7 @@ export function SettingRow({
       <div className="grid min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6">
         <div className="min-w-0">
           <div id={titleId} className="text-[14px] font-medium text-ink">{title}</div>
-          {subtitle && <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{subtitle}</div>}
+          {subtitle && <div className="mt-1 text-[12px] leading-relaxed text-pretty text-ink-secondary">{subtitle}</div>}
         </div>
         <div className="min-w-0 sm:max-w-[240px]">{children}</div>
       </div>

@@ -7,7 +7,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
 import type { CompanionAccountState } from "../types/ogb";
-import { PhoneSetupFlow, type CompanionState } from "./PhoneSetupFlow";
+import { PhoneSetupFlowView, usePhoneSetupController, type CompanionState } from "./PhoneSetupFlow";
+
+/** Settings' pairing panel: the flow with its own controller, as CompanionSection mounts it. */
+function PhoneSetupFlow() {
+  return createElement(PhoneSetupFlowView, { controller: usePhoneSetupController() });
+}
 
 const HOSTED = "https://c-opaque.openmausbot.com";
 const FULL =
@@ -97,7 +102,7 @@ afterEach(() => {
 
 async function startPairing(fake: ReturnType<typeof desktop>) {
   (globalThis as { ogb?: unknown }).ogb = fake.bridge;
-  flushSync(() => root.render(createElement(PhoneSetupFlow, { variant: "settings" })));
+  flushSync(() => root.render(createElement(PhoneSetupFlow)));
   await vi.waitFor(() => expect(button("Pair a device")?.disabled).toBe(false));
   button("Pair a device")!.click();
 }

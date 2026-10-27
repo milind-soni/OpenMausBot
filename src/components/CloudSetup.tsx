@@ -34,7 +34,7 @@ function storeCollapsed(collapsed: boolean) {
 }
 
 const CARD = "fixed bottom-4 left-4 z-40 max-h-[calc(100dvh-32px)] w-[300px] max-w-[calc(100vw-32px)] origin-bottom-left overflow-y-auto rounded-2xl border border-hairline/50 bg-menu text-ink shadow-[0_18px_48px_-16px_rgba(0,0,0,0.55),0_4px_12px_-6px_rgba(0,0,0,0.3)]";
-const PRIMARY = "ui-button ui-button-primary shrink-0 gap-1.5 text-[12.5px] transition-transform duration-150 ease-out active:scale-[0.97] motion-reduce:transition-none";
+const PRIMARY = "ui-button ui-button-primary shrink-0 gap-1.5 text-[13px] transition-transform duration-150 ease-out active:scale-[0.97] motion-reduce:transition-none";
 
 function nextRunLabel(at: number | null, now = Date.now()): string | null {
   if (!at) return null;
@@ -80,18 +80,18 @@ function CloudReady({ routine, onDone }: { routine?: Routine; onDone: () => void
     <div role="status" className="relative">
       <h2 id="cloud-ready-title" className="mt-3 text-[15px] font-semibold">{t("cloudSetup.ready.title")}</h2>
       {routine
-        ? <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">
+        ? <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
             <span className="font-medium text-ink">{routine.name}</span>
             {next ? <> {t("cloudSetup.ready.runs", { when: next })}</> : null}
           </p>
-        : <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudSetup.ready.body")}</p>}
+        : <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t("cloudSetup.ready.body")}</p>}
       {run === "failed" && <p role="alert" className="mt-1.5 text-[12px] text-danger">{t("cloudSetup.ready.runFailed")}</p>}
     </div>
     {routine
       ? <div className="relative mt-4 flex w-full flex-col gap-2">
           <button type="button" onClick={runNow} disabled={run === "starting" || run === "started"}
             className={run === "started"
-              ? "inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-success/15 text-[12.5px] font-medium text-success"
+              ? "inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-success/15 text-[13px] font-medium text-success"
               : cn(PRIMARY, "min-h-9 w-full justify-center")}>
             {run === "started" ? <><Check size={14} strokeWidth={2.5} aria-hidden="true" />{t("cloudSetup.ready.running")}</> : t("cloudSetup.ready.runNow")}
           </button>
@@ -151,7 +151,7 @@ export function CloudSetup({ viewer, welcomeShown = false }: { viewer: WelcomeVi
     const bot = state.bots.find((candidate) => candidate.id === jobBot);
     if (bot) openBot(dispatch, bot, showThreads);
   };
-  const hint = (key: LocaleKey) => <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">{t(key)}</p>;
+  const hint = (key: LocaleKey) => <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t(key)}</p>;
   const action = (label: LocaleKey, onClick: () => void) => <button type="button" className={PRIMARY} onClick={onClick}>{t(label)}<ArrowRight size={13} aria-hidden="true" /></button>;
 
   const details = (id: CloudSetupStep): { body: ReactNode; act?: ReactNode } => {
@@ -178,7 +178,7 @@ export function CloudSetup({ viewer, welcomeShown = false }: { viewer: WelcomeVi
   const titleOf = (id: CloudSetupStep) => t(TITLE[id]);
   const row = (item: CloudSetupItem, index: number) => {
     const pending = item.status === "todo";
-    const title = <span className="min-w-0 flex-1 text-[12.5px] leading-[18px]">
+    const title = <span className="min-w-0 flex-1 text-[13px] leading-[18px]">
       {titleOf(item.id)}
       {item.status === "skipped"
         ? <span> · {t("cloudSetup.skipped")}</span>
@@ -230,7 +230,7 @@ export function CloudSetup({ viewer, welcomeShown = false }: { viewer: WelcomeVi
       })}
     </div>
     {!collapsed && <div id="cloud-setup-body">
-      {current ? focus(current) : <p role="status" className="animate-rise mt-4 text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudSetup.working")}</p>}
+      {current ? focus(current) : <p role="status" className="animate-rise mt-4 text-[13px] leading-relaxed text-ink-secondary">{t("cloudSetup.working")}</p>}
       {others.length > 0 && <ol className="stagger mt-4 flex flex-col border-t border-hairline/60 pt-2.5">{others.map(row)}</ol>}
       <button type="button" className="mt-1.5 py-1 text-[12px] text-ink-secondary transition-colors hover:text-ink" onClick={hide}>{t("cloudSetup.hide")}</button>
     </div>}

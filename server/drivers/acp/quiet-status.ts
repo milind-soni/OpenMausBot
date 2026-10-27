@@ -18,6 +18,9 @@ export const promptIdleTimeoutMs = (): number => {
 export const formatQuietLimit = (ms: number): string =>
   ms >= 120_000 && ms % 60_000 === 0 ? `${ms / 60_000} min` : `${Math.round(ms / 1000)} s`;
 
+/** Silence before the first "what is it doing" notice (OMB_ACP_QUIET_NOTICE_MS overrides). */
+export const DEFAULT_QUIET_NOTICE_MS = 60_000;
+
 export type LogSignal =
   | { kind: "retry"; status: number | null; delayMs: number | null; attempt: number | null }
   | { kind: "compressing" }

@@ -24,6 +24,7 @@ import { VisibilitySection } from "./bot-settings/VisibilitySection";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { BotPanel } from "./bot-panel/PanelShell";
+import { sidePanelCls } from "./bot-panel/side-panel";
 import { HistoryRollbackDialog, useBotHistory, useBotOverview } from "./bot-settings/useBotOverview";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
@@ -166,12 +167,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
         role="dialog"
         aria-labelledby="bot-settings-title"
         tabIndex={-1}
-        className={cn(
-          "animate-sheet-in md:animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel outline-none focus-visible:outline-none",
-          overlay
-            ? "md:inset-auto md:right-0 md:top-0 md:bottom-0 md:w-[min(420px,42vw)] md:shadow-2xl"
-            : "md:static md:z-auto md:w-[min(420px,42vw)] md:shrink-0",
-        )}
+        className={sidePanelCls(overlay)}
       >
         {simpleView ? (
           <BotPanel
@@ -218,7 +214,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
 
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {visibleSections.length === 0 && (
-            <div className="px-4 py-4 text-[12.5px] leading-relaxed text-ink-secondary">
+            <div className="px-4 py-4 text-[13px] leading-relaxed text-ink-secondary">
               {t("botSettings.searchNone", { query: query.trim() })}
             </div>
           )}

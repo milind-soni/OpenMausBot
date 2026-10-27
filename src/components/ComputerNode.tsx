@@ -53,7 +53,7 @@ export const ComputerNode = memo(function ComputerNode({ computer, bots, frameUr
         <span className="absolute left-2 top-2 flex items-center gap-1.5 rounded-full bg-black/65 px-2 py-0.5 text-[10px] font-medium text-white/90 backdrop-blur-[2px]">
           <span className={cn("size-1.5 rounded-full", STATE_DOT[state], live && "animate-pulse")} />{t(STATE_LABEL[state])}
         </span>
-        {activity && live && <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/85 via-black/55 to-transparent px-2.5 pb-1.5 pt-6 text-[10.5px] leading-tight text-white/90">{activity}</span>}
+        {activity && live && <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/85 via-black/55 to-transparent px-2.5 pb-1.5 pt-6 text-[11px] leading-tight text-white/90">{activity}</span>}
       </span>
       <span className="flex h-[32px] min-w-0 items-center gap-2 px-1 pt-1.5">
         <span className="flex shrink-0 -space-x-1.5">

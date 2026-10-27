@@ -5,13 +5,13 @@ import type { ValidateFunction } from "ajv";
 import { HIGHLEVEL_TOOL_NAMES, type HighLevelToolName } from "../../shared/highlevel.ts";
 import { isReadOnlyAction } from "../../shared/connector-scopes.ts";
 import { compileToolSchema, schemaProblems } from "../mcp-schema-validator.ts";
-import { HighLevelError, type ContactFields, type HighLevelClient } from "./client.ts";
+import { HighLevelError, PAGE_MAX, PAGE_NUMBER_MAX, type ContactFields, type HighLevelClient } from "./client.ts";
 
 const ID = { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_.-]+$" };
 const TEXT = (maxLength: number, description?: string) => ({ type: "string", maxLength, ...(description ? { description } : {}) });
 const TAGS = { type: "array", minItems: 1, maxItems: 50, items: { type: "string", minLength: 1, maxLength: 100 } };
-const PAGE = { type: "integer", minimum: 1, maximum: 1000, description: "Page number, from 1." };
-const LIMIT = { type: "integer", minimum: 1, maximum: 50, description: "Results per page, at most 50. Default 20." };
+const PAGE = { type: "integer", minimum: 1, maximum: PAGE_NUMBER_MAX, description: "Page number, from 1." };
+const LIMIT = { type: "integer", minimum: 1, maximum: PAGE_MAX, description: `Results per page, at most ${PAGE_MAX}. Default 20.` };
 const DATE = TEXT(64, "ISO 8601 date-time, e.g. 2026-10-20T15:00:00Z.");
 
 const CONTACT_FIELDS = {

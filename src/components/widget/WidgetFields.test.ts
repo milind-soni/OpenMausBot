@@ -215,11 +215,11 @@ describe("DayPicker", () => {
 });
 
 describe("a widget table", () => {
-  it("is the app's own table: search, copy, CSV and expand, with the widget's columns and alignment", () => {
+  it("is the app's own table: copy, CSV and expand, with the widget's columns and alignment", () => {
     mount(sample("spendTable"));
     const table = find(".rich-table")!;
-    expect(table.querySelector(`input[aria-label="${t("table.search")}"]`)).not.toBeNull();
-    for (const action of ["table.wrap", "table.copy", "table.download", "table.expand"] as const) expect(table.querySelector(`button[aria-label="${t(action)}"]`)).not.toBeNull();
+    expect(table.querySelector(`input[aria-label="${t("table.search")}"]`)).toBeNull();
+    for (const action of ["table.copy", "table.download", "table.expand"] as const) expect(table.querySelector(`button[aria-label="${t(action)}"]`)).not.toBeNull();
     expect(all("thead th").map((cell) => cell.textContent)).toEqual(["Bot", "Runs", "Cost"]);
     expect(all<HTMLElement>("thead th")[2]!.style.textAlign).toBe("end");
     expect(all<HTMLElement>("tbody td").filter((_, index) => index % 3 === 2).map((cell) => cell.style.textAlign)).toEqual(["end", "end", "end", "end"]);

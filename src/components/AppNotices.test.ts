@@ -8,12 +8,14 @@ import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-
 import type { CloudOffer, CloudTrial } from "../../electron/cloud-home.mjs";
 import { withTourFinished } from "@/lib/guided-tour";
 import { setLocale } from "@/lib/i18n";
-import { EMPTY_ONBOARDING, LOCAL_VIEWER, type WelcomeViewer } from "@/lib/onboarding";
+import { EMPTY_ONBOARDING, LOCAL_VIEWER, markWelcomeFinished, type WelcomeViewer } from "@/lib/onboarding";
+import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
 import { setPendingIntent } from "@/lib/cloud-intent";
 import { createDesktopPrefs, registerDesktopPrefs } from "../../electron/desktop-prefs.mjs";
 import { createUpdatesConsent, registerUpdatesConsent } from "../../electron/updates-consent.mjs";
 
-const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, dispatch: null as any, brand: "default" }));
+const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], state: {} as any, updater: null as any, dispatch: null as any, brand: "default",
+  viewerEmail: undefined as string | null | undefined }));
 vi.mock("react", async original => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = typeof initial === "function" ? initial() : initial;
     return [f.values[index], (next: unknown) => { f.values[index] = typeof next === "function" ? (next as (value: unknown) => unknown)(f.values[index]) : next; }]; },
@@ -24,6 +26,8 @@ vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f
   CLOUD_LINK_SETTINGS: { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } }));
 vi.mock("@/lib/analytics", () => ({ emailGateDone: () => false, track: vi.fn(), identifyEmail: vi.fn(), analyticsChoiceKnown: () => true }));
 vi.mock("@/lib/updater", () => ({ useUpdaterState: () => f.updater }));
+// Who MausBot belongs to: unknown (as before the session answers) unless a test says otherwise.
+vi.mock("@/lib/default-bot", async original => ({ ...await original<typeof import("@/lib/default-bot")>(), useViewerEmail: () => f.viewerEmail }));
 vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ brand: { name: "OpenMausBot" }, source: f.brand, file: "" }) }));
 vi.mock("@/components/EngineLibrary", () => ({ engineReady: (instance: { snapshot: { state: string; authenticated?: boolean } }) =>
   instance.snapshot.state === "available" && instance.snapshot.authenticated !== false }));
@@ -116,6 +120,9 @@ const press = (label: string) => {
   const button = tree().find(node => node.type === "button" && (renderToStaticMarkup(node).includes(`>${label}<`) || node.props["aria-label"] === label));
   expect(button, label).toBeTruthy(); button!.props.onClick();
 };
+/** A bot has answered once, in this launch: what a new install has after its first chat. */
+const FIRST_REPLY = [{ tasks: [{ threadId: "first", usage: { turns: 1 } }] }];
+let session: Map<string, string>;
 const returning = () => { f.state.bots = [{ tasks: [{ threadId: "t", createdAt: 1, usage: { turns: 2 } }] }]; };
 const launchCardsSeen = () => { desk.saved = { seen: [CLOUD_PRO_UPDATE_NOTICE] }; storage.set(PRODUCT_HUNT_NOTICE, "1"); };
 const hints = () => f.state.config.onboarding.hintsSeen as string[];
@@ -124,7 +131,9 @@ beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
   storage = new Map(); f.values = []; f.index = 0; f.effects = []; f.updater = null; f.brand = "default"; f.dispatch = vi.fn(); now = NOW; desk = desktopMachine();
   setLocale("en"); viewer = LOCAL_VIEWER; account = signedOut; snapshot = { status: "none" }; offer = TRIAL_OFFER;
-  f.state = { connected: true, bots: [], groups: [], routines: [], instances: [{ instanceId: "claude", snapshot: { state: "available", authenticated: true } }],
+  session = new Map(); f.viewerEmail = undefined;
+  vi.stubGlobal("sessionStorage", { getItem: (key: string) => session.get(key) ?? null, setItem: (key: string, value: string) => session.set(key, value) });
+  f.state = { connected: true, hydrated: true, bots: structuredClone(FIRST_REPLY), groups: [], routines: [], instances: [{ instanceId: "claude", snapshot: { state: "available", authenticated: true } }],
     config: { onboarding: { ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen: withTourFinished(undefined) } } };
   vi.mocked(api).mockImplementation(async (_path, init) => {
     const patch = JSON.parse(String((init as RequestInit).body));
@@ -333,6 +342,13 @@ describe("the Product Hunt launch card", () => {
   const PH = "live on Product Hunt";
   const fresh = () => { storage.delete(PRODUCT_HUNT_NOTICE); };
 
+  it("waits for a new install's first reply, so it never lands on the first chat", async () => {
+    fresh(); f.state.bots = [];
+    expect(await launch()).not.toContain(PH);
+    f.state.bots = structuredClone(FIRST_REPLY);
+    expect(await launch()).toContain(PH);
+  });
+
   it("comes first, for everyone (new or not, any plan), and the upvote opens the launch and ends it for good", async () => {
     fresh(); account = paid({ machine: ready });
     const html = await launch();
@@ -444,17 +460,52 @@ describe("the Cloud Pro popup after the update", () => {
     expect(next).not.toContain(POPUP); expect(next).toContain("live on Product Hunt");
   });
 
-  it("a new install gets it once onboarding is done, never in the middle of it", async () => {
+  it("a new install gets it once onboarding is done and a bot has answered, never in the middle of it", async () => {
     f.state.config.onboarding = { ...EMPTY_ONBOARDING };
     expect(await launch()).toBe("");
     f.state.config.onboarding = { ...EMPTY_ONBOARDING, completedAt: "2026-10-16", version: 1, hintsSeen: [] };
+    f.state.welcomeOpen = true;
     expect(await launch()).toBe("");
-    f.state.config.onboarding.hintsSeen = withTourFinished(undefined); f.state.welcomeOpen = true;
-    expect(await launch()).toBe("");
-    f.state.welcomeOpen = false;
+    f.state.welcomeOpen = false; f.state.tourOpen = true;
+    expect(await launch(), "the app tour, started from Settings").toBe("");
+    f.state.tourOpen = false; f.state.bots = [{ tasks: [{ threadId: "first" }] }];
+    expect(await launch(), "the first chat, before its first reply").not.toContain(POPUP);
+    // The welcome is the whole onboarding: an app tour never taken does not hold the popup back.
+    f.state.bots = structuredClone(FIRST_REPLY);
     const html = await launch();
     expect(html).toContain(POPUP); expect(html).not.toContain(INTRO);
     expect(popupEvents("shown")).toHaveLength(1);
+  });
+
+  it("holds the cards after it until the bots have loaded, so an existing user never sees a card flash before it", async () => {
+    returning(); f.state.hydrated = undefined;
+    expect(await launch(), "bots not loaded yet").toBe("");
+    f.state.hydrated = true;
+    expect(await launch()).toContain(POPUP);
+  });
+
+  it("goes after MausBot's first-launch card: never in the launch that card opened, then in the next one", async () => {
+    f.viewerEmail = null;
+    f.state.bots = [{ ...structuredClone(FIRST_REPLY[0]), id: "maus", defaultBot: {} }];
+    expect(await launch(), "MausBot's card is due: the popup waits for it").not.toContain(POPUP);
+    markLaunchDialog("mausbot"); f.state.bots[0].welcomed = true;
+    expect(await launch(), "the card opened and was answered in this launch").not.toContain(POPUP);
+    session.clear();
+    expect(await launch(), "the next launch").toContain(POPUP);
+  });
+
+  it("claims the launch when it opens, so MausBot's card waits for a later one", async () => {
+    returning();
+    expect(await launch()).toContain(POPUP);
+    expect(launchDialogShown()).toBe("notices");
+  });
+
+  it("waits for a later launch when the welcome finished in this one, though a bot has answered", async () => {
+    markWelcomeFinished();
+    const html = await launch();
+    expect(html).not.toContain(POPUP);
+    session.clear();
+    expect(await launch(), "the next launch").toContain(POPUP);
   });
 
   it("is counted as shown once a day on this desktop, not on every reload, until it is closed", async () => {
@@ -482,7 +533,7 @@ describe("the Cloud Pro popup after the update", () => {
     // Compare plans stays in the app: the Add a Cloud dialog lists every plan.
     expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "update_popup" });
     expect(window.ogb?.openExternal).not.toHaveBeenCalled();
-    expect(identifyEmail).toHaveBeenCalledWith("person@example.test", { submitted: false });
+    expect(identifyEmail).toHaveBeenCalledWith("person@example.test");
     expect(popupEvents("see_plans")).toEqual([event("see_plans", "none", true, "local")]);
     expect(lastOrder(vi.mocked(identifyEmail))).toBeLessThan(lastOrder(vi.mocked(track)));
     expect(render()).toBe("");
@@ -492,7 +543,7 @@ describe("the Cloud Pro popup after the update", () => {
     vi.clearAllMocks(); fresh(); await launch();
     press("Upgrade to Cloud Pro");
     expect(f.dispatch).toHaveBeenCalledWith({ type: "openCloudAdd", source: "update_popup" });
-    expect(identifyEmail).toHaveBeenCalledWith("person@example.test", { submitted: false });
+    expect(identifyEmail).toHaveBeenCalledWith("person@example.test");
     expect(popupEvents("upgrade")).toEqual([event("upgrade", "none", true, "local")]);
     expect(lastOrder(vi.mocked(identifyEmail))).toBeLessThan(lastOrder(vi.mocked(track)));
   });
@@ -515,7 +566,7 @@ describe("the Cloud Pro popup after the update", () => {
       expect(bridges.cloud.openDashboard, plan).not.toHaveBeenCalled(); expect(window.ogb?.openExternal, plan).not.toHaveBeenCalled();
       expect(bridges.plan.manage, plan).not.toHaveBeenCalled();
       expect(f.dispatch, plan).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openCloudAdd" }));
-      expect(identifyEmail, plan).toHaveBeenCalledWith("person@example.test", { submitted: false });
+      expect(identifyEmail, plan).toHaveBeenCalledWith("person@example.test");
       expect(popupEvents("manage"), plan).toEqual([event("manage", plan, true, "local")]);
       expect(seenOnDesktop(), plan).toEqual([ID]); expect(render(), plan).toBe("");
       expect(bridges.cloud.offer, plan).not.toHaveBeenCalled();
@@ -795,6 +846,32 @@ describe("the product-updates question after the update", () => {
     expect(await launch(), "a restart reads it from the desktop's file").not.toContain(QUESTION);
   });
 
+  it("waits for a new install's first reply and for a launch after the one whose welcome finished, then keeps its place after the Cloud Pro popup", async () => {
+    desk.saved = null; storage.delete(CLOUD_PRO_UPDATE_NOTICE);
+    f.state.bots = [];
+    markWelcomeFinished();
+    const first = await launch();
+    expect(first, "the welcome just closed and no bot has answered").not.toContain(QUESTION); expect(first).not.toContain(POPUP);
+    f.state.bots = structuredClone(FIRST_REPLY);
+    const answered = await launch();
+    expect(answered, "a bot has answered, but in the launch the welcome finished").not.toContain(QUESTION); expect(answered).not.toContain(POPUP);
+    session.clear();
+    const later = await launch();
+    expect(later).toContain(POPUP); expect(later).not.toContain(QUESTION);
+    press("Not now"); await flush();
+    expect(render(), "right after the popup closes, as #3379 orders it").toContain(QUESTION);
+  });
+
+  it("waits while MausBot's first-launch card is due, then follows it in the same launch once it closes", async () => {
+    f.viewerEmail = null;
+    f.state.bots = [{ ...structuredClone(FIRST_REPLY[0]), id: "maus", defaultBot: {} }];
+    expect(await launch(), "the card is due: the question waits for it").not.toContain(QUESTION);
+    markLaunchDialog("mausbot"); f.state.bots[0].welcomed = true;
+    const after = await launch();
+    expect(after, "the card closed in this launch: the question follows it, as it follows the popup").toContain(QUESTION);
+    expect(after, "the popup still waits for a later launch").not.toContain(POPUP);
+  });
+
   it("never during onboarding, the tour or Settings; it shows once they are done, before the other cards", async () => {
     returning();
     f.state.welcomeOpen = true; expect(await launch()).toBe("");
@@ -835,5 +912,80 @@ describe("the product-updates question after the update", () => {
     f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"]; showWindow(MY_CLOUD);
     expect(await launch()).toContain(QUESTION);
     expect(answer()).toBeNull();
+  });
+});
+
+describe("main's Use my Mac popup, once the moment is right", () => {
+  let due: boolean, modal: boolean, answer: (() => void) | null;
+  const asked: unknown[] = [];
+  const wireLending = () => {
+    desk.handlers.set("cloud-lending:due", async () => due);
+    desk.handlers.set("cloud-lending:ask", (_event: unknown, language: unknown) => { asked.push(language); return new Promise<void>(resolve => { answer = () => { due = false; resolve(); }; }); });
+  };
+  beforeEach(() => {
+    due = true; modal = false; answer = null; asked.length = 0; wireLending(); returning(); storage.set(CLOUD_INTRO, "1");
+    vi.stubGlobal("document", { activeElement: null, body: null, getElementById: () => null, querySelector: () => null,
+      querySelectorAll: () => modal ? [{ closest: () => null, checkVisibility: () => true }] : [] });
+  });
+
+  it("asks main first, in the page's language, draws nothing itself, and nothing else shows until it is answered; then only the next launch's cards", async () => {
+    setLocale("de");
+    expect(await launch()).toBe("");
+    expect(asked).toEqual(["de"]);
+    expect(await settle(), "the star waits while main's popup is open").not.toContain("OpenMausBot");
+    expect(asked, "asked once").toHaveLength(1);
+    setLocale("en");
+    answer!(); await flush();
+    expect(await settle(), "nothing else in this launch after it").not.toContain(STAR);
+    expect(await launch(), "no longer due: the cards go on as before").toContain(STAR);
+    expect(asked).toHaveLength(1);
+  });
+
+  it("waits during the welcome, the tour, Settings, a dialog, a call, a busy bot or an update, and never asks when main says it is not due", async () => {
+    const waits: Array<() => void> = [
+      () => { f.state.welcomeOpen = true; }, () => { f.state.tourOpen = true; }, () => { f.state.appSettingsOpen = true; }, () => { modal = true; },
+      () => { f.state.liveCall = { status: "live" }; }, () => { f.state.cloudAdd = { source: "app_menu" }; }, () => { f.updater = { status: "downloaded" }; },
+      () => { f.state.bots = [{ busy: true, tasks: [{ threadId: "t", createdAt: 1, usage: { turns: 2 } }] }]; },
+      () => { f.state.config.onboarding.completedAt = undefined; },
+    ];
+    for (const wait of waits) {
+      const saved = structuredClone(f.state); wait();
+      await launch();
+      expect(asked, wait.toString()).toEqual([]);
+      f.state = saved; f.updater = null; modal = false;
+    }
+    due = false;
+    expect(await launch()).toContain(STAR);
+    expect(asked).toEqual([]);
+    due = true;
+    expect(await launch()).toBe("");
+    expect(asked).toEqual(["en"]);
+  });
+
+  it("on a new install it waits for the first reply and MausBot's card, skips the launches they or the welcome used, and claims the next", async () => {
+    f.state.bots = [{ tasks: [{ threadId: "first" }] }];
+    await launch();
+    expect(asked, "the first chat, before its first reply").toEqual([]);
+    f.viewerEmail = null;
+    f.state.bots = [{ ...structuredClone(FIRST_REPLY[0]), id: "maus", defaultBot: {} }];
+    await launch();
+    expect(asked, "MausBot's card is due").toEqual([]);
+    markLaunchDialog("mausbot"); f.state.bots[0].welcomed = true;
+    await launch();
+    expect(asked, "the launch MausBot's card opened").toEqual([]);
+    session.clear(); markWelcomeFinished();
+    await launch();
+    expect(asked, "the launch the welcome finished in").toEqual([]);
+    session.clear();
+    await launch();
+    expect(asked).toEqual(["en"]);
+    expect(launchDialogShown()).toBe("notices");
+  });
+
+  it("My Cloud's own page in this app asks too", async () => {
+    snapshot = { status: "none" }; viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true;
+    f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"]; showWindow(MY_CLOUD); wireLending();
+    await launch();
+    expect(asked).toEqual(["en"]);
   });
 });

@@ -55,16 +55,14 @@ function approvalItem(name: string, choice: ApprovalChoice): SidebarMenuItem {
     ?? all.find((option) => option.mode === mode)
     ?? all[0];
   const localOnly = approvalModeSelectionRequiresLocalDesktop(mode, trusted);
-  const modesDisabled = Boolean(choice.disabled) || localOnly;
   const CurrentIcon = current.Icon;
   return {
     key: "approval",
     separatorBefore: true,
     label: t("botSettings.simple.beforeActs", { name }),
     subtitle: current.label,
-    note: choice.disabled ? t("approvalMode.busy") : localOnly ? t("approvalMode.customLocalOnlyDot") : undefined,
+    note: localOnly ? t("approvalMode.customLocalOnlyDot") : choice.busy ? t("approvalMode.whileWorking") : undefined,
     icon: <CurrentIcon size={16} />,
-    disabled: Boolean(choice.disabled) && !choice.onManageCommandAllowlist,
     onSelect: () => {},
     submenu: [
       ...approvalModeOptionsFor(choice.driverKind, trusted).map((option): SidebarMenuItem => {
@@ -76,7 +74,7 @@ function approvalItem(name: string, choice: ApprovalChoice): SidebarMenuItem {
           icon: <Icon size={16} />,
           active: option.mode === mode,
           trailing: option.mode === mode ? check : undefined,
-          disabled: modesDisabled,
+          disabled: localOnly,
           onSelect: () => choice.onSelect(option.mode),
         };
       }),

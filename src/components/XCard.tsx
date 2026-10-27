@@ -161,7 +161,7 @@ export function XCard({ refreshKey = 0, onConnection }: {
             <span className="truncate text-[14px] font-semibold leading-5 text-ink">{t("apps.x.title")}</span>
             {using !== null && <Check size={13} strokeWidth={2.5} className="shrink-0 text-success" aria-label={t("apps.connected")} />}
           </div>
-          <p className="truncate text-[12.5px] leading-[18px] text-ink-secondary" title={description}>{description}</p>
+          <p className="truncate text-[13px] leading-[18px] text-ink-secondary" title={description}>{description}</p>
         </div>
         {status === null ? (
           loadFailed

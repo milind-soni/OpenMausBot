@@ -80,6 +80,24 @@ describe("first-conversation spotlights", () => {
     expect(store.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ method: "PUT", body: expect.stringContaining("spot.approval") }));
   });
 
+  it("show once the welcome is done, without waiting for the app tour, which no longer starts by itself", () => {
+    const record = { ...EMPTY_ONBOARDING, completedAt: "2026-10-23T00:00:00.000Z", version: WELCOME_VERSION };
+    store.state = { ...store.state, config: { onboarding: record } };
+    render(false);
+    for (const effect of fixture.effects) effect();
+    expect(render(false)?.type).toBe(Spotlight);
+  });
+
+  it("wait while the welcome is open or the app tour runs from Settings", () => {
+    for (const busy of [{ welcomeOpen: true }, { tourOpen: true }]) {
+      fixture.values = [];
+      store.state = { ...store.state, welcomeOpen: false, tourOpen: false, ...busy };
+      render(false);
+      for (const effect of fixture.effects) effect();
+      expect(render(false), JSON.stringify(busy)).toBeNull();
+    }
+  });
+
   it("stay away from a hosted member, who could never dismiss them for good", () => {
     render(true);
     for (const effect of fixture.effects) effect();

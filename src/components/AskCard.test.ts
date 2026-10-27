@@ -20,7 +20,7 @@ describe("AskCard", () => {
     expect(html).toContain("The workspace needs one before it can start.");
     expect(html).toContain("text-start");
     expect(html).not.toContain("text-left");
-    expect(html).toContain("rounded-3xl bg-composer");
+    expect(html).toContain("rounded-2xl bg-composer");
     expect(html).toContain("ring-1 ring-composer-ring");
     expect(html).not.toContain("border-accent");
     expect(html).not.toContain("shadow");

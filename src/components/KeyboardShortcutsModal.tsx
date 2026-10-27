@@ -28,7 +28,7 @@ function ShortcutRow({ item, isMac }: { item: ShortcutItem; isMac: boolean }) {
         {keys.map((key, index) => (
           <kbd
             key={index}
-            className="inline-flex min-w-[22px] items-center justify-center rounded-md border border-hairline/60 bg-control px-1.5 py-0.5 font-mono text-[11.5px] font-semibold text-ink shadow-xs"
+            className="inline-flex min-w-[22px] items-center justify-center rounded-md border border-hairline/60 bg-control px-1.5 py-0.5 font-mono text-[12px] font-semibold text-ink shadow-xs"
           >
             {key}
           </kbd>
@@ -130,9 +130,9 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-hairline/40 bg-card/30 px-5 py-2.5 text-[11.5px] text-ink-secondary">
+        <div className="flex items-center justify-between border-t border-hairline/40 bg-card/30 px-5 py-2.5 text-[12px] text-ink-secondary">
           <span>
-            {t("shortcuts.openHintBefore")} <kbd className="rounded bg-control px-1 py-0.5 font-mono text-[10.5px]">?</kbd> {t("shortcuts.openHintAfter")}
+            {t("shortcuts.openHintBefore")} <kbd className="rounded bg-control px-1 py-0.5 font-mono text-[11px]">?</kbd> {t("shortcuts.openHintAfter")}
           </span>
           <button
             type="button"

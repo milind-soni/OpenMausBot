@@ -81,6 +81,8 @@ const ALLOWED: Record<string, string> = {
   "sidebar.servers": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServer": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServerError": "points at the app menu's Server menu",
+  "sidebar.update.howOther": "a server added from the app menu's Server menu: its update is for whoever runs it, not this app",
+  "sidebar.update.howOtherRestart": "a server added from the app menu's Server menu: its update is for whoever runs it, not this app",
   "cloudPhone.step1": "points at the app menu's Server menu, entry by entry",
   "lending.viaAccess": "points at the Settings → Servers page by its label",
   "lending.viaAccessTerminal": "points at the Settings → Servers page by its label",

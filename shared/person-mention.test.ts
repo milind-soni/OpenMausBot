@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { personMentionExcerpt, personMentionRanges, personTagNames } from "./person-mention.ts";
+import { mentionablePeople, personMentionExcerpt, personMentionRanges, personTagNames, teammateMentions } from "./person-mention.ts";
 
 const tags = (text: string, options = {}) => personMentionRanges(text, options).map(({ start, end }) => text.slice(start, end));
 
@@ -57,5 +57,32 @@ describe("the line a mention notification quotes", () => {
     expect(personMentionExcerpt("Wrap `the\n@you` tag in code.")).toBeNull();
     expect(personMentionExcerpt("Use `code` and then @you decide which bucket wins")).toBe("Use `code` and then @you decide which bucket wins");
     expect(personMentionExcerpt("@you", { botNames: ["you"] })).toBeNull();
+  });
+});
+
+describe("a teammate's tag on a Team Cloud", () => {
+  const people = mentionablePeople([
+    { key: "ada", name: "Ada Lovelace" }, { key: "bob", name: "Bob" }, { key: "bo", name: "Bo Diddley" },
+    { key: "sam1", name: "Sam Hill" }, { key: "sam2", name: "Sam Wise" }, { key: "you", name: "You" },
+  ]);
+  const tagged = (text: string, bots: string[] = []) => teammateMentions(text, people, bots).map((hit) => hit.key);
+
+  it("takes a whole name, and a first name nobody else shares", () => {
+    expect(people.find((person) => person.key === "ada")!.names).toEqual(["Ada Lovelace", "Ada"]);
+    expect(people.find((person) => person.key === "sam1")!.names).toEqual(["Sam Hill"]);
+    expect(people.some((person) => person.key === "you")).toBe(false);
+    expect(tagged("@Ada can you and @Ada Lovelace and @bob look? @Sam Wise too, not @Sam")).toEqual(["ada", "bob", "sam2"]);
+  });
+
+  it("picks the longest name, gives way to a bot of the same name, and skips code, emails and longer words", () => {
+    expect(tagged("@Bo Diddley and @Bob")).toEqual(["bo", "bob"]);
+    expect(tagged("@Bob", ["Bob"])).toEqual([]);
+    expect(tagged("@Bob Builder", ["Bob Builder"])).toEqual([]);
+    expect(tagged("mail bob@acme.test, `@Bob`, @Bobby\n```\n@Ada\n```")).toEqual([]);
+  });
+
+  it("quotes the line that tags each person, once", () => {
+    expect(teammateMentions("Draft is up.\n@Bob the numbers in section two need a second look.\n@Bob again", people))
+      .toEqual([{ key: "bob", excerpt: "@Bob the numbers in section two need a second look." }]);
   });
 });

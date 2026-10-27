@@ -171,7 +171,7 @@ export function SidebarNewChatPanel({
         id="new-chat-bots"
         role="list"
         style={{ maxHeight }}
-        className="mx-3 mt-2 min-h-0 overflow-y-auto rounded-3xl border border-hairline/60 bg-composer p-1.5 shadow-xl shadow-black/25 [scrollbar-width:thin]"
+        className="mx-3 mt-2 min-h-0 overflow-y-auto rounded-2xl border border-hairline/60 bg-composer p-1.5 shadow-xl shadow-black/25 [scrollbar-width:thin]"
       >
         {actions.map((action, index) => (
           <div role="listitem" key={action.key}>

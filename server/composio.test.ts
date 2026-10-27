@@ -793,10 +793,10 @@ describe.sequential("Composio Sessions", () => {
 
   it("names the project's own auth configs at creation and rebuilds a Session that predates them", async () => {
     customAuthConfigs = [
-      { id: "ac_twitter_old", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED", last_updated_at: "2026-08-20T00:00:00Z" },
+      { id: "ac_twitter_old", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED", is_enabled_for_tool_router: true, last_updated_at: "2026-08-20T00:00:00Z" },
       // newest wins, and the slug is matched case-insensitively
-      { id: "ac_twitter", toolkit: { slug: "TWITTER" }, is_composio_managed: false, status: "ENABLED", last_updated_at: "2026-08-25T00:00:00Z" },
-      // Composio-managed, disabled, and switched-off-for-Sessions configs are not the user's choice
+      { id: "ac_twitter", toolkit: { slug: "TWITTER" }, is_composio_managed: false, status: "ENABLED", is_enabled_for_tool_router: true, last_updated_at: "2026-08-25T00:00:00Z" },
+      // Composio-managed and disabled configs are not the person's; one off for Tool Router waits until its app connects
       { id: "ac_github_managed", toolkit: { slug: "github" }, is_composio_managed: true, status: "ENABLED" },
       { id: "ac_slack_disabled", toolkit: { slug: "slack" }, is_composio_managed: false, status: "DISABLED" },
       { id: "ac_notion_off", toolkit: { slug: "notion" }, is_composio_managed: false, is_enabled_for_tool_router: false },
@@ -818,20 +818,21 @@ describe.sequential("Composio Sessions", () => {
     }
   });
 
-  it("rebuilds the Session and retries when a toolkit needs the project's own auth config", async () => {
-    customAuthConfigs = [{ id: "ac_twitter", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED" }];
+  it("rebuilds the Session and retries when a toolkit needs an auth config made since the last lookup", async () => {
     sessionAuthConfigs = {};
     const cfg: AppConfig = {
       composio: { apiKey: "ak_test", userId: "stale-local-user", sessionId: "trs_test" },
     };
     try {
+      await prepareProjectSession("ak_test", { userId: "openmausbot_existing" });
+      customAuthConfigs = [{ id: "ac_twitter_new", toolkit: { slug: "twitter" }, is_composio_managed: false, status: "ENABLED", is_enabled_for_tool_router: true }];
       const before = calls.length;
       await expect(authorizeService(cfg, "twitter")).resolves.toEqual({ url: "https://connect.composio.dev/link/twitter" });
       const since = calls.slice(before);
       expect(since.filter((call) => call.method === "POST" && call.path.endsWith("/link"))).toHaveLength(2);
       expect(since.filter((call) => call.method === "POST" && call.path.endsWith("/session")).at(-1)?.body).toMatchObject({
         user_id: "openmausbot_existing",
-        auth_configs: { twitter: "ac_twitter" },
+        auth_configs: { twitter: "ac_twitter_new" },
       });
       expect(cfg.composio).toMatchObject({ userId: "openmausbot_existing", sessionId: "trs_test" });
     } finally {

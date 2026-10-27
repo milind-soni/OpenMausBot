@@ -150,10 +150,10 @@ describe("Edit Profile boundary markers in sections", () => {
       createElement(StoreProvider, null, createElement(AccessSection, { bot: makeBot(), derived: makeDerived() })),
     );
     expect(markup).toContain(
-      'Where this bot runs its shell and file tools.</div><div class="mt-1 text-[11.5px] leading-snug text-ink-secondary">Chief-proposable',
+      'Where this bot runs its shell and file tools.</div><div class="mt-1 text-[12px] leading-snug text-ink-secondary">Chief-proposable',
     );
     expect(markup).toContain(
-      'Where Scout works: Chooses for you</div><div class="mt-1 text-[11.5px] leading-snug text-ink-secondary">Owner-only',
+      'Where Scout works: Chooses for you</div><div class="mt-1 text-[12px] leading-snug text-ink-secondary">Owner-only',
     );
     expect(markup).toContain("Inbound triggers wired to this bot.");
   });

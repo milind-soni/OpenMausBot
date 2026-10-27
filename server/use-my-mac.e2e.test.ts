@@ -4,7 +4,7 @@
 // Mac's own connect reaches, under a public address. My Cloud itself is offline: it resolves no name and fetches nothing.
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect as tcpConnect, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -166,7 +166,8 @@ function throughGate(gate: number, host: string, targetPort = 443, { request = t
   });
 }
 
-/** The desktop app's lending connector, signed in to My Cloud with the owner's session, as the Mac. */
+/** The desktop app's lending connector, signed in to My Cloud with the owner's session, as the Mac. It knows My Cloud's
+ * saved entry, as the desktop app does, so it lends its internet connection by default. */
 let dials = 0;
 function lend(file: string, power = createCloudPowerGate()) {
   class CountingSocket extends WebSocket {
@@ -174,7 +175,7 @@ function lend(file: string, power = createCloudPowerGate()) {
   }
   const env = { id: "my-cloud", name: "My Cloud", origin: base };
   const connector = createComputerSharing({
-    file, environments: () => [env], cuaConnection: async () => null, enabled: async () => false, power,
+    file, environments: () => [env], myCloud: () => env, cuaConnection: async () => null, enabled: async () => false, power,
     cloud: () => ({ status: "connected", accountId: "acct_fixture", origin: base }), home: join(home, "mac-home"),
     fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, ...edge, authorization: `Bearer ${owner}` } }),
     linkHeaders: () => ({ authorization: `Bearer ${owner}`, "x-forwarded-for": MAC_PUBLIC, "x-forwarded-proto": "https" }),
@@ -265,13 +266,16 @@ let gate = 0;
 /** A bot's turn needs the fixture engine and browser engine, scripts started by their #! line, which Windows does not run. */
 const posixOnly = it.skipIf(process.platform === "win32");
 
-it("My Cloud offers the device link, and this Mac lends its internet connection with nothing else", async () => {
+it("My Cloud offers the device link, and a fresh Mac signed in to it lends its internet connection by itself, with nothing else and no click", async () => {
   expect((await api("GET", "/.well-known/openmausbot/environment")).body.capabilities).toMatchObject({ sharedComputers: true, deviceLink: true });
-  mac = lend(join(home, "desktop-profile", "computer-sharing.json"));
-  await mac.connector.saveCloud(mac.env, { folders: [], screen: false, internet: true });
+  const file = join(home, "desktop-profile", "computer-sharing.json");
+  expect(existsSync(file), "nothing was ever lent from this Mac").toBe(false);
+  mac = lend(file);
+  mac.connector.start();
   await expect.poll(() => mac.connector.cloudState(mac.env).link, { timeout: 8000 }).toBe("on");
+  expect(mac.connector.cloudState(mac.env)).toMatchObject({ enabled: true, folders: [], screen: false, terminal: false, internet: true });
   const known = (await api("GET", "/api/shared-computers", { token: owner })).body.known;
-  expect(known).toEqual([expect.objectContaining({ online: true, lent: true, scopes: { folders: 0, terminal: false, screen: false, internet: true } })]);
+  expect(known).toEqual([expect.objectContaining({ online: true, lent: true, scopes: { folders: 0, terminal: false, screen: false, internet: true, chrome: false } })]);
 }, hostTimeout(30_000));
 
 posixOnly("a bot's browser on My Cloud reaches Instagram from the Mac's own connection: the website sees the Mac, not My Cloud", async () => {
@@ -371,7 +375,7 @@ it("a sleeping Cloud is never dialled: while the Admin says it sleeps the Mac ne
   const file = join(home, "desktop-profile", "computer-sharing.json");
   const env = { id: "my-cloud", name: "My Cloud", origin: base };
   const counted = createComputerSharing({
-    file, environments: () => [env], cuaConnection: async () => null, enabled: async () => false, power,
+    file, environments: () => [env], myCloud: () => env, cuaConnection: async () => null, enabled: async () => false, power,
     cloud: () => ({ status: "connected", accountId: "acct_fixture", origin: base }), home: join(home, "mac-home"),
     fetch: (url: string, init: RequestInit) => { polls.push(new URL(url).pathname); return fetch(url, { ...init, headers: { ...init.headers as Record<string, string>, ...edge, authorization: `Bearer ${owner}` } }); },
     linkHeaders: () => ({ authorization: `Bearer ${owner}`, "x-forwarded-for": MAC_PUBLIC }), egress: macEgress(),
@@ -392,7 +396,7 @@ it("a sleeping Cloud is never dialled: while the Admin says it sleeps the Mac ne
   mac = { connector: counted, env, power };
 }, hostTimeout(30_000));
 
-it("the person's own Off survives a restart of the app: nothing is lent again, not even by the move's default", async () => {
+it("the person's own Off survives a restart of the app: nothing is lent again, neither by the internet connection's default nor by the move's", async () => {
   mac.connector.revoke(mac.env);
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known.every((computer: any) => !computer.lent), { timeout: 5000 }).toBe(true);
   mac.connector.close();

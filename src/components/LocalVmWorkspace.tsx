@@ -767,7 +767,7 @@ export function LocalVmWorkspace({
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-[14px] font-semibold text-ink">{t("vm.workspace.viewTitle")}</h1>
-          <p className="truncate text-[11.5px] text-ink-secondary">
+          <p className="truncate text-[12px] text-ink-secondary">
             {t("vm.workspace.viewSubtitle")}
           </p>
         </div>

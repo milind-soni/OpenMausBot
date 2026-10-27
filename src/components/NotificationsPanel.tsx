@@ -78,7 +78,7 @@ export function NotificationRail() {
       >
         <Bell size={17} />
         {unread > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-accent px-1 text-[9.5px] font-semibold text-accent-ink">
+          <span className="absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-accent px-1 text-[10px] font-semibold text-accent-ink">
             {unread > 99 ? "99+" : unread}
           </span>
         )}
@@ -138,9 +138,9 @@ export function NotificationsPanel() {
       <div className="flex items-center gap-1.5 border-b border-hairline/40 px-3.5 py-2.5">
         <span className="flex-1 text-[13px] font-medium text-ink">
           {t("notifications.title")}
-          {unreadCount > 0 && <span className="ml-1.5 text-[11.5px] font-normal text-accent">· {t("notifications.unread", { count: unreadCount })}</span>}
+          {unreadCount > 0 && <span className="ml-1.5 text-[12px] font-normal text-accent">· {t("notifications.unread", { count: unreadCount })}</span>}
         </span>
-        <button type="button" onClick={markAllRead} className="shrink-0 whitespace-nowrap text-[11.5px] text-accent hover:underline">
+        <button type="button" onClick={markAllRead} className="shrink-0 whitespace-nowrap text-[12px] text-accent hover:underline">
           {t("notifications.markAllRead")}
         </button>
         <button
@@ -186,7 +186,7 @@ export function NotificationsPanel() {
           <NotificationRow key={entry.id} entry={entry} title={notificationTitle(entry, state.groups)} now={now} bot={notificationBotForAvatar(entry, state.bots)} threadName={notificationThreadName(entry, state)} onOpen={() => openRow(entry)} />
         ))}
       </div>
-      <div className="border-t border-hairline/40 px-3.5 py-2 text-center text-[11.5px] text-ink-tertiary">
+      <div className="border-t border-hairline/40 px-3.5 py-2 text-center text-[12px] text-ink-tertiary">
         {t("notifications.retention")}
       </div>
     </aside>
@@ -211,7 +211,7 @@ function NotificationRow({ entry, title, now, bot, threadName, onOpen }: { entry
         <Icon size={16} aria-hidden="true" className={cn("mt-0.5 shrink-0", className)} />
       )}
       <span className="min-w-0 flex-1">
-        <span className="flex items-baseline gap-1.5 text-[12.5px] font-medium text-ink">
+        <span className="flex items-baseline gap-1.5 text-[13px] font-medium text-ink">
           {!entry.read && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}
           {threadName ? (
             <>

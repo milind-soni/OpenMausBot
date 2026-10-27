@@ -194,7 +194,9 @@ it("the person's Mac, lent through the real connector, is usable by the owner's 
   const shared = await newBot("Shared bot");
   const guestOpened = (await api("POST", `/api/bots/${shared.id}/tasks`, { token: owner, body: { title: "Guest's" } })).body.task.threadId as string;
   const rewritten = await routineFor("Rewritten");
-  await leftBehind({ threadIds: [guestOpened], routineIds: [rewritten.id] });
+  const roomBot = await newBot("Scout");
+  const guestsRoom = (await api("POST", "/api/groups", { token: owner, body: { name: "Guest's room", memberIds: [roomBot.id], setup: { bulletin: "", defaultResponder: { kind: "member", botId: roomBot.id } } } })).body.group;
+  await leftBehind({ threadIds: [guestOpened, guestsRoom.threadId], routineIds: [rewritten.id] });
 
   const folderPath = realpathSync(mkdtempSync(join(tmpdir(), "omb-cloud-lent-folder-")));
   writeFileSync(join(folderPath, "plan.md"), "from the Mac");
@@ -254,6 +256,28 @@ it("the person's Mac, lent through the real connector, is usable by the owner's 
   const blocked = await reads(guestCall);
   expect(blocked.isError).toBe(true);
   expect(blocked.content[0].text).toContain("Start a new conversation to use it");
+
+  // The owner's own line in a group chat they opened reaches the lent computer, like their own conversation does.
+  const writer = await newBot("Writer");
+  const room = (await api("POST", "/api/groups", { token: owner, body: { name: "Brand", memberIds: [writer.id], setup: { bulletin: "", defaultResponder: { kind: "member", botId: writer.id } } } })).body.group;
+  const roomCall = await proxyFor(async () => {
+    expect((await api("POST", `/api/groups/${room.id}/messages`, { token: owner, body: { text: "Read plan.md from my Mac." } })).status).toBe(202);
+  }, writer.id, room.threadId);
+  const inRoom = JSON.parse((await roomCall("list_shared_computers")).content[0].text);
+  expect(inRoom.computers.map((entry: any) => entry.id)).toEqual([status[0].id]);
+  expect(inRoom.say).toBeUndefined();
+  expect(JSON.parse((await reads(roomCall)).content[0].text).content).toBe("from the Mac");
+  // A group chat someone else opened never does, and its bot says why instead of offering Use my Mac.
+  const guestRoomCall = await proxyFor(async () => {
+    expect((await api("POST", `/api/groups/${guestsRoom.id}/messages`, { token: owner, body: { text: "Read plan.md from my Mac." } })).status).toBe(202);
+  }, roomBot.id, guestsRoom.threadId);
+  const inGuestsRoom = JSON.parse((await guestRoomCall("list_shared_computers")).content[0].text);
+  expect(inGuestsRoom.computers).toEqual([]);
+  expect(inGuestsRoom.say).toMatch(/^Someone else wrote in this conversation, so it can't use your (?:Mac|PC|computer)\. Start a new thread in this group chat to use it\.$/u);
+  expect(inGuestsRoom.unavailable).toBe(inGuestsRoom.say);
+  const guestRoomRead = await reads(guestRoomCall);
+  expect(guestRoomRead.isError).toBe(true);
+  expect(guestRoomRead.content[0].text).toContain("Start a new thread in this group chat");
 
   const newHook = async (botId: string, delivery: "run" | "post" = "run") => {
     const hook = await api("POST", "/api/webhooks", { token: owner, body: { name: "Inbox", prompt: "Handle the event.", botId, delivery } });
@@ -451,7 +475,7 @@ it("My Cloud remembers a lent computer across its restart, says it is offline by
   await waitForExit(child, { signal: "SIGTERM" });
   await boot();
   const known = (await api("GET", "/api/shared-computers", { token: owner })).body.known;
-  expect(known).toEqual([expect.objectContaining({ id, platform: process.platform, online: false, lent: true, scopes: { folders: 1, terminal: false, screen: false, internet: false } })]);
+  expect(known).toEqual([expect.objectContaining({ id, platform: process.platform, online: false, lent: true, scopes: { folders: 1, terminal: false, screen: false, internet: false, chrome: false } })]);
   call = await ask();
   // The turn's own instructions name the computer the same way.
   expect(turn.systemPrompt).toContain(`If they ask for something on their ${device} (`);
@@ -471,7 +495,7 @@ it("My Cloud remembers a lent computer across its restart, says it is offline by
   await expect.poll(() => connector!.cloudState(env).connected, { timeout: 8000 }).toBe(true);
   connector.revoke(env);
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known, { timeout: 5000 })
-    .toEqual([expect.objectContaining({ online: false, lent: false, scopes: { folders: 0, terminal: false, screen: true, internet: false } })]);
+    .toEqual([expect.objectContaining({ online: false, lent: false, scopes: { folders: 0, terminal: false, screen: true, internet: false, chrome: false } })]);
   call = await ask();
   expect(JSON.parse((await call("list_shared_computers")).content[0].text).say).toMatch(new RegExp(`^Their ${device} .+ is no longer shared with the Cloud`, "u"));
   rmSync(folderPath, { recursive: true, force: true });
@@ -526,10 +550,10 @@ it("My Cloud's own page turns this computer's lending on in place, with the inte
   expect((await handlers.get("cloud-lending:state")!({})).on).toBe(false);
   await handlers.get("cloud-lending:set")!({}, true);
   await expect.poll(() => lending.cloudState(env).link, { timeout: 8000 }).toBe("on");
-  expect(await handlers.get("cloud-lending:state")!({})).toEqual({ available: true, on: true, status: "lent", screen: false, screenAvailable: false, internet: true, link: "on",
+  expect(await handlers.get("cloud-lending:state")!({})).toEqual({ available: true, on: true, status: "lent", screen: false, screenAvailable: false, internet: true, chrome: false, terminal: false, link: "on",
     folders: [{ name: "Desktop", write: false }, { name: "Documents", write: false }, { name: "Downloads", write: false }] });
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known.find((computer: { lent: boolean }) => computer.lent), { timeout: 5000 })
-    .toEqual(expect.objectContaining({ online: true, scopes: { folders: 3, terminal: false, screen: false, internet: true } }));
+    .toEqual(expect.objectContaining({ online: true, scopes: { folders: 3, terminal: false, screen: false, internet: true, chrome: false } }));
   await handlers.get("cloud-lending:set")!({}, false);
   expect(lending.cloudState(env).enabled).toBe(false);
   await expect.poll(async () => (await api("GET", "/api/shared-computers", { token: owner })).body.known.every((computer: { lent: boolean }) => !computer.lent), { timeout: 5000 }).toBe(true);

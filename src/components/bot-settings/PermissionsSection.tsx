@@ -39,7 +39,7 @@ export function PermissionsSection({
   const applyFullEverywhere = () =>
     dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: "full", applyToAllThreads: true } });
   const setApprovalMode = (mode: ApprovalMode) => {
-    if (bot.busy || mode === approvalMode) return;
+    if (mode === approvalMode) return;
     if (mode === "full") {
       applyFullEverywhere();
       return;
@@ -70,7 +70,7 @@ export function PermissionsSection({
           </span>
           <div className="min-w-0 flex-1">
             <div className="text-[15px] font-medium text-ink">{t("permissions.chief.title")}</div>
-            <div className="text-[11.5px] text-ink-secondary">{t("permissions.chief.oneFor", { section: displaySectionName })}</div>
+            <div className="text-[12px] text-ink-secondary">{t("permissions.chief.oneFor", { section: displaySectionName })}</div>
           </div>
           <Switch
             checked={Boolean(bot.chiefOfStaff)}
@@ -142,13 +142,13 @@ export function PermissionsSection({
             onSelect={setApprovalMode}
             menuDirection="down"
             wide
-            disabled={Boolean(bot.busy)}
+            busy={Boolean(bot.busy)}
             trustedModesAvailable={trustedModesAvailable}
             onManageCommandAllowlist={!draft && ownerOrAdmin === true ? () => setCommandAllowlistTarget({ botId: bot.id, botName: bot.name }) : undefined}
           />
         </div>
         {!draft && approvalMode === "full" && <button
-          type="button" disabled={Boolean(bot.busy)}
+          type="button"
           className="mt-3 text-[13px] text-accent hover:underline disabled:opacity-40"
           onClick={applyFullEverywhere}
         >{t("permissions.approval.applyFull")}</button>}

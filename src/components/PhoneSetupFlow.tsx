@@ -8,7 +8,6 @@ import {
   useState,
 } from "react";
 import { t } from "@/lib/i18n";
-import { PhonePreview } from "@/components/onboarding/PhonePreview";
 import {
   ArrowLeft,
   Check,
@@ -196,7 +195,6 @@ export interface PhoneSetupController {
   cancel: () => void;
   refreshCode: () => void;
   finish: () => void;
-  skip: () => void;
   act: (call: (companion: CompanionBridge) => Promise<CompanionState>) => Promise<void>;
   accountAct: (call: (remote: AccountBridge) => Promise<CompanionAccountState>) => Promise<void>;
 }
@@ -876,15 +874,6 @@ export function usePhoneSetupController(profileEmail = ""): PhoneSetupController
       setSetupTimedOut(false);
       dispatchFlow({ type: "reset" });
     },
-    skip: () => {
-      const generation = setupGeneration.current;
-      setupGeneration.current += 1;
-      invalidatePhonePairingAttempt(pairingAttemptQueue.current, generation);
-      releasePhonePairingAttempt(pairingUiOwner.current, generation);
-      setPairingBusy(false);
-      publishPairingRoutePin(null);
-      dispatchFlow({ type: "skip" });
-    },
     act,
     accountAct,
   };
@@ -902,90 +891,27 @@ function ValuePoints() {
         <div key={title} className="rounded-xl bg-inset px-3 py-3 text-left">
           <Icon size={16} className="text-accent" />
           <div className="mt-2 text-[13px] font-medium text-ink">{title}</div>
-          <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">{detail}</div>
+          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{detail}</div>
         </div>
       ))}
     </div>
   );
 }
 
-export function PhoneSetupFlowView({
-  controller,
-  variant,
-  onSkip,
-  onComplete,
-  compactHeader = false,
-}: {
-  controller: PhoneSetupController;
-  variant: "settings" | "onboarding";
-  onSkip?: () => void;
-  onComplete?: () => void;
-  compactHeader?: boolean;
-}) {
+export function PhoneSetupFlowView({ controller }: { controller: PhoneSetupController }) {
   const c = controller;
   const actionError = companionAccountActionError(c.account, c.accountError);
   const canSubmitEmail = /^\S+@\S+\.\S+$/.test(c.email.trim());
   const manualCodeMode = phonePairingManualCodeMode(Boolean(c.state?.pairing), c.pairingLink);
 
-  if (c.phase === "intro" && compactHeader) {
-    const points: Array<{ Icon: typeof Smartphone; title: string; detail: string }> = [
-      { Icon: Smartphone, title: t("phone.value.chats"), detail: t("phone.value.chatsDetail") },
-      { Icon: Check, title: t("phone.value.approvals"), detail: t("phone.value.approvalsDetail") },
-      { Icon: ShieldCheck, title: t("phone.value.private"), detail: t("phone.value.privateDetail") },
-    ];
-    return (
-      <div className="flex flex-col">
-        <p className="mt-1 text-[13.5px] leading-relaxed text-ink-secondary">{t("phone.intro.detail")}</p>
-        <div className="mt-4 grid grid-cols-[200px_1fr] items-center gap-6">
-          <PhonePreview />
-          <ul className="flex flex-col gap-3.5">
-            {points.map(({ Icon, title, detail }) => (
-              <li key={title} className="flex items-start gap-3">
-                <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent/12 text-accent">
-                  <Icon size={14} />
-                </span>
-                <span>
-                  <span className="block text-[13.5px] font-medium text-ink">{title}</span>
-                  <span className="block text-[12px] leading-relaxed text-ink-secondary">{detail}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <button
-          onClick={c.start}
-          disabled={!c.state || c.busy || c.accountBusy}
-          className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-40"
-        >
-          {t("phone.intro.setUp")}
-        </button>
-        {c.error && <p role="alert" className="mt-3 text-[12.5px] text-danger">{c.error}</p>}
-        <button
-          onClick={() => {
-            c.skip();
-            onSkip?.();
-          }}
-          className="mt-3 self-center text-[12.5px] text-ink-secondary hover:text-ink"
-        >
-          {t("phone.intro.notNow")}
-        </button>
-        <p className="mt-1.5 self-center text-[11.5px] text-ink-secondary">{t("phone.intro.resume")}</p>
-      </div>
-    );
-  }
-
   if (c.phase === "intro") {
     return (
-      <div className={compactHeader ? "flex flex-col items-start" : "flex flex-col items-center text-center"}>
-        {!compactHeader && (
-          <>
-            <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/12 text-accent">
-              <Smartphone size={26} />
-            </div>
-            <h2 className="mt-4 text-[19px] font-semibold text-ink">{t("phone.intro.title", { app: brand().name })}</h2>
-          </>
-        )}
-        <p className={compactHeader ? "mt-1 text-[13.5px] leading-relaxed text-ink-secondary" : "mt-1.5 max-w-[460px] text-[13.5px] leading-relaxed text-ink-secondary"}>
+      <div className="flex flex-col items-center text-center">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/12 text-accent">
+          <Smartphone size={26} />
+        </div>
+        <h2 className="mt-4 text-[19px] font-semibold text-ink">{t("phone.intro.title", { app: brand().name })}</h2>
+        <p className="mt-1.5 max-w-[460px] text-[14px] leading-relaxed text-ink-secondary">
           {t("phone.intro.detail")}
         </p>
         <ValuePoints />
@@ -993,33 +919,11 @@ export function PhoneSetupFlowView({
           data-phone-pairing-action
           onClick={c.start}
           disabled={!c.state || c.busy || c.accountBusy}
-          className={compactHeader
-            ? "mt-5 w-full rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-40"
-            : "mt-5 w-full max-w-[320px] rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-40"}
+          className="mt-5 w-full max-w-[320px] rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-40"
         >
-          {variant === "settings"
-            ? c.state?.devices.length
-              ? t("phone.intro.pairAnother")
-              : t("phone.intro.pair")
-            : t("phone.intro.setUp")}
+          {c.state?.devices.length ? t("phone.intro.pairAnother") : t("phone.intro.pair")}
         </button>
-        {c.error && <p role="alert" className="mt-3 max-w-[390px] text-[12.5px] text-danger">{c.error}</p>}
-        {variant === "onboarding" && (
-          <>
-            <button
-              onClick={() => {
-                c.skip();
-                onSkip?.();
-              }}
-              className={compactHeader ? "mt-3 self-center text-[12.5px] text-ink-secondary hover:text-ink" : "mt-2.5 text-[12.5px] text-ink-secondary hover:text-ink"}
-            >
-              {t("phone.intro.notNow")}
-            </button>
-            <p className={compactHeader ? "mt-2 self-center text-[11.5px] text-ink-secondary" : "mt-2 text-[11.5px] text-ink-secondary"}>
-              {t("phone.intro.resume")}
-            </p>
-          </>
-        )}
+        {c.error && <p role="alert" className="mt-3 max-w-[390px] text-[13px] text-danger">{c.error}</p>}
       </div>
     );
   }
@@ -1104,7 +1008,7 @@ export function PhoneSetupFlowView({
               </button>
             )}
             {c.codeSent && !actionError && (
-              <p className="text-[11.5px] text-ink-secondary">{t("phone.signIn.expires")}</p>
+              <p className="text-[12px] text-ink-secondary">{t("phone.signIn.expires")}</p>
             )}
           </div>
         )}
@@ -1118,28 +1022,14 @@ export function PhoneSetupFlowView({
             {c.accountBusy ? t("remote.account.retrying") : t("phone.signIn.retry")}
           </button>
         )}
-        {actionError && <p role="alert" className="mt-3 text-[12.5px] text-danger">{actionError}</p>}
+        {actionError && <p role="alert" className="mt-3 text-[13px] text-danger">{actionError}</p>}
         <div className="my-4 flex items-center gap-3 text-[11px] text-ink-secondary">
           <span className="h-px flex-1 bg-hairline/40" /> {t("phone.signIn.or")} <span className="h-px flex-1 bg-hairline/40" />
         </div>
-        {variant === "onboarding" && c.tailscaleAvailable && (
-          <>
-            <button
-              disabled={c.busy || c.accountBusy}
-              onClick={c.useTailscale}
-              className="flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
-            >
-              <ShieldCheck size={15} /> {t("remote.pairOverTailscale")}
-            </button>
-            <p className="mt-2 text-center text-[11px] leading-relaxed text-ink-secondary">
-              {t("phone.signIn.tailnetNote")}
-            </p>
-          </>
-        )}
         <button
           disabled={c.busy || c.accountBusy}
           onClick={c.useLocal}
-          className={`${variant === "onboarding" && c.tailscaleAvailable ? "mt-3" : ""} flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink hover:bg-control disabled:opacity-40`}
+          className="flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
         >
           <Wifi size={15} /> {t("phone.signIn.wifiInstead")}
         </button>
@@ -1171,7 +1061,7 @@ export function PhoneSetupFlowView({
             : t("phone.verifying.secureDetail")}
         </p>
         {(c.error || c.accountError) && (
-          <p role="alert" className="mt-3 max-w-[380px] text-[12.5px] text-danger">{c.error ?? c.accountError}</p>
+          <p role="alert" className="mt-3 max-w-[380px] text-[13px] text-danger">{c.error ?? c.accountError}</p>
         )}
         <button onClick={c.cancel} className="mt-5 text-[12px] text-ink-secondary hover:text-ink">{t("common.cancel")}</button>
       </div>
@@ -1189,13 +1079,10 @@ export function PhoneSetupFlowView({
           {t("phone.success.detail")}
         </p>
         <button
-          onClick={() => {
-            c.finish();
-            onComplete?.();
-          }}
+          onClick={c.finish}
           className="mt-5 w-full max-w-[280px] rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white"
         >
-          {variant === "onboarding" ? t("phone.success.start", { app: brand().name }) : t("phone.success.done")}
+          {t("phone.success.done")}
         </button>
       </div>
     );
@@ -1218,7 +1105,7 @@ export function PhoneSetupFlowView({
         </div>
       )}
       {!c.pairingExpired && manualCodeMode === "direct" && c.state?.pairing && (
-        <div className="mt-4 w-full max-w-[320px] rounded-xl bg-inset px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-4 w-full max-w-[320px] rounded-xl bg-inset px-4 py-3 text-[13px] text-ink-secondary">
           <div>{t("phone.code.manualIntro")}</div>
           <div className="mt-2 font-mono text-[22px] tracking-[0.25em] text-ink">
             {c.state.pairing.code}
@@ -1226,7 +1113,7 @@ export function PhoneSetupFlowView({
         </div>
       )}
       {!c.pairingExpired && manualCodeMode === "details" && c.state?.pairing && (
-        <p className="mt-3 text-[11.5px] text-ink-secondary">{t("phone.code.expiresIn", { seconds: c.secondsLeft })}</p>
+        <p className="mt-3 text-[12px] text-ink-secondary">{t("phone.code.expiresIn", { seconds: c.secondsLeft })}</p>
       )}
       {!c.pairingExpired && c.localFallback && c.state?.publicNetwork && (
         <p role="note" className="mt-3 w-full max-w-[390px] rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-left text-[12px] leading-relaxed text-warning">
@@ -1254,29 +1141,6 @@ export function PhoneSetupFlowView({
       )}
       <button onClick={c.cancel} className="mt-4 text-[12px] text-ink-secondary hover:text-ink">{t("common.cancel")}</button>
     </div>
-  );
-}
-
-export function PhoneSetupFlow({
-  profileEmail,
-  variant,
-  onSkip,
-  onComplete,
-  compactHeader,
-}: {
-  profileEmail?: string;
-  variant: "settings" | "onboarding";
-  onSkip?: () => void;
-  onComplete?: () => void;
-  compactHeader?: boolean;
-}) {
-  const controller = usePhoneSetupController(profileEmail);
-  return (
-    <PhoneSetupFlowView
-      controller={controller}
-      variant={variant}
-      onSkip={onSkip}
-      onComplete={onComplete} compactHeader={compactHeader} />
   );
 }
 

@@ -135,3 +135,31 @@ and can fail any request main sends My Cloud (`fx.intercept`). The e2e checks:
   switches on what was on there;
 - on a trial, a moved key is saved and checked but unused while the credit
   lasts (a stub plays the Admin's credit relay), and used once it runs out.
+
+## Why a move hasn't finished: the report to the Admin
+
+```sh
+node --test electron/move-status.node-test.mjs electron/one-home.node-test.mjs electron/one-home-keep.node-test.mjs electron/one-home-main.node-test.mjs
+node --test --test-name-pattern="where its move stands" electron/cloud-account.node-test.mjs
+```
+
+The real move (`createOneHome`, and `installOneHome` as main wires it) over
+fakes, with the sign-in's state set the way the Admin's session leaves it. The
+tests check:
+
+- each reason a move doesn't start has its own code, through the move's own
+  gates, and none of them starts a move: no sign-in, a sign-in the Admin can't
+  vouch for now, no Cloud, only a team's, a Cloud setting up or ended, moves
+  off, "Keep this computer's bots here", another account's move, this
+  computer frozen with no move, its server not answering, and already moved;
+- each phase's failure has its own code and phase (a network failure, an owner
+  session refused, the Admin's 429, this computer's server, My Cloud refusing
+  or answering nothing, the freeze, the check after three passes, the switch),
+  is counted from the first until the move is done, and its sentence leaves
+  without what My Cloud said, quotes, addresses, paths or tokens;
+- the wait says whether it waits for a quiet moment or for work, by its kind
+  only, and a stage is dated once however often the wait looks again;
+- the report goes a moment after a change, at most once a minute, every 15
+  minutes otherwise, holds off six hours from an Admin without the route, and a
+  send that fails, throws or never answers changes nothing in the move.
+

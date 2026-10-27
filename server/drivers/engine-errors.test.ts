@@ -115,6 +115,44 @@ describe("stopCause", () => {
     expect(stopCause("  ")).toBeUndefined();
     expect(stopCause(null)).toBeUndefined();
   });
+
+  it("says in plain words what an ACP stop reason that names its cause means, with the advice that fits it", () => {
+    // no cause carries another reason's actions whole: the advice is per reason, not one shared line
+    const advice: Record<string, RegExp[]> = {
+      refusal: [/again|retry/, /reword/, /switch/],
+      max_tokens: [/continue/, /shorter/],
+      max_turn_requests: [/carry on/, /split/],
+    };
+    for (const [token, own] of Object.entries(advice)) {
+      const cause = stopCause(token)!;
+      expect(cause, token).toContain(`(stop reason: ${token})`);
+      for (const action of own) expect(cause, `${token} advises ${action}`).toMatch(action);
+      for (const [other, others] of Object.entries(advice)) {
+        if (other === token) continue;
+        expect(others.some((action) => !action.test(cause)), `${token} does not read as ${other}`).toBe(true);
+      }
+    }
+    for (const token of ["refusal", "max_tokens", "max_turn_requests"]) {
+      const cause = stopCause(token)!;
+      expect(classifyError({ text: cause })).toEqual({ transient: false, reason: "unknown" });
+      expect(engineFailureKind(cause)).toBeNull();
+    }
+    expect(stopCause("constructor")).toBe("The engine stopped without saying why (stop reason: constructor).");
+  });
+
+  it("names the AI when the caller knows it, and still classifies like the bare token", () => {
+    expect(stopCause("refusal")).toMatch(/^The AI refused\b/);
+    expect(stopCause("refusal", "Gemini")).toMatch(/^Gemini refused to go on with this request \(stop reason: refusal\)\./);
+    expect(stopCause("max_tokens", "OpenCode")).toMatch(/^OpenCode's reply reached its maximum length/);
+    expect(stopCause("refusal", "  ")).toMatch(/^The AI refused\b/);
+    for (const provider of ["Gemini", "Qwen", "OpenCode", "Cursor", "Grok", "DeepSeek", "Cline"]) {
+      for (const token of ["refusal", "max_tokens", "max_turn_requests"]) {
+        const cause = stopCause(token, provider)!;
+        expect(classifyError({ text: cause })).toEqual({ transient: false, reason: "unknown" });
+        expect(engineFailureKind(cause)).toBeNull();
+      }
+    }
+  });
 });
 
 describe("engineFailure", () => {

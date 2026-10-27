@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import App from "../../src/App";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
-import { applySkin, readSkin } from "../../src/lib/skins";
+import { applySkinChoice, readSkinChoice } from "../../src/lib/skins";
 import "../../src/styles.css";
 
 // This entry point is served only by the disposable verification launcher.
@@ -12,5 +12,5 @@ if (new URLSearchParams(location.search).has("ombVoiceProbe")) {
 }
 setAnalyticsEnabled(false);
 if (!new URLSearchParams(location.search).has("onboarding")) setEmailGateDone("skipped");
-applySkin(readSkin());
+applySkinChoice(readSkinChoice());
 createRoot(document.getElementById("root")!).render(<App />);

@@ -195,7 +195,7 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
         </>
       }
     >
-      <p className="text-[11.5px] text-ink-tertiary">{t("connectors.card.signInHint")}</p>
+      <p className="text-[12px] text-ink-tertiary">{t("connectors.card.signInHint")}</p>
       {labelNeeded ? (
         <form
           className="mt-1.5"
@@ -213,7 +213,7 @@ export function ConnectorCard({ botId, threadId, message }: { botId: string; thr
             onChange={(event) => setLabel(event.target.value)}
             placeholder={t("connectors.aliasPlaceholder")}
             aria-label={t("connectors.aliasAriaAnother", { service: connector.label })}
-            className="mt-1.5 h-8 w-full rounded-full bg-inset px-3 text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent"
+            className="mt-1.5 h-8 w-full rounded-full bg-inset px-3 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </form>
       ) : error && <p role="alert" className="mt-1.5 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</p>}

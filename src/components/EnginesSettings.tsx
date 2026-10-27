@@ -232,7 +232,7 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
         <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("engines.footer")}</p>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
           {instance.cli ? (
-            <span className="w-full break-all font-mono text-[11.5px] text-ink-secondary" title={instance.cli}>
+            <span className="w-full break-all font-mono text-[12px] text-ink-secondary" title={instance.cli}>
               {instance.cli}
             </span>
           ) : (
@@ -250,7 +250,7 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
             <button
               onClick={updateClaude}
               disabled={switching || updating}
-              className="flex shrink-0 items-center gap-1 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
+              className="flex shrink-0 items-center gap-1 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-50"
             >
               {updating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
               {updating ? t("engines.updating") : t("engines.updateClaude")}
@@ -260,7 +260,7 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
             <button
               onClick={reset}
               disabled={switching || updating}
-              className="shrink-0 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
+              className="shrink-0 text-[12px] text-ink-secondary hover:text-ink disabled:opacity-50"
             >
               {switching ? t("engines.resetting") : t("engines.reset")}
             </button>

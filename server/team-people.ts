@@ -73,6 +73,10 @@ export function createTeamPeople(dataDir: string, now: () => number = Date.now) 
     list(): TeamPerson[] {
       return people.filter((person) => person.leftAt === undefined).sort((a, b) => a.email.localeCompare(b.email));
     },
+    /** Everyone the Admin has paired here, the ones who left included. */
+    everyone(): TeamPerson[] {
+      return [...people];
+    },
   };
 }
 

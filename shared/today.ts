@@ -37,7 +37,11 @@ export type NeedsYouItem =
   | { kind: "out-of-credit"; id: string; at: number; credit: TrialCreditRefusal; botIds: string[]; threadId: string }
   | { kind: "connection"; id: string; at: number; app: string; botIds: string[]; threadId: string; text: string }
   | { kind: "place"; id: string; at: number; place: PlaceRow; botIds: string[]; threadId: string }
-  | { kind: "question"; id: string; at: number; botId: string; threadId: string; text: string };
+  | { kind: "question"; id: string; at: number; botId: string; threadId: string; text: string }
+  /** On a Team Cloud: a teammate tagged this person, or a bot passed them a message. `from` names who, and `fromEmail`
+   * is that teammate's address when a person (not a bot) sent it; `messageId` is the line to open. It goes once they
+   * open that conversation or write in it. */
+  | { kind: "message"; id: string; at: number; botId: string; threadId: string; messageId?: string; from: string; fromEmail?: string; text: string };
 
 export interface TodayReport {
   since: number;

@@ -23,3 +23,15 @@ export function chiefLevel(bot: ({ chiefOfStaff?: boolean } & DefaultBotFields) 
   const role = roleOf(person);
   return role === "owner" || role === "admin";
 }
+
+type RoleBot = ({ chiefOfStaff?: boolean } & DefaultBotFields) | null | undefined;
+
+/** The person's MausBot holding a Chief's powers: the only bot shown its notification tools. */
+export function holdsMausBotTools<T extends NonNullable<RoleBot>>(bot: T | null | undefined): bot is T {
+  return Boolean(bot?.defaultBot) && chiefLevel(bot);
+}
+
+/** The role switches a bot's agents tools are listed under: the Chief-only tools, and MausBot's notification pair. */
+export function roleToolEnv(bot: RoleBot): { OMB_CHIEF_OF_STAFF: "1" | "0"; OMB_MAUSBOT: "1" | "0" } {
+  return { OMB_CHIEF_OF_STAFF: chiefLevel(bot) ? "1" : "0", OMB_MAUSBOT: holdsMausBotTools(bot) ? "1" : "0" };
+}

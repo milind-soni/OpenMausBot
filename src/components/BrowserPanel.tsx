@@ -58,6 +58,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const [showTyping, setShowTyping] = useState(false);
   const [masked, setMasked] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [maximized, setMaximized] = useState(false);
   const [passkeyDismissed, setPasskeyDismissed] = useState("");
   const floating = useBrowserPictureInPicture();
   const pageVisible = usePageVisible();
@@ -223,6 +224,18 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     const request = leaving ? document.exitFullscreen() : panel.current?.requestFullscreen();
     void request?.catch(() => setError(t(leaving ? "browser.panel.exitFullscreenFailed" : "browser.panel.fullscreenUnavailable")));
   };
+  // The maximized panel swallows its Escape (defaultPrevented) so the same press cannot close a dialog beneath.
+  // Capture: listeners registered before this panel must see the key already refused.
+  useEffect(() => {
+    if (!maximized) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      setMaximized(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [maximized]);
 
   const restart = () => {
     if (!window.confirm(t("browser.panel.confirmRestart"))) return;
@@ -252,7 +265,9 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const typingReady = connected && you;
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
-  return <div ref={panel} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink" data-browser-transport={stream ? "stream" : "live"}>
+  return <div ref={panel} className={maximized
+    ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-card text-ink"
+    : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink"} data-browser-transport={stream ? "stream" : "live"}>
     <ChromeRow
       ref={address}
       botName={bot.name}
@@ -264,6 +279,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       commandsReady={commandsReady}
       profileName={profileName}
       fullscreen={fullscreen}
+      maximized={maximized}
       onCommand={interact}
       onAddress={(text) => {
         const url = resolveAddressBarInput(text);
@@ -273,6 +289,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       onTake={takeControl}
       onHandBack={handBack}
       onFullscreen={toggleFullscreen}
+      onMaximize={() => setMaximized((value) => !value)}
       onProfiles={() => { browserControl.current?.handBack(); setShowProfiles(true); }}
       menu={<MoreMenu
         stream={stream}
@@ -334,7 +351,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
         e.preventDefault(); const field = e.currentTarget.elements.namedItem("pageText") as HTMLInputElement;
         if (typingReady && field.value) { interact({ type: "text", text: field.value }); field.value = ""; setShowTyping(false); }
       }}><input key={masked ? "secret" : "text"} name="pageText" type={masked ? "password" : "text"} aria-label={masked ? t("browser.typeSecret.field") : t("browser.panel.typeTextField")} autoComplete={masked ? "new-password" : "off"} spellCheck={false} maxLength={4096} placeholder={masked ? "••••••••" : t("browser.panel.typeTextPlaceholder")} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" />
-        {masked && <p className="flex items-center gap-1 text-[11.5px] text-ink-tertiary"><LockKeyhole size={11} aria-hidden="true" />{t("browser.typeSecret.note")}</p>}
+        {masked && <p className="flex items-center gap-1 text-[12px] text-ink-tertiary"><LockKeyhole size={11} aria-hidden="true" />{t("browser.typeSecret.note")}</p>}
         <button disabled={!typingReady} className="self-end rounded-lg bg-accent px-4 py-2 text-[12px] text-accent-ink disabled:opacity-40">{t("browser.panel.typeButton")}</button></form>
     </dialog>
   </div>;

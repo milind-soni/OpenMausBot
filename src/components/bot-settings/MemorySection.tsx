@@ -39,7 +39,7 @@ import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { inputCls } from "./field";
 
 const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50";
-const quietButtonCls = "rounded-md px-2 py-1 text-[12.5px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
+const quietButtonCls = "rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
 
 interface Editing {
   path: string;
@@ -297,7 +297,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
           <input type="checkbox" checked={bot.memoryEnabled !== false} disabled={bot.busy} onChange={(event) => onToggle(event.target.checked)} />
           {t("memory.enable")}
         </label>
-        <p className="mt-1 text-[12.5px] text-ink-secondary">
+        <p className="mt-1 text-[13px] text-ink-secondary">
           {t("memory.enableHelp")}
           {bot.busy ? ` ${t("memory.busyHelp")}` : ""}
         </p>
@@ -355,7 +355,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
       {editing && (
         <div className="rounded-xl bg-card p-4">
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate font-mono text-[12.5px] text-ink">{editing.path}</span>
+            <span className="truncate font-mono text-[13px] text-ink">{editing.path}</span>
             {editing.path !== MEMORY_INDEX && (
               <button type="button" className={quietButtonCls} onClick={() => void open(MEMORY_INDEX)}>
                 {t("memory.backToIndex")}
@@ -371,7 +371,7 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
             />
           )}
           <textarea
-            className={cn(inputCls, "mt-2 min-h-[200px] resize-y font-mono text-[12.5px] leading-relaxed")}
+            className={cn(inputCls, "mt-2 min-h-[200px] resize-y font-mono text-[13px] leading-relaxed")}
             value={editing.text}
             readOnly={editing.readOnly}
             placeholder={
@@ -460,8 +460,8 @@ export function MemorySection({ bot, active = true, onToggle }: { bot: Bot; acti
         </div>
       </div>
 
-      {notice && <div className="text-[12.5px] text-ink-secondary">{notice}</div>}
-      {error && <div className="text-[12.5px] text-danger">{error}</div>}
+      {notice && <div className="text-[13px] text-ink-secondary">{notice}</div>}
+      {error && <div className="text-[13px] text-danger">{error}</div>}
     </div>
   );
 }
@@ -500,11 +500,11 @@ export function MemoryUpkeepCard({
         <div className="mt-3 flex items-start justify-between gap-3 border-t border-hairline/40 pt-3">
           <div className="min-w-0">
             <div className="text-[13px] font-medium text-ink">{t("memory.learnFromRooms.title")}</div>
-            <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">{t("memory.learnFromRooms.subtitle")}</p>
+            <p className="mt-0.5 text-[13px] leading-relaxed text-ink-secondary">{t("memory.learnFromRooms.subtitle")}</p>
             {status && !status.modelSteps && (
-              <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">{t("memory.learnFromRooms.noModelSteps")}</p>
+              <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t("memory.learnFromRooms.noModelSteps")}</p>
             )}
-            {rooms.error && <p role="alert" className="mt-1 text-[12.5px] text-danger">{rooms.error}</p>}
+            {rooms.error && <p role="alert" className="mt-1 text-[13px] text-danger">{rooms.error}</p>}
           </div>
           <Switch
             checked={rooms.enabled}
@@ -516,14 +516,14 @@ export function MemoryUpkeepCard({
         </div>
       )}
       {enabled && status && !status.modelSteps && (
-        <p className="mt-2 text-[12.5px] text-ink-secondary">{t("memory.upkeep.noModelSteps")}</p>
+        <p className="mt-2 text-[13px] text-ink-secondary">{t("memory.upkeep.noModelSteps")}</p>
       )}
       {enabled && (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <button type="button" className={buttonCls} disabled={tidying} onClick={onTidy}>
             {tidying ? t("memory.upkeep.tidying") : t("memory.upkeep.tidyNow")}
           </button>
-          <span className="text-[12.5px] text-ink-secondary">
+          <span className="text-[13px] text-ink-secondary">
             {status?.lastTidy ? t("memory.upkeep.lastTidy", { time: localizedRelativeTime(status.lastTidy.at, activeLocale()), summary: localizedTidySummary(status.lastTidy).toLowerCase() }) : t("memory.upkeep.notTidied")}
             {status?.lastCapture && noticedCount(status.lastCapture) ? ` ${t(noticedCount(status.lastCapture) === 1 ? "memory.upkeep.lastNoticed.one" : "memory.upkeep.lastNoticed.many", { count: noticedCount(status.lastCapture), time: localizedRelativeTime(status.lastCapture.at, activeLocale()) })}` : ""}
           </span>
@@ -546,7 +546,7 @@ export function MemoryGauge({ index }: { index: MemoryCapacity }) {
       </div>
       <GaugeBar label={t("memory.capacity.lines")} share={status.lineShare} fill={fill} />
       <GaugeBar label={t("memory.capacity.size")} share={status.byteShare} fill={fill} />
-      <p className={cn("mt-2 text-[12.5px] leading-relaxed", status.level === "over" ? "text-danger" : "text-ink-secondary")}>
+      <p className={cn("mt-2 text-[13px] leading-relaxed", status.level === "over" ? "text-danger" : "text-ink-secondary")}>
           {status.warning ?? t("memory.capacity.sentence", { lines: index.lines, maxLines: index.maxLines, bytes: formatBytes(index.bytes), maxBytes: formatBytes(index.maxBytes), maxLoaded: index.maxLines })}
       </p>
       {status.warning && <p className="mt-1 text-[12px] text-ink-secondary">{t("memory.capacity.sentence", { lines: index.lines, maxLines: index.maxLines, bytes: formatBytes(index.bytes), maxBytes: formatBytes(index.maxBytes), maxLoaded: index.maxLines })}</p>}
@@ -557,7 +557,7 @@ export function MemoryGauge({ index }: { index: MemoryCapacity }) {
 function GaugeBar({ label, share, fill }: { label: string; share: number; fill: string }) {
   const width = `${Math.min(100, Math.round(share * 100))}%`;
   return (
-    <div className="mt-2 flex items-center gap-2 text-[11.5px] text-ink-secondary">
+    <div className="mt-2 flex items-center gap-2 text-[12px] text-ink-secondary">
       <span className="w-10 shrink-0">{label}</span>
       <div
         className="h-1.5 flex-1 overflow-hidden rounded-full bg-inset"
@@ -585,7 +585,7 @@ export function ConflictNotice({
   onOverwrite: () => void;
 }) {
   return (
-    <div className="mt-2 rounded-lg border border-warning/25 bg-warning/10 p-3 text-[12.5px] leading-relaxed text-ink">
+    <div className="mt-2 rounded-lg border border-warning/25 bg-warning/10 p-3 text-[13px] leading-relaxed text-ink">
       <div className="font-medium">{t("memory.conflict.title", { name: botName })}</div>
       <div className="mt-0.5 text-ink-secondary">
         {t("memory.conflict.help", { name: botName })}
@@ -622,7 +622,7 @@ export function MemoryFileRows({
       <div className="text-[12px] font-medium uppercase tracking-[0.08em] text-ink-secondary">{title}</div>
       <div className="mt-0.5 text-[12px] text-ink-secondary">{hint}</div>
       {files.length === 0 ? (
-        <div className="mt-2 text-[12.5px] text-ink-secondary">{t("memory.noneYet")}</div>
+        <div className="mt-2 text-[13px] text-ink-secondary">{t("memory.noneYet")}</div>
       ) : (
         <div className="mt-2 overflow-hidden rounded-lg border border-hairline/40">
           {files.map((file) => (
@@ -635,8 +635,8 @@ export function MemoryFileRows({
             >
               <button type="button" onClick={() => onOpen(file)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
                 <FileText size={14} className="shrink-0 text-ink-secondary" />
-                <span className="truncate font-mono text-[12.5px] text-ink">{file.name}</span>
-                <span className="shrink-0 text-[11.5px] text-ink-secondary">
+                <span className="truncate font-mono text-[13px] text-ink">{file.name}</span>
+                <span className="shrink-0 text-[12px] text-ink-secondary">
                   {formatBytes(file.bytes)} · {localizedRelativeTime(file.modifiedAt, activeLocale())}
                 </span>
               </button>
@@ -702,7 +702,7 @@ export function MemoryJournalList({
                   {reverting === row.id ? t("memory.undoing") : t("memory.undo")}
                 </button>
               ) : (
-                <span className="shrink-0 text-[11.5px] text-ink-secondary" title={row.revertUnavailableReason}>
+                <span className="shrink-0 text-[12px] text-ink-secondary" title={row.revertUnavailableReason}>
                   {t("memory.cantUndo")}
                 </span>
               )}
@@ -712,7 +712,7 @@ export function MemoryJournalList({
                 <summary className="cursor-pointer text-[12px] text-ink-secondary">
                   +{row.added} −{row.removed} · {t("memory.showChanged")}
                 </summary>
-                <pre className="mt-1 max-h-[240px] overflow-auto whitespace-pre-wrap rounded-md bg-card p-2 font-mono text-[11.5px] leading-relaxed text-ink">
+                <pre className="mt-1 max-h-[240px] overflow-auto whitespace-pre-wrap rounded-md bg-card p-2 font-mono text-[12px] leading-relaxed text-ink">
                   {row.diff}
                 </pre>
               </details>

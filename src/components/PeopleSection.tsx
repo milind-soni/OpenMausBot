@@ -102,7 +102,7 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly =
   const columns = "grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-4";
   return (
     <div className="flex flex-col">
-      <div className={cn(columns, "border-b border-hairline/40 pb-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary")}>
+      <div className={cn(columns, "border-b border-hairline/40 pb-2 text-[12px] font-medium uppercase tracking-wide text-ink-secondary")}>
         <span>{t("people.colPerson")}</span>
         <span>{t("people.colRole")}</span>
         <span className="text-right">{t("people.colLastSeen")}</span>
@@ -113,7 +113,7 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly =
         <div key={person.entry} className={cn(columns, "border-b border-hairline/20 py-2 text-[13px]")}>
           <span className="min-w-0">
             <span className="block truncate text-ink">{person.isDomain ? t("people.everyoneAt", { domain: person.entry.slice(1) }) : person.entry}</span>
-            {person.devices > 0 && <span className="block text-[11.5px] text-ink-secondary">{t("people.devices", { count: String(person.devices) })}</span>}
+            {person.devices > 0 && <span className="block text-[12px] text-ink-secondary">{t("people.devices", { count: String(person.devices) })}</span>}
           </span>
           <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", person.role === "admin" ? "bg-accent/15 text-accent" : "bg-control text-ink-secondary")}>
             {person.role === "admin" ? t("people.roleAdmin") : t("people.roleMember")}
@@ -138,7 +138,7 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly =
 export function CopyLink({ link }: { link: string }) {
   const { state, copy } = useCopyFeedback(link);
   return (
-    <div className="mt-3 rounded-lg border border-hairline/40 bg-inset p-3 text-[12.5px]">
+    <div className="mt-3 rounded-lg border border-hairline/40 bg-inset p-3 text-[13px]">
       <div className="mb-1 text-ink-secondary">{t("people.link")}</div>
       <div className="flex items-center gap-2">
         <code className="min-w-0 flex-1 select-all break-all text-ink">{link}</code>
@@ -147,7 +147,7 @@ export function CopyLink({ link }: { link: string }) {
           {t(state === "copied" ? "people.copied" : state === "failed" ? "common.copyFailed" : "people.copy")}
         </button>
       </div>
-      <p className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">{t("people.linkHint")}</p>
+      <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("people.linkHint")}</p>
     </div>
   );
 }
@@ -172,7 +172,7 @@ export function PortalPeople({ peopleUrl, people }: { peopleUrl: string | null; 
       <div className="mt-4">
         <PeopleTable people={people} busy={false} readOnly onRole={noop} onRemove={noop} onLink={noop} />
       </div>
-      <p className="mt-3 text-[11.5px] leading-relaxed text-ink-secondary">{t("people.portal.note")}</p>
+      <p className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("people.portal.note")}</p>
     </Card>
   );
 }
@@ -257,7 +257,7 @@ export function PeopleSection() {
   if (membership?.authority === "portal") return <PortalPeople peopleUrl={membership.peopleUrl} people={people} />;
   return (
     <Card title={t("people.title")} subtitle={t("people.subtitle")}>
-      {emailOffered === false && <p className="mb-3 rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[12.5px] text-ink-secondary">{t(membership?.pairingCodes === false ? "people.portalSignIn" : "people.notHosted")}</p>}
+      {emailOffered === false && <p className="mb-3 rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[13px] text-ink-secondary">{t(membership?.pairingCodes === false ? "people.portalSignIn" : "people.notHosted")}</p>}
       <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); void invite(); }}>
         <input
           value={draft}
@@ -276,7 +276,7 @@ export function PeopleSection() {
         </button>
         <button type="button" onClick={() => void load()} disabled={loading || busy} aria-label={t("people.refresh")} title={t("people.refresh")} className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"><RefreshCw size={13} className={cn(loading && "animate-spin")} /></button>
       </form>
-      <p className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">{t("people.inviteHint")}</p>
+      <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("people.inviteHint")}</p>
       {link && <CopyLink link={link} />}
       {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
       <div className="mt-4">
@@ -288,7 +288,7 @@ export function PeopleSection() {
           onLink={(person) => setLink(inviteLink(base, person.entry))}
         />
       </div>
-      <p className="mt-3 text-[11.5px] leading-relaxed text-ink-secondary">{t("people.note")}</p>
+      <p className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("people.note")}</p>
     </Card>
   );
 }

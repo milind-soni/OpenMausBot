@@ -190,7 +190,7 @@ describe("highlevelRpc", () => {
 
   it("answers the signed-out note so the bot asks the person to reconnect", async () => {
     const { deps, store } = harness(legacy);
-    store.markNeedsSignIn("revoked");
+    store.markNeedsSignIn("revoked", store.get()!);
     const out = await highlevelRpc(call("HIGHLEVEL_GET_CONTACT", { contactId: "contact_1" }), deps) as { isError?: boolean; content: Array<{ text: string }>; structuredContent: Record<string, unknown> };
     expect(out.isError).toBe(true);
     expect(out.content[0].text).toBe(HIGHLEVEL_SIGNED_OUT_TEXT);
@@ -229,7 +229,7 @@ describe("host", () => {
     expect(off.content[0].text).toContain("Off has not been given access to HighLevel");
     const listed = await host.handle({ method: "tools/list" }, { botId: "b4", threadId: "t" }, () => {}) as { tools: unknown[] };
     expect(listed.tools).toEqual([]);
-    service.store.markNeedsSignIn("revoked");
+    service.store.markNeedsSignIn("revoked", service.store.get()!);
     expect(await host.health(Promise.resolve({ gmail: { connected: true } }))).toEqual({ gmail: { connected: true }, highlevel: { connected: false } });
     service.disconnect();
     expect(await host.health(Promise.resolve({ gmail: { connected: true } }))).toEqual({ gmail: { connected: true } });

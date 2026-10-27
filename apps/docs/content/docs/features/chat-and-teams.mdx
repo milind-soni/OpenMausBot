@@ -79,9 +79,21 @@ On a team's Cloud, every bot reports to one person: whoever created it, unless s
 - In your private chat, a bot can ask any other bot for you. That bot's work stays private to you too, and nothing from your private chat is posted into a group chat.
 - The Team map's **Who reports to whom** shows each person with their Chief and their bots. Drag a bot onto a person to change who it reports to, or open it from a department's menu with **See who reports to whom**.
 
+## Telling a teammate (teams)
+
+On a team's Cloud, the people in your team are in the **@** list next to the bots, with their picture (or their initial when they have none) and a small "Person" tag. Everyone in the team sees each teammate's name and picture, wherever the app shows a person; your About you and everything else stay private.
+
+- **@Bob in a chat Bob can see** (a bot's shared chat, or a group chat he is in) tags him: Bob gets a notification and a line in his **Needs you** that opens the message. Nobody else is notified, admins included. Bots can tag people the same way.
+- **"Tell Bob that…" in your own chat with a bot** (or "@Bob, the launch moved") asks the bot to pass it on. Bob gets a new private conversation with that same bot, called "From Ada", whose first line is "Ada asked me to pass this on: …", plus a notification. Only that message goes: Bob never sees the rest of your chat. Your chat shows a small **Told Bob** chip with what was sent.
+- **When Bob answers** in that conversation ("tell Ada I'll do it tonight"), the bot passes it back to the chat you asked from, as "Bob replied: …", and you get a notification. Bob's other words stay in his chat.
+- Asking in a chat Bob can already see just tags him there.
+- Someone who has left the team can't be reached, and the bot says so. One conversation can pass at most 10 messages an hour.
+
+Off a team, nothing changes: the @ list shows bots, and `@you` still means you.
+
 ## Delegation
 
-Bots can hand work to other bots, in any department. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation: you see a "Sent to Bolt" line where the work went out, and the answer when it comes back.
+Bots can hand work to other bots, in any department. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation: you see a "Sent to Bolt" line where the work went out, and the answer when it comes back. A bot does not need to be in a group chat to get work from one: work for a bot that isn't in the chat goes to that bot directly, in a thread of its own, and the chat shows "Sent to Bolt directly: it isn't in this room." Nobody is added to the chat, so nobody new reads it.
 
 ### Creating a specialist with a chosen model
 

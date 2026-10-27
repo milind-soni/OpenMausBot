@@ -4,20 +4,17 @@
 import { randomUUID } from "node:crypto";
 import nativeText from "./native-text.cjs";
 
-/** The popup's question and button, by the word the person knows this computer by. */
-const USE_WORDS = Object.freeze({
-  darwin: { message: "native.lend.offer.titleMac", use: "native.lend.offer.useMac" },
-  win32: { message: "native.lend.offer.titlePc", use: "native.lend.offer.usePc" },
-  other: { message: "native.lend.offer.titleComputer", use: "native.dialog.org.useHere" },
-});
+import { wordsFor } from "./use-my-computer-words.mjs";
 
-/** "Use my Mac": the popup's question, its one line and its buttons. `screen`: apps and screen can be lent here. */
-export function useMyComputerText(platform, { screen }, t = nativeText.englishText.t) {
-  const words = USE_WORDS[platform] ?? USE_WORDS.other;
+/** "Use my Mac": the popup's question, its one line and its buttons, by the word the person knows this computer by and
+ * in the language this app's page shows. `screen`: apps and screen can be lent here. */
+export function useMyComputerText(platform, { screen, locale = "en" }) {
+  const device = platform === "darwin" ? "mac" : platform === "win32" ? "pc" : "computer";
+  const words = wordsFor(locale);
   return {
-    message: t(words.message),
-    detail: t(screen ? "native.lend.offer.detailScreen" : "native.lend.offer.detail"),
-    buttons: [t(words.use), t("native.dialog.share.notNow")],
+    message: words[`lending.useMyComputer.question.${device}`],
+    detail: words[`lending.useMyComputer.${screen ? "detail" : "detailNoScreen"}.${device}`],
+    buttons: [words[`lending.useMyComputer.use.${device}`], words["lending.useMyComputer.notNow"]],
   };
 }
 
@@ -43,8 +40,8 @@ export function serverAccessDetail(env, { folders, terminal, computer }, t = nat
 export function createLendingDialogs({ dialog, window, validate, isHome = async () => false, platform = process.platform, t = nativeText.englishText.t }) {
   return {
     /** Use my Mac, asked in `parent`: "use" or "later". */
-    async useMyComputer(parent, { screen }) {
-      const { message, detail, buttons } = useMyComputerText(platform, { screen }, t);
+    async useMyComputer(parent, { screen, locale }) {
+      const { message, detail, buttons } = useMyComputerText(platform, { screen, locale });
       const { response } = await dialog.showMessageBox(parent, { type: "question", message, detail, buttons, defaultId: 0, cancelId: 1, noLink: true });
       return response === 0 ? "use" : "later";
     },
@@ -78,6 +75,17 @@ export function createLendingDialogs({ dialog, window, validate, isHome = async 
         type: "warning", message: t("native.lend.screen.title"),
         detail: t("native.lend.screen.detail"),
         buttons: [t("native.lend.screen.button"), t("native.common.cancel")], defaultId: 1, cancelId: 1,
+      });
+      return response === 0;
+    },
+    /** The terminal asked for from My Cloud's page: false when there is no window to ask in. */
+    async confirmTerminal() {
+      const parent = window();
+      if (!parent || parent.isDestroyed()) return false;
+      const { response } = await dialog.showMessageBox(parent, {
+        type: "warning", message: "Let My Cloud's bots run commands on this computer as you?",
+        detail: "There is no limit on what a command can do: they can read, change or delete anything you can, and install software. Only continue if you trust them with this computer. It turns off again whenever lending is turned off.",
+        buttons: ["Allow the terminal", "Cancel"], defaultId: 1, cancelId: 1,
       });
       return response === 0;
     },

@@ -4,7 +4,7 @@
 type JsonObject = Record<string, unknown>;
 
 export const OWN_PROFILE_UNAVAILABLE =
-  "Computer control on this computer cannot attach to the person's own signed-in browser profile, and OpenMausBot has no setting that lets them allow it, so do not retry strategy existing_profile or ask them to grant it. To work in a site they are signed in to, use the screen: launch_app with urls opens the page in their own browser, signed in as they are; read it with get_window_state and act with click, type_text and press_key. Or use your own browser tools if you have them, and call request_sign_in when the site needs their login there.";
+  "Computer control on this computer cannot attach to the person's own signed-in browser profile, and nothing the person can turn on changes that: do not retry strategy existing_profile, and never ask them to grant it or to start anything with a flag. For work on a website, use your own browser: if select_computer offers browser, select it and end your turn. The request continues there, in the person's own Chrome when this bot's browser profile is My Chrome, and fill_login can sign in there with the person's saved logins, 1Password included. Otherwise use the screen: launch_app with urls opens the page in their own browser, signed in as they are; read it with get_window_state and act with click, type_text and press_key, and call request_sign_in when the site needs them to sign in.";
 
 const REFUSAL_CODE = "browser_consent_required";
 

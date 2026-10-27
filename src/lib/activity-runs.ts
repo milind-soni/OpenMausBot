@@ -34,7 +34,7 @@ export function isStatusActivity(message: Message): boolean {
 export function isToolStep(message: Message): message is Message & { tool: NonNullable<Message["tool"]> } {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool) return false;
-  if (message.comm || message.threadRef || message.dataResult || isStatusActivity(message)) return false;
+  if (message.comm || message.threadRef || message.relay || message.dataResult || isStatusActivity(message)) return false;
   return failedTurnCause(tool.name) === null;
 }
 

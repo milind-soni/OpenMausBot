@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { emailGateDone } from "@/lib/analytics";
+import { clearWelcomeDraft } from "@/lib/welcome-draft";
 import { hostedMember, LOCAL_VIEWER, welcomeDue, welcomeViewer, type BeatId, type WelcomeViewer } from "@/lib/onboarding";
 import { api, useStore } from "@/state/store";
 import { SharedWorkspaceHint } from "./SharedWorkspaceHint";
@@ -38,6 +39,13 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
   const [dismissed, setDismissed] = useState(false);
   const [resumeAt, setResumeAt] = useState<BeatId | undefined>(undefined);
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  // A welcome finished elsewhere (another window, an older version's record) leaves no draft behind to resume later.
+  const finished = Boolean(viewer && state.config) && !welcomeDue(state.config, {
+    remoteClient, legacyDone: emailGateDone(), hosted: viewer?.hosted, canSave: viewer?.canSave, cloudHome: viewer?.cloudHome,
+  });
+  useEffect(() => {
+    if (finished) clearWelcomeDraft();
+  }, [finished]);
   if (!viewer) return null;
   if (hostedMember(viewer)) {
     return remoteClient ? null : (
@@ -65,7 +73,6 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
   const replay = state.welcomeOpen && !due;
   return (
     <WelcomeFlow
-      bot={bot}
       replay={replay}
       hosted={viewer.hosted}
       initialBeat={resumeAt}
@@ -77,7 +84,8 @@ export function WelcomeGate({ viewer }: { viewer: WelcomeViewer | null }) {
         setDismissed(true);
         setResumeAt(undefined);
         dispatch({ type: "toggleWelcome", open: false });
-        if (!replay) dispatch({ type: "toggleTour", open: true });
+        // The first run ends in the chat with the first bot; the app tour starts only from Settings.
+        if (!replay && bot) dispatch({ type: "select", id: bot.id });
       }}
     />
   );

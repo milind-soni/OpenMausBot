@@ -113,7 +113,9 @@ export function partitionSidebarBots<T extends SidebarBot>(
 ) {
   const universalPins = options?.universalPins === true;
   const visible = bots.filter((bot) => !bot.hidden && !hiddenFromSidebar(bot, options?.viewerEmail) && bot.id !== options?.welcoming);
-  const pinnedBots = visible.filter((bot) => Boolean(bot.pinned) && (universalPins || !bot.chiefOfStaff));
+  // The pin flag is the server's, the same on every client. Only the main Chief keeps its own top slot when pins are
+  // not universal (a device's layout choice); a pinned Chief of a group is listed with the other pinned bots.
+  const pinnedBots = visible.filter((bot) => Boolean(bot.pinned) && (universalPins || !bot.chiefOfStaff || Boolean(bot.section)));
   const pinnedIds = new Set(pinnedBots.map((bot) => bot.id));
   const unsectionedChief = visible.find((bot) => bot.chiefOfStaff && !bot.section && !pinnedIds.has(bot.id)) ?? null;
   const sectionChiefs = visible.filter((bot) => bot.chiefOfStaff && Boolean(bot.section) && !pinnedIds.has(bot.id));

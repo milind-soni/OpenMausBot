@@ -67,8 +67,8 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
   return (
     <div>
       <div className="mb-1.5 text-[13px] text-ink-secondary">{t("apiInstances.title")}</div>
-      <p className="mb-2 text-[11.5px] leading-relaxed text-ink-secondary">{t("apiInstances.subtitle")}</p>
-      {servers.length === 0 && <p className="text-[11.5px] text-ink-secondary">{t("apiInstances.empty")}</p>}
+      <p className="mb-2 text-[12px] leading-relaxed text-ink-secondary">{t("apiInstances.subtitle")}</p>
+      {servers.length === 0 && <p className="text-[12px] text-ink-secondary">{t("apiInstances.empty")}</p>}
       {servers.map((server) => (
         <div key={server.instanceId} className="mb-1.5 flex items-center justify-between gap-2 rounded-lg border border-hairline/40 bg-inset px-3 py-2">
           <div className="min-w-0">
@@ -116,6 +116,97 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
           {busy === "add" ? <Loader2 size={12} aria-hidden="true" className="animate-spin" /> : <Plus size={12} aria-hidden="true" />}
           {busy === "add" ? t("apiInstances.adding") : t("apiInstances.add")}
         </button>
+      </div>
+      {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+export const LM_STUDIO_PLACEHOLDER_KEY = "lm-studio";
+
+export function lmStudioBaseUrl(port: string): string | null {
+  const text = port.trim();
+  if (!/^[1-9]\d{0,4}$/.test(text)) return null;
+  const value = Number(text);
+  if (value > 65535) return null;
+  return `http://127.0.0.1:${value}/v1`;
+}
+
+export function LmStudioServer() {
+  const { state, dispatch, refreshInstances } = useStore();
+  const added = addedServers(state.instances);
+  const [port, setPort] = useState("1234");
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const url = lmStudioBaseUrl(port);
+  const present = Boolean(url && added.some((server) => server.url === url));
+
+  const add = () => {
+    if (busy || !url || present) return;
+    setBusy(true);
+    setError(null);
+    void api("/api/instances/openai-compat", {
+      method: "POST",
+      body: JSON.stringify({
+        displayName: "LM Studio",
+        url,
+        key: token.trim() || LM_STUDIO_PLACEHOLDER_KEY,
+        catalog: "lmstudio",
+      }),
+    }).then(
+      async (created) => {
+        keySaved("custom_endpoint", "settings", "unverified");
+        if (Array.isArray(created.instances)) dispatch({ type: "instances", instances: created.instances as InstanceInfo[] });
+        else await refreshInstances({ reportErrors: true });
+        setToken("");
+      },
+      (cause: unknown) => {
+        keySaved("custom_endpoint", "settings", "error");
+        setError(cause instanceof Error && cause.message ? cause.message : t("apiInstances.failed"));
+      },
+    ).finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="rounded-lg border border-hairline/40 bg-inset px-3 py-2">
+      <div className="text-[13px] text-ink">{t("lmStudio.title")}</div>
+      <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{t("lmStudio.desc")}</p>
+      <div className="mt-2 flex flex-col gap-1.5">
+        <label className="text-[12px] text-ink-secondary">
+          {t("lmStudio.port")}
+          <input
+            inputMode="numeric"
+            value={port}
+            onChange={(event) => setPort(event.target.value)}
+            aria-label={t("lmStudio.port")}
+            spellCheck={false}
+            disabled={busy}
+            className={`${INPUT} mt-1 font-mono`}
+          />
+        </label>
+        <input
+          type="password"
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+          placeholder={t("lmStudio.token")}
+          aria-label={t("lmStudio.token")}
+          autoComplete="off"
+          disabled={busy}
+          className={`${INPUT} font-mono`}
+        />
+        <p className="text-[11px] leading-relaxed text-ink-secondary">{t("lmStudio.tokenHint")}</p>
+        {url && <p className="truncate font-mono text-[11px] text-ink-secondary">{url}</p>}
+        <button
+          type="button"
+          onClick={add}
+          disabled={busy || !url || present}
+          className="inline-flex items-center gap-1.5 self-start rounded-lg border border-hairline/40 px-2.5 py-1.5 text-[12px] text-ink hover:bg-inset disabled:opacity-50"
+        >
+          {busy ? <Loader2 size={12} aria-hidden="true" className="animate-spin" /> : <Plus size={12} aria-hidden="true" />}
+          {busy ? t("lmStudio.adding") : t("lmStudio.add")}
+        </button>
+        {present && <p className="text-[12px] text-ink-secondary">{t("lmStudio.added")}</p>}
       </div>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
     </div>

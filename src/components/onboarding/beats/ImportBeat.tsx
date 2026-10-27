@@ -52,8 +52,8 @@ export function ImportRow({ icon, label, summary, hint, sources, checked, disabl
       <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center text-ink-secondary">{icon}</span>
       <span className="flex min-w-0 flex-1 flex-col">
         {/* One run of text, so a narrow card wraps the summary under the label, marks included. */}
-        <span className="text-[12.5px] leading-5 text-ink-secondary">
-          <span className="mr-2 text-[13.5px] font-medium text-ink">{label}</span>
+        <span className="text-[13px] leading-5 text-ink-secondary">
+          <span className="mr-2 text-[14px] font-medium text-ink">{label}</span>
           <SourceMarks sources={sources} />
           {summary}
         </span>
@@ -76,8 +76,8 @@ export function GrokBotRow({ label, open, disabled, onToggle }: { label: string;
       >
         <span className="mt-0.5 flex size-4 shrink-0 items-center justify-center"><GrokBotMark size={15} /></span>
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="text-[12.5px] leading-5 text-ink-secondary">
-            <span className="mr-2 text-[13.5px] font-medium text-ink">{label}</span>
+          <span className="text-[13px] leading-5 text-ink-secondary">
+            <span className="mr-2 text-[14px] font-medium text-ink">{label}</span>
             {t("onboarding.import.grokSummary")}
           </span>
           <span className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t("onboarding.import.grokHint")}</span>
@@ -159,7 +159,7 @@ export function ImportBeat({ onNext, onSkip, setMascot, bump, detection, client,
             {done ? <Check size={12} strokeWidth={3} /> : <Info size={12} strokeWidth={2.5} />}
           </span>
           <div className="min-w-0">
-            <p className="text-[13.5px] font-medium text-ink">{line}</p>
+            <p className="text-[14px] font-medium text-ink">{line}</p>
             {notes.map((note) => (
               <p key={note} className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{note}</p>
             ))}
@@ -174,7 +174,7 @@ export function ImportBeat({ onNext, onSkip, setMascot, bump, detection, client,
 
   return (
     <div className="flex flex-col">
-      <p className="animate-rise mt-1 text-[13.5px] text-ink-secondary">{t("onboarding.import.intro")}</p>
+      <p className="animate-rise mt-1 text-[14px] text-ink-secondary">{t("onboarding.import.intro")}</p>
       <div
         className="animate-rise mt-4 divide-y divide-hairline/40 overflow-hidden rounded-xl border border-hairline/40 bg-card"
         style={staggerIndex(1)}

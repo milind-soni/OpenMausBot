@@ -13,13 +13,13 @@ export interface LinkStream { join(socket: Duplex, early?: readonly Buffer[]): v
 export type LinkOpened = LinkStream | { refused: string } | { failed: string } | { gone: true };
 export interface LinkMux {
   receive(data: string | Buffer | ArrayBuffer | Uint8Array): void;
-  open(target: { host: string; port: number }): Promise<LinkOpened>;
+  open(target: { host: string; port: number } | { chrome: true }): Promise<LinkOpened>;
   readonly size: number;
   close(): void;
 }
 export declare function createLinkMux(options: {
   send(frame: string | Buffer): void;
-  accept?: ((target: { host: unknown; port: unknown }) => Promise<{ socket?: Duplex; refused?: string; failed?: string }>) | null;
+  accept?: ((target: { host: unknown; port: unknown } | { chrome: true }) => Promise<{ socket?: Duplex; refused?: string; failed?: string }>) | null;
   window?: number;
   maxStreams?: number;
   openMs?: number;

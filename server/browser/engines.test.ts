@@ -19,7 +19,7 @@ const CHROME = { command: CHROME_ENGINE, args: ["bot:a"], env: {} };
 
 function engines(options: RuntimeRouterOptions = {}) {
   const old = {
-    agentRpc: vi.fn(async () => "agent-browser"),
+    agentRpc: vi.fn(async (_session: string, _spec: unknown, _method: string, _params: unknown, beforeDispatch?: () => void) => { beforeDispatch?.(); return "agent-browser"; }),
     previewFrame: vi.fn(async (_session: string, capture: () => Promise<unknown>) => capture()),
     withSecretInput: vi.fn(async (_session: string, _spec: unknown, fn: () => Promise<unknown>) => fn()),
     heldBy: vi.fn(() => "person"),
@@ -32,7 +32,7 @@ function engines(options: RuntimeRouterOptions = {}) {
   const oldLive = { open: vi.fn(async () => undefined), action: vi.fn(async () => "agent-browser"), handBack: vi.fn(), closeForSession: vi.fn(), closeForOwner: vi.fn(), closeForBot: vi.fn(), closeAll: vi.fn() };
   const chrome = {
     service: {
-      agentRpc: vi.fn(async () => "chrome"),
+      agentRpc: vi.fn(async (_target: unknown, _method: string, _params: unknown, beforeDispatch?: () => void) => { beforeDispatch?.(); return "chrome"; }),
       previewFrame: vi.fn(async () => ({ png: "frame", format: "jpeg" })),
       withSecretInput: vi.fn(async (_target: unknown, fn: () => Promise<unknown>) => fn()),
       heldBy: vi.fn((): string | null => null),
@@ -97,7 +97,7 @@ describe("the runtime router", () => {
   const onHost = (host: EgressHost) => {
     const egress = new BrowserEgress();
     egress.configure({ host, config: () => ({}), ownership: { botOwned: async () => false } as unknown as ListenerOwnership, listeners: new OwnListeners(host, { env: {}, streamPorts: () => [], devToolsPorts: () => [] }) });
-    return engines({ refusal: (spec, params) => (attachesToChrome(spec.env) ? null : egress.callRefusal(params)) });
+    return engines({ refusal: (_session, spec, params) => (attachesToChrome(spec.env) ? null : egress.callRefusal(params)) });
   };
   const OPENS_REDDIT = [
     { name: "agent_browser_open", arguments: { url: "https://www.reddit.com/r/test/" } },
@@ -132,6 +132,45 @@ describe("the runtime router", () => {
     const { runtime } = onHost("cloud");
     const myChrome = { ...AGENT_BROWSER, env: { ...AGENT_BROWSER.env, AGENT_BROWSER_AUTO_CONNECT: "1" } };
     await expect(runtime.agentRpc("s", myChrome, "tools/call", OPENS_REDDIT[0])).resolves.toBe("agent-browser");
+  });
+
+  it("refusal and afterCall see the session", async () => {
+    const refused: string[] = [];
+    const afterCall = vi.fn((_session: string, _spec: unknown, result: unknown) => ({ after: result }));
+    const { old, runtime } = engines({
+      refusal: (session) => { refused.push(session); return null; },
+      annotate: (_spec, result) => ({ annotated: result }),
+      afterCall,
+    });
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/call", { name: "agent_browser_snapshot" })).resolves.toEqual({ after: { annotated: "agent-browser" } });
+    expect(refused).toEqual(["s1"]);
+    expect(afterCall).toHaveBeenCalledWith("s1", AGENT_BROWSER, { annotated: "agent-browser" });
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/list", {}), "a listing is neither refused nor passed on").resolves.toBe("agent-browser");
+    expect(refused).toEqual(["s1"]);
+    expect(afterCall).toHaveBeenCalledOnce();
+    expect(old.agentRpc).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks afterClaim once beforeDispatch has claimed, and its refusal reaches neither engine", async () => {
+    const order: string[] = [];
+    let refuse: string | null = null;
+    const { old, chrome, runtime } = engines({ afterClaim: (session) => { order.push(`afterClaim ${session}`); return refuse; } });
+    const claim = () => { order.push("claim"); };
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/call", { name: "agent_browser_snapshot" }, claim)).resolves.toBe("agent-browser");
+    expect(order).toEqual(["claim", "afterClaim s1"]);
+    refuse = "Not this conversation.";
+    const refused = { isError: true, content: [{ type: "text", text: "Not this conversation." }] };
+    let reached = 0;
+    old.agentRpc.mockImplementationOnce(async (_session, _spec, _method, _params, beforeDispatch) => { beforeDispatch?.(); reached++; return "agent-browser"; });
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/call", { name: "agent_browser_snapshot" }, claim)).resolves.toEqual(refused);
+    chrome.service.agentRpc.mockImplementationOnce(async (_target, _method, _params, beforeDispatch) => { beforeDispatch?.(); reached++; return "chrome"; });
+    await expect(runtime.agentRpc("s", CHROME, "tools/call", { name: "agent_browser_snapshot" }, claim)).resolves.toEqual(refused);
+    expect(reached, "nothing after the claim ran").toBe(0);
+    order.length = 0;
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/list", {}, claim), "a listing is not judged").resolves.toBe("agent-browser");
+    expect(order).toEqual(["claim"]);
+    const taken = () => { throw new Error("another thread is using this browser"); };
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/call", { name: "agent_browser_snapshot" }, taken), "beforeDispatch's own refusal is unchanged").rejects.toThrow("another thread is using this browser");
   });
 
   it("answers who holds a session and what was interrupted across both engines", () => {

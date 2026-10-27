@@ -31,9 +31,11 @@ describe("localComputerResultLine", () => {
 
   it("names only routes the bot has, and rules out the one it cannot take", () => {
     expect(OWN_PROFILE_UNAVAILABLE).toMatch(/do not retry strategy existing_profile/u);
-    for (const tool of ["launch_app", "get_window_state", "click", "type_text", "request_sign_in"]) {
+    for (const tool of ["select_computer", "fill_login", "launch_app", "get_window_state", "click", "type_text", "request_sign_in"]) {
       expect(OWN_PROFILE_UNAVAILABLE).toContain(tool);
     }
+    expect(OWN_PROFILE_UNAVAILABLE).toContain("My Chrome");
+    expect(OWN_PROFILE_UNAVAILABLE).not.toMatch(/--grant|authorization host/u);
   });
 
   it("passes every other frame through byte for byte", () => {

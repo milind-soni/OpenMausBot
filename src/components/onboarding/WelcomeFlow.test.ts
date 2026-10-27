@@ -34,8 +34,6 @@ vi.mock("./beats/HelloBeat", () => ({ HelloBeat: () => null }));
 vi.mock("./beats/EnginesBeat", () => ({ EnginesBeat: () => null }));
 const importBeat = vi.hoisted(() => ({ props: null as null | { onBusy?: (busy: boolean) => void; onResult: (result: unknown) => void } }));
 vi.mock("./beats/ImportBeat", () => ({ ImportBeat: (props: typeof importBeat.props) => { importBeat.props = props; return null; } }));
-vi.mock("./beats/PhoneBeat", () => ({ PhoneBeat: () => null }));
-vi.mock("./beats/MeetYourBotBeat", () => ({ MeetYourBotBeat: () => null }));
 import { WelcomeFlow } from "./WelcomeFlow";
 
 const FOUND: SetupDetection = { skills: [{ name: "pdf", source: "claudeCode" }], tools: [] };
@@ -45,7 +43,7 @@ function render(props: Partial<Parameters<typeof WelcomeFlow>[0]> = {}) {
   fixture.index = 0;
   fixture.effects = [];
   function Capture(): ReactNode {
-    return WelcomeFlow({ bot: null, onDone: () => {}, reel: false, dictation: false, ...props });
+    return WelcomeFlow({ onDone: () => {}, dictation: false, ...props });
   }
   return renderToStaticMarkup(createElement(Capture));
 }
@@ -71,20 +69,20 @@ afterEach(() => {
 describe("the import step in the welcome flow", () => {
   it("joins after the engines when the desktop app's own server finds something new", async () => {
     local.detect.mockResolvedValue(FOUND);
-    expect(render()).toContain("Step 1 of 4");
-    expect(await settle()).toContain("Step 1 of 5");
+    expect(render()).toContain("Step 1 of 2");
+    expect(await settle()).toContain("Step 1 of 3");
     expect(local.detect).toHaveBeenCalledOnce();
   });
 
   it("stays out when nothing is found, the look fails, or it would land behind the person", async () => {
     local.detect.mockResolvedValue({ skills: [], tools: [] });
-    expect(await settle()).toContain("Step 1 of 4");
+    expect(await settle()).toContain("Step 1 of 2");
     fixture.values = [];
     local.detect.mockRejectedValue(new Error("403"));
-    expect(await settle()).toContain("Step 1 of 4");
+    expect(await settle()).toContain("Step 1 of 2");
     fixture.values = [];
     local.detect.mockResolvedValue(FOUND);
-    expect(await settle({ initialBeat: "phone" })).toContain("Step 3 of 4");
+    expect(await settle({ initialBeat: "permissions", dictation: true })).toContain("Step 3 of 3");
   });
 
   it("never looks on a hosted server or from another server's page", async () => {
@@ -102,7 +100,7 @@ describe("the import step in the welcome flow", () => {
     const client = { detect: vi.fn(), apply: vi.fn() };
     const html = render({ setupImport: { client, detection: FOUND }, initialBeat: "import" });
     expect(html).toContain("Bring what you already use");
-    expect(html).toContain("Step 3 of 5");
+    expect(html).toContain("Step 3 of 3");
     for (const effect of fixture.effects) effect();
     expect(client.detect).not.toHaveBeenCalled();
   });

@@ -100,6 +100,14 @@ describe("CustomAcpDriver turns (fake CLI)", () => {
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
   });
 
+  it("names the person's own agent in what it tells them, never \"Custom (ACP)\"", async () => {
+    process.env.FAKE_ACP_MODE = "empty-reply";
+    await create();
+    await instance.adapter.sendTurn({ threadId: "t-custom-name", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({ message: "Custom Test finished without replying." });
+  });
+
   it("passes instance env to the child but strips foreign provider keys", async () => {
     process.env.XAI_API_KEY = "xai-should-not-leak";
     const dump = join(scratch, "dump.json");

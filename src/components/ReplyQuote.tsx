@@ -31,7 +31,7 @@ export function ReplyQuote({
   return (
     <div className={cn(
       "flex min-w-0 items-center gap-2 rounded-2xl bg-ink/[0.06] text-ink-secondary",
-      compact ? "py-1 ps-2.5 pe-2 text-[12.5px] leading-5" : "py-1.5 ps-3 pe-1.5 text-[13px] leading-5",
+      compact ? "py-1 ps-2.5 pe-2 text-[13px] leading-5" : "py-1.5 ps-3 pe-1.5 text-[13px] leading-5",
     )}>
       {onJump ? (
         <button type="button" onClick={onJump} className="flex min-w-0 flex-1 items-center gap-2 rounded-xl text-start hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus" title={t("chat.reply.jump")}>

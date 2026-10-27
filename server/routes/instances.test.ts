@@ -17,7 +17,7 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
 });
 
-async function serve() {
+async function serve(extra: Partial<InstanceRouteDeps> = {}) {
   const fake = makeFakeDriver();
   const registry = new ProviderRegistry([fake.driver]);
   await registry.load({ a: { driver: "fake" } });
@@ -45,6 +45,7 @@ async function serve() {
     threadBusy: () => false,
     botForThread: () => null,
     activeGroupTurnForBot: () => null,
+    ...extra,
   } as unknown as InstanceRouteDeps;
   const routes = [createInstanceRoutes(deps)];
   const server = createServer(async (req, res) => {
@@ -99,5 +100,14 @@ describe("engine sign-in routes", () => {
 
     await call("POST", "/api/instances/a/auth/sign-out", {});
     expect(await probesAfterList()).toBe(5);
+  });
+});
+
+describe("an engine's check", () => {
+  it("goes through the server's tested-AI record, so the welcome's test also settles the new-bot default", async () => {
+    const asked: string[] = [];
+    const { call } = await serve({ checkInstance: async (instance) => { asked.push(instance.instanceId); return { ok: false, error: "no answer" }; } });
+    expect(await call("POST", "/api/instances/a/check", {})).toEqual({ ok: false, error: "no answer" });
+    expect(asked).toEqual(["a"]);
   });
 });

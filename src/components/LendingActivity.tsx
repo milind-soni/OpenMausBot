@@ -10,6 +10,7 @@ const ACTIONS: Record<string, LocaleKey> = {
   computer_call: "lending.action.screen",
   invalid: "lending.action.invalid",
   internet: "lending.action.website",
+  chrome: "lending.action.chrome",
 };
 
 /** Security: Electron main keeps this record; a server cannot write to it. */

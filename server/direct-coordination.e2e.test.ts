@@ -815,13 +815,16 @@ it("runs a teammate's hand-off to the Chief in the Chief's work thread for that 
 }), 60_000);
 
 it("stops a waiting source without reaching into the teammate already working", () => fixture(async f => {
-  f.plan[f.lead.id] = { delayMs: 4000, reply: "Finished after the source was stopped" };
+  const childGate = join(f.session.info.dataDir, "child-ready");
+  f.plan[f.lead.id] = { gateFile: childGate, reply: "Finished after the source was stopped" };
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  await assigningTurnEnded(f);
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.chief.activeTaskId });
 
   await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status).toBe("cancelled");
   expect(f.nodes().find((node: any) => node.parentId).status).toBe("running");
+  writeFileSync(childGate, "finish after the source was stopped");
   expect((await f.wait()).status).toBe("settled");
   const chip = (await f.messages(f.chief.activeTaskId)).find((message: any) => message.tool?.name?.startsWith("Stopped here"));
   expect(chip.tool.name).toContain("Engineering lead");
@@ -905,27 +908,28 @@ it("retains returned direct reports for follow-up turns but rechecks reach befor
 
 it("runs the owed direct follow-up while the same bot works in another thread", () => fixture(async f => {
   const gate = join(f.session.info.dataDir, "hold-gate");
-  f.plan[f.chief.id] = { turns: [
-    { steps: [
+  // The hold's turn starts while the assigning turn is still open, so each turn picks its plan by its own text.
+  f.plan[f.chief.id] = { script: [
+    { key: "assign", match: ["Assign the check, then open an independent job"], steps: [
       { tool: "coordinate_bots", arguments: { bot_ids: [f.specialist.id], message: "Independently verify the CSV export" } },
       { tool: "start_thread", arguments: { title: "Independent hold", message: "Run the long independent check." } },
     ], reply: "Assigned the check and opened the hold" },
-    { gateFile: gate, reply: "The follow-up ran while the hold worked" },
-    // The hold's completion races the resume's plan read: the resume lands on slot 1 or 2, and both settle the same reply.
-    { reply: "The follow-up ran while the hold worked" },
+    { key: "hold", match: ["Run the long independent check."], gateFile: gate, reply: "The hold finished" },
+    { key: "resume", match: ["Your downstream room requests have settled."], reply: "The follow-up ran while the hold worked" },
   ] };
   f.save();
   await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Assign the check, then open an independent job that runs long.");
   const chiefTasks = async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id).tasks;
+  const holdBusy = async () => (await chiefTasks()).find((task: any) => task.title === "Independent hold")?.busy;
   // The self-opened job stays mid-turn at its gate, so the whole-bot busy flag stays up for an unrelated thread.
-  await expect.poll(async () => (await chiefTasks()).find((task: any) => task.title === "Independent hold")?.busy, { timeout: 20_000 }).toBe(true);
+  await expect.poll(holdBusy, { timeout: 20_000 }).toBe(true);
   const root = () => f.nodes().find((node: any) => !node.parentId);
-  await expect.poll(() => root()?.status, { timeout: 10_000 }).toBe("running");
-  writeFileSync(gate, "");
-  await expect.poll(() => root()?.status, { timeout: 10_000 }).toBe("completed");
+  await expect.poll(() => root()?.status, { timeout: 15_000 }).toBe("completed");
+  expect(await holdBusy()).toBe(true);
   const tasks = await chiefTasks();
   expect(tasks.find((task: any) => task.threadId === f.chief.activeTaskId).busy).toBe(false);
-  await expect.poll(async () => (await chiefTasks()).find((task: any) => task.title === "Independent hold")?.busy, { timeout: 10_000 }).toBe(false);
+  writeFileSync(gate, "");
+  await expect.poll(holdBusy, { timeout: 10_000 }).toBe(false);
   expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.text === "The follow-up ran while the hold worked")).toBe(true);
 }), 45_000);
 

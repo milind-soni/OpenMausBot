@@ -57,6 +57,13 @@ describe("whose a bot's ask is on a Team Cloud", () => {
     expect(route.notificationReaches(ada, { ...question, kind: "mention" })).toBe(true);
   });
 
+  it("notifies only its person of a teammate tag or a passed message, an Admin no more than anyone", () => {
+    const route = routing();
+    const tagged = { kind: "mention", botId: "fox", threadId: "fox-main", forPerson: BOB };
+    expect([ada, bob, olive].map((viewer) => route.notificationReaches(viewer, tagged))).toEqual([false, true, false]);
+    expect(route.notificationReaches({ person: null, admin: true }, tagged)).toBe(false);
+  });
+
   it("routes nothing off a team: every ask is everyone's who sees it", () => {
     const route = routing(false);
     expect([ada, bob, olive].map((viewer) => route.asks(viewer, "fox", "fox-main"))).toEqual([true, true, true]);

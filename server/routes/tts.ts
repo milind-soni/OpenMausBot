@@ -1,8 +1,9 @@
 // The voice routes: whether a voice is ready, the provider's voices (searched, or one pasted by ID or link), adding an
 // ElevenLabs Voice Library voice to My Voices, and speaking a line. Scopes are keyed by path in server/request-auth.ts.
 import type { AppConfig } from "../config.ts";
+import { redactSecretsInText } from "../redact.ts";
 import * as tts from "../tts/index.ts";
-import { toUtterances } from "../tts/speech-text.ts";
+import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../tts/speech-text.ts";
 import { userError } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
@@ -16,9 +17,12 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
     const cfg = deps.config();
     if (method === "POST" && path === "/api/tts/prepare") {
       const body = await readBody(req);
+      // Replies speak while they are still being written, from text no stored message has scrubbed yet: held secrets
+      // are known only here, so they are masked here. The first block is short so the first sound comes soon.
+      const text = redactSecretsInText(String(body.text ?? ""));
       return json(res, 200, {
         ready: tts.voiceReady(cfg, typeof body.voiceId === "string" ? body.voiceId : undefined),
-        utterances: toUtterances(String(body.text ?? "")),
+        utterances: toUtterances(text, { firstBlockMaxChars: VOICE_FIRST_BLOCK_MAX_CHARS }),
       });
     }
     if (method === "GET" && path === "/api/tts/voices") {

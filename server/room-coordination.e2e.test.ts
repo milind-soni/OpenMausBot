@@ -482,3 +482,49 @@ it("runs a room member's turn a restart cut again once, told so, and resumes the
   ]);
   expect((await f.messages(f.source.activeTaskId)).filter((m: any) => /turn interrupted/.test(m.tool?.name ?? ""))).toEqual([]);
 }), 60_000);
+
+it("hands work a Chief addresses into its room to the bots it just made, which are not in the room, directly", () => withRooms(async f => {
+  await f.api(`/api/bots/${f.sender.id}`, { section: "Sales OS", chiefOfStaff: true, acknowledgePeerScope: true }, "PATCH");
+  const made = (name: string, key: string) => ({ tool: "create_bot", capture: { [key]: "\\[id: ([^\\]]+)\\]" },
+    arguments: { name, role: `${name} lead`, instructions: `Own the ${name} part of the Sales OS.` } });
+  f.plan[f.sender.id] = {
+    steps: [made("Buyer Research", "buyer"), made("Sales Writer", "writer"), made("Revenue Ops", "ops"),
+      { arguments: { group_id: f.source.id, bot_ids: ["{{buyer}}", "{{writer}}", "{{ops}}"], message: "Draft your part of the Sales OS" } }],
+    reply: "Assigned", resumeReply: "Sales OS parts reviewed",
+  };
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+
+  const names = ["Buyer Research", "Sales Writer", "Revenue Ops"];
+  const { bots, groups } = await f.api("/api/bots?messages=0", undefined, "GET");
+  const made3 = names.map(name => bots.find((bot: any) => bot.name === name));
+  expect(made3.map((bot: any) => bot?.section)).toEqual(["Sales OS", "Sales OS", "Sales OS"]);
+  expect(groups.find((room: any) => room.id === f.source.id).memberIds).toEqual([f.sender.id]);
+
+  const children = f.handoffs();
+  expect(children.map((node: any) => node.botId).sort()).toEqual(made3.map((bot: any) => bot.id).sort());
+  for (const node of children) {
+    expect([node.status, node.groupId]).toEqual(["completed", undefined]);
+    const task = made3.find((bot: any) => bot.id === node.botId).tasks.find((t: any) => t.threadId === node.threadId);
+    expect(task.openedBy).toMatchObject({ botId: f.sender.id, threadId: f.source.activeTaskId, kind: "work" });
+  }
+  const turns = f.provider();
+  for (const bot of made3) {
+    const turn = turns.find((entry: any) => entry.botId === bot.id);
+    expect(turn.threadId).toBe(children.find((node: any) => node.botId === bot.id).threadId);
+    expect(JSON.stringify(turn.prompt)).toContain("Draft your part of the Sales OS");
+    expect(`${turn.system}${JSON.stringify(turn.prompt)}`).not.toContain("SOURCE_ONLY");
+  }
+  const sent = JSON.parse(turns.find((entry: any) => entry.botId === f.sender.id).evidence.at(-1).response.result.content[0].text);
+  expect(sent.receipts.map((receipt: any) => receipt.detail)).toEqual(names.map(() => expect.stringContaining("it isn't in this room, so it got this directly")));
+
+  const room = await f.messages(f.source.activeTaskId);
+  const notes = room.filter((m: any) => m.sentDirectly);
+  expect(notes.map((m: any) => m.tool.name)).toEqual(names.map(name => `Sent to ${name} directly: it isn't in this room.`));
+  expect(notes.map((m: any) => [m.sentDirectly, m.threadRef.botId, m.threadRef.threadId])).toEqual(made3.map((bot: any) =>
+    [{ name: bot.name }, bot.id, children.find((node: any) => node.botId === bot.id).threadId]));
+  const results = room.filter((m: any) => m.roomRequest?.phase === "result");
+  expect(results.map((m: any) => m.tool.output).sort()).toEqual(made3.map((bot: any) => `Result from ${bot.id}`).sort());
+  expect(turns.filter((entry: any) => entry.botId === f.sender.id).map((entry: any) => entry.resumed)).toEqual([false, true]);
+  expect(room.filter((m: any) => m.text === "Sales OS parts reviewed")).toHaveLength(1);
+  expect(room.filter((m: any) => m.card && !m.card.autoApplied && !m.card.answered)).toEqual([]);
+}), 60_000);

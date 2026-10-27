@@ -40,7 +40,7 @@ export function EngineLimitNotice({ engine }: { engine: string | undefined }) {
   return (
     <button type="button" data-testid="engine-limit-notice" title={hint} aria-label={`${limitLine(limit)}. ${hint}`}
       disabled={checking} onClick={() => { setChecking(true); void loadLimits(true).finally(() => setChecking(false)); }}
-      className="flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-[12.5px] text-ink hover:bg-warning/15 disabled:cursor-wait">
+      className="flex items-center gap-1.5 rounded-full border border-warning/40 bg-warning/10 px-2.5 py-1 text-[13px] text-ink hover:bg-warning/15 disabled:cursor-wait">
       <Hourglass size={13} className={checking ? "shrink-0 animate-pulse text-warning" : "shrink-0 text-warning"} aria-hidden="true" />
       <span className="tabular-nums">{limitLine(limit)}</span>
     </button>

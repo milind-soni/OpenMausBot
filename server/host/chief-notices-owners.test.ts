@@ -24,6 +24,7 @@ function fixture() {
     },
     appendMessage: (threadId: string, row: unknown) => { lines.push({ threadId, row }); },
     messagesFor: () => [],
+    activePath: () => [],
   };
   const notified: unknown[] = [];
   const startTurn = vi.fn(async (_botId: string, _text: string, _opts: { threadId: string }) => undefined);
@@ -43,7 +44,7 @@ function fixture() {
 describe("a Team Cloud Chief's notices", () => {
   it("reach the owner's Chief, in a notices chat of the owner's own", () => {
     const f = fixture();
-    f.notices.reportIncident({ kind: "failed", bot: f.fox as never, threadId: "fox-main", detail: "The build failed" });
+    f.notices.reportIncident({ kind: "stalled", bot: f.fox as never, threadId: "fox-main", detail: "no activity for 20 minutes" });
     expect(f.startTurn).toHaveBeenCalledTimes(1);
     expect(f.startTurn.mock.calls[0]![0]).toBe("bobs-chief");
     const threadId = f.startTurn.mock.calls[0]![2].threadId;

@@ -52,7 +52,7 @@ export function LimitResetMarker({ marker, hourHeight, onDrop }: { marker: Reset
         if (drop) onDrop?.(drop);
       }}>
       <div className={cn("h-0 border-t-2 border-dashed", over ? "border-accent" : "border-warning/80")} />
-      <span className={cn("absolute left-1 top-0 flex max-w-[calc(100%-8px)] items-center gap-1 truncate rounded-full border px-1.5 py-0.5 text-[9.5px] font-medium shadow-sm",
+      <span className={cn("absolute left-1 top-0 flex max-w-[calc(100%-8px)] items-center gap-1 truncate rounded-full border px-1.5 py-0.5 text-[10px] font-medium shadow-sm",
         over ? "border-accent bg-accent text-accent-ink" : "border-warning/50 bg-panel text-ink")}>
         <Hourglass size={10} className="shrink-0" aria-hidden="true" />
         <span className="truncate">{label}</span>

@@ -13,9 +13,9 @@ export function CloudTrialIntroCard({ offer, onStart, onHowTo, onSignIn, onNotNo
   const view = cloudIntroView(offer);
   if (!view) return null;
   return <NoticeCard titleId="cloud-intro-title" notice="cloud-intro" icon={Cloud} title={t("cloudIntro.title")} onDismiss={onDismiss}>
-    <p className="mt-2 inline-flex rounded-full bg-accent/15 px-2 py-0.5 text-[11.5px] font-medium text-accent-text">{view.badge}</p>
-    <p className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudIntro.body")}</p>
-    <ul className="mt-2 flex flex-col gap-1.5 text-[12.5px] text-ink">
+    <p className="mt-2 inline-flex rounded-full bg-accent/15 px-2 py-0.5 text-[12px] font-medium text-accent-text">{view.badge}</p>
+    <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">{t("cloudIntro.body")}</p>
+    <ul className="mt-2 flex flex-col gap-1.5 text-[13px] text-ink">
       {view.points.map(point => <li key={point} className="flex items-start gap-2"><Check size={14} className="mt-0.5 shrink-0 text-ink-secondary" aria-hidden="true" />{point}</li>)}
     </ul>
     <p className="mt-2.5 text-[12px] text-ink-secondary">{view.price}</p>

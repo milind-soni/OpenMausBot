@@ -18,10 +18,10 @@ function nodes(value: ReactNode): Node[] {
   const node = value as Node;
   return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
 }
-function render(onSelect: (mode: ApprovalMode) => void, onManageCommandAllowlist?: () => void, trustedModesAvailable = true, disabled = false) {
+function render(onSelect: (mode: ApprovalMode) => void, onManageCommandAllowlist?: () => void, trustedModesAvailable = true, busy = false) {
   let tree: ReactNode;
   function Capture() {
-    tree = ApprovalModeSelector({ providerName: "Codex", driverKind: "codex", approvalMode: "ask", onSelect, onManageCommandAllowlist, trustedModesAvailable, disabled });
+    tree = ApprovalModeSelector({ providerName: "Codex", driverKind: "codex", approvalMode: "ask", onSelect, onManageCommandAllowlist, trustedModesAvailable, busy });
     return tree;
   }
   return { html: renderToStaticMarkup(createElement(Capture)), nodes: nodes(tree) };
@@ -69,21 +69,19 @@ describe("command allowlist menu access", () => {
     expect(render(vi.fn()).html).not.toContain("Command allowlist");
   });
 
-  it("allows command management while busy while keeping every mode unavailable", () => {
-    const select = vi.fn(), manage = vi.fn();
-    const trigger = render(select, manage, true, true).nodes.find((node) => node.props["aria-haspopup"] === "menu")!;
-    expect(trigger.props.disabled).toBe(false);
+  it("keeps every level selectable while the bot works, and says from when a change applies", () => {
+    const select = vi.fn();
+    const trigger = render(select, undefined, true, true).nodes.find((node) => node.props["aria-haspopup"] === "menu")!;
+    expect(trigger.props.disabled).toBeUndefined();
     trigger.props.onClick!();
-    const open = render(select, manage, true, true);
+    const open = render(select, undefined, true, true);
+    expect(open.html).toContain("The bot is working. A change applies from its next step");
     const modes = open.nodes.filter((node) => node.props.role === "menuitemradio");
     expect(modes.length).toBeGreaterThan(0);
-    for (const mode of modes) {
-      expect(mode.props.disabled).toBe(true);
-      mode.props.onClick!();
-    }
-    expect(select).not.toHaveBeenCalled();
-    open.nodes.find((node) => node.props.role === "menuitem")!.props.onClick!();
-    expect(manage).toHaveBeenCalledOnce();
-    expect(render(select, undefined, true, true).nodes.find((node) => node.props["aria-haspopup"] === "menu")!.props.disabled).toBe(true);
+    expect(modes.every((mode) => !mode.props.disabled)).toBe(true);
+    modes.find((node) => renderToStaticMarkup(node).includes("Full access"))!.props.onClick!();
+    expect(select).toHaveBeenCalledExactlyOnceWith("full");
+    fixture.open = true;
+    expect(render(select).html).not.toContain("The bot is working");
   });
 });

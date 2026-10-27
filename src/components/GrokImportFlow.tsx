@@ -40,7 +40,7 @@ export function GrokImportFlow({ link = null, onPreview, onAdded, bare }: {
     return grokSetupLeft(pending.grokSetup)
       ? <GrokFinishSetup notes={pending.grokSetup} imported={added} onDone={() => finish(added)} className="mt-1" />
       : (
-        <div role="status" className="flex items-center gap-2 text-[13.5px] text-ink">
+        <div role="status" className="flex items-center gap-2 text-[14px] text-ink">
           <Check size={15} className="text-success" />
           {t("grokFinish.added", { name: added.name })}
         </div>
@@ -69,7 +69,7 @@ export function GrokImportFlow({ link = null, onPreview, onAdded, bare }: {
         <div className="mt-3">
           <TeamImportDetails pending={pending} importedNames={pending.members.map((member) => takeImportName(member.name, taken))} />
         </div>
-        {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
+        {error && <div role="alert" className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-[13px] text-danger">{error}</div>}
         <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
           <button
             onClick={() => setPending(null)}
@@ -81,7 +81,7 @@ export function GrokImportFlow({ link = null, onPreview, onAdded, bare }: {
           <button
             onClick={() => void add()}
             disabled={adding}
-            className="flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[13.5px] font-medium text-white hover:bg-accent/90 disabled:opacity-60"
+            className="flex items-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[14px] font-medium text-white hover:bg-accent/90 disabled:opacity-60"
           >
             {adding && <Loader2 size={15} className="animate-spin" />}
             {adding ? t("templates.importing") : t("templates.addTeam")}

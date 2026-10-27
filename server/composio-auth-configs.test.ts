@@ -7,10 +7,10 @@ import type { AppConfig } from "./config.ts";
 import { DATA_DIR } from "./config.ts";
 import {
   authorizeService,
+  prepareConnectionAuthConfigs,
   prepareProjectSession,
   relayMcp,
   setManagedBrokerAccess,
-  useRequestedAuthConfigs,
 } from "./composio.ts";
 import { forgetProjectAuthConfigs } from "./composio-project.ts";
 
@@ -19,7 +19,7 @@ const NO_MANAGED_AUTH = (toolkit: string) =>
   `Composio does not manage auth for toolkit ${toolkit} and no auth config without required fields is available. `
   + "Please create an auth config manually or specify one in auth_config_override.";
 const NEEDS_OWN_APP = new Set(["xero", "buffer"]);
-const KEYS = ["ak_byo", "ak_pick", "ak_down", "ak_refuse", "ak_hint"];
+const KEYS = ["ak_byo", "ak_pick", "ak_down", "ak_refuse", "ak_hint", "ak_dash", "ak_card", "ak_later", "ak_plain", "ak_scoped"];
 
 interface FakeSession { user_id: string; auth_configs: Record<string, string> }
 type AuthConfigItem = Record<string, unknown> & { id: string };
@@ -32,6 +32,15 @@ let projectConfigs: Record<string, AuthConfigItem[]> = {};
 let authConfigsDown = false;
 let refusedIds = new Set<string>();
 let nextSession = 1;
+let sessionPatch = true;
+let authConfigEdits = true;
+
+/** Composio uses a Session's named auth config only while that config is enabled for Tool Router. */
+function onForToolRouter(apiKey: string, named: Record<string, string> | undefined): Record<string, string> {
+  const project = projectConfigs[apiKey] ?? [];
+  return Object.fromEntries(Object.entries(named ?? {}).filter(([, id]) =>
+    project.some((config) => config.id === id && config.is_enabled_for_tool_router === true)));
+}
 
 const json = (res: import("node:http").ServerResponse, status: number, body: unknown) => {
   res.writeHead(status, { "content-type": "application/json" });
@@ -87,6 +96,14 @@ beforeAll(async () => {
       return json(res, 200, { items: projectConfigs[apiKey] ?? [] });
     }
     const single = url.pathname.match(/^\/api\/v3\.1\/auth_configs\/([\w-]+)$/);
+    if (req.method === "PATCH" && single) {
+      if (!authConfigEdits) return json(res, 403, { error: { message: "This API key may not edit auth configs" } });
+      const item = (projectConfigs[apiKey] ?? []).find((config) => config.id === single[1]);
+      if (!item) return json(res, 404, { error: { message: "Auth config not found" } });
+      if (body?.type !== item.type) return json(res, 400, { error: { message: "type must match the auth config" } });
+      if (typeof body.is_enabled_for_tool_router === "boolean") item.is_enabled_for_tool_router = body.is_enabled_for_tool_router;
+      return json(res, 200, { success: true, message: "updated" });
+    }
     if (req.method === "GET" && single) {
       const item = (projectConfigs[apiKey] ?? []).find((config) => config.id === single[1]);
       return item ? json(res, 200, item) : json(res, 404, { error: { message: "Auth config not found" } });
@@ -96,12 +113,16 @@ beforeAll(async () => {
       const refused = named.find((id) => refusedIds.has(id));
       if (refused) return json(res, 400, { error: { message: `Auth config ${refused} is not enabled for tool router` } });
       const id = `trs_${nextSession++}`;
-      sessions.set(id, { user_id: body.user_id, auth_configs: body.auth_configs ?? {} });
+      sessions.set(id, { user_id: body.user_id, auth_configs: onForToolRouter(apiKey, body.auth_configs) });
       return json(res, 201, sessionBody(id));
     }
     const session = url.pathname.match(/^\/api\/v3\.1\/tool_router\/session\/([\w-]+)(\/link|\/toolkits)?$/);
     if (session && sessions.has(session[1]!)) {
       if (!session[2] && req.method === "GET") return json(res, 200, sessionBody(session[1]!));
+      if (!session[2] && req.method === "PATCH" && sessionPatch) {
+        if (body.auth_configs) sessions.get(session[1]!)!.auth_configs = onForToolRouter(apiKey, body.auth_configs);
+        return json(res, 200, sessionBody(session[1]!));
+      }
       if (session[2] === "/toolkits") return json(res, 200, { items: [] });
       if (session[2] === "/link" && req.method === "POST") {
         const configs = sessions.get(session[1]!)!.auth_configs;
@@ -129,6 +150,8 @@ beforeEach(() => {
   projectConfigs = {};
   authConfigsDown = false;
   refusedIds = new Set();
+  sessionPatch = true;
+  authConfigEdits = true;
 });
 
 afterEach(() => {
@@ -143,17 +166,29 @@ const existingSession = (auth_configs: Record<string, string> = {}) => {
 };
 const sessionPosts = (since: number) =>
   calls.slice(since).filter((call) => call.method === "POST" && call.path === "/api/v3.1/tool_router/session");
+const sessionWrites = (since: number) => calls.slice(since)
+  .filter((call) => call.path.startsWith("/api/v3.1/tool_router/session") && !call.path.endsWith("/link")
+    && (call.method === "POST" || call.method === "PATCH"))
+  .map((call) => call.body.auth_configs);
 const linkPosts = (since: number) => calls.slice(since).filter((call) => call.method === "POST" && call.path.endsWith("/link"));
 const callTool = (cfg: AppConfig, name: string) =>
   relayMcp(cfg, { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name, arguments: {} } })
     .then((relayed) => JSON.parse(new TextDecoder().decode(relayed.bytes)) as { result: { content: Array<{ text: string }>; isError?: boolean } });
 
 const enabled = (id: string, slug: string, updated: string, extra: Record<string, unknown> = {}): AuthConfigItem => ({
-  id, toolkit: { slug }, status: "ENABLED", is_composio_managed: false, is_enabled_for_tool_router: true, last_updated_at: updated, ...extra,
+  id, type: "custom", toolkit: { slug }, status: "ENABLED", is_composio_managed: false, is_enabled_for_tool_router: true,
+  created_at: updated, last_updated_at: updated, ...extra,
 });
+/** A custom auth config a person made in the Composio dashboard: enabled, with Tool Router unset. */
+const fromDashboard = (id: string, slug: string, created: string, extra: Record<string, unknown> = {}): AuthConfigItem => {
+  const { is_enabled_for_tool_router: _off, ...item } = enabled(id, slug, created, extra);
+  return { ...item, ...extra };
+};
+const patches = (since: number) => calls.slice(since).filter((call) => call.method === "PATCH");
 
 describe("a person's own Composio project", () => {
-  it("connects Xero and Buffer through the project's enabled custom auth configs with nothing named by the bot", async () => {
+  it("connects Xero and Buffer through the project's enabled custom auth configs, replacing a Session Composio won't change", async () => {
+    sessionPatch = false;
     projectConfigs.ak_byo = [
       enabled("ac_xero_first", "xero", "2026-10-01T00:00:00Z"),
       enabled("ac_xero_newest", "XERO", "2026-10-20T00:00:00Z"),
@@ -180,7 +215,7 @@ describe("a person's own Composio project", () => {
     await expect(authorizeService(cfg, "buffer")).resolves.toEqual({ url: "https://connect.composio.dev/link/buffer/ac_buffer" });
     expect(linkPosts(before)).toHaveLength(2);
     expect(sessionPosts(before)).toHaveLength(1);
-    expect(info).toHaveBeenCalledWith("[composio] 2 enabled auth configs for xero; using the most recently updated, ac_xero_newest");
+    expect(info).toHaveBeenCalledWith("[composio] 2 enabled auth configs for xero; using the most recently created, ac_xero_newest");
     expect(info).toHaveBeenCalledTimes(1);
   });
 
@@ -188,26 +223,26 @@ describe("a person's own Composio project", () => {
     projectConfigs.ak_pick = [
       enabled("ac_xero_team", "xero", "2026-10-01T00:00:00Z"),
       enabled("ac_xero_newest", "xero", "2026-10-20T00:00:00Z"),
-      enabled("ac_xero_off", "xero", "2026-10-21T00:00:00Z", { is_enabled_for_tool_router: false }),
       enabled("ac_xero_disabled", "xero", "2026-10-22T00:00:00Z", { status: "DISABLED" }),
       enabled("ac_slack_one", "slack", "2026-10-02T00:00:00Z"),
     ];
-    const cfg: AppConfig = { composio: { apiKey: "ak_pick", userId: "openmausbot_person", sessionId: existingSession() } };
-    const pick = (authConfigId: string) => useRequestedAuthConfigs(cfg, [{ slug: "XERO", authConfigId }]);
+    const sessionId = existingSession();
+    const cfg: AppConfig = { composio: { apiKey: "ak_pick", userId: "openmausbot_person", sessionId } };
+    const pick = (authConfigId: string) => prepareConnectionAuthConfigs(cfg, [{ slug: "XERO", authConfigId }]);
 
     await expect(pick("ac_missing")).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/has no auth config ac_missing/) });
     await expect(pick("ac_slack_one")).rejects.toThrow("Auth config ac_slack_one is for slack, not xero.");
-    await expect(pick("ac_xero_off")).rejects.toThrow(/xero auth config is not enabled for Tool Router/);
     await expect(pick("ac_xero_disabled")).rejects.toThrow(/is disabled/);
     const before = calls.length;
     await expect(authorizeService(cfg, "xero")).resolves.toEqual({ url: "https://connect.composio.dev/link/xero/ac_xero_newest" });
 
-    await pick("ac_xero_team");
+    await expect(pick("ac_xero_team")).resolves.toBe("xero connects with the person's own Composio auth config ac_xero_team, the one asked for.");
     await expect(authorizeService(cfg, "xero")).resolves.toEqual({ url: "https://connect.composio.dev/link/xero/ac_xero_team" });
-    expect(sessionPosts(before).map((call) => call.body.auth_configs)).toEqual([
+    expect(sessionWrites(before)).toEqual([
       { slack: "ac_slack_one", xero: "ac_xero_newest" },
       { slack: "ac_slack_one", xero: "ac_xero_team" },
     ]);
+    expect(cfg.composio?.sessionId).toBe(sessionId);
 
     const file = join(DATA_DIR, "composio-auth-configs.json");
     if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
@@ -266,8 +301,8 @@ describe("a person's own Composio project", () => {
     await expect(authorizeService(cfg, "buffer")).resolves.toEqual({ url: "https://connect.composio.dev/link/buffer/ac_buffer_fine" });
     await expect(authorizeService(cfg, "xero")).rejects.toMatchObject({
       status: 400,
-      message: "Composio would not use your xero auth config. Check it is enabled, and enabled for Tool Router, in your "
-        + "Composio project. Composio said: Auth config ac_xero_refused is not enabled for tool router",
+      message: "Composio would not use your xero auth config. Check it is enabled in your Composio project. "
+        + "Composio said: Auth config ac_xero_refused is not enabled for tool router",
     });
     expect(cfg.composio?.sessionId).toMatch(/^trs_\d+$/);
   });
@@ -277,8 +312,8 @@ describe("a person's own Composio project", () => {
     const reply = await callTool(cfg, "XERO_LIST_INVOICES");
     expect(reply.result.isError).toBe(true);
     expect(reply.result.content).toHaveLength(2);
-    expect(reply.result.content[1]!.text).toContain("xero has no Composio-managed sign-in");
-    expect(reply.result.content[1]!.text).toContain('[{"name":"xero","action":"add","auth_config_id":"ac_…"}]');
+    expect(reply.result.content[1]!.text).toContain("xero has no Composio-managed sign-in, so it needs an auth config with "
+      + "the person's own OAuth app in their Composio project, and there is no enabled one for xero.");
 
     projectConfigs.ak_hint = [enabled("ac_xero_new", "xero", "2026-10-22T00:00:00Z")];
     const retried = await callTool(cfg, "XERO_LIST_INVOICES");
@@ -286,21 +321,123 @@ describe("a person's own Composio project", () => {
   });
 });
 
+describe("custom auth configs made in the Composio dashboard", () => {
+  it("connects Xero and Buffer: Tool Router is turned on for the person's config and the Session they already have names it", async () => {
+    projectConfigs.ak_dash = [
+      fromDashboard("ac_xero_dash", "xero", "2026-10-20T00:00:00Z"),
+      fromDashboard("ac_buffer_dash", "buffer", "2026-10-21T00:00:00Z", { is_enabled_for_tool_router: false }),
+    ];
+    const sessionId = existingSession();
+    const cfg: AppConfig = { composio: { apiKey: "ak_dash", userId: "openmausbot_person", sessionId } };
+    const before = calls.length;
+
+    await expect(authorizeService(cfg, "xero")).resolves.toEqual({ url: "https://connect.composio.dev/link/xero/ac_xero_dash" });
+    await expect(authorizeService(cfg, "buffer")).resolves.toEqual({ url: "https://connect.composio.dev/link/buffer/ac_buffer_dash" });
+
+    expect(patches(before).filter((call) => call.path.includes("/auth_configs/")).map(({ path, body }) => [path, body])).toEqual([
+      ["/api/v3.1/auth_configs/ac_xero_dash", { type: "custom", is_enabled_for_tool_router: true }],
+      ["/api/v3.1/auth_configs/ac_buffer_dash", { type: "custom", is_enabled_for_tool_router: true }],
+    ]);
+    expect(sessionPosts(before)).toHaveLength(0);
+    expect(cfg.composio?.sessionId).toBe(sessionId);
+    expect(sessions.get(sessionId)!.auth_configs).toEqual({ buffer: "ac_buffer_dash", xero: "ac_xero_dash" });
+    const reply = await callTool(cfg, "XERO_LIST_INVOICES");
+    expect(JSON.parse(reply.result.content[0]!.text)).toEqual({ successful: true, data: { authConfig: "ac_xero_dash" } });
+  });
+
+  it("readies the config before the card shows, and tells the bot which of several it uses", async () => {
+    projectConfigs.ak_card = [
+      fromDashboard("ac_xero_first", "xero", "2026-09-01T00:00:00Z"),
+      fromDashboard("ac_xero_latest", "xero", "2026-10-25T00:00:00Z", { last_updated_at: "2026-10-25T00:00:00Z" }),
+      fromDashboard("ac_xero_edited", "xero", "2026-10-02T00:00:00Z", { last_updated_at: "2026-10-26T00:00:00Z" }),
+    ];
+    const sessionId = existingSession();
+    const cfg: AppConfig = { composio: { apiKey: "ak_card", userId: "openmausbot_person", sessionId } };
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    await expect(prepareConnectionAuthConfigs(cfg, [{ slug: "xero" }, { slug: "gmail" }])).resolves.toBe(
+      "xero connects with the person's own Composio auth config ac_xero_latest, the most recently created of their 3 enabled ones.",
+    );
+    expect(sessions.get(sessionId)!.auth_configs).toEqual({ xero: "ac_xero_latest" });
+    const before = calls.length;
+    await expect(authorizeService(cfg, "xero")).resolves.toEqual({ url: "https://connect.composio.dev/link/xero/ac_xero_latest" });
+    expect(patches(before)).toEqual([]);
+
+    await expect(prepareConnectionAuthConfigs(cfg, [{ slug: "xero", authConfigId: "ac_xero_first" }])).resolves.toBe(
+      "xero connects with the person's own Composio auth config ac_xero_first, the one asked for.",
+    );
+    await expect(authorizeService(cfg, "xero")).resolves.toEqual({ url: "https://connect.composio.dev/link/xero/ac_xero_first" });
+    expect(projectConfigs.ak_card.map((config) => [config.id, config.is_enabled_for_tool_router])).toEqual([
+      ["ac_xero_first", true], ["ac_xero_latest", true], ["ac_xero_edited", undefined],
+    ]);
+  });
+
+  it("picks up a config made after the bot's Session started, from the very call that needed it, with no restart", async () => {
+    const sessionId = existingSession();
+    const cfg: AppConfig = { composio: { apiKey: "ak_later", userId: "openmausbot_person", sessionId } };
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    await expect(callTool(cfg, "BUFFER_LIST_POSTS")).resolves.toMatchObject({ result: { isError: true } });
+
+    projectConfigs.ak_later = [fromDashboard("ac_buffer_new", "buffer", "2026-10-26T08:00:00Z")];
+    const failed = await callTool(cfg, "BUFFER_LIST_POSTS");
+    expect(failed.result.content[0]!.text).toContain(NO_MANAGED_AUTH("buffer"));
+    expect(failed.result.content[1]!.text).toBe(
+      "OpenMausBot note: buffer has no Composio-managed sign-in. buffer connects with the person's own Composio auth config "
+      + 'ac_buffer_new. Call COMPOSIO_MANAGE_CONNECTIONS with toolkits ["buffer"] to show the person a card that connects '
+      + "it, then end the turn. Do not retry this call before that.",
+    );
+    expect(sessions.get(sessionId)!.auth_configs).toEqual({ buffer: "ac_buffer_new" });
+    await expect(authorizeService(cfg, "buffer")).resolves.toEqual({ url: "https://connect.composio.dev/link/buffer/ac_buffer_new" });
+    expect(cfg.composio?.sessionId).toBe(sessionId);
+  });
+
+  it("leaves a toolkit with Composio-managed sign-in and no config of the person's exactly as it was", async () => {
+    projectConfigs.ak_plain = [fromDashboard("ac_xero_plain", "xero", "2026-10-20T00:00:00Z")];
+    const sessionId = existingSession();
+    const cfg: AppConfig = { composio: { apiKey: "ak_plain", userId: "openmausbot_person", sessionId } };
+    const before = calls.length;
+
+    await expect(prepareConnectionAuthConfigs(cfg, [{ slug: "gmail" }])).resolves.toBeUndefined();
+    await expect(authorizeService(cfg, "gmail")).resolves.toEqual({ url: "https://connect.composio.dev/link/gmail/managed" });
+    expect(patches(before)).toEqual([]);
+    expect(sessionPosts(before)).toEqual([]);
+    expect(sessions.get(sessionId)!.auth_configs).toEqual({});
+    expect(projectConfigs.ak_plain[0]!.is_enabled_for_tool_router).toBeUndefined();
+  });
+
+  it("says in plain words when Composio won't let the key turn Tool Router on", async () => {
+    authConfigEdits = false;
+    projectConfigs.ak_scoped = [fromDashboard("ac_xero_scoped", "xero", "2026-10-20T00:00:00Z")];
+    const cfg: AppConfig = { composio: { apiKey: "ak_scoped", userId: "openmausbot_person", sessionId: existingSession() } };
+
+    await expect(authorizeService(cfg, "xero")).rejects.toMatchObject({
+      status: 409,
+      message: "OpenMausBot could not turn on Tool Router for your xero auth config ac_xero_scoped, which Composio needs before "
+        + "it uses it. Check that your Composio project key may edit auth configs. Composio said: This API key may not edit auth configs",
+    });
+    const reply = await callTool(cfg, "XERO_LIST_INVOICES");
+    expect(reply.result.content[1]!.text).toMatch(/^OpenMausBot note: OpenMausBot could not turn on Tool Router for your xero auth config/);
+  });
+});
+
 describe("OpenMausBot's managed connected apps", () => {
   const managed = {} as AppConfig;
-  const plainLine = "xero needs your own OAuth app. Add your Composio project key in Settings → API keys, with an enabled "
-    + "xero auth config there, then connect again.";
+  const plainLine = "xero needs your own OAuth app. Add your Composio project key in Settings → API keys; OpenMausBot then "
+    + "uses your xero auth config from that project. Connect again.";
 
   it("answers a toolkit that needs the person's own OAuth app with one plain line instead of Composio's error", async () => {
     setManagedBrokerAccess({ url: `${origin}/broker`, token: "c".repeat(64) });
     await expect(authorizeService(managed, "xero")).rejects.toMatchObject({ status: 409, message: plainLine });
 
     const before = calls.length;
-    await expect(useRequestedAuthConfigs(managed, [{ slug: "xero", authConfigId: "ac_xero_newest" }]))
+    await expect(prepareConnectionAuthConfigs(managed, [{ slug: "xero", authConfigId: "ac_xero_newest" }]))
       .rejects.toMatchObject({ status: 409, message: plainLine });
+    await expect(prepareConnectionAuthConfigs(managed, [{ slug: "xero" }])).resolves.toBeUndefined();
     expect(calls.slice(before)).toEqual([]);
 
     const reply = await callTool(managed, "XERO_LIST_INVOICES");
     expect(reply.result.content[1]!.text).toContain("OpenMausBot's built-in connected apps cannot use. Tell the person: add their own Composio project key in Settings → API keys");
+    expect(reply.result.content[1]!.text).toContain("OpenMausBot then picks that auth config up on its own");
+    expect(calls.slice(before).some((call) => call.path.startsWith("/api/"))).toBe(false);
   });
 });

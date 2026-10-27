@@ -175,7 +175,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
               ) : null}
               <div className="min-w-[200px] flex-1">
                 <div className="font-mono text-[18px] tracking-[0.14em] text-ink">{offer.code}</div>
-                <div className="mt-1 text-[12.5px] text-ink-secondary">{t("remote.serverPairing.expires", { minutes: minutesLeft(offer.expiresAt, now) })}</div>
+                <div className="mt-1 text-[13px] text-ink-secondary">{t("remote.serverPairing.expires", { minutes: minutesLeft(offer.expiresAt, now) })}</div>
                 {offer.url ? (
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     <code className="break-all text-[12px] text-ink-secondary">{offer.url}</code>
@@ -184,7 +184,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
                     </button>
                   </div>
                 ) : (
-                  <p className="mt-3 text-[12.5px] text-ink-secondary">{offer.hint ?? t("remote.serverPairing.noLink")}</p>
+                  <p className="mt-3 text-[13px] text-ink-secondary">{offer.hint ?? t("remote.serverPairing.noLink")}</p>
                 )}
               </div>
             </div>
@@ -193,7 +193,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
       ) : null}
       <div className="mt-5 text-[13px] font-medium text-ink">{t(pairingCodes ? "remote.serverPairing.devices" : "remote.serverPairing.portalDevices")}</div>
       {listed.length === 0 ? (
-        <p className="mt-1 text-[12.5px] text-ink-secondary">{t("remote.serverPairing.noDevices")}</p>
+        <p className="mt-1 text-[13px] text-ink-secondary">{t("remote.serverPairing.noDevices")}</p>
       ) : (
         <ul className="mt-1 divide-y divide-hairline/40">
           {listed.map((device) => (

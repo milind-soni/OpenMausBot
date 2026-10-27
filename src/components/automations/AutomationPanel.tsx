@@ -12,7 +12,7 @@ import { useAllAutomationActions } from "./app-actions";
 import { FixButton, StatusMark } from "./parts";
 
 const RECENT = 5;
-const BUTTON = "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12.5px] font-medium disabled:opacity-50";
+const BUTTON = "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium disabled:opacity-50";
 
 /** One automation, simply: its sentence, its status, the last five runs, and what can be done to it. */
 export function AutomationPanel({ automation, sentence, onClose, onEdit, onDeleted }: {
@@ -64,8 +64,8 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
               {actions.copied === webhook.id ? <Check size={14} /> : <Copy size={14} />}
               {actions.copied === webhook.id ? t("automations.address.copied") : t("automations.address.copy")}
             </button>
-            {(!receiving || !state.config?.cloudHome) && <p className="mt-2 text-[11.5px] leading-relaxed text-ink-secondary">{receiving ? t("automations.address.keepOpen") : t("automations.address.unavailable")}</p>}
-            <details className="mt-2.5 text-[11.5px] text-ink-secondary">
+            {(!receiving || !state.config?.cloudHome) && <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{receiving ? t("automations.address.keepOpen") : t("automations.address.unavailable")}</p>}
+            <details className="mt-2.5 text-[12px] text-ink-secondary">
               <summary className="cursor-pointer select-none font-medium text-ink-secondary hover:text-ink">{t("automations.more")}</summary>
               <div className="mt-2 space-y-2 leading-relaxed">
                 {received && (
@@ -85,7 +85,7 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
                           <span className={cn("shrink-0 font-semibold", call.ok ? "text-success" : "text-danger")}>{call.ok ? "✓" : "✗"}</span>
                           <span className="min-w-0 truncate text-ink">{call.reason}</span>
                         </button>
-                        {openCall === call.id && <pre className="mx-1.5 mb-1 whitespace-pre-wrap break-all rounded-md bg-inset px-2 py-1.5 font-mono text-[10.5px] text-ink">{call.preview || t("automations.calls.empty")}</pre>}
+                        {openCall === call.id && <pre className="mx-1.5 mb-1 whitespace-pre-wrap break-all rounded-md bg-inset px-2 py-1.5 font-mono text-[11px] text-ink">{call.preview || t("automations.calls.empty")}</pre>}
                       </li>
                     ))}</ul>
                   )}
@@ -111,13 +111,13 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
         <section>
           <h3 className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-ink-tertiary">{t("automations.panel.recent")}</h3>
           {automation.runs.length === 0
-            ? <p className="text-[12.5px] text-ink-secondary">{t("automations.panel.noRuns")}</p>
+            ? <p className="text-[13px] text-ink-secondary">{t("automations.panel.noRuns")}</p>
             : <ul className="space-y-1">{automation.runs.slice(0, RECENT).map((run) => {
               const line = runLine(run);
               return (
                 <li key={run.id}>
                   <button type="button" disabled={!run.threadId} onClick={() => actions.openRun(automation, run)} title={run.threadId ? t("automations.panel.open") : undefined}
-                    className="flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] hover:bg-raised disabled:hover:bg-transparent">
+                    className="flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-raised disabled:hover:bg-transparent">
                     <span className="shrink-0 text-ink-secondary">{line.when}</span>
                     <span className={cn("shrink-0 font-semibold", line.mark === "✓" ? "text-success" : line.mark === "✗" ? "text-danger" : "text-warning")}>{line.mark}</span>
                     <span className="min-w-0 truncate text-ink">{line.text}</span>

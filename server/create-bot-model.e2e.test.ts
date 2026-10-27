@@ -27,7 +27,7 @@ it("Chief creation uses the workspace default or a validated explicit model with
     const chiefModel = { instanceId: "claude", model: claude.models.default };
     const chief = (await api("POST", "/api/bots", { name: "Chief", section: "Design", modelSelection: chiefModel }, 201)).bot;
     // At Ask too, each creation applies at once: OpenMausBot adds no card of its own.
-    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" });
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask", connectorScopes: { apps: { gmail: "read" } } });
     await api("POST", `/api/bots/${chief.id}/messages`, { text: "Prepare a specialist." }, 202);
     await expect.poll(() => existsSync(fixture.fixtureDumpPath), { timeout: 15_000 }).toBe(true);
     const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
@@ -65,7 +65,7 @@ it("Chief creation uses the workspace default or a validated explicit model with
     expect(bots.find((bot: any) => bot.id === chief.id).modelSelection).toEqual(chiefModel);
     for (const [id, modelSelection] of [[first.id, defaultModel], [second.id, explicit]]) {
       expect(bots.find((bot: any) => bot.id === id)).toMatchObject({
-        section: "Design", modelSelection, approvalMode: "full", autoApprove: false, composio: false, approvePeerComms: false,
+        section: "Design", modelSelection, approvalMode: "full", autoApprove: false, approvePeerComms: false, connectorScopes: { apps: { gmail: "read" } },
         soul: "Complete assigned work.",
       });
     }

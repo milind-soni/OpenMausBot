@@ -17,7 +17,7 @@ export function CloudBackendPicker({
   return (
     <div className="mt-3 rounded-lg bg-inset p-3">
       <div className="text-[12px] font-medium text-ink">{compact ? t("botAccess.cloud.provider") : t("botAccess.cloud.backend")}</div>
-      <div className="mt-0.5 text-[11.5px] text-ink-secondary">
+      <div className="mt-0.5 text-[12px] text-ink-secondary">
         {compact
           ? value === "vps" ? t("botAccess.cloud.vpsDescription") : t("botAccess.cloud.hostedDescription")
           : value === "vps"

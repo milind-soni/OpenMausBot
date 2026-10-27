@@ -31,7 +31,7 @@ describe("what a server remembers about computers lent to it", () => {
     now += 60_000;
     lent.connected("cloud-home", { id: again, name: "ASH-PC", folders: 0, terminal: false, screen: true });
     const reread = new LentComputers(path, () => now);
-    expect(reread.list("cloud-home")).toEqual([{ id: again, person: "cloud-home", name: "ASH-PC", platform: "win32", folders: 0, terminal: false, screen: true, internet: false,
+    expect(reread.list("cloud-home")).toEqual([{ id: again, person: "cloud-home", name: "ASH-PC", platform: "win32", folders: 0, terminal: false, screen: true, internet: false, chrome: false,
       lastSeenAt: now, lastUsedAt: Date.UTC(2026, 9, 7, 14, 2) + 90_000, stoppedAt: null }]);
     expect(reread.list("someone-else")).toEqual([]);
     expect(reread.list(null)).toEqual([]);
@@ -76,7 +76,7 @@ describe("the shared-computer registry with that memory", () => {
     const pc = lend({ platform: "win32" });
     broker.register(pc, { session: "s1", person: "cloud-home" }, secret);
     expect(broker.away("cloud-home")).toEqual({});
-    expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ id: pc.id, name: "ASH-PC", platform: "win32", online: true, lent: true, scopes: { folders: 1, terminal: false, screen: true, internet: false } })]);
+    expect(broker.known("cloud-home")).toEqual([expect.objectContaining({ id: pc.id, name: "ASH-PC", platform: "win32", online: true, lent: true, scopes: { folders: 1, terminal: false, screen: true, internet: false, chrome: false } })]);
     live = false;
     expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is shared with the Cloud but offline \(last online \d{4}-\d\d-\d\d \d\d:\d\d UTC\)/u);
     const offline = expect(broker.request({ computer_id: pc.id, action: "computer_tools" }, "cloud-home", () => true))
@@ -107,7 +107,7 @@ describe("the shared-computer registry with that memory", () => {
     const mac = lend({ name: "Ash's MacBook", platform: "darwin", internet: true });
     expect(sharedComputerRegistration.safeParse(mac).success).toBe(true);
     broker.register(mac, { session: "s1", person: "cloud-home" }, secret);
-    expect(broker.known("cloud-home")[0]).toEqual(expect.objectContaining({ name: "Ash's MacBook", online: true, scopes: { folders: 1, terminal: false, screen: true, internet: true } }));
+    expect(broker.known("cloud-home")[0]).toEqual(expect.objectContaining({ name: "Ash's MacBook", online: true, scopes: { folders: 1, terminal: false, screen: true, internet: true, chrome: false } }));
     expect(broker.status("cloud-home")[0]!.scopes.internet).toBe(true);
     expect(broker.internetAway("cloud-home"), "online: the browsing goes through it").toBeNull();
     live = false;
@@ -117,6 +117,13 @@ describe("the shared-computer registry with that memory", () => {
     broker.disconnect(mac.id, "s1", secret);
     expect(broker.internetAway("cloud-home"), "turned off there: no longer lent, so nothing to say").toBeNull();
     broker.close();
+  });
+
+  it("remembers whether a computer lends its Chrome", () => {
+    const path = file();
+    const lent = new LentComputers(path);
+    lent.connected("cloud-home", { id: randomUUID(), name: "ASH-PC", platform: "win32", folders: 0, terminal: false, screen: false, chrome: true });
+    expect(new LentComputers(path).list("cloud-home")[0]!.chrome).toBe(true);
   });
 
   it("keeps a paused computer lent: it reads as offline, never as turned off, and an older desktop's disconnect still stops it", () => {

@@ -54,7 +54,7 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
       <div className="px-3 pb-1 text-[11px] font-medium uppercase tracking-wide text-ink-secondary">
         {hits ? t("search.messagesCount", { count: `${hits.length}${hits.length === 40 ? "+" : ""}` }) : t("search.messages")}
       </div>
-      {error && <div className="px-3 py-2 text-[12.5px] text-danger">{t("search.failed", { error })}</div>}
+      {error && <div className="px-3 py-2 text-[13px] text-danger">{t("search.failed", { error })}</div>}
       {hits && hits.length === 0 && !error && <div className="px-3 py-3 text-[13px] text-ink-secondary">{t("search.noMatch", { query: q })}</div>}
       {hits?.map((hit) => {
         const bot = hit.botId ? state.bots.find((b) => b.id === hit.botId) : undefined;
@@ -78,7 +78,7 @@ export function SearchResults({ query, onLanded }: { query: string; onLanded: ()
                 {hit.task ? <span className="truncate">· {hit.task}</span> : null}
                 <span className="ml-auto shrink-0 tabular-nums">{formatTime(hit.at)}</span>
               </span>
-              <span dir="auto" className={cn("mt-0.5 line-clamp-2 text-[12.5px] leading-snug", hit.role === "user" ? "text-ink" : "text-ink-secondary")}>
+              <span dir="auto" className={cn("mt-0.5 line-clamp-2 text-[13px] leading-snug", hit.role === "user" ? "text-ink" : "text-ink-secondary")}>
                 {hit.kind === "activity" && <Wrench size={11} className="mr-1 inline text-ink-secondary" />}
                 {before}
                 <mark className="rounded-sm bg-accent/25 px-0.5 text-ink">{match}</mark>

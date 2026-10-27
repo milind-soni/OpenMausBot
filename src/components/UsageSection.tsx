@@ -157,12 +157,12 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
           })}
         </span>
         <span className="min-w-0">
-          <span className="block truncate text-[13.5px] text-ink">{title}</span>
+          <span className="block truncate text-[14px] text-ink">{title}</span>
           <span className="block truncate text-[12px] text-ink-tertiary">{startedLabel(root.startedAt)} · {root.bots.map((bot) => bot.name).join(", ")}</span>
         </span>
-        <span className="flex items-center gap-3 text-[12.5px] tabular-nums text-ink-secondary">
+        <span className="flex items-center gap-3 text-[13px] tabular-nums text-ink-secondary">
           {root.running && <LiveBadge />}
-          {root.errors > 0 && <span className="rounded-md bg-danger/12 px-1.5 py-0.5 text-[11.5px] font-medium text-danger">{t("trace.groupErrors", { count: String(root.errors) })}</span>}
+          {root.errors > 0 && <span className="rounded-md bg-danger/12 px-1.5 py-0.5 text-[12px] font-medium text-danger">{t("trace.groupErrors", { count: String(root.errors) })}</span>}
           {root.timed ? <span className="hidden min-w-[3.5rem] text-right sm:inline">{formatDuration(root.durationMs)}</span>
             : <span className="hidden rounded bg-raised px-1.5 text-[11px] sm:inline">{t("trace.notTimed")}</span>}
           <span className="min-w-[3.5rem] text-right text-ink">{formatCost(root.costUsd)}</span>
@@ -225,7 +225,7 @@ export function UsageSection() {
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       {open ? (
         <TraceView id={open.id} at={open.at} actions={(
-          <button type="button" onClick={() => setOpen(null)} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink">
+          <button type="button" onClick={() => setOpen(null)} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">
             <ArrowLeft size={13} />{t("trace.back")}
           </button>
         )} />
@@ -246,7 +246,7 @@ export function UsageSection() {
               {list?.roots.map((root) => <RunRow key={root.id} root={root} onOpen={() => setOpen({ id: root.id, at: root.startedAt })} />)}
             </ul>
             {list?.next !== undefined && (
-              <button type="button" onClick={more} className="m-2 rounded-lg px-3 py-1.5 text-[12.5px] text-accent hover:bg-raised/50">{t("usage.page.more")}</button>
+              <button type="button" onClick={more} className="m-2 rounded-lg px-3 py-1.5 text-[13px] text-accent hover:bg-raised/50">{t("usage.page.more")}</button>
             )}
             {untimed && <p className="px-3 pb-3 pt-1 text-[12px] text-ink-tertiary">{t("usage.page.untimedNote")}</p>}
           </section>

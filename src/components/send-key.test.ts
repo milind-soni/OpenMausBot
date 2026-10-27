@@ -8,11 +8,11 @@ import { SEND_KEYS, type SendKey } from "@/lib/send-key";
 import type { ApprovalModeSelector } from "./ApprovalModeSelector";
 import type { ModelPicker } from "./ModelPicker";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), instances: [] as unknown[], config: undefined as unknown }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), instances: [] as unknown[], config: undefined as unknown, tourOpen: false }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, api: vi.fn(async () => ({})), useStore: () => ({
-    state: { ...original.initialState, instances: fixture.instances, config: fixture.config ?? original.initialState.config },
+    state: { ...original.initialState, instances: fixture.instances, config: fixture.config ?? original.initialState.config, tourOpen: fixture.tourOpen },
     dispatch: fixture.dispatch,
   }) };
 });
@@ -103,6 +103,7 @@ beforeEach(() => {
   vi.mocked(api).mockClear();
   fixture.instances = [];
   fixture.config = undefined;
+  fixture.tourOpen = false;
   setSendKey("enter");
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } })));
   host = document.createElement("div");
@@ -240,6 +241,7 @@ describe("the send key in hints", () => {
     ["enter", "Enter"], ["shift-enter", "Shift+Enter"], ["mod-enter", "Ctrl+Enter"],
   ] as const)("names the key in the tour's composer step (%s)", (mode, label) => {
     fixture.config = { onboarding: { completedAt: 1, hintsSeen: [] } };
+    fixture.tourOpen = true; // started from Settings: the app tour never starts by itself
     setSendKey(mode);
     render(createElement(GuidedTour));
     expect(document.body.textContent).toContain(`Type anything and press ${label}. Every chat`);

@@ -10,12 +10,12 @@ import {
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
 import { addEndpoint, addEndpointSchema, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
-import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
+import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "../contracts.ts";
 import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
 import { findCliCandidates, resetPathCache } from "../env-path.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
-import { checkEngine } from "../engine-check.ts";
+import { checkEngine, type EngineCheck } from "../engine-check.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import type { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { providerIconPatchSchema, withInstanceIcon } from "../provider-icon.ts";
@@ -43,6 +43,8 @@ export interface InstanceRouteDeps {
   threadBusy(botId: string, threadId: string): boolean;
   botForThread(botId: string, threadId: string): Pick<{ modelSelection: ModelSelection }, "modelSelection"> | null;
   activeGroupTurnForBot(botId: string): { threadId: string } | null;
+  /** The server's tested-AI record (server/tested-ai.ts): a check there also settles the new-bot default. */
+  checkInstance?(instance: ProviderInstance): Promise<EngineCheck>;
 }
 
 export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
@@ -161,7 +163,7 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           const instance = registry.get(instanceId);
           if (!instance) return json(res, 404, { error: "unknown instance" });
           res.setHeader("cache-control", "no-store");
-          return json(res, 200, await checkEngine(instance));
+          return json(res, 200, await (deps.checkInstance ?? checkEngine)(instance));
         }
         if (action === "refresh-models") {
           if (!(await registry.refreshModels(instanceId))) return json(res, 404, { error: "unknown instance" });

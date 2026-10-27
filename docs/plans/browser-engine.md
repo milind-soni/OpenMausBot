@@ -148,12 +148,29 @@ system prompt teaches them. No adapter.
   `chrome://inspect/#remote-debugging` (Chrome 144+); Chrome asks before it
   accepts the connection. Switching a profile's browser closes its open one
   (which saves a built-in browser's logins) and waits for its bots' turns.
-- **Where it applies.** Only where the bots run on the person's computer:
-  the desktop app. A server or Cloud has no Chrome of the person's, so the
-  option is shown as unavailable and every profile there stays built-in.
-  `browserEngine.attachCdpUrl` in config.json is now where My Chrome is when
-  it cannot be found by itself (another port or machine); setting it also
-  makes My Chrome available on a server. It no longer attaches every bot.
+- **Where it applies.** The desktop app, where the bots run on the person's
+  computer, and My Cloud (a personal Cloud home, never a Team Cloud) once a
+  Mac or PC lends its Chrome. That computer lends Chrome only by its own
+  **Your Chrome** switch in Settings → MausBot Cloud, which is off by default,
+  never part of the default grant, and dropped when lending is turned off.
+  Chrome travels over the device link that carries the internet connection:
+  agent-browser on My Cloud attaches through a loopback door per browser
+  session (`server/browser/lent-chrome.ts`), My Cloud asks the link for a
+  Chrome stream without naming a host or port, and the computer connects only
+  to the DevTools port it finds itself in Chrome's `DevToolsActivePort`
+  (`electron/device-chrome.mjs`). It is used only in the person's own
+  conversations and routines: a conversation someone else wrote in gets
+  "Someone else wrote in this conversation, so it can't use your Chrome. Start
+  a new conversation to use it." When that computer is offline or Chrome can't
+  be reached, the call says why and never falls back to the built-in browser.
+  The Browser picker says which computer the profile uses and whether it is
+  online, or how to lend one. A self-hosted server or a Team Cloud has no
+  Chrome of the person's, so the option is shown as unavailable and every
+  profile there stays built-in. `browserEngine.attachCdpUrl` in config.json
+  is now where My Chrome is when it cannot be found by itself (another port or
+  machine); setting it also makes My Chrome available on a server. It no
+  longer attaches every bot. Details of the lent Chrome:
+  [MausBot Cloud](../cloud-pro.md#your-chrome).
 - **Why My Chrome and not a headed built-in browser.** Measured Oct 12 with
   agent-browser 0.37.0 and Chrome 154 on macOS, entering an account that
   does not exist at accounts.google.com: the headless built-in browser and a

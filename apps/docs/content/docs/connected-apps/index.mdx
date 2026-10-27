@@ -49,6 +49,18 @@ The steps below are only needed to **post** to X through Composio. Composio does
 
 The official managed OpenMausBot service keeps X disabled until it owns an appropriate X OAuth app. Older OpenMausBot tasks that refer to the connector as `x` continue to work; OpenMausBot translates that alias to Composio's `twitter` toolkit automatically.
 
+## Apps that need your own OAuth app
+
+Some apps, such as Xero and Buffer, have no sign-in that Composio provides, so they connect only with your own OAuth app:
+
+1. In your Composio project, create an auth config for the app (**Auth Configs → Create**) with your OAuth app's client ID and secret, and keep it enabled.
+2. Save the project's key under **Self-host connected apps**.
+3. Connect the app from **Connected apps**, or let a bot ask for it in chat.
+
+OpenMausBot finds the auth config by itself, switches on what Composio needs before it uses it ("enabled for Tool Router", which a config you made yourself can have off), and tells the bot which config it used. If you have several for one app, it uses the most recently created. A connection you made in the Composio dashboard itself is not visible to OpenMausBot, so connect the app once from OpenMausBot.
+
+With the managed service, these apps can't connect: it uses OpenMausBot's own Composio project, which cannot use your OAuth app. Add your own project key as above.
+
 ## Multiple accounts
 
 Connect more than one account for the same toolkit and give each a clear alias such as `work`, `personal`, or `client-acme`. When several accounts could perform an action, OpenMausBot requires explicit selection instead of silently replacing the first connection.

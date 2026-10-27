@@ -63,7 +63,7 @@ export function LoginForm({
           <input name="site" type="text" inputMode="url" autoComplete="off" spellCheck={false} required maxLength={2048}
             placeholder={t("logins.sitePlaceholder")} value={site.value} onChange={(event) => site.onChange(event.target.value)}
             disabled={pending} className={FIELD} autoFocus={autoFocus} aria-describedby={`${id}-site`} />
-          <span id={`${id}-site`} className="text-[11.5px] font-normal leading-snug text-ink-tertiary">{t("logins.siteHint")}</span>
+          <span id={`${id}-site`} className="text-[12px] font-normal leading-snug text-ink-tertiary">{t("logins.siteHint")}</span>
         </label>
       )}
       {username && (
@@ -83,10 +83,10 @@ export function LoginForm({
         {t(replacing ? "logins.totpKeep" : "logins.totp")}
         <input name="totp" type="password" autoComplete="off" spellCheck={false} maxLength={2048} value={totp}
           onChange={(event) => setTotp(event.target.value)} disabled={pending} className={FIELD} aria-describedby={`${id}-totp`} />
-        <span id={`${id}-totp`} className="text-[11.5px] font-normal leading-snug text-ink-tertiary">{t("logins.totpHint")}</span>
+        <span id={`${id}-totp`} className="text-[12px] font-normal leading-snug text-ink-tertiary">{t("logins.totpHint")}</span>
       </label>
       {children}
-      <p className="flex items-start gap-1 text-[11.5px] leading-snug text-ink-tertiary">
+      <p className="flex items-start gap-1 text-[12px] leading-snug text-ink-tertiary">
         <LockKeyhole size={11} aria-hidden="true" className="mt-[3px] shrink-0" /> {t("logins.private")}
       </p>
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}

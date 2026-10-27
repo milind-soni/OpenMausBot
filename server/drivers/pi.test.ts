@@ -10,9 +10,9 @@ import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
+import { buildMcpServers } from "./pi-mcp-servers.ts";
 import {
   applyPiLocalCatalog,
-  buildMcpServers,
   decodePiFrame,
   ensurePiInjectModel,
   fetchPiModels,
@@ -679,6 +679,43 @@ describe("PiDriver turns (fake CLI)", () => {
       .map((line) => JSON.parse(line) as { prompt?: { message?: string } })
       .find((row) => row.prompt)?.prompt?.message;
     expect(message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nbare");
+  });
+
+  it("waits for a slow new_session reply before it sends the prompt, and says so in the chat", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-slow-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("session-slow", { FAKE_PI_DUMP: dump });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const sent = instance.adapter.sendTurn({ threadId: "t-pi-session-slow-" + randomUUID(), text: "hi", model: "openai/gpt-4o" });
+      await recorder.until((e) => e.type === "turn.started");
+      await vi.advanceTimersByTimeAsync(20_001);
+      const { turnId } = await sent;
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      expect(done).toMatchObject({ ok: true });
+      const order = readFileSync(dump, "utf8").split("\n").filter(Boolean)
+        .map((line) => Object.keys(JSON.parse(line) as object)[0]).filter((key) => ["sessionReplied", "setModel", "prompt"].includes(key));
+      expect(order).toEqual(["sessionReplied", "setModel", "prompt"]);
+      expect(recorder.events.find((e) => e.type === "runtime.notice" && e.turnId === turnId)).toMatchObject({ message: expect.stringMatching(/Pi is taking longer than usual/) });
+    } finally {
+      vi.useRealTimers();
+      removeTempDir(dir);
+    }
+  });
+
+  it("stops waiting for the session reply when the turn is stopped, and sends nothing after", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-stop-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("session-slow", { FAKE_PI_DUMP: dump, FAKE_PI_SESSION_DELAY_MS: "60000" });
+    const threadId = "t-pi-session-stop-" + randomUUID();
+    const sent = instance.adapter.sendTurn({ threadId, text: "hi", model: "openai/gpt-4o" });
+    await recorder.until((e) => e.type === "turn.started");
+    await instance.adapter.interruptTurn(threadId);
+    const { turnId } = await sent;
+    expect(recorder.events.find((e) => e.type === "turn.completed" && e.turnId === turnId)).toMatchObject({ stopReason: "cancelled" });
+    const rows = readFileSync(dump, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as object);
+    expect(rows.some((row) => "setModel" in row || "prompt" in row)).toBe(false);
+    removeTempDir(dir);
   });
 
   it("fails promptly when the pi process exits before replying", async () => {

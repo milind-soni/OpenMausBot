@@ -20,8 +20,10 @@ import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQue
 import { PluginsPanel, preloadConnectedApps } from "@/components/PluginsPanel";
 import {
   ActivityPanel, BotSettingsDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace, NewBotDialog,
-  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, SettingsModal, TeamMapPage, TriggersPage,
+  preloadScreens, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamMapPage, TriggersPage,
 } from "@/components/lazy-screens";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { useRoomPanelShown } from "@/lib/room-panel";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
 import { useNotificationFeed } from "@/lib/notification-preferences";
@@ -31,7 +33,7 @@ import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
 import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
-import { useTeamPeopleLoader } from "@/state/team-people";
+import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { CloudHowTo } from "@/components/CloudHowTo";
 import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
@@ -49,18 +51,22 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { setLocale, t } from "@/lib/i18n";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import { effectiveLanguage, localeTag, useLanguageChoice } from "@/lib/language-preference";
-import { botShowsUnread } from "@/lib/bot-unread";
+import { botShowsUnread, showBrowserUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { takeConnectRequest } from "@/lib/connect-link";
 import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
+import { useReadShownChatOnFocus } from "@/hooks/use-read-shown-chat";
 import { usePresence } from "@/hooks/use-presence";
 import { ChatNotice } from "@/components/ChatErrorBanner";
 import { loadingLine } from "@/lib/app-loading";
+import { useAiSwitchKeeper } from "@/lib/ai-switch";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   useTeamChats(state.config);
-  useTeamPeopleLoader(state.config, state.bots.map((bot) => `${bot.id}:${bot.reportsTo ?? ""}:${bot.activity ?? ""}:${(bot.tasks ?? []).filter((task) => task.activity === "waiting-on-you").length}`).join("|"));
+  useTeamPeopleLoader(state.config, needsYouVersion(state.bots, state.groups, state.notifications));
+  // A Switch AI pick lands once its stopped turn's chat is idle, wherever the person is by then.
+  useAiSwitchKeeper({ bots: state.bots, dispatch });
   const showThreads = useShowThreads();
   const { capabilities } = useDesktopCapabilities();
   const captionChrome = useCaptionChrome();
@@ -126,7 +132,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
   const notificationFeed = useNotificationFeed() && !remoteClient;
-  const sidePanelOpen = (Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen)) || (notificationFeed && state.notificationsOpen);
+  const advanced = useAdvancedMode();
+  const roomPanelOpen = useRoomPanelShown({ group, state, simple: !advanced && !remoteClient });
+  const sidePanelOpen = (Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen)) || roomPanelOpen || (notificationFeed && state.notificationsOpen);
   const collapseSidebar = sidePanelOpen && !sidebarAndPanelFit;
   const calendarFocus = state.activeView === "routines" && state.routinesFocus.view === "calendar";
 
@@ -180,8 +188,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [state.bots, state.selectedId, state.shortcutsOpen, showThreads, dispatch]);
 
+  useReadShownChatOnFocus();
   useEffect(() => {
-    window.ogb?.setUnreadCount?.(unreadCount);
+    if (window.ogb?.setUnreadCount) window.ogb.setUnreadCount(unreadCount);
+    else showBrowserUnread(unreadCount);
   }, [unreadCount]);
 
   useEffect(() => {
@@ -364,6 +374,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
             onOpenVmWorkspace={openLocalVmWorkspace}
           />
         )
+      )}
+      {roomPanelOpen && group && (
+        <RoomPanel key={`room:${group.id}`} group={group} overlay={notificationFeed && state.notificationsOpen && !twoSidePanelsFit} />
       )}
       {!remoteClient && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
       {!remoteClient && state.activityOpen && bot && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}

@@ -48,6 +48,16 @@ describe("resolveSurface", () => {
     }
   });
 
+  it("a thread a bot opened mounts the built-in browser beside any computer, since no person watches it", () => {
+    for (const destination of ["cloud", "vm", "local"] as const) {
+      expect(resolveSurface({ destination, browserOn: true, botOpened: true })).toEqual({ computer: destination, browser: true, pinned: null, note: "", botOpened: true });
+      expect(resolveSurface({ destination, browserOn: false, botOpened: true })).toMatchObject({ computer: destination, browser: false });
+    }
+    expect(resolveSurface({ destination: undefined, pinnedSurface: "vm", browserOn: true, botOpened: true })).toMatchObject({ computer: "vm", browser: true, pinned: "vm" });
+    expect(resolveSurface({ destination: undefined, browserOn: true, botOpened: true })).toMatchObject({ computer: undefined, browser: true, botOpened: true });
+    expect(resolveSurface({ destination: "off", browserOn: true, botOpened: true })).toMatchObject({ computer: "off", browser: false });
+  });
+
   it("Off mounts no computer and no browser, and says which setting did it", () => {
     const plan = resolveSurface({ destination: "off", browserOn: true });
     expect(plan).toMatchObject({ computer: "off", browser: false, pinned: null });
@@ -171,6 +181,17 @@ describe("surfacePrompt", () => {
     expect(text).toContain("explain the mismatch and ask the user to change where this conversation works in the Screen panel");
     expect(text).toContain("changing places requires the user's choice in the Screen panel, not a different tool name");
     expect(text).not.toContain("computer selector");
+  });
+
+  it("tells a bot in a thread a bot opened to report back, not to wait for a person at the Screen panel", () => {
+    const mismatch = surfacePrompt({ computer: "vm", browser: false }, { botOpened: true });
+    expect(mismatch).toContain("tell the bot that gave you this job which place you need and end your turn");
+    expect(mismatch).not.toContain("ask the user to change where this conversation works");
+    const none = surfacePrompt({ computer: null, browser: false }, { botOpened: true });
+    expect(none).toContain("tell the bot that gave you this job which place you need and end your turn");
+    expect(none).not.toContain("ask the user to choose where this conversation works");
+    expect(surfacePrompt({ computer: "vm", browser: false }, { botOpened: true, canSelect: true }))
+      .toBe(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true }));
   });
 
   const mounts: Array<{ computer: "cloud" | null; browser: boolean }> = [

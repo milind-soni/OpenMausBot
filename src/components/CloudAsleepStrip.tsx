@@ -9,7 +9,7 @@ export function CloudAsleepStrip() {
   const [asleep, setAsleep] = useState(cloudAsleep);
   useEffect(() => onCloudPower(setAsleep), []);
   if (!asleep) return null;
-  return <div role="status" data-cloud-asleep className="flex items-center justify-center gap-2 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[12.5px] text-ink-secondary">
+  return <div role="status" data-cloud-asleep className="flex items-center justify-center gap-2 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
     <Moon size={14} aria-hidden="true" />
     <span>{t("cloudPower.asleep")}</span>
     <button type="button" className="font-medium text-accent-text underline underline-offset-2 hover:text-ink" onClick={() => markCloudAwake()}>{t("cloudPower.wake")}</button>

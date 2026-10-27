@@ -3,6 +3,7 @@ import { Loader2, PackageOpen, RefreshCw, Sparkles, X } from "lucide-react";
 import { updaterMessage, useUpdaterState } from "@/lib/updater";
 import { brand } from "../lib/brand";
 import { t } from "@/lib/i18n";
+import { NoticeToast } from "./NoticeCard";
 
 const primaryAction =
   "flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-[13px] font-medium text-white transition-colors disabled:cursor-default disabled:bg-control disabled:text-ink-secondary";
@@ -21,6 +22,25 @@ type UpdateBannerProps = {
   sidebarIndicator?: boolean;
 };
 
+/** Said once, the first time the person looks at the window after the app updated itself while they were away. */
+function UpdatedLine({ version, onSeen }: { version: string; onSeen: () => void }) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (shown) return;
+    const look = () => {
+      if (document.visibilityState === "visible" && document.hasFocus()) setShown(true);
+    };
+    look();
+    window.addEventListener("focus", look);
+    document.addEventListener("visibilitychange", look);
+    return () => {
+      window.removeEventListener("focus", look);
+      document.removeEventListener("visibilitychange", look);
+    };
+  }, [shown]);
+  return shown ? <NoticeToast text={t("update.updatedItself", { app: brand().name, version })} onDone={onSeen} /> : null;
+}
+
 export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
   const s = useUpdaterState();
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -28,6 +48,9 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
   const status = s?.status;
   useEffect(() => setPending(null), [status]);
 
+  if (s?.updated && ["idle", "checking", "downloading", "preparing"].includes(s.status)) {
+    return <UpdatedLine version={s.updated} onSeen={() => void window.ogb?.updater?.seen?.().catch(() => {})} />;
+  }
   if (!s || s.status === "idle" || s.status === "checking" || s.status === "downloading" || s.status === "preparing") return null;
   if (sidebarIndicator && (s.status === "downloaded" || s.status === "installing")) return null;
   const key = `${s.status}:${s.version ?? ""}`;
@@ -52,15 +75,15 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
     s.status === "downloaded"
       ? handoff
         ? t("update.banner.copyCommand")
-        : t("update.banner.restartToFinish")
+        : s.installsByItself
+          ? t("update.card.idleNote", { app: brand().name })
+          : t("update.banner.restartToFinish")
       : installing
         ? handoff
           ? t("update.banner.copying")
           : updaterMessage(s) || t("update.banner.reopening", { app: brand().name })
         : s.status === "handed-off"
-          ? s.terminalOpened
-            ? t("update.banner.copiedOpened")
-            : t("update.banner.copiedPaste")
+          ? `${updaterMessage(s) ? `${updaterMessage(s)} ` : ""}${s.terminalOpened ? t("update.banner.copiedOpened") : t("update.banner.copiedPaste")}`
           : s.retryable === false
             ? t("update.banner.quitReopen", { error: friendlyError(updaterMessage(s, { restart: false })?.split(" Quit and reopen ")[0]), app: brand().name })
             : friendlyError(updaterMessage(s));
@@ -72,8 +95,8 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
           <Sparkles size={14} />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="text-[13.5px] font-semibold text-ink">{title}</div>
-          <div className="mt-0.5 text-[12.5px] text-ink-secondary" title={subtitle}>
+          <div className="text-[14px] font-semibold text-ink">{title}</div>
+          <div className="mt-0.5 text-[13px] text-ink-secondary" title={subtitle}>
             {subtitle}
           </div>
         </div>
@@ -89,7 +112,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
       </div>
 
       {s.status === "handed-off" && s.command && (
-        <code className="mt-2.5 block overflow-x-auto rounded-lg bg-control px-2 py-1.5 font-mono text-[11.5px] whitespace-pre text-ink-secondary">
+        <code className="mt-2.5 block overflow-x-auto rounded-lg bg-control px-2 py-1.5 font-mono text-[12px] whitespace-pre text-ink-secondary">
           {s.command}
         </code>
       )}

@@ -50,7 +50,7 @@ function harness(options: { bot?: () => "ready" | "busy" | "missing" } = {}) {
   });
   const complete = (run: RoutineRun, ok = true, error?: string) => {
     if (error) manager.handleRuntimeEvent({ type: "runtime.error", threadId: run.threadId!, message: error } as never);
-    manager.handleRuntimeEvent({ type: "turn.completed", threadId: run.threadId!, ok, stopReason: ok ? "end_turn" : "error" } as never);
+    manager.handleRuntimeEvent({ type: "turn.completed", threadId: run.threadId!, ok, stopReason: ok ? "end_turn" : "refusal" } as never);
   };
   return {
     get manager() { return manager; }, gate, answers, asked, settled, released, started, failed, deferred, tick, watch, complete, settle,

@@ -35,7 +35,7 @@ export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId
     if (!card.undone && ref.kind === "schedule" && state.routinesLoadState === "loading") return null;
     if (!card.undone && ref.kind === "app" && !appTriggers.loaded) return null;
     return (
-      <div data-trigger-card={ref.id} className="flex w-full max-w-[840px] items-center gap-2 text-[12.5px] text-ink-tertiary">
+      <div data-trigger-card={ref.id} className="flex w-full max-w-[840px] items-center gap-2 text-[13px] text-ink-tertiary">
         {card.undone ? <Undo2 size={13} /> : <Zap size={13} />}
         <span>{card.undone ? t("automations.card.removed") : `${t("automations.card.gone")} · ${fallbackName}`}</span>
       </div>

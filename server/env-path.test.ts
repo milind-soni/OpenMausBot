@@ -343,6 +343,27 @@ IF EXIST "%dp0%\\node.exe" (
 endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\pkg\\bin\\ombfake.js" %*
 `;
 
+// ...and for one whose bin is an extensionless `#!/usr/bin/env node` script — cmd-shim keeps the
+// package.json bin name verbatim (droid, grok)
+const EXTENSIONLESS_SHIM = `@ECHO off
+GOTO start
+:find_dp0
+SET dp0=%~dp0
+EXIT /b
+:start
+SETLOCAL
+CALL :find_dp0
+
+IF EXIST "%dp0%\\node.exe" (
+  SET "_prog=%dp0%\\node.exe"
+) ELSE (
+  SET "_prog=node"
+  SET PATHEXT=%PATHEXT:;.JS;=;%
+)
+
+endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\pkg\\bin\\ombfake" %*
+`;
+
 // ...and npm's own npm.cmd / npx.cmd, which Node's installer puts beside
 // node.exe with CRLF endings: the CLI entry sits in a variable, next to a
 // helper script
@@ -431,6 +452,18 @@ winOnly("resolveCli (Windows)", () => {
     expect(stdout.trim()).toBe("js target -p,hi");
   });
 
+  it("parses an npm .cmd shim down to the extensionless node script it wraps (#3594)", async () => {
+    shimWith("ombfake.cmd", EXTENSIONLESS_SHIM, "ombfake", "#!/usr/bin/env node\nconsole.log('shim target ' + process.argv.slice(2).join(','));\n");
+    onPath();
+    const r = resolveCli("ombfake", ["-p", "hi"]);
+    expect(r.command.toLowerCase()).toMatch(/node(\.exe)?$/);
+    expect(r.args).toEqual([join(dir, "node_modules", "pkg", "bin", "ombfake"), "-p", "hi"]);
+    const stdout = await new Promise<string>((resolve, reject) =>
+      execFile(r.command, r.args, (err, out) => (err ? reject(err) : resolve(out))),
+    );
+    expect(stdout.trim()).toBe("shim target -p,hi");
+  });
+
   it.each(["npm", "npx"] as const)("parses npm's own %s.cmd down to `node <cli.js>`, not its prefix helper", async (name) => {
     writeFileSync(join(dir, `${name}.cmd`), npmLauncher(name));
     const bin = join(dir, "node_modules", "npm", "bin");
@@ -465,6 +498,61 @@ winOnly("resolveCli (Windows)", () => {
       execFile(r.command, r.args, (err, out) => (err ? reject(err) : resolve(out))),
     );
     expect(stdout.trim()).toBe("shebang a,b");
+  });
+
+  it("resolves a Cursor PowerShell -File shim to powershell.exe and the sibling script", async () => {
+    const ps1 = join(dir, "cursor-agent.ps1");
+    mkdirSync(join(dir, "versions"), { recursive: true });
+    writeFileSync(join(dir, "versions", "promote-staged.cmd"), "@echo off\r\n");
+    writeFileSync(ps1, 'Write-Output ("cursor " + ($args -join ","))\r\n');
+    writeFileSync(join(dir, "cursor-agent.cmd"), [
+      "@echo off",
+      'if exist "%~dp0versions\\promote-staged.cmd" call "%~dp0versions\\promote-staged.cmd"',
+      'set "SCRIPT_DIR=%~dp0"',
+      '%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%\\cursor-agent.ps1" %*',
+    ].join("\r\n"));
+    onPath();
+    const root = process.env.SystemRoot || process.env.WINDIR || "";
+    const resolved = resolveCli("cursor-agent", ["--version"]);
+    expect(resolved.command.toLowerCase()).toBe(join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe").toLowerCase());
+    expect(resolved.args).toEqual(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, "--version"]);
+    const stdout = await new Promise<string>((resolve, reject) => {
+      execFile(resolved.command, resolved.args, (err, out) => (err ? reject(err) : resolve(out)));
+    });
+    expect(stdout.trim()).toBe("cursor --version");
+  });
+
+  it("resolves a bare powershell.exe -File sibling from PATH", () => {
+    const ps1 = join(dir, "tool.ps1");
+    writeFileSync(ps1, 'Write-Output ("tool " + ($args -join ","))\r\n');
+    writeFileSync(join(dir, "tool.cmd"), 'powershell.exe -NoProfile -File "%SCRIPT_DIR%\\tool.ps1" %*\r\n');
+    onPath();
+    const resolved = resolveCli("tool", ["--version"]);
+    expect(resolved.command.toLowerCase()).toMatch(/powershell\.exe$/);
+    expect(resolved.args).toEqual(["-NoProfile", "-File", ps1, "--version"]);
+  });
+
+  it("leaves a non-sibling or -Command PowerShell launcher as the .cmd", () => {
+    const outside = join(dir, "..", "omb-outside.ps1");
+    const escaped = join(dir, "escaped.cmd");
+    const commanded = join(dir, "commanded.cmd");
+    writeFileSync(outside, "Write-Output no\r\n");
+    writeFileSync(escaped, '%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe -File "%SCRIPT_DIR%\\..\\omb-outside.ps1" %*\r\n');
+    writeFileSync(commanded, 'powershell.exe -Command "Write-Output hi"\r\n');
+    writeFileSync(join(dir, "ok.ps1"), "Write-Output ok\r\n");
+    const mixedCommand = join(dir, "mixed-command.cmd");
+    const mixedSlash = join(dir, "mixed-c.cmd");
+    writeFileSync(mixedCommand, 'powershell.exe -Command "Write-Output hi" -File "%SCRIPT_DIR%\\ok.ps1"\r\n');
+    writeFileSync(mixedSlash, 'powershell.exe /c "Write-Output hi" -File "%SCRIPT_DIR%\\ok.ps1"\r\n');
+    onPath();
+    try {
+      expect(resolveCli("escaped", ["--version"]).command.toLowerCase()).toBe(escaped.toLowerCase());
+      expect(resolveCli("commanded", []).command.toLowerCase()).toBe(commanded.toLowerCase());
+      expect(resolveCli("mixed-command", []).command.toLowerCase()).toBe(mixedCommand.toLowerCase());
+      expect(resolveCli("mixed-c", []).command.toLowerCase()).toBe(mixedSlash.toLowerCase());
+    } finally {
+      rmSync(outside, { force: true });
+    }
   });
 
   it("never crosses the no-shell boundary for an unparseable shim", () => {

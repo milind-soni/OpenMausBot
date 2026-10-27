@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  BROWSER_SIGN_IN_FAILED, cloudOwnerOf, isConnected, isOwnerOrAdmin, previewBrowserSignIn, readSessionState, reasonWorthShowing, SERVICE_TRUST_REASON, signInWithBrowserGrant,
+  BROWSER_SIGN_IN_FAILED, cloudOwnerOf, isConnected, isOwnerOrAdmin, previewBrowserSignIn, profileForSession, readSessionState, reasonWorthShowing, SERVICE_TRUST_REASON, signInWithBrowserGrant,
   takeBrowserSignInFromLocation, takeInvitedEmailFromLocation, takePairingCodeFromLocation,
+  type SessionState,
 } from "./session";
 
 describe("what the pair page says about why it was shown", () => {
@@ -105,6 +106,69 @@ describe("who the served UI is on its own machine", () => {
     expect(isOwnerOrAdmin({ kind: "session", id: "s", label: "l", scopes: ["client"], expiresAt: 1 })).toBe(false);
     expect(isOwnerOrAdmin({ kind: "session", id: "s", label: "l", scopes: ["admin", "client"], expiresAt: 1 })).toBe(true);
     expect(isOwnerOrAdmin(null)).toBe(false);
+  });
+});
+
+describe("the profile shown for a signed-in session", () => {
+  const owner = { name: "Owner", email: "owner@example.test", avatarUrl: "/owner.png" };
+  const ada: Extract<SessionState, { kind: "session" }> = { kind: "session", id: "s", label: "Ada's iPad", email: "ada@example.test", scopes: ["client"], expiresAt: 1 };
+
+  it("preserves the verified email, device label, and team membership", async () => {
+    const answer: typeof fetch = async () => new Response(JSON.stringify({
+      kind: "session", id: "s", label: "Ada's iPad", email: "ada@example.test", scopes: ["client"], expiresAt: 1,
+      team: { id: "team-1", name: "Shared Team", role: "member" },
+    }), { status: 200 });
+    expect(await readSessionState(answer)).toMatchObject({
+      kind: "session", id: "s", label: "Ada's iPad", email: "ada@example.test", scopes: ["client"], expiresAt: 1,
+      team: { id: "team-1", name: "Shared Team", role: "member" },
+    });
+  });
+
+  it("shows only the signed-in email when it differs from the configured owner", () => {
+    expect(profileForSession(owner, ada)).toEqual({ email: "ada@example.test" });
+    expect(profileForSession({ name: "Owner", avatarUrl: "/owner.png" }, ada)).toEqual({ email: "ada@example.test" });
+    expect(profileForSession(undefined, ada)).toEqual({ email: "ada@example.test" });
+  });
+
+  it("keeps the configured profile when its email matches after trimming and case folding", () => {
+    const matchingOwner = { ...owner, email: "  OWNER@EXAMPLE.TEST  " };
+    const ownerSession = { ...ada, email: "owner@example.test" };
+    expect(profileForSession(matchingOwner, ownerSession)).toBe(matchingOwner);
+  });
+
+  it("does not show the configured owner while the session is still loading", () => {
+    expect(profileForSession(owner, null)).toBeUndefined();
+  });
+
+  it("does not show the configured owner when the session cannot be verified", () => {
+    const sessions: SessionState[] = [
+      { kind: "unauthenticated", error: "pair" },
+      { kind: "unreachable", error: "offline" },
+    ];
+    for (const session of sessions) {
+      expect(profileForSession(owner, session)).toBeUndefined();
+    }
+  });
+
+  it("keeps the configured profile for loopback sessions", () => {
+    expect(profileForSession(owner, { kind: "loopback" })).toBe(owner);
+  });
+
+  it("keeps the configured profile for an admin session, with or without an email, and on a Team Cloud", () => {
+    expect(profileForSession(owner, { kind: "session", id: "s", label: "Owner's browser", scopes: ["admin", "client"], expiresAt: 1 })).toBe(owner);
+    expect(profileForSession(owner, { ...ada, scopes: ["admin", "client"] })).toBe(owner);
+    const member = { name: "Ada", email: "ada@example.test" };
+    expect(profileForSession(member, { ...ada, team: { id: "team-1", name: "Shared Team", role: "member" } })).toBe(member);
+  });
+
+  it("does not show the configured owner for email-less paired sessions", () => {
+    const sessions: SessionState[] = [
+      { kind: "session", id: "s", label: "Ada's iPad", scopes: ["client"], expiresAt: 1 },
+      { kind: "session", id: "s", label: "Ada's iPad", email: "  ", scopes: ["client"], expiresAt: 1 },
+    ];
+    for (const session of sessions) {
+      expect(profileForSession(owner, session)).toBeUndefined();
+    }
   });
 });
 

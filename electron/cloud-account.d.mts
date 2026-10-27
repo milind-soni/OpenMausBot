@@ -222,6 +222,9 @@ export interface CloudAccountClient {
   reportMove(options: { installation: string }): Promise<boolean>;
   /** This computer keeps its bots on itself again: it no longer counts as moved. False when the Admin can't take it yet. */
   reportKept(options: { installation: string }): Promise<boolean>;
+  /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status); false without a
+   * sign-in or when the Admin doesn't take it yet. */
+  reportMoveStatus(report: import("./move-status.mjs").MoveStatusReport): Promise<boolean>;
   growDisk(sizeGb: number): Promise<{ supported: false } | { supported: true; refused: true } | { supported: true; disk: { gb: number; maxGb: number } }>;
   /** This sign-in's own X research relay access while its plan is paid; null without one. */
   xResearchAccess(): Promise<{ url: string; token: string } | null>;

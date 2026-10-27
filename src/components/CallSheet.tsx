@@ -122,7 +122,7 @@ export function CallSheet({ message, transcript, botName, threadId, busy, partia
               <span>{t("chat.callSheet.kicker")}</span>
             </div>
             <h2 id="call-sheet-title" className="mt-0.5 truncate text-[16px] font-semibold">{title}</h2>
-            <p className="mt-0.5 text-[12.5px] tabular-nums text-ink-secondary">{`${formatCallDuration(call.seconds)} · ${when}`}</p>
+            <p className="mt-0.5 text-[13px] tabular-nums text-ink-secondary">{`${formatCallDuration(call.seconds)} · ${when}`}</p>
           </div>
           <button
             type="button"
@@ -143,7 +143,7 @@ export function CallSheet({ message, transcript, botName, threadId, busy, partia
             </div>
           )}
         </div>
-        <footer className="border-t border-hairline/40 px-5 py-3 text-[11.5px] text-ink-tertiary">
+        <footer className="border-t border-hairline/40 px-5 py-3 text-[12px] text-ink-tertiary">
           {t("chat.callSheet.kept", { name: botName })}
         </footer>
       </div>
@@ -155,7 +155,7 @@ export function CallSheet({ message, transcript, botName, threadId, busy, partia
 function SheetBlock({ block, busy, threadId }: { block: Block; busy: boolean; threadId?: string }): ReactNode {
   if (block.kind === "lines") {
     return (
-      <ul className="flex flex-col gap-0.5 pl-1 text-[12.5px] text-ink-secondary">
+      <ul className="flex flex-col gap-0.5 pl-1 text-[13px] text-ink-secondary">
         {block.lines.map((line) => <CallLineItem key={line.id} line={line} busy={busy} />)}
       </ul>
     );

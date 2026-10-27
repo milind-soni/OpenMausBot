@@ -446,14 +446,23 @@ describe("over the owner's own session", () => {
     expect(there.get("p1")!.sender, "a peer's ask is never the owner's").toBeUndefined();
   });
 
-  it("any other session's send, and a room's lines, arrive as they were", async () => {
+  it("any other session's send arrives as it was", async () => {
     const store = fresh();
     const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
     await route(store, sent(ava.id, ava.threadId, [typed("g1", 1, null)]), false);
     expect(store.messagesFor(ava.threadId)[0]!.sender).toBeUndefined();
     const room = store.createGroup("Launch", [ava.id]);
-    await route(store, { v: 1, dataDir: "/desk/.openmausbot", conversations: [{ room: room.id, threadId: room.threadId, task: null, rows: [typed("r1", 1, null)], leaf: "r1", sent: false }] }, true);
+    await route(store, { v: 1, dataDir: "/desk/.openmausbot", conversations: [{ room: room.id, threadId: room.threadId, task: null, rows: [typed("r1", 1, null)], leaf: "r1", sent: false }] }, false);
     expect(store.messagesFor(room.threadId).map((row) => [row.id, row.sender])).toEqual([["r1", undefined]]);
+  });
+
+  it("the owner's own send makes a room's lines the owner wrote theirs too; a peer's ask in it stays nobody's", async () => {
+    const store = fresh();
+    const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
+    const room = store.createGroup("Launch", [ava.id]);
+    const peer: Message = { id: "p1", at: 2, parentId: "r1", role: "user", kind: "text", text: "From Chief", peerAsk: { botId: "chief", name: "Chief" } };
+    await route(store, { v: 1, dataDir: "/desk/.openmausbot", conversations: [{ room: room.id, threadId: room.threadId, task: null, rows: [typed("r1", 1, null), peer], leaf: "p1", sent: false }] }, true);
+    expect(store.messagesFor(room.threadId).map((row) => [row.id, row.sender])).toEqual([["r1", { name: "Amit", id: OWNER.person }], ["p1", undefined]]);
   });
 
   /** The move's ask for the rows My Cloud already held, by id: `stamped` collects what the route says changed. */
@@ -465,7 +474,7 @@ describe("over the owner's own session", () => {
     }).then(() => answered!);
   };
 
-  it("lines My Cloud already held from that computer, named by id, become the owner's as arriving ones do; nobody else's, no automation's and no room's ever", async () => {
+  it("lines My Cloud already held from that computer, named by id, become the owner's as arriving ones do, in a room too; nobody else's and no automation's ever", async () => {
     const store = fresh();
     const ava = store.createBot({ name: "Ava" }, { seedMessages: false });
     // As an earlier send or a Bring left them on My Cloud: every line names nobody.
@@ -482,15 +491,15 @@ describe("over the owner's own session", () => {
     expect((await own(store, body, false, stamped)).status, "only My Cloud's owner's own session may say").toBe(403);
     expect(store.messagesFor(ava.threadId).map((row) => row.sender ?? null)).toEqual([null, null, null, null, null]);
 
-    expect(await own(store, body, true, stamped)).toEqual({ status: 200, body: { v: 1, stamped: 2 } });
+    expect(await own(store, body, true, stamped)).toEqual({ status: 200, body: { v: 1, stamped: 3 } });
     const there = new Map(store.messagesFor(ava.threadId).map((row) => [row.id, row]));
     expect(there.get(mine.id)!.sender).toEqual({ name: "Amit", id: OWNER.person });
     expect(there.get(card.id)!.card!.answeredBy).toEqual({ kind: "session", name: "Amit", person: OWNER.person });
     expect([peer, routine, notNamed].map((row) => there.get(row.id)!.sender ?? null)).toEqual([null, null, null]);
-    expect(store.messagesFor(room.threadId).map((row) => row.sender ?? null)).toEqual([null]);
-    expect(stamped, "the conversation whose lines became the owner's").toEqual([ava.threadId]);
+    expect(store.messagesFor(room.threadId).map((row) => row.sender ?? null)).toEqual([{ name: "Amit", id: OWNER.person }]);
+    expect(stamped, "the conversations whose lines became the owner's").toEqual([ava.threadId, room.threadId]);
     expect(await own(store, body, true, stamped), "a second ask changes nothing").toEqual({ status: 200, body: { v: 1, stamped: 0 } });
-    expect(stamped).toEqual([ava.threadId]);
+    expect(stamped).toEqual([ava.threadId, room.threadId]);
   });
 
   it("My Cloud takes at most 5,000 of a conversation's row ids, and 10,000 in all, in one ask", async () => {

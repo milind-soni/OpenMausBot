@@ -175,7 +175,7 @@ export function SecretRequestCard({
       dismissLabel={t("notice.notNow")}
     >
       {remoteClient ? (
-        <div className="text-[12.5px] leading-relaxed text-ink-secondary">
+        <div className="text-[13px] leading-relaxed text-ink-secondary">
           {t("chat.secret.remoteClient")}
         </div>
       ) : (
@@ -198,7 +198,7 @@ export function SecretRequestCard({
               {t(savedLocally ? "chat.secret.continue" : "chat.secret.save")}
             </button>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-ink-tertiary">
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-tertiary">
             <span className="flex items-center gap-1">
               <LockKeyhole size={11} /> {t("chat.secret.storedHint")}
             </span>

@@ -288,14 +288,15 @@ const idsSchema = z.object({
   conversations: z.array(z.object({ threadId: z.string().regex(/^[\w-]{1,200}$/u), ids: z.array(z.string().max(200)).max(VERIFY_IDS) })).max(200),
 }).refine((body) => body.conversations.reduce((sum, entry) => sum + entry.ids.length, 0) <= 2 * VERIFY_IDS);
 
-/** My Cloud's side of the move's own lines: of these rows it holds of a bot conversation, each its owner wrote or
- * answered in the window they came from, which an earlier send or a Bring left naming nobody, becomes the owner's as an
- * arriving one does. A room's never do. Ids only. */
+/** My Cloud's side of the move's own lines: of these rows it holds of a bot conversation or a room, each its owner wrote
+ * or answered in the window they came from, which an earlier send or a Bring left naming nobody, becomes the owner's as
+ * an arriving one does. Ids only. */
 export function stampHeld(store: CloudSendChatsDeps["store"], conversations: ReadonlyArray<{ threadId: string; ids: readonly string[] }>, owner: CloudOwner): { stamped: number; threads: string[] } {
   let stamped = 0;
   const threads = new Set<string>();
   for (const { threadId, ids } of conversations) {
-    if (!ownerOf(store, threadId).bot) continue;
+    const where = ownerOf(store, threadId);
+    if (!where.bot && !where.room) continue;
     const named = new Set(ids);
     for (const row of store.messagesFor(threadId)) {
       const stamp = named.has(row.id) ? ownerStamp(row, owner) : null;

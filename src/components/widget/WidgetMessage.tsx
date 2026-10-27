@@ -19,7 +19,7 @@ import { kids } from "./widget-style";
 import { newWidgetSendId, sendWidgetAction, type WidgetSendResult } from "./widget-send";
 
 const WIDTH: Record<string, string> = { sm: "max-w-[360px]", md: "max-w-[440px]", lg: "max-w-[600px]", full: "max-w-[600px]" };
-const SURFACE = "w-full overflow-hidden rounded-3xl bg-composer ring-1 ring-composer-ring transition-opacity";
+const SURFACE = "w-full overflow-hidden rounded-2xl bg-composer ring-1 ring-composer-ring transition-opacity";
 const SENT_MS = 1600;
 
 function labelledFields(node: WidgetNode, into = new Set<string>()): Set<string> {
@@ -233,7 +233,7 @@ function WidgetCard({ botId, threadId, messageId, payload }: { botId: string; th
             <div className={cn("flex items-start gap-3 px-4 pt-3.5", kids(root).length ? "pb-3" : "pb-3.5")}>
               <div className="min-w-0 flex-1">
                 {statusText && (
-                  <p className={cn("flex items-center gap-1.5 text-[12.5px] font-semibold leading-[18px] text-accent-text", (title || caption) && "mb-1")}>
+                  <p className={cn("flex items-center gap-1.5 text-[13px] font-semibold leading-[18px] text-accent-text", (title || caption) && "mb-1")}>
                     {typeof status.icon === "string" && <WidgetGlyph name={status.icon} size={14} />}
                     <bdi dir="auto" className="min-w-0 truncate">{statusText}</bdi>
                   </p>

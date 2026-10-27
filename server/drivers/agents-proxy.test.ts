@@ -651,6 +651,7 @@ describe("agents-proxy MCP surface", () => {
       "fill_login",
       "decide",
       "extract",
+      "report_bug",
       "memory_update",
       "retry_thread",
       "memory_log",

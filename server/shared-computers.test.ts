@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { provenRequestPerson, SharedComputers, sharedComputerScopeRefusal } from "./shared-computers.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerScopeRefusal } from "./shared-computers.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { TurnResources } from "./turn-resources.ts";
 
@@ -27,6 +30,24 @@ describe("shared computer authority and lifecycle", () => {
     expect(JSON.stringify(broker.list(alice.person))).not.toContain(secret);
     broker.close();
   });
+  it("chromeLender names the newest computer that lends Chrome, and whether it is online", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-chrome-"));
+    let live = true;
+    const broker = new SharedComputers(() => live, new LentComputers(join(dir, "lent.json")));
+    const a = { ...registration(), name: "A", platform: "darwin" as const, chrome: true };
+    const b = { ...registration(), name: "B", platform: "darwin" as const, chrome: false };
+    broker.register(a, alice, secret);
+    broker.register(b, { session: "owner2", person: alice.person }, secret);
+    expect(broker.chromeLender(alice.person)).toEqual({ name: "A", device: "Mac", online: true });
+    expect(broker.chromeLender(bob.person)).toBeNull();
+    live = false;
+    expect(broker.chromeLender(alice.person)).toEqual({ name: "A", device: "Mac", online: false });
+    live = true;
+    broker.disconnect(a.id, alice.session, secret);
+    expect(broker.chromeLender(alice.person)).toBeNull();
+    broker.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
   it("delivers a job once, refuses concurrent work, and never replays after disconnect", async () => {
     const broker = new SharedComputers(() => true);
     const computer = registration(); broker.register(computer, alice, secret);
@@ -46,6 +67,49 @@ describe("shared computer authority and lifecycle", () => {
     broker.disconnect(computer.id, "owner", secret); await rejection;
     expect(broker.list(alice.person)).toEqual([]);
     await expect(broker.request(operation, alice.person, () => true)).rejects.toThrow(/offline/);
+    broker.close();
+  });
+  it("waits for a command as long as the command may run, and a non-command action still 45 seconds", async () => {
+    vi.useFakeTimers();
+    const lent = () => {
+      const broker = new SharedComputers(() => true);
+      const computer = { ...registration({ terminal: true, computer: true }), commandTimeouts: true as const }; broker.register(computer, alice, secret);
+      const run = async (operation: Omit<Parameters<SharedComputers["request"]>[0], "computer_id">) => {
+        const result = broker.request({ computer_id: computer.id, ...operation }, alice.person, () => true);
+        result.catch(() => {});
+        const job = await broker.poll(computer.id, alice.session, secret);
+        broker.liveJob(computer.id, alice.session, secret, job!.id);
+        return { result, job: job!, complete: (value: unknown) => broker.complete(computer.id, alice.session, secret, job!.id, value), close: () => broker.close() };
+      };
+      return run;
+    };
+    const long = await lent()({ action: "run_command", command: "./weekly-scan", timeout_seconds: 200 });
+    expect(long.job.operation).toMatchObject({ timeout_seconds: 200 });
+    await vi.advanceTimersByTimeAsync(199_000);
+    long.complete({ exitCode: 0 });
+    await expect(long.result).resolves.toEqual({ exitCode: 0 });
+    long.close();
+    const defaulted = await lent()({ action: "run_command", command: "./scan" });
+    await vi.advanceTimersByTimeAsync(134_000);
+    defaulted.complete({ exitCode: 0 });
+    await expect(defaulted.result).resolves.toEqual({ exitCode: 0 });
+    defaulted.close();
+    const tools = await lent()({ action: "computer_tools" });
+    await vi.advanceTimersByTimeAsync(45_000);
+    await expect(tools.result).rejects.toThrow(/timed out/);
+    tools.close();
+  });
+  it("never sends a timeout to a desktop that did not say it takes one, and waits for it as before", async () => {
+    const broker = new SharedComputers(() => true);
+    const computer = registration({ terminal: true }); broker.register(computer, alice, secret);
+    vi.useFakeTimers();
+    const command = broker.request({ computer_id: computer.id, action: "run_command", command: "./scan", timeout_seconds: 200 }, alice.person, () => true);
+    const rejection = expect(command).rejects.toThrow(/timed out/);
+    const job = await broker.poll(computer.id, alice.session, secret);
+    expect(job?.operation).toEqual({ computer_id: computer.id, action: "run_command", command: "./scan" });
+    broker.liveJob(computer.id, alice.session, secret, job!.id);
+    await vi.advanceTimersByTimeAsync(45_000);
+    await rejection;
     broker.close();
   });
   it("turn cancellation rejects queued and already delivered actions", async () => {
@@ -227,7 +291,7 @@ describe("status for the next step's placement", () => {
     const docs = { id: randomUUID(), name: "Docs", write: true };
     const mac = registration({ computer: true, folders: [docs] }); broker.register(mac, alice, secret);
     broker.register(registration({ terminal: true }), bob, other);
-    expect(broker.status(alice.person)).toEqual([{ id: mac.id, name: "Desktop", online: true, busy: false, lastSeenAt: expect.any(Number), scopes: { folders: [docs], terminal: false, screen: true, internet: false } }]);
+    expect(broker.status(alice.person)).toEqual([{ id: mac.id, name: "Desktop", online: true, busy: false, lastSeenAt: expect.any(Number), scopes: { folders: [docs], terminal: false, screen: true, internet: false, chrome: false } }]);
     expect(broker.status(null)).toEqual([]);
     expect(JSON.stringify(broker.status(alice.person))).not.toContain(secret);
     await vi.advanceTimersByTimeAsync(40_001);

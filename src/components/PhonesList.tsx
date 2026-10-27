@@ -27,7 +27,7 @@ export function PhonesList() {
     <div className="border-t border-hairline/30 pt-4">
       <div className="text-[13px] text-ink">{t("remote.phones.title")}</div>
       {phones.length === 0 ? (
-        <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">{t("remote.phones.empty")}</div>
+        <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">{t("remote.phones.empty")}</div>
       ) : (
         <ul className="mt-3 flex flex-col gap-2">
           {phones.map((phone) => {
@@ -36,10 +36,10 @@ export function PhonesList() {
               <li key={phone.key} className="rounded-xl bg-inset px-3 py-3">
                 <div className="flex items-center gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13.5px] font-medium text-ink">
+                    <div className="truncate text-[14px] font-medium text-ink">
                       {name} <span className="font-normal text-ink-secondary">· {phonePlatformLabel(platform)}</span>
                     </div>
-                    <div className="text-[11.5px] text-ink-secondary">
+                    <div className="text-[12px] text-ink-secondary">
                       {phone.online ? t("remote.phones.online") : t("remote.phones.offline", { when: relative(phone.seen) })}
                     </div>
                   </div>

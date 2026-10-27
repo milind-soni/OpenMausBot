@@ -1,8 +1,14 @@
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { setLocale } from "./i18n";
 import { localizedCard } from "./widget-text";
-import type { WidgetPayload } from "../../shared/widget";
+import type { WidgetNode, WidgetPayload } from "../../shared/widget";
+import { DATA_DIR } from "../../server/config";
+import { createBrief } from "../../server/host/brief";
+import { closeMessageDb } from "../../server/message-db";
+import { Store } from "../../server/store";
 
 afterEach(() => setLocale("en"));
 
@@ -13,7 +19,46 @@ const card = (i18n: unknown, extra: Record<string, unknown> = {}): WidgetPayload
     children: [{ type: "Text", id: "n2", value: "8:30 AM · Standup", i18n, ...extra }] },
 });
 
+const nodes = (node: WidgetNode): WidgetNode[] => [node, ...(node.children ?? []).flatMap(nodes)];
+
 describe("a server card in the person's language", () => {
+  it.each([1, 3])("keeps an Ideas caption's English for %i chats through persistence and translates it for the reader", async (count) => {
+    const selection = () => ({ instanceId: "claude", model: "claude-sonnet-5" });
+    const store = new Store(selection);
+    const chief = store.createBot({ name: "Chief" });
+    store.setChiefOfStaff(chief.id);
+    const idea = "<b>Save</b> the Friday checklist as a skill";
+    const brief = createBrief({
+      store, dataDir: mkdtempSync(join(DATA_DIR, "brief-i18n-")), now: () => at, hosted: false, watching: () => true, mainThread: () => chief.threadId,
+      threadBusy: () => false, notify: () => {}, runs: () => [], needsYou: () => [], engineName: () => "Claude",
+      hostTimeZone: () => "UTC", language: () => "en", session: () => null, address: () => undefined,
+      failRun: () => {}, keep: () => {}, items: () => null, ideas: () => ({ ideas: [idea], conversations: count }),
+    });
+    await brief.active("desktop", "UTC", "en");
+    const written = store.messagesFor(chief.threadId).findLast((message) => message.serverCard)!;
+    closeMessageDb();
+    const persisted = new Store(selection).messagesFor(chief.threadId).find((message) => message.id === written.id)!;
+    expect(persisted.widget).toEqual(written.widget);
+    const payload = persisted.widget!;
+    const original = JSON.stringify(payload);
+    const caption = nodes(payload.root).find((node) => node.type === "Caption" && node.value === `Noticed across ${count} chats`)!;
+    expect(caption).toBeDefined();
+    expect(caption.i18n).toEqual({ value: { key: "brief.row.noticedAcross", params: { count: String(count) } } });
+    expect(localizedCard(payload, true)).toBe(payload);
+    expect(JSON.stringify(localizedCard(payload, true))).toBe(original);
+    if (count === 3) {
+      setLocale("pt-br");
+      const translated = localizedCard(payload, true);
+      expect(translated.root.title).toBe("Seu resumo");
+      expect(nodes(translated.root).some((node) => node.value === "Ideias")).toBe(true);
+      expect(nodes(translated.root).some((node) => node.value === "Percebido em 3 conversas")).toBe(true);
+      expect(nodes(translated.root).some((node) => node.value === idea)).toBe(true);
+      expect(JSON.stringify(payload)).toBe(original);
+      setLocale("en");
+      expect(JSON.stringify(localizedCard(payload, true))).toBe(original);
+    }
+  });
+
   it("words titles, nested keys and moments in the reader's locale", () => {
     setLocale("pt-br");
     const shown = localizedCard(card({ value: { key: "brief.card.meetingLine", params: { time: { at, style: "clock", zone: "America/Sao_Paulo" }, title: "Standup" } } }), true).root;

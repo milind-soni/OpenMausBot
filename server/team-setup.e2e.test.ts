@@ -31,7 +31,7 @@ it("Clive sets up multi-provider teams at Ask with no card, keeps existing threa
     const selection = (instance: any) => ({ instanceId: instance.instanceId, model: instance.models.default });
     const chief = (await api("POST", "/api/bots", { name: "Clive", title: "Chief of Staff", section: "Operations", modelSelection: selection(claude) }, 201)).bot;
     // At Ask: team setup applies at once, since OpenMausBot adds no card of its own.
-    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask" });
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask", connectorTools: { slack: { tools: ["SLACK_SEND_MESSAGE"] } } });
     const state = async () => (await api("GET", "/api/bots")).bots;
     // The fixture pins its starter's name, but identity is the honest comparison: a name once collided with a random starter.
     const initialBotIds = new Set((await state()).map((bot: any) => bot.id));
@@ -70,7 +70,8 @@ it("Clive sets up multi-provider teams at Ask with no card, keeps existing threa
     const created = saved.filter((bot: any) => !initialBotIds.has(bot.id));
     expect(created.map((bot: any) => bot.name).sort()).toEqual(["Mira", "Patch", "Quill"]);
     const engineer = created.find((bot: any) => bot.name === "Patch");
-    expect(engineer).toMatchObject({ title: "Implementation and verification engineer", section: "Engineering", chiefOfStaff: true, modelSelection: selection(codex), approvalMode: "full", autoApprove: false, composio: false });
+    expect(engineer).toMatchObject({ title: "Implementation and verification engineer", section: "Engineering", chiefOfStaff: true, modelSelection: selection(codex), approvalMode: "full", autoApprove: false });
+    for (const bot of created) expect(bot.connectorTools, bot.name).toEqual({ slack: { tools: ["SLACK_SEND_MESSAGE"] } });
     expect(engineer.managedSections).toBeUndefined();
     expect(saved.find((bot: any) => bot.id === chief.id).managedSections).toEqual(expect.arrayContaining(plan.newTeams));
     const notice = saved.find((bot: any) => bot.id === chief.id).messages.find((message: any) => message.card?.requestId === applied.requestId).card;

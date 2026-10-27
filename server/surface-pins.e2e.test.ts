@@ -22,6 +22,7 @@ describe("surface pin provenance against the real server", () => {
   let dumpFile = "";
   let finishFile = "";
   let cuaDescriptor = "";
+  let inertBrowser = "";
   let output = "";
   let child: ChildProcess | null = null;
   let base = "";
@@ -75,7 +76,7 @@ describe("surface pin provenance against the real server", () => {
     writeFileSync(join(data, "bots.json"), JSON.stringify(bots, null, 2));
   };
 
-  async function start() {
+  async function start(withBrowser = false) {
     const port = await freePortBlock([0, 1]);
     base = `http://127.0.0.1:${port}`;
     output = "";
@@ -87,6 +88,7 @@ describe("surface pin provenance against the real server", () => {
         TEMP: home, TMP: home, TMPDIR: home,
         OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
         OMB_BOAT_API: boatApi, OMB_USER_DATA: join(home, "user-data"),
+        ...(withBrowser ? { OMB_AGENT_BROWSER_PATH: inertBrowser, AGENT_BROWSER_EXECUTABLE_PATH: inertBrowser } : {}),
       }, stdio: ["ignore", "pipe", "pipe"],
     });
     child = proc;
@@ -118,6 +120,8 @@ describe("surface pin provenance against the real server", () => {
     dumpFile = join(home, "dump.json");
     finishFile = join(home, "finish");
     cuaDescriptor = join(home, "user-data", "cua-connection.json");
+    inertBrowser = join(home, "agent-browser");
+    writeFileSync(inertBrowser, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     vmState();
     mkdirSync(data);
     mkdirSync(join(ui, "assets"), { recursive: true });
@@ -266,6 +270,49 @@ describe("surface pin provenance against the real server", () => {
     await apiOk("DELETE", `/api/bots/${bot.id}`);
     await stop();
   });
+
+  it("mounts the built-in browser beside the computer in a thread a teammate opened, and not in a person's thread", async () => {
+    await start(true);
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Delegated Browser Bot" });
+    const [own, delegated] = (await Promise.all([
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+      apiOk("POST", `/api/bots/${bot.id}/tasks`, {}),
+    ])).map(({ task }) => task);
+    await stop();
+    editSavedBot(bot.id, saved => {
+      saved.browserProfile = "guest";
+      saved.tasks.find((task: any) => task.threadId === delegated.threadId).openedBy = { botId: "coordinator", name: "Coordinator", kind: "work", at: Date.now() };
+    });
+    const turnIn = async (threadId: string) => {
+      resetTurn();
+      await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Check the signed-in page.", threadId });
+      const servers = (await dump()).mcpConfig.mcpServers;
+      writeFileSync(finishFile, "finish");
+      await idle(bot.id, threadId);
+      return servers;
+    };
+    for (const computer of [undefined, "vm"]) {
+      if (computer) {
+        await stop();
+        editSavedBot(bot.id, saved => { saved.computer = computer; });
+        for (const threadId of [own.threadId, delegated.threadId]) {
+          editSavedBot(bot.id, saved => {
+            const task = saved.tasks.find((entry: any) => entry.threadId === threadId);
+            delete task.surface;
+            delete task.surfaceSource;
+          });
+        }
+      }
+      await start(true);
+      const person = await turnIn(own.threadId);
+      expect(person.computer?.args.some((arg: string) => arg.includes("container-mcp")), `${computer} person`).toBe(true);
+      expect(person.browser, `${computer} person`).toBeUndefined();
+      const teammate = await turnIn(delegated.threadId);
+      expect(teammate.computer?.args.some((arg: string) => arg.includes("container-mcp")), `${computer} teammate`).toBe(true);
+      expect(teammate.browser, `${computer} teammate`).toBeDefined();
+    }
+    await stop();
+  }, 60_000);
 
   it("records future auto pins and moves them when Works on changes", async () => {
     await start();

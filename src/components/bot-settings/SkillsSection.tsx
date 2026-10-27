@@ -225,11 +225,11 @@ export function SkillReviewDialog({
         <div id="skill-review-title" className="text-[16px] font-semibold text-ink">
           {t("skills.reviewTitle", { name: skill.name })}
         </div>
-        <div className="mt-1 break-all text-[11.5px] text-ink-secondary">
+        <div className="mt-1 break-all text-[12px] text-ink-secondary">
           {t("skills.source", { source: skill.source })}
         </div>
         {skill.warnings.length > 0 && (
-          <div className="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[11.5px] text-warning">
+          <div className="mt-2 rounded-lg bg-warning/10 px-3 py-2 text-[12px] text-warning">
             {skill.warnings.join(" · ")}
           </div>
         )}
@@ -418,7 +418,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
             ) : (
               <div className="text-[12px] text-ink-secondary">{t("skills.library.allAssigned")}</div>
             )}
-            <div className="text-[11.5px] text-ink-secondary">{t("skills.library.manageHint")}</div>
+            <div className="text-[12px] text-ink-secondary">{t("skills.library.manageHint")}</div>
           </div>
         ) : (
           <>
@@ -462,17 +462,17 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     onClick={() => void view(skill)}
                     className="min-w-0 flex-1 text-left"
                   >
-                    <div className="truncate font-mono text-[12.5px] text-ink">{skill.name}</div>
+                    <div className="truncate font-mono text-[13px] text-ink">{skill.name}</div>
                     {(libraryOn || skill.origin === "imported" || skill.origin === "native") && (
                       <span
-                        className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[9.5px] uppercase tracking-wide text-ink-secondary"
+                        className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[10px] uppercase tracking-wide text-ink-secondary"
                         title={skill.origin === "imported" ? t("skills.origin.importedHint") : skill.origin === "native" ? t("skills.origin.nativeHint") : undefined}
                       >
                         {skill.origin === "imported" ? t("skills.origin.imported") : skill.origin === "native" ? t("skills.origin.native") : skill.origin === "library" ? t("skills.origin.library") : t("skills.origin.private")}
                       </span>
                     )}
-                    <div className="mt-0.5 line-clamp-2 text-[11.5px] text-ink-secondary">{skill.description}</div>
-                    <div className="mt-0.5 text-[10.5px] text-ink-secondary">{t("skills.usedWhenRelevant")}</div>
+                    <div className="mt-0.5 line-clamp-2 text-[12px] text-ink-secondary">{skill.description}</div>
+                    <div className="mt-0.5 text-[11px] text-ink-secondary">{t("skills.usedWhenRelevant")}</div>
                   </button>
                   {skill.origin !== "native" && (
                     <Switch
@@ -494,16 +494,16 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     </button>
                   )}
                 </div>
-                <div className="mt-1 truncate text-[10.5px] text-ink-secondary" title={skill.source}>{t("skills.source", { source: skill.source })}</div>
+                <div className="mt-1 truncate text-[11px] text-ink-secondary" title={skill.source}>{t("skills.source", { source: skill.source })}</div>
                 {skill.warnings.length > 0 && (
-                  <div className="mt-1 text-[10.5px] text-warning">{skill.warnings.join(" · ")}</div>
+                  <div className="mt-1 text-[11px] text-warning">{skill.warnings.join(" · ")}</div>
                 )}
               </div>
             ))}
           </div>
         )}
         {staged.length > 0 && (
-          <div className="mt-2 text-[11.5px] text-warning">
+          <div className="mt-2 text-[12px] text-warning">
             {staged.length === 1 ? t("skills.stagedOne") : t("skills.stagedMany", { count: staged.length })}
           </div>
         )}

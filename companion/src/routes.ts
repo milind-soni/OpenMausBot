@@ -112,6 +112,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/compact$/ },
+  // Set me up under a new bot's greeting and the x on its chip: no more than a typed /setup.
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/setup-request$/ },
+  { method: "DELETE", path: /^\/api\/bots\/[\w-]+\/setup-request$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },

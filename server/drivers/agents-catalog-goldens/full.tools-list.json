@@ -45,7 +45,7 @@
     },
     {
       "name": "shared_computer",
-      "description": "Use a desktop explicitly shared by the user. Discover computer_id and folder_id with list_shared_computers. list_files/read_file/write_file are confined to chosen folders; paths are relative. read_file returns sha256; overwriting requires expected_sha256. Binary files support base64 encoding. run_command requires a SEPARATE unrestricted terminal grant. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. To browse there, open pages with launch_app urls (the person's own browser) and use get_window_state, click and type_text: the browser_* tools need a DevTools endpoint most browsers lack. Never substitute the server's filesystem when this desktop is offline. Actions are not retried automatically; inspect an uncertain outcome before retrying.",
+      "description": "Use a desktop explicitly shared by the user. Discover computer_id and folder_id with list_shared_computers. list_files/read_file/write_file are confined to chosen folders; paths are relative. read_file returns sha256; overwriting requires expected_sha256. Binary files support base64 encoding. run_command requires a SEPARATE unrestricted terminal grant and stops after timeout_seconds (default 120, at most 240): run longer jobs in the background with output to a file, then read it. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. To browse there, open pages with launch_app urls (the person's own browser) and use get_window_state, click and type_text: the browser_* tools need a DevTools endpoint most browsers lack. Never substitute the server's filesystem when this desktop is offline. Actions are not retried automatically; inspect an uncertain outcome before retrying.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -85,6 +85,11 @@
           },
           "command": {
             "type": "string"
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 240
           },
           "tool_name": {
             "type": "string"
@@ -572,7 +577,7 @@
     },
     {
       "name": "create_bot",
-      "description": "Chief of Staff only: add a specialist to your section now; the person can undo it. instructions become its soul. Omit modelSelection for the workspace default, or use exact IDs from list_team_setup. It starts with connected apps off, at the default access level. Assign work with coordinate_bots. At most four per turn.",
+      "description": "Chief of Staff only: add a specialist to your section now; the person can undo it. instructions become its soul. Omit modelSelection for the workspace default, or use exact IDs from list_team_setup. It starts with your connected apps, at the default access level. Assign work with coordinate_bots. At most four per turn.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -822,7 +827,7 @@
     },
     {
       "name": "manage_room",
-      "description": "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, for rooms in your own department, with any bots you can reach; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between departments. Follow the tool result under the effective access level; if the change is refused, report the blocker and ask the user to make the change instead, without trying another route.",
+      "description": "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, for rooms in your own department, with any bots you can reach; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between departments. coordinate_bots reaches bots outside the room directly. Follow the tool result under the effective access level; if the change is refused, report the blocker, without trying another route.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -922,7 +927,7 @@
     },
     {
       "name": "fill_login",
-      "description": "Sign in with a login the person saved in OpenMausBot. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself, submits each step, and says where the page went; you never see the password. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed (a code sent to their own email, which you read and type in, is one), or call request_sign_in.",
+      "description": "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself, submits each step, and says where the page went; you never see the password. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed (a code sent to their own email, which you read and type in, is one), or call request_sign_in.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1191,6 +1196,58 @@
         },
         "required": [
           "fields"
+        ]
+      }
+    },
+    {
+      "name": "message_person",
+      "description": "Pass a message to a person on this team, when someone asks you to tell them something (\"tell Bob the launch moved\"). Only your message goes, never this conversation. Someone who can see this conversation is tagged here; anyone else gets it in a new private conversation with you, and their answer can come back here.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "to": {
+            "type": "string",
+            "maxLength": 254,
+            "description": "Their name or email address."
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "What to tell them, in your words, complete on its own."
+          }
+        },
+        "required": [
+          "to",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "report_bug",
+      "description": "Send the person's bug report to the MausBot team (OpenMausBot's developers) with the app's diagnostics. Only for a message that tags @devs, once. No passwords, keys, tokens or file contents.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "went_wrong": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "What the person says went wrong."
+          },
+          "you_saw": {
+            "type": "string",
+            "maxLength": 3000,
+            "description": "What you saw here: errors, failed tools, stuck steps, or nothing unusual."
+          },
+          "steps": {
+            "type": "string",
+            "maxLength": 2000,
+            "description": "Steps to reproduce."
+          }
+        },
+        "required": [
+          "went_wrong"
         ]
       }
     },

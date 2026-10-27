@@ -13,6 +13,8 @@ export interface FakeHttpMcpOptions {
   transport?: "http" | "sse";
   /** require this header on every request; anything else gets 401 */
   requireHeader?: { name: string; value: string };
+  /** require every one of these headers with these values, as a gateway such as Cloudflare Access does; anything else gets 403 */
+  requireHeaders?: Record<string, string>;
   /** accept a request only when this approves its Authorization header */
   acceptBearer?: (authorization: string | undefined) => boolean;
   /** WWW-Authenticate value sent with a 401 */
@@ -210,6 +212,10 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
   const handle: RequestListener = (req, res) => {
     void (async () => {
       seenHeaders.push({ ...req.headers });
+      if (options.requireHeaders && Object.entries(options.requireHeaders).some(([name, value]) => req.headers[name.toLowerCase()] !== value)) {
+        res.writeHead(403, { "content-type": "text/plain" }).end("Forbidden");
+        return;
+      }
       if ((options.requireHeader && req.headers[options.requireHeader.name.toLowerCase()] !== options.requireHeader.value)
         || (options.acceptBearer && !options.acceptBearer(req.headers.authorization))) {
         res.writeHead(401, {

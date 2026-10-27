@@ -272,7 +272,7 @@ test("an app or key that could not move is said with My Cloud's reason, counted,
     error: "My Cloud said: this key is not for this Cloud" }]);
 });
 
-test("a move has My Cloud keep as its owner's the lines it already held of this computer's bots, by row id only; never a room's, and Send everything never asks", async () => {
+test("a move has My Cloud keep as its owner's the lines it already held of this computer's bots and rooms, by row id only, and Send everything never asks", async () => {
   const conversations = [
     { bot: "ember", threadId: "t-ember", last: 1, lastId: "t-ember-1", busy: false },
     { bot: "juno", threadId: "t-juno", last: 1, lastId: "t-juno-1", busy: false },
@@ -287,8 +287,8 @@ test("a move has My Cloud keep as its owner's the lines it already held of this 
     } });
   const outcome = await createCloudSend(make().deps).send({ reason: "move" });
   assert.deepEqual(outcome.result.failed, []);
-  assert.deepEqual(asked, [[["t-ember", 5_000, "t-ember-1"], ["t-ember", 5_000, "t-ember-5001"]], [["t-ember", 2_001, "t-ember-10001"]]],
-    "Ember's row ids, at most 10,000 a request; Juno is not on My Cloud, and a room's lines are never the owner's");
+  assert.deepEqual(asked, [[["t-ember", 5_000, "t-ember-1"], ["t-ember", 5_000, "t-ember-5001"]], [["t-ember", 2_001, "t-ember-10001"], ["t-room", 1, "t-room-1"]]],
+    "Ember's and the room's row ids, at most 10,000 a request; Juno is not on My Cloud");
   asked.length = 0;
   await createCloudSend(make().deps).send();
   assert.deepEqual(asked, [], "only the move asks");

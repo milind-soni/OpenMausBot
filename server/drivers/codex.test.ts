@@ -18,6 +18,7 @@ import { CODEX_SIGN_IN_EXPIRED, codexNotSignedIn, codexSignInRefused, codexUserE
 import { CODEX_USAGE_LIMIT_REACHED } from "../../shared/codex-usage-limit.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
+import { unsupportedCallsNotice } from "./codex-unsupported-calls.ts";
 import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { startFakeHttpMcp, type FakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
 import * as procs from "../procs.ts";
@@ -159,6 +160,24 @@ describe("CodexDriver turns (fake app-server)", () => {
     await instance.adapter.sendTurn({ threadId: "team-tools", text: "Fixture" });
     await recorder.until((event) => event.type === "turn.completed");
     expect(recorder.events.filter((e) => e.type === "runtime.notice").map((e) => (e as { message: string }).message)).toEqual([TEAM_TOOLS_FAILED]);
+  });
+
+  it("says which tool calls codex refused as unsupported this turn, and not the ones from earlier turns", async () => {
+    const rollout = join(scratch, "rollout.jsonl");
+    // An earlier turn's refusal is already in the rollout: it was reported then.
+    writeFileSync(rollout, `${JSON.stringify({ type: "response_item", payload: { type: "function_call_output", call_id: "old", output: "unsupported call: coordinate_bots" } })}\n`);
+    await create({ environment: { HOME: scratch, CODEX_HOME: join(scratch, ".codex"), FAKE_CODEX_ROLLOUT: rollout } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let warned: string[];
+    try {
+      await instance.adapter.sendTurn({ threadId: "unsupported-call", text: "Fixture" });
+      await recorder.until((event) => event.type === "turn.completed");
+      warned = warn.mock.calls.map((call) => String(call[0]));
+    } finally {
+      warn.mockRestore();
+    }
+    expect(recorder.events.filter((e) => e.type === "runtime.notice").map((e) => (e as { message: string }).message)).toEqual([unsupportedCallsNotice(["retry_thread"])]);
+    expect(warned).toContain("[codex] unsupported tool call (provider dropped the MCP namespace): retry_thread");
   });
 
   it("refuses native selection before a Codex prompt, including resumed Full-access turns", async () => {

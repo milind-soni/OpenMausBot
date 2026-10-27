@@ -103,7 +103,7 @@ export function useDesktopNotices(desktop: DesktopNoticesBridge | undefined): De
 const CLICKS: ReadonlySet<CloudProPopupAction> = new Set(["upgrade", "manage", "see_plans"]);
 
 export function reportCloudProPopup(action: CloudProPopupAction, who: Who, page: CloudProPopupPage) {
-  if (who.email && CLICKS.has(action) && analyticsChoiceKnown()) identifyEmail(who.email, { submitted: false });
+  if (who.email && CLICKS.has(action) && analyticsChoiceKnown()) identifyEmail(who.email);
   track("cloud_pro_popup", { action, plan: who.plan, signed_in: who.signedIn, page });
 }
 
@@ -168,13 +168,13 @@ export function CloudProPopup({ view, onPrimary, onSeePlans, onNotNow, onClose }
       </div>
       {view.badge && <p className="mt-3 inline-flex rounded-full bg-accent/15 px-2 py-0.5 text-[12px] font-medium text-accent-text">{view.badge}</p>}
       <div id="cloud-pro-popup-body">
-        <p className="mt-3 text-[13.5px] leading-relaxed text-ink-secondary">{t("cloudIntro.body")}</p>
+        <p className="mt-3 text-[14px] leading-relaxed text-ink-secondary">{t("cloudIntro.body")}</p>
         <ul className="mt-3 flex flex-col gap-2 text-[13px]">
           {view.points.map(point => <li key={point} className="flex items-start gap-2"><Check size={15} className="mt-0.5 shrink-0 text-ink-secondary" aria-hidden="true" />{point}</li>)}
         </ul>
         {view.current && <p className="mt-3 text-[13px] font-medium">{view.current}</p>}
-        {view.price && <p className="mt-3 text-[12.5px] text-ink-secondary">{view.price}</p>}
-        {view.moneyBack && <p className="text-[12.5px] text-ink-secondary">{view.moneyBack}</p>}
+        {view.price && <p className="mt-3 text-[13px] text-ink-secondary">{view.price}</p>}
+        {view.moneyBack && <p className="text-[13px] text-ink-secondary">{view.moneyBack}</p>}
       </div>
       <div className="mt-5 flex flex-wrap items-center gap-3">
         <button type="button" className={PRIMARY} onClick={onPrimary}>{view.primary.label}</button>
@@ -183,7 +183,7 @@ export function CloudProPopup({ view, onPrimary, onSeePlans, onNotNow, onClose }
         </button>}
       </div>
       <div className="mt-3 flex items-center justify-between gap-3">
-        <p className="text-[11.5px] text-ink-secondary">{t("pro.disclaimer")}</p>
+        <p className="text-[12px] text-ink-secondary">{t("pro.disclaimer")}</p>
         <NotNowButton onClick={onNotNow} />
       </div>
       <button type="button" onClick={onClose} aria-label={t("cloudAdd.close")} className="ui-icon-button absolute end-4 top-4"><X size={16} /></button>

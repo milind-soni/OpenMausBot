@@ -169,7 +169,7 @@ function ActivityLine({ row, current, onJump }: { row: ActivityRow; current: boo
           <span className="mt-0.5 block truncate font-mono text-[11px] text-ink-secondary">{routineLineText(row.summaryCode, row.summary, row.summaryParams)}</span>
         )}
       </span>
-      <span className={cn("mt-[2px] shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium", TONE_CLASS[chip.tone])}>
+      <span className={cn("mt-[2px] shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium", TONE_CLASS[chip.tone])}>
         {chip.text}
       </span>
     </button>

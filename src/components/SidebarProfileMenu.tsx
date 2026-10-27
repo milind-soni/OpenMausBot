@@ -29,7 +29,9 @@ import { updaterMessage, useUpdaterState, type UpdaterState } from "@/lib/update
 import { brand } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
+import { FEEDBACK_URL, HELP_CENTER_URL, appVersion, openExternalLink } from "@/lib/app-links";
+import { useOtherServerName } from "@/lib/other-server";
+import { profileForSession, readSessionState, type SessionState } from "@/lib/session";
 import {
   cloudPhoneDestination,
   connectPhoneEntry,
@@ -179,9 +181,10 @@ export function useUpdateItem(): UpdateEntry | null {
 }
 
 /** Without the packaged app's updater the server cannot replace itself, so the row says whether a newer release exists and how to install it. */
-function useServerUpdateItem(enabled: boolean): UpdateEntry | null {
+export function useServerUpdateItem(enabled: boolean): UpdateEntry | null {
   const [phase, setPhase] = useState<ServerUpdatePhase>("idle");
   const [check, setCheck] = useState<ServerUpdateCheck | null>(null);
+  const otherServer = useOtherServerName(enabled);
 
   useEffect(() => {
     if (phase !== "up-to-date") return;
@@ -190,7 +193,7 @@ function useServerUpdateItem(enabled: boolean): UpdateEntry | null {
   }, [phase]);
 
   if (!enabled) return null;
-  const row = serverUpdateRow(phase, check);
+  const row = serverUpdateRow(phase, check, appVersion(), otherServer);
   return {
     phase,
     pending: false,
@@ -350,9 +353,18 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const update = desktopUpdate ?? serverUpdate;
   const [aboutOpen, setAboutOpen] = useState(false);
   const [phoneAppOpen, setPhoneAppOpen] = useState(false);
+  const [session, setSession] = useState<SessionState | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
 
-  const profile = state.config?.profile;
+  useEffect(() => {
+    let active = true;
+    void readSessionState().then((state) => {
+      if (active) setSession(state);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const profile = profileForSession(state.config?.profile, session);
   const name = profileLabel(profile);
   const connectTo = (destination: PhoneDestination) => selectPhoneDestination(destination, { bridge: cloudPhone.bridge, dispatch });
   const remote = window.ogb?.remoteClient?.active === true;

@@ -14,7 +14,7 @@ import type { ToolScope } from "../shared/tool-scope.ts";
 import type { SendTurnInput } from "./contracts.ts";
 import { TOOL_BRIDGE_ENV } from "./drivers/agents-bridge.ts";
 import { mountChatTools, type ChatToolSession } from "./drivers/chat-mcp-tools.ts";
-import { buildMcpServers } from "./drivers/pi.ts";
+import { buildMcpServers } from "./drivers/pi-mcp-servers.ts";
 import { turnStdioMcpServers } from "./drivers/turn-mcp.ts";
 import { gateServer } from "./mcp-gate-config.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";

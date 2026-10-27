@@ -99,7 +99,7 @@ export function AvatarFraming({
         onChange={(event) => onPatch({ avatarZoom: clampAvatarZoom(Number(event.target.value)) })}
         className="w-full accent-accent"
       />
-      <div className="mt-1.5 flex items-center justify-between gap-3 text-[11.5px] text-ink-secondary">
+      <div className="mt-1.5 flex items-center justify-between gap-3 text-[12px] text-ink-secondary">
         <span>{t("botIdentity.framing.hint")}</span>
         {framed && (
           <button

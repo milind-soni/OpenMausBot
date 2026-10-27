@@ -49,10 +49,10 @@ export function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
         <ArrowRight size={13} className={cn("shrink-0", live ? "text-accent" : "text-ink-secondary")} />
         <span className="truncate text-[13px] font-medium text-ink">{target.name}</span>
       </div>
-      {edge.reason && <span className="max-w-[220px] truncate text-[11.5px] text-ink-secondary">{edge.reason}</span>}
+      {edge.reason && <span className="max-w-[220px] truncate text-[12px] text-ink-secondary">{edge.reason}</span>}
       <span
         className={cn(
-          "rounded-full px-2 py-0.5 text-[10.5px] font-medium",
+          "rounded-full px-2 py-0.5 text-[11px] font-medium",
           edge.state === "running"
             ? "bg-success/15 text-success"
             : edge.state === "queued"
@@ -191,7 +191,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
         aria-modal="true"
         aria-labelledby="section-context-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[680px] flex-col overflow-hidden rounded-[24px] border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+        className="animate-pop-in flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[680px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
       >
         <header className="flex items-start justify-between gap-4 border-b border-hairline/40 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div>
@@ -201,7 +201,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
                 {t("team.instructionsTitle", { name: label })}
               </h2>
             </div>
-            <p className="mt-1.5 max-w-[520px] text-[12.5px] leading-relaxed text-ink-secondary">
+            <p className="mt-1.5 max-w-[520px] text-[13px] leading-relaxed text-ink-secondary">
               {t("team.instructionsHint")}
             </p>
           </div>
@@ -228,9 +228,9 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
                 onChange={(event) => setText(event.target.value)}
                 placeholder={t("team.instructionsPlaceholder")}
                 aria-label={t("team.instructionsTitle", { name: label })}
-                className="min-h-[280px] w-full resize-y rounded-xl border border-hairline/60 bg-inset px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/50"
+                className="min-h-[280px] w-full resize-y rounded-xl border border-hairline/60 bg-inset px-4 py-3 font-mono text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/50"
               />
-              <div className="mt-2 flex items-start justify-between gap-4 text-[11.5px] text-ink-secondary">
+              <div className="mt-2 flex items-start justify-between gap-4 text-[12px] text-ink-secondary">
                 <span>
                   {t("team.instructionsFactHint")} {updatedAt ? ` ${t("team.instructionsLastSaved", { time: new Date(updatedAt).toLocaleString(intlLocale()) })}` : ""}
                 </span>

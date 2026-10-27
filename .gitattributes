@@ -33,3 +33,6 @@ Dockerfile text eol=lf
 # line against the body after it; the phone apps copy it byte for byte. A CRLF
 # checkout on Windows fails both for a reason that has nothing to do with the page.
 shared/app-frame/app-host.html text eol=lf
+
+# Imported by a vitest test: a CRLF checkout of its first lines broke the import on Windows.
+scripts/tighten-ratchets.mjs text eol=lf

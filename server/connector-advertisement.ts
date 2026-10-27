@@ -121,3 +121,27 @@ export function filterToolsListFrame(
   });
   return { ...frame, result: { ...(result as Record<string, unknown>), tools: kept } };
 }
+
+const AUTH_CONFIG_PARAMETER = {
+  type: "string",
+  description: "Optional, read by OpenMausBot: the id (ac_…) of an auth config in the person's own Composio project to "
+    + "connect the one listed toolkit with. Leave it out to use their most recently created enabled config for it.",
+};
+
+/** COMPOSIO_MANAGE_CONNECTIONS as OpenMausBot's connection cards read it: Composio's schema has no auth config id. */
+export function withAuthConfigParameter(frame: Record<string, unknown>): Record<string, unknown> {
+  const result = frame.result;
+  if (!result || typeof result !== "object" || Array.isArray(result)) return frame;
+  const tools = (result as { tools?: unknown }).tools;
+  if (!Array.isArray(tools)) return frame;
+  const withParameter = tools.map((tool) => {
+    if (!tool || typeof tool !== "object" || Array.isArray(tool)) return tool;
+    const { name, inputSchema } = tool as { name?: unknown; inputSchema?: unknown };
+    if (typeof name !== "string" || !name.endsWith("_MANAGE_CONNECTIONS")) return tool;
+    if (!inputSchema || typeof inputSchema !== "object" || Array.isArray(inputSchema)) return tool;
+    const properties = (inputSchema as { properties?: unknown }).properties;
+    if (!properties || typeof properties !== "object" || Array.isArray(properties) || "auth_config_id" in properties) return tool;
+    return { ...tool, inputSchema: { ...inputSchema, properties: { ...properties, auth_config_id: AUTH_CONFIG_PARAMETER } } };
+  });
+  return { ...frame, result: { ...(result as Record<string, unknown>), tools: withParameter } };
+}

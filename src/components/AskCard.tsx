@@ -36,7 +36,7 @@ export function AskCard({
       data-tour={tour}
       data-ask-card="pending"
       onKeyDown={onKeyDown}
-      className="w-full max-w-[600px] rounded-3xl bg-composer px-4 py-3 text-start ring-1 ring-composer-ring"
+      className="w-full max-w-[600px] rounded-2xl bg-composer px-4 py-3 text-start ring-1 ring-composer-ring"
     >
       <div className={cn("flex min-w-0 gap-2", plain ? "items-start" : "items-center")}>
         {icon && <span aria-hidden="true" className="flex shrink-0 text-accent-text">{icon}</span>}
@@ -45,12 +45,12 @@ export function AskCard({
             "min-w-0 flex-1",
             plain
               ? "break-words text-[15px] font-semibold leading-6 text-ink"
-              : "truncate text-[13.5px] font-semibold text-accent-text",
+              : "truncate text-[14px] font-semibold text-accent-text",
           )}
         >
           <bdi dir="auto">{title}</bdi>
         </div>
-        {meta && <span className="shrink-0 text-[11.5px] tabular-nums text-ink-tertiary">{meta}</span>}
+        {meta && <span className="shrink-0 text-[12px] tabular-nums text-ink-tertiary">{meta}</span>}
         {onDismiss && dismissLabel && (
           <button
             type="button"
@@ -91,7 +91,7 @@ export function AskSettledLine({
       role="group"
       aria-label={ariaLabel}
       data-ask-card="settled"
-      className="w-full max-w-[600px] text-start text-[12.5px] text-ink-tertiary"
+      className="w-full max-w-[600px] text-start text-[13px] text-ink-tertiary"
     >
       <div className="flex min-w-0 items-center gap-1.5">
         <span aria-hidden="true" className="flex shrink-0">

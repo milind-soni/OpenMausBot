@@ -360,6 +360,95 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     }
   }, 120_000);
 
+  it("starts a person's 1:1 turn while the same bot's room turn is still running", async () => {
+    const { botId, threads } = await botWithThreads(1);
+    const threadId = threads[0];
+    const createdRoom = await api("POST", "/api/groups", {
+      name: "Direct overlap room",
+      memberIds: [botId],
+      setup: { bulletin: "Answer briefly.", defaultResponder: { kind: "member", botId } },
+    });
+    expect(createdRoom.status).toBe(201);
+    const room = createdRoom.body.group;
+    const roomWorking = async () =>
+      (await api("GET", "/api/bots?messages=0")).body.groups.find((group: any) => group.id === room.id)?.working;
+    try {
+      const sent = await api("POST", `/api/groups/${room.id}/messages`, { text: "Hold the room turn open." });
+      expect(sent.status).toBe(202);
+      // Room turns run in the member's shared workspace, so the gated fake holds under the bot id, not the room thread id.
+      await dump(botId);
+      await expect.poll(roomWorking, { timeout: 15_000 }).toBe(true);
+      expect(await busyThreads(botId)).toEqual([]);
+
+      const direct = await send(botId, threadId, "REACH_ME_NOW");
+      expect(direct.status).toBe(202);
+      expect(direct.body.queued).toBeUndefined();
+      // A second provider process for the same bot: proof the 1:1 turn started, not just a receipt.
+      await dump(threadId);
+      expect(JSON.stringify((await dump(threadId)).prompt)).toContain("REACH_ME_NOW");
+      expect(await busyThreads(botId)).toEqual([threadId]);
+      // The room turn is untouched: still live while the 1:1 turn runs.
+      expect(await roomWorking()).toBe(true);
+
+      finish(threadId);
+      await expect.poll(async () => (await busyThreads(botId)).length, { timeout: 15_000 }).toBe(0);
+      expect(await roomWorking()).toBe(true);
+    } finally {
+      // A drain can start the queued 1:1 turn only after the room turn ends, so release in a loop.
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        finish(botId);
+        for (const id of await busyThreads(botId)) finish(id);
+        if ((await busyThreads(botId)).length === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+    }
+  }, 120_000);
+
+  it("drains a person's queued message beside the bot's room turn, so a newer send cannot overtake it", async () => {
+    await limit(1);
+    const { botId, threads } = await botWithThreads(3);
+    const [, first, second] = threads;
+    const createdRoom = await api("POST", "/api/groups", {
+      name: "Queued overlap room",
+      memberIds: [botId],
+      setup: { bulletin: "Answer briefly.", defaultResponder: { kind: "member", botId } },
+    });
+    expect(createdRoom.status).toBe(201);
+    const room = createdRoom.body.group;
+    const roomWorking = async () =>
+      (await api("GET", "/api/bots?messages=0")).body.groups.find((group: any) => group.id === room.id)?.working;
+    try {
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "Hold the room turn open." })).status).toBe(202);
+      await dump(botId);
+      await expect.poll(roomWorking, { timeout: 15_000 }).toBe(true);
+
+      expect((await send(botId, first, "FIRST_TASK")).body.queued).toBeUndefined();
+      await dump(first);
+      // The one slot is taken, so the next task thread queues for capacity, not for the room.
+      const queued = await send(botId, second, "QUEUED_TASK");
+      expect(queued.body).toMatchObject({ queued: true, reason: "capacity", threadId: second });
+
+      finish(first);
+      // The slot frees while the room turn still runs: the queued message starts now, not after the room.
+      expect(JSON.stringify((await dump(second)).prompt)).toContain("QUEUED_TASK");
+      expect(await busyThreads(botId)).toEqual([second]);
+      expect(await roomWorking()).toBe(true);
+      finish(second);
+      await expect.poll(async () => (await busyThreads(botId)).length, { timeout: 15_000 }).toBe(0);
+    } finally {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        finish(botId);
+        for (const id of await busyThreads(botId)) finish(id);
+        if ((await busyThreads(botId)).length === 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+    }
+  }, 120_000);
+
   it("dispatches a hand-off into a free slot without waiting for whole-bot idle, and holds the next at capacity", async () => {
     await limit(2);
     const target = await botWithThreads(2);

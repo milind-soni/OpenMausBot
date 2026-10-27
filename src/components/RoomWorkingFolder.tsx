@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Folder, FolderOpen } from "lucide-react";
 import { api, type Group } from "@/state/store";
+import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { shortPath } from "@/lib/short-path";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
@@ -9,7 +10,7 @@ import { useDesktopCapabilities } from "./DesktopCapabilities";
  * PATCHed directly, not via patchGroup: the server validates the path, and a rejected folder must not stick in local
  * state.
  */
-export function RoomWorkingFolder({ group }: { group: Group }) {
+export function RoomWorkingFolder({ group, heading = true }: { group: Group; heading?: boolean }) {
   const { capabilities } = useDesktopCapabilities();
   const home = capabilities.host.homeDir;
   const [draft, setDraft] = useState<string | null>(null);
@@ -38,12 +39,14 @@ export function RoomWorkingFolder({ group }: { group: Group }) {
   };
 
   return (
-    <div className="rounded-xl bg-card p-4">
-      <div className="text-[15px] font-medium text-ink">{t("room.folder.title")}</div>
-      <div className="mt-0.5 text-[13px] text-ink-secondary">{t("room.folder.detail")}</div>
+    <div data-room-working-folder className="rounded-xl bg-card p-4">
+      {heading && <>
+        <div className="text-[15px] font-medium text-ink">{t("room.folder.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">{t("room.folder.detail")}</div>
+      </>}
       {locked ? (
-        <div className="mt-3">
-          <div className="truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink" title={shownCwd}>
+        <div className={cn(heading && "mt-3")}>
+          <div className="truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink" title={shownCwd}>
             {shownCwd ? shortPath(shownCwd, home) : <span className="text-ink-secondary">{t("room.folder.own")}</span>}
           </div>
           <div className="mt-2 text-[12px] text-ink-secondary">
@@ -51,8 +54,8 @@ export function RoomWorkingFolder({ group }: { group: Group }) {
           </div>
         </div>
       ) : canPick ? (
-        <div className="mt-3 flex items-center gap-2">
-          <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink" title={group.cwd}>
+        <div className={cn("flex items-center gap-2", heading && "mt-3")}>
+          <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink" title={group.cwd}>
             {group.cwd ? shortPath(group.cwd, home) : <span className="text-ink-secondary">{t("room.folder.own")}</span>}
           </div>
           <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
@@ -66,14 +69,14 @@ export function RoomWorkingFolder({ group }: { group: Group }) {
         </div>
       ) : (
         <form
-          className="mt-3 flex items-center gap-2"
+          className={cn("flex items-center gap-2", heading && "mt-3")}
           onSubmit={(e) => {
             e.preventDefault();
             void save((draft ?? group.cwd ?? "").trim() || null);
           }}
         >
           <input
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 font-mono text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none"
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 font-mono text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
             placeholder={t("room.folder.placeholder")}
             value={draft ?? group.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
@@ -88,8 +91,14 @@ export function RoomWorkingFolder({ group }: { group: Group }) {
   );
 }
 
+export function roomWorkingFolder(group: Group): { path: string; name: string } | null {
+  const path = group.pinnedCwd === undefined ? group.cwd : (group.pinnedCwd ?? undefined);
+  if (!path) return null;
+  return { path, name: path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path };
+}
+
 export function RoomWorkingFolderChip({ group, onToggle }: { group: Group; onToggle: () => void }) {
-  const folder = group.pinnedCwd === undefined ? group.cwd : (group.pinnedCwd ?? undefined);
+  const folder = roomWorkingFolder(group);
   if (!folder) {
     return (
       <button
@@ -101,15 +110,14 @@ export function RoomWorkingFolderChip({ group, onToggle }: { group: Group; onTog
       </button>
     );
   }
-  const name = folder.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || folder;
   return (
     <button
       onClick={onToggle}
-      className="flex max-w-[180px] items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink"
-      title={t("chat.workingFolder", { folder })}
+      className="flex max-w-[180px] items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+      title={t("chat.workingFolder", { folder: folder.path })}
     >
       <Folder size={12} />
-      <span className="truncate font-mono">{name}</span>
+      <span className="truncate font-mono">{folder.name}</span>
     </button>
   );
 }

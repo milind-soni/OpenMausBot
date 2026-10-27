@@ -105,6 +105,9 @@ export interface SendTurnInput {
   recalled?: string;
   /** Reasserted every turn so a resumed native session cannot keep a stale, more permissive mode. */
   approvalMode?: ApprovalMode;
+  /** The conversation's level right now, which the person may change while the turn runs. A driver that gates its own
+   * tool calls reads it before each one; a native engine keeps `approvalMode` until its next turn. */
+  approvalModeNow?: () => ApprovalMode;
   /** Fresh owner selection, independent of execution approval and resume state. */
   toolScope?: ToolScope;
   /** A guest turn: no shell or command execution, no reads outside its folder. Sent only to drivers whose guestTurns is "confined". */
@@ -298,6 +301,9 @@ export type SteerOutcome = "steered" | "refused" | "indeterminate";
 export interface ProviderSnapshot {
   /** Separate, explicitly authorized ChatGPT-plan billing (not Codex login). */
   chatgptPlan?: boolean;
+  /** Ready only through OpenCode's free no-login models (no login, subscription or key of the person's own): a backup that
+   * ranks last for a new bot's default and never counts as "an AI already works" in the welcome. */
+  freeFallback?: boolean;
   authenticationUnavailableReason?: string;
   state: "available" | "unavailable";
   reason?: string;

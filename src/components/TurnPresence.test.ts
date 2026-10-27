@@ -47,15 +47,15 @@ describe("TurnPresence phrases", () => {
     expect(visibleText()).toEqual([phraseAt(thinking, `${seed}|think`, 1)]);
   });
 
-  it("crossfades the outgoing phrase in the same cell, then drops it", () => {
-    render({ phrases: thinking, phase: "think" });
+  it("swaps one phrase for the next and never draws two at once", () => {
+    // The fading old phrase sat out of flow: a longer one drew over the size beside it ("Piecing it together" over "· 2 KB").
+    render({ label: "Working", phrases: thinking, phase: "think", since: Date.now(), size: "2 KB" });
     act(() => void vi.advanceTimersByTime(phraseHoldMs(`${seed}|think`, 0)));
-    const outgoing = host.querySelector(".turn-phrase-out");
-    expect(outgoing?.textContent).toBe("Thinking");
-    expect(outgoing?.getAttribute("aria-hidden")).toBe("true");
+    const drawn = () => Array.from(host.querySelectorAll("[data-turn-now] .thinking-shimmer")).map((node) => node.textContent);
+    expect(drawn()).toEqual([phraseAt(thinking, `${seed}|think`, 1)]);
     expect(host.querySelector(".turn-phrase-in")).not.toBeNull();
     act(() => void vi.advanceTimersByTime(320));
-    expect(host.querySelector(".turn-phrase-out")).toBeNull();
+    expect(drawn()).toEqual([phraseAt(thinking, `${seed}|think`, 1)]);
   });
 
   it("starts a new step at its plain label", () => {
@@ -75,13 +75,6 @@ describe("TurnPresence phrases", () => {
     expect(visibleText()).toEqual(["Thinking"]);
   });
 
-  it("floats the outgoing phrase out of flow, so only the shown phrase sets the width", () => {
-    render({ phrases: thinking, phase: "think" });
-    act(() => void vi.advanceTimersByTime(phraseHoldMs(`${seed}|think`, 0)));
-    expect(host.querySelector(".turn-phrase-out")?.className).toContain("absolute");
-    expect(host.querySelector(".turn-phrase-in")?.className).not.toContain("absolute");
-  });
-
   it("keeps a single phrase steady", () => {
     render({ phrases: ["Running the test suite"], phase: "spoken" });
     act(() => void vi.advanceTimersByTime(60_000));
@@ -98,8 +91,7 @@ describe("TurnPresence phrases", () => {
 
 describe("the status line", () => {
   const line = () => {
-    const shown = host.querySelector("[data-turn-status]")?.cloneNode(true) as HTMLElement | undefined;
-    shown?.querySelectorAll(".turn-phrase-out").forEach((node) => node.remove());
+    const shown = host.querySelector("[data-turn-status]");
     return shown?.textContent?.replace(/\s+/g, " ").trim();
   };
 

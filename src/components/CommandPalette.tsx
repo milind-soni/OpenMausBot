@@ -191,7 +191,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
                 <BotIcon size={16} className="shrink-0 text-ink-secondary" />
                 <span className="truncate text-[14px] text-ink">{bot.name}</span>
                 {bot.title && (
-                  <span className="min-w-0 truncate text-[12.5px] text-ink-secondary">{bot.title}</span>
+                  <span className="min-w-0 truncate text-[13px] text-ink-secondary">{bot.title}</span>
                 )}
               </>,
             ),
@@ -232,7 +232,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
                     {hit.name}
                     {hit.task ? <span className="font-normal text-ink-secondary"> · {hit.task}</span> : null}
                   </span>
-                  <span className="line-clamp-2 text-[12.5px] text-ink-secondary">
+                  <span className="line-clamp-2 text-[13px] text-ink-secondary">
                     {before}<mark className="rounded-sm bg-accent/25 px-0.5 text-ink">{match}</mark>{after}
                   </span>
                 </>,

@@ -21,7 +21,7 @@ export function CloudNoticeCard({ kind, busy = false, failed = false, onAction, 
 }) {
   const card = CLOUD_NOTICE_CARD[kind];
   return <NoticeCard titleId="cloud-notice-title" notice={`cloud-notice-${kind}`} icon={Cloud} title={t(card.title)} onDismiss={onNotNow}>
-    <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">{t(card.hint)}</p>
+    <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t(card.hint)}</p>
     <div className="mt-3 flex flex-wrap items-center gap-3">
       <button type="button" disabled={busy} className={PRIMARY_BUTTON} onClick={onAction}>{t(card.action)}</button>
       <NotNowButton onClick={onNotNow} />

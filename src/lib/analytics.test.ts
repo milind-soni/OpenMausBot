@@ -261,7 +261,7 @@ describe("loading the client", () => {
       ...OPENED,
       "capture onboarding_step",
       "identify someone@example.com",
-      "capture email_submitted",
+      // No email_submitted: nothing asks for an email on the first-run screen any more.
       "capture onboarding_done",
     ]);
   });

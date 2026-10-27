@@ -1,9 +1,10 @@
 import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 import { codexShellDisabled, GUEST_CONFINED_CODEX_ARGS } from "./codex-guest.ts";
 import { TEAM_TOOLS_FAILED, teamToolsFailed } from "./team-tools.ts";
+import { reportUnsupportedCalls, rolloutMark, type RolloutMark } from "./codex-unsupported-calls.ts";
 // The `codex` CLI headless over its app-server JSON-RPC (NDJSON on stdio): completion is
 // `turn/completed`, approvals arrive as server→client requests, resumeCursor is the codex thread id.
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -15,8 +16,8 @@ import { hostedWorkspaceConfigured } from "../enterprise.ts";
 import { cloudHomeConfigured } from "../cloud-home.ts";
 import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
-import { cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
-import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tryCodexLaunchSlot } from "./codex-process.ts";
+import { captureCliTree, cliVersionReader, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
+import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tomlInlineTable, tryCodexLaunchSlot } from "./codex-process.ts";
 import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
 
 import type {
@@ -36,7 +37,7 @@ import { newEventId, newId } from "../contracts.ts";
 import { decodeCodexSelection, OFFICIAL_CODEX_PROVIDER, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 import { codexLocalProviderArgs } from "./local-inject.ts";
 import { codexBackgroundRoute, runCodexBackgroundRoute, runCodexOneShot } from "./codex-background-text.ts";
-import { augmentedPath, splitCliString } from "../env-path.ts";
+import { augmentedPath } from "../env-path.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
 import { answersAlone, permissionLaunchCwd, shellRequest } from "./permission-command.ts";
@@ -53,7 +54,8 @@ import { classifyResumeFailure, mayReplay, rebuiltSessionNotice, recoveryPromptF
 import { extractMcpImages } from "../mcp-tool-images.ts"; import { codexImageInputs, withoutInlineImages } from "./codex-images.ts";
 import { parseProtocolAskQuestions, questionChoices } from "../../shared/ask-question.ts";
 import { codexQuestionReply, openAsyncQuestion, type CodexAsk } from "./codex-questions.ts";
-import { codexVersionBehind, readLatestCodexRelease } from "./codex-release.ts";
+import { codexReleaseUpdate, codexUpdateCommand } from "./codex-update.ts";
+export { codexUpdateCommand };
 import { effectiveApprovalPolicy, effectiveApprovalsReviewer } from "./codex-approval-config.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
@@ -82,30 +84,6 @@ function missingNativeCodexThread(error: unknown, cursor: string): boolean {
 /** Codex refuses to resume an archived session: "session <id> is archived. Run `codex unarchive <id>` to unarchive it first." */
 const archivedNativeCodexThread = (error: unknown, cursor: string): boolean =>
   error instanceof CodexRpcError && error.message.includes(cursor) && /\bis archived\b/.test(error.message);
-
-/** Ask the configured executable to update itself, so a non-PATH Codex is the one updated. */
-export function codexUpdateCommand(cli: string, platform: NodeJS.Platform = process.platform): string {
-  if (cli === "codex") return "codex update";
-  const trimmed = cli.trim();
-  const tokens = trimmed.includes(" ") && existsSync(trimmed)
-    ? [trimmed]
-    : splitCliString(trimmed);
-  const quote = platform === "win32"
-    ? (token: string) => `'${token.replaceAll("'", "''")}'`
-    : (token: string) => `'${token.replaceAll("'", `'\\''`)}'`;
-  const command = (tokens.length > 0 ? tokens : [trimmed]).map(quote).join(" ");
-  return platform === "win32" ? `& ${command} update` : `${command} update`;
-}
-
-async function codexReleaseUpdate(version: string, cli: string): Promise<ProviderSnapshot["update"] | undefined> {
-  const latest = await readLatestCodexRelease();
-  if (!latest || !codexVersionBehind(version, latest)) return undefined;
-  return {
-    title: `Update Codex to ${latest}`,
-    message: `A newer stable Codex CLI is available (installed: ${version}). Update it, then refresh models. Model availability also depends on your signed-in account.`,
-    command: codexUpdateCommand(cli),
-  };
-}
 
 export interface CodexConfig {
   cli: string;
@@ -183,11 +161,6 @@ function noteRenamedMcpServer(name: string, mountName: string): void {
   if (renamedMcpServers.has(name)) return;
   renamedMcpServers.add(name);
   console.error(`codex: MCP server ${JSON.stringify(name)} is also declared in Codex's own config.toml — mounted as ${JSON.stringify(mountName)} for this bot so the two do not merge`);
-}
-
-/** JSON string quoting is valid TOML basic-string quoting. */
-function tomlInlineTable(entries: Record<string, string>): string {
-  return `{ ${Object.entries(entries).map(([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`).join(", ")} }`;
 }
 
 interface CodexApprovalParams {
@@ -918,6 +891,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // "codex exited null (signal SIGTERM) before turn/completed".
       let interruptRequested = false;
       const stop = async () => {
+        captureCliTree(child);
         stopRequested = true;
         stopSignal.abort();
         if (!state.settled && !interruptRequested && codexThreadId && codexTurnId &&
@@ -1132,6 +1106,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const seenReviews = new Set<string>();
       let reviewWarning = false;
       let teamToolsNoticed = false;
+      let rolloutAt: RolloutMark | null = null; // where the native rollout ended when this turn began: a refused call's only trace
       let timedOutReview = false;
       const retryMode = approvalMode[0].toUpperCase() + approvalMode.slice(1);
       const reviewNotice = (status: "warning" | "timedOut" | "denied", action?: any) => {
@@ -1354,6 +1329,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               turnError({ message: state.retryError });
             }
             if (abandoned) break;
+            reportUnsupportedCalls(rolloutAt, (message) => emit({ ...base(threadId, turnId), type: "runtime.notice", message }));
             void settle(t.status === "completed", t.status === "completed" ? null :
               (classifyError({ text: state.lastError }).reason === "provider_safety" ? "provider_safety" : (state.lastError || t.status || "failed")));
             break;
@@ -1569,6 +1545,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             }
             approvalParams = withResolvedSandbox(approvalParams, resumed);
             codexThreadId = resumed?.thread?.id ?? cursor;
+            rolloutAt = rolloutMark(resumed?.thread?.path);
             resumedNativeThread = true;
           } catch (error) {
             const failure = classifyResumeFailure({
@@ -1607,6 +1584,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           approvalParams = withResolvedSandbox(approvalParams, started);
           codexThreadId = started?.thread?.id ?? null;
+          rolloutAt = rolloutMark(started?.thread?.path);
           startedModel = started?.model ?? null;
         }
         if (!codexThreadId) throw new Error("Codex did not return a native thread id");

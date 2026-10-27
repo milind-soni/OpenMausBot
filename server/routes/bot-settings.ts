@@ -46,6 +46,8 @@ export interface BotSettingsRouteDeps {
   canManageCommandAllowlist(auth: RequestAuth): boolean;
   commandAllowlistResponse(bot: BotRecord): CommandAllowlistResponse;
   cardAnswerRefusal(auth: RequestAuth, threadId: string, requestId: string, behavior: string): string | null;
+  /** A person opened this conversation (a Team Cloud's Needs you lines for them there are done). */
+  threadRead?(auth: RequestAuth, threadId: string): void;
 }
 
 export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandler {
@@ -161,6 +163,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       requirePinnedClientThread(m[1], body?.threadId);
       const current = requestedTaskBot(m[1], body?.threadId);
       sawThread(current.threadId);
+      deps.threadRead?.(auth, current.threadId);
       store.patchTask(current.id, current.threadId, { unread: false, ...readCursor(current.threadId) });
       readThreadNotifications(current.threadId, broadcast);
       const bot = store.bot(current.id)!;

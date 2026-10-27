@@ -20,7 +20,7 @@ export function modelName(model: string, instances: readonly InstanceInfo[]): st
 
 export function LiveBadge() {
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent/12 px-2.5 py-1 text-[12.5px] font-medium text-accent" data-testid="trace-live">
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-accent/12 px-2.5 py-1 text-[13px] font-medium text-accent" data-testid="trace-live">
       <span className="size-1.5 animate-pulse rounded-full bg-accent" />{t("trace.live")}
     </span>
   );
@@ -110,7 +110,7 @@ function RowName({ row, models }: { row: TraceRow; models: readonly InstanceInfo
   return (
     <>
       {icon}
-      <span className={cn("shrink-0 truncate text-[13.5px]", node.kind === "turn" ? "font-medium text-ink" : "text-ink", failed && "text-danger")}>{name}</span>
+      <span className={cn("shrink-0 truncate text-[14px]", node.kind === "turn" ? "font-medium text-ink" : "text-ink", failed && "text-danger")}>{name}</span>
       {detail && <span className={cn("min-w-0 truncate text-[13px]", failed ? "text-danger/80" : "text-ink-tertiary")}>{detail}</span>}
       {node.kind === "turn" && !node.timed && <span className="shrink-0 rounded bg-raised px-1.5 text-[11px] text-ink-secondary">{t("trace.notTimed")}</span>}
     </>
@@ -129,7 +129,7 @@ function barClass(row: TraceRow): string {
 function Badge({ kind }: { kind: "slowest" | "costliest" }) {
   return (
     <span className={cn(
-      "ml-2 rounded-md px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em]",
+      "ml-2 rounded-md px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.06em]",
       kind === "slowest" ? "bg-warning/15 text-warning" : "bg-accent/12 text-accent",
     )}>{t(kind === "slowest" ? "trace.slowest" : "trace.costliest")}</span>
   );
@@ -167,7 +167,7 @@ function RowBar({ row, origin, axisMax, badges, now, trackPx }: {
       {point
         ? <span className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] bg-ink-tertiary" style={{ left: `${startPct}%` }} />
         : <span className={cn("absolute top-1/2 h-[18px] -translate-y-1/2 rounded-md", barClass(row))} style={{ left: `${startPct}%`, width: `max(${width}%, 3px)` }} />}
-      <span className={cn("absolute top-1/2 flex -translate-y-1/2 items-center whitespace-nowrap text-[12.5px] tabular-nums", place === "inside" ? "text-ink" : "text-ink-secondary")} style={labelStyle}>
+      <span className={cn("absolute top-1/2 flex -translate-y-1/2 items-center whitespace-nowrap text-[13px] tabular-nums", place === "inside" ? "text-ink" : "text-ink-secondary")} style={labelStyle}>
         {label}
         {badges.slowest === node.id && <Badge kind="slowest" />}
         {badges.costliest === node.id && <Badge kind="costliest" />}

@@ -10,7 +10,7 @@ import { MAX_MCP_SERVERS, mcpServerNameError } from "../mcp-registry.ts";
 import { journalMemoryWrite } from "../memory-journal.ts";
 import { resolveBotCreationDefaults } from "../new-bot-defaults.ts";
 import { PRESET_UNAVAILABLE_MESSAGE, applyPresetToBot, presetOffered, type OrgInstallStatus, type PresetStore } from "../presets.ts";
-import { clientBotPatchViolation, type RequestAuth } from "../request-auth.ts";
+import { adminOnlyBotSetting, clientBotPatchViolation, type RequestAuth } from "../request-auth.ts";
 import type { RoutineManager } from "../routines.ts";
 import { installOrgSkill, installSkill, parseSkillMd, setSkillEnabled } from "../skills.ts";
 import type { BotRecord, Store } from "../store.ts";
@@ -62,6 +62,12 @@ export function keptBotIds(body: Record<string, unknown>, store: Pick<Store, "bo
   return { id, ...(threadId === undefined ? {} : { threadId }) };
 }
 
+/** The fields a request to make a bot asks for itself. The New bot defaults it may take are the host owner's choice. */
+function askedSettings(body: Record<string, unknown>): Record<string, unknown> {
+  const { id: _id, threadId: _threadId, useDefaults: _useDefaults, settings, ...asked } = body;
+  return { ...(settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {}), ...asked };
+}
+
 export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
   const {
     store, cfg, presetStore, orgInstallStatuses,
@@ -76,6 +82,12 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       let body = await readBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "bot must be a JSON object" });
+      }
+      if (req.headers["x-openmausbot-companion"] === "1") {
+        const field = adminOnlyBotSetting(askedSettings(body));
+        if (field) {
+          return json(res, 403, { error: `forbidden: a paired device may say who a new bot is and how it looks, not "${field}"; set that on the host computer` });
+        }
       }
       const kept = keptBotIds(body, store);
       if ("error" in kept) return json(res, kept.error.includes("already") ? 409 : 400, { error: kept.error });

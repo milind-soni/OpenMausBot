@@ -56,7 +56,7 @@ export function ArchivedBotRow({
       <BotAvatar bot={bot} state="happy" size={42} animated={false} />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[14px] font-medium text-ink">{bot.name}</div>
-        <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{bot.title || t("sidebar.archived.botFallback")}</div>
+        <div className="mt-0.5 truncate text-[13px] text-ink-secondary">{bot.title || t("sidebar.archived.botFallback")}</div>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         <button
@@ -172,7 +172,7 @@ export function ArchivedBotsPanel({
         aria-modal="true"
         aria-labelledby="archived-bots-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-[24px] border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+        className="animate-pop-in flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
       >
         <header className="flex items-start justify-between gap-4 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div>
@@ -226,7 +226,7 @@ export function ArchivedBotsPanel({
               />
             ))}
           </div>
-          {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
+          {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[13px] text-danger">{error}</div>}
         </div>
       </div>
       <ConfirmDialog

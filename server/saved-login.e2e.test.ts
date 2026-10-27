@@ -1,5 +1,5 @@
 // A happy-dom page behind a stand-in agent-browser: nothing reaches a real browser, the user's data or port 8799.
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -195,6 +195,48 @@ it.skipIf(process.platform === "win32")("fills a login saved for example.com on 
     expect(answered(2, "fill_login")[0].content[0].text).toBe(`The site did not accept the login for ${USERNAME} on www.example.com. It said: “Incorrect password.”. Check the saved login in Settings → Logins, or call request_sign_in. The password was cleared from the page.`);
     expect(page.sent).toHaveLength(1);
     expect(page.field("#password").value).toBe("");
+    expect(JSON.stringify(evidence())).not.toContain(PASSWORD);
+    expect(JSON.stringify(browser.engineArgs)).not.toContain(PASSWORD);
+  } finally {
+    await browser.close();
+  }
+}, 120_000);
+
+// Auto lands on this computer's screen only on macOS and Windows, and the stand-in browser is a shebang script.
+it.runIf(process.platform === "darwin")("moves a sign-in that started on this computer's screen to the bot's own browser, where fill_login signs in", async () => {
+  const browser = await browserFixture("https://example.com/login");
+  const { page, api, evidence, answered } = browser;
+  page.answer = () => ({ navigate: INVOICES });
+  try {
+    expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+    // What the desktop app writes once computer control is ready; the driver itself never runs here.
+    const support = join(browser.fixture.info.dataDir, "Library", "Application Support", "OpenMausBot");
+    mkdirSync(support, { recursive: true });
+    writeFileSync(join(support, "cua-connection.json"), JSON.stringify({
+      mode: "embedded", status: "ready", socketPath: join(support, "cua.sock"), mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {},
+    }), { mode: 0o600 });
+    const bot = (await api("POST", "/api/bots", { name: "Statements" })).body.bot;
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { browserProfile: "guest" })).status).toBe(200);
+    expect((await api("POST", "/api/logins", { site: "example.com", username: USERNAME, password: PASSWORD, bots: [bot.id] })).status).toBe(201);
+    writeFileSync(browser.planPath, JSON.stringify({ [bot.id]: { turns: [
+      { steps: [{ tool: "fill_login", arguments: {}, expectError: true }], reply: "Moving to my browser to sign in." },
+      { steps: [{ tool: "fill_login", arguments: {} }], reply: "Signed in." },
+    ] } }));
+
+    await runControlOmb(["send", "--bot", bot.id, "--task", bot.threadId, "--text", "Sign in to example.com and get the invoices.", "--url", browser.base]);
+    await expect.poll(() => evidence().length, { timeout: 20_000 }).toBe(2);
+    const [onScreen, inBrowser] = evidence();
+    expect(onScreen.system).toContain("Everything you do on screen happens on this computer");
+    expect(answered(0, "fill_login")[0].content[0].text).toBe("fill_login types a password only into a page of your own browser, where OpenMausBot checks the page's site first; it never types one on the screen of this computer. OpenMausBot is moving this conversation to your own browser. End this turn now without using the screen tools: the request continues there with your browser tools. Open the site's sign-in page in that browser, then call fill_login.");
+    expect(inBrowser.system).toContain("Everything you do on screen happens in the built-in browser tab");
+    expect(JSON.stringify(inBrowser.prompt)).toContain("The computer selection is now the built-in browser.");
+    expect(JSON.stringify(inBrowser.prompt)).toContain("Sign in to example.com and get the invoices.");
+    const [filled] = answered(1, "fill_login");
+    expect(filled.isError).toBeFalsy();
+    expect(filled.content[0].text).toBe(`Filled the username and the password for ${USERNAME} on example.com and submitted it; the page is now https://example.com/invoices (“Invoices”). Check you are signed in.`);
+    expect(page.sent).toEqual([{ email: USERNAME, password: PASSWORD, csrf: "token-not-a-secret" }]);
+    const task = (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id).tasks.find((candidate: any) => candidate.threadId === bot.threadId);
+    expect(task).toMatchObject({ surface: "browser", surfaceAuto: true });
     expect(JSON.stringify(evidence())).not.toContain(PASSWORD);
     expect(JSON.stringify(browser.engineArgs)).not.toContain(PASSWORD);
   } finally {

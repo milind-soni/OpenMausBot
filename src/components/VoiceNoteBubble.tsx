@@ -138,7 +138,7 @@ export function VoiceNoteBubble({
             onClick={() => setTranscriptOpen((open) => !open)}
             data-test-voice-note-transcript=""
             aria-expanded={transcriptOpen}
-            className="mt-1 flex items-center gap-0.5 self-start text-[11.5px] text-ink-secondary transition-colors hover:text-ink"
+            className="mt-1 flex items-center gap-0.5 self-start text-[12px] text-ink-secondary transition-colors hover:text-ink"
           >
             <ChevronRight size={12} aria-hidden="true" className={cn("transition-transform duration-150", transcriptOpen && "rotate-90")} />
             {t("chat.voiceNote.transcript")}

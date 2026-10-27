@@ -18,8 +18,8 @@ sent.
   `server` for a page a server serves (MausBot Cloud, a self-hosted server, or the app in a browser).
 - PostHog adds its standard device facts to every event: operating system, browser and its version, device type,
   screen and window size, language and time zone. Like any server, PostHog sees the IP address a request comes from.
-- Events are tied to a random id that PostHog keeps in the page's storage. If you shared your email on the first-run
-  screen, your events are tied to that email from then on (`email_submitted`). If you are signed in to MausBot Cloud in
+- Events are tied to a random id that PostHog keeps in the page's storage. The first-run screen asks for a name only and
+  ties no email to your events. If you are signed in to MausBot Cloud in
   the desktop app and choose the Cloud Pro popup's main button or Compare plans, your events on this computer's page are
   tied to your Cloud account's email from then on (`cloud_pro_popup`); My Cloud's Manage plan, and Continue on this
   computer on a server's page, are counted on that page as `continue` and finish on this computer's page, which counts
@@ -45,9 +45,8 @@ on there lasts until that page reloads. In a browser, switch it off on each serv
 
 - API keys, tokens or passwords, or anything derived from them: no length, prefix, hash or last characters.
 - Names of bots, rooms, teams, people, routines, files, devices, models, presets or accounts.
-- Emails, except the one you chose to share on the first-run screen, and your Cloud account's email once a click on the
-  Cloud Pro popup's main button or Compare plans is counted on this computer's page while you are signed in to MausBot
-  Cloud.
+- Emails, except your Cloud account's email once a click on the Cloud Pro popup's main button or Compare plans is
+  counted on this computer's page while you are signed in to MausBot Cloud.
 - URLs, hosts and addresses. PostHog's own `$current_url`, `$host`, `$pathname`, `$referrer`, `$referring_domain`,
   campaign parameters (`utm_*`, `gclid` and the like) and their `$initial_*` and `$session_entry_*` copies are removed
   before an event leaves the app.
@@ -138,15 +137,13 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `app_first_open` | The first time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `app_opened` | Each time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `app_active` | Once a day you use the app: when this app page starts, comes into view or is focused, or when a check every ten minutes finds a new day while the page is in view and focused. At most once per day by your computer's date for each app page, and never while the page is hidden | `platform`: `desktop`, `browser` |
-| `email_submitted` | You shared your email on the first-run screen; your events are tied to that email from then on | none |
-| `$identify` | PostHog's own event, sent with `email_submitted`, and before a `cloud_pro_popup` `upgrade`, `manage` or `see_plans` counted on this computer's page for someone signed in to MausBot Cloud (not while the app has kept no analytics choice of its own and serves that page on a port other than its first), to tie your events to that email. When your events were already tied to an email, PostHog sends its `$set` event with the new one instead | `$set`: `email`, the email you shared or your Cloud account's email; `$anon_distinct_id`: the random id your events had before |
-| `email_skipped` | You skipped the email on the first-run screen | none |
-| `onboarding_step` | A first-run tour step is shown | `step`: `hello`, `reel`, `engines`, `import`, `permissions`, `phone`, `cloud`, `bot`; `replay`: true/false |
+| `$identify` | PostHog's own event, sent before a `cloud_pro_popup` `upgrade`, `manage` or `see_plans` counted on this computer's page for someone signed in to MausBot Cloud (not while the app has kept no analytics choice of its own and serves that page on a port other than its first), to tie your events to that email. When your events were already tied to an email, PostHog sends its `$set` event with the new one instead | `$set`: `email`, your Cloud account's email; `$anon_distinct_id`: the random id your events had before |
+| `email_skipped` | You chose Maybe later on the first-run screen. A name you typed is kept in this computer's profile only | none |
+| `onboarding_step` | A first-run tour step is shown | `step`: `hello`, `engines`, `import`, `permissions`, `cloud`; `replay`: true/false |
 | `onboarding_completed` | The first-run tour ends | `reason`: `completed`, `skipped`; `at`: the step it ended on; `replay`: true/false |
 | `setup_import_applied` | You bring in the skills and MCP servers the first-run tour found from other AI tools on this computer | `skills`, `tools`: how many were added. Never their names or where they came from |
 | `setup_import_skipped` | You skip that step | `skills`, `tools`: how many it found |
 | `onboarding_cloud` | You answer the first-run tour's MausBot Cloud step | `action`: `start_trial` (Start free trial, or See plans when the offer has no trial), `not_now`; `trial`: true/false, with `start_trial`: the offer has a free trial |
-| `phone_setup_skipped`, `phone_setup_completed` | The phone step of the first-run tour was skipped or finished | none |
 | `message_sent` | You send a message | To a bot: `driver`: engine; `queued`: true/false. To a room: `room`: true; `mode`: `chat`, `goal`; `queued`: true/false |
 | `call_started` | You start a call with a bot | `driver`: engine; `mode`: `turns`, `live` |
 | `group_call_started` | You start a call with a room | `memberCount`: count |

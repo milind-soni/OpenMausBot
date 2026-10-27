@@ -109,7 +109,7 @@ export function VoiceSetupDialog({
         aria-describedby={subtitleId}
         tabIndex={-1}
         data-voice-setup-dialog={bot.id}
-        className="glass-surface animate-pop-in relative flex max-h-full w-[min(560px,100%)] flex-col overflow-hidden rounded-[24px] outline-none"
+        className="glass-surface animate-pop-in relative flex max-h-full w-[min(560px,100%)] flex-col overflow-hidden rounded-2xl outline-none"
       >
         <header className="flex items-start justify-between gap-4 px-6 pb-4 pt-6 sm:px-7">
           <div className="flex min-w-0 items-center gap-3.5">

@@ -13,7 +13,7 @@ export const FIELD = "w-full rounded-lg border border-hairline bg-app px-3 py-2.
 export function Heading({ title, sub }: { title: string; sub?: ReactNode }) {
   return <div className="pe-8">
     <h2 id="cloud-add-title" tabIndex={-1} className="text-[22px] font-semibold leading-tight tracking-[-0.02em] text-ink outline-none [text-wrap:balance]">{title}</h2>
-    {sub && <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-secondary">{sub}</p>}
+    {sub && <p className="mt-1.5 text-[14px] leading-relaxed text-ink-secondary">{sub}</p>}
   </div>;
 }
 
@@ -38,8 +38,8 @@ export function Checklist({ items, label }: { label?: string; items: Array<{ key
       className={cn("grid grid-cols-[22px_minmax(0,1fr)] items-start gap-3 rounded-xl px-3 py-2.5", item.state === "now" && "bg-accent/10")}>
       <StepMark state={item.state} />
       <span className="min-w-0">
-        <span className={cn("block text-[13.5px] font-semibold", item.state === "next" ? "text-ink-secondary" : "text-ink")}>{item.title}</span>
-        {item.detail && <span className="block break-words text-[12.5px] text-ink-secondary">{item.detail}</span>}
+        <span className={cn("block text-[14px] font-semibold", item.state === "next" ? "text-ink-secondary" : "text-ink")}>{item.title}</span>
+        {item.detail && <span className="block break-words text-[13px] text-ink-secondary">{item.detail}</span>}
       </span>
     </li>)}
   </ol>;

@@ -5,7 +5,7 @@ import { formatCount } from "./data-format";
 export function SourcesStrip({ sources }: { sources: Array<Pick<DataSource, "name" | "rowCount"> & { sqlName?: string }> }) {
   if (sources.length === 0) return null;
   return (
-    <ul className="m-0 mt-1 flex max-h-10 list-none flex-wrap gap-x-4 overflow-y-auto p-0 text-[11.5px] text-ink-tertiary" aria-label={t("data.sources.label")} data-testid="sources-strip">
+    <ul className="m-0 mt-1 flex max-h-10 list-none flex-wrap gap-x-4 overflow-y-auto p-0 text-[12px] text-ink-tertiary" aria-label={t("data.sources.label")} data-testid="sources-strip">
       {sources.map((source) => (
         <li key={source.name} className="flex items-baseline gap-2 py-0.5">
           <span className="min-w-0 truncate font-mono">{source.sqlName ?? source.name}</span>

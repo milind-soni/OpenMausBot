@@ -209,6 +209,11 @@ describe("order and the grey line", () => {
     expect(runLine(run("failed", at(-1, 9), { error: "token expired, sign in again" }), NOW)).toMatchObject({ mark: "✗", text: "It's signed out. Sign in again so it can run." });
   });
 
+  it("says why a stopped run stopped when it knows, and plain Stopped when nobody gave a reason", () => {
+    expect(runLine(run("cancelled", at(0, 9), { error: "The assigned bot was deleted\nmore" }), NOW)).toMatchObject({ mark: "✗", text: "Stopped: The assigned bot was deleted" });
+    expect(runLine(run("cancelled", at(0, 9)), NOW)).toMatchObject({ mark: "✗", text: "Stopped" });
+  });
+
   it("says a run that found nothing to tell found nothing new, whatever its last words were", () => {
     expect(runLine(run("completed", at(0, 9, 2), { output: "Checked 14 emails.\nNOTHING NEW", report: { state: "quiet" } }), NOW)).toEqual({ when: "Today 9:02 AM", mark: "✓", text: "Nothing new" });
   });

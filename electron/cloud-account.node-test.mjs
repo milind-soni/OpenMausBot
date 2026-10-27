@@ -16,7 +16,7 @@ async function fixture(t, options = {}) {
     entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 }, timer: null, delay: null, cloud: undefined, expiresIn: 600,
     disk: { status: 404, body: "<!doctype html>not here" }, x: { status: 404, body: { error: "unsupported" } }, pages: { status: 404, body: { error: "unsupported" } }, sessionPage: null, sessionError: null, tokenPage: null, publicConfig: { status: 404, body: { error: "not_found" } },
     offer: undefined, checkout: { status: 404, body: "<!doctype html>not here" }, interest: { status: 200, body: { ok: true } },
-    upgradePreview: { status: 404, body: { error: "not_found" } }, upgrade: { status: 404, body: { error: "not_found" } }, teams: undefined, teamPairing: { status: 404, body: { error: "not_found" } }, moved: { status: 404, body: { error: "not_found" } } };
+    upgradePreview: { status: 404, body: { error: "not_found" } }, upgrade: { status: 404, body: { error: "not_found" } }, teams: undefined, teamPairing: { status: 404, body: { error: "not_found" } }, moved: { status: 404, body: { error: "not_found" } }, moveStatus: { status: 404, body: { error: "not_found" } } };
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "fixture-device" }, account: { id: "fixture-account", email: "person@example.test" } });
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
@@ -37,6 +37,7 @@ async function fixture(t, options = {}) {
     if (/^\/api\/cloud\/desktop\/teams\/[^/]+\/pairing$/.test(req.url) && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.teamPairing.status, f.teamPairing.body);
     if (req.url === "/api/cloud/desktop/services/pages" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.pages.status, f.pages.body);
     if (req.url === "/api/cloud/desktop/moved" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.moved.status, f.moved.body);
+    if (req.url === "/api/cloud/desktop/move-status" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.moveStatus.status, f.moveStatus.body);
     for (const [route, answer] of [["/api/cloud/desktop/checkout", f.checkout], ["/api/cloud/desktop/interest", f.interest],
       ["/api/cloud/desktop/upgrade/preview", f.upgradePreview], ["/api/cloud/desktop/upgrade", f.upgrade]]) {
       if (req.url !== route || req.method !== "POST" || req.headers.authorization !== `Bearer ${accessToken}`) continue;
@@ -770,6 +771,20 @@ test("the session's teams come with a verified session, each with its Cloud; a t
   await until(() => f.client.state().teams === undefined);
   f.teams = undefined; await f.client.refresh();
   assert.equal(f.client.state().teams, undefined, "an older Admin: no teams");
+});
+
+test("this computer tells the Admin where its move stands with its own sign-in; nothing without one, and nothing more from an Admin that can't take it", async t => {
+  const f = await fixture(t), report = { v: 1, appVersion: "0.1.129", phase: "none", reason: "moves_off", keepHere: false, since: null, startedAt: null, passes: null, retryAt: null, busy: null, cloudState: "ready", failure: null };
+  assert.equal(await f.client.reportMoveStatus(report), false, "nobody signed in");
+  assert.equal(f.requests.some(r => r.route === "/api/cloud/desktop/move-status"), false);
+  await f.connect();
+  assert.equal(await f.client.reportMoveStatus(report), false, "an Admin that can't take it yet");
+  f.moveStatus = { status: 200, body: { cloudContractVersion: 1, recorded: true } };
+  assert.equal(await f.client.reportMoveStatus(report), true);
+  const said = f.requests.findLast(r => r.route === "/api/cloud/desktop/move-status");
+  assert.deepEqual([said.method, said.token, said.version, JSON.parse(said.body)], ["POST", `Bearer ${accessToken}`, "0.1.fixture", report]);
+  f.moveStatus = { status: 429, body: { error: "rate_limited" } };
+  await assert.rejects(f.client.reportMoveStatus(report), { status: 429 });
 });
 
 test("this computer tells the Admin its move is done, and asks for an ended Cloud's export, as itself; as before when it can't say", async t => {

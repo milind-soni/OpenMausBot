@@ -473,7 +473,7 @@ h1 {
 .tuner-slider-name em {
   overflow: hidden;
   color: #6d6d69;
-  font-size: 9.5px;
+  font-size: 10px;
   font-style: normal;
   text-overflow: ellipsis;
   white-space: nowrap;

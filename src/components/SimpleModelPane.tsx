@@ -68,7 +68,7 @@ export function SimpleModelPane({
   onManage: () => void;
 }) {
   const row = "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
-  const note = "px-2 py-1.5 text-[12.5px] text-ink-secondary";
+  const note = "px-2 py-1.5 text-[13px] text-ink-secondary";
   return (
     <div data-simple-model-pane className="flex min-h-0 w-full flex-col">
       <div className="flex min-h-0 flex-1">
@@ -127,9 +127,9 @@ export function SimpleModelPane({
                 <p className="mt-1">{t("policy.modelBlocked", { organization: managedBy })}</p>
               </div>
             ) : needsSetup ? (
-              <div className="flex flex-col items-start gap-3 px-2 py-1.5 text-[12.5px] text-ink-secondary">
+              <div className="flex flex-col items-start gap-3 px-2 py-1.5 text-[13px] text-ink-secondary">
                 <span>{t("model.simple.needsSetup", { name: needsSetup.name })}</span>
-                <button type="button" data-simple-set-up onClick={onSetUp} className="rounded-full bg-accent px-3 py-1.5 text-[12.5px] font-medium text-accent-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+                <button type="button" data-simple-set-up onClick={onSetUp} className="rounded-full bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
                   {t("model.simple.setUp")}
                 </button>
               </div>
@@ -137,7 +137,7 @@ export function SimpleModelPane({
               query ? (
                 <p className={note}>{t("model.noMatch", { query: query.trim() })}</p>
               ) : (
-                <div className="flex flex-col items-start gap-1.5 px-2 py-1.5 text-[12.5px] text-ink-secondary">
+                <div className="flex flex-col items-start gap-1.5 px-2 py-1.5 text-[13px] text-ink-secondary">
                   <span>{t("model.simple.noModels")}</span>
                   {onRefresh && (
                     <button
@@ -173,10 +173,10 @@ export function SimpleModelPane({
                       >
                         <span className="min-w-0 flex-1 truncate">{label}</span>
                         {route && (
-                          <span data-simple-route className="max-w-[45%] shrink-0 truncate text-[11.5px] font-normal text-ink-secondary">{route}</span>
+                          <span data-simple-route className="max-w-[45%] shrink-0 truncate text-[12px] font-normal text-ink-secondary">{route}</span>
                         )}
                         {option.id === botModelId && (
-                          <span data-bot-model className="shrink-0 text-[11.5px] font-normal text-ink-secondary">{t("model.botModelTag")}</span>
+                          <span data-bot-model className="shrink-0 text-[12px] font-normal text-ink-secondary">{t("model.botModelTag")}</span>
                         )}
                         {current && <Check size={14} className="shrink-0 text-accent-text" aria-hidden="true" />}
                       </button>
@@ -230,7 +230,7 @@ export function SimpleModelPane({
                 aria-pressed={effort.current === level}
                 onClick={() => effort.onPick(level)}
                 className={cn(
-                  "truncate rounded-lg px-1 py-1.5 text-[12.5px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
+                  "truncate rounded-lg px-1 py-1.5 text-[13px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus",
                   effort.current === level ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
                 )}
               >

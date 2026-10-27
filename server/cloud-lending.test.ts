@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { cloudHomeLendingRefusal, createCloudRoutineAuthors, ownerOnlyConversation, routineFingerprint, type CloudLendingTurn } from "./cloud-lending.ts";
+import { cloudHomeLendingRefusal, cloudLendingRefusalText, createCloudRoutineAuthors, ownerOnlyConversation, routineFingerprint, type CloudLendingTurn } from "./cloud-lending.ts";
 
 const OWNER = "p_owner", GUEST = "p_guest";
 const ownerPerson = (person: string | undefined) => person === OWNER;
@@ -136,5 +136,28 @@ describe("the owner's routines", () => {
     symlinkSync(join(dir, "real.json"), join(dir, "linked.json"));
     expect(createCloudRoutineAuthors(join(dir, "linked.json")).authored("r1", routine)).toBe(false);
     expect(createCloudRoutineAuthors(join(dir, "real.json")).authored("r1", routine)).toBe(true);
+  });
+});
+
+describe("cloudLendingRefusalText", () => {
+  const mac = { room: false, fromBefore: false, device: "Mac" as const };
+  const room = { ...mac, room: true };
+  it("names the reason the person can act on, and never offers Use my Mac", () => {
+    expect(cloudLendingRefusalText("someone-else", { ...mac, fromBefore: true })).toBe("This conversation has messages from before My Cloud, so it can't use your Mac. Start a new conversation with this bot to use it.");
+    expect(cloudLendingRefusalText("someone-else", mac)).toBe("Someone else wrote in this conversation, so it can't use your Mac. Start a new conversation to use it.");
+    expect(cloudLendingRefusalText("not-owner", mac)).toBe("Only conversations you start with a bot, and routines you wrote, can use your Mac. Start a new conversation with this bot to use it.");
+    expect(cloudLendingRefusalText("memory-changed", room)).toBe("This bot's memory was changed in a conversation you didn't write. Review it in Memory to use your Mac again.");
+    for (const why of ["unproven", "not-owner", "someone-else", "memory-changed"] as const) {
+      for (const where of [mac, room, { ...room, fromBefore: true }]) expect(cloudLendingRefusalText(why, where)).not.toMatch(/Use my Mac/u);
+    }
+  });
+  it("in a group chat, points to a new thread there or to asking there", () => {
+    expect(cloudLendingRefusalText("someone-else", { ...room, fromBefore: true })).toBe("This conversation has messages from before My Cloud, so it can't use your Mac. Start a new thread in this group chat to use it.");
+    expect(cloudLendingRefusalText("someone-else", room)).toBe("Someone else wrote in this conversation, so it can't use your Mac. Start a new thread in this group chat to use it.");
+    expect(cloudLendingRefusalText("unproven", room)).toBe("Only your own messages in a group chat, and the bots that answer them there, can use your Mac. Ask here yourself to use it.");
+  });
+  it("calls the computer what it is", () => {
+    expect(cloudLendingRefusalText("unproven", { ...room, device: "PC" })).toContain("your PC");
+    expect(cloudLendingRefusalText("unproven", { ...mac, device: "computer" })).not.toMatch(/\bMac\b/u);
   });
 });

@@ -508,11 +508,16 @@ test("the Cloud's setup checklist can open the lending switch here, and nothing 
   await local.bridge.cloudLending.open({ origin: "https://evil.example.test", folders: ["/"] });
   assert.deepEqual(local.invoked, [["cloud-lending:open"]]);
   const page = preload(CLOUD);
-  assert.deepEqual(Object.keys(page.bridge.cloudLending), ["open", "state", "set", "screen", "offer"]);
+  assert.deepEqual(Object.keys(page.bridge.cloudLending), ["open", "state", "set", "screen", "terminal", "offer", "due", "ask"]);
   await assert.rejects(page.bridge.cloudLending.offer(), /Press Use my Mac/, "a bot's link opens the popup only from the person's click");
   await assert.rejects(page.bridge.cloudLending.set(true), /Turn on the switch/);
+  await assert.rejects(page.bridge.cloudLending.terminal(true), /Tick Terminal/, "the terminal goes on only from the person's click");
   await page.bridge.cloudLending.set(false);
-  assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-lending")), [["cloud-lending:set", false]]);
+  await page.bridge.cloudLending.terminal(false);
+  // The page's notices only say when, and in which language: main decides whether, once per Cloud, and draws the popup.
+  await page.bridge.cloudLending.due();
+  await page.bridge.cloudLending.ask({ toString: () => "de" });
+  assert.deepEqual(page.invoked.filter(([channel]) => channel.startsWith("cloud-lending")), [["cloud-lending:set", false], ["cloud-lending:terminal", false], ["cloud-lending:due"], ["cloud-lending:ask", "de"]]);
   const ipc = pageIpc({ mainWindow: { isDestroyed: () => false, webContents: { mainFrame: { url: `${LOCAL}/` } } }, environmentsState: { environments: [], activeId: "local" } });
   const localContents = ipc.context.mainWindow.webContents;
   await ipc.handlers.get("cloud-lending:open")({ sender: localContents, senderFrame: localContents.mainFrame }, { origin: "https://evil.example.test" });

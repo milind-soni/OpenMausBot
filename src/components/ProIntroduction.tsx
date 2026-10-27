@@ -40,15 +40,15 @@ export function ProSettingsCard() {
           <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.settingsSummary")}</p>
           {cheapest !== null && <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.fromPrice", { price: usd(cheapest / 100) })}</p>}
           {moneyBack && <p className="mt-1 text-[12px] text-ink-secondary">{moneyBack}</p>}
-          <p className="mt-1 text-[11.5px] text-ink-secondary">{t("pro.disclaimer")}</p></div>
+          <p className="mt-1 text-[12px] text-ink-secondary">{t("pro.disclaimer")}</p></div>
       </div>
       <div className="flex flex-col items-end gap-1">
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" className="cursor-pointer text-[12.5px] text-ink-secondary underline underline-offset-2 hover:text-ink"
+          <button type="button" className="cursor-pointer text-[13px] text-ink-secondary underline underline-offset-2 hover:text-ink"
             onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t("pro.seePlans")}</button>
           <button type="button" className="ui-button ui-button-primary" onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}>{t(trial ? "cloudIntro.start" : "cloudAccount.upgrade")}</button>
         </div>
-        {view.kind === "signed-out" && <button type="button" className="cursor-pointer text-[12.5px] font-medium text-accent-text underline underline-offset-2 hover:text-ink"
+        {view.kind === "signed-out" && <button type="button" className="cursor-pointer text-[13px] font-medium text-accent-text underline underline-offset-2 hover:text-ink"
           onClick={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })}>{t("cloudAccount.signIn")}</button>}
       </div>
     </section>;

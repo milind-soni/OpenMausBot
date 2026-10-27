@@ -29,11 +29,11 @@ export function UsageSection({ bot, bare = false }: { bot: Bot; bare?: boolean }
       </div>}
       <div className={cn("grid grid-cols-3 gap-3 text-[13px]", !bare && "mt-3")}>
         <div>
-          <div className="text-[11.5px] uppercase tracking-wide text-ink-secondary">{t("usage.colTurns")}</div>
+          <div className="text-[12px] uppercase tracking-wide text-ink-secondary">{t("usage.colTurns")}</div>
           <div className="mt-0.5 tabular-nums text-ink">{usage.turns}</div>
         </div>
         <div>
-          <div className="text-[11.5px] uppercase tracking-wide text-ink-secondary">{tokensColumnLabel(usage)}</div>
+          <div className="text-[12px] uppercase tracking-wide text-ink-secondary">{tokensColumnLabel(usage)}</div>
           <div
             className="mt-0.5 tabular-nums text-ink"
             title={usageDetail(usage)}
@@ -42,7 +42,7 @@ export function UsageSection({ bot, bare = false }: { bot: Bot; bare?: boolean }
           </div>
         </div>
         <div>
-          <div className="text-[11.5px] uppercase tracking-wide text-ink-secondary">{t("usage.colCost")}</div>
+          <div className="text-[12px] uppercase tracking-wide text-ink-secondary">{t("usage.colCost")}</div>
           <div className="mt-0.5 tabular-nums text-ink">
             {hasFiniteCost(usage.costUsd) ? formatUsd(usage.costUsd) : "—"}
           </div>

@@ -143,6 +143,8 @@ export interface SkillLibraryEntry {
   sha256: string;
   importedAt: string;
   reviewState: LibraryReviewState;
+  /** Available to every existing and future bot, unless a private skill shadows it. */
+  everyBot?: boolean;
   license?: string;
   compatibility?: string;
   tags?: string[];
@@ -166,6 +168,7 @@ export interface LibrarySkillListing {
   name: string;
   description: string;
   enabled: boolean;
+  everyBot: boolean;
   editable: false;
   source: string;
   sha256: string;
@@ -184,6 +187,7 @@ const skillLibraryEntrySchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   importedAt: z.string(),
   reviewState: z.enum(["approved", "disabled"]),
+  everyBot: z.boolean().optional(),
   license: z.string().optional(),
   compatibility: z.string().optional(),
   tags: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,23}$/)).max(8).optional(),
@@ -271,6 +275,7 @@ function librarySkillListing(root: string, entry: SkillLibraryEntry): LibrarySki
     name: entry.name,
     description: entry.description,
     enabled: entry.reviewState === "approved" && intact,
+    everyBot: entry.everyBot === true,
     editable: false,
     source: entry.source,
     sha256: entry.sha256,
@@ -283,6 +288,23 @@ function librarySkillListing(root: string, entry: SkillLibraryEntry): LibrarySki
       : [...entry.warnings, "stored SKILL.md changed after review — enablement is blocked"],
     skippedFiles: entry.skippedFiles,
   };
+}
+
+export function setLibrarySkillEveryBot(
+  name: string,
+  everyBot: boolean,
+  root: string = skillsLibraryRoot(),
+): LibrarySkillListing | { error: string } {
+  if (!isSkillName(name)) return { error: "invalid skill name" };
+  const indexRead = readSkillLibraryIndexState(root);
+  if ("error" in indexRead) return indexRead;
+  const entry = indexRead.index[name];
+  if (!entry) return { error: `no library skill named "${name}"` };
+  if (everyBot) entry.everyBot = true;
+  else delete entry.everyBot;
+  writeSkillLibraryIndex(root, indexRead.index);
+  skillLibraryEvents.emit("invalidate", { kind: "every-bot", name });
+  return librarySkillListing(root, entry);
 }
 
 export function listLibrarySkills(root: string = skillsLibraryRoot()): LibrarySkillListing[] {

@@ -587,12 +587,12 @@ export function createCloudSend({ local, cloud, handoff, store, onChange = () =>
   }
 
   /** A move has My Cloud make its owner's lines and answers its owner's among the rows it already held of this computer's
-   * bots, which an earlier send or a Bring left naming nobody: this computer's row ids go, never a row. */
+   * bots and rooms, which an earlier send or a Bring left naming nobody: this computer's row ids go, never a row. */
   async function stampHeld(origin, session, theirs) {
     const listed = await localJson(scoped("/api/cloud-send/chats"));
     const kept = entry(origin);
     const cloudBots = new Set(theirs.items.filter((item) => item.kind === "bot" && item.id).map((item) => item.id));
-    const threads = (Array.isArray(listed?.conversations) ? listed.conversations : []).filter((head) => record(head) && cloudBots.has(head.bot)
+    const threads = (Array.isArray(listed?.conversations) ? listed.conversations : []).filter((head) => record(head) && (cloudBots.has(head.bot) || typeof head.room === "string")
       && typeof head.threadId === "string" && /^[\w-]{1,200}$/u.test(head.threadId) && kept.chats[head.threadId] !== "removed").map((head) => head.threadId);
     let batch = [], ids = 0;
     const flush = async () => {

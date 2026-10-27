@@ -42,6 +42,11 @@ function subscribeReactor(listener: () => void): () => void {
   return () => reactorListeners.delete(listener);
 }
 
+/** The same key outside a render's hooks: "user" until the server's answer arrives, which useReactor asks for. */
+export function currentReactor(): string {
+  return reactor;
+}
+
 /** Whose reactions in the chat are this viewer's: "user" unless the server keys each person of a shared workspace. */
 export function useReactor(): string {
   return useSyncExternalStore(subscribeReactor, () => reactor, () => "user");

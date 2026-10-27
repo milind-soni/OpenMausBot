@@ -52,14 +52,14 @@ export function BotTab({ bot, derived, editingInstructions, onEditInstructions, 
   // Antigravity's old Auto still executes as Ask: show that without changing the saved mode or granting Full.
   const displayedMode: ApprovalMode = engine?.driverKind === "antigravityAgent" && approvalMode === "auto" ? "ask" : approvalMode;
   const actsOptions: SegmentOption<ApprovalMode>[] = [
-    { value: "ask", label: ACTS_LABEL.ask(), tooltip: t("botSettings.simple.askHint"), disabled: Boolean(bot.busy) },
-    { value: "full", label: ACTS_LABEL.full(), tooltip: t("botSettings.simple.fullHint"), disabled: Boolean(bot.busy) },
+    { value: "ask", label: ACTS_LABEL.ask(), tooltip: t("botSettings.simple.askHint") },
+    { value: "full", label: ACTS_LABEL.full(), tooltip: t("botSettings.simple.fullHint") },
     ...(displayedMode === "ask" || displayedMode === "full"
       ? []
       : [{ value: displayedMode, label: ACTS_LABEL[displayedMode](), disabled: true }]),
   ];
   const chooseActs = (mode: ApprovalMode) => {
-    if (bot.busy || mode === approvalMode || (mode !== "ask" && mode !== "full")) return;
+    if (mode === approvalMode || (mode !== "ask" && mode !== "full")) return;
     const chosen: ActsChoice = mode;
     if (chosen === "full") {
       dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: "full", applyToAllThreads: true } });
@@ -161,7 +161,7 @@ export function BotTab({ bot, derived, editingInstructions, onEditInstructions, 
         )}
         <section data-panel-card="approval">
           <ColRow data-panel-row="approval">
-            <RowText title={t("botSettings.simple.beforeActs", { name })} />
+            <RowText title={t("botSettings.simple.beforeActs", { name })} hint={bot.busy ? t("approvalMode.whileWorking") : undefined} />
             <Segmented
               attr="data-approval-choice"
               label={t("botSettings.simple.beforeActs", { name })}

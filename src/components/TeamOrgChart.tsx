@@ -74,16 +74,16 @@ function Column({ column, team, over, onOver, onDrop, onDragStart }: {
         {person ? <PersonFace person={person} size={30} /> : <span aria-hidden="true" className="inline-flex size-[30px] items-center justify-center rounded-full border border-dashed border-ink-secondary/60 text-ink-secondary">?</span>}
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14px] font-semibold text-ink">{person ? (person.you ? t("owner.you", { name: person.name }) : person.name) : t("orgChart.noOwner")}</span>
-          <span className="block truncate text-[11.5px] text-ink-secondary">{person ? person.email : t("orgChart.noOwnerHint")}</span>
+          <span className="block truncate text-[12px] text-ink-secondary">{person ? person.email : t("orgChart.noOwnerHint")}</span>
         </span>
       </header>
       {person && (column.chief
-        ? <div className="flex flex-col gap-1"><span className="text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">{t("orgChart.chief")}</span>
+        ? <div className="flex flex-col gap-1"><span className="text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">{t("orgChart.chief")}</span>
             <BotRow bot={column.chief} team={team} onDragStart={onDragStart} /></div>
         : <span className="text-[12px] text-ink-tertiary">{t("orgChart.noChief")}</span>)}
       {column.departments.map((department) => (
         <div key={department.key} data-org-department={department.key} className="flex flex-col gap-1">
-          <span className="truncate text-[10.5px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">{department.key || t("teamSettings.general")}</span>
+          <span className="truncate text-[11px] font-medium uppercase tracking-[0.08em] text-ink-tertiary">{department.key || t("teamSettings.general")}</span>
           {department.bots.map((bot) => <BotRow key={bot.id} bot={bot} team={team} onDragStart={onDragStart} />)}
         </div>
       ))}

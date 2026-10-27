@@ -112,6 +112,16 @@ describe("the update card", () => {
     expect(card()!.querySelector('[role="progressbar"]')).toBeNull();
   });
 
+  it("says the update installs by itself the next time the person is away, and still offers Restart", async () => {
+    await emit({ status: "downloaded", version: "0.2.0", installMode: "restart", installsByItself: true });
+    await act(async () => button()!.click());
+    expect(card()!.textContent).toContain("Restart now, or leave it: OpenMausBot installs it by itself the next time you're away and nothing is running.");
+    expect(card()!.textContent).toContain("Restart to update");
+    await emit({ status: "downloaded", version: "0.2.0", installMode: "restart", installsByItself: false });
+    expect(card()!.textContent).toContain("OpenMausBot closes and reopens in a moment.");
+    expect(card()!.textContent).not.toContain("by itself");
+  });
+
   it("offers Install where a terminal finishes the update", async () => {
     await emit({ status: "downloaded", version: "0.2.0", installMode: "handoff" });
     await act(async () => button()!.click());

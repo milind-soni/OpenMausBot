@@ -374,12 +374,12 @@ function StartingRole({ draft, defaultsMode }: { draft: BotCreationDraft; defaul
         {presets.length ? <optgroup label={t("newBot.builtInRoles")}>{roles}</optgroup> : roles}
       </Select>
     </label>
-    {chosen && <div className="mt-2 space-y-1 rounded-lg bg-card px-3 py-2.5 text-[12.5px] text-ink-secondary" data-new-bot-preset>
+    {chosen && <div className="mt-2 space-y-1 rounded-lg bg-card px-3 py-2.5 text-[13px] text-ink-secondary" data-new-bot-preset>
       {presetSummaryLines(chosen).map((line, index) => <p key={index} className="break-words">{line}</p>)}
       {chosen.source === "file" && <button type="button" onClick={() => void remove(chosen)}
         className="mt-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink">{t("newBot.presetRemove")}</button>}
     </div>}
-    {error && <p role="alert" className="mt-2 text-[12.5px] text-danger">{error}</p>}
+    {error && <p role="alert" className="mt-2 text-[13px] text-danger">{error}</p>}
   </div>;
 }
 

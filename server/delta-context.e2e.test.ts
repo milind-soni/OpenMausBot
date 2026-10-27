@@ -805,6 +805,11 @@ const leadRunning = async (f: any, launches = 1) => {
   await expect.poll(() => f.launches(f.lead.id).length, { timeout: 15_000 }).toBe(launches);
 };
 const cursor = (f: any) => Object.values(f.task().resumeCursors)[0];
+// A terminal message is published before the driver releases its turn: wait, or a loaded runner reaches the previous turn.
+const sourceWaiting = (f: any) => expect.poll(async () => (await f.api("/api/bots")).bots
+  .find((bot: any) => bot.id === f.chief.id).tasks
+  .find((task: any) => task.threadId === f.thread).waitingForTeammates,
+{ timeout: 15_000 }).toBe(true);
 
 it("gives a replacement session the full assignment when a result returns after its resume was rejected", () => fixture(async (f) => {
   await warmUp(f);
@@ -851,13 +856,8 @@ it("gives a replacement session an earlier round's result that its rebuild could
   await expect.poll(() => f.turns().length, { timeout: 10_000 }).toBe(3);
   await expect.poll(() => count(f.prompt(f.turns()[2]), "ROUND_ONE_RESULT_TOKEN"), { timeout: 10_000 }).toBe(1);
   await expect.poll(() => f.launches(f.lead.id).length, { timeout: 15_000 }).toBe(2);
-  // A terminal message is published before the driver releases its turn: wait, or a loaded runner steers into the previous turn.
-  const sourceWaiting = () => expect.poll(async () => (await f.api("/api/bots")).bots
-    .find((bot: any) => bot.id === f.chief.id).tasks
-    .find((task: any) => task.threadId === f.thread).waitingForTeammates,
-  { timeout: 15_000 }).toBe(true);
   for (let i = 0; i < chat; i++) {
-    await sourceWaiting();
+    await sourceWaiting(f);
     expect((await f.send(`chat ${i}`)).steered).toBeUndefined();
     await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(4 + i);
     await expect.poll(async () => (await f.messages()).some((m: any) => m.text === `chat reply ${i}` && m.turnTerminal), { timeout: 10_000 }).toBe(true);
@@ -867,7 +867,7 @@ it("gives a replacement session an earlier round's result that its rebuild could
   const original = cursor(f);
   await f.setMode("resume=dead-session");
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === `chat reply ${chat - 1}` && m.turnTerminal), { timeout: 10_000 }).toBe(true);
-  await sourceWaiting();
+  await sourceWaiting(f);
   expect((await f.send("One more question.")).steered).toBeUndefined();
   await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(4 + chat);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "recovered reply"), { timeout: 10_000 }).toBe(true);
@@ -885,7 +885,7 @@ it("gives a replacement session an earlier round's result that its rebuild could
   expect(records[0].ids).not.toContain(resultMessage.id);
   expect(order.indexOf(records[0].omitted)).toBeGreaterThanOrEqual(order.indexOf(resultMessage.id));
 
-  await sourceWaiting();
+  await sourceWaiting(f);
   f.open(f.gate("r2"));
   await expect.poll(() => f.turns().length, { timeout: 30_000 }).toBe(5 + chat);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "Final" && m.turnTerminal), { timeout: 15_000 }).toBe(true);
@@ -1282,6 +1282,7 @@ it("gives a Codex return the model chosen while its teammate worked", () => fixt
   await f.send("Please have Engineering build the export.");
   await leadRunning(f);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.role === "bot" && m.text === "Assigned"), { timeout: 15_000 }).toBe(true);
+  await sourceWaiting(f);
   // Codex applies a model only when a thread starts: thread/resume would keep the old one.
   const [, other] = await f.codexModels();
   await f.selectModel(other);
@@ -1306,9 +1307,8 @@ it("gives a Codex return today's fresh thread when explicit effort is cleared wh
   await f.send("Please have Engineering build the export.");
   await leadRunning(f);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.role === "bot" && m.text === "Assigned"), { timeout: 15_000 }).toBe(true);
+  await sourceWaiting(f);
   // An effort the driver does not send leaves the native thread's last value.
-  await expect.poll(async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id)
-    .tasks.find((task: any) => task.threadId === f.thread).waitingForTeammates, { timeout: 15_000 }).toBe(true);
   await f.selectModel(model);
   f.open(f.gate("lead"));
   await f.wait();

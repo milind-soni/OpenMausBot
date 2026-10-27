@@ -14,9 +14,22 @@ export interface TeamSession { id: string; name: string; role: string }
 
 export type SessionState =
   | { kind: "loopback"; trust?: "service" }
-  | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string; team?: TeamSession }
+  | { kind: "session"; id: string; label: string; email?: string; scopes: string[]; expiresAt: number; cloudGuest?: true; openedThreads?: string[]; reactor?: string; team?: TeamSession }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
+
+type SessionProfile = { name?: string; email?: string; avatarUrl?: string };
+
+/** The sidebar's "you". The configured profile is the owner's: an admin (the owner on a My Cloud) keeps it, and a Team
+ * Cloud already sends each person their own. Anyone else sees their own email, never the owner's name or picture. */
+export function profileForSession(profile: SessionProfile | undefined, sessionState: SessionState | null): SessionProfile | undefined {
+  if (!sessionState) return undefined;
+  if (sessionState.kind !== "session") return sessionState.kind === "loopback" ? profile : undefined;
+  if (sessionState.team || sessionState.scopes.includes("admin")) return profile;
+  const email = sessionState.email;
+  if (!email?.trim()) return undefined;
+  return profile?.email?.trim().toLowerCase() === email.trim().toLowerCase() ? profile : { email };
+}
 
 export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise<SessionState> {
   let res: Response;
@@ -36,6 +49,7 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       kind: "session",
       id: record.id,
       label: typeof record.label === "string" ? record.label : "",
+      ...(typeof record.email === "string" ? { email: record.email } : {}),
       scopes: Array.isArray(record.scopes) ? record.scopes.filter((s): s is string => typeof s === "string") : [],
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
       ...(typeof record.reactor === "string" ? { reactor: record.reactor } : {}),

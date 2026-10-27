@@ -44,20 +44,22 @@ import {
   mergeLocalInject,
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
-import { allowsTool, canUseMcpServer, parseToolScope } from "../../shared/tool-scope.ts";
-import { appMountFor, customServerGate, gateServer, mcpStdioServer } from "../mcp-gate-config.ts";
-import { remoteMcpSpec } from "../mcp-http.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
+import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
+import { buildMcpServers } from "./pi-mcp-servers.ts";
 
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
 const PI_MODEL_UPDATE_ARGS = ["update", "--models", "--no-approve"];
-const NODE_ENV_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 /** omp's RPC transport caps a frame at 1 MiB and chunks bigger ones only after the client
  *  negotiates protocol 2. Vanilla pi has no handshake frame to wait for. */
 const PI_NEGOTIATE_FRAME = { id: "negotiate", type: "negotiate_protocol", protocolVersion: 2 };
 const PI_PROMPT_RE_ANCHOR_TURNS = 8;
 /** How long to wait after a finished turn_end for agent_end, which some runtimes never send. */
 const PI_AGENT_END_GRACE_MS = 60_000;
+/** A prompt sent before pi answers new_session or switch_session runs on a session pi then replaces, so the turn waits
+ *  for that answer however long it takes, and says so in the chat after this long. */
+const PI_SESSION_SLOW_MS = 20_000;
+const PI_SESSION_SLOW = "Pi is taking longer than usual to start this conversation's session. The turn goes on when Pi answers. Press Stop to cancel it.";
 
 /** pi answered success:false: an explicit refusal from a live runtime, not a transport failure. */
 class PiRpcRefusalError extends Error {}
@@ -93,46 +95,6 @@ function piNativeLogMessage(message: Record<string, unknown>): Record<string, un
 
 export function piThinkingLevel(effort: EffortLevel): (typeof EFFORT_LEVELS)[number] | "off" {
   return effort === "none" ? "off" : effort;
-}
-
-export function buildMcpServers(turn: SendTurnInput): Record<string, unknown> | null {
-  const parsed = parseToolScope(turn.toolScope);
-  if (!parsed.ok) throw new Error(parsed.error);
-  const servers: Record<string, unknown> = {};
-  if (turn.integrations?.composio) servers.composio = { ...turn.integrations.composio }; if (turn.integrations?.composioOwn) servers[OWN_APPS_SERVER] = { ...turn.integrations.composioOwn };
-  if (turn.integrations?.localComputer) {
-    const local = turn.integrations.localComputer;
-    servers.computer = {
-      command: local.command,
-      args: local.args,
-      env: local.env,
-      // Host control carries scope so the extension gates every call behind a permission card.
-      ...(local.scope ? { scope: local.scope } : {}),
-    };
-  }
-  if (turn.integrations?.agents) servers.agents = { ...turn.integrations.agents };
-  if (turn.integrations?.phone) servers.phone = { ...turn.integrations.phone };
-  if (turn.integrations?.dweb) {
-    servers.dweb = {
-      command: process.execPath,
-      args: [SPAWNED_PROXIES.dweb],
-      env: { ...NODE_ENV_FLAG, DWEB_URL: turn.integrations.dweb.url },
-    };
-  }
-  if (turn.integrations?.browser) servers.browser = { ...turn.integrations.browser };
-  for (const name of ["data", "highlevel", "device"] as const) if (turn.integrations?.[name]) servers[name] = { ...turn.integrations[name] };
-  for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) servers[name] = { ...server, scope: "custom" };
-  for (const [name, server] of Object.entries(servers)) {
-    if (parsed.scope !== undefined && !canUseMcpServer(parsed.scope, name)) { delete servers[name]; continue; }
-    // pi registers every tool it is given and has no tool search of its own.
-    const directory = remoteMcpSpec(server) !== undefined;
-    const gated = gateServer({ name, server, toolScope: parsed.scope, threadId: turn.threadId, nodeEnv: NODE_ENV_FLAG, directory, ...customServerGate(name, name in (turn.integrations?.custom ?? {}), turn.integrations?.customResultBudgets), apps: appMountFor(name, turn) });
-    const stdio = gated ?? mcpStdioServer(server, { nodeEnv: NODE_ENV_FLAG, ...(directory ? { directory: { name } } : {}) });
-    if (!stdio) throw new Error("Pi MCP server configuration is invalid");
-    const original = server as { scope?: string };
-    servers[name] = { ...stdio, ...(original.scope ? { scope: original.scope } : {}), ...(directory ? { directory: true } : {}) };
-  }
-  return Object.keys(servers).length ? servers : null;
 }
 
 interface PiModelEntry {
@@ -650,7 +612,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       })();
       let assistantText = "";
       let compactionObserved = false;
-      const responseWaiters = new Map<string, { resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>();
+      const responseWaiters = new Map<string, { resolve: (data: unknown) => void; reject: (err: Error) => void; timer?: NodeJS.Timeout }>();
       // Steers correlate by a unique id, so concurrent steers never share or overwrite a waiter.
       let steerSeq = 0;
       const rejectWaiters = (err: Error) => {
@@ -662,11 +624,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       };
       const awaitResponse = (command: string, timeoutMs = 20_000, key = command) =>
         new Promise<unknown>((resolve, reject) => {
-          const timer = setTimeout(() => {
+          const timer = timeoutMs === Infinity ? undefined : setTimeout(() => {
             responseWaiters.delete(key);
             reject(new Error(`pi ${command} timed out`));
           }, timeoutMs);
-          timer.unref?.();
+          timer?.unref?.();
           responseWaiters.set(key, { resolve, reject, timer });
         });
       child.stdin.on("error", () => rejectWaiters(new Error("pi stdin closed")));
@@ -948,9 +910,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       let sessionReady = false;
       try {
         const command = sessionPath ? "switch_session" : "new_session";
-        const hsPromise = awaitResponse(command);
+        const hsPromise = awaitResponse(command, Infinity);
         send(sessionPath ? { type: "switch_session", sessionPath } : { type: "new_session" });
-        const hs = (await hsPromise) as { sessionFile?: string; sessionId?: string } | undefined;
+        const slow = setTimeout(() => emit({ ...base(threadId, turnId), type: "runtime.notice", message: PI_SESSION_SLOW }), PI_SESSION_SLOW_MS);
+        const hs = (await hsPromise.finally(() => clearTimeout(slow))) as { sessionFile?: string; sessionId?: string } | undefined;
         if (hs?.sessionFile) sessionFile = hs.sessionFile;
         sessionReady = true;
         emit({
@@ -962,6 +925,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       } catch {
         // pi --no-session accepts a prompt without an explicit session.
       }
+      if (settled) return { turnId };
 
       const chosen = typeof turn.model === "string" ? splitPiModel(turn.model) : null;
       if (chosen) {

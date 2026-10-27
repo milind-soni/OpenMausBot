@@ -130,7 +130,7 @@ function MenuRows({
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate">{item.label}</span>
                 {item.subtitle && <span className="truncate text-[12px] font-normal leading-4 text-ink-secondary">{item.subtitle}</span>}
-                {item.note && <span className="text-[11.5px] font-normal leading-snug text-ink-tertiary">{item.note}</span>}
+                {item.note && <span className="text-[12px] font-normal leading-snug text-ink-tertiary">{item.note}</span>}
               </span>
             ) : (
               <span className="flex-1 truncate">{item.label}</span>

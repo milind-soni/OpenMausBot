@@ -6,7 +6,7 @@ import {
 } from "./config.ts";
 import { createLineSplitter } from "./mcp-bridge.ts";
 import { UI_EXTENSION, withUiExtension } from "./mcp-app-observer.ts";
-import { MAX_REMOTE_MCP_BYTES, McpHttpError, REMOTE_MCP_STARTUP_MS, RemoteMcpClient } from "./mcp-http.ts";
+import { MAX_REMOTE_MCP_BYTES, McpHttpError, McpRpcError, REMOTE_MCP_STARTUP_MS, RemoteMcpClient } from "./mcp-http.ts";
 import { discoverMcpAuth } from "./mcp-oauth-discovery.ts";
 import { isRemoteMcpServer, type StoredMcpServer, type StoredRemoteMcpServer, type StoredStdioMcpServer } from "./mcp-registry.ts";
 import { killCliTree, spawnCli } from "./procs.ts";
@@ -16,11 +16,17 @@ export interface McpProbeTool {
   description?: string;
 }
 
+/** Why a test failed, when the person can act on it: `keys` the server refused the headers it was sent (HTTP 401 or 403
+ * with no sign-in to offer, or an MCP "unauthorized" error); `unreachable` and `timeout` may pass on a second try. */
+export type McpProbeFailure = "keys" | "unreachable" | "timeout";
+
 export type McpProbeResult =
   | { ok: true; tools: McpProbeTool[]; total?: number }
-  | { ok: false; error: string; auth?: "required" };
+  | { ok: false; error: string; auth?: "required"; reason?: McpProbeFailure; status?: number };
 
 export const SIGN_IN_REQUIRED = "This server needs you to sign in.";
+/** How MCP servers word a refused key in a JSON-RPC error when they answer it with HTTP 200. */
+const UNAUTHORIZED = /unauthori[sz]ed|forbidden|not authenticated|authentication (?:failed|required)|invalid (?:api[ _-]?)?(?:key|token|credentials)/i;
 
 export interface McpProbeOptions {
   extension?: boolean;
@@ -106,7 +112,7 @@ async function probeRemoteMcpServer(
     return { ok: true, ...publicTools(tools, secrets) };
   } catch (error) {
     if (signal?.aborted) return { ok: false, error: publicProbeError("cancelled") };
-    if (timeout.signal.aborted) return { ok: false, error: publicProbeError("timeout") };
+    if (timeout.signal.aborted) return { ok: false, error: publicProbeError("timeout"), reason: "timeout" };
     if (error instanceof McpHttpError && error.status === 401) {
       const discovery = AbortSignal.timeout(5_000);
       const meta = await discoverMcpAuth(server.url, error.wwwAuthenticate ?? null, {
@@ -114,13 +120,19 @@ async function probeRemoteMcpServer(
       }).catch(() => null);
       if (meta) return { ok: false, auth: "required", error: SIGN_IN_REQUIRED };
     }
+    if (error instanceof McpHttpError && error.kind === "status" && (error.status === 401 || error.status === 403)) {
+      return { ok: false, error: `The server didn't accept the keys (HTTP ${error.status}). Check the header values.`, reason: "keys", status: error.status };
+    }
+    if (error instanceof McpRpcError && UNAUTHORIZED.test(error.detail)) {
+      return { ok: false, error: "The server didn't accept the keys. Check the header values.", reason: "keys" };
+    }
     if (error instanceof McpHttpError && error.kind === "status") {
-      return { ok: false, error: `The server answered HTTP ${error.status}. Check the address and headers.` };
+      return { ok: false, error: `The server answered HTTP ${error.status}. Check the address and headers.`, ...(error.status !== undefined && error.status >= 500 ? { reason: "unreachable" as const } : {}) };
     }
     if (error instanceof McpHttpError && error.kind === "protocol") {
       return { ok: false, error: "The server did not return a valid MCP tools list." };
     }
-    return { ok: false, error: "Could not reach this address. Check the URL and your network." };
+    return { ok: false, error: "Could not reach this address. Check the URL and your network.", reason: "unreachable" };
   } finally {
     clearTimeout(timer);
     await client.close().catch(() => {});
@@ -207,7 +219,7 @@ function probeStdioMcpServer(
     });
 
     timer = setTimeout(() => {
-      finish({ ok: false, error: publicProbeError("timeout") });
+      finish({ ok: false, error: publicProbeError("timeout"), reason: "timeout" });
     }, timeoutMs);
     signal?.addEventListener("abort", onAbort, { once: true });
     child.stdout.on("data", (chunk: Buffer) => {

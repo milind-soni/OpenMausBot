@@ -286,6 +286,17 @@ it("refuses someone else's bot: Acme's own, one another person moves, and anythi
   expect((await moveIn("GET", "/api/cloud-send?move=1")).body.items).toEqual([]);
   // A Member's own session never reaches the move routes.
   expect((await onTeam("cleo")("GET", "/api/cloud-send/manifest")).status).toBe(403);
+  // Its bot arrives as who it is, with what Acme gives any new bot: never a Chief reporting to the Owner.
+  const made = await moveIn("POST", "/api/bots", { id, name: "Mine", reportsTo: OWNER.email, acknowledgePeerScope: true, acknowledgeLocalAuto: true,
+    settings: { soul: "Plans trips.", chiefOfStaff: true, approvalMode: "auto", alwaysAllow: ["Bash(*)"], approvePeerComms: false, cwd: team.home } });
+  expect(made.status, JSON.stringify(made.body)).toBe(201);
+  type Settings = Bot & { chiefOfStaff?: boolean; approvalMode?: string; alwaysAllow?: string[]; cwd?: string; reportsTo?: string; approvePeerComms?: boolean };
+  const acme = await teamBots("olive") as Settings[];
+  const [arrived, inbox] = [acme.find((bot) => bot.id === id)!, acme.find((bot) => bot.id === olives.id)!];
+  expect(arrived.chiefOfStaff).toBeFalsy();
+  expect(arrived.reportsTo).not.toBe(OWNER.email);
+  const settings = ({ approvalMode, alwaysAllow, cwd, approvePeerComms }: Settings) => ({ approvalMode, alwaysAllow: alwaysAllow ?? [], cwd, approvePeerComms });
+  expect(settings(arrived)).toEqual(settings(inbox));
 }, hostTimeout(120_000));
 
 it("Ada's moved chats are hers on any device: the server names them among the conversations she opened", async () => {

@@ -9,6 +9,7 @@ import {
   filterToolsListFrame,
   parseConnectorAllowedToolsEnv,
   parseConnectorServiceSlugsEnv,
+  withAuthConfigParameter,
 } from "./connector-advertisement.ts";
 import { withSignedOutHint } from "./connector-signed-out-hint.ts";
 import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
@@ -194,17 +195,17 @@ function connectorAdds(args: unknown): { requests: ConnectorRequest[]; badAuthCo
   return { requests: checked, badAuthConfig };
 }
 
-async function showConnectorCards(items: ConnectorRequest[]): Promise<void> {
+/** Resolves to the harness's line on which auth config each toolkit connects with, when it names one. */
+async function showConnectorCards(items: ConnectorRequest[]): Promise<string> {
   const response = await fetch(`${HARNESS}/api/internal/connectors/request`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
     body: JSON.stringify({ botId: BOT_ID, threadId: THREAD_ID, items, resumeKey: randomUUID() }),
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as { error?: unknown };
-    throw new Error(String(body.error ?? `could not show connection card (HTTP ${response.status})`));
-  }
+  const body = (await response.json().catch(() => ({}))) as { error?: unknown; authConfigNote?: unknown };
+  if (!response.ok) throw new Error(String(body.error ?? `could not show connection card (HTTP ${response.status})`));
+  return typeof body.authConfigNote === "string" && body.authConfigNote ? ` ${body.authConfigNote}` : "";
 }
 
 function fittedList(frame: Json): Json {
@@ -246,11 +247,11 @@ async function handle(message: Json): Promise<void> {
       return;
     }
     if (requests.length) {
-      await showConnectorCards(requests);
+      const authConfigNote = await showConnectorCards(requests);
       const labels = requests.map((r) => (r.alias ? `${r.slug} (${r.alias})` : r.slug)).join(", ");
       send(textResult(
         id,
-        `OpenMausBot showed the user a secure connection card for ${labels}. End this turn now. The app will continue the task automatically after the connection finishes.`,
+        `OpenMausBot showed the user a secure connection card for ${labels}.${authConfigNote} End this turn now. The app will continue the task automatically after the connection finishes.`,
       ));
       return;
     }
@@ -265,7 +266,7 @@ async function handle(message: Json): Promise<void> {
       ? await relay(message).catch(() => delay(TOOLS_LIST_RETRY_MS).then(() => relay(message)))
       : await relay(message);
     if (response && id !== undefined) {
-      send(method === "tools/list" ? fittedList(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response)
+      send(method === "tools/list" ? fittedList(withAuthConfigParameter(ALLOWED_TOOLS ? filterToolsListFrame(response, ALLOWED_TOOLS, SERVICE_SLUGS) : response))
         : method === "tools/call" ? withSignedOutHint(message, response, SERVICE_SLUGS) : response);
     }
   } catch (error) {

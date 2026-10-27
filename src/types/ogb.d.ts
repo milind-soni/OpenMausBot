@@ -114,13 +114,23 @@ const __APP_VERSION__: string;
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      /** This app's own version, and whether this page is this app's own: false on a server added in the Server menu,
+       * whose page carries that server's version. Absent in desktop builds before it. */
+      app?: { version: string; ownPage: boolean };
       organization?: import("../../electron/managed-desktop.mjs").ManagedDesktopBridge;
       cloudAccount?: import("../../electron/cloud-account.mjs").CloudAccountBridge;
       /** "Let my bots use this Mac" (this PC, this computer), on My Cloud's own page in this app: its one switch and
        * what is lent (electron/cloud-lending-ipc.mjs). `open` shows this computer's own Settings, leaving the page. */
-      cloudLending?: { open(): Promise<void>; state?(): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; set?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; screen?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>;
-        /** A bot's Use my Mac link: this app's own popup, which turns on every part of Let my bots use this Mac. */
-        offer?(): Promise<void> };
+      cloudLending?: { open(): Promise<void>; state?(): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; set?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; screen?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>; terminal?(on: boolean): Promise<import("../../electron/cloud-lending-ipc.mjs").PageLending>;
+        /** A bot's Use my Mac link: this app's own popup, which turns on every part of Let my bots use this Mac, in
+         * `language` (the page's own). */
+        offer?(language?: string): Promise<void>;
+        /** Whether the Use my Mac popup is due on this computer for this Cloud: once per Cloud, and never after the person
+         * turned lending off or answered it. */
+        due?(): Promise<boolean>;
+        /** The page's notices found the moment: main shows its Use my Mac popup if it is still due, and resolves once it is
+         * answered or put off. */
+        ask?(language?: string): Promise<void> };
       /** Either page in this app: the one-time move's line (on its way, what arrived, coming home). */
       cloudSendPage?: import("../../electron/cloud-send.mjs").CloudSendPageBridge;
       /** Settings on the person's own Cloud: the plan, read only. */
@@ -343,6 +353,8 @@ const __APP_VERSION__: string;
       revealInFolder?(filePath: string): Promise<"shown" | "missing" | "invalid">;
       /** Opens this app's logs folder in Explorer or Finder and says where it is. */
       openLogsFolder?(): Promise<{ folder: string; opened: boolean; error?: string }>;
+      /** This app's own login item, which opens the window. `available`: false in a build that cannot add one. */
+      openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
         name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey",
@@ -357,6 +369,8 @@ const __APP_VERSION__: string;
         /** apply the download: quit-and-install, or copy the command and open
          * a terminal. On a server's page, only from the person's click. */
         install(): Promise<void>;
+        /** The person saw the line that the app updated itself: it is not shown again. */
+        seen?(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
       };
     };
@@ -398,15 +412,21 @@ export interface UpdaterState {
   /** native work may still be running; recovery requires an app restart */
   retryable?: boolean;
   /**
-   * How the download gets applied. "restart" quits and installs in place;
+   * How the download gets applied. "restart" quits and installs in place (an
+   * Ubuntu .deb asks for the password once, installs and reopens);
    * "handoff" copies the install command and opens a terminal so the user
-   * can finish — Ubuntu .deb (and rpm/pacman) builds use this.
+   * can finish — rpm/pacman builds, and a .deb where no password prompt
+   * can be shown, use this.
    */
   installMode?: "restart" | "handoff";
   /** hand-off only: the install command, already on the clipboard */
   command?: string;
   /** hand-off only: whether a terminal was opened to paste it into */
   terminalOpened?: boolean;
+  /** downloaded only: the app installs it by itself the next time the person is away and nothing is running */
+  installsByItself?: boolean;
+  /** the version the app updated itself to while the person was away, until they have seen it said */
+  updated?: string;
 }
 
 export interface CompanionAccountState {

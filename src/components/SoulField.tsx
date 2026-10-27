@@ -75,7 +75,7 @@ export function SoulField({
             type="button"
             disabled={resolving}
             onClick={() => onPatch({ soul: bot.description, description: firstSentence(bot.description) })}
-            className="rounded-md px-1.5 py-1 text-[11.5px] font-medium text-accent-text hover:bg-accent/10"
+            className="rounded-md px-1.5 py-1 text-[12px] font-medium text-accent-text hover:bg-accent/10"
           >
             {t("botIdentity.soul.moveToFile")}
           </button>
@@ -87,7 +87,7 @@ export function SoulField({
           <div className="mt-1 text-ink-secondary">
             {t("botIdentity.soul.externalEditHelp")} {t("botIdentity.soul.fileLabel")} <span className="break-all">{info.file}</span>
           </div>
-          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-control p-2 text-[11.5px]">{info.fileText}</pre>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-control p-2 text-[12px]">{info.fileText}</pre>
           <div className="mt-2 flex gap-2">
             <button type="button" disabled={resolving} onClick={() => void resolve("apply-file")} className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50">
               {t("botIdentity.soul.useFile")}

@@ -11,7 +11,7 @@ export function RoutinesSection({ bot, routines, runs, defaultRunOn }: { bot: Bo
   const [editing, setEditing] = useState<Routine | "new" | null>(null);
   return <div className="flex flex-col gap-4">
     <div className="rounded-xl bg-card p-4">
-      <div className="flex items-center gap-2"><CalendarClock size={16} className="text-accent" /><h2 className="min-w-0 flex-1 text-[15px] font-medium text-ink">{t("computer.tab.routines")}</h2><span className="text-[11.5px] text-ink-secondary">{routines.length}</span></div>
+      <div className="flex items-center gap-2"><CalendarClock size={16} className="text-accent" /><h2 className="min-w-0 flex-1 text-[15px] font-medium text-ink">{t("computer.tab.routines")}</h2><span className="text-[12px] text-ink-secondary">{routines.length}</span></div>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" onClick={() => setEditing("new")} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-medium text-white hover:brightness-110"><Plus size={14} />{t("computer.routines.create")}</button>
         <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "logs", botId: bot.id })} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[12px] text-ink hover:bg-raised-hover"><FileText size={13} />{t("routines.logs")}</button>

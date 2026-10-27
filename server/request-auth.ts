@@ -4,6 +4,7 @@ import type { IncomingMessage } from "node:http";
 import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
+import { BOT_PROFILE_PATCH_FIELDS } from "./bot-profile.ts";
 import type { Scope, SessionRecord, SessionRegistry } from "./sessions.ts";
 import { denyReason as companionDenial, isCompanionNotice } from "../companion/src/routes.ts";
 
@@ -194,6 +195,15 @@ export function isSameOrigin(req: IncomingMessage): boolean {
   return own !== null && origin.trim().toLowerCase() === own;
 }
 
+/** The desktop window's session adds the owner header to every request for this server, whichever page in it asks, and
+ * a saved server can be opened in that window at another loopback origin. So a browser's header counts only on a
+ * same-origin request or the window's own navigation; any other page there is a different site. */
+export function fromOwnPage(req: IncomingMessage): boolean {
+  if (!fromBrowser(req)) return true;
+  const site = headerValue(req.headers["sec-fetch-site"])?.trim().toLowerCase();
+  return isSameOrigin(req) && (site === undefined || site === "same-origin" || site === "none");
+}
+
 /** Unlike isSameOrigin, a request with neither Origin nor Sec-Fetch-Site fails. */
 export function provesSameOrigin(req: IncomingMessage): boolean {
   if (headerValue(req.headers.origin)) return isSameOrigin(req);
@@ -304,6 +314,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/job$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages\/[\w-]+\/edit$/ },
+  { methods: ["POST", "DELETE"], path: /^\/api\/bots\/[\w-]+\/setup-request$/ }, // Set me up: what a typed /setup could do
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/compact$/ },
   { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/interrupt$/ },
@@ -383,6 +394,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/needs-you$/ },
   // who a Team Cloud bot can report to, and handing over a bot the member owns: the handler checks who may
   { methods: ["GET"], path: /^\/api\/team\/people$/ },
+  // a teammate's picture: the handler serves it to the team's own members only
+  { methods: ["GET"], path: /^\/api\/team\/people\/p_[\w-]{22}\/picture$/ },
   { methods: ["PUT"], path: /^\/api\/bots\/[\w-]+\/reports-to$/ },
 ];
 
@@ -405,6 +418,24 @@ export function clientBotPatchViolation(body: unknown, ownMausBot = false): stri
   if (!body || typeof body !== "object" || Array.isArray(body)) return "body";
   for (const key of Object.keys(body)) if (!CLIENT_BOT_PATCH_FIELDS.has(key) && !(ownMausBot && key === "name")) return key;
   return null;
+}
+
+/** All a paired device or a Team Cloud move-in may give a bot it makes or brings in: who the bot is, how it looks, its
+ * own playbooks, projects and library skills, and which of this place's models it runs on. Everything else (what it may
+ * do and reach, where it runs, its department, whom it answers to or directs, whether it is the MausBot or a package's
+ * bot) only an admin on the host sets. */
+const BOT_PROFILE_SETTINGS: ReadonlySet<string> = new Set([
+  ...CLIENT_BOT_PATCH_FIELDS, ...BOT_PROFILE_PATCH_FIELDS, "hidden",
+  "modelSelection", "requireAvailableModel", "fallback", "projects", "playbooks", "assignedSkills",
+]);
+
+/** The first field of `fields` beyond a bot's profile; null when there is none. */
+export function adminOnlyBotSetting(fields: Record<string, unknown>): string | null {
+  return Object.keys(fields).find((key) => !BOT_PROFILE_SETTINGS.has(key)) ?? null;
+}
+
+export function botProfileSettings(fields: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(fields).filter(([key]) => BOT_PROFILE_SETTINGS.has(key)));
 }
 
 /** Same for a room: name and reading state, never its folder or who answers. */
@@ -448,6 +479,8 @@ function mutatingPublicRoute(method: string, path: string): boolean {
   ) return true;
   // Hands out a desktop's VNC password and control.
   if (path.startsWith("/api/desktop-viewer/")) return true;
+  // Hand out a stored secret to a loopback reader: a webhook's address, a Local VM's viewer password.
+  if (upper === "GET" && (/^\/api\/webhooks\/[\w-]+\/address$/.test(path) || /^\/api\/(?:bots\/[\w-]+\/)?local-computer$/.test(path))) return true;
   // Drives a bot's browser: a WebSocket upgrade is a GET, but what it carries is input.
   if (/^\/api\/bots\/[\w-]+\/browser\/stream$/.test(path)) return true;
   if (["GET", "HEAD", "OPTIONS"].includes(upper)) return false;
@@ -491,7 +524,8 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     if (via === "cookie" && !isSameOrigin(req)) return deny(403, "forbidden: cross-origin request");
     // A browser sign-in's session is its cookie, never a bearer token.
     if (via === "bearer" && session.cookieOnly) return deny(401, "unauthorized: this session belongs to a browser; sign in with a pairing code");
-    if (via === "cookie" && session.cookieOnly && !["GET", "HEAD", "OPTIONS"].includes(method) && !provesSameOrigin(req)) {
+    if (via === "cookie" && session.cookieOnly && (!["GET", "HEAD", "OPTIONS"].includes(method) || mutatingPublicRoute(method, path)) &&
+      !provesSameOrigin(req)) {
       return deny(403, "forbidden: this browser's session makes changes only from its own page");
     }
     const narrowed = options.restricted?.(session, method, path, options.url) ?? null;
@@ -524,7 +558,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES, companionDevice: headerValue(req.headers["x-openmausbot-companion-device"]) }, status: 401, error: "" };
     }
     const desktopOwner = options.loopbackMutationToken !== undefined &&
-      secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken);
+      secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken) && fromOwnPage(req);
     if (fromBrowser(req) && !desktopOwner && !options.trustLocalBrowser) return deny(401, BROWSER_SIGN_IN);
     if (options.loopbackMutationToken !== undefined && mutatingPublicRoute(method, path) && !desktopOwner) {
       return deny(403, "forbidden: this change must come from the desktop app or a paired device");

@@ -43,7 +43,7 @@ export function highLevelAppCard(): Pick<ToolkitCard, "logo" | "domain" | "label
 }
 
 export function botAppsFrom(
-  bot: Pick<Bot, "composio" | "connectorScopes">,
+  bot: Pick<Bot, "composio" | "connectorScopes" | "connectorTools">,
   inventory: ConnectorInventory | null,
   cards: ReadonlyMap<string, ToolkitCard>,
   highlevel: HighLevelStatus | null = null,

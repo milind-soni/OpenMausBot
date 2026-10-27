@@ -37,7 +37,7 @@ export function ownerStamp(row: Message, owner: CloudOwner): Pick<Message, "send
   return { ...(line ? { sender: { name: owner.name, id: owner.person } } : {}), ...(card ? { card: { ...card, answeredBy } } : {}) };
 }
 
-/** A bot conversation's rows as My Cloud keeps them: the owner's own lines and answers carry the owner. */
+/** A conversation's rows as My Cloud keeps them: the owner's own lines and answers carry the owner. */
 export function stampOwner(rows: readonly Message[], owner: CloudOwner): Message[] {
   return rows.map((row) => {
     const stamp = ownerStamp(row, owner);

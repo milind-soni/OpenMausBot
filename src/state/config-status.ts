@@ -151,6 +151,10 @@ export interface BrowserEngineSummary {
   /** Whether a browser profile can use "My Chrome", the person's own running
    * Chrome: only where the bots run on their computer (the desktop app). */
   myChrome?: boolean;
+  /** On My Cloud, the computer that lends its Chrome. */
+  myChromeOn?: { name: string; device: "PC" | "Mac" | "computer"; online: boolean };
+  /** On My Cloud with no computer lending Chrome: it can be lent from the desktop app. */
+  myChromeLendable?: true;
   /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
   engine?: "agent-browser" | "chrome";
 }

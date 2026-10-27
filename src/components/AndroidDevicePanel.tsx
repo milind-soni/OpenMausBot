@@ -346,7 +346,7 @@ export function AndroidDevicePanel({ status }: { status: AndroidDeviceStatus }) 
         <div className="flex items-center gap-2 text-[13px] font-medium text-ink">
           <Usb size={15} className="text-accent" /> {t("computer.android.setupTitle")}
         </div>
-        <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-[11.5px] leading-relaxed text-ink-secondary">
+        <ol className="mt-2 list-decimal space-y-1.5 pl-4 text-[12px] leading-relaxed text-ink-secondary">
           <li>{t("computer.android.step1")}</li>
           <li>
             {t("computer.android.step2").split(/(\{buildNumber\}|\{usbDebugging\})/).map((part, index) =>

@@ -18,6 +18,7 @@ export const ROUTINE_LINE = {
   "routines.server.part.stalled": "the AI stalled",
   "routines.server.part.rateLimited": "a rate limit",
   "routines.server.part.provider": "a temporary error",
+  "routines.server.part.failed": "a failure",
 } as const;
 
 export type RoutineLineKey = keyof typeof ROUTINE_LINE;

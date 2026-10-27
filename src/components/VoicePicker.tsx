@@ -238,7 +238,7 @@ export function VoicePicker({
             <span className="min-w-0 flex-1">
               <span className={cn("block truncate text-[13px] leading-5 text-ink", current && "font-medium")}>{voice.label}</span>
               {voice.description && (
-                <span title={voice.description} className="block truncate text-[11.5px] leading-4 text-ink-secondary">
+                <span title={voice.description} className="block truncate text-[12px] leading-4 text-ink-secondary">
                   {voice.description}
                 </span>
               )}
@@ -286,7 +286,7 @@ export function VoicePicker({
             aria-label={t("voice.search")}
             autoComplete="off"
             spellCheck={false}
-            className="w-full bg-transparent text-[12.5px] text-ink placeholder:text-ink-secondary focus:outline-none [&::-webkit-search-cancel-button]:hidden"
+            className="w-full bg-transparent text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none [&::-webkit-search-cancel-button]:hidden"
           />
         </div>
       </div>

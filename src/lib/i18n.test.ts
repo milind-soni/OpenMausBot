@@ -69,6 +69,8 @@ describe("t", () => {
     expect(resolveLocale("pt-PT", available)).toBe("pt");
     expect(resolveLocale("hi-IN", available)).toBe("hi");
     expect(resolveLocale("tr-TR", available)).toBe("tr");
+    expect(resolveLocale("ru-RU", available)).toBe("ru");
+    expect(resolveLocale("ru-RU-x-custom", available)).toBe("ru");
   });
 
   it("every registered pack carries only known keys with non-empty values", () => {
@@ -191,7 +193,7 @@ describe("page language", () => {
 
   it("names every picker language with a valid BCP-47 tag", () => {
     expect(localeChoices.map(({ code }) => documentLanguage(code))).toEqual([
-      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk", "vi", "tr", "pl",
+      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk", "vi", "tr", "pl", "ru", "it",
     ]);
     for (const { code } of localeChoices) {
       expect(Intl.getCanonicalLocales(documentLanguage(code))).toEqual([documentLanguage(code)]);

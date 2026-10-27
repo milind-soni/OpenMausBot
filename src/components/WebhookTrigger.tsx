@@ -68,7 +68,7 @@ export function WebhookEditor({ webhook, bots, initialBotId, onClose, onCredenti
         </div>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
           <div>
-            <div className="mb-2 text-[12.5px] font-medium text-ink">{t("automations.editor.app.who")}</div>
+            <div className="mb-2 text-[13px] font-medium text-ink">{t("automations.editor.app.who")}</div>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">{bots.map((bot) => (
               <button key={bot.id} type="button" onClick={() => setBotId(bot.id)} className={cn("flex min-w-0 items-center gap-2 rounded-xl border px-3 py-2 text-left", botId === bot.id ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised/60")}>
                 <BotAvatar bot={bot} state={botId === bot.id ? "happy" : "idle"} size={32} animated={false} /><span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span>
@@ -76,22 +76,22 @@ export function WebhookEditor({ webhook, bots, initialBotId, onClose, onCredenti
             ))}</div>
           </div>
           <label className="block">
-            <span className="mb-2 block text-[12.5px] font-medium text-ink">{t("automations.editor.app.what")}</span>
+            <span className="mb-2 block text-[13px] font-medium text-ink">{t("automations.editor.app.what")}</span>
             <textarea autoFocus value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} placeholder={t("automations.editor.app.whatPlaceholder")} className={cn(FIELD, "resize-y py-3 leading-relaxed")} />
           </label>
           <details className="rounded-xl border border-hairline/45 bg-inset/45 px-4 py-3">
-            <summary className="cursor-pointer text-[12.5px] font-medium text-ink">{t("automations.more")}</summary>
+            <summary className="cursor-pointer text-[13px] font-medium text-ink">{t("automations.more")}</summary>
             <div className="mt-4 space-y-4">
-              <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">{t("automations.editor.app.name")}</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder={suggestedName(prompt, bots.find((bot) => bot.id === botId))} className={FIELD} /></label>
+              <label className="block"><span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">{t("automations.editor.app.name")}</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder={suggestedName(prompt, bots.find((bot) => bot.id === botId))} className={FIELD} /></label>
               <div>
-                <div className="mb-2 text-[11.5px] font-medium text-ink-secondary">{t("automations.editor.app.runOn")}</div>
+                <div className="mb-2 text-[12px] font-medium text-ink-secondary">{t("automations.editor.app.runOn")}</div>
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setRunOn("maus")} className={cn("flex items-center gap-2 rounded-xl border p-3 text-left text-[12.5px] font-medium text-ink", runOn === "maus" ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-panel hover:bg-raised/60")}><Laptop size={14} />{t("automations.editor.app.thisComputer")}</button>
-                  <button type="button" disabled={!cloudReady && runOn !== "cloud"} onClick={() => setRunOn("cloud")} className={cn("flex items-center gap-2 rounded-xl border p-3 text-left text-[12.5px] font-medium text-ink disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-panel hover:bg-raised/60")}><Cloud size={14} />{t("automations.editor.app.cloud")}</button>
+                  <button type="button" onClick={() => setRunOn("maus")} className={cn("flex items-center gap-2 rounded-xl border p-3 text-left text-[13px] font-medium text-ink", runOn === "maus" ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-panel hover:bg-raised/60")}><Laptop size={14} />{t("automations.editor.app.thisComputer")}</button>
+                  <button type="button" disabled={!cloudReady && runOn !== "cloud"} onClick={() => setRunOn("cloud")} className={cn("flex items-center gap-2 rounded-xl border p-3 text-left text-[13px] font-medium text-ink disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/70 bg-accent/10" : "border-hairline/50 bg-panel hover:bg-raised/60")}><Cloud size={14} />{t("automations.editor.app.cloud")}</button>
                 </div>
               </div>
-              <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">{t("automations.editor.app.events")}</span><input value={eventTypes} onChange={(event) => setEventTypes(event.target.value)} placeholder="push, workflow_run" className={FIELD} /><span className="mt-1.5 block text-[10.5px] text-ink-secondary">{t("automations.editor.app.eventsHelp")}</span></label>
-              <label className="block"><span className="mb-1.5 block text-[11.5px] font-medium text-ink-secondary">{t("automations.editor.app.limit")}</span><input type="number" inputMode="numeric" min={1} max={WEBHOOK_MAX_PENDING_RUNS_LIMIT} step={1} value={maxPendingRuns} onChange={(event) => setMaxPendingRuns(event.target.value)} placeholder={String(WEBHOOK_DEFAULT_MAX_PENDING_RUNS)} className={FIELD} /><span className="mt-1.5 block text-[10.5px] text-ink-secondary">{t("automations.editor.app.limitHelp", { count: WEBHOOK_DEFAULT_MAX_PENDING_RUNS })}</span></label>
+              <label className="block"><span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">{t("automations.editor.app.events")}</span><input value={eventTypes} onChange={(event) => setEventTypes(event.target.value)} placeholder="push, workflow_run" className={FIELD} /><span className="mt-1.5 block text-[11px] text-ink-secondary">{t("automations.editor.app.eventsHelp")}</span></label>
+              <label className="block"><span className="mb-1.5 block text-[12px] font-medium text-ink-secondary">{t("automations.editor.app.limit")}</span><input type="number" inputMode="numeric" min={1} max={WEBHOOK_MAX_PENDING_RUNS_LIMIT} step={1} value={maxPendingRuns} onChange={(event) => setMaxPendingRuns(event.target.value)} placeholder={String(WEBHOOK_DEFAULT_MAX_PENDING_RUNS)} className={FIELD} /><span className="mt-1.5 block text-[11px] text-ink-secondary">{t("automations.editor.app.limitHelp", { count: WEBHOOK_DEFAULT_MAX_PENDING_RUNS })}</span></label>
             </div>
           </details>
           {error && <div className="rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-3 text-[12px] text-danger">{error}</div>}

@@ -39,7 +39,7 @@ export function HistorySection({
   return (
     <div className="flex flex-col gap-2">
       {refreshError && (
-        <div className="rounded-lg bg-inset px-3 py-2 text-[12.5px] text-ink-secondary">{t("history.refreshError")}</div>
+        <div className="rounded-lg bg-inset px-3 py-2 text-[13px] text-ink-secondary">{t("history.refreshError")}</div>
       )}
       {sorted.map((row) => (
         <div key={`${bot.id}-${row.id}`} className="rounded-xl bg-card p-4">

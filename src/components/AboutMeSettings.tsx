@@ -107,7 +107,7 @@ function LearnedFacts({ onChanged }: { onChanged: (aboutMe: string) => void }) {
               <span className="text-[12px] text-ink-secondary">{t("settings.profile.learned.from", { name: fact.botName })}</span>
             </span>
             <button type="button" disabled={busy === fact.id} onClick={() => void remove(fact.id)}
-              className="rounded-md px-2 py-1 text-[12.5px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50">
+              className="rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50">
               {t("settings.profile.learned.remove")}
             </button>
           </li>

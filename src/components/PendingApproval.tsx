@@ -219,7 +219,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
                   ? t("approval.aria.reviewProfile")
                   : t("approval.aria.reviewDetails")
           }
-          className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-3xl bg-inset px-4 py-3 font-mono text-[12px] leading-relaxed text-ink"
+          className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-inset px-4 py-3 font-mono text-[12px] leading-relaxed text-ink"
         >
           {pending.commandAllowlist?.command ?? pending.detail}
         </pre>

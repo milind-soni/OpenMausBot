@@ -7,7 +7,7 @@ import {
 import { bootstrapBrand } from "./lib/brand";
 import { setLocale, t } from "./lib/i18n";
 import { startupLocaleTag } from "./lib/language-preference";
-import { applySkin, readSkin } from "./lib/skins";
+import { applySkinChoice, readSkinChoice } from "./lib/skins";
 import { applyChatWidth, readChatWidth } from "./lib/chat-width";
 import { applyFont, readFont } from "./lib/fonts";
 import { settleAdvancedModeDefault } from "./lib/interface-mode";
@@ -18,7 +18,7 @@ import "./styles.css";
 
 // Before first paint; settleAdvancedModeDefault must run before applySkin writes omb-skin.
 settleAdvancedModeDefault();
-applySkin(readSkin());
+applySkinChoice(readSkinChoice());
 applyFont(readFont());
 applyChatWidth(readChatWidth());
 setLocale(startupLocaleTag());

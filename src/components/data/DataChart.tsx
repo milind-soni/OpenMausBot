@@ -98,7 +98,7 @@ export function DataChart({ botId, cardId, spec, rowCount, theme, revision }: Da
       element.append(candidate);
       // SAFETY: the server validated the spec against Vega-Lite's schema and rendered it once headlessly; embed throws
       // on anything it still rejects.
-      const embedded = await embed(candidate, bound as Parameters<typeof embed>[1], { actions: false, config: vegaConfig(theme) });
+      const embedded = await embed(candidate, bound as Parameters<typeof embed>[1], { actions: false, ast: true, config: vegaConfig(theme) });
       candidateResult = embedded;
       if (!alive) { discardCandidate(); return; }
       naturalHeight ??= unit ? candidate.clientHeight || undefined : undefined;

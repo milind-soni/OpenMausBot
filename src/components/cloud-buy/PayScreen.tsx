@@ -27,7 +27,7 @@ export function PayScreen({ plan, offer, browser, late, link, email, busy, copie
       {link && <button type="button" className="ui-button" disabled={busy} onClick={onCopy}><Copy size={14} aria-hidden="true" />{t("cloudBuy.pay.copy")}</button>}
       <button type="button" className={`${LINK} px-1 py-1`} onClick={onChangePlan}>{t("cloudAdd.changePlan")}</button>
     </div>
-    <div aria-live="polite" className="text-[12.5px] empty:-mt-4">
+    <div aria-live="polite" className="text-[13px] empty:-mt-4">
       {copied && <p className="text-ink-secondary">{t("cloudBuy.pay.copied")}</p>}
       {failed && <p role="alert" className="text-danger">{t("cloudBuy.pay.failed")}</p>}
     </div>

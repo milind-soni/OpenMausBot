@@ -25,7 +25,7 @@ const standup: CalendarEvent = {
   attendees: [{ email: "me@x.test", self: true, organizer: true }, { email: "ada@x.test", name: "Ada", self: false, organizer: false }],
 };
 
-function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?: string } = {}) {
+function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?: string; ideas?: string[] } = {}) {
   let watching = true;
   const dir = mkdtempSync(join(tmpdir(), "omb-brief-"));
   dirs.push(dir);
@@ -44,6 +44,7 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?
     notify: (_bot, _thread, detail) => notified.push(detail), runs: () => runs, needsYou: () => options.needsYou ?? [], engineName: () => "Claude",
     hostTimeZone: () => "UTC", language: () => options.language, session: () => null, address: () => "me@x.test",
     failRun: (id, why) => failed.push([id, why]), keep: (key) => kept.push(key), items: (key) => items.get(key) ?? null,
+    ideas: (botId) => (botId === chief.id && options.ideas ? { ideas: options.ideas, conversations: 3 } : { ideas: [], conversations: 0 }),
   });
   let brief = make();
   const thread = () => store.bot(chief.id)!.threadId;
@@ -69,6 +70,26 @@ describe("the brief", () => {
     const shown = JSON.stringify(briefCard({ now: Date.parse("2026-10-22T08:00:00Z"), timeZone: "UTC", intro: false, needs: [], meetings: null, emails, waiting: 3, routines: [] }).card);
     expect(shown).toContain("and 2 more");
     expect(shown).toContain(ENGLISH_BRIEF.waitingCount(3));
+  });
+
+  it("offers the night's ideas as plain text on the first open of the day, without a notification", async () => {
+    const s = setup({ ideas: ["Make the Friday report a routine", "<b>Save</b> the draft checklist as a skill"] });
+    expect((await s.brief.active("desktop", "UTC")).open).toEqual({ botId: s.chief.id, threadId: s.thread() });
+    const root = s.card()!.widget!.root;
+    expect(s.shown()).toContain('"value":"Ideas"');
+    expect(s.shown()).toContain("Make the Friday report a routine");
+    expect(s.shown()).toContain("Noticed across 3 chats");
+    expect(JSON.stringify(root)).not.toMatch(/"type":"(?:Button|Link|Image|Html)"[^}]*Save/);
+    expect(s.notified).toEqual([]);
+  });
+
+  it("shows ideas after routines, counts them in the summary, and leaves the section out when there are none", () => {
+    const facts = { now: Date.parse("2026-10-22T08:00:00Z"), timeZone: "UTC", intro: false, needs: [], meetings: null, emails: [], routines: [] };
+    const none = briefCard(facts);
+    expect(JSON.stringify(none.card)).not.toContain(ENGLISH_BRIEF.ideas);
+    const many = briefCard({ ...facts, ideas: Array.from({ length: 7 }, (_, i) => ({ text: `Idea ${i}`, note: ENGLISH_BRIEF.noticedAcross(4) })) });
+    expect(JSON.stringify(many.card)).toContain("and 1 more");
+    expect(JSON.stringify(many.summary)).toContain("7 ideas");
   });
 
   it("is not there while it has nothing for the person, so an open never takes the screen for an empty card", async () => {

@@ -12,6 +12,11 @@ export const sharedComputerRegistration = z.object({
   platform: z.enum(LENT_PLATFORMS).optional(),
   /** Its internet connection, for the bots' browsers; sent only to a server that advertises deviceLink. */
   internet: z.boolean().optional(),
+  /** Its real Chrome, for the bots' browser; sent only to a server that advertises myChromeLink. */
+  chrome: z.boolean().optional(),
+  /** It takes and honours run_command's timeout_seconds; sent only to a server that advertises commandTimeouts. Older
+   * desktops refuse a job with a field they do not know, and stop every command at 30 seconds. */
+  commandTimeouts: z.literal(true).optional(),
 }).strict();
 export const sharedComputerOperation = z.object({
   computer_id: z.string().uuid(),
@@ -19,21 +24,25 @@ export const sharedComputerOperation = z.object({
   folder_id: z.string().uuid().optional(), path: z.string().max(2048).optional(),
   content: z.string().max(350_000).optional(), encoding: z.enum(["utf8", "base64"]).optional(),
   expected_sha256: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-  command: z.string().max(8000).optional(), tool_name: z.string().max(100).optional(),
+  command: z.string().max(8000).optional(), timeout_seconds: z.number().int().min(1).max(240).optional(), tool_name: z.string().max(100).optional(),
   arguments: z.record(z.string(), z.unknown()).optional(),
 }).strict();
 type Registration = z.infer<typeof sharedComputerRegistration>;
 type Operation = z.infer<typeof sharedComputerOperation>;
+const COMMAND_SECONDS = 120;
+/** A command's deadline is its own limit on the desktop plus time for the result to come back. */
+const jobDeadlineMs = (registration: Registration, operation: Operation) =>
+  operation.action === "run_command" && registration.commandTimeouts ? (operation.timeout_seconds ?? COMMAND_SECONDS) * 1000 + 15_000 : 45_000;
 /** The registering session alone may poll, answer and disconnect; only that person's bot turns may see or use it. */
 export type SharedComputerOwner = { session: string; person: string };
 export type SharedComputerStatus = {
   id: string; name: string; online: boolean; busy: boolean; lastSeenAt: number;
-  scopes: { folders: { id: string; name: string; write: boolean }[]; terminal: boolean; screen: boolean; internet: boolean };
+  scopes: { folders: { id: string; name: string; write: boolean }[]; terminal: boolean; screen: boolean; internet: boolean; chrome: boolean };
 };
 /** A computer lent now or before: what the person's own Cloud page shows, online or not, across restarts. */
 export type KnownLentComputer = {
   id: string; name: string; platform: "darwin" | "win32" | "linux" | null; online: boolean; busy: boolean; lent: boolean;
-  lastSeenAt: number; lastUsedAt: number | null; scopes: { folders: number; terminal: boolean; screen: boolean; internet: boolean };
+  lastSeenAt: number; lastUsedAt: number | null; scopes: { folders: number; terminal: boolean; screen: boolean; internet: boolean; chrome: boolean };
 };
 type Job = {
   id: string; operation: Operation; active: () => boolean; sent: boolean; leased: boolean; resolve: (result: unknown) => void; reject: (error: Error) => void;
@@ -104,8 +113,8 @@ export class SharedComputers {
     const old = this.computers.get(key);
     if (old) {
       this.authorize(registration.id, owner.session, secret);
-      // Its link was let in for the internet connection as lent then: lent or taken back since, the link starts over.
-      if ((old.registration.internet === true) !== (registration.internet === true)) this.links?.drop(key);
+      // Its link was let in for the internet connection and Chrome as lent then: lent or taken back since, the link starts over.
+      if ((old.registration.internet === true) !== (registration.internet === true) || (old.registration.chrome === true) !== (registration.chrome === true)) this.links?.drop(key);
       old.registration = registration; old.seen = Date.now();
       this.remember(registration, old.owner.person);
       return;
@@ -123,7 +132,7 @@ export class SharedComputers {
   }
   private remember(registration: Registration, person: string) {
     this.lent?.connected(person, { id: registration.id, name: registration.name, platform: registration.platform,
-      folders: registration.folders.length, terminal: registration.terminal, screen: registration.computer, internet: registration.internet === true });
+      folders: registration.folders.length, terminal: registration.terminal, screen: registration.computer, internet: registration.internet === true, chrome: registration.chrome === true });
   }
   private reap() {
     for (const [key, entry] of this.computers) {
@@ -150,7 +159,7 @@ export class SharedComputers {
       const entry = live.find(candidate => candidate.registration.id === record.id);
       return { id: record.id, name: record.name, platform: record.platform, online: entry ? this.online(entry) : false, busy: (entry?.jobs.size ?? 0) > 0,
         lent: record.stoppedAt === null, lastSeenAt: entry ? Math.max(entry.seen, record.lastSeenAt) : record.lastSeenAt, lastUsedAt: record.lastUsedAt,
-        scopes: { folders: record.folders, terminal: record.terminal, screen: record.screen, internet: record.internet === true } };
+        scopes: { folders: record.folders, terminal: record.terminal, screen: record.screen, internet: record.internet === true, chrome: record.chrome === true } };
     });
   }
   /** For a bot: which known computer is offline and since when, and the sentence to say; nothing while one is online. */
@@ -173,11 +182,17 @@ export class SharedComputers {
     if (!lending.length || lending.some(record => online.has(record.id))) return null;
     return { away: deviceWord(lending[0]!.platform) };
   }
+  /** The newest computer lending its Chrome, and whether it is online now; null when none lends it. */
+  chromeLender(principal: string): { name: string; device: "PC" | "Mac" | "computer"; online: boolean } | null {
+    const record = (this.lent?.list(principal) ?? []).find(candidate => candidate.chrome === true && candidate.stoppedAt === null);
+    if (!record) return null;
+    return { name: record.name, device: deviceWord(record.platform), online: this.list(principal).some(registration => registration.id === record.id) };
+  }
   /** The registered computer behind a device link: the same session and secret as its poll. */
   linkable(id: string, session: string, secret: string): LinkedComputer {
     const entry = this.authorize(id, session, secret);
     entry.seen = Date.now();
-    return { key: SharedComputers.key(session, id), person: entry.owner.person, internet: entry.registration.internet === true, seenAs: null,
+    return { key: SharedComputers.key(session, id), person: entry.owner.person, internet: entry.registration.internet === true, chrome: entry.registration.chrome === true, seenAs: null,
       live: () => this.sessionLive(session), used: () => this.lent?.used(entry.owner.person, id) };
   }
   status(principal: string | null): SharedComputerStatus[] {
@@ -187,7 +202,7 @@ export class SharedComputers {
       id: entry.registration.id, name: entry.registration.name, online: this.online(entry), busy: entry.jobs.size > 0, lastSeenAt: entry.seen,
       scopes: {
         folders: entry.registration.folders.map(({ id, name, write }) => ({ id, name, write })),
-        terminal: entry.registration.terminal, screen: entry.registration.computer, internet: entry.registration.internet === true,
+        terminal: entry.registration.terminal, screen: entry.registration.computer, internet: entry.registration.internet === true, chrome: entry.registration.chrome === true,
       },
     }));
   }
@@ -270,9 +285,11 @@ export class SharedComputers {
     if (refusal) throw failure(refusal, 403);
     if (entry.jobs.size >= 1) throw failure("This shared computer is busy. Wait for its current action to finish.");
     if (!active()) throw failure("The requesting turn ended", 401);
+    const { timeout_seconds: _timeout, ...withoutTimeout } = operation;
+    const forDesktop = entry.registration.commandTimeouts ? operation : withoutTimeout;
     return new Promise((resolve, reject) => {
       const id = randomUUID();
-      const job: Job = { id, operation, active, sent: false, leased: false, resolve, reject, timer: setTimeout(() => this.finish(entry, job, failure("Computer action timed out. Its outcome is unknown; inspect before retrying.")), 45_000) };
+      const job: Job = { id, operation: forDesktop, active, sent: false, leased: false, resolve, reject, timer: setTimeout(() => this.finish(entry, job, failure("Computer action timed out. Its outcome is unknown; inspect before retrying.")), jobDeadlineMs(entry.registration, operation)) };
       entry.jobs.set(id, job); entry.wake?.();
     });
   }

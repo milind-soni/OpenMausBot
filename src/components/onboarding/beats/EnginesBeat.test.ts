@@ -6,8 +6,19 @@ import type { ManagedDesktopBridge } from "../../../../electron/managed-desktop.
 import { setLocale } from "@/lib/i18n";
 import type { InstanceInfo } from "@/state/store";
 
-const f = vi.hoisted(() => ({ instances: [] as InstanceInfo[], dispatch: vi.fn(), row: null as null | { bridge: unknown; onOpenSettings: () => void } }));
-vi.mock("@/state/store", () => ({ api: async () => ({ instances: f.instances }), useStore: () => ({ state: { instances: f.instances }, dispatch: f.dispatch }) }));
+const f = vi.hoisted(() => ({
+  instances: [] as InstanceInfo[], dispatch: vi.fn(), row: null as null | { bridge: unknown; onOpenSettings: () => void },
+  check: (): Promise<object> => Promise.resolve({ ok: true }), checks: [] as string[], fail: false,
+}));
+vi.mock("@/state/store", () => ({
+  api: async (path: string) => {
+    if (f.fail) { f.fail = false; throw new Error("503"); }
+    if (!path.endsWith("/check")) return { instances: f.instances };
+    f.checks.push(path);
+    return f.check();
+  },
+  useStore: () => ({ state: { instances: f.instances }, dispatch: f.dispatch }),
+}));
 vi.mock("@/components/EngineSetup", async () => {
   const { createElement: h } = await import("react");
   return { EngineSetup: ({ instance, intent, description }: { instance: InstanceInfo; intent: string; description?: string }) =>
@@ -36,9 +47,12 @@ const otherWays = async () => {
 
 beforeEach(() => {
   setLocale("en");
+  f.check = () => Promise.resolve({ ok: true });
+  f.checks = [];
   f.instances = [engine("grok", "grokAgent", "Grok", false), engine("claude", "claudeAgent", "Claude", false), engine("codex", "codex", "Codex", false)];
   f.dispatch.mockReset();
   f.row = null;
+  f.fail = false;
   vi.stubGlobal("ogb", undefined);
   host = document.createElement("div");
   document.body.append(host);
@@ -51,6 +65,24 @@ afterEach(async () => {
 });
 
 describe("the welcome's Connect an AI step", () => {
+  it("says when it could not check the AIs, keeps what it already lists, and checks again", async () => {
+    // Was a step of scripts/verify-onboarding-ui.ts, whose fixture no longer reaches this step (its AI already works).
+    await show();
+    await otherWays();
+    const listed = () => [...host.querySelectorAll("[aria-expanded]")].map((node) => node.textContent);
+    const before = listed();
+    const checkAgain = async () => {
+      const button = [...host.querySelectorAll("button")].find((node) => node.textContent === "Check again")!;
+      await act(async () => { button.click(); });
+    };
+    f.fail = true;
+    await checkAgain();
+    expect(text()).toContain("Couldn't check your AI connections");
+    expect(listed()).toEqual(before);
+    await checkAgain();
+    expect(text()).not.toContain("Couldn't check your AI connections");
+  });
+
   it("leads with one recommended way and folds every other way, with no status list and no engine talk", async () => {
     await show();
     expect([...host.querySelectorAll("[data-engine-setup]")].map((node) => node.getAttribute("data-engine-setup"))).toEqual(["claude"]);
@@ -100,6 +132,75 @@ describe("the welcome's Connect an AI step", () => {
     await show();
     expect(host.querySelector("[data-ai-connected]")?.textContent).toContain("Claude");
     expect(host.querySelector("[data-ai-recommended]")).toBeNull();
+  });
+
+  it("says Connected only after the AI answered a test message, and plainly while it checks", async () => {
+    let answer!: (value: object) => void;
+    f.check = () => new Promise((resolve) => { answer = resolve; });
+    f.instances = [engine("grok", "grokAgent", "Grok", true), engine("claude", "claudeAgent", "Claude", true)];
+    await show();
+    expect(f.checks).toEqual(["/api/instances/claude/check"]);
+    expect(host.querySelector("[data-ai-connected]")).toBeNull();
+    expect(host.querySelector("[data-ai-checking]")?.textContent).toBe("Checking that Claude answers…");
+    await act(async () => { answer({ ok: true }); });
+    expect(host.querySelector("[data-ai-connected]")?.textContent).toBe("Connected · Claude");
+    expect(host.querySelector("[data-ai-checking]")).toBeNull();
+  });
+
+  it("says a signed-in AI didn't answer, tries the next one, and keeps every other way open", async () => {
+    f.check = () => Promise.resolve({ ok: false, error: "Claude didn't answer within 90 seconds." });
+    f.instances = [engine("claude", "claudeAgent", "Claude", true), engine("codex", "codex", "Codex", false), engine("kimi", "kimiAgent", "Kimi", false)];
+    await show();
+    expect(host.querySelector("[data-ai-silent] [data-ai-reason]")?.textContent).toBe("Claude didn't answer within 90 seconds.");
+    expect(host.querySelector("[data-ai-silent]")?.textContent).toContain("Or connect another AI below.");
+    expect(host.querySelector("[data-ai-connected]")).toBeNull();
+    expect(host.querySelector("[data-ai-recommended]")?.getAttribute("data-ai-recommended")).toBe("codex");
+    await otherWays();
+    expect(text()).toContain("Kimi");
+    // The next ready AI gets its own test.
+    f.instances = [...f.instances, engine("grok", "grokAgent", "Grok", true)];
+    f.check = () => Promise.resolve({ ok: true });
+    await show();
+    expect(f.checks).toEqual(["/api/instances/claude/check", "/api/instances/grok/check"]);
+    expect(host.querySelector("[data-ai-connected]")?.textContent).toBe("Connected · Grok");
+  });
+
+  it("says the plain reason a check gave, and Check again sends a new test message", async () => {
+    f.check = () => Promise.resolve({ ok: false, error: "Claude isn't signed in on this computer anymore. Sign in again, then check again." });
+    f.instances = [engine("claude", "claudeAgent", "Claude", true), engine("codex", "codex", "Codex", false)];
+    await show();
+    expect(host.querySelector("[data-ai-reason]")?.textContent).toBe("Claude isn't signed in on this computer anymore. Sign in again, then check again.");
+    expect(text()).not.toContain("is signed in but didn't answer");
+    let answer!: (value: object) => void;
+    f.check = () => new Promise((resolve) => { answer = resolve; });
+    const again = [...host.querySelectorAll<HTMLButtonElement>("[data-ai-silent] button")].find((button) => button.textContent === "Check again")!;
+    await act(async () => { again.click(); });
+    expect(f.checks).toEqual(["/api/instances/claude/check", "/api/instances/claude/check"]);
+    expect(host.querySelector("[data-ai-checking]")?.textContent).toBe("Checking that Claude answers…");
+    await act(async () => { answer({ ok: true }); });
+    expect(host.querySelector("[data-ai-connected]")?.textContent).toBe("Connected · Claude");
+  });
+
+  it("shows what the server's own test found, without sending another", async () => {
+    f.instances = [{ ...engine("claude", "claudeAgent", "Claude", true), aiTest: "failed", aiTestError: "Your Claude usage limit has been reached." },
+      engine("codex", "codex", "Codex", false)];
+    await show();
+    expect(f.checks).toEqual([]);
+    expect(host.querySelector("[data-ai-reason]")?.textContent).toBe("Your Claude usage limit has been reached.");
+    // With no reason given, the plain line.
+    f.instances = [{ ...engine("claude", "claudeAgent", "Claude", true), aiTest: "failed" }];
+    await show();
+    expect(host.querySelector("[data-ai-reason]")?.textContent).toBe("Claude is signed in but didn't answer. Try another way.");
+  });
+
+  it("asks for the person's own AI when only OpenCode's free model works, and says the free model is a backup", async () => {
+    const backup: InstanceInfo = { ...engine("opencodeGo", "opencodeGo", "OpenCode", true), snapshot: { state: "available", authenticated: true, freeFallback: true } };
+    f.instances = [backup, engine("claude", "claudeAgent", "Claude", false)];
+    await show();
+    expect(f.checks).toEqual([]);
+    expect(host.querySelector("[data-ai-connected]")).toBeNull();
+    expect(host.querySelector("[data-ai-backup]")?.textContent).toBe("OpenCode's free model is ready as a backup. For the best answers, connect an AI you already use.");
+    expect(host.querySelector("[data-ai-recommended]")?.getAttribute("data-ai-recommended")).toBe("claude");
   });
 
   it("offers the organization sign-in under Other ways on this computer's own window only", async () => {

@@ -62,7 +62,7 @@ export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: B
         aria-modal="true"
         aria-labelledby="bot-instructions-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[min(760px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-[24px] border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+        className="animate-pop-in flex max-h-[min(760px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
       >
         <header className="flex items-start justify-between gap-4 border-b border-hairline/40 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div className="flex min-w-0 items-center gap-3">
@@ -82,7 +82,7 @@ export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: B
               <h2 id="bot-instructions-title" className="mt-0.5 truncate text-[20px] font-semibold tracking-[-0.01em] text-ink">
                 {bot.name}
               </h2>
-              {bot.title && <p className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{bot.title}</p>}
+              {bot.title && <p className="mt-0.5 truncate text-[13px] text-ink-secondary">{bot.title}</p>}
             </div>
           </div>
           <button
@@ -97,7 +97,7 @@ export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: B
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 sm:px-8 sm:py-6">
           {bot.description.trim() ? (
-            <div className="whitespace-pre-wrap break-words rounded-xl border border-hairline/50 bg-inset px-4 py-4 text-[13.5px] leading-6 text-ink">
+            <div className="whitespace-pre-wrap break-words rounded-xl border border-hairline/50 bg-inset px-4 py-4 text-[14px] leading-6 text-ink">
               {bot.description}
             </div>
           ) : (
@@ -109,7 +109,7 @@ export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: B
           )}
         </div>
 
-        <footer className="flex items-center justify-between gap-4 border-t border-hairline/40 px-6 py-4 text-[11.5px] text-ink-secondary sm:px-8">
+        <footer className="flex items-center justify-between gap-4 border-t border-hairline/40 px-6 py-4 text-[12px] text-ink-secondary sm:px-8">
           <span>{t("botIdentity.dialog.contextHelp")}</span>
           <button type="button" onClick={close} className="rounded-lg bg-control px-3.5 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover">
             {t("common.done")}

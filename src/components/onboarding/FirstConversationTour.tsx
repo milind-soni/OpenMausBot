@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hintSeenPatch, welcomeDue } from "@/lib/onboarding";
 import { emailGateDone } from "@/lib/analytics";
-import { currentStep } from "@/lib/guided-tour";
 import { anchorFor, cardAnswered, nextSpotlight, placementFor, tourComplete, type ChatObservation, type SpotlightId } from "@/lib/first-conversation";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
@@ -38,7 +37,7 @@ export function FirstConversationTour({ quiet = false }: { quiet?: boolean }) {
     !remoteClient &&
     !state.welcomeOpen &&
     Boolean(record?.completedAt) &&
-    currentStep(record) === null &&
+    !state.tourOpen &&
     !welcomeDue(state.config, { remoteClient, legacyDone: emailGateDone() }) &&
     !tourComplete(seen);
 

@@ -167,6 +167,45 @@ describe("connector MCP bridge", () => {
     expect(received).toHaveLength(3);
   });
 
+  it("tells the bot which of the person's auth configs a card connects with, when the app names one", async () => {
+    const harness = await listen((request, response) => {
+      request.resume();
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          messageIds: ["m1"],
+          authConfigNote: "xero connects with the person's own Composio auth config ac_xero1234, the most recently created of their 2 enabled ones.",
+        }));
+      });
+    });
+    const lines = start({ OMB_HARNESS_URL: harness, OMB_CONNECTOR_TOKEN: "bridge-secret", OMB_BOT_ID: "bot-1", OMB_THREAD_ID: "thread-1" });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "COMPOSIO_MANAGE_CONNECTIONS", arguments: { toolkits: ["xero"] } } })}\n`);
+    expect((await nextJson(lines)).result.content[0].text).toBe(
+      "OpenMausBot showed the user a secure connection card for xero. xero connects with the person's own Composio auth config "
+      + "ac_xero1234, the most recently created of their 2 enabled ones. End this turn now. The app will continue the task "
+      + "automatically after the connection finishes.",
+    );
+  });
+
+  it("offers auth_config_id on COMPOSIO_MANAGE_CONNECTIONS, whose Composio schema has none", async () => {
+    const manage = {
+      name: "COMPOSIO_MANAGE_CONNECTIONS",
+      inputSchema: { type: "object", properties: { toolkits: { type: "array", items: { type: "string" } } }, required: ["toolkits"] },
+    };
+    const upstream = await listen((request, response) => {
+      request.resume();
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: 5, result: { tools: [manage, { name: "COMPOSIO_SEARCH_TOOLS" }] } }));
+    });
+    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 5, method: "tools/list", params: {} })}\n`);
+    const [listed, search] = (await nextJson(lines)).result.tools;
+    expect(listed.inputSchema.required).toEqual(["toolkits"]);
+    expect(Object.keys(listed.inputSchema.properties)).toEqual(["toolkits", "auth_config_id"]);
+    expect(listed.inputSchema.properties.auth_config_id).toMatchObject({ type: "string", description: expect.stringContaining("(ac_…)") });
+    expect(search).toEqual({ name: "COMPOSIO_SEARCH_TOOLS" });
+  });
+
   it("answers initialize locally so a missing or failing upstream cannot fail the MCP handshake", async () => {
     const lines = start({});
     child!.stdin.write(`${JSON.stringify({

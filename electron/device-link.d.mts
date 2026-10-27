@@ -1,3 +1,4 @@
+import type { ChromeDoor, createChromeDoor } from "./device-chrome.mjs";
 import type { createDeviceEgress } from "./device-egress.mjs";
 
 export declare function linkUrl(origin: string, path: string): string;
@@ -10,8 +11,10 @@ export declare function runDeviceLink(options: {
   pingMs?: number;
   silentMs?: number;
   openMs?: number;
+  lends?: () => { internet: boolean; chrome: boolean };
+  chrome?: NonNullable<Parameters<typeof createChromeDoor>[0]> | ChromeDoor;
   onOpen?: () => void;
-  onStream?: (target: { host: string; port: number }, result: Awaited<ReturnType<ReturnType<typeof createDeviceEgress>["open"]>>) => void;
+  onStream?: (target: { host: string; port: number } | { chrome: true }, result: { socket?: import("node:stream").Duplex; refused?: string; failed?: string }) => void;
   traffic?: () => void;
   now?: () => number;
 }): Promise<{ code: number; reason: string }>;

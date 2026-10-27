@@ -298,7 +298,7 @@ it("a turn in a conversation a guest left behind writing MEMORY.md directly take
   expect(listing.unavailable).toContain("This bot's memory was changed in a conversation you didn't write");
   const blocked = await reads(ownerTools);
   expect(blocked.isError).toBe(true);
-  expect(blocked.content[0].text).toContain("Review it in Memory to use your computer again");
+  expect(blocked.content[0].text).toMatch(/Review it in Memory to use your (?:Mac|PC|computer) again/u);
   const current = await review(bot);
   expect(current?.changed).toEqual(["MEMORY.md"]);
   expect((await local("POST", `/api/bots/${bot.id}/memory/reviewed`, { token: current!.token })).status).toBe(403);
@@ -310,10 +310,27 @@ it("a turn in a conversation a guest left behind writing MEMORY.md directly take
   expect(JSON.parse((await reads(ownerTools)).content[0].text).content).toBe("from the Mac");
 }, 60_000);
 
-it("a room turn writing the bot's memory directly takes the bot out of lending too", async () => {
+it("the owner's own room turn writing the bot's memory directly keeps the Mac in reach, as their own conversation does", async () => {
+  const bot = await newBot("Own room", "held");
+  const room = await api("POST", "/api/groups", { token: owner, body: { memberIds: [bot.id], name: "Plans", setup: { bulletin: "", defaultResponder: { kind: "everyone" } } } });
+  expect(room.status, JSON.stringify(room.body)).toBe(201);
+  const roomTools = await toolsFor(async () => {
+    const posted = await api("POST", `/api/groups/${room.body.group.id}/messages`, { token: owner, body: { text: "Everyone: note today's plan." } });
+    expect(posted.status, JSON.stringify(posted.body)).toBeLessThan(300);
+  });
+  expect((await sees(roomTools)).computers).toHaveLength(1);
+  appendFileSync(join(home, ".openmausbot", "workspaces", bot.id, "MEMORY.md"), "\n- Today's plan: ship it.\n");
+  expect((await api("POST", `/api/groups/${room.body.group.id}/interrupt`, { token: owner, body: {} })).status).toBe(200);
+  const ownerTools = await toolsFor(async () => say(owner, bot, "Read plan.md from my Mac.", await newThread(bot)));
+  expect((await sees(ownerTools)).computers).toHaveLength(1);
+  expect((await api("GET", `/api/bots/${bot.id}/memory`, { token: owner })).body).not.toHaveProperty("lendingReview");
+}, 60_000);
+
+it("a turn in a room someone else opened writing the bot's memory directly takes the bot out of lending too", async () => {
   const bot = await newBot("Roomie", "held");
   const room = await api("POST", "/api/groups", { token: owner, body: { memberIds: [bot.id], name: "Standup", setup: { bulletin: "", defaultResponder: { kind: "everyone" } } } });
   expect(room.status, JSON.stringify(room.body)).toBe(201);
+  await leftBehind({ threadIds: [room.body.group.threadId] });
   await toolsFor(async () => {
     const posted = await api("POST", `/api/groups/${room.body.group.id}/messages`, { token: owner, body: { text: "Everyone: note today's plan." } });
     expect(posted.status, JSON.stringify(posted.body)).toBeLessThan(300);

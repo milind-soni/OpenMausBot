@@ -59,7 +59,7 @@ const OWNER_PLACES: ReadonlySet<PlaceState> = new Set([
 ]);
 /** A connected app refusing for want of a working sign-in, as Composio and the apps behind it word it. */
 const BROKEN_CONNECTION = /\b(?:401|unauthori[sz]ed|invalid[_ ]grant|(?:token|credentials?) (?:has |have )?(?:expired|been revoked)|expired (?:token|credentials?)|re-?authori[sz]e|re-?authenticate|reconnect|no (?:active )?connected account|connected ?account (?:not found|is (?:inactive|expired|disabled))|connection (?:is )?(?:inactive|expired|revoked|not found)|insufficient[_ ](?:scopes?|permissions?)|ACCESS_TOKEN_SCOPE_INSUFFICIENT|not connected)\b/i;
-const KIND_ORDER: Record<NeedsYouItem["kind"], number> = { "signed-out": 0, "out-of-credit": 1, "usage-limit": 2, connection: 3, place: 4, question: 5 };
+const KIND_ORDER: Record<NeedsYouItem["kind"], number> = { "signed-out": 0, "out-of-credit": 1, "usage-limit": 2, connection: 3, place: 4, question: 5, message: 6 };
 const DAY_MS = 24 * 60 * 60_000;
 const TITLE_CHARS = 160;
 /** A failed row and the summary its turn ends with are written this close together. */

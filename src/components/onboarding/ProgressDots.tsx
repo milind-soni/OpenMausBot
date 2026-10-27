@@ -51,7 +51,7 @@ export function ProgressDots({
             {dot}
           </button>
         ) : (
-          <span key={item.id} className="flex h-3.5 items-center justify-center" style={{ width: SLOT }}>
+          <span key={item.id} data-step-dot={item.id} data-current={i === index} className="flex h-3.5 items-center justify-center" style={{ width: SLOT }}>
             {dot}
           </span>
         );

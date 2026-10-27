@@ -145,7 +145,7 @@ export function SignInRequestCard({
       )}
       {saving ? (
         <div className="mt-2.5" data-testid="sign-in-save">
-          <p className="mb-2 text-[12.5px] leading-snug text-ink-secondary">{t("signIn.save.note", { name: botName, site: target?.site ?? pageHost })}</p>
+          <p className="mb-2 text-[13px] leading-snug text-ink-secondary">{t("signIn.save.note", { name: botName, site: target?.site ?? pageHost })}</p>
           <LoginForm submitLabel={t("signIn.save.submit")} autoFocus onCancel={() => setSaving(false)}
             onSubmit={async (fields) => {
               await saveLoginFromCard({ botId, threadId, messageId: message.id }, fields, alsoThere ? target?.signInHost : undefined);
@@ -153,19 +153,19 @@ export function SignInRequestCard({
               returnFocusToComposer();
             }}>
             {target?.signInHost && (
-              <label className="flex items-start gap-2 text-[12.5px] leading-snug text-ink" data-testid="sign-in-save-elsewhere">
+              <label className="flex items-start gap-2 text-[13px] leading-snug text-ink" data-testid="sign-in-save-elsewhere">
                 <input type="checkbox" name="signInHost" className="mt-[2px]" checked={alsoThere} onChange={(event) => setAlsoThere(event.target.checked)} />
                 <span dir="auto">{t("signIn.save.elsewhere", { host: target.signInHost })}</span>
               </label>
             )}
           </LoginForm>
         </div>
-      ) : <p className="mt-2 text-[12.5px] leading-snug text-ink-secondary">{t(where, { name: botName })}</p>}
+      ) : <p className="mt-2 text-[13px] leading-snug text-ink-secondary">{t(where, { name: botName })}</p>}
       {explained && (
-        <p role="note" className="mt-1.5 text-[12.5px] leading-snug text-ink">{t(here ? "signIn.local.explain" : "signIn.local.explainHost", { name: botName })}</p>
+        <p role="note" className="mt-1.5 text-[13px] leading-snug text-ink">{t(here ? "signIn.local.explain" : "signIn.local.explainHost", { name: botName })}</p>
       )}
       {!saving && (
-        <p className="mt-2 flex items-center gap-1 text-[11.5px] text-ink-tertiary">
+        <p className="mt-2 flex items-center gap-1 text-[12px] text-ink-tertiary">
           <LockKeyhole size={11} aria-hidden="true" /> {t("signIn.private")}
         </p>
       )}

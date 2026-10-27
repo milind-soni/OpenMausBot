@@ -4,6 +4,7 @@ import type { Server } from "node:net";
 
 import { agentBrowserDevToolsPorts, agentBrowserStreamPorts } from "../../browser-engine.ts";
 import { sanitizePageText } from "../../browser-page-health.ts";
+import { useMyComputerLink } from "../../../shared/use-my-computer.ts";
 import { FLEET_FIRST_PORT, FLEET_PORT_STRIDE } from "../../fleet.ts";
 import { botEngineSessions } from "../../procs.ts";
 import { openGate, resolveTarget, type EgressGate, type GateTarget, type GateUpstream, type ResolvedAddress } from "./gate.ts";
@@ -91,9 +92,10 @@ export interface EgressSetup {
   ownership?: ListenerOwnership;
   /** How a gate looks names up: the system's resolver unless a test passes one. */
   resolve?(host: string): Promise<ResolvedAddress[]>;
-  /** MausBot Cloud: the person's own computer while it lends its internet connection, or which device is away. Only
-   * the sites that turn away data centres (home-sites.ts) go through it. */
-  device?(session: string): GateUpstream | { away: string } | null;
+  /** MausBot Cloud: the person's own computer while it lends its internet connection, which device is away, or that
+   * none of the person's computers shares it; null where this browser may not use a computer's connection. Only the
+   * sites that turn away data centres (home-sites.ts) go through it. */
+  device?(session: string): GateUpstream | { away: string } | { unshared: true } | null;
 }
 
 interface Blocked { target: string; reason: Refusal }
@@ -102,13 +104,16 @@ interface Blocked { target: string; reason: Refusal }
  * person's computer is away. */
 export const awayNotice = (device: string) => `The person's ${device} is away, so sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection for now and may refuse. They open through the ${device} again once it is back.`;
 
+/** What the bot reads once when those sites load from My Cloud's own connection because no computer shares one. */
+export const UNSHARED_NOTICE = `Sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection and may refuse it with an error page or "too many requests". If one does and the person needs it, tell them they can share their computer's internet connection with My Cloud: ${useMyComputerLink("computer")} in OpenMausBot on that computer, and these sites then open through it while it is on.`;
+
 /** One gate per browser session for the life of the server, so a Chrome keeps the port it launched with. */
 export class BrowserEgress {
   private setup: Required<Omit<EgressSetup, "device">> & Pick<EgressSetup, "device"> | null = null;
   private readonly gates = new Map<string, Promise<EgressGate>>();
   private readonly blocked = new Map<string, Blocked[]>();
   /** Sessions told those sites load from My Cloud's own connection, until the computer is back. */
-  private readonly toldAway = new Map<string, string>();
+  private readonly toldAway = new Map<string, { kind: "away" | "unshared"; text: string }>();
 
   configure(setup: EgressSetup): void {
     hearDesktopReports();
@@ -144,13 +149,14 @@ export class BrowserEgress {
   }
 
   /** The way out for one of `session`'s connections to a site that turns away data centres: on MausBot Cloud the
-   * person's computer while it lends its connection, else this server's own (when that computer is away, the bot is told
-   * once). Every other site always goes this server's own way. */
+   * person's computer while it lends its connection, else this server's own (when that computer is away, or none shares
+   * its connection, the bot is told once). Every other site always goes this server's own way. */
   private through(session: string): GateUpstream | null {
     const device = this.setup?.host === "cloud" ? this.setup.device?.(session) ?? null : null;
     if (device && "open" in device) { this.toldAway.delete(session); return device; }
-    if (device && !this.toldAway.has(session)) this.toldAway.set(session, awayNotice(device.away));
-    if (!device) this.toldAway.delete(session);
+    if (!device) { this.toldAway.delete(session); return null; }
+    const kind = "away" in device ? "away" : "unshared";
+    if (this.toldAway.get(session)?.kind !== kind) this.toldAway.set(session, { kind, text: "away" in device ? awayNotice(device.away) : UNSHARED_NOTICE });
     return null;
   }
 
@@ -184,8 +190,9 @@ export class BrowserEgress {
   takeNotice(session: string): string | null {
     const list = this.blocked.get(session);
     this.blocked.delete(session);
-    const away = this.toldAway.get(session);
-    if (away) this.toldAway.set(session, "");
+    const told = this.toldAway.get(session);
+    const away = told?.text;
+    if (told) told.text = "";
     const lines = away ? [away] : [];
     if (list?.length) {
       const shown = list.slice(0, NOTICE_SHOWN).map((entry) => `${JSON.stringify(entry.target)} (blocked: ${REFUSAL_TEXT[entry.reason] ?? "not allowed"})`);

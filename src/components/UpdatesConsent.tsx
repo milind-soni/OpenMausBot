@@ -60,7 +60,7 @@ export function UpdatesConsentDialog({ signedIn, onYes, onNo }: {
         <Mail size={18} className="shrink-0 text-accent-text" aria-hidden="true" />
         <h2 id={TITLE} tabIndex={-1} className="text-[17px] font-semibold outline-none">{t("updatesConsent.title")}</h2>
       </div>
-      <p id="updates-consent-body" className="mt-3 text-[13.5px] leading-relaxed text-ink-secondary">{t("updatesConsent.body")}</p>
+      <p id="updates-consent-body" className="mt-3 text-[14px] leading-relaxed text-ink-secondary">{t("updatesConsent.body")}</p>
       {!signedIn && <label className="mt-4 flex flex-col gap-1.5 text-[13px] font-medium">
         {t("updatesConsent.email")}
         <input type="email" value={email} autoComplete="email" placeholder="you@example.com" disabled={busy} onChange={event => { setEmail(event.target.value); setError(null); }}
@@ -68,7 +68,7 @@ export function UpdatesConsentDialog({ signedIn, onYes, onNo }: {
           className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] font-normal text-ink placeholder:text-ink-secondary focus:outline-none" />
         <span className="text-[12px] font-normal text-ink-secondary">{t("updatesConsent.emailHint")}</span>
       </label>}
-      {error && <p role="alert" className="mt-3 text-[12.5px] text-danger">{error}</p>}
+      {error && <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p>}
       <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
         <button type="button" className={SECONDARY} disabled={busy} onClick={onNo}>{t("updatesConsent.no")}</button>
         <button type="button" className={PRIMARY} disabled={busy} onClick={yes}>{t("updatesConsent.yes")}</button>

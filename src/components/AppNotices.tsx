@@ -9,11 +9,13 @@ import { brandStatus } from "@/lib/brand";
 import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, cloudTrialView, offerTrialDays } from "@/lib/cloud-plan";
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
-import { cornerPopupWaits } from "@/lib/corner-popup";
-import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore } from "@/lib/notices";
-import { cloudSignInDue, onboardingCloudOffered, type WelcomeViewer } from "@/lib/onboarding";
+import { cornerPopupWaits, firstReplyPending } from "@/lib/corner-popup";
+import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, UPDATES_CONSENT_NOTICE, USE_MY_COMPUTER_NOTICE, usedBefore } from "@/lib/notices";
+import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
+import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
 import { useUpdaterState } from "@/lib/updater";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
+import { useUseMyComputerDue } from "@/lib/use-my-computer-notice";
 import { engineReady } from "./EngineLibrary";
 import { CLOUD_NOTICE_CARD, cloudNoticeStep, CloudNoticeCard } from "./CloudNotice";
 import { CLOUD_PRO_POPUP_SOURCE, CloudProPopup, cloudProCloudPageView, cloudProPopupView, reportCloudProPopup, useDesktopNotices, useOtherDialogOpen,
@@ -24,10 +26,11 @@ import { CloudTrialNoticeCard, useCloudPlanSnapshot } from "./CloudTrialNotice";
 import { LinkButton, NoticeCard, NoticeToast, NotNowButton } from "./NoticeCard";
 import { localDesktopPage } from "./onboarding/WelcomeGate";
 import { UpdatesConsentDialog, updatesConsentBridge, useUpdatesConsent } from "./UpdatesConsent";
+import { useMausBotWelcomeDue } from "./MausBotWelcome";
 
 function StarCard({ onDismiss }: { onDismiss: () => void }) {
   return <NoticeCard titleId="github-star-title" notice="github-star" icon={Star} title={t("star.title")} onDismiss={onDismiss}>
-    <p className="mb-3 mt-1 text-[12.5px] text-ink-secondary">{t("star.body")}</p>
+    <p className="mb-3 mt-1 text-[13px] text-ink-secondary">{t("star.body")}</p>
     <div className="flex flex-wrap items-center gap-3">
       <LinkButton url={APP_REPOSITORY} label={t("star.button")} onOpened={onDismiss} />
       <NotNowButton onClick={onDismiss} />
@@ -37,7 +40,7 @@ function StarCard({ onDismiss }: { onDismiss: () => void }) {
 
 function ProductHuntCard({ onDone }: { onDone: (action: "upvote" | "not_now" | "close") => void }) {
   return <NoticeCard titleId="product-hunt-title" notice="product-hunt" icon={Rocket} title={t("productHunt.title")} onDismiss={() => onDone("close")}>
-    <p className="mb-3 mt-1 text-[12.5px] text-ink-secondary">{t("productHunt.body")}</p>
+    <p className="mb-3 mt-1 text-[13px] text-ink-secondary">{t("productHunt.body")}</p>
     <div className="flex flex-wrap items-center gap-3">
       <LinkButton url={PRODUCT_HUNT_URL} label={t("productHunt.button")} onOpened={() => onDone("upvote")} />
       <NotNowButton onClick={() => onDone("not_now")} />
@@ -75,6 +78,12 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const updater = useUpdaterState();
   const intent = useCloudIntent();
   const moving = useMoveQuiet(now);
+  const mausBot = useMausBotWelcomeDue(viewer);
+  const lending = remote ? undefined : window.ogb?.cloudLending;
+  const [macAsked, setMacAsked] = useState(false);
+  const [macAsking, setMacAsking] = useState(false);
+  const macDue = useUseMyComputerDue(lending, macAsked);
+  const macBlocked = useOtherDialogOpen(macDue === true) || Boolean(state.liveCall && state.liveCall.status !== "ended");
   useEffect(() => {
     if (!bridge) return;
     let active = true, updated = false;
@@ -140,12 +149,26 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     return introOpen || stage === "due" ? true : null;
   };
   const cards = Boolean(bridge || planBridge);
+  // Promotions never land on a new install's first chat: they wait for its first reply, and the full-screen Cloud Pro popup
+  // also for a launch after the one whose welcome just finished. Account and billing notices keep their own rules.
+  // Unknown (null) until the bots have loaded, so nothing lower in the queue flashes up before them.
+  const firstChat = firstReplyPending(state);
+  // MausBot's first-launch card goes first: the popup and the question wait while it is due. The popup skips a launch the
+  // card used; the question may follow the card once it closes, as it follows the popup.
+  const afterWelcome = welcomeFinishedThisLaunch() || launchDialogShown() === "mausbot" || firstChat;
+  const consentWaits = welcomeFinishedThisLaunch() || firstChat;
+  const mausBotFirst = mausBot.due;
+  const consentNow = consentWaits === true || consentFact === false ? false : consentWaits === null || mausBotFirst ? null : consentFact;
   // After a closed popup only the product-updates question may follow in this launch; nothing else does.
-  const notice = waits ? null : closed ? (consentFact === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere ? nextNotice({
-    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving ? false : popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
-    [UPDATES_CONSENT_NOTICE]: consentFact,
-    [PRODUCT_HUNT_NOTICE]: !cards || moving || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
-      : organization === null || moving === null ? null : !organization,
+  // Main's Use my Mac popup is full-screen too: it waits and skips a launch as the Cloud Pro popup does.
+  const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere || Boolean(lending?.ask) ? nextNotice({
+    [USE_MY_COMPUTER_NOTICE]: moving || macDue === false || afterWelcome === true ? false
+      : macDue === null || moving === null || afterWelcome === null || mausBotFirst || macBlocked ? null : true,
+    [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving || afterWelcome === true ? false
+      : afterWelcome === null || mausBotFirst || popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
+    [UPDATES_CONSENT_NOTICE]: consentNow,
+    [PRODUCT_HUNT_NOTICE]: !cards || moving || firstChat === true || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
+      : organization === null || moving === null || firstChat === null ? null : !organization,
     [CLOUD_INTRO]: moving ? false : moving === null ? null : introDue(),
     [CLOUD_TRIAL_NOTICE]: planBridge && plan === null ? null : Boolean(key && (trialDue || trialOpen === key)),
     [CLOUD_NOTICE]: !view ? false : view.kind === "unknown" ? null
@@ -157,6 +180,8 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const shownKey = notice === CLOUD_TRIAL_NOTICE ? key : notice;
   useEffect(() => {
     if (!shownKey) return;
+    // The popups and the question own this launch: MausBot's first-launch card waits for a later one.
+    if (shownKey === USE_MY_COMPUTER_NOTICE || shownKey === CLOUD_PRO_UPDATE_NOTICE || shownKey === UPDATES_CONSENT_NOTICE) markLaunchDialog("notices");
     if (shownKey === CLOUD_INTRO) {
       setIntroOpen(true);
       track("cloud_card_shown", { variant: view?.kind === "signed-out" ? "signed_out" : "free" });
@@ -165,6 +190,10 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     } else if (notice === CLOUD_TRIAL_NOTICE && trialOpen !== shownKey) {
       setTrialOpen(shownKey);
       void planBridge?.noticeSeen?.().catch(() => {});
+    } else if (shownKey === USE_MY_COMPUTER_NOTICE && !macAsking) {
+      // Main draws this popup itself: the page only says now, and waits for it to be answered or put off.
+      setMacAsking(true);
+      void lending?.ask?.(activeLocale()).catch(() => {}).finally(() => { setMacAsked(true); close(); });
     } else if (shownKey === CLOUD_PRO_UPDATE_NOTICE && !popupShown && popupView) {
       setPopupShown(true);
       void desktop?.shown(CLOUD_PRO_UPDATE_NOTICE).then(first => { if (first) reportCloudProPopup("shown", popupView, page); }, () => {});

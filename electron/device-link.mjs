@@ -1,5 +1,6 @@
 // A lent computer's end of the device link: one WebSocket to My Cloud, through which My Cloud's browsers reach the web
 // from this computer's own internet connection. Lending keeps it open; this runs one connection of it.
+import { createChromeDoor } from "./device-chrome.mjs";
 import { createDeviceEgress } from "./device-egress.mjs";
 import { createLinkMux } from "./device-link-protocol.mjs";
 
@@ -20,9 +21,11 @@ export function linkUrl(origin, path) {
 /**
  * Runs one link connection until it ends, then resolves with its close code and reason; `signal` aborting ends it.
  * `egress`: what the computer's own check takes (resolve, connect, interfaces), for tests. `onStream(target, result)`:
- * each connection My Cloud asked for, with what this computer's check answered.
+ * each connection My Cloud asked for, with what this computer's check answered. `lends()`: what this computer lends right
+ * now, read on every stream, so My Cloud is never taken at its word. `chrome`: the Chrome door's options, or an object
+ * with its own `open` to stand in for the door.
  */
-export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocket: Socket = globalThis.WebSocket, pingMs = PING_MS, silentMs = SILENT_MS, openMs = OPEN_MS, onOpen = () => {}, onStream = () => {}, traffic = () => {}, now = Date.now }) {
+export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocket: Socket = globalThis.WebSocket, pingMs = PING_MS, silentMs = SILENT_MS, openMs = OPEN_MS, lends = () => ({ internet: true, chrome: false }), chrome = {}, onOpen = () => {}, onStream = () => {}, traffic = () => {}, now = Date.now }) {
   return new Promise((done) => {
     let seenAs = null;
     let heard = now();
@@ -33,8 +36,11 @@ export function runDeviceLink({ url, headers = {}, egress = {}, signal, WebSocke
     ws.binaryType = "arraybuffer";
     const send = (frame) => { try { ws.send(frame); } catch {} };
     const deviceEgress = createDeviceEgress({ ...egress, seenAs: () => seenAs });
+    const chromeDoor = typeof chrome.open === "function" ? chrome : createChromeDoor(chrome);
     const mux = createLinkMux({ send, traffic, accept: async (target) => {
-      const result = await deviceEgress.open(target);
+      const isChrome = target.chrome === true;
+      const grant = lends();
+      const result = !(isChrome ? grant.chrome : grant.internet) ? { refused: "not-lent" } : isChrome ? await chromeDoor.open() : await deviceEgress.open(target);
       try { onStream(target, result); } catch {}
       return result;
     } });

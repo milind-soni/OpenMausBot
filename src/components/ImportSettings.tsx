@@ -40,7 +40,7 @@ export function AiAppsImportView({ local, detection, chosen, status, result, onC
           {done ? <Check size={12} strokeWidth={3} /> : <Info size={12} strokeWidth={2.5} />}
         </span>
         <div className="min-w-0">
-          <p className="text-[13.5px] font-medium text-ink">{line}</p>
+          <p className="text-[14px] font-medium text-ink">{line}</p>
           {notes.map((note) => <p key={note} className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{note}</p>)}
         </div>
       </div>

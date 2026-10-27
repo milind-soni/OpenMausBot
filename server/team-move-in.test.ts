@@ -125,12 +125,35 @@ describe("what a move-in may write", () => {
     expect((await call(moveIn.guard, "POST", "/api/bots", moveInSession(), { id: OTHER, name: "Copy" })).answer?.status).toBe(403);
   });
 
+  const ADMINS_SET = {
+    approvalMode: "full", autoApprove: true, alwaysAllow: ["Bash(*)"], chiefOfStaff: true, managedSections: ["Ops"], computer: "local", cwd: "/",
+    cloudBackend: "vps", peers: [OTHER], approvePeerComms: false, composio: true, browser: true, browserProfile: "guest", mcpServers: ["github"],
+    toolScope: { allow: ["native:*"] }, connectorTools: {}, connectorScopes: {}, outbound: {}, xResearch: true, phoneApps: [], section: "Finance",
+    visibility: { audience: "members" }, recordBrowserSteps: true, cacheKeepWarm: true,
+  };
+
   it("leaves what the bot may do, and being a Chief of Staff, to the team's admins", async () => {
     const { moveIn } = await moving();
-    const patched = await call(moveIn.guard, "PATCH", `/api/bots/${SCOUT}`, moveInSession(), { soul: "Plans trips.", approvalMode: "full", autoApprove: true, alwaysAllow: ["Bash"], chiefOfStaff: true, name: "Scout" });
-    expect(patched.body).toEqual({ soul: "Plans trips.", name: "Scout (Ada)" });
-    const fields = await call(moveIn.guard, "PUT", "/api/cloud-send/kind", moveInSession(), { v: 1, key: `bot:${SCOUT}`, dataDir: "/d", record: { chiefOfStaff: true, managedSections: ["Ops"], pinned: true } });
-    expect(fields.body).toEqual({ v: 1, key: `bot:${SCOUT}`, dataDir: "/d", record: { pinned: true } });
+    const patched = await call(moveIn.guard, "PATCH", `/api/bots/${SCOUT}`, moveInSession(), { soul: "Plans trips.", color: "teal", ...ADMINS_SET, name: "Scout" });
+    expect(patched.body).toEqual({ soul: "Plans trips.", color: "teal", name: "Scout (Ada)" });
+    const fields = await call(moveIn.guard, "PUT", "/api/cloud-send/kind", moveInSession(), { v: 1, key: `bot:${SCOUT}`, dataDir: "/d",
+      record: { chiefOfStaff: true, managedSections: ["Ops"], defaultBot: {}, installedPackage: { installId: "acme-ops" }, pinned: true, projects: [] } });
+    expect(fields.body).toEqual({ v: 1, key: `bot:${SCOUT}`, dataDir: "/d", record: { pinned: true, projects: [] } });
+  });
+
+  it("makes its bot with who it is and how it looks only: never an admin's setting, the team's defaults, a preset, or reporting to anyone but the mover", async () => {
+    const { moveIn } = await moving();
+    const model = { instanceId: "claude", model: "claude-sonnet-5" };
+    const made = await call(moveIn.guard, "POST", "/api/bots", moveInSession(), {
+      id: SCOUT, name: "Scout", useDefaults: true, modelSelection: model, requireAvailableModel: true, title: "Trips",
+      preset: "ops-chief", reportsTo: "olive@acme.test", acknowledgeLocalAuto: true, acknowledgePeerScope: true, section: "Finance", visibility: { audience: "members" },
+      settings: { soul: "Plans trips.", color: "teal", ...ADMINS_SET },
+    });
+    expect(made.out).toBe(PASS);
+    expect(made.body).toEqual({ id: SCOUT, name: "Scout (Ada)", useDefaults: false, modelSelection: model, requireAvailableModel: true, title: "Trips",
+      settings: { soul: "Plans trips.", color: "teal" } });
+    const own = await call(moveIn.guard, "POST", "/api/bots", moveInSession(), { id: SCOUT, name: "Scout", reportsTo: "Ada@acme.test" });
+    expect(own.body).toEqual({ id: SCOUT, name: "Scout (Ada)", useDefaults: false, reportsTo: "Ada@acme.test" });
   });
 
   it("takes its own routines only, reporting into the mover's conversation, and a library skill only when the team lacks it", async () => {

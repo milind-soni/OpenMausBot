@@ -10,7 +10,6 @@ vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f
 vi.mock("@/lib/analytics", () => ({ track: vi.fn(), setEmailGateDone: vi.fn() }));
 vi.mock("@/components/Avatar", () => ({ MausAvatar: () => null }));
 vi.mock("@/components/DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false } } }) }));
-vi.mock("./beats/MeetYourBotBeat", () => ({ MeetYourBotBeat: () => createElement("p", null, "the first bot") }));
 const { WelcomeFlow } = await import("./WelcomeFlow");
 const { welcomeOnScreen } = await import("@/lib/onboarding");
 
@@ -20,22 +19,22 @@ const OFFER: CloudOffer = { recommended: "pro", plans: [{ tier: "pro", amount: 4
 let host: HTMLDivElement, root: Root;
 beforeEach(() => { setLocale("en"); f.state = { config: {}, cloudAdd: null, bots: [], instances: [] }; host = document.createElement("div"); document.body.append(host); root = createRoot(host); });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
-const flow = (extra: Record<string, unknown> = {}) => createElement(WelcomeFlow, { bot: null, onDone: vi.fn(), reel: false, dictation: false, initialBeat: "cloud", cloudOffer: OFFER, ...extra });
+const flow = (extra: Record<string, unknown> = {}) => createElement(WelcomeFlow, { onDone: vi.fn(), dictation: false, initialBeat: "cloud", cloudOffer: OFFER, ...extra });
 
-it("the welcome offers MausBot Cloud between the phone and the first bot, and Not now goes on to the bot", async () => {
-  await act(async () => { root.render(flow()); });
+it("the welcome offers MausBot Cloud as its last step, and Not now finishes it, straight into the chat", async () => {
+  const onDone = vi.fn();
+  await act(async () => { root.render(flow({ onDone })); });
   expect(host.textContent).toContain("Keep your bots working while you sleep");
-  expect(host.textContent).toContain("4 of 5");
+  expect(host.textContent).toContain("3 of 3");
   const notNow = [...host.querySelectorAll("button")].find(button => button.textContent === "Not now")!;
   await act(async () => { notNow.click(); });
-  expect(host.textContent).toContain("the first bot");
-  expect(host.textContent).toContain("5 of 5");
+  expect(onDone).toHaveBeenCalledOnce();
 });
 
 it("without an offer the welcome has no Cloud beat at all", async () => {
   await act(async () => { root.render(flow({ cloudOffer: null })); });
   expect(host.textContent).not.toContain("Keep your bots working while you sleep");
-  expect(host.textContent).toContain("1 of 4");
+  expect(host.textContent, "asked for the Cloud step, it opens on the step before it").toContain("2 of 2");
 });
 
 it("marks itself on screen while it is shown (so a Cloud sheet over it never switches the window), not as an embedded preview", async () => {

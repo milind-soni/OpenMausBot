@@ -8,10 +8,14 @@ import type { Message } from "./store.ts";
 
 const REASON_CHARS = 600;
 
+type RuntimeError = RuntimeEvent & { type: "runtime.error" };
+
 export interface TurnStop {
   turnId?: string;
   cause?: string;
   error?: string;
+  /** The engine's own flags on that error (a setup or credit refusal, a stall, a usage limit's reset). */
+  flags?: Pick<RuntimeError, "setup" | "stalled" | "trialCredit" | "limitResetsAt">;
   handoffPath?: string;
 }
 
@@ -29,6 +33,10 @@ export class TurnStops {
     const stop = this.#turn(event.threadId, event.turnId);
     if (event.type === "cap.exhausted") stop.handoffPath = event.handoffPath;
     else stop.error = error;
+    if (event.type === "runtime.error") {
+      const { setup, stalled, trialCredit, limitResetsAt } = event;
+      if (setup || stalled || trialCredit || limitResetsAt) stop.flags = { setup, stalled, trialCredit, limitResetsAt };
+    }
   }
 
   stopping(threadId: string, turnId: string | undefined, cause: string): void {

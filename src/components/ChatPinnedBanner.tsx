@@ -34,8 +34,8 @@ export function PinnedBanner({
           className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
           title={t("chat.pinnedJump")}
         >
-          <span className="shrink-0 text-[11.5px] font-medium text-accent">{sender}</span>
-          <span dir="auto" className="truncate text-[12.5px] text-ink-secondary">{text}</span>
+          <span className="shrink-0 text-[12px] font-medium text-accent">{sender}</span>
+          <span dir="auto" className="truncate text-[13px] text-ink-secondary">{text}</span>
         </button>
         {onUnpin && <button
           onClick={onUnpin}

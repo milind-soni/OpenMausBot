@@ -171,7 +171,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
         ))}
       </div>
       {needle && shown.length === 0 && (
-        <p className="px-3 py-3 text-[12.5px] text-ink-secondary">{t("task.noMatch", { query: needle })}</p>
+        <p className="px-3 py-3 text-[13px] text-ink-secondary">{t("task.noMatch", { query: needle })}</p>
       )}
       {!needle && hidden > 0 && (
         <button
@@ -179,7 +179,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
           data-conversations-more
           aria-expanded={expanded}
           onClick={() => setExpanded((open) => !open)}
-          className="mt-0.5 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
+          className="mt-0.5 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink"
         >
           {expanded ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
           {expanded ? t("botPanel.conversations.showFewer") : t("botPanel.conversations.showMore", { count: hidden })}

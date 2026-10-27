@@ -155,7 +155,7 @@ describe("remembering exact command approvals", () => {
     const html = renderToStaticMarkup(createElement(PendingApprovalPanel, { pending, count: 1, index: 0, botName: "Scout" }));
     const row = html.slice(0, html.indexOf('id="approval-details-'));
     expect(row).toContain("flex flex-wrap items-baseline gap-x-2");
-    expect(row).toMatch(/<code class="[^"]*font-mono text-\[12\.5px\] leading-5[^"]*pb-\[3px\] pt-\[5px\][^"]*"[^>]*><span class="truncate">git status --short<\/span><\/code>/);
+    expect(row).toMatch(/<code class="[^"]*font-mono text-\[13px\] leading-5[^"]*pb-\[3px\] pt-\[5px\][^"]*"[^>]*><span class="truncate">git status --short<\/span><\/code>/);
     expect(row).toMatch(/<svg[^>]*class="[^"]*self-center[^"]*"/);
   });
 });

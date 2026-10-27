@@ -21,20 +21,20 @@ export function TeamImportDetails({ pending, importedNames, org = false }: {
   return (
     <>
       {pending.description && (
-        <p className="max-w-2xl text-[13.5px] leading-relaxed text-ink-secondary">{pending.description}</p>
+        <p className="max-w-2xl text-[14px] leading-relaxed text-ink-secondary">{pending.description}</p>
       )}
       {pending.brief && (
-        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamImport.brief")}</div>
           <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words">{pending.brief}</p>
         </div>
       )}
-      {Boolean(pending.warnings?.length) && <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+      {Boolean(pending.warnings?.length) && <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
         <div className="mb-2 font-medium text-ink">{pending.leftOut ? t("grokImport.leftOut") : t("templates.backupNotes")}</div>
         {pending.warnings?.map((warning, index) => <p key={index}>{warning}</p>)}
       </div>}
       {(pending.kind === "package" || pending.kind === "backup") && (
-        <div className="mt-5 flex flex-wrap gap-2 text-[11.5px] text-ink-secondary">
+        <div className="mt-5 flex flex-wrap gap-2 text-[12px] text-ink-secondary">
           {pending.chiefOfStaff && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Crown size={13} />{t("templates.leads", { name: pending.chiefOfStaff })}</span>}
           {!pending.library && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><MessageSquare size={13} />{t("templates.groupChats", { count: pending.rooms })}</span>}
           {!(pending.library && !pending.playbooks) && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><BookOpen size={13} />{t("templates.playbooks", { count: pending.playbooks })}</span>}
@@ -46,26 +46,26 @@ export function TeamImportDetails({ pending, importedNames, org = false }: {
         </div>
       )}
       {Boolean(pending.skills?.length) && (
-        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{org ? t("orgLibrary.skillsOn") : pending.version === 2 ? t("teamImport.skillsOff") : t("templates.skillsDisabled")}</div>
           <p className="mt-1 break-words">{pending.skills?.join(", ")}</p>
           {!org && <p className="mt-1">{pending.version === 2 ? t("teamImport.skillsReview") : t("templates.skillsReview")}</p>}
         </div>
       )}
       {pending.library && Boolean(pending.presets?.length) && (
-        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamImport.presetList")}</div>
           <p className="mt-1 break-words">{pending.presets?.join(", ")}</p>
         </div>
       )}
       {Boolean(pending.offeredSkills?.length) && (
-        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamImport.offeredSkills")}</div>
           <p className="mt-1 break-words">{pending.offeredSkills?.join(", ")}</p>
         </div>
       )}
       {Boolean(pending.connections?.length) && (
-        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamImport.connections", { count: pending.connections?.length ?? 0 })}</div>
           <ul className="mt-1">
             {pending.connections?.map((connection, index) => (
@@ -87,13 +87,13 @@ export function TeamImportDetails({ pending, importedNames, org = false }: {
               )}
             <div className="min-w-0">
               <div className="truncate text-[14px] font-medium text-ink">{importedNames[index]}</div>
-              {importedNames[index] !== member.name && <div className="text-[11.5px] text-ink-secondary">{t("templates.newCopyOf", { name: member.name })}</div>}
-              <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{member.title || t("templates.generalAssistant")}</div>
+              {importedNames[index] !== member.name && <div className="text-[12px] text-ink-secondary">{t("templates.newCopyOf", { name: member.name })}</div>}
+              <div className="mt-0.5 truncate text-[13px] text-ink-secondary">{member.title || t("templates.generalAssistant")}</div>
             </div>
           </div>
         ))}
       </div>
-      <div className="mt-6 flex items-start gap-2.5 rounded-xl bg-raised/45 px-4 py-3 text-[12.5px] leading-relaxed text-ink-secondary">
+      <div className="mt-6 flex items-start gap-2.5 rounded-xl bg-raised/45 px-4 py-3 text-[13px] leading-relaxed text-ink-secondary">
         <Check size={15} className="mt-0.5 shrink-0 text-success" />
         <p>
           {pending.kind === "backup"

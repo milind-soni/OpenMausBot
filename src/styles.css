@@ -1,4 +1,7 @@
 @import "tailwindcss";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
 
 /* Phones and tablets have no hover, and Tailwind only applies `hover:` and
    `group-hover:` under `@media (hover: hover)`. A control revealed on hover
@@ -24,6 +27,9 @@
   text-underline-offset: 3px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+}
+.mention-highlight.mention-person {
+  text-decoration-style: dotted;
 }
 .mention-highlight.mention-you {
   --mention-color: var(--color-accent);
@@ -134,28 +140,28 @@
   --animate-sent-border: sent-border 1.2s ease-out forwards;
 
   /* Defaults = Midnight. Kept here so the app is never unstyled. */
-  --color-app: #070707;
-  --color-panel: #111111;
-  --color-raised: #2f2f2f;
-  --color-raised-hover: #3d3d3d;
+  --color-app: #121212;
+  --color-panel: #0e0e0e;
+  --color-raised: #202020;
+  --color-raised-hover: #2e2e2e;
   /* the composer pill. Every skin but Daylight paints it in `raised`; there
      it is the page colour with a hairline ring, so it needs a tone (and a
      ring, transparent everywhere else) of its own. */
-  --color-composer: #2f2f2f;
-  --color-composer-ring: transparent;
+  --color-composer: #1f1f1f;
+  --color-composer-ring: #2e2e2e;
   /* popover and right-click menus. Same story as the composer: every skin
      but Daylight paints them in `card`, which there is the bot's bubble and
      a shade too grey for a menu. */
-  --color-menu: #262626;
-  --color-card: #262626;
-  --color-inset: #191919;
+  --color-menu: #1f1f1f;
+  --color-card: #1f1f1f;
+  --color-inset: #171717;
   /* a control ON a card. The dark skins take their `raised` value, so this
      is a no-op for them; the light skins need a tone of their own, because
      there `raised` is pure white and a card is too. */
-  --color-control: #2f2f2f;
-  --color-hairline: #333333;
+  --color-control: #282828;
+  --color-hairline: #383838;
   --color-ink: #fcfcfc;
-  --color-ink-secondary: #fcfcfc99;
+  --color-ink-secondary: #fcfcfcbf;
   /* quiet text: timestamps, hints, placeholders, calendar hours. It used to
      be `text-ink-secondary/70`, which fades an ink already tuned close to
      AA and landed at 2.2–4:1. Each skin sets this to the quietest ink that
@@ -174,8 +180,15 @@
   --color-danger: #ff5667;
   --color-warning: #ff9800;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  /* Some engines map `ui-monospace` to a proportional face, so concrete names come first. */
+  --font-mono: "Geist Mono Variable", "SF Mono", SFMono-Regular, ui-monospace, Menlo,
+    Consolas, "Liberation Mono", monospace;
+
+  --shadow-lg: 0 6px 16px -8px rgb(0 0 0 / 0.18), 0 1px 3px rgb(0 0 0 / 0.06);
+  --shadow-xl: 0 10px 28px -12px rgb(0 0 0 / 0.24), 0 2px 6px -2px rgb(0 0 0 / 0.08);
+  --shadow-2xl: 0 16px 40px -16px rgb(0 0 0 / 0.3), 0 4px 10px -4px rgb(0 0 0 / 0.1);
 
   /* Add a rounded transition class.
      For situations where multiple transition-properties need to be set simultaneously,
@@ -189,6 +202,7 @@
   --chat-bubble-max: 35rem;
   --chat-bubble-pct: 80%;
   --chat-card-pct: 88%;
+  --chat-prose-max: 44rem;
   /* .chat-column: fills a narrow pane, then stops at this width and centers, so wider windows only grow the gutters. */
   --chat-column-max: 60rem;
 }
@@ -196,12 +210,14 @@
   --chat-bubble-max: 64rem;
   --chat-bubble-pct: 92%;
   --chat-card-pct: 94%;
+  --chat-prose-max: 64rem;
   --chat-column-max: 80rem;
 }
 :root[data-chat-width="full"] {
   --chat-bubble-max: 100%;
   --chat-bubble-pct: 96%;
   --chat-card-pct: 96%;
+  --chat-prose-max: 100%;
   --chat-column-max: 100%;
 }
 
@@ -232,19 +248,19 @@
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="midnight"] {
   --code-color-scheme: dark;
-  --color-app: #070707;
-  --color-panel: #111111;
-  --color-raised: #2f2f2f;
-  --color-raised-hover: #3d3d3d;
-  --color-composer: #2f2f2f;    /* = raised: unchanged */
-  --color-composer-ring: transparent;
-  --color-card: #262626;
-  --color-menu: #262626;    /* = card: unchanged */
-  --color-inset: #191919;
-  --color-control: #2f2f2f;       /* = raised: Midnight is unchanged */
-  --color-hairline: #333333;
+  --color-app: #121212;
+  --color-panel: #0e0e0e;
+  --color-raised: #202020;
+  --color-raised-hover: #2e2e2e;
+  --color-composer: #1f1f1f;
+  --color-composer-ring: #2e2e2e;
+  --color-card: #1f1f1f;
+  --color-menu: #1f1f1f;    /* = card: unchanged */
+  --color-inset: #171717;
+  --color-control: #282828;
+  --color-hairline: #383838;
   --color-ink: #fcfcfc;
-  --color-ink-secondary: #fcfcfc99;
+  --color-ink-secondary: #fcfcfcbf;
   --color-ink-tertiary: #fcfcfc90;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
@@ -260,7 +276,7 @@
   --color-scrollbar: #3d3d3d;
   --color-maus-line: #fcfcfc;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 0.5rem;
   --radius-xl: 0.75rem;
@@ -268,7 +284,7 @@
   --identity-blue: #377FE6;
   --identity-red: #D94B52;
   --identity-orange: #E78531;
-  --identity-purple: #8963cc;
+  --identity-purple: #8d69ce;
   --identity-cyan: #0EA5C6;
   --identity-pink: #D84F8B;
   --identity-yellow: #D8A729;
@@ -324,7 +340,7 @@
   --color-scrollbar: #c9c0ae;
   --color-maus-line: #6b6559;
 
-  /* System faces rather than Inter: paper reads as the platform's own. */
+  /* System faces rather than Geist: paper reads as the platform's own. */
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
   --radius-lg: 6px;
@@ -395,7 +411,7 @@
   --color-scrollbar: #3d3529;
   --color-maus-line: #b0a696;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 4px;
   --radius-xl: 8px;
@@ -529,7 +545,7 @@
   --color-scrollbar: #464b54;
   --color-maus-line: #b3b8c2;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 6px;
   --radius-xl: 10px;
@@ -642,7 +658,7 @@
   --color-scrollbar: #4a414f;
   --color-maus-line: #b9afbd;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 12px;
@@ -669,15 +685,15 @@
    page, the one place a light skin carries inverted ink. That is what
    --color-bubble-user-ink exists for — see the rule at the bottom of the
    file. Everything else is a short ladder of greys: page #fcfcfc, sidebar
-   #f7f7f7, selected row #e1e1e1.
+   #f5f5f5, selected row #e4e4e4, and white for the composer and menus.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="daylight"] {
   --code-color-scheme: light;
   --color-app: #fcfcfc;           /* the thread */
-  --color-panel: #f7f7f7;         /* sidebar, one step down from the thread */
-  --color-raised: #e1e1e1;
-  --color-raised-hover: #d7d7d7;  /* the selected row */
-  --color-card: #eeeeee;          /* what a bot says */
+  --color-panel: #f5f5f5;         /* sidebar, one step down from the thread */
+  --color-raised: #e4e4e4;
+  --color-raised-hover: #d8d8d8;
+  --color-card: #f0f0f0;          /* what a bot says */
   --color-inset: #e6e6e6;         /* the search field */
   --color-control: #dedede;       /* a chip on a card */
   /* Sampled at #efefef, which is what the eye reads on the divider — but a
@@ -687,7 +703,7 @@
   --color-hairline: #d0d0d0;
 
   --color-ink: #0d0d0d;
-  --color-ink-secondary: #575757;
+  --color-ink-secondary: #444444;
   --color-ink-tertiary: #5c5c5c;
 
   /* The upstream blue is #1084fe, which carries white at 3.1:1 — fine for the
@@ -700,9 +716,9 @@
   --color-accent-ink: #ffffff;
   /* The composer is the page with a ring around it, not a grey slab —
      the one surface where this skin departs from `raised`. */
-  --color-composer: #fcfcfc;
+  --color-composer: #ffffff;
   --color-composer-ring: #e4e4e4;
-  --color-menu: #fcfcfc;          /* menus sit on the page tone, not the bubble */
+  --color-menu: #ffffff;          /* menus sit a step above the page, not on the bubble */
   --color-bubble-user: #070707;   /* your own messages, inverted */
   --color-bubble-user-ink: #fcfcfc;
 
@@ -714,7 +730,7 @@
   --color-scrollbar: #c4c4c4;
   --color-maus-line: #5f5f5f;
 
-  --font-sans: "Inter", -apple-system, blinkmacsystemfont, "SF Pro Text",
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 14px;
@@ -734,11 +750,9 @@
 
 /* ── Meadow ───────────────────────────────────────────────────────────────
    The MausBot brand look: a white page, a sidebar washed in the faintest
-   green, mint for the selected row and a calm green accent. Like Daylight,
-   your own bubble is the one dark surface (green-black), so it gets the same
-   @scope treatment further down. The brand green #1f8a52 carries white at
-   only 4.3:1, so the filled accent is one step deeper; the brand green stays
-   as the accent border.
+   green, mint for the selected row and a calm green accent. The brand
+   green #1f8a52 carries white at only 4.3:1, so the filled accent is one
+   step deeper; the brand green stays as the accent border.
    ───────────────────────────────────────────────────────────────────────── */
 [data-skin="meadow"] {
   --code-color-scheme: light;
@@ -752,7 +766,7 @@
   --color-hairline: #c9d3cc;
 
   --color-ink: #0f1a13;
-  --color-ink-secondary: #4d5a52;
+  --color-ink-secondary: #3e4a42;
   --color-ink-tertiary: #4f5c54;
 
   --color-accent: #1a7a48;
@@ -763,8 +777,8 @@
   --color-composer: #ffffff;
   --color-composer-ring: #e3e9e4;
   --color-menu: #ffffff;
-  --color-bubble-user: #0f1a13;   /* your own messages, inverted */
-  --color-bubble-user-ink: #ffffff;
+  --color-bubble-user: #e1e9e3;   /* your own messages, a step under a bot's card */
+  --color-bubble-user-ink: #0f1a13;
 
   --color-success: #1a7a48;
   --color-danger: #c02b3a;
@@ -774,7 +788,7 @@
   --color-scrollbar: #c3cdc6;
   --color-maus-line: #5a675f;
 
-  --font-sans: "Inter", -apple-system, blinkmacsystemfont, "SF Pro Text",
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 10px;
   --radius-xl: 16px;
@@ -795,7 +809,7 @@
 /* ── Pop ──────────────────────────────────────────────────────────────────
    Cream paper, white cards, ink outlines and hard offset shadows. Light-only,
    with an ink bubble for your own messages, so it takes the same @scope
-   treatment as Daylight and Meadow. The brand grape #8b5cf6 carries white at
+   treatment as Daylight. The brand grape #8b5cf6 carries white at
    only 4.2:1, so the filled accent is one step deeper; the brand grape stays
    as the accent border. Mint, butter and coral are fills for ink text only.
    ───────────────────────────────────────────────────────────────────────── */
@@ -833,7 +847,7 @@
   --color-scrollbar: #d0bfa6;
   --color-maus-line: #6b625b;
 
-  --font-sans: "Plus Jakarta Sans", ui-rounded, "SF Pro Rounded", "Inter",
+  --font-sans: "Plus Jakarta Sans", ui-rounded, "SF Pro Rounded", "Geist Variable",
     -apple-system, system-ui, "Segoe UI", sans-serif;
   --radius-lg: 12px;
   --radius-xl: 18px;
@@ -885,7 +899,7 @@
   --color-scrollbar: #3b3048;
   --color-maus-line: #c2b3cc;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 12px;
@@ -938,7 +952,7 @@
 /* Chat copy. 15px stays; the line box goes from Tailwind's leading-relaxed
    (1.625) to 1.75 so Arabic and Latin both get a little more air without
    moving the surrounding chrome. Arabic and Hebrew use a local face when
-   the machine has one. Inter and the UI stack do not carry those glyphs,
+   the machine has one. Geist and the UI stack do not carry those glyphs,
    and a generic family listed later would otherwise win. */
 @font-face {
   font-family: "omb-chat";
@@ -954,6 +968,36 @@
 .chat-md {
   line-height: 1.75;
   font-family: "omb-chat", var(--font-sans);
+}
+.chat-md :is(strong, b) {
+  font-weight: 600;
+}
+
+.chat-code-actions > button:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+@media (width < 40rem), (hover: none), (pointer: coarse) {
+  .chat-code-actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+  }
+
+  .chat-code-actions > button {
+    min-width: 44px;
+    min-height: 44px;
+    max-width: 100%;
+    padding: 8px 10px;
+    font-size: 12px;
+    white-space: normal;
+  }
+
+  .chat-code-actions svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
 }
 
 html,
@@ -983,7 +1027,7 @@ body,
     Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 :root[data-font="inter"] {
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+  --font-sans: "Inter Variable", "Inter", -apple-system, BlinkMacSystemFont,
     "Segoe UI", Roboto, sans-serif;
 }
 :root[data-font="poppins"] {
@@ -998,11 +1042,11 @@ body {
   background-color: var(--color-app);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  /* Greyscale smoothing (`antialiased`) draws macOS stems lighter than the
-     system UI, which is the washed-out look on a Retina display. The window
-     background is opaque, so the default smoothing can stay. */
-  -webkit-font-smoothing: auto;
-  -moz-osx-font-smoothing: auto;
+  /* Chromium on macOS thickens every stem under the default (`auto`)
+     smoothing, so regular text reads close to semibold on dark skins.
+     Windows ignores both properties. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
 }
 
@@ -1111,11 +1155,11 @@ body {
      an inline background already centers on the glyphs, and `clone` keeps
      the padding on every wrapped piece. */
   .ui-code-chip {
-    padding: 0.125em 0.3em;
+    padding: 0.125em 0.35em;
     border-radius: 0.25rem;
-    background: var(--color-inset);
+    background: color-mix(in srgb, var(--color-ink) 8%, transparent);
     font-family: var(--font-mono);
-    font-size: 0.92em;
+    font-size: 0.86em;
     line-height: 1;
     -webkit-box-decoration-break: clone;
     box-decoration-break: clone;
@@ -1169,8 +1213,8 @@ body {
   box-shadow:
     inset 0 1px 0 color-mix(in srgb, white 16%, transparent),
     inset 0 0 0 1px color-mix(in srgb, white 4%, transparent),
-    0 24px 64px -12px color-mix(in srgb, black 45%, transparent),
-    0 2px 8px color-mix(in srgb, black 12%, transparent);
+    0 16px 40px -16px color-mix(in srgb, black 35%, transparent),
+    0 2px 8px color-mix(in srgb, black 10%, transparent);
 }
 /* Where a glass pop-up sits: inside the window less a safe area. The top
    inset clears the macOS traffic lights and the Windows caption buttons
@@ -1621,22 +1665,17 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   padding: 0.35em 0.12em;
   margin: -0.35em -0.12em;
 }
-/* rotating presence phrase: the old phrase fades out where the new one
-   fades in, in the same grid cell */
+/* rotating presence phrase: the new phrase fades in where the old one was;
+   only one is ever drawn */
 @keyframes turn-phrase-in {
   from { opacity: 0; }
 }
-@keyframes turn-phrase-out {
-  to { opacity: 0; }
-}
 .turn-phrase-in { animation: shimmer 2s linear infinite, turn-phrase-in 0.32s ease-out both; }
-.turn-phrase-out { animation: shimmer 2s linear infinite, turn-phrase-out 0.32s ease-in both; pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .animate-caret, .animate-msg-in, .animate-shimmer, .animate-pop-in, .animate-pop-out { animation: none; }
   .animate-status-pulse { animation: none; opacity: 0.6; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
   .turn-phrase-in { animation: none; }
-  .turn-phrase-out { display: none; }
   .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
   .reply-bubble-in { animation: none; }
   .animate-rise, .animate-spot-in { animation: none; }
@@ -2195,30 +2234,6 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   }
 }
 
-/* Meadow's own bubble is green-black on white: the same inverted context as
-   Daylight's, tuned to the green ink. */
-@scope ([data-skin="meadow"]) to ([data-skin]) {
-  .bg-bubble-user {
-    --color-ink: #ffffff;
-    --color-ink-secondary: #c3d6ca;
-    --color-ink-tertiary: #a9bfb1;
-    --color-panel: #142219;
-    --color-inset: #1b2b21;
-    --color-raised: #2a3b30;
-    --color-raised-hover: #35493c;
-    --color-control: #2a3b30;
-    --color-hairline: #5f7266;
-    --color-accent: #7fdca8;
-    --color-accent-text: #7fdca8;
-    --color-accent-ink: #0f1a13;
-    --color-focus: #7fdca8;
-    --color-danger: #ff7788;
-    --color-danger-ink: #0f1a13;
-    --color-success: #7fdca8;
-    --color-success-ink: #0f1a13;
-  }
-}
-
 /* Pop's own bubble is ink on cream: the same inverted context, with butter,
    coral and mint as the fills that carry ink text on it. */
 @scope ([data-skin="pop"]) to ([data-skin]) {
@@ -2422,6 +2437,10 @@ button:disabled.bg-danger {
     summary:not([aria-disabled="true"], [aria-busy="true"])
   ) {
     cursor: pointer;
+  }
+  /* lucide writes stroke-width="2" as an attribute, which any CSS outranks; an explicit strokeWidth prop is left alone. */
+  :where(svg.lucide[stroke-width="2"]) {
+    stroke-width: 1.75;
   }
 }
 

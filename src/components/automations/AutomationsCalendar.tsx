@@ -133,7 +133,7 @@ export function AutomationsCalendar({ botFilter, selectedAutomationId, onOpenAut
           <button type="button" aria-pressed={days === 1} onClick={() => setDays(1)} className={segment(days === 1)}>{t("routines.view.day")}</button>
           <button type="button" aria-pressed={days === 7} onClick={() => setDays(7)} className={segment(days === 7)}>{t("routines.view.week")}</button>
         </div>
-        {error && <button type="button" onClick={() => setError("")} className="w-full text-left text-[11.5px] text-danger">{error}</button>}
+        {error && <button type="button" onClick={() => setError("")} className="w-full text-left text-[12px] text-danger">{error}</button>}
       </div>
       <div className="relative flex min-h-0 flex-1">
         {!liveSelected && <div className="hidden shrink-0 @min-[1040px]/routines:block"><CalendarSidebar bots={visibleBots} anchor={anchor} onSelectDate={(at) => setAnchor(startOfDay(at))} /></div>}

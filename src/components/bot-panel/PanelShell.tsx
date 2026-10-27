@@ -14,9 +14,7 @@ import { PANEL_TABS, PAGES, TAB_LABEL, type PanelTab, type PanelTarget, type Sim
 import { PageBody, pageSurfaceCls } from "./pages";
 import { linkTarget, usePanelLink, type PanelLink } from "./panel-link";
 import { PanelHero } from "./PanelHero";
-import { PageHeader } from "./rows";
-
-const roundButtonCls = "flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.06] text-ink hover:bg-ink/[0.11] max-md:size-9 max-md:border max-md:border-hairline max-md:bg-card";
+import { PageHeader, roundButtonCls } from "./rows";
 
 function initialTarget(section: BotSettingsSection | null, link: PanelLink | null): PanelTarget {
   return section ? linkTarget(section, link) : { tab: "bot" };
@@ -133,7 +131,7 @@ export function BotPanel({ bot, derived, headerClassName, linkedSection, onClose
                   data-panel-tab={id}
                   onClick={() => openTab(id)}
                   className={cn(
-                    "min-w-0 truncate rounded-full px-[13px] py-1.5 text-[13.5px] transition-colors @max-[20rem]:px-2 @max-[20rem]:text-[12.5px]",
+                    "min-w-0 truncate rounded-full px-[13px] py-1.5 text-[14px] transition-colors @max-[20rem]:px-2 @max-[20rem]:text-[13px]",
                     tab === id ? "bg-ink/[0.07] font-medium text-ink" : "text-ink-secondary hover:text-ink",
                   )}
                 >

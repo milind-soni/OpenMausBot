@@ -120,8 +120,9 @@ describe("bounded scheduled overlap and run health", () => {
   const start = Date.parse("2026-09-13T08:00:00Z");
   const input = () => ({ name: "Health check", prompt: "Check the fixture", botId: "maus-1",
     schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: start } });
+  // A failed turn here is a refusal, which is never retried: one failure ends the run.
   const finish = (h: ReturnType<typeof harness>, threadId: string, ok: boolean) => h.manager.handleRuntimeEvent({
-    eventId: "done", provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok,
+    eventId: "done", provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok, ...(ok ? {} : { stopReason: "refusal" }),
   });
 
   it.each<RoutineSchedule>([
@@ -1830,7 +1831,7 @@ describe("RoutineManager", () => {
     expect(h.manager.listRuns()).toHaveLength(1);
     expect(h.manager.listRoutines()[0]?.nextRunAt).toBe(anchorAt + 10 * 60_000);
 
-    h.manager.failThread("thread-1", "Finished test run");
+    h.manager.failThread("thread-1", "Finished test run", { cause: "refused" });
     h.setNow(anchorAt + 10 * 60_000);
     await h.manager.tick();
     expect(h.manager.listRuns()).toHaveLength(2);
@@ -2988,7 +2989,7 @@ describe("RoutineManager", () => {
     expect(h.manager.finishGoalRun(run.id, "stopped", "Stopped by you.")).toBeNull();
   });
 
-  it("reports a failed run once with its detached thread", async () => {
+  it("reports a failed run once with its detached thread, after its one automatic retry failed too", async () => {
     const h = harness();
     const routine = h.manager.create({
       name: "Broken report",
@@ -2999,8 +3000,8 @@ describe("RoutineManager", () => {
     h.setNow(routine.nextRunAt!);
     await h.manager.tick();
 
-    h.manager.handleRuntimeEvent({
-      eventId: "failed",
+    const crash = () => h.manager.handleRuntimeEvent({
+      eventId: `failed-${Math.random()}`,
       provider: "fake",
       threadId: "thread-1",
       createdAt: new Date().toISOString(),
@@ -3008,6 +3009,12 @@ describe("RoutineManager", () => {
       ok: false,
       stopReason: "provider crashed",
     });
+    crash();
+    expect(h.manager.listRuns()[0]).toMatchObject({ threadId: "thread-1", status: "queued", retried: "failed" });
+    expect(h.failed).toEqual([]);
+    h.setNow(routine.nextRunAt! + 16_000);
+    await h.manager.tick();
+    crash();
 
     expect(h.failed).toMatchObject([
       {
@@ -3015,7 +3022,7 @@ describe("RoutineManager", () => {
         botId: "maus-failed",
         threadId: "thread-1",
         status: "failed",
-        error: "provider crashed",
+        error: "Failed after one automatic retry: provider crashed",
       },
     ]);
     expect(h.manager.listRuns()[0]).toMatchObject({ threadId: "thread-1", status: "failed" });
@@ -3027,11 +3034,12 @@ describe("RoutineManager", () => {
   it.each([
     // a Cloud run's Claude turn: its api-error frame is the run's error row, its result's stop token says nothing
     ["stop_sequence", 'Your Claude account is out of credits (Claude says: "Credit balance is too low"). Add credits with Claude, then run it again.',
-      'Your Claude account is out of credits (Claude says: "Credit balance is too low"). Add credits with Claude, then run it again.'],
-    ["stop_sequence", undefined, "The engine stopped without saying why (stop reason: stop_sequence)."],
-    ["rpc_error", undefined, "The engine stopped without saying why (stop reason: rpc_error)."],
-    [undefined, undefined, "The bot did not complete this run"],
-  ])("records a failed run's real cause, never a bare stop token (%s)", async (stopReason, error, expected) => {
+      'Your Claude account is out of credits (Claude says: "Credit balance is too low"). Add credits with Claude, then run it again.', false],
+    // Failures nothing names get their one retry first, and the retry's failure says so.
+    ["stop_sequence", undefined, "The engine stopped without saying why (stop reason: stop_sequence).", true],
+    ["rpc_error", undefined, "The engine stopped without saying why (stop reason: rpc_error).", true],
+    [undefined, undefined, "The bot did not complete this run", true],
+  ])("records a failed run's real cause, never a bare stop token (%s)", async (stopReason, error, cause, retried) => {
     const h = harness();
     const routine = h.manager.create({
       name: "Morning report",
@@ -3042,9 +3050,18 @@ describe("RoutineManager", () => {
     h.setNow(routine.nextRunAt!);
     await h.manager.tick();
     const base = { provider: "claude", threadId: "thread-1", createdAt: new Date().toISOString() };
-    if (error) h.manager.handleRuntimeEvent({ ...base, eventId: "runtime-error", type: "runtime.error", message: error });
-    h.manager.handleRuntimeEvent({ ...base, eventId: "turn-completed", type: "turn.completed", ok: false, stopReason });
-
+    const fail = () => {
+      if (error) h.manager.handleRuntimeEvent({ ...base, eventId: `runtime-error-${Math.random()}`, type: "runtime.error", message: error });
+      h.manager.handleRuntimeEvent({ ...base, eventId: `turn-completed-${Math.random()}`, type: "turn.completed", ok: false, stopReason });
+    };
+    fail();
+    if (retried) {
+      expect(h.manager.listRuns()[0]).toMatchObject({ status: "queued", retried: "failed" });
+      h.setNow(routine.nextRunAt! + 16_000);
+      await h.manager.tick();
+      fail();
+    }
+    const expected = retried ? `Failed after one automatic retry: ${cause}` : cause;
     expect(h.manager.listRuns()[0]).toMatchObject({ status: "failed", error: expected });
     expect(h.failed).toMatchObject([{ error: expected }]);
   });
@@ -3120,7 +3137,7 @@ describe("RoutineManager", () => {
     await h.manager.tick();
     h.manager.handleRuntimeEvent({
       eventId: "broken", provider: "fake", threadId: "thread-1",
-      createdAt: new Date().toISOString(), type: "turn.completed", ok: false, stopReason: "provider crashed",
+      createdAt: new Date().toISOString(), type: "turn.completed", ok: false, stopReason: "refusal",
     });
     h.setNow(fine.nextRunAt!);
     await h.manager.tick();
@@ -3132,7 +3149,7 @@ describe("RoutineManager", () => {
     await h.manager.tick();
     h.manager.handleRuntimeEvent({
       eventId: "acknowledged", provider: "fake", threadId: "thread-3",
-      createdAt: new Date().toISOString(), type: "turn.completed", ok: false, stopReason: "crashed earlier",
+      createdAt: new Date().toISOString(), type: "turn.completed", ok: false, stopReason: "refusal",
     });
     const runsByName = () => new Map(h.manager.listRuns().map((run) => [run.routineName, run]));
     h.manager.markSeen(runsByName().get("Old failure")!.id);
@@ -3171,7 +3188,7 @@ describe("RoutineManager", () => {
     await h.manager.tick();
     h.manager.handleRuntimeEvent({
       eventId: "broken", provider: "fake", threadId: "thread-1",
-      createdAt: new Date().toISOString(), type: "turn.completed", ok: false, stopReason: "provider crashed",
+      createdAt: new Date().toISOString(), type: "turn.completed", ok: false, stopReason: "refusal",
     });
     expect(h.manager.listRuns()[0]).toMatchObject({ status: "failed" });
 
@@ -3192,7 +3209,7 @@ describe("RoutineManager", () => {
   describe("deleting a routine", () => {
     const finish = (h: ReturnType<typeof harness>, threadId: string, ok: boolean) => h.manager.handleRuntimeEvent({
       eventId: `${threadId}-done`, provider: "fake", threadId, createdAt: new Date().toISOString(),
-      type: "turn.completed", ok, ...(ok ? {} : { stopReason: "provider crashed" }),
+      type: "turn.completed", ok, ...(ok ? {} : { stopReason: "refusal" }),
     });
     const needsYou = (h: ReturnType<typeof harness>) => h.manager.listRuns().some((run) => isRoutineProblemRun(run) && !run.seenAt);
     const nextRunAt = (h: ReturnType<typeof harness>, id: string) => h.manager.listRoutines().find((routine) => routine.id === id)!.nextRunAt!;

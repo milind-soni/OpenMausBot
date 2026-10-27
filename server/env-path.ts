@@ -164,8 +164,9 @@ export function findCliCandidates(name: string): string[] {
 }
 
 // Windows: libuv ignores PATHEXT, Node refuses to spawn a .cmd without shell:true since CVE-2024-27980, and there is no #!.
-// shell:true is out (cmd would mangle the JSON drivers pass in argv), so npm .cmd shims resolve to what they wrap and node
-// shebang scripts to `node <script>`; an unknown shim stays unspawnable rather than cross the no-shell security boundary.
+// shell:true is out (cmd would mangle the JSON drivers pass in argv), so npm .cmd shims resolve to what they wrap, node
+// shebang scripts to `node <script>`, and a PowerShell -File .cmd to powershell.exe plus its sibling .ps1. An unknown
+// shim stays the .cmd rather than cross the no-shell security boundary.
 
 export interface ResolvedSpawn {
   command: string;
@@ -228,7 +229,80 @@ function nodeExe(near: string, env?: NodeJS.ProcessEnv): string | null {
   return (process.versions as Record<string, string | undefined>).electron ? null : process.execPath;
 }
 
-/** npm/pnpm .cmd shims spell their target as "%dp0%\..." (or "%~dp0\..."). */
+const POWERSHELL_NAMES = new Set(["powershell.exe", "pwsh.exe"]);
+const POWERSHELL_COMMAND_SWITCHES = new Set(["c", "command", "e", "ec", "enc", "encodedcommand"]);
+
+/** `-Command` / `-c` / `-EncodedCommand` (and `/c`) run before `-File`, so that line is not a script launch. */
+function isPowerShellCommandSwitch(token: string): boolean {
+  let name = token.startsWith("-") || token.startsWith("/") ? token.slice(1) : token;
+  const colon = name.indexOf(":");
+  if (colon >= 0) name = name.slice(0, colon);
+  return POWERSHELL_COMMAND_SWITCHES.has(name.toLowerCase());
+}
+
+function windowsSystemRoot(env?: NodeJS.ProcessEnv): string {
+  const source = env ?? process.env;
+  return source.SystemRoot || source.WINDIR || process.env.SystemRoot || process.env.WINDIR || "";
+}
+
+/** Only `%SystemRoot%` and `%WINDIR%` expand, and only in the executable token. */
+function expandWindowsRoot(token: string, env?: NodeJS.ProcessEnv): string {
+  const root = windowsSystemRoot(env);
+  return token.replace(/%SystemRoot%/gi, () => root).replace(/%WINDIR%/gi, () => root);
+}
+
+function powerShellExecutable(token: string, env?: NodeJS.ProcessEnv): string | null {
+  const expanded = expandWindowsRoot(token, env);
+  if (!POWERSHELL_NAMES.has(basename(expanded).toLowerCase())) return null;
+  if (/[\\/]/.test(expanded) || /^[a-zA-Z]:/.test(expanded)) {
+    return extname(expanded).toLowerCase() === ".exe" && isFile(expanded) ? expanded : null;
+  }
+  const hit = whichWin(expanded, env);
+  return hit && extname(hit).toLowerCase() === ".exe" ? hit : null;
+}
+
+/** `%SCRIPT_DIR%` and `%~dp0` are the shim directory. A remaining `%VAR%`, `..`, or another directory does not count. */
+function siblingPowerShellScript(operand: string, shimDir: string): string | null {
+  const prefix = /^(?:%SCRIPT_DIR%|%~dp0)\\?/i.exec(operand);
+  if (!prefix && /%[^%]+%/.test(operand)) return null;
+  const rest = prefix ? operand.slice(prefix[0].length) : operand;
+  if (/%[^%]+%/.test(rest)) return null;
+  const absolute = /^[a-zA-Z]:[\\/]/.test(rest) || rest.startsWith("\\\\");
+  if (!prefix && !absolute) return null;
+  const script = prefix ? join(shimDir, rest) : rest;
+  if (extname(script).toLowerCase() !== ".ps1" || !isFile(script)) return null;
+  if (dirname(script).toLowerCase() !== shimDir.toLowerCase()) return null;
+  return script;
+}
+
+/** `-Command` is not a spawn. The first `-File` whose `.ps1` sits beside the shim is. */
+function parsePowerShellFileShim(shim: string, text: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | null {
+  const shimDir = dirname(shim);
+  for (const line of text.split(/\r?\n/)) {
+    const tokens = splitCliString(line);
+    const head = tokens[0];
+    if (!head || tokens.length < 3) continue;
+    const command = powerShellExecutable(head, env);
+    if (!command) continue;
+    const rest = tokens.slice(1);
+    if (rest.some(isPowerShellCommandSwitch)) continue;
+    const fileAt = rest.findIndex((token) => token.toLowerCase() === "-file");
+    const operand = fileAt >= 0 ? rest[fileAt + 1] : undefined;
+    if (!operand) continue;
+    const script = siblingPowerShellScript(operand, shimDir);
+    if (!script) continue;
+    const args: string[] = [];
+    for (let index = 0; index < rest.length; index++) {
+      const token = rest[index];
+      if (!token || token === "%*") continue;
+      args.push(index === fileAt + 1 ? script : token);
+    }
+    return { command, args };
+  }
+  return null;
+}
+
+/** npm/pnpm .cmd shims spell their target as "%dp0%\..." (or "%~dp0\..."). A PowerShell `-File` launcher is spawnable only for a sibling `.ps1`. */
 function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | null {
   let text: string;
   try {
@@ -248,7 +322,12 @@ function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | nu
     if (node) return { command: node, args: [script] };
   }
   const exe = targets.find((p) => extname(p).toLowerCase() === ".exe");
-  return exe ? { command: exe, args: [] } : null;
+  if (exe) return { command: exe, args: [] };
+  for (const target of targets) {
+    const viaNode = parseNodeShebang(target, env);
+    if (viaNode) return viaNode;
+  }
+  return parsePowerShellFileShim(shim, text, env);
 }
 
 function parseNodeShebang(file: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | null {

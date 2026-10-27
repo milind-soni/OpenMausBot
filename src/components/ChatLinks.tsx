@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { activeLocale } from "@/lib/i18n";
 
 export { isUseMyComputerUrl } from "../../shared/use-my-computer";
 /** A published page's link in a message opens like its card's Open. */
@@ -13,5 +14,5 @@ export const GITHUB_REF_CLASS =
 export function UseMyComputerLink({ children }: { children?: ReactNode }) {
   const offer = window.ogb?.cloudLending?.offer;
   if (!offer) return <span className="break-words">{children}</span>;
-  return <button type="button" data-use-my-computer onClick={() => void offer().catch(() => {})} className={LINK_CLASS}>{children}</button>;
+  return <button type="button" data-use-my-computer onClick={() => void offer(activeLocale()).catch(() => {})} className={LINK_CLASS}>{children}</button>;
 }

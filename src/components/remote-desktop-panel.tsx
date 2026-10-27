@@ -342,8 +342,8 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
                 >
                   <span className={cn("size-1.5 shrink-0 rounded-full", routine.enabled ? "bg-success" : "bg-ink-secondary/40")} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12.5px] font-medium text-ink">{routine.name}</span>
-                    <span className="block truncate text-[10.5px] text-ink-secondary">
+                    <span className="block truncate text-[13px] font-medium text-ink">{routine.name}</span>
+                    <span className="block truncate text-[11px] text-ink-secondary">
                       {routineScheduleLabel(routine)}{routine.runOn === "cloud" ? ` · ${t("remoteDesktop.runsOnVm")}` : ""}
                     </span>
                   </span>

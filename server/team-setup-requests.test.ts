@@ -143,7 +143,7 @@ describe("reviewed Chief team setup", () => {
   it("shows what stays owner-owned after creation on create cards, and keeps update cards lean", () => {
     const h = harness();
     const create = h.propose([specialist("Mira", "Work")]);
-    expect(create.detail).toContain("New bots stay owner-owned after creation: connected apps off, the workspace's default access level, a private workspace by default, avatar untouched.");
+    expect(create.detail).toContain("New bots stay owner-owned after creation: the same connected apps as @Clive, the workspace's default access level, a private workspace by default, avatar untouched.");
     expect(create.detail).toContain("Existing execution permissions are unchanged.");
     const update = h.propose([{ action: "update", botId: h.peer.id, fields: { title: "Research lead" } }]);
     expect(update.detail).not.toContain("owner-owned");

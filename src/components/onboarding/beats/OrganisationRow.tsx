@@ -100,7 +100,7 @@ export function OrganisationRow({
         type="button"
         disabled={busy}
         onClick={() => void perform(() => bridge.begin({ portalOrigin: DEFAULT_ADMIN_ORIGIN }))}
-        className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white transition-[filter] hover:brightness-110 disabled:opacity-50"
+        className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white transition-[filter] hover:brightness-110 disabled:opacity-50"
       >
         {busy ? t("organization.working") : t("onboarding.org.signIn")}
       </button>

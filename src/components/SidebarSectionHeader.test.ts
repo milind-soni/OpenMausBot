@@ -102,7 +102,7 @@ describe("SidebarSectionHeader as a Simple-mode line", () => {
     const element = line({ onMenu, onDelete: () => {} });
     const html = renderToStaticMarkup(element);
     expect(html).toContain('data-sidebar-section-line=""');
-    expect(html).toMatch(/text-\[11\.5px\][^"]*text-ink-tertiary/);
+    expect(html).toMatch(/text-\[12px\][^"]*text-ink-tertiary/);
     expect(html).toContain('<span aria-hidden="true" class="h-px min-w-4 flex-1 bg-hairline/60"></span>');
     expect(html).toContain('aria-label="Actions for Work department" title="Actions for Work department" aria-haspopup="menu" aria-expanded="false"');
     expect(html).not.toContain("Delete Work department");

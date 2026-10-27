@@ -11,7 +11,7 @@ const VARIANTS = {
 const SIZES = {
   lg: { select: "py-2.5 pl-3 pr-9 text-[15px]", chevron: "right-2" },
   md: { select: "py-2 pl-3 pr-9 text-[13px]", chevron: "right-2" },
-  sm: { select: "py-1.5 pl-2.5 pr-8 text-[12.5px]", chevron: "right-1.5" },
+  sm: { select: "py-1.5 pl-2.5 pr-8 text-[13px]", chevron: "right-1.5" },
 } as const;
 
 export function Select({

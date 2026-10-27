@@ -21,7 +21,7 @@ export function ChatHeadConversation({ bot }: { bot: Bot }) {
         aria-haspopup="dialog"
         title={t("chat.showConversations", { name: bot.name })}
         onClick={() => openBotSettings(dispatch, "overview", { anchor: "conversations" })}
-        className="flex h-8 min-w-0 max-w-[260px] items-center gap-1.5 rounded-full px-2.5 text-[13.5px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
+        className="flex h-8 min-w-0 max-w-[260px] items-center gap-1.5 rounded-full px-2.5 text-[14px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
       >
         <span dir="auto" className="truncate">{localizedTaskTitle(task.title || t("task.newShort"))}</span>
         {elsewhere > 0 && (

@@ -79,3 +79,41 @@ it("makes MausBot a new install's first bot, never deleted, hidden by its switch
     await fixture.close();
   }
 }, 120_000);
+
+it("lets MausBot read the unread notifications and mark finished work read, and gives no other bot the tools", async () => {
+  const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_MODE: "hang" });
+  const api = async (path: string) => (await (await fetch(`${fixture.info.url}${path}`, { signal: AbortSignal.timeout(10_000) })).json()) as any;
+  const control = (args: string[]) => runControlOmb([...args, "--url", fixture.info.url]) as Promise<any>;
+  const launch = async (botId: string) => {
+    await control(["send", "--bot", botId, "--text", "Stay active."]);
+    await expect.poll(() => existsSync(fixture.fixtureDumpPath), { timeout: 30_000 }).toBe(true);
+    const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")) as { mcpConfig: { mcpServers: Record<string, McpServer> } };
+    rmSync(fixture.fixtureDumpPath, { force: true });
+    return dump.mcpConfig.mcpServers.agents!;
+  };
+  const text = (answer: Answer) => answer.result?.content?.[0]?.text ?? "";
+  try {
+    const [maus] = (await api("/api/bots")).bots as any[];
+    const agents = await launch(maus.id);
+    expect(agents.env.OMB_MAUSBOT).toBe("1");
+
+    const unread = await callTool(agents, "list_unread_notifications", {});
+    expect(unread.result?.isError, text(unread)).toBeFalsy();
+    expect(text(unread)).toContain('"notifications":[');
+    const marked = await callTool(agents, "mark_notifications_read", { ids: ["no-such-notification"] });
+    expect(marked.result?.isError, text(marked)).toBeFalsy();
+    expect(text(marked)).toContain("Marked none read.");
+    expect(text(marked)).toContain("no-such-notification: not an unread notification");
+    expect((await callTool(agents, "mark_notifications_read", { ids: "all" })).result?.isError).toBe(true);
+
+    const { bot: clive } = await control(["new-bot", "--name", "Clive"]);
+    const other = await launch(clive.id);
+    expect(other.env.OMB_MAUSBOT).toBe("0");
+    expect((await callTool(other, "list_unread_notifications", {})).result?.isError ?? true).toBe(true);
+    expect((await callTool(other, "mark_notifications_read", { ids: ["no-such-notification"] })).result?.isError ?? true).toBe(true);
+    await control(["interrupt", "--bot", maus.id]);
+    await control(["interrupt", "--bot", clive.id]);
+  } finally {
+    await fixture.close();
+  }
+}, 180_000);

@@ -50,7 +50,7 @@ export function ShareTeamContents({ preview, includeMemory, localSkips }: {
   return (
     <div>
       <div className="text-[12px] font-medium text-ink-secondary">{t("teamShare.included")}</div>
-      <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 rounded-xl bg-raised/45 px-4 py-3 text-[12.5px]">
+      <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 rounded-xl bg-raised/45 px-4 py-3 text-[13px]">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt className="text-ink-secondary">{label}</dt>
@@ -60,7 +60,7 @@ export function ShareTeamContents({ preview, includeMemory, localSkips }: {
       </dl>
       {pkg.connections?.length ? (
         // Security: the whole address shows before Save, since hosted server URLs often carry a key.
-        <div className="mt-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamShare.addresses")}</div>
           <ul className="mt-1 space-y-0.5">
             {pkg.connections.map((connection) => (
@@ -69,12 +69,12 @@ export function ShareTeamContents({ preview, includeMemory, localSkips }: {
           </ul>
         </div>
       ) : null}
-      <p className="mt-3 flex items-start gap-2 text-[12.5px] leading-relaxed text-ink-secondary">
+      <p className="mt-3 flex items-start gap-2 text-[13px] leading-relaxed text-ink-secondary">
         <ShieldCheck size={15} className="mt-0.5 shrink-0 text-success" />
         <span>{t("teamShare.never")}</span>
       </p>
       {preview.redacted.length > 0 && (
-        <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamShare.redacted")}</div>
           <ul className="mt-1 list-disc pl-5">
             {preview.redacted.map((part) => <li key={part}>{describePart(part, preview.document)}</li>)}
@@ -82,7 +82,7 @@ export function ShareTeamContents({ preview, includeMemory, localSkips }: {
         </div>
       )}
       {skipped.length > 0 && (
-        <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mt-3 rounded-xl border border-hairline px-4 py-3 text-[13px] text-ink-secondary">
           <div className="font-medium text-ink">{t("teamShare.skipped")}</div>
           <ul className="mt-1 list-disc pl-5">
             {skipped.map((line, index) => <li key={`${line}-${index}`}>{line}</li>)}
@@ -105,7 +105,7 @@ export function ShareSkillChoices({ available, ticked, counted, onToggle }: {
       {counted && available.length === 0 && <p className="mt-1 text-[12px] text-ink-secondary">{t("teamShare.noSkills")}</p>}
       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
         {available.map((skill) => (
-          <label key={skill} className="flex items-center gap-1.5 text-[12.5px]">
+          <label key={skill} className="flex items-center gap-1.5 text-[13px]">
             <input type="checkbox" className="size-3.5 accent-accent" checked={ticked.has(skill)} onChange={() => onToggle(skill)} />
             {skill}
           </label>
@@ -230,7 +230,7 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
     else next.add(skill);
     setSkillChoice(next);
   };
-  const field = "mt-1 w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13.5px] text-ink disabled:opacity-60";
+  const field = "mt-1 w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[14px] text-ink disabled:opacity-60";
 
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4" onMouseDown={(event) => {
@@ -251,15 +251,15 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
         <header className="flex items-start justify-between gap-3 px-6 pb-2 pt-5">
           <div>
             <h2 id="share-team-title" className="text-[17px] font-semibold">{t("teamShare.title", { name: team || t("teamLibrary.general") })}</h2>
-            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">{t("teamShare.intro")}</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t("teamShare.intro")}</p>
           </div>
           <button aria-label={t("teamShare.close")} disabled={saving} onClick={onClose} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"><X size={18} /></button>
         </header>
 
         {saved ? (
           <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-4 pt-2">
-            <p className="flex items-center gap-2 text-[13.5px] font-medium text-ink"><Check size={16} className="text-success" />{t("teamShare.saved", { filename: saved.filename })}</p>
-            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-secondary">{t("teamShare.savedHint")}</p>
+            <p className="flex items-center gap-2 text-[14px] font-medium text-ink"><Check size={16} className="text-success" />{t("teamShare.saved", { filename: saved.filename })}</p>
+            <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">{t("teamShare.savedHint")}</p>
             <div className="mt-4">
               <ShareTeamContents preview={saved} includeMemory={includeMemory} localSkips={includePictures ? pictures?.skipped ?? [] : []} />
             </div>
@@ -289,27 +289,27 @@ export function ShareTeamDialog({ team, onClose }: { team: string; onClose: () =
             </fieldset>
 
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <label className="block text-[12.5px] text-ink-secondary">{t("teamShare.name")}
+              <label className="block text-[13px] text-ink-secondary">{t("teamShare.name")}
                 <input value={name} maxLength={100} disabled={saving} onChange={(event) => setName(event.target.value)} className={field} />
               </label>
-              <label className="block text-[12.5px] text-ink-secondary">{t("teamShare.release")}
+              <label className="block text-[13px] text-ink-secondary">{t("teamShare.release")}
                 <input value={release} maxLength={20} disabled={saving} placeholder="1.0.0" onChange={(event) => setRelease(event.target.value)} className={field} />
               </label>
             </div>
-            <p className="mt-1 text-[11.5px] text-ink-secondary">{t("teamShare.releaseHint")}</p>
-            <label className="mt-3 block text-[12.5px] text-ink-secondary">{t("teamShare.notes")}
+            <p className="mt-1 text-[12px] text-ink-secondary">{t("teamShare.releaseHint")}</p>
+            <label className="mt-3 block text-[13px] text-ink-secondary">{t("teamShare.notes")}
               <textarea value={notes} maxLength={4000} rows={2} disabled={saving} onChange={(event) => setNotes(event.target.value)} className={field} />
             </label>
-            <label className="mt-3 block text-[12.5px] text-ink-secondary">{t("teamShare.tagline")}
+            <label className="mt-3 block text-[13px] text-ink-secondary">{t("teamShare.tagline")}
               <input value={tagline} maxLength={160} disabled={saving} onChange={(event) => setTagline(event.target.value)} className={field} />
             </label>
-            <label className="mt-3 block text-[12.5px] text-ink-secondary">{t("teamShare.summary")}
+            <label className="mt-3 block text-[13px] text-ink-secondary">{t("teamShare.summary")}
               <textarea value={summary} maxLength={2000} rows={2} disabled={saving} onChange={(event) => setSummary(event.target.value)} className={field} />
             </label>
           </div>
         )}
 
-        {error && <p role="alert" className="mx-6 mb-2 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</p>}
+        {error && <p role="alert" className="mx-6 mb-2 rounded-lg bg-danger/10 px-3 py-2 text-[13px] text-danger">{error}</p>}
         <footer className="flex justify-end gap-2 border-t border-hairline/35 px-6 py-3">
           {saved ? (
             <button onClick={onClose} className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white">{t("teamShare.done")}</button>

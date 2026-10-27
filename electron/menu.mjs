@@ -63,9 +63,12 @@ function roleMenus(t, isMac) {
   return { file, edit, view, window };
 }
 
+/** A local environment has a folder and no address. */
+const whereItLives = (environment) => (environment.kind === "local" ? environment.dataDir : new URL(environment.origin).host);
+
 /**
  * @param {object} input
- * @param {{ id: string, name: string, origin: string }[]} input.environments
+ * @param {({ id: string, name: string, origin: string } | { id: string, name: string, kind: "local", dataDir: string })[]} input.environments
  * @param {string} input.activeId  "local" or an environment id
  * @param {(id: string) => void} input.onSwitch
  * @param {() => void} input.onAddFromClipboard
@@ -76,8 +79,10 @@ function roleMenus(t, isMac) {
  * @param {{ origin: string, onBack: () => void } | null} [input.home] My Cloud once the person's bots moved there: the
  *   menu lists only the other saved servers, with Back to My Cloud, and is absent without any.
  * @param {(key: string, params?: Record<string, string | number>) => string} [input.t]
+ * @param {{ checked: boolean, onToggle: (on: boolean) => void } | null} [input.openAtLogin] Open at Login, in the app
+ *   menu on macOS and the File menu elsewhere; absent when this build cannot add a login item.
  */
-export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget, onOpenSettings, onOrganizationSignIn, onAddCloud, sublabels = {}, home = null, t = nativeText.englishText.t }) {
+export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget, onOpenSettings, onOrganizationSignIn, onAddCloud, sublabels = {}, home = null, openAtLogin = null, t = nativeText.englishText.t }) {
   const isMac = process.platform === "darwin";
   const active = environments.find((e) => e.id === activeId) ?? null;
   const others = home ? environments.filter((e) => e.origin !== home.origin && e.kind !== "local") : [];
@@ -98,7 +103,7 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
     submenu: [
       { label: t("place.local"), type: "radio", checked: !active, click: () => onSwitch("local") },
       ...environments.map((e) => ({
-        label: `${e.name} — ${Object.hasOwn(sublabels, e.id) ? sublabels[e.id] : new URL(e.origin).host}`,
+        label: `${e.name} — ${Object.hasOwn(sublabels, e.id) ? sublabels[e.id] : whereItLives(e)}`,
         type: "radio",
         checked: e.id === activeId,
         click: () => onSwitch(e.id),
@@ -115,12 +120,14 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
       },
     ],
   };
+  const atLogin = openAtLogin ? [{ id: "open-at-login", label: t("native.menu.openAtLogin"), type: "checkbox", checked: openAtLogin.checked, click: () => openAtLogin.onToggle(!openAtLogin.checked) }] : [];
   const roles = roleMenus(t, isMac);
   const appMenu = {
     label: app.name,
     submenu: [
       role(t, "about", "native.role.about", { app: app.name }),
       { label: t("native.menu.preferences"), accelerator: "CmdOrCtrl+,", click: () => onOpenSettings() },
+      ...atLogin,
       { type: "separator" },
       role(t, "hide", "native.role.hide", { app: app.name }),
       role(t, "hideOthers", "native.role.hideOthers"),
@@ -131,7 +138,7 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
   };
   const template = [
     ...(isMac ? [appMenu] : []),
-    roles.file,
+    !isMac && openAtLogin ? { ...roles.file, submenu: [...atLogin, { type: "separator" }, role(t, "quit", "native.role.quit")] } : roles.file,
     roles.edit,
     ...(home && !others.length ? [] : [server]),
     roles.view,

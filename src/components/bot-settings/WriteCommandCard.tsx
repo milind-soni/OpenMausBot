@@ -102,7 +102,7 @@ export function WriteCommandCard({ bot, taken, onSaved }: { bot: Bot; taken: rea
           onChange={(e) => setInstructions(e.target.value)}
         />
         <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 text-[11.5px] text-ink-secondary">
+          <div className="min-w-0 text-[12px] text-ink-secondary">
             {touched && problem ? t(PROBLEM_KEY[problem]) : message}
           </div>
           <button

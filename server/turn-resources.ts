@@ -12,6 +12,13 @@ export class TurnResources {
   /** Only turns actually waiting: a lazy claim that failed once and moved on must not block the front. */
   private readonly waiters = new Map<string, TurnOwner[]>();
   private readonly waitStats = new Map<string, { ewmaMs: number; samples: number }>();
+  private readonly claimListeners = new Set<(resource: string, owner: TurnOwner) => void>();
+
+  /** Told each time a claim makes a turn a resource's new holder; returns the way to stop listening. */
+  onClaim(listener: (resource: string, owner: TurnOwner) => void): () => void {
+    this.claimListeners.add(listener);
+    return () => { this.claimListeners.delete(listener); };
+  }
 
   startWaiting(resource: string, owner: TurnOwner): number {
     const queue = this.waiters.get(resource);
@@ -70,6 +77,7 @@ export class TurnResources {
       if (!queue.length) this.waiters.delete(resource);
     }
     this.owners.set(resource, owner);
+    for (const listener of this.claimListeners) listener(resource, owner);
     return true;
   }
 

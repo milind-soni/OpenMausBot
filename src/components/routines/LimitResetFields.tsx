@@ -12,7 +12,7 @@ export function LimitResetFields({ value, botEngine, onChange }: { value: LimitR
   const choices = [...new Set([...(botEngine ? [botEngine] : []), ...limits.map((limit) => limit.engine), ...(engine ? [engine] : [])])];
   const reset = limits.find((limit) => limit.engine === engine)?.resetsAt ?? null;
   return (
-    <div className="space-y-2 text-[12.5px] text-ink" data-testid="limit-reset-fields">
+    <div className="space-y-2 text-[13px] text-ink" data-testid="limit-reset-fields">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{t("routines.limitReset.engine")}</span>
         <Select aria-label={t("routines.limitReset.engine")} value={engine} onChange={(event) => onChange({ ...value, engine: event.target.value })}>
@@ -23,7 +23,7 @@ export function LimitResetFields({ value, botEngine, onChange }: { value: LimitR
           <option value="every_reset">{t("routines.limitReset.every")}</option>
         </Select>
       </div>
-      <div className="text-[11.5px] text-ink-secondary">
+      <div className="text-[12px] text-ink-secondary">
         {reset !== null && reset > Date.now() ? t("routines.limitReset.next", { time: resetTime(reset) }) : t("routines.limitReset.unknown")}
       </div>
     </div>

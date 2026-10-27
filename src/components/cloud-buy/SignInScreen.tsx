@@ -64,17 +64,17 @@ export function SignInScreen({ phase, email, code, profileEmail, busy, now, onBa
       <Heading title={title} sub={t("cloudBuy.signIn.sub")} />
     </div>
     {phase.step === "email" && <form className="flex flex-col gap-1.5" onSubmit={submit} noValidate>
-      <label htmlFor="cloud-add-email" className="text-[12.5px] font-medium text-ink-secondary">{t("cloudBuy.signIn.email")}</label>
+      <label htmlFor="cloud-add-email" className="text-[13px] font-medium text-ink-secondary">{t("cloudBuy.signIn.email")}</label>
       <input id="cloud-add-email" data-autofocus type="email" autoComplete="email" inputMode="email" spellCheck={false} value={email} disabled={busy}
         aria-invalid={problem === "invalid-email" || undefined} aria-describedby={problem ? "cloud-add-problem" : undefined}
         onChange={event => onEmail(event.target.value)} className={FIELD} />
       <button type="submit" className={`${PRIMARY_WIDE} mt-1.5`} disabled={busy || !email.trim()}>
         {busy && <Loader2 size={16} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />}{t("cloudBuy.signIn.send")}
       </button>
-      {profileEmail && email.trim().toLowerCase() === profileEmail.trim().toLowerCase() && <p className="text-[12.5px] text-ink-tertiary">{t("cloudBuy.signIn.fromProfile")}</p>}
+      {profileEmail && email.trim().toLowerCase() === profileEmail.trim().toLowerCase() && <p className="text-[13px] text-ink-tertiary">{t("cloudBuy.signIn.fromProfile")}</p>}
     </form>}
     {phase.step === "code" && <div className="flex flex-col gap-2">
-      <p id="cloud-add-code-label" className="text-[12.5px] font-medium text-ink-secondary">
+      <p id="cloud-add-code-label" className="text-[13px] font-medium text-ink-secondary">
         {t("cloudBuy.signIn.codeLabel", { email: phase.email })} · <button type="button" className={LINK} disabled={busy} onClick={onChangeEmail}>{t("cloudBuy.signIn.change")}</button>
       </p>
       <div role="group" aria-labelledby="cloud-add-code-label" className="grid grid-cols-8 gap-1.5" dir="ltr">
@@ -86,8 +86,8 @@ export function SignInScreen({ phase, email, code, profileEmail, busy, now, onBa
           onFocus={event => event.currentTarget.select()}
           className={`${FIELD} min-w-0 px-0 py-2.5 text-center text-[20px] font-semibold tabular-nums`} />)}
       </div>
-      {phase.signupOpen === false && <p data-cloud-signup-closed className="text-[12.5px] leading-relaxed text-ink-secondary">{t("cloudBuy.signIn.signupClosedNote")}</p>}
-      <div className="flex min-h-6 items-center justify-between gap-3 text-[12.5px] text-ink-tertiary">
+      {phase.signupOpen === false && <p data-cloud-signup-closed className="text-[13px] leading-relaxed text-ink-secondary">{t("cloudBuy.signIn.signupClosedNote")}</p>}
+      <div className="flex min-h-6 items-center justify-between gap-3 text-[13px] text-ink-tertiary">
         {busy ? <span role="status" className="inline-flex items-center gap-1.5"><Loader2 size={13} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />{t("cloudBuy.signIn.checking")}</span>
           : phase.resendAt > now ? <span>{t("cloudBuy.signIn.resendIn", { time: clock(phase.resendAt - now) })}</span>
             : <button type="button" className={LINK} onClick={onResend}>{t("cloudBuy.signIn.resend")}</button>}
@@ -101,7 +101,7 @@ export function SignInScreen({ phase, email, code, profileEmail, busy, now, onBa
       {browser && <button type="button" className="ui-button ui-button-primary" onClick={onBrowser}>{t("cloudBuy.signIn.continueBrowser")}<ExternalLink size={14} aria-hidden="true" /></button>}
       {problem === "expired" && phase.step === "code" && <button type="button" className="ui-button" disabled={busy} onClick={onResend}>{t("cloudBuy.signIn.newCode")}</button>}
     </div>}
-    {phase.step !== "done" && !browser && <p className="text-[12.5px] text-ink-tertiary">{t("cloudBuy.signIn.ssoHint")}{" "}
+    {phase.step !== "done" && !browser && <p className="text-[13px] text-ink-tertiary">{t("cloudBuy.signIn.ssoHint")}{" "}
       <button type="button" className={LINK} onClick={onBrowser}>{t("cloudBuy.signIn.continueBrowser")}</button></p>}
   </div>;
 }
@@ -112,7 +112,7 @@ export function BrowserSignInScreen({ code, checkout, trial, busy, onReopen, onC
 }) {
   return <div data-cloud-add="signing-in" className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
     <Heading title={t("cloudAdd.browserTitle")} />
-    {code ? <ol className="list-decimal ps-5 text-[13.5px] leading-relaxed text-ink marker:text-ink-tertiary">
+    {code ? <ol className="list-decimal ps-5 text-[14px] leading-relaxed text-ink marker:text-ink-tertiary">
       <li>{t("cloudAdd.signInStep1")}</li>
       <li>{t("cloudAccount.codeCheck")}<code dir="ltr" className="mt-1 block select-all text-[18px] font-semibold tracking-widest">{code}</code></li>
       <li>{t(!checkout ? "cloudAdd.signInStep3Connect" : trial ? "cloudAdd.signInStep3Trial" : "cloudAdd.signInStep3")}</li>

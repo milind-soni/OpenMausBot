@@ -129,7 +129,7 @@ export function ComputerFilesPane({ bot }: { bot: Bot }) {
                   ) : (
                     <div className="flex min-w-0 items-center gap-2 px-2.5 py-2" title={t("computer.files.notSharedHint")}>
                       <FileText size={14} className="shrink-0 text-ink-secondary" aria-hidden="true" />
-                      <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink">{name}</span>
+                      <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{name}</span>
                       <span className="shrink-0 text-[11px] text-ink-tertiary">{t("computer.files.notShared")}</span>
                     </div>
                   )}

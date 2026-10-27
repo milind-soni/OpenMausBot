@@ -14,6 +14,7 @@ import { closeMessageDb,
   lastRowAt,
   latestPersonLineAts,
   logNotification,
+  openRescueMessages,
   latestSaidByBot,
   markNotificationLogRead,
   markThreadNotificationLogRead,
@@ -61,6 +62,19 @@ describe("message-db", () => {
     const thread = readThread("t1", legacy("t1"));
     expect(thread.messages.map((m) => m.text)).toEqual(["hello, edited", "world"]);
     expect(thread.activeLeafId).toBe("m2");
+  });
+
+  it("finds the first-reply rescue rows that never settled or ended", () => {
+    const rescue = (id: string, state: Record<string, true> = {}) => msg(id, "", {
+      role: "bot", kind: "activity",
+      tool: { name: "notice: Maus hasn't heard back from OpenCode yet.", ok: true,
+        rescue: { botId: "b", threadId: "t1", turnId: id, instanceId: "opencodeGo", ai: "OpenCode", ...state } },
+    });
+    insertMessage("t1", rescue("open"));
+    insertMessage("t1", rescue("settled", { settled: true }));
+    insertMessage("t1", rescue("over", { over: true }));
+    insertMessage("t1", msg("plain", "", { role: "bot", kind: "activity", tool: { name: "notice: something else", ok: true } }));
+    expect(openRescueMessages().map((hit) => [hit.threadId, hit.message.id])).toEqual([["t1", "open"]]);
   });
 
   it("imports a legacy JSON thread file exactly once", () => {
@@ -503,6 +517,18 @@ describe("notification_log", () => {
     const logged = logNotification({ kind: "question", botId: "bot-1", botName: "Scout", threadId: "thread-1", title: "Scout asks", body: "Which?" });
     expect(logged).toMatchObject({ kind: "question", read: false });
     expect(recentNotificationLog()).toEqual([logged]);
+  });
+
+  it("keeps the one person a notification is for, in a feed made before that was recorded too", () => {
+    closeMessageDb();
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(join(DATA_DIR, `messages.db${suffix}`), { force: true });
+    const old = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    old.exec("CREATE TABLE notification_log (id TEXT PRIMARY KEY, at INTEGER NOT NULL, kind TEXT NOT NULL, bot_id TEXT NOT NULL, bot_name TEXT NOT NULL, thread_id TEXT NOT NULL, group_id TEXT, title TEXT NOT NULL, body TEXT NOT NULL, avatar_url TEXT, read INTEGER NOT NULL DEFAULT 0)");
+    old.exec("INSERT INTO notification_log VALUES ('before', 1, 'done', 'bot-1', 'Scout', 'thread-1', NULL, 'Scout finished', 'Done', NULL, 0)");
+    old.close();
+    const tagged = logNotification({ kind: "mention", botId: "bot-1", botName: "Scout", threadId: "thread-1", title: "Ada mentioned you", body: "@Bob look", forPerson: "p_bobbobbobbobbobbobbobb" });
+    expect(recentNotificationLog()).toEqual([tagged, expect.objectContaining({ id: "before" })]);
+    expect(recentNotificationLog()[1]).not.toHaveProperty("forPerson");
   });
 
   it("forgets a thread's notifications when the thread is deleted", () => {

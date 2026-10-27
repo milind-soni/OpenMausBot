@@ -8,7 +8,7 @@ import type { NotifyKind } from "../shared/notification.ts";
 import { audienceMember, type Audience } from "./audience.ts";
 
 /** The notifications that are a bot asking a person for something; "done", "mention" and the rest reach whoever sees
- * the conversation, as before. */
+ * the conversation, unless one names its person (`forPerson`). */
 export const ASK_NOTIFICATIONS: ReadonlySet<NotifyKind> = new Set([
   "approval", "question", "sign-in", "routine-failed", "routine-deferred", "turn-failed", "incident",
 ]);
@@ -45,8 +45,10 @@ export function createAskRouting(deps: AskRoutingDeps) {
     return person === null ? viewer.admin : person === viewer.person;
   }
 
-  /** Whether a notification reaches this viewer: an ask only its person, anything else whoever sees it. */
-  function notificationReaches(viewer: AskViewer, notification: { kind?: unknown; botId?: unknown; threadId?: unknown }): boolean {
+  /** Whether a notification reaches this viewer: one for a person only them, an ask only its person, anything else
+   * whoever sees it. */
+  function notificationReaches(viewer: AskViewer, notification: { kind?: unknown; botId?: unknown; threadId?: unknown; forPerson?: unknown }): boolean {
+    if (deps.team && typeof notification.forPerson === "string") return notification.forPerson === viewer.person;
     if (!deps.team || typeof notification.threadId !== "string" || !ASK_NOTIFICATIONS.has(notification.kind as NotifyKind)) return true;
     return asks(viewer, typeof notification.botId === "string" ? notification.botId : undefined, notification.threadId);
   }

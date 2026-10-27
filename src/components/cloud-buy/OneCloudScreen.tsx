@@ -14,7 +14,7 @@ export function OneCloudScreen({ name, color, busy, interest, openFailed, onInte
       {interest !== "sent" && <button type="button" className="ui-button" disabled={busy} onClick={onInterest}>{t("cloudBuy.one.email")}</button>}
       <button type="button" className="ui-button ui-button-primary" disabled={busy} onClick={onOpen}>{t("cloudBuy.setup.open", { name })}</button>
     </div>
-    <div aria-live="polite" className="text-[12.5px] empty:-mt-4">
+    <div aria-live="polite" className="text-[13px] empty:-mt-4">
       {interest === "sent" && <p className="text-ink-secondary">{t("cloudBuy.one.thanks")}</p>}
       {interest === "failed" && <p role="alert" className="text-danger">{t("cloudBuy.one.failed")}</p>}
       {openFailed && <p role="alert" className="text-danger">{t("cloudBuy.openFailed", { name })}</p>}
@@ -26,7 +26,7 @@ export function OneCloudScreen({ name, color, busy, interest, openFailed, onInte
 export function StatusScreen({ kind, line, onRetry, onClose }: { kind: string; line: string | null; onRetry?: () => void; onClose: () => void }) {
   return <div data-cloud-add={kind} className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
     <Heading title={t("cloudAdd.title")} />
-    {line ? <p role="alert" className="text-[13.5px] leading-relaxed text-ink">{line}</p>
+    {line ? <p role="alert" className="text-[14px] leading-relaxed text-ink">{line}</p>
       : <p role="status" className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />{t("cloudAdd.checking")}</p>}
     <div className="flex flex-wrap items-center justify-end gap-2">
       <button type="button" className="ui-button" onClick={onClose}>{t("cloudAdd.close")}</button>

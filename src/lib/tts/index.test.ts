@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { VoiceProbeSample } from "../../../shared/voice-latency-probe";
 
 import { Speaker } from "./index";
 import { setLocale } from "../i18n";
@@ -461,5 +462,162 @@ describe("prefetch window", () => {
     expect(gates[1]!.signal?.aborted).toBe(true);
     expect(gates[2]!.signal?.aborted).toBe(true);
     expect(playedUrls).toEqual(["blob:block-1"]);
+  });
+});
+
+describe("stream identification", () => {
+  beforeEach(() => {
+    FakeAudio.latest = null;
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.stubGlobal("Audio", FakeAudio);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:voice-test");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  });
+
+  it("adopts the completed message id into the snapshot and probe records", async () => {
+    const probe: VoiceProbeSample[] = [];
+    vi.stubGlobal("window", { __ombVoiceProbe: probe });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith("/prepare")
+          ? json({ ready: true, utterances: ["Hello.", "Bye."] })
+          : new Response(new Blob(["mp3"]), { status: 200 }),
+      ),
+    );
+    const captions: string[] = [];
+    const speaker = new Speaker();
+    const stream = speaker.begin({ botId: "bot" });
+    expect(speaker.state).toEqual({ status: "preparing", botId: "bot" });
+    expect(speaker.isSpeaking("m9")).toBe(false);
+    speaker.subscribe((snapshot) => {
+      if (snapshot.caption) captions.push(snapshot.caption);
+    });
+    stream.identify("m9");
+    expect(speaker.state).toEqual({ status: "preparing", botId: "bot", messageId: "m9" });
+    expect(speaker.isSpeaking("m9")).toBe(true);
+    for (const block of await stream.prepare("Hello. Bye.")) stream.push(block);
+    for (const caption of ["Hello.", "Bye."]) {
+      await vi.waitFor(() => expect(captions).toContain(caption));
+      FakeAudio.latest!.onended?.();
+    }
+    await stream.end();
+    expect(speaker.state).toEqual({ status: "idle" });
+    const sample = probe.find((entry) => entry.messageId === "m9");
+    expect(sample?.blockCount).toBe(2);
+    expect(sample?.blocks).toHaveLength(2);
+    expect(sample?.blocks[0]?.renderStartAt).toBeDefined();
+  });
+
+  it("cancel tears down only the stream that is still current", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith("/prepare")
+          ? json({ ready: true, utterances: ["Old."] })
+          : new Response(new Blob(["mp3"]), { status: 200 }),
+      ),
+    );
+    const speaker = new Speaker();
+    const first = speaker.begin({});
+    first.push("Old.");
+    const second = speaker.begin({});
+
+    first.cancel();
+    expect(speaker.state).toEqual({ status: "preparing" });
+
+    second.cancel();
+    expect(speaker.state).toEqual({ status: "idle" });
+  });
+});
+
+describe("local system voice stream", () => {
+  const makeSynth = () => ({
+    speak: vi.fn(),
+    cancel: vi.fn(),
+    getVoices: (): SpeechSynthesisVoice[] => [],
+  });
+  let synth = makeSynth();
+  let spoken: FakeUtterance[] = [];
+
+  class FakeUtterance {
+    text: string;
+    voice: SpeechSynthesisVoice | null = null;
+    onstart: (() => void) | null = null;
+    onend: (() => void) | null = null;
+    onerror: ((event: { error: string }) => void) | null = null;
+
+    constructor(text: string) {
+      this.text = text;
+      spoken.push(this);
+    }
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    synth = makeSynth();
+    spoken = [];
+    vi.stubGlobal("window", {
+      ogb: { remoteClient: { active: true }, platform: "darwin" },
+      speechSynthesis: synth,
+      SpeechSynthesisUtterance: FakeUtterance,
+    });
+  });
+
+  it("resets the preparing state when nothing was ever pushed", async () => {
+    const speaker = new Speaker();
+    const stream = speaker.begin({ botId: "bot" });
+    expect(speaker.state).toEqual({ status: "preparing", botId: "bot" });
+    expect(speaker.isSpeaking()).toBe(true);
+
+    await stream.end();
+
+    expect(speaker.state).toEqual({ status: "idle" });
+    expect(speaker.isSpeaking()).toBe(false);
+  });
+
+  it("does not speak a block queued before a newer stream took over", async () => {
+    const speaker = new Speaker();
+    const first = speaker.begin({ botId: "bot" });
+    first.push("Stale words.");
+    const second = speaker.begin({ botId: "bot" });
+    second.identify("m2");
+
+    await first.end();
+    expect(synth.speak).not.toHaveBeenCalled();
+
+    second.push("Fresh words.");
+    await vi.waitFor(() => expect(spoken.map((utterance) => utterance.text)).toEqual(["Fresh words."]));
+    spoken[0]!.onstart?.();
+    expect(speaker.state).toEqual({ status: "speaking", botId: "bot", messageId: "m2", caption: "Fresh words." });
+    spoken[0]!.onend?.();
+    await second.end();
+    expect(speaker.state).toEqual({ status: "idle" });
+  });
+
+  it("surfaces a failure and resets a live stream", () => {
+    const speaker = new Speaker();
+    const stream = speaker.begin({ botId: "bot" });
+
+    stream.fail("splitter down");
+
+    expect(speaker.state).toEqual({ status: "idle", error: "splitter down" });
+  });
+
+  it("cancel silences only a stream that is still current", () => {
+    const speaker = new Speaker();
+    const first = speaker.begin({ botId: "bot" });
+    const second = speaker.begin({ botId: "bot" });
+    const cancelsBefore = synth.cancel.mock.calls.length;
+
+    first.cancel();
+    expect(speaker.state).toEqual({ status: "preparing", botId: "bot" });
+    expect(synth.cancel.mock.calls.length).toBe(cancelsBefore);
+
+    second.cancel();
+    expect(speaker.state).toEqual({ status: "idle" });
+    expect(synth.cancel.mock.calls.length).toBe(cancelsBefore + 1);
   });
 });

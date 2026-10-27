@@ -27,14 +27,14 @@ export function PermissionsBeat({ onNext, onSkip, setMascot, bump }: BeatProps) 
 
   return (
     <div className="flex flex-col">
-      <p className="animate-rise mt-1 text-[13.5px] text-ink-secondary">{t("onboarding.perms.intro")}</p>
+      <p className="animate-rise mt-1 text-[14px] text-ink-secondary">{t("onboarding.perms.intro")}</p>
       <div className="stagger mt-4 flex flex-col gap-2.5">
         <div className="animate-rise flex items-center justify-between gap-3 rounded-xl bg-card p-3.5" style={staggerIndex(1)}>
           <div className="flex items-start gap-3">
             <Mic size={18} className="mt-0.5 shrink-0 text-ink-secondary" />
             <div>
               <div className="text-[14px] font-medium text-ink">{t("onboarding.perms.mic")}</div>
-              <div className="mt-0.5 text-[12.5px] text-ink-secondary">{t("onboarding.perms.micDetail")}</div>
+              <div className="mt-0.5 text-[13px] text-ink-secondary">{t("onboarding.perms.micDetail")}</div>
             </div>
           </div>
           {granted ? (

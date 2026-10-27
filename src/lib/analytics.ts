@@ -208,11 +208,11 @@ export function track(event: string, props?: Record<string, unknown>) {
   whenReady((ph) => ph.capture(event, props));
 }
 
-// Sends a personal identifier, so it is gated on analyticsEnabled(), not on opt_out_capturing() alone.
-export function identifyEmail(email: string, { submitted = true }: { submitted?: boolean } = {}) {
+// Sends a personal identifier, so it is gated on analyticsEnabled(), not on opt_out_capturing() alone. Only a counted
+// Cloud Pro popup click by someone signed in to MausBot Cloud calls it; the first-run screen asks for no email.
+export function identifyEmail(email: string) {
   whenReady((ph) => {
     ph.identify(email, { email });
-    if (submitted) ph.capture("email_submitted");
   });
 }
 

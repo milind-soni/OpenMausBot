@@ -44,7 +44,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
   };
   const choice = (value: SetUpKind, label: string, Icon: typeof CalendarClock) => (
     <button type="button" role="radio" aria-checked={kind === value} onClick={() => setKind(value)}
-      className={cn("flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left text-[13.5px]", kind === value ? "border-accent/70 bg-accent/10 text-ink" : "border-hairline/50 text-ink-secondary hover:bg-raised")}>
+      className={cn("flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left text-[14px]", kind === value ? "border-accent/70 bg-accent/10 text-ink" : "border-hairline/50 text-ink-secondary hover:bg-raised")}>
       <Icon size={16} className="shrink-0 text-accent" />{label}
     </button>
   );
@@ -64,7 +64,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
               {choice("webhook", t("automations.newBox.whenApp"), Share2)}
             </div>
             <div className="mt-5 flex items-center justify-between gap-2">
-              <button type="button" onClick={() => setYourself(false)} className="rounded-lg px-2 py-1.5 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink">{t("automations.newBox.back")}</button>
+              <button type="button" onClick={() => setYourself(false)} className="rounded-lg px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">{t("automations.newBox.back")}</button>
               <button type="button" onClick={() => onSetUpYourself(kind, bot?.id ?? "")} className="rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-accent-ink hover:brightness-110">{t("automations.newBox.continue")}</button>
             </div>
           </>
@@ -73,9 +73,9 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
             <textarea autoFocus value={text} onChange={(event) => setText(event.target.value)} rows={3} placeholder={t("automations.newBox.placeholder")}
               onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }}
               className="mt-4 w-full resize-none rounded-xl border border-hairline/60 bg-inset px-3.5 py-3 text-[14px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/70" />
-            {bots.length === 0 && <p className="mt-2 text-[12.5px] text-warning">{t("automations.newBox.noBots")}</p>}
+            {bots.length === 0 && <p className="mt-2 text-[13px] text-warning">{t("automations.newBox.noBots")}</p>}
             {bots.length > 1 && (
-              <label className="mt-3 flex items-center gap-2 text-[12.5px] text-ink-secondary">
+              <label className="mt-3 flex items-center gap-2 text-[13px] text-ink-secondary">
                 {t("automations.newBox.bot")}
                 <Select size="sm" value={botId} onChange={(event) => setBotId(event.target.value)} aria-label={t("automations.newBox.bot")} className="max-w-[220px]">
                   {bots.map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.name}</option>)}
@@ -83,7 +83,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
               </label>
             )}
             <div className="mt-4 flex items-center justify-between gap-2">
-              <button type="button" onClick={() => setYourself(true)} className="rounded-lg px-2 py-1.5 text-[12.5px] text-ink-secondary underline-offset-2 hover:text-ink hover:underline">{t("automations.newBox.yourself")}</button>
+              <button type="button" onClick={() => setYourself(true)} className="rounded-lg px-2 py-1.5 text-[13px] text-ink-secondary underline-offset-2 hover:text-ink hover:underline">{t("automations.newBox.yourself")}</button>
               <button type="button" disabled={!text.trim() || !bot} onClick={send} className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-accent-ink hover:brightness-110 disabled:opacity-40"><Send size={14} />{t("automations.newBox.send")}</button>
             </div>
           </>

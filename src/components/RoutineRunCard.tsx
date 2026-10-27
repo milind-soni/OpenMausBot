@@ -89,12 +89,12 @@ export function RoutineRunCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <h3 className="truncate text-[14px] font-semibold text-ink">{run.routineName}</h3>
-            <span aria-live="polite" className={cn("inline-flex items-center gap-1 text-[11.5px] font-semibold", copy.tone)}>
+            <span aria-live="polite" className={cn("inline-flex items-center gap-1 text-[12px] font-semibold", copy.tone)}>
               {run.status === "running" && !run.goalStatus && <Loader2 aria-hidden="true" className="size-3 animate-spin" />}
               {t(copy.label)}
             </span>
           </div>
-          <time dateTime={new Date(run.scheduledFor ?? message.at).toISOString()} className="mt-0.5 block text-[11.5px] text-ink-secondary">
+          <time dateTime={new Date(run.scheduledFor ?? message.at).toISOString()} className="mt-0.5 block text-[12px] text-ink-secondary">
             {routineDateTime(run.scheduledFor ?? message.at)}
           </time>
           {detail && <p className="mt-1.5 text-[13px] leading-relaxed text-ink-secondary">{detail}</p>}

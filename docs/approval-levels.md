@@ -1,7 +1,8 @@
 # Approval levels
 
 Approval levels belong to a bot and apply to its next provider turn, including
-when that provider resumes an existing native thread. Each level is one of the
+when that provider resumes an existing native thread. You can also change one
+while the bot is working (see below). Each level is one of the
 provider's own permission modes, passed through. A native tool request that
 reaches you is one the provider left for you. OpenMausBot only answers from an
 explicit grant: Full Access, a saved exact command or MCP read-shaped tool, or
@@ -41,13 +42,36 @@ desktop app, where the choice crosses a private process channel rather than the
 bot-accessible HTTP API, because it holds restrictions you wrote yourself. It
 is hidden in development, standalone web, and remote pages.
 
+### Changing the level while the bot works
+
+You don't have to stop a bot to change its level. From the moment you pick
+one, every approval decision OMB makes in that conversation uses it. How far
+that reaches depends on who runs the tools:
+
+- **API engines** (OpenAI-compatible, Grok API, MiniMax, Mistral, Cerebras,
+  Groq, Meta): OMB's tool gate reads the level before each tool call, so the
+  change applies from the next call, up or down.
+- **Engines with their own modes** (Codex, Claude, Cursor, Antigravity, Grok
+  Build, Qwen Code, Gemini CLI, Droid, Pi's custom MCP tools): the engine got
+  its mode when the turn started and keeps it to the end of the turn. A
+  permission request it still sends is answered at the new level, so raising
+  to Full access applies to the next request. Lowering from Full access, and
+  moving between Ask, Auto-accept edits and Approve for me, applies from the
+  next turn.
+- **Agents whose requests OMB answers** (OpenCode, Cline, Kimi, Hermes, custom
+  ACP agents, Pi's computer-control confirms): every request reaches OMB, so
+  the change applies from the next request, up or down.
+
+A request already on screen stays for you to answer, and an action already
+running finishes. A team change sets the level on working bots too.
+
 A department's sidebar menu has **Set for all bots in this department…**, for the owner
 or an admin. It sets one approval level (Ask, Auto-accept edits, Approve for
 me or Full access), or one model and effort, on every bot in that department. It
 lists what each bot will get before anything changes, then saves the bots one
 at a time with the same request and checks as each bot's own settings. A bot
-that is working, or whose engine does not offer the level, model or effort,
-is skipped and the summary gives the reason. A skipped bot is not changed
+whose engine does not offer the level, model or effort, or that is working
+during a model change, is skipped and the summary gives the reason. A skipped bot is not changed
 later: once its turn ends, run the team change again or set that bot in its
 own settings. A level reaches each bot and every one of its threads, the same
 way for every level, so a thread opened with New thread moves too; a bot is

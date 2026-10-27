@@ -101,10 +101,10 @@ Without the permission, Google refuses the call with `403 ACCESS_TOKEN_SCOPE_INS
 To grant the permission:
 
 1. In the [Composio Dashboard](https://dashboard.composio.dev), open your project's **Auth Configs** and create an auth config for the app (for example Gmail) that uses your own OAuth app credentials.
-2. Add the permissions you need to it, keep it enabled, and leave it available to Tool Router.
+2. Add the permissions you need to it and keep it enabled.
 3. In OpenMausBot, open **Connected apps** and reconnect the account. The consent screen now asks for the added permissions.
 
-OpenMausBot uses your project's own auth config for an app automatically, in place of the Composio-managed one. If there are several for the same app, it uses the most recently updated, and it skips disabled ones and ones turned off for Tool Router. Google may require your OAuth app to list the added permissions on its consent screen, and to be verified before people outside your organization can grant them.
+OpenMausBot uses your project's own auth config for an app automatically, in place of the Composio-managed one. If there are several enabled ones for the same app, it uses the most recently created, and it skips disabled ones. Google may require your OAuth app to list the added permissions on its consent screen, and to be verified before people outside your organization can grant them.
 
 On a MausBot Cloud plan, connected apps run through OpenMausBot's managed connection service rather than your own Composio project, so you cannot add permissions yourself; ask OpenMausBot support instead.
 
@@ -112,11 +112,18 @@ On a MausBot Cloud plan, connected apps run through OpenMausBot's managed connec
 
 Some apps, such as Xero and Buffer, have no sign-in that Composio provides: they connect only through an auth config holding your own OAuth app. Without one, Composio answers "Composio does not manage auth for toolkit … and no auth config without required fields is available".
 
-With your own Composio project key, create the auth config in the Composio dashboard (**Auth Configs → Create**), keep it enabled and available to Tool Router, then connect the app. OpenMausBot reads the project's enabled auth configs (at most once a minute, and again right after Composio reports a missing one) and names them in the Session, so the app connects with no further input. A Session that predates a new auth config is replaced once, under the same Composio user, so existing connections stay. If the auth configs cannot be read, the Session keeps the ones it last read; if Composio refuses the Session with them, it is created without them, and connecting that app says why.
+With your own Composio project key, create the auth config in the Composio dashboard (**Auth Configs → Create**), keep it enabled, then connect the app. Nothing else is needed:
 
-A bot can also name one auth config for an app: `COMPOSIO_MANAGE_CONNECTIONS` with `toolkits: [{ "name": "xero", "action": "add", "auth_config_id": "ac_…" }]` (`auth_config_override` is read as well). OpenMausBot checks the id in your project before it shows the Connect card (it must exist, belong to that app, be enabled and be available to Tool Router) and keeps the choice in `composio-auth-configs.json` in the data folder, so later Sessions use it while it stays usable.
+- A Tool Router Session uses one of your auth configs only while that config is *enabled for Tool Router*. A config you made yourself can have that off, and the dashboard may not show it. When an app is connected (its Connect card appears, you click **Connect**, or a bot's call to it fails for want of a config), OpenMausBot turns it on for the app's config through Composio's API. It changes nothing else in your project, and nothing for apps you don't connect.
+- OpenMausBot then names the config in its Session (`auth_configs`), changing the Session in place, so a bot that is already running keeps its tools and picks the config up on its next call. If Composio won't change the Session, a new one is made under the same Composio user, so existing connections stay.
+- If an app has several enabled auth configs, OpenMausBot uses the most recently created and tells the bot which one in the card's tool result.
+- OpenMausBot reads your project's auth configs at most once a minute, and again right away when Composio reports a missing one, so a config made while a bot is working is found on the next try. If they cannot be read, the Session keeps the ones it last read; if Composio refuses a config, connecting that app says what Composio said.
 
-OpenMausBot's managed connection service (the desktop default and MausBot Cloud) runs on OpenMausBot's own Composio project, which cannot use an auth config in yours. For such an app it says so in one line: add your own Composio project key in **Settings → API keys**, with an enabled auth config for that app in that project.
+An account you connected in the Composio dashboard belongs to a different Composio user than OpenMausBot's, so OpenMausBot does not see it: connect the app once from OpenMausBot.
+
+A bot can also name one auth config for an app: `COMPOSIO_MANAGE_CONNECTIONS` with `"auth_config_id": "ac_…"` next to a single toolkit, or `toolkits: [{ "name": "xero", "action": "add", "auth_config_id": "ac_…" }]` (`auth_config_override` is read as well). OpenMausBot adds `auth_config_id` to the tool's description so bots can see it. It checks the id in your project before it shows the Connect card (it must exist, belong to that app and be enabled) and keeps the choice in `composio-auth-configs.json` in the data folder, so later Sessions use it while it stays usable.
+
+OpenMausBot's managed connection service (the desktop default and MausBot Cloud) runs on OpenMausBot's own Composio project, which cannot use an auth config in yours. For such an app it says so in one line: add your own Composio project key in **Settings → API keys**; OpenMausBot then uses your auth config for that app from that project.
 
 ## Browser authorization recovery
 
@@ -189,5 +196,7 @@ A bot with no grant record at all keeps the legacy behavior: every tool on every
 **Nothing changes until you assign.** Upgrading OpenMausBot does not alter any bot's access: existing bots keep the all-tools default until someone edits their grants. An emptied grant list is deliberate and means "no tools on any connected app."
 
 **Imported bots land with no grants.** Shareable packages and team imports never carry grants — an imported bot starts with connected apps off, and any grants it later gets are chosen by the importing workspace. Grants also never appear in exports; only the workspace's own private team backup keeps them.
+
+**A Chief's new bots start with the Chief's apps.** A bot a Chief of Staff creates (`create_bot`, or a team setup) starts with a copy of the Chief's own connected apps, tools, read or write levels and MCP servers at that moment, never more, and the workspace's default access level. It has the Chief's owner and exactly the Chief's audience; on a Team Cloud, an app each person connects still works only in each person's own private chat, with their own connection. A bot a person creates keeps the defaults above.
 
 Grants are enforced on the real tool names at call time (including batches inside the MULTI_EXECUTE meta-tool), the tool list offered to the model is filtered to the granted set, and every allow/deny writes a decision-log row. Refusals do not enumerate what else is granted. Paired phones see each bot's grants read-only in its profile (What this bot does → App tools); grants are assigned on the computer, never from a phone.

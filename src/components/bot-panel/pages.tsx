@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { FolderOpen, Plus } from "lucide-react";
 
-import { withBotApp } from "@/lib/bot-app-access";
+import { appSwitchPatch } from "@/lib/bot-app-access";
 import { skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { MEMORY_INDEX, saveMemoryDoc } from "@/lib/memory";
@@ -40,22 +40,13 @@ function errorText(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
 
-/** One switch per connected app; the first app switched on while apps are off for the bot turns them on with only
- * that app granted. */
 export function AppsPage({ bot, derived }: PageContext) {
   const { dispatch } = useStore();
   const apps = useBotApps(bot);
-  const { patch, canUseConnectedApps, connectedAppsEnabled } = derived;
+  const { patch, canUseConnectedApps } = derived;
 
   const toggle = (app: BotApp) => {
-    const on = app.scope === null;
-    const connectorScopes = on && !connectedAppsEnabled && !bot.connectorScopes
-      ? { apps: { [app.slug]: "write" as const } }
-      : withBotApp(bot.connectorScopes, apps.connectedSlugs, app.slug, on);
-    const next = {
-      ...(connectorScopes ? { connectorScopes } : {}),
-      ...(on && !connectedAppsEnabled ? { composio: true } : {}),
-    };
+    const next = appSwitchPatch(bot, apps.connectedSlugs, app.slug, app.scope === null);
     if (Object.keys(next).length > 0) patch(next);
   };
   const note = !canUseConnectedApps
@@ -75,7 +66,7 @@ export function AppsPage({ bot, derived }: PageContext) {
         {canUseConnectedApps && apps.apps.map((app) => (
           <div key={app.slug} data-simple-app={app.slug} className={rowCls}>
             <ServiceIcon key={`${app.card.logo}:${app.card.domain}`} card={app.card} className="size-7 shrink-0" />
-            <div className="min-w-0 flex-1 truncate text-[13.5px] font-medium text-ink">{app.label}</div>
+            <div className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{app.label}</div>
             <BotSwitch
               color={bot.color}
               checked={app.scope !== null}
@@ -120,7 +111,7 @@ export function RoutinesPage({ bot, derived }: PageContext) {
       <Card>
         <LinkRow data-panel-action="new-routine" icon={Plus} onClick={() => setEditing("new")}>{t("botPanel.routines.add")}</LinkRow>
       </Card>
-      <p className="mx-1 text-[12.5px] leading-normal text-ink-secondary">{t("botPanel.routines.ask", { name: bot.name })}</p>
+      <p className="mx-1 text-[13px] leading-normal text-ink-secondary">{t("botPanel.routines.ask", { name: bot.name })}</p>
       {editing && (
         <RoutineEditor
           key={bot.id}
@@ -348,7 +339,7 @@ export function FolderPage({ bot }: PageContext) {
         <Card>
           {canPick ? (
             <div className={rowCls}>
-              <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink" title={bot.cwd}>
+              <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink" title={bot.cwd}>
                 {bot.cwd ? shortPath(bot.cwd, home) : <span className="text-ink-secondary">{t("botAccess.folder.private")}</span>}
               </div>
               <button type="button" data-panel-action="pick-folder" disabled={saving} onClick={() => void pick()} className={buttonCls}>
@@ -371,7 +362,7 @@ export function FolderPage({ bot }: PageContext) {
                 placeholder={t("botAccess.folder.placeholder")}
                 aria-label={t("botAccess.folder.title")}
                 onChange={(event) => setDraft(event.target.value)}
-                className="h-8 min-w-0 flex-1 rounded-lg border border-hairline bg-inset px-2.5 font-mono text-[12.5px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent-border"
+                className="h-8 min-w-0 flex-1 rounded-lg border border-hairline bg-inset px-2.5 font-mono text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent-border"
               />
               <button type="submit" disabled={saving || draft === null} className={buttonCls}>{t("botAccess.folder.save")}</button>
             </form>

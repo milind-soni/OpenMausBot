@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { botAppScope, withBotApp } from "./bot-app-access";
+import { appSwitchPatch, botAppScope, withBotApp } from "./bot-app-access";
 
 describe("what one bot may do with a connected app", () => {
   it("is everything while nobody has scoped the bot", () => {
@@ -18,6 +18,12 @@ describe("what one bot may do with a connected app", () => {
     expect(botAppScope(bot, "gmail")).toBe("read");
     expect(botAppScope(bot, "slack")).toBe("write");
     expect(botAppScope(bot, "github")).toBeNull();
+  });
+
+  it("is off for an app the bot's tool list leaves out, so the switch says what the bot can call", () => {
+    const listed = { connectorTools: { gmail: { tools: "*" as const } } };
+    expect(botAppScope(listed, "gmail")).toBe("write");
+    expect(botAppScope(listed, "youtube")).toBeNull();
   });
 });
 
@@ -47,5 +53,33 @@ describe("switching one app on or off for a bot", () => {
 
   it("keeps a read-only app read-only when it is already on", () => {
     expect(withBotApp({ apps: { gmail: "read" } }, connected, "gmail", true)).toBeUndefined();
+  });
+});
+
+describe("the patch one app switch saves", () => {
+  const connected = ["gmail", "youtube"];
+
+  it("gives the app every tool when the bot's tool list leaves it out", () => {
+    const bot = { connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] } } };
+    expect(appSwitchPatch(bot, connected, "youtube", true)).toEqual({
+      connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] }, youtube: { tools: "*" } },
+    });
+  });
+
+  it("keeps the tools already chosen for the app", () => {
+    const bot = { connectorScopes: { apps: {} }, connectorTools: { youtube: { tools: ["YOUTUBE_UPLOAD_VIDEO"] } } };
+    expect(appSwitchPatch(bot, connected, "youtube", true)).toEqual({ connectorScopes: { apps: { youtube: "write" } } });
+  });
+
+  it("leaves the tool list alone when the switch goes off", () => {
+    const bot = { connectorTools: { youtube: { tools: "*" as const } } };
+    expect(appSwitchPatch(bot, connected, "youtube", false)).toEqual({ connectorScopes: { apps: { gmail: "write" } } });
+  });
+
+  it("turns the bot's apps on with only that app when they were off", () => {
+    expect(appSwitchPatch({ composio: false }, connected, "youtube", true)).toEqual({
+      composio: true,
+      connectorScopes: { apps: { youtube: "write" } },
+    });
   });
 });

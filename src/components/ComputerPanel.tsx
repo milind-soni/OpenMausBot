@@ -1080,7 +1080,7 @@ export function ComputerPanel({
       <Globe size={15} className="shrink-0 text-ink-secondary" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-medium text-ink">{t("computer.browserSwitch.title", { name: bot.name })}</div>
-        {!browserCanTurnOn && <div className="text-[11.5px] text-ink-secondary">{browserUnavailableReason(state.config)}</div>}
+        {!browserCanTurnOn && <div className="text-[12px] text-ink-secondary">{browserUnavailableReason(state.config)}</div>}
       </div>
       <Switch
         checked={browserEnabled}
@@ -1157,7 +1157,7 @@ export function ComputerPanel({
     && liveTask.surface !== profileBot.computer ? liveTask.surface : undefined;
 
   const tabClass = (active: boolean) => cn(
-    "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] transition-colors @max-[28rem]/paneltabs:[&>svg]:hidden @max-[22rem]/paneltabs:px-2",
+    "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[13px] transition-colors @max-[28rem]/paneltabs:[&>svg]:hidden @max-[22rem]/paneltabs:px-2",
     active ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
   );
 
@@ -1718,11 +1718,11 @@ export function ComputerPanel({
             ))}
           </div>
           {liveTask?.surface && (
-            <p className="mt-2 text-[11.5px] leading-5 text-ink-secondary" data-testid="place-pinned-note">
+            <p className="mt-2 text-[12px] leading-5 text-ink-secondary" data-testid="place-pinned-note">
               {t("place.pinnedNote", { place: t(placeLabelKey(liveTask.surface)) })}
             </p>
           )}
-          <div className="mt-3 border-t border-hairline/40 pt-3 text-[11.5px] leading-5 text-ink-secondary" aria-live="polite" data-testid="place-line">
+          <div className="mt-3 border-t border-hairline/40 pt-3 text-[12px] leading-5 text-ink-secondary" aria-live="polite" data-testid="place-line">
             {worksOnView.line}
             {placeActionButton(worksOnView, "mt-1 block font-medium text-accent hover:underline")}
           </div>
@@ -1739,7 +1739,7 @@ export function ComputerPanel({
           <CalendarClock size={17} className="mt-0.5 shrink-0 text-accent" />
           <span className="min-w-0 flex-1">
             <span className="block text-[14px] font-medium text-ink">{t("computer.tab.routines")} <span className="ml-1 text-[11px] text-ink-secondary">{botRoutines.length}</span></span>
-            <span className={cn("mt-1 block truncate text-[11.5px]", activeRoutineRun ? routineRunTone(activeRoutineRun) : "text-ink-secondary")}>{activeRoutineRun ? `${activeRoutineRun.routineName} · ${routineRunLabel(activeRoutineRun)}` : t("computer.routines.openTitle")}</span>
+            <span className={cn("mt-1 block truncate text-[12px]", activeRoutineRun ? routineRunTone(activeRoutineRun) : "text-ink-secondary")}>{activeRoutineRun ? `${activeRoutineRun.routineName} · ${routineRunLabel(activeRoutineRun)}` : t("computer.routines.openTitle")}</span>
           </span>
           <span className="text-ink-secondary" aria-hidden="true">→</span>
         </button>
@@ -1765,17 +1765,17 @@ export function ComputerPanel({
                 >
                   <Icon size={16} className={cn("shrink-0", selected ? "text-accent" : "text-ink-secondary")} aria-hidden="true" />
                   <span className="w-full truncate text-[12px] font-medium leading-4">{simpleLabel}</span>
-                  {issue && <span className="w-full truncate text-[10.5px] leading-3 text-ink-secondary">{view.short}</span>}
+                  {issue && <span className="w-full truncate text-[11px] leading-3 text-ink-secondary">{view.short}</span>}
                 </button>
               ))}
             </div>
-            <div className="mt-3 text-[11.5px] leading-5 text-ink-secondary" data-testid="place-line">
+            <div className="mt-3 text-[12px] leading-5 text-ink-secondary" data-testid="place-line">
               {worksOnView.line}
               {placeActionButton(worksOnView, "mt-1 block font-medium text-accent hover:underline")}
             </div>
             {heldPin && (
               <div className="mt-2 flex items-center gap-2">
-                <p className="min-w-0 flex-1 text-[11.5px] leading-5 text-ink-secondary" data-testid="place-pinned-note">
+                <p className="min-w-0 flex-1 text-[12px] leading-5 text-ink-secondary" data-testid="place-pinned-note">
                   {t("place.pinnedNoteSimple", {
                     place: placeOptions.find(({ mode }) => mode === heldPin)?.simpleLabel ?? t(placeLabelKey(heldPin)),
                   })}
@@ -1785,7 +1785,7 @@ export function ComputerPanel({
                   disabled={Boolean(bot.busy)}
                   title={bot.busy ? t("place.busy") : undefined}
                   onClick={() => dispatch({ type: "updateTask", botId: profileBot.id, threadId: profileBot.threadId, patch: { surface: null } })}
-                  className="shrink-0 rounded-md px-2 py-0.5 text-[11.5px] font-medium leading-5 text-accent-text transition-colors hover:bg-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
+                  className="shrink-0 rounded-md px-2 py-0.5 text-[12px] font-medium leading-5 text-accent-text transition-colors hover:bg-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
                   data-testid="place-unpin"
                 >
                   {t("place.unpinSimple", {

@@ -151,14 +151,15 @@ it("names Bob, not the owner, in his private chat's system prompt, with his Abou
   const bobs = await turn(bob, thread, "Who am I talking to?");
   expect(bobs.systemPrompt).toContain(JSON.stringify("Bob Builder"));
   expect(bobs.systemPrompt).toContain("payroll");
-  expect(bobs.systemPrompt).not.toContain("Ada Lovelace");
+  expect(bobs.systemPrompt).not.toContain('conversation is "Ada Lovelace"');
   expect(bobs.systemPrompt).not.toContain("like tea");
   expect(bobs.systemPrompt).not.toContain("Olive");
   const adaThread = (await team.as(ada, "POST", `/api/bots/${bot.id}/tasks`, { title: "Ada and Scout" })).body.task.threadId as string;
   const adas = await turn(ada, adaThread, "And now?");
   expect(adas.systemPrompt).toContain(JSON.stringify("Ada Lovelace"));
   expect(adas.systemPrompt).toContain("like tea");
-  expect(adas.systemPrompt).not.toContain("Bob Builder");
+  expect(adas.systemPrompt).not.toContain('conversation is "Bob Builder"');
+  expect(adas.systemPrompt).not.toContain("payroll");
   expect(adas.systemPrompt).not.toContain("Olive");
   expect(serverProfile()).toMatchObject({ name: "Olive Owner" });
 }, hostTimeout(120_000));

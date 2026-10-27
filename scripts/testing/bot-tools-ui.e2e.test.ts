@@ -160,20 +160,22 @@ describe("bot setup and tools in the real renderer", () => {
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Optional ways to customize this bot. You can start chatting now.");
     await click("Access");
     await click("Add an MCP server…");
-    // The registry loads on mount; Paste config is disabled until it finishes.
-    await expect.poll(() => evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Paste config')?.disabled"), { timeout: 10_000 }).toBe(false);
-    await click("Paste config");
-    await expect.poll(() => evaluate("Boolean(document.querySelector('textarea[aria-label=\"Paste config\"]'))"), { timeout: 10_000 }).toBe(true);
+    // The registry loads on mount; Add MCP server is disabled until it finishes.
+    await expect.poll(() => evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Add MCP server')?.disabled"), { timeout: 10_000 }).toBe(false);
+    await click("Add MCP server");
+    await expect.poll(() => evaluate("Boolean(document.querySelector('textarea[aria-label=\"Server link or setup command\"]'))"), { timeout: 10_000 }).toBe(true);
     const pasted = await ui("snapshot", "--interactive");
     const textarea = Object.entries(pasted.refs as Record<string, { role: string; name: string }>)
-      .find(([, entry]) => entry.role === "textbox" && entry.name === "Paste config");
+      .find(([, entry]) => entry.role === "textbox" && entry.name === "Server link or setup command");
     expect(textarea).toBeDefined();
     await ui("type", "--ref", `@${textarea![0]}`, "--text", JSON.stringify({ mcpServers: {
       fixture: { command: process.execPath, args: ["-e", "process.exit(0)"] },
     } }));
-    await click("Add servers");
+    await click("Add");
     const registry = async () => (await fetch(`${info.url}/api/mcp/servers`).then((response) => response.json())).servers;
+    // It exits before answering, so it is saved but stays off, with the reason on its row.
     await expect.poll(registry, { timeout: 10_000 }).toMatchObject([{ name: "fixture", enabled: false }]);
+    await expect.poll(() => evaluate("document.body.textContent.includes(\"Couldn't connect, so it stays off.\")"), { timeout: 20_000 }).toBe(true);
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Turn fixture on");
     await click("Turn fixture on");
     await expect.poll(registry, { timeout: 10_000 }).toMatchObject([{ name: "fixture", enabled: true }]);

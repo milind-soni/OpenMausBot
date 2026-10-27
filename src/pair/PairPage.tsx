@@ -119,7 +119,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
           <p role="status" className="text-[20px] font-semibold">{cloudHome ? t("pair.openingCloud") : t("pair.connectingTo", { name: environment?.label ?? t("pair.thisOpenMausBot") })}</p>
         ) : <>
         <h1 className="text-[20px] font-semibold">{cloudHome ? t("pair.myCloud") : t(mode === "email" ? "pair.signInTo" : "pair.connectTo", { name: environment?.label ?? t("pair.thisOpenMausBot") })}</h1>
-        <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-secondary">
+        <p className="mt-1.5 text-[14px] leading-relaxed text-ink-secondary">
           {environment && !cloudHome ? `${t("pair.version", { version: environment.version, platform: environment.platform })} ` : ""}
           {pairIntro({ mode, sent, email, cloudHome })}
         </p>
@@ -127,7 +127,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
         {error && cloudHome && initialCode ? <p className="mt-3 text-[13px] text-ink-secondary">{t("pair.expired", { open: t("cloudHome.connect"), section: t("settings.section.cloudAccount") })}</p> : null}
         </>}
         {opening ? null : connected ? (
-          <p className="mt-4 text-[13.5px]">
+          <p className="mt-4 text-[14px]">
             {t("pair.alreadyConnected")}{" "}
             <a href="/" className="text-accent underline">
               {t("pair.openApp")}

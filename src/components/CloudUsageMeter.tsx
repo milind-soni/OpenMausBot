@@ -151,7 +151,7 @@ export function CloudUsageCardView({ usage, meters, band, upgrade, onHide, onSee
         <button type="button" onClick={onHide} aria-label={t("usageMeter.card.hide")} title={t("usageMeter.card.hide")} className="ui-icon-button -me-1 -mt-0.5 shrink-0"><X size={14} /></button>
       </div>
       {meters.map((meter) => <MeterRow key={meter.kind} meter={meter} compact />)}
-      <p className="mt-2 text-[11.5px] text-ink-secondary">{resetLine(usage)}</p>
+      <p className="mt-2 text-[12px] text-ink-secondary">{resetLine(usage)}</p>
       {path !== "top" && (
         <button type="button" className="ui-button ui-button-primary mt-2.5 w-full justify-center gap-1.5" disabled={upgrade.busy !== null} onClick={() => upgrade.onUpgrade()}>
           {upgrade.busy === "preview" && <Loader2 size={13} className="animate-spin" aria-hidden="true" />}
@@ -202,7 +202,7 @@ export function CloudUsageSettingsView({ usage, upgrade, children }: { usage: Cl
           )}
           {path === "app" && others.map((other) => (
             <button key={other.tier} type="button" disabled={upgrade.busy !== null} onClick={() => upgrade.onUpgrade(other.tier)}
-              className="cursor-pointer text-[12.5px] text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-50">{upgradeLabel(other)}</button>
+              className="cursor-pointer text-[13px] text-ink-secondary underline underline-offset-2 hover:text-ink disabled:opacity-50">{upgradeLabel(other)}</button>
           ))}
         </div>
         {upgrade.note && <div className="mt-2"><NoteLine note={upgrade.note} /></div>}

@@ -80,6 +80,8 @@ export interface ProactiveDeps {
   owned(routine: Routine): void;
   /** The decision and extraction models: with them on, they sort the inbox on any engine. */
   helpers?: { decider: Pick<Decider, "choose">; extractor: Pick<Extractor, "extract"> };
+  /** The owner's last nightly dream, for the brief's Ideas. */
+  ideas?: BriefDeps["ideas"];
 }
 
 export function createProactive(deps: ProactiveDeps) {
@@ -121,6 +123,7 @@ export function createProactive(deps: ProactiveDeps) {
     failRun: (runId, why) => deps.routines()?.rejectResult(runId, why),
     keep: (key) => checks.commit(key),
     items: (key) => checks.items(key),
+    ...(deps.ideas ? { ideas: deps.ideas } : {}),
   });
   const inbox = deps.helpers ? createInboxTriage({ ...deps.helpers, config: () => cfg }) : undefined;
   const suggestion = createHelperSuggestion({
@@ -227,6 +230,8 @@ export function createProactive(deps: ProactiveDeps) {
   let timer: ReturnType<typeof setInterval> | null = null;
   return {
     checks: routineChecks, fence, brief,
+    /** Only the owner dreams, and only while its brief is on: at most one model call a night, with no switch of its own. */
+    dreamer: (): string | undefined => (watching() ? owner()?.id : undefined),
     /** Not now on the add-a-key suggestion; the inbox connected now is remembered with it. */
     suggestionNotNow: (threadId: string, messageId: string, auth: RequestAuth) => {
       const address = checks.address();

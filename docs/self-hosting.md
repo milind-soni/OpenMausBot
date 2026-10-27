@@ -726,7 +726,7 @@ alone.
   thread could carry the other's answers to people who cannot see it. Bots nobody restricted all
   share "everyone", so nothing changes until an admin restricts one. A bot a
   Chief creates (directly, or in a reviewed team setup) gets exactly the
-  Chief's audience.
+  Chief's audience, and a copy of the Chief's connected apps.
 - **Who sees everything.** Admin sessions, the owner on this machine, and a
   session-less local service (the Slack worker under `service` trust) see
   every bot. A pairing-code device with no email sees only bots everyone
@@ -887,6 +887,35 @@ stay where they are, and their message is sent again. Turns nobody typed
 The offer is on by default. To switch it off, start the server with
 `OMB_QUOTA_SWITCH=0`; any other value, or none, leaves it on. It has no
 setting in `config.json` yet.
+
+### Which engine a new bot uses
+
+A saved default model (Settings, `openmausbot setup`, or the New Bot
+defaults) always wins. Without one, new bots get the first engine that can
+run, in this order: a Claude account, a ChatGPT plan, Gemini, Grok, then the
+rest in the order of `instances`; OpenCode running only Zen's free no-login
+models comes last.
+
+The server picks at once at start, then sends the person's own engines one
+tiny test message each in the background ("Reply with the single word OK",
+90 seconds at most), best first, stopping at the first that answers. One
+miss alone doesn't move the default: that engine is tried again two minutes
+later. Two misses in a row move the default to the best engine that
+answered; the engine is tried again ten minutes later, then once an hour.
+An engine that already answered (for example one the welcome checked) can
+take the default after a single miss. An organization's models and the
+trial credit are never tested this way. Results are kept for a day per
+engine and sign-in in `<data dir>/providers/ai-checks.json`, so a restart
+doesn't send them again. On a later start, where the engines are read one at
+a time, nothing is tested or moved until that read ends: never on the status
+the last run recorded.
+
+The first bot the app made follows the default until someone writes to it
+or picks a model for it or one of its conversations: it moves only after a
+test result, only to an engine that answered, and only away from one whose
+latest test missed or that is signed out or turned off, or up to a better
+one. A status read that timed out moves nothing. No other bot ever moves. To stop the
+background test messages, start the server with `OMB_AI_CHECKS=0`.
 
 ### The decision log
 

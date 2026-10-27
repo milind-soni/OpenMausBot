@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import { Check, ChevronLeft, ChevronRight, Trash2, type LucideIcon } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -6,8 +6,9 @@ import { MAUS_COLORS, type MausColor } from "@/lib/mascot";
 import { Switch } from "../SettingsPrimitives";
 
 export const rowCls = "flex min-h-[46px] items-center gap-2.5 px-3.5 py-[11px]";
-const titleCls = "text-[13.5px] font-medium text-ink";
-const hintCls = "mt-px text-[12.5px] leading-[1.35] text-ink-secondary";
+export const roundButtonCls = "flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.06] text-ink hover:bg-ink/[0.11] max-md:size-9 max-md:border max-md:border-hairline max-md:bg-card";
+const titleCls = "text-[14px] font-medium text-ink";
+const hintCls = "mt-px text-[13px] leading-[1.35] text-ink-secondary";
 export const buttonCls =
   "inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[9px] bg-control px-3.5 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50";
 export const chipCls = (on: boolean) =>
@@ -18,7 +19,7 @@ export const chipCls = (on: boolean) =>
 
 export function CardLabel({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="mx-1 mb-2 mt-5 flex min-h-5 items-center justify-between gap-3 text-[12.5px] text-ink-secondary">
+    <div className="mx-1 mb-2 mt-5 flex min-h-5 items-center justify-between gap-3 text-[13px] text-ink-secondary">
       <span className="min-w-0 truncate">{children}</span>
       {action}
     </div>
@@ -27,7 +28,7 @@ export function CardLabel({ children, action }: { children: ReactNode; action?: 
 
 export function LabelAction({ children, onClick, ...rest }: { children: ReactNode; onClick: () => void; "aria-label"?: string; "data-panel-action"?: string }) {
   return (
-    <button type="button" {...rest} onClick={onClick} className="shrink-0 rounded-[5px] px-1 py-px text-[12.5px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink">
+    <button type="button" {...rest} onClick={onClick} className="shrink-0 rounded-[5px] px-1 py-px text-[13px] text-ink-secondary hover:bg-ink/[0.04] hover:text-ink">
       {children}
     </button>
   );
@@ -102,6 +103,7 @@ export function NavRow({ title, hint, value, icon, onClick, drill = true, danger
   danger?: boolean;
   disabled?: boolean;
   tooltip?: string;
+  ref?: Ref<HTMLButtonElement>;
   "data-panel-row"?: string;
   "data-panel-page"?: string;
 }) {
@@ -150,7 +152,7 @@ export function ColRow({ children, ...rest }: { children: ReactNode; "data-panel
 export function NoteRow({ children, tone }: { children: ReactNode; tone?: "warn" }) {
   return (
     <div className={rowCls}>
-      <div className={cn("text-[12.5px] leading-[1.35]", tone === "warn" ? "text-warning" : "text-ink-secondary")}>{children}</div>
+      <div className={cn("text-[13px] leading-[1.35]", tone === "warn" ? "text-warning" : "text-ink-secondary")}>{children}</div>
     </div>
   );
 }
@@ -195,7 +197,7 @@ export function Segmented<V extends string>({ options, value, onChange, label, a
           title={option.tooltip}
           onClick={() => onChange(option.value)}
           className={cn(
-            "min-w-0 flex-auto truncate whitespace-nowrap rounded-full px-1.5 py-1.5 text-[12.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+            "min-w-0 flex-auto truncate whitespace-nowrap rounded-full px-1.5 py-1.5 text-[13px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
             value === option.value ? "bg-control font-medium text-ink" : "text-ink-secondary enabled:hover:text-ink",
           )}
         >
@@ -310,7 +312,7 @@ export function PageHeader({ back, title, intro, onBack }: { back: string; title
         <span>{back}</span>
       </button>
       <h3 className="mx-1 mt-1.5 text-[18px] font-semibold text-ink">{title}</h3>
-      {intro && <p className="mx-1 mt-1.5 text-[12.5px] leading-normal text-ink-secondary">{intro}</p>}
+      {intro && <p className="mx-1 mt-1.5 text-[13px] leading-normal text-ink-secondary">{intro}</p>}
     </div>
   );
 }

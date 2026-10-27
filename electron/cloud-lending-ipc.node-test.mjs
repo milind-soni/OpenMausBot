@@ -8,19 +8,20 @@ import { createLendingTarget, defaultGrant, existingFolders, installCloudLending
 
 const usual = ["Desktop", "Documents", "Downloads"].map((name, i) => ({ id: `id-${i}`, path: `/Users/me/${name}`, name, write: false }));
 
-function setup({ enabled = false, kept = { folders: [], screen: false }, screenAvailable = true, screenReady = false, stopped, confirm = true } = {}) {
+function setup({ enabled = false, kept = { folders: [], screen: false }, screenAvailable = true, screenReady = false, stopped, confirm = true, whileAsked = () => {} } = {}) {
   const handlers = new Map(), calls = [];
-  let state = { enabled, folders: kept.folders, screen: kept.screen, internet: kept.internet === true, busy: false, connected: enabled, ...(stopped ? { stopped } : {}) };
+  let state = { enabled, folders: kept.folders, screen: kept.screen, internet: kept.internet === true, chrome: kept.chrome === true, terminal: kept.terminal === true, busy: false, connected: enabled, ...(stopped ? { stopped } : {}) };
   const lending = installCloudLending({
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     localOnly: (channel, handler) => (event, ...args) => { if (event.page !== "local") throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
     cloudPage: (channel, handler) => (event, ...args) => { if (!event.page) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
     snapshot: async () => ({ available: true, screenAvailable, screenReady, state }),
     environment: () => ({ id: "cloud" }),
-    save: async (_env, choice) => { calls.push(["save", choice]); state = { ...state, enabled: true, connected: true, folders: choice.folders, screen: choice.screen, internet: choice.internet, terminal: choice.terminal === true }; },
+    save: async (_env, choice) => { calls.push(["save", choice]); state = { ...state, enabled: true, connected: true, folders: choice.folders, screen: choice.screen, internet: choice.internet, chrome: choice.chrome === true, terminal: choice.terminal === true }; },
     stop: () => { calls.push(["stop"]); state = { ...state, enabled: false, connected: false, stopped: { reason: "you", at: 1 } }; },
     chooseFolder: async () => null,
     confirmScreen: async () => { calls.push(["confirm"]); return confirm; },
+    confirmTerminal: async () => { calls.push(["confirm terminal"]); whileAsked(lending); return confirm; },
     defaults: async () => usual,
     validate: async ([folder]) => {
       if (folder.path.includes("Gone")) throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
@@ -34,27 +35,27 @@ function setup({ enabled = false, kept = { folders: [], screen: false }, screenA
 test("turned on with nothing chosen, lending lends the internet connection and the usual folders, read only; a choice already made is kept", async () => {
   const fresh = setup();
   await fresh.handlers.get("lending:save")({ page: "local" }, { folders: [], screen: false });
-  assert.deepEqual(fresh.calls, [["save", { folders: usual, screen: false, internet: true }]]);
+  assert.deepEqual(fresh.calls, [["save", { folders: usual, screen: false, internet: true, chrome: false }]]);
   const chosen = setup();
   const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: true }];
   await chosen.handlers.get("lending:save")({ page: "local" }, { folders: plans, screen: true });
-  assert.deepEqual(chosen.calls, [["save", { folders: plans, screen: true, internet: false }]]);
+  assert.deepEqual(chosen.calls, [["save", { folders: plans, screen: true, internet: false, chrome: false }]]);
 });
 
 test("the internet connection alone is a grant: nothing else is added to it", async () => {
   const { handlers, calls } = setup();
   await handlers.get("lending:save")({ page: "local" }, { folders: [], screen: false, internet: true });
-  assert.deepEqual(calls, [["save", { folders: [], screen: false, internet: true }]]);
+  assert.deepEqual(calls, [["save", { folders: [], screen: false, internet: true, chrome: false }]]);
 });
 
 test("the terminal is chosen only from this computer's own Settings: alone it is a grant, and My Cloud's page and the move's default never turn it on", async () => {
   const alone = setup();
   await alone.handlers.get("lending:save")({ page: "local" }, { folders: [], screen: false, terminal: true });
-  assert.deepEqual(alone.calls, [["save", { folders: [], screen: false, internet: false, terminal: true }]], "nothing else is added to a terminal-only grant");
+  assert.deepEqual(alone.calls, [["save", { folders: [], screen: false, internet: false, chrome: false, terminal: true }]], "nothing else is added to a terminal-only grant");
   const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: false }];
   const both = setup();
   await both.handlers.get("lending:save")({ page: "local" }, { folders: plans, screen: false, terminal: "yes" });
-  assert.deepEqual(both.calls, [["save", { folders: plans, screen: false, internet: false }]], "only a real true counts");
+  assert.deepEqual(both.calls, [["save", { folders: plans, screen: false, internet: false, chrome: false }]], "only a real true counts");
   await assert.rejects(async () => alone.handlers.get("lending:save")({ page: "cloud" }, { folders: [], screen: false, terminal: true }), /only available/);
   const page = setup({ kept: { folders: plans, screen: false, terminal: true } });
   await page.handlers.get("cloud-lending:set")({ page: "cloud" }, true);
@@ -67,8 +68,8 @@ test("the terminal is chosen only from this computer's own Settings: alone it is
 test("My Cloud's page turns lending on in place with no native confirmation, says it lends the internet connection, and off at once", async () => {
   const { handlers, calls } = setup();
   const on = await handlers.get("cloud-lending:set")({ page: "cloud" }, true);
-  assert.deepEqual(calls, [["save", { folders: usual, screen: false, internet: true }]]);
-  assert.deepEqual(on, { available: true, on: true, status: "lent", folders: usual.map(({ name, write }) => ({ name, write })), screen: false, screenAvailable: true, internet: true });
+  assert.deepEqual(calls, [["save", { folders: usual, screen: false, internet: true, chrome: false }]]);
+  assert.deepEqual(on, { available: true, on: true, status: "lent", folders: usual.map(({ name, write }) => ({ name, write })), screen: false, screenAvailable: true, internet: true, chrome: false, terminal: false });
   assert.ok(!JSON.stringify(on).includes("/Users/me"), "the page never learns a path");
   const off = await handlers.get("cloud-lending:set")({ page: "cloud" }, false);
   assert.equal(off.on, false);
@@ -79,23 +80,23 @@ test("an off switch lends again what it lent before, the internet connection inc
   const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: false }];
   const again = setup({ kept: { folders: plans, screen: true } });
   await again.handlers.get("cloud-lending:set")({ page: "cloud" }, true);
-  assert.deepEqual(again.calls, [["save", { folders: plans, screen: true, internet: false }]]);
+  assert.deepEqual(again.calls, [["save", { folders: plans, screen: true, internet: false, chrome: false }]]);
   const withInternet = setup({ kept: { folders: plans, screen: false, internet: true } });
   await withInternet.handlers.get("cloud-lending:set")({ page: "cloud" }, true);
-  assert.deepEqual(withInternet.calls.at(-1), ["save", { folders: plans, screen: false, internet: true }]);
+  assert.deepEqual(withInternet.calls.at(-1), ["save", { folders: plans, screen: false, internet: true, chrome: false }]);
   const noScreen = setup({ kept: { folders: plans, screen: true }, screenAvailable: false });
   await noScreen.handlers.get("cloud-lending:set")({ page: "cloud" }, true);
-  assert.deepEqual(noScreen.calls.at(-1), ["save", { folders: plans, screen: false, internet: false }]);
+  assert.deepEqual(noScreen.calls.at(-1), ["save", { folders: plans, screen: false, internet: false, chrome: false }]);
 });
 
 test("My Cloud's page lends Apps and screen only after this app's own dialog, keeps what else is lent, and takes it back at once", async () => {
   const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: false }];
   const lent = setup({ enabled: true, kept: { folders: plans, screen: false, internet: true } });
   const on = await lent.handlers.get("cloud-lending:screen")({ page: "cloud" }, true);
-  assert.deepEqual(lent.calls, [["confirm"], ["save", { folders: plans, screen: true, internet: true }]]);
+  assert.deepEqual(lent.calls, [["confirm"], ["save", { folders: plans, screen: true, internet: true, chrome: false }]]);
   assert.equal(on.screen, true);
   const off = await lent.handlers.get("cloud-lending:screen")({ page: "cloud" }, false);
-  assert.deepEqual(lent.calls.slice(2), [["save", { folders: plans, screen: false, internet: true }]]);
+  assert.deepEqual(lent.calls.slice(2), [["save", { folders: plans, screen: false, internet: true, chrome: false }]]);
   assert.equal(off.screen, false);
 
   const declined = setup({ enabled: true, kept: { folders: plans, screen: false }, confirm: false });
@@ -114,7 +115,7 @@ test("Apps and screen is never lent from My Cloud's page while lending is off or
 test("the move's default grant: the usual folders read only, each project folder with editing, the internet connection, and the screen when lent before or already working here", async () => {
   const fresh = setup();
   const lent = await fresh.lending.lendByDefault({ projects: ["/Users/me/code/site", "/Users/me", "relative/path", "/Users/me/Gone"] });
-  assert.deepEqual(fresh.calls, [["save", { folders: [...usual, { id: fresh.calls[0][1].folders[3].id, path: "/Users/me/code/site", name: "site", write: true }], screen: false, internet: true }]],
+  assert.deepEqual(fresh.calls, [["save", { folders: [...usual, { id: fresh.calls[0][1].folders[3].id, path: "/Users/me/code/site", name: "site", write: true }], screen: false, internet: true, chrome: false }]],
     "a project folder that is the home folder, relative or gone is left out, never failing the move");
   assert.equal(lent.internet, true);
   const screenBefore = setup({ kept: { folders: [], screen: true }, stopped: { reason: "signed-out", at: 1 } });
@@ -132,11 +133,79 @@ test("the move's default grant: the usual folders read only, each project folder
     [["Desktop", true], ["Documents", false], ["Downloads", false]]);
 });
 
+test("My Cloud's page lends the terminal on top of what is lent only after main's own question, and takes it back", async () => {
+  const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: true }];
+  const lent = setup({ enabled: true, kept: { folders: plans, screen: true, internet: true } });
+  const terminal = lent.handlers.get("cloud-lending:terminal");
+  await assert.rejects(async () => terminal({}, true), /only available in this app's window/u, "no other page reaches it");
+  const page = await terminal({ page: "cloud" }, true);
+  assert.equal(page.terminal, true);
+  assert.deepEqual(lent.calls, [["confirm terminal"], ["save", { folders: plans, screen: true, internet: true, chrome: false, terminal: true }]]);
+  await lent.handlers.get("cloud-lending:screen")({ page: "cloud" }, false);
+  assert.deepEqual(lent.calls.at(-1), ["save", { folders: plans, screen: false, internet: true, chrome: false, terminal: true }], "Apps and screen off keeps the terminal");
+  await lent.handlers.get("cloud-lending:screen")({ page: "cloud" }, true);
+  assert.deepEqual(lent.calls.at(-1), ["save", { folders: plans, screen: true, internet: true, chrome: false, terminal: true }], "and so does Apps and screen on");
+  lent.calls.length = 2;
+  await lent.lending.lendTerminal(true);
+  assert.equal(lent.calls.length, 2, "already on: no question, no save");
+  await lent.lending.lendTerminal(false);
+  assert.deepEqual(lent.calls.at(-1), ["save", { folders: plans, screen: true, internet: true, chrome: false }], "off keeps everything else, with no question");
+
+  const declined = setup({ enabled: true, kept: { folders: plans, screen: false, internet: true }, confirm: false });
+  await declined.lending.lendTerminal(true);
+  assert.deepEqual(declined.calls, [["confirm terminal"]], "No lends nothing");
+
+  const off = setup({ kept: { folders: plans, screen: false } });
+  await off.lending.lendTerminal(true);
+  assert.deepEqual(off.calls, [], "never starts lending that is off");
+
+  const stoppedMeanwhile = setup({ enabled: true, kept: { folders: plans, screen: false, internet: true }, whileAsked: () => stoppedMeanwhile.handlers.get("lending:stop")({ page: "local" }) });
+  await stoppedMeanwhile.lending.lendTerminal(true);
+  assert.deepEqual(stoppedMeanwhile.calls, [["confirm terminal"], ["stop"]], "a Yes after lending stopped never starts it again");
+
+  const terminalOnly = setup({ enabled: true, kept: { folders: [], screen: false, internet: false, terminal: true } });
+  await terminalOnly.lending.lendTerminal(false);
+  assert.deepEqual(terminalOnly.calls, [["stop"]], "nothing else lent: off stops lending instead of lending the usual folders");
+});
+
+test("the terminal switch on My Cloud's page keeps a lent Chrome, on and off, and Chrome alone keeps lending on", async () => {
+  const withChrome = setup({ enabled: true, kept: { folders: [], screen: false, internet: true, chrome: true } });
+  await withChrome.lending.lendTerminal(true);
+  assert.equal(withChrome.calls.at(-1)[1].chrome, true, "turning the terminal on keeps Chrome");
+  await withChrome.lending.lendTerminal(false);
+  assert.equal(withChrome.calls.at(-1)[1].chrome, true, "and so does turning it off");
+  const chromeOnly = setup({ enabled: true, kept: { folders: [], screen: false, internet: false, chrome: true, terminal: true } });
+  await chromeOnly.lending.lendTerminal(false);
+  assert.deepEqual(chromeOnly.calls, [["save", { folders: [], screen: false, internet: false, chrome: true }]], "Chrome is still lent, so lending stays on");
+});
+
+test("the move's default keeps an internet connection the person unticked off; Use my Mac turns it on with the rest", async () => {
+  const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: false }];
+  const unticked = setup({ enabled: true, kept: { folders: plans, screen: false, internet: false } });
+  assert.equal((await unticked.lending.lendByDefault({ projects: [] })).internet, false);
+  assert.equal(unticked.calls.at(-1)[1].internet, false);
+  assert.equal((await unticked.lending.lendByDefault({ asked: true })).internet, true, "the person pressed Use my Mac: every part");
+  const internetOnly = setup({ enabled: true, kept: { folders: [], screen: false, internet: true } });
+  assert.deepEqual(internetOnly.calls, []);
+  await internetOnly.lending.lendByDefault({ projects: [] });
+  assert.deepEqual(internetOnly.calls, [["save", { folders: usual, screen: false, internet: true, chrome: false }]], "the move adds the usual folders to the internet connection lent by default");
+  assert.equal(defaultGrant({ kept: { internet: false }, usual, projects: [] }).internet, false);
+});
+
+test("the move's default and Use my Mac keep a terminal lent now, and never bring back one lent before an Off", async () => {
+  const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: false }];
+  const lent = setup({ enabled: true, kept: { folders: plans, screen: false, internet: true, terminal: true } });
+  assert.equal((await lent.lending.lendByDefault({ projects: [] })).terminal, true);
+  assert.equal((await lent.lending.lendByDefault({ asked: true })).terminal, true);
+  const offBefore = setup({ kept: { folders: plans, screen: false, internet: true, terminal: true }, stopped: { reason: "signed-out", at: 1 } });
+  assert.equal((await offBefore.lending.lendByDefault({ asked: true })).terminal, false);
+});
+
 test("Use my Mac lends apps and screen on top of what is lent, once computer control works; never while lending is off", async () => {
   const plans = [{ id: "p", path: "/Users/me/Plans", name: "Plans", write: true }];
   const lent = setup({ enabled: true, kept: { folders: plans, screen: false, internet: true } });
   assert.equal((await lent.lending.lendScreen()).screen, true);
-  assert.deepEqual(lent.calls, [["save", { folders: plans, screen: true, internet: true }]], "no dialog: the person chose it in this app's own popup");
+  assert.deepEqual(lent.calls, [["save", { folders: plans, screen: true, internet: true, chrome: false }]], "no dialog: the person chose it in this app's own popup");
   await lent.lending.lendScreen();
   assert.equal(lent.calls.length, 1, "lent once");
   const off = setup({ kept: { folders: plans, screen: false } });
@@ -145,7 +214,7 @@ test("Use my Mac lends apps and screen on top of what is lent, once computer con
   assert.equal(await unavailable.lending.lendScreen(), null);
   assert.deepEqual([...off.calls, ...unavailable.calls], []);
   assert.deepEqual(await setup({ screenReady: true, stopped: { reason: "you", at: 1 } }).lending.state(),
-    { available: true, on: false, status: null, folders: [], screen: false, screenAvailable: true, internet: false, screenReady: true, ownOff: true });
+    { available: true, on: false, status: null, folders: [], screen: false, screenAvailable: true, internet: false, chrome: false, terminal: false, screenReady: true, ownOff: true });
 });
 
 test("the person's own Off is never undone: the move's default leaves lending off, while other stops are lent again", async () => {
@@ -190,7 +259,7 @@ test("the usual folders: each one that exists and passes the folder checks, the 
     return [{ ...folder, name: folder.path.split("/").pop() }];
   });
   assert.deepEqual(found.map((folder) => [folder.name, folder.write]), [["Desktop", false], ["Documents", false]]);
-  assert.deepEqual(pageLending({ available: true, state: { enabled: false, folders: usual, internet: true, problem: "signed-out" } }), { available: true, on: false, status: "signed-out", folders: [], screen: false, screenAvailable: false, internet: false });
+  assert.deepEqual(pageLending({ available: true, state: { enabled: false, folders: usual, internet: true, problem: "signed-out" } }), { available: true, on: false, status: "signed-out", folders: [], screen: false, screenAvailable: false, internet: false, chrome: false, terminal: false });
   assert.equal(pageLending({ available: true, state: { enabled: true, connected: true, folders: [], internet: true, link: "unsupported" } }).link, "unsupported", "the page can say My Cloud is updating");
 });
 
@@ -198,11 +267,11 @@ test("a folder lent before and gone since is left out instead of failing the swi
   const gone = [{ id: "g", path: "/Users/me/Gone", name: "Gone", write: false }];
   const onlyGone = setup({ kept: { folders: gone, screen: false } });
   await onlyGone.handlers.get("cloud-lending:set")({ page: "cloud" }, true);
-  assert.deepEqual(onlyGone.calls.at(-1), ["save", { folders: usual, screen: false, internet: true }]);
+  assert.deepEqual(onlyGone.calls.at(-1), ["save", { folders: usual, screen: false, internet: true, chrome: false }]);
   const plans = { id: "p", path: "/Users/me/Plans", name: "Plans", write: false };
   const mixed = setup();
   await mixed.handlers.get("lending:save")({ page: "local" }, { folders: [...gone, plans], screen: false });
-  assert.deepEqual(mixed.calls, [["save", { folders: [plans], screen: false, internet: false }]]);
+  assert.deepEqual(mixed.calls, [["save", { folders: [plans], screen: false, internet: false, chrome: false }]]);
 });
 
 test("only a folder that is gone is left out; any other refusal still fails the switch", async () => {
@@ -280,7 +349,7 @@ test("with no usual folders the internet connection is still lent; a refused fol
     validate: async ([folder]) => { throw Object.assign(new Error(`refused ${folder.path}`), { code: "NOT_FOLDER" }); },
   });
   await handlers.get("cloud-lending:set")({ page: "cloud" }, true);
-  assert.deepEqual(calls, [["save", { folders: [], screen: false, internet: true }]], "a computer with no usual folders lends its internet connection");
+  assert.deepEqual(calls, [["save", { folders: [], screen: false, internet: true, chrome: false }]], "a computer with no usual folders lends its internet connection");
   calls.length = 0;
   await assert.rejects(handlers.get("lending:folder")({ page: "local" }), { message: "lending-refused:home-or-root" });
   chosen = [{ id: "f", path: "/Users/me/notes.txt", name: "notes.txt", write: false }];
@@ -310,5 +379,13 @@ test("My Cloud's page asks main to lend Apps and screen only from the person's c
   // A bot's Use my Mac link only opens main's own popup, and only from the person's click.
   await assert.rejects(unclicked.bridge.cloudLending.offer(), /Press Use my Mac/);
   await clicked.bridge.cloudLending.offer();
-  assert.deepEqual([...unclicked.invoked, ...clicked.invoked].filter(([channel]) => channel === "cloud-lending:offer"), [["cloud-lending:offer"]]);
+  assert.deepEqual([...unclicked.invoked, ...clicked.invoked].filter(([channel]) => channel === "cloud-lending:offer"), [["cloud-lending:offer", ""]]);
+});
+
+test("the default grant never lends Chrome unless it was lent before", () => {
+  const usual = [{ id: "a", path: "/Users/x/Documents", name: "Documents", write: false }];
+  assert.equal(defaultGrant({ kept: null, usual, projects: [] }).chrome, false);
+  assert.equal(defaultGrant({ kept: { chrome: true, folders: [] }, usual, projects: [] }).chrome, true);
+  assert.equal(pageLending({ state: { enabled: true, chrome: true } }).chrome, true);
+  assert.equal(pageLending({ state: { enabled: false, chrome: true } }).chrome, false);
 });

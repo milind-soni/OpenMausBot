@@ -69,7 +69,6 @@ export function planTeamChange(bots: readonly Bot[], instances: readonly Instanc
     const engineName = engine?.displayName ?? bot.modelSelection.instanceId;
     if (change.kind === "approval") {
       if ([approvalModeFor(bot), ...threadApprovalModes(bot)].every((mode) => mode === change.mode)) return { bot, status: "unchanged" };
-      if (bot.busy || bot.tasks?.some((task) => task.busy)) return { bot, status: "skip", reason: t("teamSettings.skip.busy") };
       if (!teamModeOffered(engine?.driverKind, change.mode)) {
         return { bot, status: "skip", reason: t("teamSettings.skip.modeUnsupported", { engine: engineName }) };
       }

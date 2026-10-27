@@ -84,6 +84,8 @@ export interface BriefDeps {
   /** The run's answer was read: its items are settled. */
   keep(key: string): void;
   items(key: string): { mail: EmailHeader[]; prep: Array<{ key: string; event: CalendarEvent }> } | null;
+  /** What the bot's last nightly dream noticed across its chats, while fresh. AI text: shown as plain text only. */
+  ideas?(botId: string): { ideas: string[]; conversations: number };
 }
 
 export interface PresenceAnswer {
@@ -226,6 +228,7 @@ export function createBrief(deps: BriefDeps) {
         case "connection": return row(item.app, w.reconnecting(item.app), clip(item.text, 140), { text: words("brief.row.reconnect", { app: item.app }) });
         case "place": return row("", w.unreachable, w.chooseAnother, { text: words("brief.row.place"), note: words("brief.row.placeNote") });
         case "question": { const bot = deps.store.bot(item.botId)?.name; return row(bot ?? "", w.asked(bot ?? w.aBot), clip(item.text, 140), { text: words("brief.row.asked", { name: bot ?? words("brief.part.aBot") }) }); }
+        case "message": return row(item.from, w.asked(item.from), clip(item.text, 140), { text: words("brief.row.asked", { name: item.from }) });
       }
     });
   }
@@ -256,10 +259,12 @@ export function createBrief(deps: BriefDeps) {
       const header = headers.get(row.messageId);
       return header ? [{ messageId: row.messageId, threadId: row.threadId, from: header.from, subject: header.subject, needsReply: row.needsReply, ...(header.why ? { why: header.why, ...(header.whyText ? { whyText: header.whyText } : {}) } : {}) }] : [];
     });
+    const dreamt = deps.ideas?.(chiefBot.id);
+    const ideas = (dreamt?.ideas ?? []).map((idea): BriefRow => ({ text: idea, note: w.noticedAcross(dreamt!.conversations), said: { note: words("brief.row.noticedAcross", { count: String(dreamt!.conversations) }) } }));
     return {
       now: at, ...(zone ? { timeZone: zone } : {}), ...(language ? { language } : {}), intro: state.introducedOn === undefined || state.introducedOn === day,
       needs: [...troubleRows, ...failed, ...clashRows, ...needsYouRows(w), ...unfencedRows],
-      meetings, emails, ...(waiting !== undefined ? { waiting } : {}), routines: done,
+      meetings, emails, ...(waiting !== undefined ? { waiting } : {}), routines: done, ...(ideas.length ? { ideas } : {}),
     };
   }
 
@@ -304,7 +309,7 @@ export function createBrief(deps: BriefDeps) {
       const threadId = existing?.card.threadId ?? home(bot);
       if (!threadId) return null;
       const needsPerson = built.needs.length > 0 || built.emails.length > 0;
-      const worth = needsPerson || (built.meetings?.length ?? 0) > 0;
+      const worth = needsPerson || (built.meetings?.length ?? 0) > 0 || (built.ideas?.length ?? 0) > 0;
       if (!existing && !(options.create ? worth : needsPerson)) return null;
       if (deps.threadBusy(bot.id, threadId)) {
         dirty = true;

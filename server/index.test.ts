@@ -174,6 +174,7 @@ const connectorLinkRequests: Array<{ toolkit: string; alias?: string }> = [];
 // The ak_good project's own auth configs (a Xero OAuth app), and the auth_configs each new Session named.
 let connectorAuthConfigs: Array<{ id: string; status: string; is_composio_managed: boolean; toolkit: { slug: string } }> = [];
 const connectorSessionAuthConfigs: Array<Record<string, string> | undefined> = [];
+const connectorAuthConfigEdits: Array<{ id: string; body: unknown }> = [];
 const connectorRelayCalls: Array<{ transportSessionId: string; body: any }> = [];
 const browserCapabilityCalls: Array<{ operation: string; authorization?: string; body: any }> = [];
 let browserRevokeFailuresRemaining = 0;
@@ -886,6 +887,11 @@ beforeAll(async () => {
     }
     if (req.url?.startsWith("/api/v3.1/auth_configs") && req.headers["x-api-key"] === "ak_good") {
       const id = req.url.match(/^\/api\/v3\.1\/auth_configs\/([\w-]+)/)?.[1];
+      if (req.method === "PATCH" && id) {
+        let raw = "";
+        for await (const chunk of req) raw += chunk;
+        connectorAuthConfigEdits.push({ id, body: JSON.parse(raw) });
+      }
       const found = id ? connectorAuthConfigs.find((config) => config.id === id) : undefined;
       res.writeHead(id && !found ? 404 : 200, { "content-type": "application/json" });
       return res.end(JSON.stringify(id ? found ?? { error: { message: "Auth config not found" } } : { items: connectorAuthConfigs }));
@@ -907,7 +913,7 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({ redirect_url: "https://connect.composio.dev/fixture-only" }));
       }
-      if (req.method === "POST") connectorSessionAuthConfigs.push(body.auth_configs);
+      if (req.method === "POST" || req.method === "PATCH") connectorSessionAuthConfigs.push(body.auth_configs);
       res.writeHead(201, { "content-type": "application/json" });
       return res.end(JSON.stringify({
         session_id: "trs_config_test",
@@ -3725,9 +3731,10 @@ describe("harness HTTP API", () => {
       await expect.poll(roomRows, { timeout: 5_000 }).toEqual([[roomBot.id, null, "queued", 1, COMPUTER_FREE_NOTE]]);
       const roomMessages = (await isolatedApi("GET", `/api/threads/${room.threadId}/messages`)).body.messages;
       expect(roomMessages.filter((message: any) => message.tool?.ok === false && /Computer still busy|Parked/.test(message.tool.name))).toHaveLength(0);
-      const roomEvents = (await isolatedApi("GET", `/api/threads/${room.threadId}/events`)).body.entries;
-      expect(roomEvents.filter((entry: any) => entry.kind === "runtime" && entry.data.type === "turn.wait_ended"))
-        .toMatchObject([{ data: { outcome: "parked" } }]);
+      await expect.poll(async () => {
+        const roomEvents = (await isolatedApi("GET", `/api/threads/${room.threadId}/events`)).body.entries;
+        return roomEvents.filter((entry: any) => entry.kind === "runtime" && entry.data.type === "turn.wait_ended");
+      }, { timeout: 5_000 }).toMatchObject([{ data: { outcome: "parked" } }]);
 
       expect((await isolatedApi("POST", `/api/bots/${botId}/interrupt`, { threadId: sibling.threadId })).status).toBe(200);
       await expect.poll(promptsOnParkBox, { timeout: 10_000 }).toBeGreaterThanOrEqual(3);
@@ -6496,6 +6503,11 @@ describe("harness HTTP API", () => {
         return await response.json() as { ok: boolean; text: string };
       };
       expect(await fill()).toEqual({ ok: false, text: "fill_login works in the built-in browser, and this conversation has none. Call request_sign_in instead." });
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" })).status).toBe(200);
+      const onScreen = await fill();
+      expect(onScreen.ok).toBe(false);
+      expect(onScreen.text).toContain("it never types one on the screen of this computer");
+      expect(onScreen.text).toContain("Call request_sign_in so the person signs in on this computer.");
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "browser" })).status).toBe(200);
       const inBrowser = await fill();
       expect(inBrowser.ok).toBe(false);
@@ -7666,7 +7678,7 @@ describe("harness HTTP API", () => {
     await api("DELETE", `/api/bots/${bot.id}`);
   });
 
-  it("refuses approval-level changes while a bot is working", async () => {
+  it("saves an approval-level change while a bot is working", async () => {
     const instances = (await api("GET", "/api/instances")).body.instances;
     const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
     const bot = (await api("POST", "/api/bots", {
@@ -7680,15 +7692,14 @@ describe("harness HTTP API", () => {
         return state.bots.find((candidate: { id: string }) => candidate.id === bot.id)?.busy;
       }, { timeout: 5_000 }).toBe(true);
 
-      const blocked = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto" });
-      expect(blocked.status).toBe(409);
-      expect(blocked.body.error).toMatch(/stop this bot's turn before changing its approval level/i);
+      const changed = await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto" });
+      expect(changed.status, JSON.stringify(changed.body)).toBe(200);
       const stored = (await api("GET", "/api/bots?messages=0")).body.bots.find(
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(stored.busy).toBe(true);
-      expect(stored.approvalMode).toBe(bot.approvalMode);
-      expect(stored.autoApprove).toBe(bot.autoApprove);
+      expect(stored.approvalMode).toBe("auto");
+      expect(stored.autoApprove).toBe(true);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
       await expect.poll(async () => {
@@ -9079,6 +9090,180 @@ describe("harness HTTP API", () => {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);
     }
+  });
+
+  describe("Set me up under a new bot's greeting", () => {
+    type Seen = { systemPrompt?: string; prompt?: { message?: { content?: unknown } } };
+    const userText = (seen: Seen): string => {
+      const content: unknown = seen.prompt?.message?.content;
+      return typeof content === "string" ? content : Array.isArray(content)
+        ? content.filter((block: { type?: string }) => block?.type === "text").map((block: { text?: string }) => block.text ?? "").join("") : "";
+    };
+    const blankBot = async (name: string) => {
+      const bot = (await api("POST", "/api/bots", { name })).body.bot;
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
+      return bot;
+    };
+    const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.messages as any[];
+    const task = async (botId: string, threadId: string) => (await api("GET", "/api/bots?messages=0")).body.bots
+      .find((candidate: { id: string }) => candidate.id === botId)?.tasks?.find((one: { threadId: string }) => one.threadId === threadId);
+    const turn = async (botId: string, text: string, threadId?: string) => {
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${botId}/messages`, { text, ...(threadId ? { threadId } : {}) })).status).toBe(202);
+      const seen = await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
+      await releaseTurn(botId);
+      return seen;
+    };
+
+    it("answers the press at once with the bot's own line and no model, and keeps the waiting mark on the server", async () => {
+      const bot = await blankBot("Press");
+      try {
+        expect(bot.messages[0]).toMatchObject({ role: "bot", kind: "text", text: "Hi, I'm Press. What would you like me to do?", setupOffer: true });
+        rmSync(fakeClaudeDump, { force: true });
+        const pressed = await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId });
+        expect(pressed.status).toBe(200);
+        const rows = await messages(bot.threadId);
+        expect(rows.map((row) => [row.role, row.setupOffer ?? null])).toEqual([["bot", null], ["bot", null]]);
+        expect(rows[1].text).toMatch(/^Great\. Tell me what you'd like help with/);
+        expect(await task(bot.id, bot.threadId)).toMatchObject({ setupRequest: { at: rows[1].at } });
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).body).toEqual({ ok: true, already: true });
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(existsSync(fakeClaudeDump)).toBe(false);
+      } finally {
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("runs the person's next line as setup while the chat keeps their words; other conversations and a cancel leave it alone", async () => {
+      const bot = await blankBot("Next line");
+      try {
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        const other = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Elsewhere" })).body.task;
+        const elsewhere = await turn(bot.id, "hello over here", other.threadId);
+        expect(elsewhere.systemPrompt).not.toContain("The user explicitly asked you to set yourself up");
+        expect(await task(bot.id, bot.threadId)).toMatchObject({ setupRequest: expect.any(Object) });
+
+        const setup = await turn(bot.id, "sort my inbox every morning", bot.threadId);
+        expect(setup.systemPrompt).toContain("The user explicitly asked you to set yourself up");
+        expect(userText(setup)).toContain("Set yourself up for this job: sort my inbox every morning");
+        expect(userText(setup)).not.toContain("/setup");
+        const line = (await messages(bot.threadId)).find((row) => row.role === "user");
+        expect(line).toMatchObject({ text: "sort my inbox every morning", setupRequest: true });
+        expect((await task(bot.id, bot.threadId))?.setupRequest).toBeUndefined();
+
+        const after = await turn(bot.id, "thanks", bot.threadId);
+        expect(after.systemPrompt).not.toContain("The user explicitly asked you to set yourself up");
+      } finally {
+        await api("POST", `/api/bots/${bot.id}/interrupt`);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("forgets the request when its chip is closed", async () => {
+      const bot = await blankBot("Cancelled");
+      try {
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        expect((await api("DELETE", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        expect((await task(bot.id, bot.threadId))?.setupRequest).toBeUndefined();
+        const plain = await turn(bot.id, "sort my inbox every morning", bot.threadId);
+        expect(plain.systemPrompt).not.toContain("The user explicitly asked you to set yourself up");
+        expect(userText(plain)).not.toContain("Set yourself up for this job");
+      } finally {
+        await api("POST", `/api/bots/${bot.id}/interrupt`);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("reads a queued line the same way, once the bot has a free slot", async () => {
+      const bot = await blankBot("Queued setup");
+      try {
+        expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 1 } })).status).toBe(200);
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        const holder = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Hold the slot" })).body.task;
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hold the one slot", threadId: holder.threadId })).status).toBe(202);
+        await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
+        const queued = await api("POST", `/api/bots/${bot.id}/messages`, { text: "sort my inbox", threadId: bot.threadId, dataContext: { cardId: "c_2" } });
+        expect(queued.body).toMatchObject({ queued: true, reason: "capacity" });
+        rmSync(fakeClaudeDump, { force: true });
+        await releaseTurn(bot.id);
+        await expect.poll(() => existsSync(fakeClaudeDump) && userText(JSON.parse(readFileSync(fakeClaudeDump, "utf8")) as Seen).includes("sort my inbox"),
+          { timeout: 15_000 }).toBe(true);
+        const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8")) as Seen;
+        await releaseTurn(bot.id);
+        expect(seen.systemPrompt).toContain("The user explicitly asked you to set yourself up");
+        expect(userText(seen)).toContain("Set yourself up for this job: sort my inbox\n\n<data-context>");
+        expect(userText(seen)).toContain('"cardId":"c_2"');
+      } finally {
+        await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 3 } });
+        await api("POST", `/api/bots/${bot.id}/interrupt`);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("tells a Chief that sets itself up to stay the Chief", async () => {
+      const bot = await blankBot("Chief setup");
+      try {
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: true })).status).toBe(200);
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        const setup = await turn(bot.id, "keep an eye on my inbox", bot.threadId);
+        expect(setup.systemPrompt).toContain("You are also the Chief of Staff, and setting yourself up does not change that");
+      } finally {
+        await api("POST", `/api/bots/${bot.id}/interrupt`);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("never offers it to a bot made with a description", async () => {
+      const bot = (await api("POST", "/api/bots", { name: "Described", description: "Files bugs." })).body.bot;
+      try {
+        expect(bot.messages[0].setupOffer).toBeUndefined();
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
+        expect(await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).toEqual({
+          status: 409, body: { error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do." },
+        });
+      } finally {
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("refuses the press when the bot's AI cannot set it up", async () => {
+      const bot = (await api("POST", "/api/bots", { name: "No tools" })).body.bot;
+      try {
+        // A plain chat model with its tools off cannot propose a profile.
+        expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "plainApi", model: "fixture-plain-model" } })).status).toBe(200);
+        expect(await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).toEqual({
+          status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead." },
+        });
+        expect(await messages(bot.threadId)).toHaveLength(1);
+      } finally {
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
+
+    it("reads the line as a typed /setup would, with the Data tab's context after the words, and an edit of it sets up again", async () => {
+      const bot = await blankBot("Edited setup");
+      try {
+        expect((await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).status).toBe(200);
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "sort my inbox", threadId: bot.threadId, dataContext: { cardId: "c_1" } })).status).toBe(202);
+        const first = await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
+        await releaseTurn(bot.id);
+        expect(userText(first)).toContain("Set yourself up for this job: sort my inbox\n\n<data-context>");
+        expect(userText(first)).toContain('"cardId":"c_1"');
+        const line = (await messages(bot.threadId)).find((row) => row.role === "user");
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages/${line.id}/edit`, { text: "sort my inbox and my calendar", threadId: bot.threadId })).status).toBe(202);
+        const edited = await readJsonFileWhenReady<Seen>(fakeClaudeDump, 15_000);
+        await releaseTurn(bot.id);
+        expect(edited.systemPrompt).toContain("The user explicitly asked you to set yourself up");
+        expect(userText(edited)).toContain("Set yourself up for this job: sort my inbox and my calendar");
+        expect((await messages(bot.threadId)).find((row) => row.role === "user" && row.text === "sort my inbox and my calendar")).toMatchObject({ setupRequest: true });
+      } finally {
+        await api("POST", `/api/bots/${bot.id}/interrupt`);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+    });
   });
 
   it("tells a /setup turn to connect an app itself when its connected-apps tools are mounted, and names the switch when they are off", async () => {
@@ -11539,6 +11724,8 @@ describe("harness HTTP API", () => {
 
       const requested = await request("ac_xero_e2e");
       expect(requested.status).toBe(200);
+      expect(requested.body.authConfigNote).toBe("xero connects with the person's own Composio auth config ac_xero_e2e, the one asked for.");
+      expect(connectorAuthConfigEdits).toEqual([{ id: "ac_xero_e2e", body: { type: "custom", is_enabled_for_tool_router: true } }]);
       const authorized = await api("POST", `/api/bots/${bot.id}/connector-cards/${requested.body.messageIds[0]}/authorize`, { threadId: bot.threadId });
       expect(authorized.status).toBe(200);
       expect(connectorLinkRequests.at(-1)).toEqual({ toolkit: "xero" });

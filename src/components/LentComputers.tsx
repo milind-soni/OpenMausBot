@@ -19,7 +19,7 @@ export interface KnownLentComputer {
   lent: boolean;
   lastSeenAt: number;
   lastUsedAt: number | null;
-  scopes: { folders: number; terminal: boolean; screen: boolean; internet?: boolean };
+  scopes: { folders: number; terminal: boolean; screen: boolean; internet?: boolean; chrome?: boolean };
 }
 
 const PLATFORM: Record<string, string> = { win32: "Windows", darwin: "macOS", linux: "Linux" };
@@ -31,6 +31,7 @@ export function lentComputerLines(computer: KnownLentComputer, now = Date.now())
     : t("lending.cloudSide.offline", { when: localizedRelativeTime(computer.lastSeenAt, activeLocale(), now) });
   const what = [
     ...(computer.scopes.internet ? [t("lending.cloudSide.internet")] : []),
+    ...(computer.scopes.chrome ? [t("lending.cloudSide.chrome")] : []),
     ...(computer.scopes.folders === 1 ? [t("lending.cloudSide.folderOne")]
       : computer.scopes.folders ? [t("lending.cloudSide.folders", { count: String(computer.scopes.folders) })] : []),
     ...(computer.scopes.screen ? [t("lending.cloudSide.screen")] : []),
@@ -49,16 +50,17 @@ export function pageLendingLine(lending: PageLending): string {
   if (lending.status && lending.status !== "lent" && lending.status !== "starting") return t(lendingProblemKey(lending.status) ?? "lending.status.starting");
   if (lending.status === "starting") return t("lending.status.starting");
   const updating = lending.link === "unsupported";
-  const what = lentWhat(lending.folders, lending.screen, lending.internet === true && !updating);
+  const what = lentWhat(lending.folders, lending.screen, lending.internet === true && !updating, lending.terminal === true, lending.chrome === true && !updating);
   if (updating) return what ? `${lendsLine(what)} ${t("lending.internetUnsupported")}` : t("lending.internetUnsupported");
-  return what ? lendsLine(what) : t("lending.status.lent");
+  const line = what ? lendsLine(what) : t("lending.status.lent");
+  return lending.internet && lending.link === "connecting" ? `${line} ${t("lending.internetConnecting")}` : line;
 }
 
-type PageLendingBridge = { state(): Promise<PageLending>; set(on: boolean): Promise<PageLending>; screen?(on: boolean): Promise<PageLending> };
+type PageLendingBridge = { state(): Promise<PageLending>; set(on: boolean): Promise<PageLending>; screen?(on: boolean): Promise<PageLending>; terminal?(on: boolean): Promise<PageLending> };
 
-/** In the desktop app on My Cloud's own page: "Let my bots use this Mac" right here, one switch, one line and Apps and
- * screen, so nobody has to leave My Cloud. Turning either on takes a real click; Apps and screen also asks in a dialog of
- * this app's own. */
+/** In the desktop app on My Cloud's own page: "Let my bots use this Mac" right here, one switch, one line, Apps and
+ * screen and the terminal, so nobody has to leave My Cloud. Turning any on takes a real click; Apps and screen and the
+ * terminal also ask in a dialog of this app's own. */
 function LendThisComputer({ bridge }: { bridge: PageLendingBridge }) {
   const [lending, setLending] = useState<PageLending | null>(null);
   const [working, setWorking] = useState(false);
@@ -77,19 +79,26 @@ function LendThisComputer({ bridge }: { bridge: PageLendingBridge }) {
   };
   const toggle = () => perform(() => bridge.set(!lending.on));
   const lendScreen = bridge.screen;
+  const lendTerminal = bridge.terminal;
   return <div data-lend-this-computer={lending.on ? "on" : "off"} className="flex flex-col gap-1.5 rounded-lg bg-raised/60 p-3">
     <div className="flex items-start justify-between gap-3">
       <p id="lend-this-computer" className="text-[13px] font-medium text-ink">{lendingTitle()}</p>
       <Switch checked={lending.on} disabled={working} aria-labelledby="lend-this-computer" onClick={toggle} />
     </div>
-    <p role="status" className="text-[12.5px] text-ink-secondary">{pageLendingLine(lending)}</p>
+    <p role="status" className="text-[13px] text-ink-secondary">{pageLendingLine(lending)}</p>
     {lending.on && lendScreen && <label data-lend-screen={lending.screen ? "on" : "off"} className="mt-1 flex items-start gap-2">
       <input className="mt-1" type="checkbox" checked={lending.screen} disabled={working || (!lending.screen && !lending.screenAvailable)}
         onChange={(event) => perform(() => lendScreen(event.target.checked))} />
-      <span className="text-[12.5px] text-ink">{t("lending.screen")}<span className="mt-0.5 block text-[12px] text-ink-secondary">
+      <span className="text-[13px] text-ink">{t("lending.screen")}<span className="mt-0.5 block text-[12px] text-ink-secondary">
         {t(lending.screen || lending.screenAvailable ? "lending.screenHelp" : "lending.screenUnavailable")}</span></span>
     </label>}
-    {failed && <p role="alert" data-lending-failed={failed} className="text-[12.5px] text-danger">{t(failed)}</p>}
+    {lending.on && lendTerminal && <label data-lend-terminal={lending.terminal ? "on" : "off"} className="mt-1 flex items-start gap-2">
+      <input className="mt-1" type="checkbox" checked={lending.terminal === true} disabled={working}
+        onChange={(event) => perform(() => lendTerminal(event.target.checked))} />
+      <span className="text-[13px] text-ink">{t("lending.terminal")}<span className="mt-0.5 block text-[12px] text-ink-secondary">
+        {t("lending.terminalHelp")}</span></span>
+    </label>}
+    {failed && <p role="alert" data-lending-failed={failed} className="text-[13px] text-danger">{t(failed)}</p>}
   </div>;
 }
 
@@ -109,7 +118,7 @@ export function LentComputersCard() {
     return () => { alive = false; clearInterval(timer); };
   }, []);
   const lending = window.ogb?.cloudLending;
-  const here = lending?.state && lending.set ? { state: lending.state, set: lending.set, screen: lending.screen } : null;
+  const here = lending?.state && lending.set ? { state: lending.state, set: lending.set, screen: lending.screen, terminal: lending.terminal } : null;
   return <Card title={t("lending.cloudSide.title")}>
     <div data-lent-computers={known === null ? "loading" : known.length} className="flex flex-col gap-3">
       {here && <LendThisComputer bridge={here} />}

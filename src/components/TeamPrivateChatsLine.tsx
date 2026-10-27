@@ -34,5 +34,5 @@ export function TeamSharedHeader({ team }: { team: { name: string } }) {
 export function TeamPrivateFirstLine({ team }: { team: { id: string; name: string } }) {
   const [due] = useState(() => teamPrivateChatsLineDue(team.id, typeof localStorage === "undefined" ? null : localStorage));
   if (!due) return null;
-  return <p role="status" data-team-private-chats className="mx-5 mb-2 text-[12.5px] text-ink-secondary">{t("team.privateChats", { team: team.name })}</p>;
+  return <p role="status" data-team-private-chats className="mx-5 mb-2 text-[13px] text-ink-secondary">{t("team.privateChats", { team: team.name })}</p>;
 }

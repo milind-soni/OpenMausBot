@@ -13,3 +13,11 @@ it("the welcome's English copy uses none of the app's internal words", () => {
     .map(([key]) => key);
   expect(offending).toEqual([]);
 });
+
+it("Settings describes the welcome as it now is: no phone step, no first-bot step", async () => {
+  const { readFileSync } = await import("node:fs");
+  const settings = readFileSync(new URL("../components/SettingsModal.tsx", import.meta.url), "utf8");
+  const used = /subtitle=\{t\("(settings\.welcome\.[\w.]+)"\)\}/.exec(settings)?.[1] as keyof typeof en | undefined;
+  expect(used).toBeDefined();
+  expect(en[used!]).not.toMatch(/phone|first bot|providers/i);
+});

@@ -58,7 +58,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
       role="dialog"
       tabIndex={-1}
       aria-label={t("call.live.settings")}
-      className="flex w-[300px] max-w-[90vw] flex-col gap-3 rounded-xl border border-hairline bg-panel p-3 text-[12.5px] text-ink shadow-lg"
+      className="flex w-[300px] max-w-[90vw] flex-col gap-3 rounded-xl border border-hairline bg-panel p-3 text-[13px] text-ink shadow-lg"
       onKeyDown={(event) => {
         if (event.key !== "Escape") return;
         event.stopPropagation();
@@ -77,7 +77,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           {LIVE_VOICE_OPTIONS.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
         </Select>
       </label>
-      <div className="-mt-2 text-[11.5px] text-ink-tertiary">{t("call.live.voiceNext")}</div>
+      <div className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.voiceNext")}</div>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.readTyped")}</span>
         <input
@@ -88,7 +88,7 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
           onChange={(event) => void save({ readTypedReplies: event.target.checked })}
         />
       </label>
-      <div id={typedHintId} className="-mt-2 text-[11.5px] text-ink-tertiary">{t("call.live.readTypedHint")}</div>
+      <div id={typedHintId} className="-mt-2 text-[12px] text-ink-tertiary">{t("call.live.readTypedHint")}</div>
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t("call.live.idle")}</span>
         <Select
@@ -116,10 +116,10 @@ export function LiveCallSettings({ onClose }: { onClose: () => void }) {
         </span>
       </div>
       {live.keySource !== "live" && (
-        <div className="-mt-2 text-[11.5px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")}</div>
+        <div className="-mt-2 text-[12px] text-ink-tertiary">{t(live.keySource === "openai" ? "call.live.keyFromApiKeys" : "call.live.needsKey")}</div>
       )}
       {changingKey && <LiveKeySetup compact onSaved={() => setChangingKey(false)} />}
-      <div className="text-[11.5px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true })} {t("call.live.cost")}</div>
+      <div className="text-[12px] text-ink-tertiary">{liveDisclosure({ cloudHome: state.config?.cloudHome === true })} {t("call.live.cost")}</div>
       {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );

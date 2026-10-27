@@ -106,7 +106,7 @@ export function TeamMoveLine({ move, onChange }: { move: TeamMoveView; onChange(
   };
   const close = () => { void page?.dismiss("team-move").then(() => onChange(null)).catch(() => {}); };
   const link = "font-medium text-accent-text underline underline-offset-2 hover:text-ink";
-  return <div role="status" data-cloud-send-strip={line.kind} data-team-move-line={move.phase} className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[12.5px] text-ink-secondary">
+  return <div role="status" data-cloud-send-strip={line.kind} data-team-move-line={move.phase} className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
     {line.kind === "sending" || busy ? <Loader2 size={14} aria-hidden="true" className="animate-spin" /> : <ArrowRightLeft size={14} aria-hidden="true" />}
     <span dir="auto" data-cloud-send-strip-line>{line.text}</span>
     {line.kind === "done" && page?.openTeam && <>

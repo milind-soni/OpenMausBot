@@ -242,7 +242,7 @@ describe.skipIf(!chrome)("S6: a hostile page in a bot's browser", () => {
     const connects: string[] = [];
     const http = createServer();
     const links = new DeviceLinks({ pingMs: 1_000 });
-    http.on("upgrade", (req, socket, head) => links.accept({ req, socket: socket as Socket, head }, { key: "mac", person: "cloud-home", internet: true, seenAs: "203.0.113.9", live: () => true }));
+    http.on("upgrade", (req, socket, head) => links.accept({ req, socket: socket as Socket, head }, { key: "mac", person: "cloud-home", internet: true, chrome: false, seenAs: "203.0.113.9", live: () => true }));
     await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
     const stop = new AbortController();
     const link = runDeviceLink({

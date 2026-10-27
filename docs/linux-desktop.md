@@ -85,6 +85,20 @@ chmod +x release/OpenMausBot-*-x86_64.AppImage
 
 For a downloaded release AppImage, use `OpenMausBot.AppImage` in place of the versioned path above.
 
+### Updating
+
+The app checks for updates in the background and downloads them by itself. Nothing restarts until you click
+**Restart to update**.
+
+- **Debian package.** The click asks for your password once, in the system's own prompt, installs the update with
+  `apt-get` (so new dependencies are resolved) and reopens OpenMausBot. The downloaded file is copied to a
+  root-only folder and checked against the checksum in the update feed first; a file that does not match is
+  refused and nothing is installed. Closing the prompt leaves the update ready to try again. If the session cannot
+  show a prompt (SSH, no desktop, no `pkexec`), the app falls back to copying the `sudo apt-get install` command
+  and opening a terminal, and says why. Set `OMB_UPDATE_INSTALL=terminal` to always use the terminal.
+- **AppImage.** The update replaces the AppImage when you restart; no password is needed.
+- **rpm and pacman packages** still use the terminal hand-off.
+
 ### Bundled bot browser on Ubuntu 24.04
 
 The desktop packages include the browser engine and browser runtime; no separate browser download is needed.

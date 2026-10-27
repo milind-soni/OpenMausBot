@@ -17,7 +17,7 @@ const OTHER = "https://bots.example.test";
 const fixture = vi.hoisted(() => ({ autoUpdater: null, handlers: new Map() }));
 
 vi.mock("electron", () => ({
-  app: { isPackaged: true, getPath: () => "/unused-updater-test-log" },
+  app: { isPackaged: true, getPath: () => "/unused-updater-test-log", getVersion: () => "1.0.0", hide: vi.fn() },
   clipboard: { writeText: vi.fn() },
   ipcMain: { handle: (name, handler) => fixture.handlers.set(name, handler) },
 }));
@@ -149,7 +149,7 @@ function bridgeFor(origin, { clicked = false, rule = null } = {}) {
 
 it("My Cloud's page gets the update bridge, and it restarts the app only on the person's click", async () => {
   const local = bridgeFor(LOCAL);
-  expect(Object.keys(local.bridge.updater).sort()).toEqual(["check", "install", "onState"]);
+  expect(Object.keys(local.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen"]);
   expect(local.asked, "this computer's page has the whole bridge without asking").toEqual([]);
   await local.bridge.updater.install();
   expect(local.invoked).toEqual([["update:install"]]);
@@ -157,7 +157,7 @@ it("My Cloud's page gets the update bridge, and it restarts the app only on the 
   const rule = mainRule();
   rule.show(page(CLOUD), "cloud");
   const cloud = bridgeFor(CLOUD, { rule });
-  expect(Object.keys(cloud.bridge.updater).sort()).toEqual(["check", "install", "onState"]);
+  expect(Object.keys(cloud.bridge.updater).sort()).toEqual(["check", "install", "onState", "seen"]);
   await expect(cloud.bridge.updater.install()).rejects.toThrow(/Restart to update/);
   await cloud.bridge.updater.check();
   cloud.bridge.updater.onState(() => {});
@@ -228,6 +228,45 @@ it("a downloaded update installs when the app quits, except a system package, wh
   }
 });
 
+it("a downloaded update installs by itself at a quiet moment on macOS and Windows, and Linux installs stay the person's", async () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const resourcesPath = process.resourcesPath;
+  const appImage = process.env.APPIMAGE;
+  const resources = mkdtempSync(join(tmpdir(), "omb-updater-quiet-"));
+  const quiet = { locked: () => true, idleMs: () => 0, typedAt: () => 0, shown: () => true, busy: () => null, work: async () => null, watch: () => {} };
+  try {
+    for (const [os, marker, image, installs] of [
+      ["darwin", null, null, true],
+      ["win32", null, null, true],
+      ["linux", null, "/home/a/OpenMausBot.AppImage", false],
+      ["linux", "deb", null, false],
+      ["linux", "rpm", null, false],
+    ]) {
+      Object.defineProperty(process, "platform", { ...platform, value: os });
+      process.resourcesPath = resources;
+      rmSync(join(resources, "package-type"), { force: true });
+      if (marker) writeFileSync(join(resources, "package-type"), marker);
+      if (image) process.env.APPIMAGE = image;
+      else delete process.env.APPIMAGE;
+      const { updater, autoUpdater, handlers } = await load(() => true);
+      updater.startUpdater(quiet);
+      await vi.advanceTimersByTimeAsync(15_000);
+      await settle();
+      expect(autoUpdater.quitAndInstall, `${os} ${marker ?? image ?? ""} waits for a quiet moment`).not.toHaveBeenCalled();
+      expect((await handlers.get("update:get-state")({})).installsByItself, os).toBe(installs ? true : undefined);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await settle();
+      expect(autoUpdater.quitAndInstall.mock.calls, `${os} ${marker ?? image ?? ""}`).toEqual(installs ? [[true, true]] : []);
+    }
+  } finally {
+    Object.defineProperty(process, "platform", platform);
+    process.resourcesPath = resourcesPath;
+    if (appImage === undefined) delete process.env.APPIMAGE;
+    else process.env.APPIMAGE = appImage;
+    rmSync(resources, { recursive: true, force: true });
+  }
+});
+
 it("My Cloud's page hears \"Restart to update\" once the sign-in it loaded before is restored", async () => {
   const rule = mainRule();
   rule.launching();
@@ -244,7 +283,10 @@ it("My Cloud's page hears \"Restart to update\" once the sign-in it loaded befor
   expect(() => handlers.get("update:get-state")(cloud.event)).toThrow(/only available/);
   expect(cloud.webContents.send).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
-  expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(1);
+  // The staged 2.0.0 is still offered, so the hourly check looks again (quietly) for something newer; macOS stages
+  // natively and is not re-checked.
+  expect(autoUpdater.checkForUpdates).toHaveBeenCalledTimes(process.platform === "darwin" ? 1 : 2);
+  expect(cloud.webContents.send).not.toHaveBeenCalled();
 
   rule.signedIn({ status: "connected", account: { id: "a1" }, machine: { origin: CLOUD, status: "ready" } });
   expect(cloud.webContents.send).toHaveBeenLastCalledWith("update:state", expect.objectContaining({ status: "downloaded", version: "2.0.0" }));
@@ -277,7 +319,7 @@ it("downloads an update by itself: the first check after launch starts it, and n
 it("My Cloud's page reads and drives the update channels, and another server's page is refused", async () => {
   const rule = mainRule();
   const { handlers } = await load(rule.pageAllowed);
-  expect([...handlers.keys()].sort()).toEqual(["update:check", "update:get-state", "update:install"]);
+  expect([...handlers.keys()].sort()).toEqual(["update:check", "update:get-state", "update:install", "update:seen"]);
 
   const cloud = page(CLOUD);
   rule.show(cloud, "cloud");

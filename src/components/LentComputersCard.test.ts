@@ -12,8 +12,8 @@ const { LentComputersCard, lentComputerLines, pageLendingLine } = await import("
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement;
 let root: Root;
-const off: PageLending = { available: true, on: false, status: null, folders: [], screen: false, screenAvailable: true, internet: false };
-const lent: PageLending = { available: true, on: true, status: "lent", folders: ["Desktop", "Documents", "Downloads"].map((name) => ({ name, write: false })), screen: false, screenAvailable: true, internet: true };
+const off: PageLending = { available: true, on: false, status: null, folders: [], screen: false, screenAvailable: true, internet: false, chrome: false, terminal: false };
+const lent: PageLending = { available: true, on: true, status: "lent", folders: ["Desktop", "Documents", "Downloads"].map((name) => ({ name, write: false })), screen: false, screenAvailable: true, internet: true, chrome: false, terminal: false };
 
 beforeEach(() => {
   setLocale("en");
@@ -67,6 +67,26 @@ it("on My Cloud's page, Apps and screen is a tick under the switch once lending 
   expect(host.querySelector<HTMLInputElement>('[data-lend-screen="on"] input')!.checked).toBe(true);
 });
 
+it("on My Cloud's page, the terminal is a tick under the switch once lending is on, and an older app without it shows none", async () => {
+  const terminal = vi.fn().mockResolvedValue({ ...lent, terminal: true });
+  (window as { ogb?: unknown }).ogb = { platform: "darwin", cloudLending: { open: vi.fn(), state: vi.fn().mockResolvedValue(lent), set: vi.fn(), screen: vi.fn(), terminal } };
+  await render();
+  const tick = host.querySelector<HTMLInputElement>('[data-lend-terminal="off"] input')!;
+  expect(host.textContent).toContain("Terminal");
+  expect(host.textContent).toContain("Bots can run any command on this computer as you");
+  await act(async () => tick.click());
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(terminal).toHaveBeenCalledExactlyOnceWith(true);
+  expect(host.querySelector<HTMLInputElement>('[data-lend-terminal="on"] input')!.checked).toBe(true);
+  expect(host.textContent).toContain("and terminal on this Mac");
+
+  await act(async () => root.unmount());
+  root = createRoot(host);
+  (window as { ogb?: unknown }).ogb = { platform: "darwin", cloudLending: { open: vi.fn(), state: vi.fn().mockResolvedValue(lent), set: vi.fn(), screen: vi.fn() } };
+  await render();
+  expect(host.querySelector("[data-lend-terminal]")).toBeNull();
+});
+
 it("says to set up computer control first where Apps and screen can't be lent yet", async () => {
   (window as { ogb?: unknown }).ogb = { platform: "darwin", cloudLending: { open: vi.fn(), state: vi.fn().mockResolvedValue({ ...lent, screenAvailable: false }), set: vi.fn(), screen: vi.fn() } };
   await render();
@@ -89,6 +109,8 @@ it("says how lending is going in plain words", () => {
   expect(pageLendingLine({ ...lent, folders: [], screen: true, internet: false })).toBe("Your bots can use apps and screen on this computer.");
   expect(pageLendingLine({ ...lent, link: "unsupported" })).toBe("Your bots can use Desktop, Documents, and Downloads (read only) on this computer. My Cloud is updating. Your bots can use this computer's internet connection once it's done.");
   expect(pageLendingLine({ ...lent, folders: [], link: "unsupported" })).toBe("My Cloud is updating. Your bots can use this computer's internet connection once it's done.");
+  expect(pageLendingLine({ ...lent, folders: [], internet: true, link: "connecting" })).toBe("Your bots can use the internet connection on this computer. Internet connection: connecting…");
+  expect(pageLendingLine({ ...lent, folders: [], internet: true, link: "on" })).toBe("Your bots can use the internet connection on this computer.");
 });
 
 it("a refused folder says why plainly, with no Try again; only a failure trying again can fix says Try again", async () => {
@@ -117,4 +139,13 @@ it("on the phone or in a browser, a computer that lends its internet connection 
   expect(away).toContain("While it's away, Instagram, YouTube and Google sign-in open from My Cloud's own connection and may turn your bots away.");
   expect(lentComputerLines({ ...computer, online: false, scopes: { ...computer.scopes, internet: false } }).join(" ")).not.toContain("My Cloud's own connection");
   expect(lentComputerLines({ ...computer, online: false, lent: false }).join(" ")).not.toContain("My Cloud's own connection");
+});
+
+it("names a lent Chrome on both sides, a Chrome-only grant included", () => {
+  expect(pageLendingLine({ ...lent, chrome: true })).toBe("Your bots can use the internet connection, your Chrome, and Desktop, Documents, and Downloads (read only) on this computer.");
+  expect(pageLendingLine({ ...lent, folders: [], internet: false, chrome: true })).toBe("Your bots can use your Chrome on this computer.");
+  const computer = { id: "c", name: "Ash's MacBook", platform: "darwin" as const, online: true, busy: false, lent: true, lastSeenAt: Date.now(), lastUsedAt: null,
+    scopes: { folders: 2, terminal: false, screen: false, internet: true, chrome: true } };
+  expect(lentComputerLines(computer)).toContain("Shares: internet connection, Chrome, 2 folders");
+  expect(lentComputerLines({ ...computer, scopes: { folders: 0, terminal: false, screen: false, internet: false, chrome: true } })).toContain("Shares: Chrome");
 });

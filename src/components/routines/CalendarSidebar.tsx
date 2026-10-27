@@ -61,7 +61,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
             onChange={(event) => setQuery(event.target.value)}
             type="search"
             placeholder={t("routines.sidebar.searchBots")}
-            className="h-8 w-full rounded-lg border border-hairline/45 bg-control/55 pl-8 pr-2.5 text-[11.5px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/60 focus:bg-control"
+            className="h-8 w-full rounded-lg border border-hairline/45 bg-control/55 pl-8 pr-2.5 text-[12px] text-ink outline-none placeholder:text-ink-tertiary focus:border-accent/60 focus:bg-control"
           />
         </label>
 
@@ -83,12 +83,12 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
               />
               <BotAvatar bot={bot} size={27} animated={false} />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[11.5px] font-medium text-ink">{bot.name}</div>
-                <div className="truncate text-[9.5px] text-ink-tertiary">
+                <div className="truncate text-[12px] font-medium text-ink">{bot.name}</div>
+                <div className="truncate text-[10px] text-ink-tertiary">
                   {bot.title || t("routines.sidebar.botFallback")}
                 </div>
               </div>
-              <span className="shrink-0 rounded-full border border-hairline/50 px-1.5 py-0.5 text-[8.5px] text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
+              <span className="shrink-0 rounded-full border border-hairline/50 px-1.5 py-0.5 text-[9px] text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
                 {t("routines.sidebar.drag")}
               </span>
             </div>
@@ -101,7 +101,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
           )}
         </div>
 
-        <p className="mt-2 px-2 text-[9.5px] leading-relaxed text-ink-tertiary">
+        <p className="mt-2 px-2 text-[10px] leading-relaxed text-ink-tertiary">
           {t("routines.sidebar.dragHint")}
         </p>
       </section>

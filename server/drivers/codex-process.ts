@@ -85,6 +85,11 @@ export async function keepStopping(stop: () => Promise<boolean>, owned: () => bo
   return false;
 }
 
+/** A `-c key={ … }` override value: JSON string quoting is valid TOML basic-string quoting. */
+export function tomlInlineTable(entries: Record<string, string>): string {
+  return `{ ${Object.entries(entries).map(([key, value]) => `${JSON.stringify(key)} = ${JSON.stringify(value)}`).join(", ")} }`;
+}
+
 /**
  * Codex drops root-level `-c` once the subcommand has its own (openai/codex#39012), and the driver
  * always passes its own after `app-server`. So `-c key=value` / `--config key=value` typed into the

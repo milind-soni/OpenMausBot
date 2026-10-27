@@ -71,6 +71,7 @@ describe("DataChart refresh", () => {
     render("first", { mark: "line", height: 280 });
     await settle();
     expect(fixture.embed.mock.calls[0]![1]).toMatchObject({ height: 180, autosize: { type: "fit", contains: "padding" } });
+    expect(fixture.embed.mock.calls[0]![2], "a bot's chart expressions are interpreted, not compiled to code").toMatchObject({ ast: true });
     const original = chart("chart");
     viewportHeight = 800;
     observer.callback();

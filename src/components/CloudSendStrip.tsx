@@ -56,7 +56,7 @@ export function CloudSendStrip({ cloudHome, onPairPhone }: { cloudHome: boolean;
       .catch((cause: unknown) => { setUnanswered(ipcErrorText(cause) ?? t("cloudSend.move.failingPlain")); setRetrying(false); });
   };
   const close = () => { void bridge.dismiss(MOVE_LINE).then(setNotice).catch(() => {}); };
-  return <div role="status" data-cloud-send-strip={move.kind} data-move-line={notice!.move!.phase} className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[12.5px] text-ink-secondary">
+  return <div role="status" data-cloud-send-strip={move.kind} data-move-line={notice!.move!.phase} className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
     {move.kind === "sending" || retrying ? <Loader2 size={14} aria-hidden="true" className="animate-spin" /> : <CloudUpload size={14} aria-hidden="true" />}
     <span dir="auto" data-cloud-send-strip-line>{unanswered ?? move.text}</span>
     {move.extra.map((line) => <span key={line} dir="auto" data-move-line-extra>{line}</span>)}

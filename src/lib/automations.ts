@@ -308,7 +308,10 @@ export function runLine(run: RoutineRun, now = Date.now()): { when: string; mark
   if (run.status === "completed") return { when, mark: "✓", text: run.report?.state === "quiet" ? t("automations.run.nothingNew") : short(firstLine(run.output)) || t("automations.run.done") };
   if (run.status === "waiting") return { when, mark: "!", text: t("automations.reason.answer") };
   if (run.status === "running" || run.status === "queued") return { when, mark: "…", text: t("automations.runningNow") };
-  if (run.status === "cancelled") return { when, mark: "✗", text: t("automations.run.stopped") };
+  if (run.status === "cancelled") {
+    const reason = short(firstLine(run.error && routineLineText(run.errorCode, run.error, run.errorParams)));
+    return { when, mark: "✗", text: reason ? t("automations.run.stoppedBecause", { reason }) : t("automations.run.stopped") };
+  }
   return { when, mark: "✗", text: ownerFix(run)?.reason ?? (short(firstLine(run.error && routineLineText(run.errorCode, run.error, run.errorParams))) || t("automations.run.failed")) };
 }
 

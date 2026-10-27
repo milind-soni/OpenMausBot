@@ -36,7 +36,7 @@ async function scratch(t) {
   return dir;
 }
 
-function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false } = {}) {
+function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = false, timeouts = false } = {}) {
   const json = (value, status = 200) => ({ ok: status < 400, status, body: (async function* () { yield Buffer.from(JSON.stringify(value)); })() });
   const state = { paired: true, environmentId: randomUUID(), sessionId: randomUUID(), connects: [], disconnects: 0, disconnectBodies: [], results: [], queue: [], waiting: null };
   const nextJob = () => new Promise(resolve => { state.waiting = resolve; });
@@ -47,7 +47,7 @@ function cloudHome({ cloudHome = true, scopes = ["admin", "client"], details = f
   state.fetch = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return state.paired ? json({ kind: "session", id: state.sessionId, scopes, ...(cloudHome ? { cloudHome: true } : {}) }) : json({ error: "unauthorized" }, 401);
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}) } });
+    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, ...(details ? { lendingDetails: true } : {}), ...(timeouts ? { commandTimeouts: true } : {}) } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
     if (route.endsWith("/poll")) {
@@ -152,6 +152,15 @@ test("the terminal is lent only when asked for with exactly true: the bots can t
   assert.equal(sharing.cloudState(env).terminal, false);
   assert.equal((await sharing.saveCloud(env, { folders, screen: false })).terminal, false);
   await assert.rejects(sharing.saveCloud(env, { folders: [], screen: false }), /terminal/);
+});
+
+test("Your Chrome does not outlive the switch: after an Off nothing reports it and a plain save does not bring it back", async t => {
+  const { folderPath, sharing } = await lendingFixture(t);
+  const folders = [{ id: randomUUID(), path: folderPath, write: false }];
+  assert.equal((await sharing.saveCloud(env, { folders, screen: false, chrome: true })).chrome, true);
+  sharing.revoke(env);
+  assert.equal(sharing.cloudState(env).chrome, false);
+  assert.equal((await sharing.saveCloud(env, { folders, screen: false })).chrome, false);
 });
 
 test("refuses to lend unless the Cloud sign-in is verified for this exact machine, and never to a server that is not a Cloud home", async t => {
@@ -321,7 +330,7 @@ test("Stop lending is instant: the Cloud is told, running work is cancelled, and
   home.push({ action: "computer_call", tool_name: "click", arguments: {} });
   await delay(300);
   assert.equal((await readFile(driver.calls, "utf8")).trim(), "drag");
-  assert.deepEqual(summaries.at(-1), { lending: [], busy: null });
+  assert.deepEqual(summaries.at(-1), { lending: [], internetOnly: false, terminal: false, busy: null });
 });
 
 test("quitting the app pauses lending; it never switches it off, even mid-reconnect", async t => {
@@ -402,6 +411,31 @@ test("the menu-bar indicator speaks the app's language and says it again when th
   assert.deepEqual(trays[0].menu.slice(2).map(item => item.label), ["Parar de compartilhar", "Configurações de compartilhamento…"]);
 });
 
+test("the menu-bar indicator lends the terminal through main, and shows what is lent once main answers", async () => {
+  const trays = [];
+  class Tray {
+    constructor() { trays.push(this); }
+    on() {} setToolTip() {} setTitle() {} setContextMenu(menu) { this.menu = menu; } isDestroyed() { return false; } destroy() {}
+  }
+  const asked = [];
+  let answer;
+  const indicator = createLendingIndicator({ Tray, Menu: { buildFromTemplate: items => items }, nativeImage: { createFromPath: () => ({ resize: () => ({}) }) },
+    iconPath: "icon.png", onStop: () => {}, onOpen: () => {}, onTerminal: on => { asked.push(on); return new Promise(resolve => { answer = resolve; }); }, device: "Mac" });
+  indicator.update({ lending: true, busy: false, terminal: false });
+  const terminal = () => trays[0].menu.find(item => item.label === "Terminal");
+  assert.equal(terminal().checked, false);
+  terminal().click();
+  terminal().checked = true;
+  answer();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(asked, [true]);
+  assert.equal(terminal().checked, false, "a No leaves it unticked");
+  indicator.update({ lending: true, busy: false, terminal: true });
+  assert.equal(terminal().checked, true);
+  terminal().click();
+  assert.deepEqual(asked, [true, false]);
+});
+
 test("Stop lending is remembered as the person's own choice, with when, and a new lend clears it", async t => {
   const { folderPath, home, sharing } = await lendingFixture(t);
   await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: true });
@@ -440,6 +474,15 @@ test("tells My Cloud its platform only when that Cloud takes it, so its bots say
     await connected(sharing, 1, home);
     if (details) assert.equal(home.connects[0].platform, process.platform);
     else assert.equal("platform" in home.connects[0], false, "an older Cloud refuses fields it does not know");
+  }
+});
+
+test("says it takes a command's timeout only to a Cloud that sends one, since an older Cloud refuses fields it does not know", async t => {
+  for (const timeouts of [true, false]) {
+    const { folderPath, home, sharing } = await lendingFixture(t, { home: { timeouts } });
+    await sharing.saveCloud(env, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false });
+    await connected(sharing, 1, home);
+    assert.equal(home.connects[0].commandTimeouts, timeouts ? true : undefined);
   }
 });
 

@@ -34,8 +34,8 @@ function render(embedded: boolean, whopCard = false) {
 }
 
 /** useState order in McpServersPanel: the server whose sign-in is open, then its flow. */
-const SIGNING_IN = 7;
-const SIGN_IN_FLOW = 8;
+const SIGNING_IN = 6;
+const SIGN_IN_FLOW = 7;
 
 beforeEach(() => {
   vi.stubGlobal("window", {});
@@ -48,10 +48,9 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Your MCP servers inside the Apps pop-up", () => {
-  it("lists each server with Test, Edit and an on/off switch, plus Paste config and Add MCP server", () => {
+  it("lists each server with Test, Edit and an on/off switch, plus one Add MCP server", () => {
     const html = render(true);
     expect(html).toContain("Your MCP servers");
-    expect(html).toContain("Paste config");
     expect(html).toContain("Add MCP server");
     expect(html.match(/role="switch"/g)?.length).toBeGreaterThanOrEqual(3); // two servers + the Claude Code switch
     expect(html).toMatch(/aria-label="Turn notes off" type="button" role="switch" aria-checked="true"/);

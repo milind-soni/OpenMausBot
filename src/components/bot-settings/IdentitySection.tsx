@@ -83,7 +83,7 @@ export function IdentitySection({
           <button
             type="button"
             onClick={() => setInstructionsOpen(true)}
-            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11.5px] font-medium text-accent-text hover:bg-accent/10"
+            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] font-medium text-accent-text hover:bg-accent/10"
           >
             <BookOpen size={12} /> {t("botSettings.identity.viewFull")}
           </button>

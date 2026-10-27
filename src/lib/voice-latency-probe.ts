@@ -30,6 +30,7 @@ const sampleFor = (probe: VoiceProbeSample[], messageId: string): VoiceProbeSamp
 const pendingFirstDeltaAt = new Map<ThreadId, number>();
 
 export function recordRuntimeEvent(event: RuntimeEvent): void {
+  if (!sink()) return;
   if (event.type === "turn.started") {
     pendingFirstDeltaAt.delete(event.threadId);
     return;

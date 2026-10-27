@@ -419,7 +419,7 @@ export function CloudComputersCard({
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="truncate text-[13.5px] font-medium text-ink">
+                  <span className="truncate text-[14px] font-medium text-ink">
                     {instance.orphaned ? t("vm.cloud.orphan") : instance.ownerName}
                   </span>
                   <span
@@ -435,11 +435,11 @@ export function CloudComputersCard({
                     {state}
                   </span>
                 </div>
-                <div className="mt-1 break-all text-[11.5px] text-ink-secondary">
+                <div className="mt-1 break-all text-[12px] text-ink-secondary">
                   {instance.orphaned ? t("vm.owner.gone") : t("vm.owner.owned")} · {instance.name}
                 </div>
                 {instance.inUse && (
-                  <div className="mt-1 text-[11.5px] text-ink-secondary">{t("vm.cloud.stopFirst")}</div>
+                  <div className="mt-1 text-[12px] text-ink-secondary">{t("vm.cloud.stopFirst")}</div>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
@@ -557,7 +557,7 @@ export function LocalVmInventoryCard({
             >
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="truncate text-[13.5px] font-medium text-ink">{instance.name}</span>
+                  <span className="truncate text-[14px] font-medium text-ink">{instance.name}</span>
                   <span
                     className={cn(
                       "rounded-full px-2 py-0.5 text-[11px]",
@@ -573,19 +573,19 @@ export function LocalVmInventoryCard({
                     {state}
                   </span>
                 </div>
-                <div className="mt-1 text-[11.5px] text-ink-secondary">
+                <div className="mt-1 text-[12px] text-ink-secondary">
                   {t("vm.perBot.destination", { destination: t(destinationLabelKeys[instance.destination]) })}
                 </div>
                 {!managed && (
-                  <div className="mt-1 text-[11.5px] text-warning">
+                  <div className="mt-1 text-[12px] text-warning">
                     {t("vm.perBot.unmanaged")}
                   </div>
                 )}
                 {managed && instance.problem && !instance.inUse && (
-                  <div className="mt-1 text-[11.5px] text-warning">{localizeComputerProblem(instance.problem)}</div>
+                  <div className="mt-1 text-[12px] text-warning">{localizeComputerProblem(instance.problem)}</div>
                 )}
                 {managed && instance.inUse && (
-                  <div className="mt-1 text-[11.5px] text-ink-secondary">{t("vm.perBot.stopFirst")}</div>
+                  <div className="mt-1 text-[12px] text-ink-secondary">{t("vm.perBot.stopFirst")}</div>
                 )}
               </div>
               {managed && <button
@@ -649,7 +649,7 @@ function ActionButton({
       aria-busy={pending === action}
       disabled={pending !== null}
       className={cn(
-        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-50",
+        "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium disabled:opacity-50",
         danger ? "bg-danger/15 text-danger hover:bg-danger/20" : "bg-accent text-white hover:brightness-110",
       )}
     >
@@ -714,7 +714,7 @@ export function LocalVmIdleTimeoutSetting({
       <div className="flex items-center justify-between gap-3">
         <div>
           <label htmlFor="local-vm-idle-timeout" className="text-[13px] text-ink">{t("vm.idle.label")}</label>
-          <div id="local-vm-idle-timeout-help" className="text-[11.5px] text-ink-secondary">{t("vm.idle.detail")}</div>
+          <div id="local-vm-idle-timeout-help" className="text-[12px] text-ink-secondary">{t("vm.idle.detail")}</div>
         </div>
         <div
           className={cn(
@@ -744,7 +744,7 @@ export function LocalVmIdleTimeoutSetting({
             }}
             className="min-w-0 flex-1 bg-transparent px-2.5 py-1.5 text-[13px] tabular-nums text-ink focus:outline-none disabled:opacity-50"
           />
-          <span className="pr-2.5 text-[12.5px] text-ink-secondary">{t("vm.idle.minutes")}</span>
+          <span className="pr-2.5 text-[13px] text-ink-secondary">{t("vm.idle.minutes")}</span>
         </div>
       </div>
       {error ? (
@@ -1221,7 +1221,7 @@ export function LocalComputerSection() {
           <span
             aria-live="polite"
             className={cn(
-              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px]",
+              "flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[13px]",
               headerReady ? "bg-success/15 text-success" : "bg-control text-ink-secondary",
             )}
           >
@@ -1245,7 +1245,7 @@ export function LocalComputerSection() {
               setInventoryRefreshKey((key) => key + 1);
             }}
             disabled={loading || pending !== null}
-            className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"
           >
             <RefreshCw size={12} /> {t("vm.main.recheck")}
           </button>
@@ -1254,7 +1254,7 @@ export function LocalComputerSection() {
               href={status?.viewer_url ?? c?.view}
               target="_blank"
               rel="noreferrer"
-              className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink hover:bg-control"
+              className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[13px] text-ink hover:bg-control"
             >
               <ExternalLink size={12} /> {t("vm.main.watch")}
             </a>
@@ -1288,7 +1288,7 @@ export function LocalComputerSection() {
           <div className="mt-3 flex items-center justify-between gap-3">
             <div>
               <div className="text-[13px] text-ink">{t("vm.isolation.max")}</div>
-              <div className="text-[11.5px] text-ink-secondary">{t("vm.isolation.maxDetail")}</div>
+              <div className="text-[12px] text-ink-secondary">{t("vm.isolation.maxDetail")}</div>
             </div>
             <Select size="sm"
               aria-label={t("vm.isolation.maxAria")}

@@ -208,7 +208,7 @@ export function Spotlight({
             key={anchor ?? "centre"}
             className="min-w-0 flex-1 animate-rise motion-reduce:animate-none"
           >
-            <div className="text-[13.5px] leading-relaxed text-ink">
+            <div className="text-[14px] leading-relaxed text-ink">
               {children}
             </div>
             <div className="mt-2.5 flex items-center gap-3">
@@ -217,13 +217,13 @@ export function Spotlight({
                   type="button"
                   autoFocus
                   onClick={primary.onClick}
-                  className="rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white transition-transform duration-150 active:scale-[0.98]"
+                  className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-white transition-transform duration-150 active:scale-[0.98]"
                 >
                   {primary.label}
                 </button>
               )}
               {progress && (
-                <span className="text-[11.5px] tabular-nums text-ink-secondary">
+                <span className="text-[12px] tabular-nums text-ink-secondary">
                   {progress}
                 </span>
               )}

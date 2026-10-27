@@ -70,8 +70,8 @@ export function WelcomeFiles({ name, headingRef, onFinish }: { name: string; hea
   const card = (id: string, icon: typeof Plug, title: string, body: string, action?: { label: string; run: () => void }) =>
     <div data-welcome-files={id} className={cn(CARD, CARD_IDLE)}>
       <CardIcon icon={icon} />
-      <span className="text-[14.5px] font-semibold text-ink">{title}</span>
-      <span className="text-[12.5px] leading-relaxed text-ink-secondary">{body}</span>
+      <span className="text-[15px] font-semibold text-ink">{title}</span>
+      <span className="text-[13px] leading-relaxed text-ink-secondary">{body}</span>
       {action && <span className="mt-1"><button type="button" className={SECONDARY} onClick={action.run}>{action.label}</button></span>}
     </div>;
   return <section aria-labelledby="cloud-welcome-step" data-welcome-step="files" className="flex flex-col gap-5">

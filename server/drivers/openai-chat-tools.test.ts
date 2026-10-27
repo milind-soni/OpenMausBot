@@ -883,6 +883,21 @@ describe("structured tool execution boundaries", () => {
   });
 
   it.each([
+    ["a steer", "The receipt is stored."],
+    ["an announcement nudge", "I'll write the receipt now."],
+  ])("keeps reasoning_content on an answer resent after %s", async (kind, text) => {
+    const first = deferred<ServerResponse>();
+    const f = await fixture((_body, response, round) => round === 1 ? first.resolve(response) : answer(response));
+    await f.start({ approvalMode: "full" });
+    const response = await first.promise;
+    if (kind === "a steer") await expect(f.instance.adapter.steer!(f.threadId, "One more thing.")).resolves.toBe("steered");
+    sse(response, [chunk({ reasoning: "Synthetic reasoning." }), chunk({ content: text }, "stop")]);
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests[1].messages.find((message) => message.role === "assistant"))
+      .toMatchObject({ content: text, reasoning_content: "Synthetic reasoning." });
+  });
+
+  it.each([
     { scenario: "only a DONE marker", body: "data: [DONE]\n\n" },
     { scenario: "an invalid frame before DONE", body: "data: {invalid\n\ndata: [DONE]\n\n" },
     { scenario: "a frame without a completion choice", body: "data: {}\n\ndata: [DONE]\n\n" },
@@ -1204,6 +1219,31 @@ describe("structured tool execution boundaries", () => {
     })]);
   });
 
+  it("answers in the last allowed step and leaves a message steered during it for the next turn", async () => {
+    const last = deferred<ServerResponse>();
+    const f = await fixture((_body, response, round) => round < 64
+      ? sse(response, [chunk({ tool_calls: [toolCall("audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
+      : last.resolve(response));
+    await f.start({ approvalMode: "full" });
+    const response = await last.promise;
+    await expect(f.instance.adapter.steer!(f.threadId, "One more thing.")).resolves.toBe("refused");
+    answer(response);
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(64);
+  });
+
+  it.each([
+    ["a failed tool call", "audit_fail", "The operation is complete.", "tool_error"],
+    ["an announced action", "audit_write", "I'll write the next receipt.", "incomplete_action"],
+  ])("ends on %s in the last allowed step without asking for another step", async (_, lastTool, text, stopReason) => {
+    const f = await fixture((_body, response, round) => round < 64
+      ? sse(response, [chunk({ tool_calls: [toolCall(round === 63 ? lastTool : "audit_write", `{"name":"step","value":"${round}"}`, `call_${round}`)] }, "tool_calls")])
+      : answer(response, text));
+    await f.start({ approvalMode: "full", toolErrorCorrectiveRounds: 1 });
+    expect(await f.completed()).toMatchObject({ ok: false, stopReason });
+    expect(f.requests).toHaveLength(64);
+  });
+
   it("stops at 200 tool calls in one turn without running the batch that crosses it", async () => {
     const f = await fixture((_body, response, round) => sse(response, [chunk({
       tool_calls: Array.from({ length: 25 }, (_, index) => ({
@@ -1286,5 +1326,25 @@ describe("a configured MCP server that cannot mount", () => {
     const names = f.requests[0].tools!.map((tool) => tool.function.name);
     expect(names).toContain("audit_write");
     expect(names.some((name) => name.startsWith("slack_"))).toBe(false);
+  });
+});
+
+describe("a provider that streams whole tool calls without an index", () => {
+  it("runs both of Gemini's calls from one chunk and answers each by its id", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [
+        { id: "function-call-14076893379878918689", type: "function", function: { name: "audit_write", arguments: '{"name":"first","value":"done"}' } },
+        { id: "function-call-14076893379878916096", type: "function", function: { name: "audit_write", arguments: '{"name":"second","value":"done"}' } },
+      ] }, "stop")]);
+      else answer(response);
+    });
+    await f.start();
+    await f.decide();
+    const second = await f.recorder.until((event) => event.type === "request.opened" && f.recorder.events.filter((seen) => seen.type === "request.opened").indexOf(event) === 1);
+    await f.instance.adapter.respondToRequest(f.threadId, second.requestId!, { behavior: "allow" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.effects()).toEqual([{ name: "first", value: "done" }, { name: "second", value: "done" }]);
+    const results = f.requests[1].messages.filter((message) => message.role === "tool").map((message) => message.tool_call_id);
+    expect(results).toEqual(["function-call-14076893379878918689", "function-call-14076893379878916096"]);
   });
 });

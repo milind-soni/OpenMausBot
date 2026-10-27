@@ -12,7 +12,7 @@ import {
 } from "../imported-skills.ts";
 import { nativeSkillListing, nativeSkills, readNativeSkillFile } from "../native-skills.ts";
 import { redactSecretsInText } from "../redact.ts";
-import { readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
+import { listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
 import {
   conversationAssignedSkills,
   prepareShareNote,
@@ -78,7 +78,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
 
   /** The bot's own skills, and its library skills while the library is on; an imported skill of the same name yields. */
   const ownSkills = (bot: BotRecord) =>
-    skillsLibraryEnabled(cfg) ? resolveBotSkills(bot.id, bot.assignedSkills) : listSkills(bot.id);
+    skillsLibraryEnabled(cfg) ? resolveBotSkills(bot.id, bot.assignedSkills ?? []) : listSkills(bot.id);
   const listBotSkills = (bot: BotRecord, threadId = bot.threadId): SkillListing[] => {
     const own = ownSkills(bot);
     const listed = [...own, ...importedSkillListings(bot.id, new Set(own.map((skill) => skill.name)))];
@@ -91,7 +91,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     // Private wins collisions: a private skill that no longer verifies must not fall through to a same-named shared one.
     if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
     // The library fallback is by assignment only, never by name alone.
-    if (skillsLibraryEnabled(cfg) && bot.assignedSkills?.includes(name)) return readLibrarySkillFile(name);
+    if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (skill.everyBot || bot.assignedSkills?.includes(name)))) return readLibrarySkillFile(name);
     if (readImportedSkills()[name]) return readImportedSkillFile(name);
     const native = nativesFor(bot).find((skill) => skill.name === name);
     return native ? readNativeSkillFile(native) : null;
@@ -114,7 +114,8 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   };
   const conversationStartedAt = (threadId: string): number | undefined => store.messagesFor(threadId)[0]?.at;
   // The bot record predates awaited setup work; an assignment PUT in that window must still reach this prompt.
-  const liveAssigned = (bot: BotRecord) => store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills;
+  // An empty list, not undefined, while the library is on: every-bot skills still reach a bot with no assignments.
+  const liveAssigned = (bot: BotRecord) => store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills ?? [];
   const conversationSkills = (bot: BotRecord, threadId: string): string[] | undefined =>
     skillsLibraryEnabled(cfg) ? conversationAssignedSkills(bot.id, liveAssigned(bot), conversationStartedAt(threadId)) : undefined;
 
@@ -242,7 +243,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     /** A turn's skills index, or the preview's without a thread: the bot's own and library skills, then the ones from
      * this computer, each with a budget of its own. */
     skillsIndex(bot: BotRecord, threadId: string | undefined, instance?: TurnInstance): string {
-      const assigned = threadId === undefined ? (skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined) : conversationSkills(bot, threadId);
+      const assigned = threadId === undefined ? (skillsLibraryEnabled(cfg) ? bot.assignedSkills ?? [] : undefined) : conversationSkills(bot, threadId);
       return skillsSystemPrompt(bot.id, assigned, threadId === undefined ? undefined : conversationStartedAt(threadId)) +
         importedSkillsPrompt(importsFor(bot, assigned, instance));
     },

@@ -29,7 +29,7 @@ export function ApprovalModeSelector({
   align = "left",
   menuDirection = "up",
   wide = false,
-  disabled = false,
+  busy = false,
   trustedModesAvailable = true,
   trustedModesNotice,
   onManageCommandAllowlist,
@@ -42,7 +42,7 @@ export function ApprovalModeSelector({
   align?: "left" | "right";
   menuDirection?: "up" | "down";
   wide?: boolean;
-  disabled?: boolean;
+  busy?: boolean;
   trustedModesAvailable?: boolean;
   trustedModesNotice?: string;
   onManageCommandAllowlist?: () => void;
@@ -80,8 +80,7 @@ export function ApprovalModeSelector({
   }, [open]);
 
   const CurrentIcon = current.Icon;
-  const triggerDisabled = disabled && !onManageCommandAllowlist;
-  const modesDisabled = disabled || requiresLocalDesktop;
+  const modesDisabled = requiresLocalDesktop;
   const allowlistAction = onManageCommandAllowlist && (
     <button
       type="button"
@@ -105,14 +104,12 @@ export function ApprovalModeSelector({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={t("approvalMode.triggerAria", { mode: current.label, provider: providerName })}
-        disabled={triggerDisabled}
-        title={disabled ? t("approvalMode.busy") : wide ? undefined : current.chip}
+        title={wide ? undefined : current.chip}
         onClick={() => setOpen((value) => !value)}
         className={cn(
           wide
             ? "flex h-10 w-full items-center justify-between rounded-lg border border-hairline/40 bg-inset px-3.5 text-[13px] text-ink hover:bg-raised"
             : "flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink",
-          triggerDisabled && "cursor-not-allowed opacity-45 hover:bg-transparent hover:text-ink-secondary",
         )}
       >
         {wide ? (
@@ -143,6 +140,7 @@ export function ApprovalModeSelector({
             <div className="text-[14px] font-medium text-ink">
               {t("approvalMode.question", { provider: providerName })}
             </div>
+            {busy && <p role="status" className="mt-1 text-[12px] leading-snug text-ink-secondary">{t("approvalMode.whileWorking")}</p>}
             <button
               type="button"
               onClick={() => void openExternalLink(APPROVAL_LEVELS_URL)}
@@ -162,9 +160,7 @@ export function ApprovalModeSelector({
                     role="menuitemradio"
                     aria-checked={selected}
                     disabled={modesDisabled}
-                    title={
-                      disabled ? t("approvalMode.busy") : requiresLocalDesktop ? t("approvalMode.customLocalOnly") : undefined
-                    }
+                    title={requiresLocalDesktop ? t("approvalMode.customLocalOnly") : undefined}
                     onClick={() => {
                       if (modesDisabled) return;
                       onSelect(option.mode);
@@ -181,7 +177,7 @@ export function ApprovalModeSelector({
                         {option.label}
                         {selected && <Check size={15} className="shrink-0" />}
                       </span>
-                      <span className="text-[12.5px] leading-snug text-ink-secondary">
+                      <span className="text-[13px] leading-snug text-ink-secondary">
                         {option.description}
                       </span>
                     </span>
@@ -192,7 +188,7 @@ export function ApprovalModeSelector({
             })}
             {!visibleOptions.some((option) => option.mode === "full") && allowlistAction}
             {!trustedModesAvailable && (trustedModesNotice || driverKind === "codex" || requiresLocalDesktop) && (
-              <div className="border-t border-hairline/20 px-4 py-2.5 text-[11.5px] leading-snug text-ink-secondary">
+              <div className="border-t border-hairline/20 px-4 py-2.5 text-[12px] leading-snug text-ink-secondary">
                 {trustedModesNotice ?? t("approvalMode.customLocalOnlyDot")}
               </div>
             )}

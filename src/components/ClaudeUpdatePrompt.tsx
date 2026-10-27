@@ -46,7 +46,7 @@ export function ClaudeUpdatePrompt({
     <button
       type="button"
       onClick={onRetry}
-      className="flex items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink hover:bg-raised-hover"
+      className="flex items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink hover:bg-raised-hover"
     >
       <RefreshCw size={12} aria-hidden="true" /> {t("chat.retry")}
     </button>
@@ -61,14 +61,14 @@ export function ClaudeUpdatePrompt({
             <button
               type="button"
               onClick={update}
-              className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1 text-[12.5px] font-medium text-white hover:brightness-110"
+              className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1 text-[13px] font-medium text-white hover:brightness-110"
             >
               <Download size={12} aria-hidden="true" /> {t("chat.claudeUpdate.doIt")}
             </button>
             <button
               type="button"
               onClick={() => setPhase({ kind: "manual" })}
-              className="rounded-full border border-hairline/40 px-3 py-1 text-[12.5px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
+              className="rounded-full border border-hairline/40 px-3 py-1 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
             >
               {t("chat.claudeUpdate.myself")}
             </button>
@@ -110,7 +110,7 @@ export function ClaudeUpdatePrompt({
               <button
                 type="button"
                 onClick={update}
-                className="rounded-full border border-hairline/40 px-2.5 py-1 text-[12.5px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
+                className="rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
               >
                 {t("chat.claudeUpdate.tryAgain")}
               </button>

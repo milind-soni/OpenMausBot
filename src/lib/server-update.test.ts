@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { setLocale } from "./i18n";
 import { serverCheckPhase, serverUpdateRow, type ServerUpdateCheck } from "./server-update";
 
 const check = (patch: Partial<ServerUpdateCheck> = {}): ServerUpdateCheck => ({
@@ -61,5 +62,44 @@ describe("self-hosted update row", () => {
 
   it("reports a failed check plainly", () => {
     expect(serverUpdateRow("error", null)).toEqual({ label: "Couldn't check for updates — try again" });
+  });
+});
+
+describe("the update row for another server the app shows", () => {
+  const npm = check({ current: "0.1.116", install: "npm", available: true, latest: "0.1.127", command: "npm install -g openmausbot@latest", restart: true });
+
+  it("says whose update it is, and that whoever runs that server installs it", () => {
+    expect(serverUpdateRow("available", npm, "0.1.116", "Office Mac")).toEqual({
+      label: "Office Mac can update to 0.1.127",
+      subtitle: "Whoever runs that server updates it with: npm install -g openmausbot@latest, then restarts it",
+    });
+    const docker = check({ available: true, latest: "0.1.127", command: "docker compose pull omb && docker compose up -d", restart: false });
+    expect(serverUpdateRow("available", docker, "0.1.116", "Office Mac").subtitle).toBe(
+      "Whoever runs that server updates it with: docker compose pull omb && docker compose up -d",
+    );
+    expect(serverUpdateRow("up-to-date", check({ current: "0.1.127" }), "0.1.127", "Office Mac")).toEqual({
+      label: "Office Mac is up to date",
+      subtitle: "v0.1.127",
+    });
+  });
+
+  it("keeps the rows of servers updated for their owner, and the row of this computer", () => {
+    expect(serverUpdateRow("up-to-date", check({ install: "desktop" }), "0.1.116", "Office Mac").label).toBe(
+      "Updates come from the OpenMausBot app on the computer these bots run on",
+    );
+    expect(serverUpdateRow("up-to-date", check({ install: "managed" }), "0.1.116", "Office Mac").label).toBe("Kept up to date for you");
+    expect(serverUpdateRow("available", npm, "0.1.116", null).label).toBe("Version 0.1.127 available — release notes");
+  });
+
+  it("says it in German too", () => {
+    setLocale("de");
+    try {
+      expect(serverUpdateRow("available", npm, "0.1.116", "Office Mac")).toEqual({
+        label: "Office Mac kann auf 0.1.127 aktualisiert werden",
+        subtitle: "Wer diesen Server betreibt, aktualisiert ihn mit: npm install -g openmausbot@latest und startet ihn danach neu",
+      });
+    } finally {
+      setLocale("en");
+    }
   });
 });

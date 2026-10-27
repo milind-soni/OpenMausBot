@@ -39,7 +39,7 @@ export function HelperSetup() {
   if (!steps.length) return null;
   return (
     <div role="group" aria-label={t("helperIntro.setup")} data-helper-setup="" className="flex max-w-full flex-col items-start gap-1.5">
-      <span className="text-[12.5px] text-ink-secondary">{t("helperIntro.setup")}</span>
+      <span className="text-[13px] text-ink-secondary">{t("helperIntro.setup")}</span>
       <div className="flex flex-wrap gap-1.5">
         {steps.map((step) => {
           const { label, icon: Icon } = STEPS[step];

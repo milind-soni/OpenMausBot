@@ -44,17 +44,17 @@ describe("team-wide settings", () => {
     expect(teamBots(bots, "").map((b) => b.id)).toEqual(["d"]);
   });
 
-  it("plans an approval level per bot: unchanged, busy, unsupported and Full on every thread", () => {
+  it("plans an approval level per bot: unchanged, working, unsupported and Full on every thread", () => {
     const bots = [
       bot("ask", { approvalMode: "ask" }),
       bot("already", { approvalMode: "full" }),
-      bot("busy", { approvalMode: "ask", busy: true }),
+      bot("working", { approvalMode: "ask", busy: true }),
       bot("antigravity", { approvalMode: "ask", modelSelection: { instanceId: "ag", model: "x" } }),
     ];
     const plan = planTeamChange(bots, [...instances, engine("ag", "antigravityAgent", ["x"])], { kind: "approval", mode: "full" });
-    expect(plan.map((row) => row.status)).toEqual(["apply", "unchanged", "skip", "apply"]);
+    expect(plan.map((row) => row.status)).toEqual(["apply", "unchanged", "apply", "apply"]);
     expect(plan[0]).toMatchObject({ patch: { approvalMode: "full", applyToAllThreads: true } });
-    expect(plan[2]).toMatchObject({ reason: expect.stringMatching(/busy/) });
+    expect(plan[2]).toMatchObject({ patch: { approvalMode: "full", applyToAllThreads: true } });
     const auto = planTeamChange([bots[3]!], [engine("ag", "antigravityAgent", ["x"])], { kind: "approval", mode: "auto" });
     expect(auto[0]).toMatchObject({ status: "skip", reason: "Ag does not offer this approval level" });
     expect(planTeamChange([bot("codex", { modelSelection: { instanceId: "codex", model: "gpt-5" } })], instances,
@@ -87,15 +87,14 @@ describe("team-wide settings", () => {
     ]);
   });
 
-  it("calls a bot already set only when every one of its threads is, and skips one with any thread working", () => {
+  it("calls a bot already set only when every one of its threads is, and sets one with a thread working too", () => {
     const tasks = (...modes: Array<"ask" | "auto" | undefined>) => modes.map((approvalMode, index) => ({ threadId: `t${index}`, title: "T", createdAt: index, approvalMode }));
     const plan = planTeamChange([
       bot("all", { approvalMode: "auto", tasks: tasks(undefined, "auto") }),
       bot("opened", { approvalMode: "auto", tasks: tasks(undefined, "ask") }),
       bot("working", { approvalMode: "ask", tasks: [...tasks(undefined), { threadId: "w", title: "W", createdAt: 9, busy: true }] }),
     ], instances, { kind: "approval", mode: "auto" });
-    expect(plan.map((row) => row.status)).toEqual(["unchanged", "apply", "skip"]);
-    expect(plan[2]).toMatchObject({ reason: expect.stringMatching(/busy/) });
+    expect(plan.map((row) => row.status)).toEqual(["unchanged", "apply", "apply"]);
   });
 
   it("asks for the local-computer consent only when Auto reaches a bot on this computer", () => {
@@ -147,18 +146,19 @@ describe("team-wide settings", () => {
       order.push(`${target.id}:${JSON.stringify(patch)}`);
       await Promise.resolve();
       inFlight--;
-      if (target.id === "b") throw new Error("Stop this bot's turn before changing its approval level");
+      if (target.id === "b") throw new Error("This provider does not support the selected approval level");
     }, { acknowledgeLocalAuto: true });
     expect(order).toEqual([
       'a:{"approvalMode":"auto","applyToAllThreads":true}',
       'b:{"approvalMode":"auto","applyToAllThreads":true}',
+      'c:{"approvalMode":"auto","applyToAllThreads":true}',
       'e:{"approvalMode":"auto","applyToAllThreads":true,"acknowledgeLocalAuto":true}',
     ]);
-    expect(results.map((row) => row.status)).toEqual(["applied", "skipped", "skipped", "unchanged", "applied"]);
-    expect(results[1]).toMatchObject({ reason: "Stop this bot's turn before changing its approval level" });
-    expect(teamResultCounts(results)).toEqual({ applied: 2, unchanged: 1, skipped: 2 });
+    expect(results.map((row) => row.status)).toEqual(["applied", "skipped", "applied", "unchanged", "applied"]);
+    expect(results[1]).toMatchObject({ reason: "This provider does not support the selected approval level" });
+    expect(teamResultCounts(results)).toEqual({ applied: 3, unchanged: 1, skipped: 1 });
     const markup = renderToStaticMarkup(createElement(TeamSettingsRows, { rows: results }));
-    expect(markup).toContain("Skipped: busy. Stop its turn, then try again");
+    expect(markup).toContain("Skipped: This provider does not support the selected approval level");
     expect(markup).toContain("Already set");
   });
 

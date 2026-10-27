@@ -32,6 +32,13 @@ describe("the Team map's Who reports to whom", () => {
     expect(chart).toMatch(/data-org-person="ada@acme.test"[\s\S]*Chief of Staff[\s\S]*data-org-bot="Ada&#x27;s Chief"[\s\S]*data-org-bot="Tech Lead"/);
   });
 
+  it("heads each person's column with their picture, or their initial when they have none", () => {
+    setTeamPeople({ ...asBob(), people: [{ ...ADA, pictureUrl: "/api/team/people/p_ada/picture?v=1" }, BOB] });
+    const chart = render(createElement(TeamOrgChart, { bots }));
+    expect(chart).toMatch(/data-org-person="ada@acme.test"[^>]*><header[^>]*><img src="\/api\/team\/people\/p_ada\/picture\?v=1"[^>]*style="width:30px;height:30px"/);
+    expect(chart).toMatch(/data-org-person="bob@acme.test"[^>]*><header[^>]*><span aria-hidden="true"[^>]*>B<\/span>/);
+  });
+
   it("lets a member drag only the bots that report to them; an Admin drags any", () => {
     setTeamPeople(asBob());
     const member = render(createElement(TeamOrgChart, { bots }));

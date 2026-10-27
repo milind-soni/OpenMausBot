@@ -70,7 +70,7 @@ function KeepWarmRow({ bot, workspaceOn, onChange }: { bot: Bot; workspaceOn: bo
   );
 }
 
-function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback: Bot["fallback"]) => void }) {
+export function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback: Bot["fallback"]) => void }) {
   const { state } = useStore();
   const chain = bot.fallback ?? [];
   const available = state.instances.filter(
@@ -81,6 +81,11 @@ function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback: Bot["
       !chain.some((entry) => entry.instanceId === instance.instanceId),
   );
   const nameOf = (instanceId: string) => state.instances.find((instance) => instance.instanceId === instanceId)?.displayName ?? instanceId;
+  const modelsOf = (entry: NonNullable<Bot["fallback"]>[number]) => {
+    const instance = state.instances.find((candidate) => candidate.instanceId === entry.instanceId);
+    const offered = instance?.models.options.filter((model) => instance.snapshot.authenticated !== false || model.custom) ?? [];
+    return offered.some((model) => model.id === entry.model) ? offered : [{ id: entry.model, label: entry.model }, ...offered];
+  };
 
   const add = (instanceId: string) => {
     const instance = state.instances.find((candidate) => candidate.instanceId === instanceId);
@@ -101,7 +106,11 @@ function FallbackChain({ bot, onChange }: { bot: Bot; onChange: (fallback: Bot["
             <li key={entry.instanceId} className="flex items-center gap-2 rounded-lg bg-inset px-3 py-1.5 text-[13px]">
               <span className="w-4 shrink-0 tabular-nums text-ink-secondary">{index + 1}.</span>
               <span className="min-w-0 flex-1 truncate text-ink">{nameOf(entry.instanceId)}</span>
-              <span className="shrink-0 truncate text-[11.5px] text-ink-secondary">{entry.model}</span>
+              <Select size="sm" className="max-w-[45%] shrink-0" value={entry.model}
+                aria-label={t("model.fallback.model", { name: nameOf(entry.instanceId) })}
+                onChange={(event) => onChange(chain.map((candidate) => candidate.instanceId === entry.instanceId ? { ...candidate, model: event.target.value } : candidate))}>
+                {modelsOf(entry).map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+              </Select>
               <button
                 type="button"
                 onClick={() => onChange(chain.filter((candidate) => candidate.instanceId !== entry.instanceId))}

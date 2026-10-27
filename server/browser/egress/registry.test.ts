@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { agentBrowserDevToolsPorts, agentBrowserStreamPorts } from "../../browser-engine.ts";
-import { BrowserEgress, OwnListeners, staticOwnPorts } from "./registry.ts";
+import { BrowserEgress, OwnListeners, staticOwnPorts, UNSHARED_NOTICE } from "./registry.ts";
 import type { ListenerOwnership } from "./ownership.ts";
 
 const noScans = { streamPorts: () => [], devToolsPorts: () => [] };
@@ -169,7 +169,7 @@ describe("one gate per browser session", () => {
   });
 
   it("on MausBot Cloud says once, and only for those sites, when they load from the Cloud's own connection because the computer is away", async () => {
-    let device: { open(target: { host: string; port: number }): Promise<{ refused: string }> } | { away: string } | null = { away: "Mac" };
+    let device: { open(target: { host: string; port: number }): Promise<{ refused: string }> } | { away: string } | { unshared: true } | null = { away: "Mac" };
     const cloud = new BrowserEgress();
     cloud.configure({ host: "cloud", config: () => ({}), listeners: new OwnListeners("cloud", { env: {}, ...noScans }), ownership, resolve: async () => [], device: () => device });
     const port = await cloud.open("bot-1");
@@ -188,7 +188,21 @@ describe("one gate per browser session", () => {
       expect(cloud.takeNotice("bot-1"), "said again after it came back and went away again").toContain("The person's Mac is away");
       device = null;
       await socksCode(port, "www.google.com", 443);
-      expect(cloud.takeNotice("bot-1"), "nothing to say when no computer lends its connection").toBeNull();
+      expect(cloud.takeNotice("bot-1"), "nothing to say where this browser may not use a computer's connection").toBeNull();
+      device = { unshared: true };
+      await socksCode(port, "en.wikipedia.org", 443);
+      expect(cloud.takeNotice("bot-1"), "a site that loads from My Cloud anyway: nothing to say").toBeNull();
+      await socksCode(port, "www.instagram.com", 443);
+      expect(cloud.takeNotice("bot-1")).toBe(UNSHARED_NOTICE);
+      expect(UNSHARED_NOTICE).toContain("[Use this computer](openmausbot://use-my-computer)");
+      await socksCode(port, "www.instagram.com", 443);
+      expect(cloud.takeNotice("bot-1"), "said once while none shares").toBeNull();
+      device = { away: "PC" };
+      await socksCode(port, "www.instagram.com", 443);
+      expect(cloud.takeNotice("bot-1"), "a computer that shares and then goes away is said in its own words").toContain("The person's PC is away");
+      device = { unshared: true };
+      await socksCode(port, "www.youtube.com", 443);
+      expect(cloud.takeNotice("bot-1"), "said again once sharing stopped").toBe(UNSHARED_NOTICE);
     } finally {
       await cloud.close();
     }

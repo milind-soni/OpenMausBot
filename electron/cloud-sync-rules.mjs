@@ -17,7 +17,10 @@ const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|conin\$|conout\$|com[0-9\u00b9\u00
 // Right-to-left and other direction overrides: "invoice\u202Efdp.exe" shows as a PDF.
 const BIDI = /[\u202a-\u202e\u2066-\u2069]/;
 // Files an agent or a tool runs or obeys when it opens a folder: never brought down from My Cloud.
-const AGENT_CONFIG = /(?:^|\/)(?:\.mcp\.json|claude\.md|agents\.md|gemini\.md|\.envrc|[^/]*\.code-workspace|\.(?:claude|codex|cursor|vscode|idea|github|gemini)\/.*)$/i;
+const AGENT_CONFIG = /(?:^|\/)(?:\.mcp\.json|claude\.md|agents\.md|gemini\.md|\.envrc|[^/]*\.code-workspace|\.(?:claude|codex|cursor|vscode|idea|github|gemini|devcontainer)\/.*)$/i;
+// Version control runs hooks and config commands (git's core.fsmonitor) from these whenever anything reads the folder's
+// status, and a ".git" file can point git at a folder of its own: never brought down as a folder or a file.
+const VCS_METADATA = new Set([".git", ".hg", ".svn", ".jj", ".bzr"]);
 // eslint-disable-next-line no-control-regex
 const WINDOWS_CHARACTERS = /[<>:"\\|?*\u0000-\u001f]/;
 
@@ -38,7 +41,11 @@ export function validWirePath(path) {
 /** True for a path from My Cloud this computer never writes: through a folder sync skips, or an agent's or tool's config. */
 export function neverFromCloud(path) {
   const parts = path.split("/");
-  return AGENT_CONFIG.test(path) || parts.some((part, index) => skipped(part, index < parts.length - 1));
+  // macOS's and Windows's usual disks are case-insensitive: ".GIT" there is the ".git" every tool reads.
+  return AGENT_CONFIG.test(path) || parts.some((part, index) => {
+    const folder = index < parts.length - 1;
+    return VCS_METADATA.has(part.toLowerCase()) || skipped(folder ? part.toLowerCase() : part, folder);
+  });
 }
 
 /** Why a Windows PC cannot hold this path, or null. */

@@ -59,7 +59,13 @@ test("never brings down an agent's or tool's config, or what sync skips, from My
   for (const path of [".mcp.json", "x/.MCP.json", "CLAUDE.md", "docs/Agents.md", ".claude/settings.json", ".Claude/hooks.json", ".codex/config.toml", ".vscode/tasks.json", ".github/workflows/ci.yml", "a.code-workspace", ".envrc", ".git/config", "node_modules/x.js"]) {
     assert.equal(neverFromCloud(path), true, path);
   }
-  for (const path of ["report.md", "docs/readme.md", "claude-notes.md"]) assert.equal(neverFromCloud(path), false, path);
+  for (const path of [".git", "x/.git", ".GIT/config", ".Git/hooks/pre-commit", "repo/.git/HEAD", ".hg/hgrc", ".svn/entries", ".jj/repo", ".bzr/branch",
+    ".devcontainer/devcontainer.json", "Node_Modules/a.js", ".VENV/bin/activate"]) {
+    assert.equal(neverFromCloud(path), true, path);
+  }
+  for (const path of ["report.md", "docs/readme.md", "claude-notes.md", "notes/.gitignore", "my.git/readme.md", "Git notes.md", "venv"]) {
+    assert.equal(neverFromCloud(path), false, path);
+  }
   assert.equal(validWirePath("invoice\u202efdp.exe"), false);
   assert.equal(validWirePath("caf\u00e9.txt"), true);
 });

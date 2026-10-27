@@ -4,7 +4,7 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "../../shared/runtime-events";
-import type { ServerFrame } from "../../shared/wire";
+import type { LiveCallState, ServerFrame } from "../../shared/wire";
 import type { AppState, BotAnnouncement } from "./store";
 
 class FixtureEventSource {
@@ -126,5 +126,36 @@ describe("live frames the store does not keep", () => {
     stop();
     expect(missed).toHaveBeenCalledTimes(1);
     expect(FixtureEventSource.opened).toHaveLength(1);
+  });
+
+  it("hand a live.call frame's call to spoken reply speech", async () => {
+    // Loaded after the globals are stubbed, like the store above: it pulls in the tts speaker.
+    const { spokenReplyStream } = await import("@/lib/spoken-reply-stream");
+    const onLiveCall = vi.spyOn(spokenReplyStream, "onLiveCall");
+    const call = { callId: "c1", botId: "bot", threadId: "thread", client: "desktop", voice: "vo", startedAt: 1, status: "live" } as LiveCallState;
+    await send({ kind: "live.call", botId: "bot", threadId: "thread", call });
+    expect(onLiveCall).lastCalledWith(call);
+    await send({ kind: "live.call", botId: "bot", threadId: "thread", call: null });
+    expect(onLiveCall).lastCalledWith(null);
+    await send({ kind: "live.call", botId: "bot", threadId: "thread" } as ServerFrame);
+    expect(onLiveCall).toHaveBeenCalledTimes(2);
+    onLiveCall.mockRestore();
+  });
+
+  it("hand reply text to spoken reply speech, naming the bot only when it speaks its replies", async () => {
+    const { spokenReplyStream } = await import("@/lib/spoken-reply-stream");
+    const onRuntimeEvent = vi.spyOn(spokenReplyStream, "onRuntimeEvent").mockImplementation(() => {});
+    const completeBotText = vi.spyOn(spokenReplyStream, "completeBotText").mockImplementation(() => {});
+    const delta: RuntimeEvent = { type: "content.delta", eventId: "d1", provider: "codex", threadId: "thread", turnId: "t1", createdAt: "2026-10-04T00:00:00.000Z", streamKind: "assistant_text", delta: "Hello there. " };
+    await send({ kind: "runtime", event: delta });
+    expect(onRuntimeEvent).lastCalledWith(delta, null);
+    await send({ kind: "bot", bot: { ...bot, speakReplies: true, voice: "vo" } } as ServerFrame);
+    await send({ kind: "runtime", event: delta });
+    expect(onRuntimeEvent).lastCalledWith(delta, { botId: "bot", voiceId: "vo" });
+    await send({ kind: "message", threadId: "thread", message: { id: "m1", at: 1, role: "bot", kind: "text", text: "Hello there.", turnId: "t1" } } as ServerFrame);
+    expect(completeBotText).lastCalledWith("thread", "t1", "Hello there.", { botId: "bot", voiceId: "vo" }, "m1");
+    await send({ kind: "bot", bot } as ServerFrame);
+    onRuntimeEvent.mockRestore();
+    completeBotText.mockRestore();
   });
 });

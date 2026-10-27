@@ -145,7 +145,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
         aria-modal="true"
         aria-labelledby="team-memory-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[min(720px,calc(100dvh-2rem))] w-full max-w-[720px] flex-col overflow-hidden rounded-[24px] border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+        className="animate-pop-in flex max-h-[min(720px,calc(100dvh-2rem))] w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
       >
         <header className="flex items-start justify-between gap-4 border-b border-hairline/40 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div>
@@ -155,7 +155,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
                 {t("teamMemory.title", { name: label })}
               </h2>
             </div>
-            <p className="mt-1.5 max-w-[560px] text-[12.5px] leading-relaxed text-ink-secondary">
+            <p className="mt-1.5 max-w-[560px] text-[13px] leading-relaxed text-ink-secondary">
               {t("teamMemory.description")}
             </p>
           </div>
@@ -240,7 +240,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
                             if (event.key === "Enter") (event.target as HTMLInputElement).blur();
                           }}
                           aria-label={t("teamMemory.entryDetailLabel", { name: entry.name })}
-                          className="mt-0.5 block w-full rounded bg-transparent px-1 py-0.5 text-[12.5px] text-ink outline-none hover:bg-card focus:bg-card"
+                          className="mt-0.5 block w-full rounded bg-transparent px-1 py-0.5 text-[13px] text-ink outline-none hover:bg-card focus:bg-card"
                         />
                         <span className="block px-1 text-[11px] text-ink-secondary">
                           {entry.source.botName || t("teamMemory.you")} · {new Date(entry.updatedAt).toLocaleDateString(intlLocale())} · {loadedIds.includes(entry.id) ? t("teamMemory.loaded") : t("teamMemory.searchable")}
@@ -299,11 +299,11 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
                 <button
                   onClick={add}
                   disabled={busyId !== null || !draft.name.trim() || !draft.detail.trim()}
-                  className="rounded-lg bg-accent px-3 py-1 text-[12.5px] font-medium text-white disabled:opacity-50"
+                  className="rounded-lg bg-accent px-3 py-1 text-[13px] font-medium text-white disabled:opacity-50"
                 >
                   {busyId === "new" ? t("teamMemory.adding") : t("teamMemory.add")}
                 </button>
-                <button onClick={() => setAdding(false)} className="text-[12.5px] text-ink-secondary hover:text-ink">
+                <button onClick={() => setAdding(false)} className="text-[13px] text-ink-secondary hover:text-ink">
                   {t("common.cancel")}
                 </button>
               </div>
@@ -311,7 +311,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
           ) : (
             <button
               onClick={() => setAdding(true)}
-              className={cn("flex items-center gap-1.5 text-[12.5px] text-ink-secondary hover:text-ink", entries === null && "hidden")}
+              className={cn("flex items-center gap-1.5 text-[13px] text-ink-secondary hover:text-ink", entries === null && "hidden")}
             >
               <Plus size={13} /> {t("teamMemory.addEntry")}
             </button>

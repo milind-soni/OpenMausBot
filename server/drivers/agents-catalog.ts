@@ -3,50 +3,15 @@ import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
+import { DEVS_TOOL_DEFINITIONS } from "./agents-devs-tools.ts";
 import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
+import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
+import { PERSON_TOOL_DEFINITIONS, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
+import type { CatalogProfile } from "./agents-catalog-profile.ts";
+export { catalogProfileFromEnv, type CatalogProfile } from "./agents-catalog-profile.ts";
 
-/** Which tools a turn is shown. Presentation only: the server still authenticates and scopes every call. */
-export interface CatalogProfile {
-  skillAuthoring: boolean;
-  sharedComputers: boolean;
-  voiceNotes: boolean;
-  /** A treg key or a Cloud plan's research credential is held and this bot's research switch is on. Absent means off. */
-  xResearch?: boolean;
-  cloudHome: boolean;
-  memoryEnabled?: boolean;
-  /** The section's Chief of Staff; the server refuses Chief-only tools to every other bot. */
-  chief: boolean;
-  /** Written into start_thread's schema: the only bot_id it accepts. */
-  botId: string;
-  /** features.chiefEscalations: raise_escalation is mounted. */
-  escalations?: boolean;
-}
-
-/** Everything is off unless the harness says "1". */
-export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
-  return {
-    skillAuthoring: env.OMB_SKILL_AUTHORING_ENABLED === "1",
-    sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
-    voiceNotes: env.OMB_VOICE_NOTES === "1",
-    xResearch: env.OMB_X_RESEARCH === "1",
-    cloudHome: env.OMB_CLOUD_HOME === "1",
-    memoryEnabled: env.OMB_MEMORY_ENABLED !== "0",
-    chief: env.OMB_CHIEF_OF_STAFF === "1",
-    botId: env.OMB_BOT_ID ?? "",
-    escalations: env.OMB_ESCALATIONS === "1",
-  };
-}
-
-export const WEEKDAYS = [
-  "monday",
-  "tuesday",
-  "wednesday",
-  "thursday",
-  "friday",
-  "saturday",
-  "sunday",
-] as const;
+export const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
 
 // One flat object without oneOf/const/format: several agent CLIs flatten or drop JSON-Schema
 // composition when converting MCP tools, and a model that never saw the branches guesses shapes.
@@ -237,11 +202,11 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "shared_computer",
-    description: "Use a desktop explicitly shared by the user. Discover computer_id and folder_id with list_shared_computers. list_files/read_file/write_file are confined to chosen folders; paths are relative. read_file returns sha256; overwriting requires expected_sha256. Binary files support base64 encoding. run_command requires a SEPARATE unrestricted terminal grant. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. To browse there, open pages with launch_app urls (the person's own browser) and use get_window_state, click and type_text: the browser_* tools need a DevTools endpoint most browsers lack. Never substitute the server's filesystem when this desktop is offline. Actions are not retried automatically; inspect an uncertain outcome before retrying.",
+    description: "Use a desktop explicitly shared by the user. Discover computer_id and folder_id with list_shared_computers. list_files/read_file/write_file are confined to chosen folders; paths are relative. read_file returns sha256; overwriting requires expected_sha256. Binary files support base64 encoding. run_command requires a SEPARATE unrestricted terminal grant and stops after timeout_seconds (default 120, at most 240): run longer jobs in the background with output to a file, then read it. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. To browse there, open pages with launch_app urls (the person's own browser) and use get_window_state, click and type_text: the browser_* tools need a DevTools endpoint most browsers lack. Never substitute the server's filesystem when this desktop is offline. Actions are not retried automatically; inspect an uncertain outcome before retrying.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       computer_id: { type: "string" }, action: { type: "string", enum: ["list_files", "read_file", "write_file", "run_command", "computer_tools", "computer_call"] },
       folder_id: { type: "string" }, path: { type: "string" }, content: { type: "string" }, encoding: { type: "string", enum: ["utf8", "base64"] }, expected_sha256: { type: "string" },
-      command: { type: "string" }, tool_name: { type: "string" }, arguments: { type: "object", additionalProperties: true },
+      command: { type: "string" }, timeout_seconds: { type: "integer", minimum: 1, maximum: 240 }, tool_name: { type: "string" }, arguments: { type: "object", additionalProperties: true },
     }, required: ["computer_id", "action"] },
   },
   {
@@ -381,7 +346,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "create_bot",
     description:
-      "Chief of Staff only: add a specialist to your section now; the person can undo it. instructions become its soul. Omit modelSelection for the workspace default, or use exact IDs from list_team_setup. It starts with connected apps off, at the default access level. Assign work with coordinate_bots. At most four per turn.",
+      "Chief of Staff only: add a specialist to your section now; the person can undo it. instructions become its soul. Omit modelSelection for the workspace default, or use exact IDs from list_team_setup. It starts with your connected apps, at the default access level. Assign work with coordinate_bots. At most four per turn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -475,7 +440,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "manage_room",
     description:
-      "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, for rooms in your own department, with any bots you can reach; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between departments. Follow the tool result under the effective access level; if the change is refused, report the blocker and ask the user to make the change instead, without trying another route.",
+      "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, for rooms in your own department, with any bots you can reach; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between departments. coordinate_bots reaches bots outside the room directly. Follow the tool result under the effective access level; if the change is refused, report the blocker, without trying another route.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -534,7 +499,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "fill_login",
     description:
-      "Sign in with a login the person saved in OpenMausBot. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself, submits each step, and says where the page went; you never see the password. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed (a code sent to their own email, which you read and type in, is one), or call request_sign_in.",
+      "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself, submits each step, and says where the page went; you never see the password. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed (a code sent to their own email, which you read and type in, is one), or call request_sign_in.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -562,7 +527,7 @@ const TOOL_DEFINITIONS = [
       required: ["text"],
     },
   },
-  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS,
+  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS, ...PERSON_TOOL_DEFINITIONS, ...DEVS_TOOL_DEFINITIONS,
   {
     name: "memory_update",
     description:
@@ -806,7 +771,6 @@ const TOOL_DEFINITIONS = [
         detail: { type: "string", maxLength: 600, description: "The fact, decision or result, with its context and brief rationale." },
         aliases: { type: "array", maxItems: 8, items: { type: "string", maxLength: 120 }, description: "Other names or abbreviations." },
         key: { type: "string", maxLength: 240, description: "Stable project/fact key (tapa/colour). Reuse for corrections, even if the name changes." },
-
       },
       required: ["kind", "name", "detail"],
     },
@@ -971,7 +935,8 @@ function catalogTools(profile: CatalogProfile) {
   const BOT_SCOPED_TOOLS = TOOL_DEFINITIONS.filter((tool) =>
     (profile.botId === WATCHER_OPTIONS_CARD_BOT_ID || !WATCHER_TOOL_NAMES.has(tool.name)) &&
     (profile.memoryEnabled !== false || (tool.name !== "memory_update" && tool.name !== "memory_log")) &&
-    (profile.escalations === true || tool.name !== "raise_escalation"));
+    (profile.escalations === true || tool.name !== "raise_escalation") &&
+    (profile.team === true || !PERSON_TOOL_NAMES.has(tool.name)));
   const AUTHORING_TOOLS = profile.skillAuthoring
     ? BOT_SCOPED_TOOLS
     : BOT_SCOPED_TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));
@@ -991,7 +956,7 @@ function catalogTools(profile: CatalogProfile) {
       const properties = Object.fromEntries(Object.entries(tool.inputSchema.properties).filter(([key]) => key !== "for_bot_id"));
       return { ...tool, description: tool.description.replace(CHIEF_PROFILE_TARGET, ""), inputSchema: { ...tool.inputSchema, properties } };
     });
-  return ROLE_TOOLS.map(tool => tool.name === "start_thread" ? {
+  return [...ROLE_TOOLS, ...(profile.mausbot === true ? MAUSBOT_TOOL_DEFINITIONS : [])].map(tool => tool.name === "start_thread" ? {
     ...tool,
     inputSchema: { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
       bot_id: { type: "string", enum: [profile.botId], description: START_THREAD_SELF_ID },

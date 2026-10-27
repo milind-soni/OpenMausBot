@@ -116,7 +116,7 @@ describe("LinkPreviewCard", () => {
     const html = renderToStaticMarkup(createElement(LinkPreviewCard, { href: "https://www.example.com/docs/caf%C3%A9?x=1" }));
     expect(html).toContain(">example.com</div>");
     expect(html).toContain("/docs/café?x=1");
-    expect(html).toContain("rounded-3xl bg-composer");
+    expect(html).toContain("rounded-2xl bg-composer");
   });
 
   it("titles a commit by its short sha", () => {

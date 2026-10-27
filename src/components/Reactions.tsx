@@ -191,7 +191,7 @@ function Chips({ threadId, message, bots = [], align = "start", canReact = true 
         const face = (
           <>
             <span aria-hidden="true">{emoji}</span>
-            {people.length > 1 && <span aria-hidden="true" className="text-[11.5px] tabular-nums text-ink-secondary">{people.length}</span>}
+            {people.length > 1 && <span aria-hidden="true" className="text-[12px] tabular-nums text-ink-secondary">{people.length}</span>}
           </>
         );
         return canReact && Object.hasOwn(LABEL, emoji) ? (

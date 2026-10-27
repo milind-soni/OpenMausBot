@@ -45,7 +45,7 @@ export function EngineCheckLine({ name, check, onRetry }: { name: string; check:
       <CircleAlert size={15} aria-hidden="true" className="mt-0.5 shrink-0 text-warning" />
       <span><span className="font-medium">{t("engineCheck.failed", { name })}</span> {check.error}</span>
     </p>
-    <button type="button" onClick={onRetry} className="mt-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-[12.5px] font-medium text-ink transition-colors hover:bg-raised">
+    <button type="button" onClick={onRetry} className="mt-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium text-ink transition-colors hover:bg-raised">
       <RefreshCw size={12} aria-hidden="true" />{t("engineCheck.retry")}
     </button>
   </div>;

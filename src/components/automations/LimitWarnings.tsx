@@ -45,7 +45,7 @@ export function LimitWarnings({ botFilter = "all" }: { botFilter?: string }) {
               <>
                 <span className="text-ink-secondary">{t(due.length === 1 ? "limits.dueOne" : "limits.dueMany", { count: due.length })}</span>
                 <button type="button" disabled={busy === limit.engine} onClick={() => void move(limit, due)}
-                  className="ml-auto rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-accent-ink hover:brightness-110 disabled:opacity-50">
+                  className="ml-auto rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink hover:brightness-110 disabled:opacity-50">
                   {t("limits.moveAfterReset")}
                 </button>
               </>

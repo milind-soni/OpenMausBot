@@ -13,15 +13,15 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 }));
 import { CloudLending, lendingFailureKey, lendingStatusKey, lendingStoppedLine, lendingTitle, lentWhat, thisDevice } from "./CloudLending";
 
-type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; onChange?: (event: { target: { checked: boolean } }) => void; role?: string; type?: string; "aria-label"?: string; disabled?: boolean; checked?: boolean; "data-lending-more"?: boolean; "data-lending-terminal-choice"?: boolean; "data-lending-internet-choice"?: boolean; }>;
+type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; onChange?: (event: { target: { checked: boolean } }) => void; role?: string; type?: string; "aria-label"?: string; disabled?: boolean; checked?: boolean; "data-lending-more"?: boolean; "data-lending-terminal-choice"?: boolean; "data-lending-internet-choice"?: boolean; "data-lending-chrome-choice"?: boolean; }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
 let bridge: CloudLendingBridge;
 function render() { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudLending({ bridge }); return tree; }
   const html = renderToStaticMarkup(createElement(Capture)); return { html, nodes: nodes(tree) }; }
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const folder = { id: "11111111-1111-4111-8111-111111111111", name: "Plans", path: "/Users/me/Plans", write: false };
-const off: CloudLendingSnapshot = { available: true, screenAvailable: true, state: { enabled: false, folders: [], screen: false, internet: false, busy: false }, activity: [] };
-const lent: CloudLendingSnapshot = { available: true, screenAvailable: true, state: { enabled: true, folders: [folder], screen: false, internet: false, busy: false, connected: true }, activity: [] };
+const off: CloudLendingSnapshot = { available: true, screenAvailable: true, state: { enabled: false, folders: [], screen: false, internet: false, chrome: false, busy: false }, activity: [] };
+const lent: CloudLendingSnapshot = { available: true, screenAvailable: true, state: { enabled: true, folders: [folder], screen: false, internet: false, chrome: false, busy: false, connected: true }, activity: [] };
 async function ready(snapshot: CloudLendingSnapshot) {
   vi.mocked(bridge.state).mockResolvedValue(snapshot);
   render(); const cleanup = f.effects[0]!(); await flush(); return cleanup;
@@ -101,6 +101,23 @@ it("the internet connection is a choice of its own: ticking it lends it, and unt
   expect(bridge.stop).toHaveBeenCalledOnce();
 });
 
+it("a computer that shares only its internet connection by default reads naturally: on, connecting until the link opens, and its switch ticked", async () => {
+  const internetOnly = (link: "on" | "connecting") => ({ ...lent, state: { ...lent.state!, folders: [], internet: true, link } });
+  await ready(internetOnly("connecting"));
+  expect(render().html).toContain("Your bots can use the internet connection on this computer.");
+  expect(render().html).toContain("Internet connection: connecting…");
+  await ready(internetOnly("on"));
+  expect(render().html).toContain("Internet connection: on");
+  expect(render().html).not.toContain("connecting…");
+  more();
+  const choice = render().nodes.find(node => node.type === "input" && (node.props as Record<string, unknown>)["data-lending-internet-choice"])!;
+  expect(choice.props.checked).toBe(true);
+  await ready({ ...lent, state: { ...lent.state!, internet: false } });
+  expect(render().html).not.toContain("Internet connection: ");
+  await ready({ ...off, state: { ...off.state!, internet: true, stopped: { reason: "you", at: 1 } } });
+  expect(render().html).not.toContain("Internet connection: ");
+});
+
 it("says so while My Cloud is too old to browse through this computer", async () => {
   await ready({ ...lent, state: { ...lent.state!, internet: true, link: "unsupported" } });
   expect(render().html).toContain("Your bots can use Plans (read only) on this computer.");
@@ -156,7 +173,7 @@ it("apps and screen cannot be chosen until this app's computer control is ready"
 it("an off switch says why and since when, keeps the choices, and the switch lends the same again", async () => {
   const at = new Date(2026, 9, 7, 14, 2).getTime();
   const stopped: CloudLendingSnapshot = { available: true, screenAvailable: true, activity: [],
-    state: { enabled: false, folders: [folder], screen: true, internet: false, busy: false, stopped: { reason: "signed-out", at } } };
+    state: { enabled: false, folders: [folder], screen: true, internet: false, chrome: false, busy: false, stopped: { reason: "signed-out", at } } };
   expect(lendingStoppedLine(stopped.state)).toBe("Off since Oct 7, 2026, 2:02 PM, when you signed out of MausBot Cloud.");
   expect(lendingStoppedLine({ ...stopped.state!, stopped: { reason: "you", at } })).toBe("Off since Oct 7, 2026, 2:02 PM: you turned it off.");
   expect(lendingStoppedLine({ ...stopped.state!, stopped: { reason: "something-new", at } })).toBe("Off since Oct 7, 2026, 2:02 PM.");
@@ -192,7 +209,7 @@ it("while the bots move to My Cloud, an off switch says it turns on by itself on
 it("says how it is lent when Computer access lent it, terminal included, and when My Cloud last used it", async () => {
   const viaAccess: CloudLendingSnapshot = { available: true, screenAvailable: true,
     activity: [{ at: Date.now() - 3 * 60_000, server: "My Cloud", origin: "https://omb-u-1.fly.dev", action: "computer_call", detail: "", ok: true }],
-    state: { enabled: true, folders: [], screen: true, internet: false, busy: false, via: "access", terminal: true, problem: "access-off" } };
+    state: { enabled: true, folders: [], screen: true, internet: false, chrome: false, busy: false, via: "access", terminal: true, problem: "access-off" } };
   expect(lendingStatusKey(viaAccess, true)).toBe("lending.status.accessOff");
   await ready(viaAccess);
   const html = render().html;
@@ -293,8 +310,31 @@ it("turning the terminal off needs no question, and it is not kept when lending 
   expect(bridge.save).toHaveBeenCalledExactlyOnceWith({ folders: [folder], screen: false, internet: false });
 });
 
+it("ticking Your Chrome saves it, unticking omits it, and Off then on does not carry it", async () => {
+  await ready({ ...lent, state: { ...lent.state!, chrome: true } });
+  more();
+  const chromeBox = () => render().nodes.find(node => node.props["data-lending-chrome-choice"])!;
+  expect(chromeBox().props.checked).toBe(true);
+  chromeBox().props.onChange!({ target: { checked: false } }); await flush();
+  expect(bridge.save).toHaveBeenLastCalledWith({ folders: [folder], screen: false, internet: false });
+  chromeBox().props.onChange!({ target: { checked: true } }); await flush();
+  expect(bridge.save).toHaveBeenLastCalledWith({ folders: [folder], screen: false, internet: false, chrome: true });
+  vi.mocked(bridge.save).mockClear();
+  await ready({ ...off, state: { ...off.state!, folders: [folder], chrome: true } });
+  toggle().props.onClick!(); await flush();
+  expect(bridge.save).toHaveBeenCalledExactlyOnceWith({ folders: [folder], screen: false, internet: false });
+});
+
+it("the Chrome update note shows only when the Cloud cannot take Your Chrome yet", async () => {
+  await ready({ ...lent, state: { ...lent.state!, chrome: true, chromeLink: "on" } });
+  expect(render().html).not.toContain("My Cloud is updating. Your bots can use your Chrome");
+  await ready({ ...lent, state: { ...lent.state!, chrome: true, chromeLink: "unsupported" } });
+  expect(render().html).toContain("My Cloud is updating. Your bots can use your Chrome");
+});
+
 it("a lent terminal is named in what is lent, in the same words as the Cloud's list", () => {
   expect(lentWhat([], false, false, true)).toBe("terminal");
+  expect(lentWhat([], false, true, false, true)).toBe("the internet connection and your Chrome");
   expect(lentWhat([{ name: "Plans", write: true }], true, true, true)).toBe("the internet connection, Plans (can edit), apps and screen, and terminal");
 });
 

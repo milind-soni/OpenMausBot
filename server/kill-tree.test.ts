@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import type { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 
-import { killCliTree, spawnCli } from "./procs.ts";
+import { captureCliTree, killCliTree, spawnCli } from "./procs.ts";
 
 const IDLE = "setInterval(() => {}, 1000)";
 const STUBBORN = `process.on('SIGTERM', () => {}); console.log(process.pid); ${IDLE}`;
@@ -79,6 +80,37 @@ describe("killCliTree", () => {
       }
     }
   }, 20_000);
+
+  it.runIf(process.platform === "linux").each([false, true])("stops a captured detached helper after protocol reparenting (root exited: %s)", async (exitFirst) => {
+    const parent = spawnCli(process.execPath, ["-e", `
+      const c = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(STUBBORN)}], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      c.stdout.once('data', (pid) => process.stdout.write(pid));
+      process.stdin.on('data', () => process.exit(0));
+      ${IDLE};
+    `], { stdio: ["pipe", "pipe", "pipe"] });
+    let helper = 0;
+    try {
+      helper = await reportedPid(parent.stdout);
+      captureCliTree(parent);
+      if (exitFirst) {
+        const closed = once(parent, "close");
+        parent.stdin.write("interrupt\n");
+        await closed;
+      }
+      await expect(killCliTree(parent, 80)).resolves.toBe(true);
+      let running = false;
+      try {
+        const stat = readFileSync(`/proc/${helper}/stat`, "utf8");
+        running = !["Z", "X"].includes(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0]!);
+      } catch {}
+      expect(running).toBe(false);
+    } finally {
+      await killCliTree(parent, 0);
+      if (helper && alive(helper)) {
+        try { process.kill(helper, "SIGKILL"); } catch {}
+      }
+    }
+  });
 
   it.skipIf(process.platform === "win32")("escalates ignored TERM and shares concurrent stop attempts", async () => {
     const child = spawnCli(process.execPath, ["-e", STUBBORN], { stdio: ["pipe", "pipe", "pipe"] });

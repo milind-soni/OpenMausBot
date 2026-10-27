@@ -5,7 +5,7 @@ import { intlLocale, t } from "@/lib/i18n";
 import type { AppNetwork } from "../../../shared/app";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_QUIET_BUTTON } from "../AskCard";
 
-export const APP_SURFACE = "w-full overflow-hidden rounded-3xl bg-composer ring-1 ring-composer-ring";
+export const APP_SURFACE = "w-full overflow-hidden rounded-2xl bg-composer ring-1 ring-composer-ring";
 const ICON_BUTTON =
   "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/[0.07] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
 
@@ -83,7 +83,7 @@ export function AppInfo({ id, network, bytes, bordered }: { id: string; network:
   if (bytes > 0) rows.push([t("app.info.size"), formatAppBytes(bytes)]);
   rows.push([t("app.info.off"), t("app.info.offList")]);
   return (
-    <div id={id} data-app-info className={cn("rounded-2xl bg-inset px-3.5 py-3 text-[12.5px] leading-[18px]", bordered ? "mx-4 mb-3" : "mb-2")}>
+    <div id={id} data-app-info className={cn("rounded-2xl bg-inset px-3.5 py-3 text-[13px] leading-[18px]", bordered ? "mx-4 mb-3" : "mb-2")}>
       <p className="mb-2 text-ink-secondary">{t("app.info.sandbox")}</p>
       <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-1">
         {rows.map(([label, value]) => (
@@ -130,7 +130,7 @@ export function AppPlaceholder({ height, loading, open, label, children }: {
     <div data-app-placeholder className="flex w-full flex-col items-center justify-center gap-2 px-4 text-center" style={{ height }}>
       {children}
       {loading && slow && (
-        <span role="status" className="flex items-center gap-1.5 text-[12.5px] text-ink-tertiary">
+        <span role="status" className="flex items-center gap-1.5 text-[13px] text-ink-tertiary">
           <Loader2 aria-hidden="true" size={14} className="animate-spin motion-reduce:animate-none" />
           {t("app.loading")}
         </span>

@@ -25,7 +25,7 @@ export function BrowserSignInPage({ credential, owner }: { credential: string; o
     <main className="flex min-h-screen items-center justify-center bg-app px-6 text-ink">
       <div className="w-full max-w-[420px]">
         <h1 className="text-[20px] font-semibold">{t("pair.browser.title", { owner })}</h1>
-        <p className="mt-1.5 text-[13.5px] text-ink-secondary">{t("pair.browser.notYou")}</p>
+        <p className="mt-1.5 text-[14px] text-ink-secondary">{t("pair.browser.notYou")}</p>
         {error ? <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p> : null}
         <button type="button" onClick={() => void continueSignIn()} disabled={busy}
           className="mt-5 w-full rounded-md bg-accent px-4 py-2 text-[14px] font-medium text-accent-ink disabled:opacity-50">

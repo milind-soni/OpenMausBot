@@ -3,8 +3,8 @@ import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
-export const PRIMARY = "ui-button ui-button-primary min-h-9 px-4 text-[13.5px]";
-export const SECONDARY = "ui-button min-h-9 px-4 text-[13.5px]";
+export const PRIMARY = "ui-button ui-button-primary min-h-9 px-4 text-[14px]";
+export const SECONDARY = "ui-button min-h-9 px-4 text-[14px]";
 export const QUIET = "rounded-md px-2 py-1.5 text-[13px] font-medium text-accent-text transition-colors hover:bg-raised/60 disabled:opacity-50 motion-reduce:transition-none";
 export const CARD = "flex min-w-0 flex-col gap-2 rounded-2xl border p-4 text-left";
 export const CARD_IDLE = "border-hairline/50 bg-card/50";

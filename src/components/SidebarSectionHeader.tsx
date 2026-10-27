@@ -86,14 +86,14 @@ export function SidebarSectionHeader({
             aria-expanded={!collapsed}
             aria-keyshortcuts={reorderable ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
             title={toggleTitle}
-            className="flex min-w-0 shrink items-center gap-1 rounded px-0.5 text-left text-[11.5px] font-medium tracking-[0.01em] text-ink-tertiary hover:text-ink-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
+            className="flex min-w-0 shrink items-center gap-1 rounded px-0.5 text-left text-[12px] font-medium tracking-[0.01em] text-ink-tertiary hover:text-ink-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
           >
             <span className="truncate">{name}</span>
             {collapsed && <ChevronRight size={11} className="shrink-0" aria-hidden="true" />}
             <SectionAttention attention={attention} label={attentionLabel} alert={alert} />
           </button>
         ) : (
-          <div className="flex min-w-0 shrink items-center px-0.5 text-[11.5px] font-medium tracking-[0.01em] text-ink-tertiary">
+          <div className="flex min-w-0 shrink items-center px-0.5 text-[12px] font-medium tracking-[0.01em] text-ink-tertiary">
             <span className="truncate">{name}</span>
             {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
           </div>

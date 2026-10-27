@@ -75,7 +75,7 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
       <ProposalStatus bot={bot} kind="chief" />
       {canPick ? (
         <div className="mt-3 flex items-center gap-2">
-          <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink" title={bot.cwd}>
+          <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink" title={bot.cwd}>
             {bot.cwd ? shortPath(bot.cwd, home) : <span className="text-ink-secondary">{t("botAccess.folder.private")}</span>}
           </div>
           <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
@@ -96,7 +96,7 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
           }}
         >
           <input
-            className={cn(inputCls, "font-mono text-[12.5px]")}
+            className={cn(inputCls, "font-mono text-[13px]")}
             placeholder={t("botAccess.folder.placeholder")}
             value={draft ?? bot.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
@@ -162,8 +162,8 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
           {servers.map((server) => (
             <div key={server.name} className="flex items-center justify-between gap-3 px-3 py-2">
               <div className="min-w-0 flex-1">
-                <div className="truncate font-mono text-[12.5px] text-ink">{server.name}</div>
-                {!server.enabled && <div className="text-[11.5px] text-ink-secondary">{t("botAccess.mcpDisabled")}</div>}
+                <div className="truncate font-mono text-[13px] text-ink">{server.name}</div>
+                {!server.enabled && <div className="text-[12px] text-ink-secondary">{t("botAccess.mcpDisabled")}</div>}
               </div>
               <Switch
                 checked={mounted.has(server.name)}
@@ -297,13 +297,13 @@ function ConnectorToolsGrants({
   };
 
   if (!slugs.length) {
-    return <div className="mt-3 text-[11.5px] text-ink-secondary">{t("botAccess.grants.noApps")}</div>;
+    return <div className="mt-3 text-[12px] text-ink-secondary">{t("botAccess.grants.noApps")}</div>;
   }
 
   return (
     <div className="mt-3">
       <div className="text-[12px] font-medium text-ink">{t("botAccess.grants.header")}</div>
-      <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t("botAccess.grants.hint")}</div>
+      <div className="mt-0.5 text-[12px] text-ink-secondary">{t("botAccess.grants.hint")}</div>
       <div className="mt-2 divide-y divide-hairline/40 overflow-hidden rounded-lg border border-hairline/40">
         {slugs.map((slug) => {
           const access = connectorServiceAccess(record, slug);
@@ -337,8 +337,8 @@ function ConnectorToolsGrants({
                 className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-control/60"
               >
                 {open ? <ChevronDown size={14} className="shrink-0 text-ink-secondary" /> : <ChevronRight size={14} className="shrink-0 text-ink-secondary" />}
-                <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-ink">{slug}</span>
-                <span className="shrink-0 text-[11.5px] text-ink-secondary">
+                <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">{slug}</span>
+                <span className="shrink-0 text-[12px] text-ink-secondary">
                   {!access.editable
                     ? t("botAccess.grants.custom")
                     : access.level === "all"
@@ -351,7 +351,7 @@ function ConnectorToolsGrants({
               {open && (
                 <div className="border-t border-hairline/40 bg-inset/40 px-3 py-3">
                   {!access.editable ? (
-                    <div className="text-[11.5px] leading-relaxed text-ink-secondary">
+                    <div className="text-[12px] leading-relaxed text-ink-secondary">
                       {t("botAccess.grants.uneditable")}
                     </div>
                   ) : (
@@ -361,7 +361,7 @@ function ConnectorToolsGrants({
                           type="button"
                           onClick={() => (isAll ? leaveAllForService(slug) : allForService(slug))}
                           className={cn(
-                            "rounded-full px-2.5 py-1 text-[11.5px] font-medium",
+                            "rounded-full px-2.5 py-1 text-[12px] font-medium",
                             isAll ? "bg-accent/15 text-accent-text" : "bg-control text-ink hover:bg-raised-hover",
                           )}
                         >
@@ -371,14 +371,14 @@ function ConnectorToolsGrants({
                           <button
                             type="button"
                             onClick={() => patch({ connectorTools: null })}
-                            className="rounded-full bg-control px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-raised-hover"
+                            className="rounded-full bg-control px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-raised-hover"
                           >
                             {t("botAccess.grants.allApps")}
                           </button>
                         )}
                       </div>
                       {toolsError ? (
-                        <div className="mt-2 text-[11.5px] text-ink-secondary">
+                        <div className="mt-2 text-[12px] text-ink-secondary">
                           {t("botAccess.grants.loadError")}{" "}
                           <button
                             type="button"
@@ -393,9 +393,9 @@ function ConnectorToolsGrants({
                           </button>
                         </div>
                       ) : tools === null ? (
-                        <div className="mt-2 text-[11.5px] text-ink-secondary">{t("botAccess.grants.loading")}</div>
+                        <div className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.grants.loading")}</div>
                       ) : serviceTools.length === 0 ? (
-                        <div className="mt-2 text-[11.5px] text-ink-secondary">{t("botAccess.grants.noListing")}</div>
+                        <div className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.grants.noListing")}</div>
                       ) : (
                         <>
                           <div className="mt-2 flex flex-wrap gap-1.5">
@@ -438,7 +438,7 @@ function ConnectorToolsGrants({
                                     className="mt-0.5"
                                   />
                                   <span className="min-w-0 flex-1">
-                                    <span className="block truncate font-mono text-[11.5px] text-ink" title={tool.name}>{tool.name}</span>
+                                    <span className="block truncate font-mono text-[12px] text-ink" title={tool.name}>{tool.name}</span>
                                     {tool.description && (
                                       <span className="block truncate text-[11px] text-ink-secondary" title={tool.description}>
                                         {tool.description}
@@ -449,7 +449,7 @@ function ConnectorToolsGrants({
                               );
                             })}
                             {matches.length === 0 && (
-                              <div className="px-1.5 py-2 text-[11.5px] text-ink-secondary">{t("botAccess.grants.noMatches")}</div>
+                              <div className="px-1.5 py-2 text-[12px] text-ink-secondary">{t("botAccess.grants.noMatches")}</div>
                             )}
                           </div>
                         </>
@@ -502,8 +502,8 @@ function RecordStepsRow({ on, browserOn, myChrome, onChange }: { on: boolean; br
   return (
     <div className="mt-3 flex items-center justify-between gap-4 border-t border-hairline/40 pt-3">
       <div>
-        <div className="text-[13.5px] font-medium text-ink">{t("botAccess.recordSteps.title")}</div>
-        <div className="mt-0.5 text-[12.5px] text-ink-secondary">
+        <div className="text-[14px] font-medium text-ink">{t("botAccess.recordSteps.title")}</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">
           {!browserOn ? t("botAccess.recordSteps.needsBrowser") : on ? t("botAccess.recordSteps.on") : t("botAccess.recordSteps.off")}
           {browserOn && on && myChrome ? ` ${t("botAccess.recordSteps.myChrome")}` : ""}
         </div>
@@ -554,7 +554,7 @@ export function VpsAliasField({ bot }: { bot: Bot }) {
   return (
     <div className="mt-3 rounded-lg bg-inset p-3">
       <div className="text-[13px] text-ink">{t("botAccess.cloud.server")}</div>
-      <div className="mt-0.5 text-[11.5px] text-ink-secondary">
+      <div className="mt-0.5 text-[12px] text-ink-secondary">
         {defaultAlias
           ? t("botAccess.cloud.serverDefault", { alias: defaultAlias })
           : t("botAccess.cloud.serverNoDefault")}
@@ -567,7 +567,7 @@ export function VpsAliasField({ bot }: { bot: Bot }) {
         }}
       >
         <input
-          className={cn(inputCls, "font-mono text-[12.5px]")}
+          className={cn(inputCls, "font-mono text-[13px]")}
           placeholder={defaultAlias || t("botAccess.cloud.serverPlaceholder")}
           value={value}
           aria-label={t("botAccess.cloud.server")}
@@ -594,7 +594,7 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
   return (
     <>
       {!bot.computer && (
-        <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-ink-secondary">
+        <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[12px] leading-relaxed text-ink-secondary">
           <span className="font-medium text-ink">{t("botAccess.cloud.autoTitle")}</span>{" "}
           {t("botAccess.cloud.autoDescription")}
         </div>
@@ -609,7 +609,7 @@ export function CloudPreference({ bot, patch }: { bot: Bot; patch: ReturnType<ty
         <div className="mt-3 flex items-center justify-between gap-4 rounded-lg bg-inset px-3 py-2.5">
           <div className="min-w-0">
             <div className="text-[13px] text-ink">{t("botAccess.cloud.startVps")}</div>
-            <div className="mt-0.5 text-[11.5px] text-ink-secondary">
+            <div className="mt-0.5 text-[12px] text-ink-secondary">
               {t("botAccess.cloud.startVpsDescription")}
             </div>
           </div>
@@ -811,7 +811,7 @@ export function AccessSection({
                 >
                   {webhook.enabled ? t("botAccess.webhooks.active") : t("botAccess.webhooks.paused")}
                 </span>
-                <span className="shrink-0 text-[11.5px] tabular-nums text-ink-secondary">
+                <span className="shrink-0 text-[12px] tabular-nums text-ink-secondary">
                   {t("botAccess.webhooks.deliveries", { count: webhook.deliveryCount })}
                 </span>
               </div>
@@ -830,7 +830,7 @@ export function AccessSection({
           <div className="mt-3 divide-y divide-hairline/40 overflow-hidden rounded-lg border border-hairline/40">
             {alwaysAllow.map((entry) => (
               <div key={entry} className="flex items-center justify-between gap-3 px-3 py-2">
-                <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] text-ink">{entry}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">{entry}</span>
                 <button
                   type="button"
                   aria-label={t("botAccess.always.remove", { entry })}
@@ -872,13 +872,13 @@ function ConnectorScopesControl({ connectedSlugs, labels = {}, scopes, onChange 
       <Switch checked={limited} aria-label={t("botAccess.scopes.limitLabel")} onClick={() => onChange(limited ? null : { apps: {} })} />
     </div>
     {limited && <div className="mt-2 flex flex-col divide-y divide-hairline/20 rounded-lg bg-inset">
-      {!slugs.length && <div className="px-3 py-2 text-[11.5px] text-ink-secondary">{t("botAccess.scopes.empty")}</div>}
+      {!slugs.length && <div className="px-3 py-2 text-[12px] text-ink-secondary">{t("botAccess.scopes.empty")}</div>}
       {slugs.map((slug) => <div key={slug} className="flex flex-wrap items-center justify-between gap-3 px-3 py-1.5">
-        <span className="min-w-0 text-[13px] text-ink">{labels[slug] ?? slug}{!connectedSlugs.includes(slug) && <span className="ml-2 text-[10.5px] text-ink-secondary">{t("botAccess.scopes.notConnected")}</span>}</span>
+        <span className="min-w-0 text-[13px] text-ink">{labels[slug] ?? slug}{!connectedSlugs.includes(slug) && <span className="ml-2 text-[11px] text-ink-secondary">{t("botAccess.scopes.notConnected")}</span>}</span>
         <div className="flex shrink-0 gap-0.5 rounded-md bg-card p-0.5" role="group" aria-label={t("botAccess.scopes.accessLabel", { app: slug })}>
           {([[null, t("botAccess.scopes.off"), t("botAccess.scopes.offHint")], ["read", t("botAccess.scopes.read"), t("botAccess.scopes.readHint")], ["write", t("botAccess.scopes.readWrite"), t("botAccess.scopes.readWriteHint")]] as const).map(([value, label, hint]) =>
             <button key={label} type="button" title={hint} aria-pressed={(scopes?.apps[slug] ?? null) === value} onClick={() => setScope(slug, value)}
-              className={cn("rounded px-2 py-0.5 text-[11.5px] font-medium", (scopes?.apps[slug] ?? null) === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink")}>{label}</button>)}
+              className={cn("rounded px-2 py-0.5 text-[12px] font-medium", (scopes?.apps[slug] ?? null) === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink")}>{label}</button>)}
         </div>
       </div>)}
     </div>}

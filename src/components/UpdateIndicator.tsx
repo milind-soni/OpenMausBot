@@ -153,7 +153,9 @@ export function UpdateCard({
       ? t("update.card.downloadingNote")
       : handoff
         ? t("update.card.handoffNote")
-        : t("update.card.restartNote", { app: brand().name });
+        : status === "downloaded" && state.installsByItself
+          ? t("update.card.idleNote", { app: brand().name })
+          : t("update.card.restartNote", { app: brand().name });
 
   return createPortal(
     <div

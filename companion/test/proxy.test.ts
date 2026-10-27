@@ -319,6 +319,35 @@ describe("the sidecar in front of an unmodified harness", () => {
     }
   });
 
+  it("refuses a new bot's protected settings from a paired device without making the bot", async () => {
+    const ids = async () => ((await device("GET", "/api/bots")).body.bots as Array<{ id: string }>).map((bot) => bot.id);
+    const before = await ids();
+    const settings: Array<[string, unknown]> = [
+      ["approvalMode", "full"], ["approvalMode", "ask"], ["alwaysAllow", ["Bash(*)"]], ["chiefOfStaff", true], ["computer", "local"],
+      ["cwd", "/"], ["peers", []], ["approvePeerComms", false], ["mcpServers", ["github"]], ["browserProfile", "guest"],
+      ["toolScope", { allow: ["native:*"] }], ["composio", true], ["browser", true],
+    ];
+    const fields: Array<[string, unknown]> = [
+      ["section", "Ops"], ["preset", "chief-of-staff"], ["visibility", { audience: "members" }], ["reportsTo", "someone@example.test"], ["unexpected", true],
+    ];
+    for (const [field, body] of [
+      ...settings.map(([field, value]) => [field, { name: "From the phone", settings: { [field]: value } }] as const),
+      ...fields.map(([field, value]) => [field, { name: "From the phone", [field]: value }] as const),
+    ]) {
+      const refused = await device("POST", "/api/bots", { body });
+      expect(refused.status, JSON.stringify(body)).toBe(403);
+      expect(refused.body.error).toContain(field);
+      expect(refused.body.error).toContain("host computer");
+    }
+    expect(await ids()).toEqual(before);
+
+    const made = await device("POST", "/api/bots", {
+      body: { name: "From the phone", settings: { soul: "Plans trips.", color: "teal", mascotBody: "star" } },
+    });
+    expect(made.status, JSON.stringify(made.body)).toBe(201);
+    expect(made.body.bot).toMatchObject({ name: "From the phone", color: "teal", mascotBody: "star" });
+  });
+
   it("saves the avatar panel's reset and shape choices from a paired device", async () => {
     const { body } = await device("GET", "/api/bots");
     const bot = body.bots[0];

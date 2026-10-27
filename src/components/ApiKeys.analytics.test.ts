@@ -126,18 +126,19 @@ describe("a key saved in Settings → API keys", () => {
     expect(fixture.track.mock.calls).toEqual([["api_key_removed", { provider: "anthropic", via: "settings" }]]);
   });
 
-  it("reports a cleared Composio key only when the project was self-hosted, not for the managed connection", async () => {
-    const clear = () => render({ section: "composio" }).find((node) => node.type === "button" && JSON.stringify(node.props.children).includes("Clear"))!;
-    const managed = { composio: { configured: true, mode: "managed" } };
-    fixture.config = managed;
-    fixture.api.mockResolvedValue(managed);
-    clear().props.onClick!();
+  it("offers Clear for a Composio project key of the person's own, and none for the managed connection", async () => {
+    const row = () => render({ section: "composio" });
+    const clear = () => row().find((node) => node.type === "button" && JSON.stringify(node.props.children).includes("Clear"));
+    fixture.config = { composio: { configured: true, mode: "managed" } };
+    expect(clear()).toBeUndefined();
+    expect(JSON.stringify(row().map((node) => node.props.children))).not.toContain("Configured");
+    fixture.config = { composio: { configured: true, mode: "self-hosted" } };
+    fixture.api.mockResolvedValue({ composio: { configured: true, mode: "managed" } });
+    clear()!.props.onClick!();
     await flush();
     expect(fixture.api).toHaveBeenCalledOnce();
-    expect(fixture.track).not.toHaveBeenCalled();
-    fixture.config = { composio: { configured: true, mode: "self-hosted" } };
-    clear().props.onClick!();
-    await flush();
     expect(fixture.track.mock.calls).toEqual([["api_key_removed", { provider: "composio", via: "settings" }]]);
+    fixture.config = { composio: { configured: true, mode: "managed" } };
+    expect(clear()).toBeUndefined();
   });
 });

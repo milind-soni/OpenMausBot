@@ -104,7 +104,7 @@ try {
   await command("wait", "--fn", "document.body.textContent.includes('Signed in') && !document.getElementById('mcp-callback-documents')");
   assert.equal(oauth.counts.token, 2);
   await clickButton("Test");
-  await command("wait", "--fn", "document.body.textContent.includes('read_notes')");
+  await command("wait", "--fn", "document.body.textContent.includes('Connected: 1 tool')");
   await command("screenshot", join(evidence, "signed-in.png"), "--full");
   // Revoke the initiating browser while another attempt waits.
   await clickButton("Sign out");

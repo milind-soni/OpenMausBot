@@ -338,8 +338,8 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
   const lineCount = countLines(code);
 
   return (
-    <div dir="ltr" className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
-      <div className="flex items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
+    <div dir="ltr" className="chat-code-block my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span title={displayLanguage} className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
             {displayLanguage}
@@ -350,7 +350,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
             </span>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+        <div className="chat-code-actions flex shrink-0 items-center gap-1 whitespace-nowrap">
           <button
             type="button"
             onClick={() => setWrapLines((w) => !w)}
@@ -364,7 +364,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
             aria-pressed={wrapLines}
           >
             <WrapText size={12} aria-hidden="true" />
-            <span className="hidden sm:inline">{t(wrapLines ? "chat.code.unwrap" : "chat.code.wrap")}</span>
+            <span>{t(wrapLines ? "chat.code.unwrap" : "chat.code.wrap")}</span>
           </button>
           <button
             type="button"
@@ -374,7 +374,7 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
             aria-label={t("chat.code.download")}
           >
             <Download size={12} aria-hidden="true" />
-            <span className="hidden sm:inline">{t("common.save")}</span>
+            <span>{t("common.save")}</span>
           </button>
           <button
             type="button"
@@ -383,22 +383,13 @@ export function CodeBlock({ code, lang, initialWrap = false }: CodeBlockProps) {
             title={copied === "copied" ? t("chat.code.copied") : copied === "failed" ? t("common.copyFailed") : t("chat.code.copy")}
             aria-label={copied === "copied" ? t("chat.code.copiedLabel") : copied === "failed" ? t("common.copyFailed") : t("chat.code.copyLabel")}
           >
-            {copied === "failed" ? (
-              <>
-                <X size={12} className="text-danger" aria-hidden="true" />
-                <span className="text-danger font-medium hidden sm:inline">{t("common.copyFailed")}</span>
-              </>
-            ) : copied === "copied" ? (
-              <>
-                <Check size={12} className="text-success" aria-hidden="true" />
-                <span className="text-success font-medium hidden sm:inline">{t("chat.code.copiedShort")}</span>
-              </>
-            ) : (
-              <>
-                <Copy size={12} aria-hidden="true" />
-                <span className="hidden sm:inline">{t("common.copy")}</span>
-              </>
-            )}
+            {copied === "failed" ? <X size={12} className="text-danger" aria-hidden="true" />
+              : copied === "copied" ? <Check size={12} className="text-success" aria-hidden="true" />
+                : <Copy size={12} aria-hidden="true" />}
+            <span aria-hidden="true" className="hidden max-sm:inline touch:inline">{t("common.copy")}</span>
+            <span role="status" className={`max-sm:sr-only touch:sr-only ${copied === "failed" ? "text-danger font-medium" : copied === "copied" ? "text-success font-medium" : ""}`}>
+              {copied === "failed" ? t("common.copyFailed") : copied === "copied" ? t("chat.code.copiedShort") : t("common.copy")}
+            </span>
           </button>
         </div>
       </div>
@@ -936,10 +927,10 @@ const MARKDOWN_COMPONENTS: Components = {
     return <ol dir={blockDirection(node)} className="list-decimal space-y-1 ps-5">{children}</ol>;
   },
   h1({ node, children }: BlockProps) {
-    return <div dir={blockDirection(node)} className="mt-2 text-[16px] font-semibold">{children}</div>;
+    return <div dir={blockDirection(node)} className="mt-3 text-[18px] font-semibold">{children}</div>;
   },
   h2({ node, children }: BlockProps) {
-    return <div dir={blockDirection(node)} className="mt-2 text-[15.5px] font-semibold">{children}</div>;
+    return <div dir={blockDirection(node)} className="mt-2 text-[16px] font-semibold">{children}</div>;
   },
   h3({ node, children }: BlockProps) {
     return <div dir={blockDirection(node)} className="mt-1.5 font-semibold">{children}</div>;
@@ -951,7 +942,7 @@ const MARKDOWN_COMPONENTS: Components = {
     return <div dir={blockDirection(node)} className="mt-1.5 text-[14px] font-semibold">{children}</div>;
   },
   h6({ node, children }: BlockProps) {
-    return <div dir={blockDirection(node)} className="mt-1.5 text-[13.5px] font-semibold text-ink-secondary">{children}</div>;
+    return <div dir={blockDirection(node)} className="mt-1.5 text-[14px] font-semibold text-ink-secondary">{children}</div>;
   },
   blockquote({ node, children }: BlockProps) {
     return (
@@ -1016,7 +1007,7 @@ export function samePeers(previous: readonly MentionPeer[], next: readonly Menti
   if (previous.length !== next.length) return false;
   return previous.every((peer, index) => {
     const other = next[index]!;
-    return peer.name === other.name && peer.hidden === other.hidden && peer.color === other.color;
+    return peer.name === other.name && peer.hidden === other.hidden && peer.color === other.color && peer.person === other.person;
   });
 }
 

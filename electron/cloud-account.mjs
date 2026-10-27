@@ -593,6 +593,14 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       try { await request("kept", { method: "POST", body: { installation }, token: current.token }); return true; }
       catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
     },
+    /** Tells the Admin where this computer's move to My Cloud stands (POST /api/cloud/desktop/move-status; move-status.mjs
+     * builds `report`). False when there is no sign-in or the Admin doesn't take it yet (404). */
+    async reportMoveStatus(report) {
+      const current = grant;
+      if (!current) return false;
+      try { await request("move-status", { method: "POST", body: report, token: current.token, timeoutMs: 15_000 }); return true; }
+      catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
+    },
     /** This sign-in's own X research relay access while its plan is paid:
      * `{ url, token }` for the local server (electron/included-x.mjs), or null
      * when there is no sign-in, the Admin says the plan is not active (402) or

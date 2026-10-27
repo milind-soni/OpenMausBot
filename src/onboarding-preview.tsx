@@ -9,18 +9,11 @@ import type { MausMotion } from "@/lib/mascot";
 import { type BeatId, beatsFor } from "@/lib/onboarding";
 import type { SetupImportClient } from "@/lib/setup-import";
 import { SKINS, type SkinId } from "@/lib/skins";
-import { StoreProvider, type Bot } from "@/state/store";
+import { StoreProvider } from "@/state/store";
 import type { SetupDetection, SetupImportResult } from "../shared/setup-import";
 import "./styles.css";
 
-const PREVIEW_BOT = {
-  id: "preview-bot",
-  name: "Maus",
-  color: "green",
-  soul: "",
-} as unknown as Bot;
-
-const BEATS = beatsFor({ dictation: true, reel: true, setupImport: true, cloud: true });
+const BEATS = beatsFor({ dictation: true, setupImport: true, cloud: true });
 
 /** The Cloud beat's stand-in for the Admin's offer (the app reads its own). */
 const PREVIEW_CLOUD_OFFER: CloudOffer = { recommended: "pro", creditUsd: 5, reminderDays: 1, refundDays: 14, plans: [
@@ -87,7 +80,6 @@ function Stage({ skin, beat, run, scale = 1, entrance, importMode = null }: { sk
           entrance={entrance}
           initialBeat={beat}
           cloudOffer={PREVIEW_CLOUD_OFFER}
-          bot={PREVIEW_BOT}
           onDone={() => {}}
           setupImport={{ client: previewImport(importMode), detection: PREVIEW_DETECTION }}
         />

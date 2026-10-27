@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toUtterances } from "../../server/tts/speech-text.ts";
+import { toUtterances, VOICE_FIRST_BLOCK_MAX_CHARS } from "../../server/tts/speech-text.ts";
 import {
   buildCorpus,
   CADENCE,
@@ -62,6 +62,15 @@ describe("voice latency corpus fixture", () => {
     expect(byId.get("staccato-92")!.blocks).toBe(1);
     expect(byId.get("staccato-92")!.blockChars[0]).toBe(92);
     expect(byId.get("mixed-late-319")!.blockChars.at(-1)).toBe(319);
+  });
+
+  it("the voice path's capped splitter opens every committed reply within the first-block cap", () => {
+    const corpus = JSON.parse(committed) as { replies: { id: string; text: string }[] };
+    for (const reply of corpus.replies) {
+      const capped = toUtterances(reply.text, { firstBlockMaxChars: VOICE_FIRST_BLOCK_MAX_CHARS });
+      expect([...(capped[0] ?? "")].length, reply.id).toBeLessThanOrEqual(VOICE_FIRST_BLOCK_MAX_CHARS);
+      expect(capped.join(" "), reply.id).toBe(toUtterances(reply.text).join(" "));
+    }
   });
 
   it("documents the replay cadence both sides share", () => {

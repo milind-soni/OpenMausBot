@@ -1,5 +1,11 @@
 # Welcome flow and guided tour
 
+The first run is short (Oct 23 2026): the greeting (a name only; the email is
+asked once, by the separate product-updates question), Connect an AI when none works, then only the import, microphone and
+Cloud steps this computer needs, and the chat. There is no feature reel, phone
+step or first-bot step, and the app tour starts only from Settings → Replay
+app tour.
+
 Launch the isolated full-app fixture following [Chat UI](chat-ui.md):
 
 ```sh
@@ -17,11 +23,12 @@ first-run onboarding through the fixture-only `?onboarding=1` entry. It uses
 the real renderer and fake-engine server. No provider login, real phone
 pairing, native permissions or user workspace is involved.
 
-Assertions cover profile-save failure and retry, reduced-motion reel playback,
-engine refresh failure without losing inventory, phone skip, welcome completion,
+Assertions cover the greeting asking for a name only, a reload keeping the typed name, profile-save failure
+and retry, the one-step welcome (the fixture's Claude already works) landing in the
+chat with the first bot and no app tour (also after a reload),
 automatic starter-model selection and a successful first composer message without
 opening the model picker,
-every guided tour step, persistence after reload, Settings replay, skipping
+every app tour step from Settings, persistence after reload, Settings replay, skipping
 while Next is saving, closing welcome while its save is pending, and replay on
 legacy installs with a failed-save retry. Screenshots
 are retained in `.omb-scratch/verify-evidence/onboarding/` with a PASS line for
@@ -57,7 +64,7 @@ What each first-run surface depends on, and how it was checked:
 | Desktop app, own server (full bridge, `remoteClient` present) | The same flow as before, decided without a new request | `src/components/onboarding/WelcomeGate.test.ts`; `HelloBeat`/`EnginesBeat` HTML compared byte for byte with main (no bridge) |
 | Hosted workspace opened inside the desktop app (reduced bridge, no `remoteClient`) | Treated like a browser: the server is asked | `src/components/onboarding/WelcomeGate.test.ts` |
 | Packaged desktop with the organization bridge | An optional "Using OpenMausBot at work?" row on the engines beat; a signed-in Company engine counts as ready | `src/components/onboarding/beats/OrganisationRow.test.ts`, `src/components/onboarding/beats/EnginesBeat.test.ts` (fake bridge) |
-| Browser, admin of a hosted workspace | Greeting (no inputs) and the bot beat only | `src/components/onboarding/WelcomeGate.test.ts`, `src/components/onboarding/beats/HelloBeat.test.ts`, `src/lib/onboarding.test.ts` |
+| Browser, admin of a hosted workspace | Greeting (no inputs) only | `src/components/onboarding/WelcomeGate.test.ts`, `src/components/onboarding/beats/HelloBeat.test.ts`, `src/lib/onboarding.test.ts` |
 | Browser, hosted member (no admin scope) | No welcome flow; one dismissible note kept in browser storage; no first-conversation spotlights | `src/components/onboarding/WelcomeGate.test.ts`, `src/components/onboarding/FirstConversationTour.test.ts` |
 | Browser, client-scope session on a server that is not hosted | Nothing new: the flow does not open itself (it could not be saved); Settings replay and spotlights as before | `src/components/onboarding/WelcomeGate.test.ts`, `src/lib/onboarding.test.ts` |
 
@@ -136,3 +143,29 @@ Midnight and Daylight, at a narrow width, working, failed and with its result
 came from `onboarding-preview.html` with a fixture detection (`?beat=import`,
 `?import=notes`, `?import=fail`, `?w=390&h=760`). Not covered here: the
 packaged Electron window itself.
+
+## One short welcome, no second tour (Oct 23 2026)
+
+```sh
+pnpm exec vitest run src/lib/onboarding.test.ts src/lib/welcome-draft.test.ts src/components/onboarding src/components/AppNotices.test.ts
+```
+
+`src/lib/onboarding.test.ts` lists every step set (no reel, phone or bot step in any
+combination) and the shared count behind the dots and "Step N of M".
+`src/components/onboarding/WelcomeFlow.steps.test.ts` renders the flow in happy-dom: a double click moves
+one step and Back waits while a step changes; the dots match the counter on
+every step; a reload resumes on the saved step with the typed fields, or on the
+step before one still loading (import, Cloud) and then on it; Skip and Escape
+keep the typed name; a replay or the preview never touches the
+saved draft; Skip stays out of a long title's way. `src/components/onboarding/beats/HelloBeat.test.ts` covers the
+name-only greeting and Maybe later keeping the name typed. `src/components/onboarding/GuidedTour.test.ts`,
+`src/components/onboarding/FirstConversationTour.test.ts` and `src/components/onboarding/WelcomeGate.test.ts` check the app tour
+never starts by itself, also after a reload, and the first-conversation
+spotlights no longer wait for it.
+
+Layout was checked in `onboarding-preview.html` (`?w=375&h=667`, `?w=1920&h=1080`)
+in a browser of the same size. `verify-onboarding-ui.ts` passed end to end on a fresh
+`ui launch` fixture (Oct 23 2026). That fixture has a working AI, so it never reaches
+Connect an AI; the engines step's refresh failure is covered by
+`src/components/onboarding/beats/EnginesBeat.test.ts`, and the steps after it by
+`src/components/onboarding/WelcomeFlow.steps.test.ts`.
