@@ -86,6 +86,8 @@ describe("describeTool", () => {
   it.each([
     ["decide", "Decide", "activity.tool.team.decide"],
     ["extract", "Extract", "activity.tool.team.extract"],
+    ["message_person", "Message person", "activity.tool.team.messagePerson"],
+    ["report_bug", "Report bug", "activity.tool.team.reportBug"],
   ])("names %s with its own activity key and unchanged English", (tool, label, labelKey) => {
     expect(describedTool(`mcp__agents__${tool}`)).toEqual({ app: "Team", appKey: "activity.app.team", label, labelKey });
     expect(describeTool(`mcp__agents__${tool}`)).toEqual({ app: "Team", label });

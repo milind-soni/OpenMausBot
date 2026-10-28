@@ -27130,7 +27130,9 @@
       "native.update.checkFailed": "8e5453aca31c5dae9f51629b6beae4008a3edf665764414c6f6cd6a869750882",
       "native.update.installing": "d4c2786de1c7bbed0fa0f010fb037527cece9f42ebc3861f985dc1c498703f3c",
       "native.update.installFailedPlain": "3c9928b6a20133c3fcff626c5a99e0db83ddced0685a9c30f169be94b1b80e74",
-      "mcp.check.unauthorized": "e9d83f01c9aff03af6380e341aad90a5547d378ef54582383c6c9a35c53181af"
+      "mcp.check.unauthorized": "e9d83f01c9aff03af6380e341aad90a5547d378ef54582383c6c9a35c53181af",
+      "activity.tool.team.messagePerson": "4595b0d3ba139903811a08a150c47714c85ae016981b3c97e672ca18e4cc8915",
+      "activity.tool.team.reportBug": "7769e4f1f4a97877d278fc62381aa05b12a5ef6b6e1c2d8a3fc73893f4921ddf"
     },
     "zh": {
       "highlevel.unavailable": "87b8ac7f7610e6dd69f520bc59058fd92f307b9f4bcf804075f25d08bcaa7533",

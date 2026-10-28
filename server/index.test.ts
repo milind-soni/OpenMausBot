@@ -9220,7 +9220,7 @@ describe("harness HTTP API", () => {
         expect(bot.messages[0].setupOffer).toBeUndefined();
         expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
         expect(await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).toEqual({
-          status: 409, body: { error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do." },
+          status: 409, body: { error: "This bot already has instructions. To change its job, type /setup and what you'd like it to do.", errorKey: "serverError.setup.hasInstructions" },
         });
       } finally {
         await api("DELETE", `/api/bots/${bot.id}`);
@@ -9233,7 +9233,7 @@ describe("harness HTTP API", () => {
         // A plain chat model with its tools off cannot propose a profile.
         expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "plainApi", model: "fixture-plain-model" } })).status).toBe(200);
         expect(await api("POST", `/api/bots/${bot.id}/setup-request`, { threadId: bot.threadId })).toEqual({
-          status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead." },
+          status: 409, body: { error: "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead.", errorKey: "serverError.setup.noTools" },
         });
         expect(await messages(bot.threadId)).toHaveLength(1);
       } finally {

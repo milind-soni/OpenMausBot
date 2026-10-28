@@ -8009,5 +8009,7 @@
   "native.update.checkFailed": "Não foi possível buscar atualizações. {error}",
   "native.update.installing": "Instalando a atualização. Digite a senha se ela for solicitada.",
   "native.update.installFailedPlain": "Não foi possível instalar a atualização.",
-  "mcp.check.unauthorized": "acesso não autorizado"
+  "mcp.check.unauthorized": "acesso não autorizado",
+  "activity.tool.team.messagePerson": "Enviar mensagem a uma pessoa",
+  "activity.tool.team.reportBug": "Relatar um problema"
 }

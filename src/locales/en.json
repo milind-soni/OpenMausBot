@@ -8009,5 +8009,7 @@
   "native.update.checkFailed": "Couldn't check for updates. {error}",
   "native.update.installing": "Installing the update. Enter your password if asked.",
   "native.update.installFailedPlain": "The update could not be installed.",
-  "mcp.check.unauthorized": "unauthorized"
+  "mcp.check.unauthorized": "unauthorized",
+  "activity.tool.team.messagePerson": "Message person",
+  "activity.tool.team.reportBug": "Report bug"
 }

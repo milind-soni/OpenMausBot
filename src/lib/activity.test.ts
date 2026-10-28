@@ -65,10 +65,12 @@ describe("activityLabel", () => {
   afterEach(() => { setLocale("en"); });
 
   it.each([
-    ["decide", "Decide", "Decidir"],
-    ["extract", "Extract", "Extrair"],
-  ])("words %s in pt-BR and keeps its English label unchanged", (tool, label, portuguese) => {
-    const entry = row({ tool: `mcp__agents__${tool}`, app: "Team", label, labelKey: `activity.tool.team.${tool}` });
+    ["decide", "Decide", "Decidir", "activity.tool.team.decide"],
+    ["extract", "Extract", "Extrair", "activity.tool.team.extract"],
+    ["message_person", "Message person", "Enviar mensagem a uma pessoa", "activity.tool.team.messagePerson"],
+    ["report_bug", "Report bug", "Relatar um problema", "activity.tool.team.reportBug"],
+  ])("words %s in pt-BR and keeps its English label unchanged", (tool, label, portuguese, labelKey) => {
+    const entry = row({ tool: `mcp__agents__${tool}`, app: "Team", label, labelKey });
     expect(activityLabel(entry)).toBe(label);
     setLocale("pt-br");
     expect(activityLabel(entry)).toBe(portuguese);
