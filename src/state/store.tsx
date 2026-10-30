@@ -276,7 +276,7 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
-export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor"> {
+export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" | "access" | "yourAccess"> {
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;

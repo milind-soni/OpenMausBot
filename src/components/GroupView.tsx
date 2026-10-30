@@ -47,7 +47,7 @@ import { isCancelledTranscriptRow } from "../../shared/client-cancel";
 import { roomRetryRequest } from "@/lib/room-retry";
 import { botEngine, failedTurnCause } from "@/lib/failed-turn";
 import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
-import { Composer } from "./Composer";
+import { RoomComposer } from "./bot-access/RoomComposer";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
 import { RoomContextWarnings } from "./ContextWarning";
 import { ChatFindBar } from "./ChatFindBar";
@@ -1203,7 +1203,7 @@ export function GroupView({ group }: { group: Group }) {
       )}
 
       <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
-      <Composer
+      <RoomComposer
         key={group.threadId}
         group={group}
         members={members}
