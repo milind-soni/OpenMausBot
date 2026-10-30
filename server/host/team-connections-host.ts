@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 
 import { audienceMember, type Audience } from "../audience.ts";
-import type { CloudTeam } from "../cloud-team.ts";
+import type { CloudTeam, TeamRole } from "../cloud-team.ts";
 import type * as Composio from "../composio.ts";
 import type { AppConfig } from "../config.ts";
 import type { McpServerSpec } from "../contracts.ts";
@@ -36,6 +36,8 @@ export interface TeamConnectionsHostDeps {
   requester(threadId: string, generation?: string): string | null;
   /** What a person is called in a bot's words: the name they chose, else their address. */
   personName?(person: string): string | undefined;
+  /** The members the Admin paired here, by person key, with their address and role (server/team-people.ts). */
+  roster?(): ReadonlyArray<{ person: string; email: string; role: TeamRole }>;
   /** A `connectors` capability for this turn; `connectorsFor` makes it the member's own bridge's. */
   mint(capability: { botId: string; threadId: string; generation: string; connectorsFor?: string }): string;
   mcpOAuth: McpOAuthManager;
@@ -103,16 +105,23 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     const member = audienceMember(deps.audienceOf(threadId));
     return person && (member === null || member === person) ? person : null;
   };
-  const nameOf = (person: string): string => deps.personName?.(person) || people.emailOf(person) || "this person";
+  const rosterEntry = (person: string) => deps.roster?.().find((entry) => entry.person === person);
+  const nameOf = (person: string): string => deps.personName?.(person) || rosterEntry(person)?.email || people.emailOf(person) || "this person";
   const teamName = () => team?.name ?? "the team";
   /** An admin's page for who connects each app, where one can be connected for the whole team. */
   const appsPage = () => { const where = link(); return where ? `${where}/apps` : null; };
   const noWorkaround = "Nothing was run. Don't try it another way (the browser or another tool).";
+  const roleOf = (person: string): TeamRole | null => rosterEntry(person)?.role ?? null;
+  const isAdmin = (person: string): boolean => roleOf(person) === "owner" || roleOf(person) === "admin";
+  /** Where a person connects their own: an Owner's or Admin's are on the team's Apps page, a User's on their team home. */
+  const ownPage = (person: string) => (isAdmin(person) ? appsPage() : link());
+  /** Who connects the team's apps, by name: the people a User can ask. */
+  const admins = () => list((deps.roster?.() ?? []).filter((entry) => entry.role !== "member").map((entry) => nameOf(entry.person)).slice(0, 3));
 
   const lines = {
-    connect: (name: string, who: string) => {
-      const where = link();
-      return `${name} is connected by each person in ${teamName()}, and ${who} hasn't connected theirs. ${noWorkaround} Reply with this one line and nothing more about it: `
+    connect: (name: string, person: string) => {
+      const where = ownPage(person);
+      return `${name} is connected by each person in ${teamName()}, and ${nameOf(person)} hasn't connected theirs. ${noWorkaround} Reply with this one line and nothing more about it: `
         + (where ? `"Connect your ${name} here: ${where}"` : `"Connect your own ${name} on your team's page in MausBot Cloud."`);
     },
     /** No one person's own request is behind this work: say so, and how to get it done. */
@@ -122,13 +131,23 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
         + `"${name} is each person's own, so I can't use it here. Ask me yourself and I'll use yours${where ? `, or an admin can connect ${name} for the whole team: ${where}` : ""}."`;
     },
     ownOnly: (who: string) => `These are ${who}'s own apps, and this turn no longer acts for ${who}: it was stopped, or someone else wrote in it since. ${noWorkaround} Say so in one plain line: ${who} can ask again.`,
-    ownGone: (who: string) => {
-      const where = link();
-      return `${who}'s own apps aren't connected here any more. ${noWorkaround} Reply with this one line and nothing more about it: `
+    ownGone: (person: string) => {
+      const where = ownPage(person);
+      return `${nameOf(person)}'s own apps aren't connected here any more. ${noWorkaround} Reply with this one line and nothing more about it: `
         + (where ? `"Connect your apps again here: ${where}"` : `"Connect your apps again on your team's page in MausBot Cloud."`);
     },
     teamApp: (name: string) => `${name} is ${team?.name ?? "the team"}'s, connected once for everyone: use it through the composio tools, not ${OWN_APPS_SERVER}. Nothing was run.`,
-    teamCard: (name: string) => `${name} is ${team?.name ?? "the team"}'s, connected once for everyone by an admin: ask an admin to connect it. Nothing was shown.`,
+    /** A team app's connection card, asked for through a member's own bridge. An Owner or Admin can connect it for
+     * everyone from its card, so the bot asks through the team's bridge; a User is told who can, by name. */
+    teamCard: (name: string, person: string) => {
+      if (isAdmin(person)) {
+        return `${name} is ${teamName()}'s, connected once for everyone, and ${nameOf(person)} can connect it: they're ${roleOf(person) === "owner" ? "the owner" : "an admin"} of ${teamName()}. `
+          + `Ask for its connection through the composio tools, not ${OWN_APPS_SERVER}: its card here lets them connect it for the whole team. Nothing was shown.`;
+      }
+      const who = admins();
+      return `${name} is ${teamName()}'s, connected once for everyone by its owner or an admin, and ${nameOf(person)} isn't one. Nothing was shown. Don't try it another way (the browser or another tool). `
+        + `Reply with this one line and nothing more about it: "${name} is connected for the whole team by ${who ? who : "the team's owner or an admin"}: ask ${who ? (who.includes(" and ") ? "one of them" : "them") : "one of them"} to connect it."`;
+    },
     opaque: (names: string[]) => `Code that calls apps can't run here while ${list(names)} ${names.length === 1 ? "is" : "are"} connected by each person. Call the app's tools directly.`,
   };
 
@@ -136,7 +155,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
   const personAppLine = (app: string, threadId: string, generation?: string): string => {
     const person = turnPerson(threadId, generation);
     if (!person) return lines.nobody(appLabel(app));
-    return people.appsAccess(person) ? `${appLabel(app)} here is ${nameOf(person)}'s own: use it through the ${OWN_APPS_SERVER} tools. Nothing was run.` : lines.connect(appLabel(app), nameOf(person));
+    return people.appsAccess(person) ? `${appLabel(app)} here is ${nameOf(person)}'s own: use it through the ${OWN_APPS_SERVER} tools. Nothing was run.` : lines.connect(appLabel(app), person);
   };
 
   const personSpec = async (person: string, name: string, spec: Extract<McpServerSpec, { url: string }>): Promise<McpServerSpec | null> => {
@@ -187,7 +206,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       if (!own) return {};
       if (turnPerson(capability.threadId, capability.generation) !== own) return { refusal: lines.ownOnly(nameOf(own)) };
       const access = people.appsAccess(own);
-      return access ? { access } : { refusal: lines.ownGone(nameOf(own)) };
+      return access ? { access } : { refusal: lines.ownGone(own) };
     },
 
     /** The app calls a frame would run, checked against the scopes: a `person` app never through the team's bridge, a
@@ -219,10 +238,10 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       const apps = personApps();
       for (const slug of slugs) {
         const app = apps.includes(slug) ? slug : null;
-        if (capability.connectorsFor) return app ? lines.connect(appLabel(app), nameOf(capability.connectorsFor)) : lines.teamCard(appLabel(slug));
+        if (capability.connectorsFor) return app ? lines.connect(appLabel(app), capability.connectorsFor) : lines.teamCard(appLabel(slug), capability.connectorsFor);
         if (app) {
           const person = turnPerson(capability.threadId, capability.generation);
-          return person ? lines.connect(appLabel(app), nameOf(person)) : lines.nobody(appLabel(app));
+          return person ? lines.connect(appLabel(app), person) : lines.nobody(appLabel(app));
         }
       }
       return null;
@@ -267,7 +286,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       const ownApps = mounted.composioOwn ? apps : [];
       const ownServers = servers.filter((name) => Object.hasOwn(mounted.custom ?? {}, name));
       const missing = [...(mounted.composioOwn ? [] : apps.map(appLabel)), ...servers.filter((name) => !ownServers.includes(name))];
-      const where = link();
+      const where = ownPage(person);
       const only = `They are used only for ${who}'s request: if someone else asks for something from them, say they are ${whose}.`;
       return (ownApps.length ? ` ${list(ownApps.map(appLabel))} ${ownApps.length === 1 ? "is" : "are"} ${whose} own: use ${ownApps.length === 1 ? "it" : "them"} through the ${OWN_APPS_SERVER} tools, which act as their own accounts; ${team.name}'s shared apps stay under composio.` : "")
         + (ownServers.length ? ` The MCP ${ownServers.length === 1 ? "server" : "servers"} ${list(ownServers)} act${ownServers.length === 1 ? "s" : ""} as ${whose} own account.` : "")

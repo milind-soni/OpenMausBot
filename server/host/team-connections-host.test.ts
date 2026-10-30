@@ -23,7 +23,14 @@ const CLEO_ACCESS = { url: "https://broker.test", token: "c".repeat(64) };
  * turn acts for is acting-person.ts's answer (the `requester`); "" is a turn that acts for nobody, as a routine's. */
 const AUDIENCES: Record<string, Audience> = { "ada-chat": `member:${ADA}`, "cleo-chat": `member:${CLEO}`, "room-chat": "room:launch", "main-chat": "team", "work-chat": "team" };
 
-function setup(options: { team?: boolean; requester?: Record<string, string>; servers?: Record<string, unknown> } = {}) {
+const OLIVE = personKey({ id: "", email: "olive@acme.test" });
+/** The members the Admin paired: Olive owns the team, Ben is an admin, Ada and Cleo are Users. */
+const ROSTER = [
+  { person: OLIVE, email: "olive@acme.test", role: "owner" as const }, { person: BEN, email: "ben@acme.test", role: "admin" as const },
+  { person: ADA, email: "ada@acme.test", role: "member" as const }, { person: CLEO, email: "cleo@acme.test", role: "member" as const },
+];
+
+function setup(options: { team?: boolean; requester?: Record<string, string>; servers?: Record<string, unknown>; roster?: typeof ROSTER } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-team-connections-"));
   const requester = { "ada-chat": ADA, "cleo-chat": CLEO, "room-chat": ADA, "main-chat": ADA, "work-chat": ADA, ...options.requester };
   const cfg = { mcpServers: options.servers ?? {
@@ -52,6 +59,7 @@ function setup(options: { team?: boolean; requester?: Record<string, string>; se
       return [name, { type: "http", url: server.url, headers: server.headers } as McpServerSpec];
     })),
     isSessionLive: () => true,
+    ...(options.roster ? { roster: () => options.roster! } : {}),
     brokerUrl: () => ADA_ACCESS.url,
     composio: composio as never,
   });
@@ -204,7 +212,7 @@ describe("apps each person connects", () => {
     expect(host.connectRefusal({ threadId: "room-chat", generation: "g" }, ["gmail"]), "her own room line: where to connect hers").toContain("\"Connect your Gmail here: https://cloud.example.test/cloud/team/team-acme-1\"");
     expect(host.connectRefusal({ threadId: "main-chat", generation: "g" }, ["gmail"])).toMatch(/this work doesn't act for one person/);
     expect(host.connectRefusal({ threadId: "room-chat", generation: "g" }, ["slack"]), "a team app keeps its card").toBeNull();
-    expect(host.connectRefusal({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }, ["slack"])).toMatch(/ask an admin/);
+    expect(host.connectRefusal({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }, ["slack"])).toMatch(/Slack is Acme's, connected once for everyone by its owner or an admin/);
     expect(setup({ team: false }).host.connectRefusal({ threadId: "ada-chat", generation: "g" }, ["gmail"])).toBeNull();
   });
 });
@@ -345,5 +353,36 @@ describe("the connected apps a turn's app tools come from", () => {
     expect(composio.connectedServices, "not read again at once").toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(appTools(await host.appsIntegrations(bot, "main-chat", "g3"))).toContain("gmail.search_emails");
+  });
+});
+
+describe("who is told to connect a team app", () => {
+  it("never tells the owner or an admin to ask an admin: their bot asks for the card through the team's tools", () => {
+    const { host } = setup({ roster: ROSTER, requester: { "main-chat": OLIVE, "room-chat": BEN } });
+    const owner = host.connectRefusal({ threadId: "main-chat", generation: "g", connectorsFor: OLIVE }, ["figma"])!;
+    expect(owner).toContain("Figma is Acme's, connected once for everyone, and olive@acme.test can connect it: they're the owner of Acme.");
+    expect(owner).toContain("Ask for its connection through the composio tools, not own_apps: its card here lets them connect it for the whole team.");
+    expect(owner).not.toMatch(/ask an admin|ask one of them/i);
+    const admin = host.connectRefusal({ threadId: "room-chat", generation: "g", connectorsFor: BEN }, ["figma"])!;
+    expect(admin).toContain("ben@acme.test can connect it: they're an admin of Acme.");
+    expect(admin).not.toMatch(/ask an admin|ask one of them/i);
+  });
+
+  it("tells a User who can connect it, by name, never someone who can't", () => {
+    const { host } = setup({ roster: ROSTER });
+    const user = host.connectRefusal({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }, ["figma"])!;
+    expect(user).toContain("\"Figma is connected for the whole team by olive@acme.test and ben@acme.test: ask one of them to connect it.\"");
+    expect(user).not.toContain("cleo@acme.test");
+    const one = setup({ roster: ROSTER.filter((entry) => entry.person !== BEN) }).host;
+    expect(one.connectRefusal({ threadId: "ada-chat", generation: "g", connectorsFor: ADA }, ["figma"])).toContain("\"Figma is connected for the whole team by olive@acme.test: ask them to connect it.\"");
+  });
+
+  it("sends an owner or an admin to the team's Apps page for their own connections, and a User to their team home", () => {
+    const { host } = setup({ roster: ROSTER, requester: { "main-chat": OLIVE } });
+    host.scopes.set("app", "gmail", "person");
+    expect(host.connectRefusal({ threadId: "main-chat", generation: "g" }, ["gmail"])).toContain("\"Connect your Gmail here: https://cloud.example.test/cloud/team/team-acme-1/apps\"");
+    expect(host.connectRefusal({ threadId: "ada-chat", generation: "g" }, ["gmail"])).toContain("\"Connect your Gmail here: https://cloud.example.test/cloud/team/team-acme-1\"");
+    expect(host.prompt("main-chat", "g", {})).toContain("\"Connect your <name> here: https://cloud.example.test/cloud/team/team-acme-1/apps\"");
+    expect(host.relayActor({ threadId: "main-chat", generation: "g", connectorsFor: OLIVE }).refusal).toContain("\"Connect your apps again here: https://cloud.example.test/cloud/team/team-acme-1/apps\"");
   });
 });

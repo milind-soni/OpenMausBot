@@ -121,9 +121,12 @@ their team page in MausBot Cloud (the Admin's Cloud page calls the routes below 
   `composio`; the relay checks every frame again: the team's bridge refuses a `person` app (and code that calls apps
   while the team's own installation still holds one), a member's bridge refuses a team app and anything outside their
   own turn. A connection card for a `person` app is never shown: the bot gets one plain line to say, *"Connect your
-  Gmail here: <their team page>"*; in work that acts for nobody, that the person can ask themselves, or an admin can
-  connect it for the whole team on the team's Apps page. Either way the bot doesn't try it another way (the browser or
-  another tool).
+  Gmail here: <their page>"* (a User's team home; the Owner's and an Admin's own connections are on the team's Apps
+  page); in work that acts for nobody, that the person can ask themselves, or an admin can connect it for the whole
+  team on the team's Apps page. A card for a team app asked through a member's own bridge is never shown either: for
+  the Owner or an Admin, the bot asks for it through the team's `composio` bridge, whose card connects it for everyone;
+  a User is told who can connect it, by name (the team's Owner and Admins), never to "ask an admin" with no name. Either
+  way the bot doesn't try it another way (the browser or another tool).
 - **MCP servers.** Only a server reached by its address can be `person`. A `person` server's team credential is never
   attached to any turn; a turn that acts for a member gets the server with their own key (in the header the Admin's key
   used, else `Authorization: Bearer`) or their own sign-in; one not mounted is named to the bot with why and the fix. Both are pinned to the server's address: re-pointed, they aren't sent.
