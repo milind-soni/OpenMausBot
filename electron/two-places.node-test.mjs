@@ -110,13 +110,14 @@ test("main's places: My Cloud only while the person keeps this computer's bots h
     fetch: async (url) => { asked.push(new URL(url).origin); return Response.json(summary("Chief")); },
     environments: () => environments, cloud: () => ({ origin: "https://omb-u-1.fly.dev", asleep: false }),
     oneHome: { journal: () => journal, keep: { state: () => keep, set: async (on) => { keep = { ...keep, on }; } } },
-    ownHome: { offers: (place) => offered.has(place.id), start: async (id) => { active = true; asked.push(`start:${id}`); }, active: () => active },
+    ownHome: { owns: (place) => offered.has(place.id), offers: (place) => offered.has(place.id), start: async (id) => { active = true; asked.push(`start:${id}`); }, active: () => active,
+      away: () => false, refresh: () => {} },
     dismissed: memory(), tell: () => {},
   });
   try {
     await main.refresh({ force: true });
     assert.deepEqual(await handlers.get("two-places:state")({}), { suggest: { key: "cloud:https://omb-u-1.fly.dev", name: "My Cloud", kind: "cloud" } });
-    assert.deepEqual(asked.sort(), ["https://garage.example.test", "https://omb-u-1.fly.dev"], "never the team's Cloud or a server others use");
+    assert.deepEqual([...new Set(asked)].sort(), ["https://garage.example.test", "https://omb-u-1.fly.dev"], "never the team's Cloud or a server others use");
     await handlers.get("two-places:accept")({}, "cloud:https://omb-u-1.fly.dev");
     assert.equal(keep.on, false, "the one tap lets this computer's bots move to My Cloud, as anyone's first move");
     await main.refresh({ force: true });
@@ -127,4 +128,49 @@ test("main's places: My Cloud only while the person keeps this computer's bots h
     offered = new Set();
     assert.deepEqual(main.state(), { suggest: null }, "a server that stopped saying it is theirs alone is never suggested");
   } finally { main.close(); }
+});
+
+test("each place of the person's own hears which bots their other places have, names only, and again only once that changed", async () => {
+  const told = { here: [], cloud: [], garage: [] };
+  let mine = ["Scout"], ledger = ["Ledger"], moving = false, failing = false;
+  const place = (key, name, kind, bots, to) => ({ key, name, kind, read: async () => summary(...bots()),
+    tell: async (payload) => { if (failing && to === "garage") throw new Error("Garage server did not answer"); told[to].push(payload); } });
+  const two = createTwoPlaces({
+    local: async () => (mine === null ? null : summary(...mine)),
+    here: { name: async () => "Work laptop", tell: async (payload) => { told.here.push(payload); } },
+    places: () => [place("cloud:https://omb-u-1.fly.dev", "My Cloud", "cloud", () => ["Chief"], "cloud"), place("server:https://garage.example.test", "Garage server", "server", () => ledger, "garage")],
+    settled: () => true, quiet: () => moving, dismissed: memory(),
+  });
+  await two.refresh();
+  assert.deepEqual(told.garage, [{ v: 1, self: { name: "Garage server", kind: "server" },
+    places: [{ name: "Work laptop", kind: "computer", bots: ["Scout"] }, { name: "My Cloud", kind: "cloud", bots: ["Chief"] }] }]);
+  assert.deepEqual(told.here, [{ v: 1, self: { name: "this computer", kind: "computer" },
+    places: [{ name: "My Cloud", kind: "cloud", bots: ["Chief"] }, { name: "Garage server", kind: "server", bots: ["Ledger"] }] }]);
+  assert.equal(told.cloud.length, 1);
+  assert.ok(!/https?:|bot:/u.test(JSON.stringify(told)), "never an address or an id");
+  await two.refresh({ force: true });
+  assert.deepEqual([told.here.length, told.cloud.length, told.garage.length], [1, 1, 1], "nothing changed: nobody is told again");
+
+  ledger = ["Ledger", "Quill"];
+  await two.refresh({ force: true });
+  assert.deepEqual([told.here.length, told.cloud.length, told.garage.length], [2, 2, 1], "Garage server's own bots changed: only the others hear of it");
+
+  failing = true;
+  mine = ["Scout", "Ember"];
+  await two.refresh({ force: true });
+  assert.equal(told.garage.length, 1, "Garage server didn't answer");
+  failing = false;
+  await two.refresh({ force: true });
+  assert.equal(told.garage.length, 2, "so it is told on the next look");
+
+  moving = true;
+  mine = ["Scout", "Ember", "Echo"];
+  await two.refresh({ force: true });
+  assert.deepEqual([told.here.length, told.cloud.length, told.garage.length], [2, 3, 2], "nothing is read or told while a move is under way");
+  moving = false;
+  mine = null;
+  ledger = ["Ledger", "Quill", "Ink"];
+  await two.refresh({ force: true });
+  assert.equal(told.here.length, 2, "this computer's bots moved: it is told nothing more, whatever changed elsewhere");
+  assert.deepEqual(told.garage.at(-1).places.map((entry) => entry.name), ["My Cloud"], "and the others no longer hear of bots on it");
 });

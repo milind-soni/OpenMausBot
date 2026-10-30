@@ -70,3 +70,30 @@ or for a place that couldn't say, and each place is read again at most every ten
 minutes unless the places changed. `src/components/AppNotices.test.ts` shows the
 card once on this computer's page before any promotion, never during the welcome
 or the tour, and never on a Cloud's or a server's page, which never get the bridge.
+
+## Bots that say where another bot lives
+
+```sh
+pnpm exec vitest run server/places-elsewhere.e2e.test.ts server/places-elsewhere.test.ts server/routes/waits.test.ts
+node --test electron/two-places.node-test.mjs
+```
+
+The person's app tells each of their own places (this computer, a server that
+says it is theirs alone, My Cloud while awake) the names of the bots their other
+places have, and nothing more: no address, id or message, and never a team's
+place or one others sign in to (`PUT /api/places/elsewhere`, owner only).
+`server/places-elsewhere.e2e.test.ts` checks, over the same fixture:
+
+- before the app said anything, `coordinate_bots` to a name nowhere here answers
+  no such bot and that bots work together only within one place, with the way to
+  bring them together;
+- once it said, a bot on the person's server asking for a bot on their computer,
+  and the other way round, hears where that bot lives and the one tap that brings
+  them together (**Make Garage server my home**); a typo is still no such bot;
+- a server shared with others is never told and refuses to be;
+- the person @mentioning that bot in a chat tells the answering bot where it
+  lives, and in a room one plain line says so to the person.
+
+The unit tests add how My Cloud's way is said, two places of theirs that are no
+computer (by hand, with a backup), a bot here of the same name winning, waits
+(`bot_idle`) answering the same way, and the word kept across a restart.

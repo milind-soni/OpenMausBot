@@ -10,7 +10,7 @@ export function installTwoPlacesMain(deps: {
   /** My Cloud's address while it is ready, and whether it sleeps now. */
   cloud(): { origin: string | null; asleep: boolean };
   oneHome: { journal(): unknown; keep: { state(): { shown: boolean; on: boolean; moved: boolean }; set(on: boolean): Promise<unknown> } };
-  ownHome: { offers(place: any): boolean; start(id: string): Promise<unknown>; active(): boolean };
+  ownHome: { owns(place: any): boolean; offers(place: any): boolean; start(id: string): Promise<unknown>; active(): boolean; away(): boolean; refresh(): void };
   dismissed: { read(): unknown; write(value: unknown): void };
   tell(): void;
   log?(line: string): void;
