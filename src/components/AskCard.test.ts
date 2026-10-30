@@ -7,7 +7,7 @@ import { askPrimary, AskCard, AskChoices, AskDetail, AskHeader, AskReply, AskSet
 afterEach(() => vi.unstubAllGlobals());
 
 const classesOf = (html: string, at: RegExp) => (at.exec(html)?.[1] ?? "").split(" ");
-const LONG = "Ja, auch den Einladungstext und den Abschlusstext der Sondervariante natural-greenery, als Branch fix/natural-greenery-custom-case";
+const LONG = "Yes, the welcome text too, and the footer text of the pricing page, on branch fix/pricing-page-footer";
 
 describe("AskCard", () => {
   it("is one raised card in both modes: the composer's surface, a 0.5px hairline, rounded 20, 560 wide", () => {
@@ -21,11 +21,11 @@ describe("AskCard", () => {
   });
 
   it("puts the question in clear ink at reading size, under a header line in secondary ink that names the bot that asks", () => {
-    const header = createElement(AskHeader, { asker: { name: "Biber", color: "teal" }, line: "Biber asks" });
-    const html = renderToStaticMarkup(createElement(AskCard, { ariaLabel: "Q", header, title: "Soll ich den Fix umsetzen?" }));
-    expect(html).toMatch(/text-\[15px\] font-medium leading-\[22px\] text-ink"><bdi dir="auto">Soll ich den Fix umsetzen\?</);
+    const header = createElement(AskHeader, { asker: { name: "Ledger", color: "teal" }, line: "Ledger asks" });
+    const html = renderToStaticMarkup(createElement(AskCard, { ariaLabel: "Q", header, title: "Should I apply the fix?" }));
+    expect(html).toMatch(/text-\[15px\] font-medium leading-\[22px\] text-ink"><bdi dir="auto">Should I apply the fix\?</);
     expect(html).toMatch(/data-ask-header="" class="[^"]*text-\[13px\][^"]*text-ink-secondary[^"]*"/);
-    expect(html.indexOf("Biber asks")).toBeLessThan(html.indexOf("Soll ich den Fix umsetzen?"));
+    expect(html.indexOf("Ledger asks")).toBeLessThan(html.indexOf("Should I apply the fix?"));
   });
 
   it("offers a dismiss button only with a name for it", () => {
@@ -37,7 +37,7 @@ describe("AskCard", () => {
 
 describe("AskChoices", () => {
   const render = (props: Partial<Parameters<typeof AskChoices>[0]> = {}) => renderToStaticMarkup(createElement(AskChoices, {
-    choices: [{ label: "Ja, nur den Abschlusstext" }, { label: LONG }, { label: "Nein" }], label: "Soll ich?", onPick: () => {}, ...props,
+    choices: [{ label: "Yes, only the footer text" }, { label: LONG }, { label: "No" }], label: "Should I?", onPick: () => {}, ...props,
   }));
 
   it("is one button per choice, stacked, at least 36px tall and 44 on touch, with a label that wraps instead of being cut", () => {
@@ -51,7 +51,7 @@ describe("AskChoices", () => {
       expect(classes).not.toContain("whitespace-nowrap");
     }
     expect(html).toContain('role="radiogroup"');
-    expect(html).toMatch(/class="block break-words[^"]*">Ja, auch den Einladungstext/);
+    expect(html).toMatch(/class="block break-words[^"]*">Yes, the welcome text too/);
   });
 
   it("has no letter keys: a choice is pressed, never typed", () => {
@@ -61,7 +61,7 @@ describe("AskChoices", () => {
   });
 
   it("shows the tapped choice on its way and holds the others until it lands", () => {
-    const html = render({ sending: "Nein" });
+    const html = render({ sending: "No" });
     const tags = html.match(/<button[^>]*data-ask-choice[^>]*>/g)!;
     expect(tags[2]).toContain('aria-busy="true"');
     expect(tags[2]).toContain('aria-checked="true"');
@@ -71,10 +71,10 @@ describe("AskChoices", () => {
   });
 
   it("is a checkbox group for several picks, and tags each choice for the surface that shows it", () => {
-    const html = render({ multi: true, picked: ["Nein"], tag: "data-inbox-choice" });
+    const html = render({ multi: true, picked: ["No"], tag: "data-inbox-choice" });
     expect(html).toContain('role="group"');
     expect(html).toContain('role="checkbox"');
-    expect(html).toContain('data-inbox-choice="Nein"');
+    expect(html).toContain('data-inbox-choice="No"');
   });
 });
 
@@ -100,7 +100,7 @@ describe("AskReply", () => {
 describe("AskDetail", () => {
   it("folds a long command after three lines, and keeps a short one whole", () => {
     expect(renderToStaticMarkup(createElement(AskDetail, { text: "git push", mono: true }))).not.toContain("line-clamp-3");
-    const long = renderToStaticMarkup(createElement(AskDetail, { text: "git push origin fix/natural-greenery-custom-case ".repeat(6), mono: true }));
+    const long = renderToStaticMarkup(createElement(AskDetail, { text: "git push origin fix/pricing-page-footer ".repeat(6), mono: true }));
     expect(long).toContain("line-clamp-3");
     expect(long).toContain("font-mono");
     expect(long).toContain('aria-expanded="false"');
@@ -109,13 +109,13 @@ describe("AskDetail", () => {
 
 describe("AskSettledLine", () => {
   it("settles into one calm line that announces itself, with its own mark for an answer, a stop and an expiry", () => {
-    const html = renderToStaticMarkup(createElement(AskSettledLine, { ariaLabel: "Plan", children: settledAnswer("Ja, nur den Abschlusstext", ["Ja, nur den Abschlusstext", "Nein"]) }));
+    const html = renderToStaticMarkup(createElement(AskSettledLine, { ariaLabel: "Plan", children: settledAnswer("Yes, only the footer text", ["Yes, only the footer text", "No"]) }));
     expect(html).toContain('data-ask-card="settled"');
     expect(html).toContain('aria-live="polite"');
     expect(html).toContain("You chose:");
-    expect(html).toContain("Ja, nur den Abschlusstext");
+    expect(html).toContain("Yes, only the footer text");
     expect(html).toContain("text-success");
-    expect(renderToStaticMarkup(createElement(AskSettledLine, { children: settledAnswer("Erst morgen", ["Ja", "Nein"]) }))).toContain("You answered:");
+    expect(renderToStaticMarkup(createElement(AskSettledLine, { children: settledAnswer("Not until tomorrow", ["Yes", "No"]) }))).toContain("You answered:");
     expect(renderToStaticMarkup(createElement(AskSettledLine, { tone: "stopped", children: "Stopped" }))).toContain('data-tone="stopped"');
     expect(renderToStaticMarkup(createElement(AskSettledLine, { tone: "expired", children: "Expired" }))).toContain('data-tone="expired"');
   });
