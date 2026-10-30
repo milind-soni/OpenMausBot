@@ -68,7 +68,7 @@ export const COMPUTER_ASK_WORDS = {
   "computerAsk.reason.unsupported": "Screen control can't work on your {device} right now.",
   "computerAsk.reason.terminalOff": "Running commands isn't turned on for your {device}.",
   "computerAsk.reason.closed": "{app} isn't open on your {device}. Open it there and {name} carries on.",
-  "computerAsk.reason.never": "{app} isn't on your computer yet. Install it, sign in to your Cloud, and {name} carries on.",
+  "computerAsk.reason.never": "{app} isn't on your computer yet. Install it, sign in to MausBot Cloud there, and {name} carries on.",
   "computerAsk.reason.update": "{app} on your {device} needs an update first. Update it, and {name} carries on.",
   "computerAsk.action.turnOn": "Turn on",
   "computerAsk.action.tryAgain": "Try again",

@@ -67,7 +67,7 @@ export function createSharedComputerRoutes(deps: {
     }
     if (path === "/api/shared-computers/asks") {
       if (!deps.asks || !deps.cloudHomeLender) return json(res, 404, { error: "not found" });
-      if (!auth.scopes.includes("admin")) return json(res, 403, { error: "Only your own computers can answer your Cloud's bots." });
+      if (!auth.scopes.includes("admin")) return json(res, 403, { error: "Only your own computers can answer the Cloud's bots." });
       const parsed = desktopPresence.safeParse(body);
       if (!parsed.success) return json(res, 400, { error: "Invalid computer state" });
       const power = deps.power();
