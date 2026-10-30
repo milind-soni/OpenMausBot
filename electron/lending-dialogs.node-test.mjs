@@ -35,6 +35,29 @@ test("a picked folder is checked and lent read only; a cancelled picker lends no
   assert.deepEqual({ path: folder.path, name: folder.name, write: folder.write }, { path: "/Users/me/Plans", name: "Plans", write: false });
 });
 
+test("the terminal is lent only after its warning's own yes, one question at a time; turning it off never asks", async () => {
+  for (const [response, lent] of [[0, true], [1, false], [-1, false]]) {
+    const { dialog, calls } = fakeDialog({ response });
+    let lends = 0;
+    await createLendingDialogs({ dialog, window: liveWindow, validate: named }).lendTerminal(true, async () => { lends += 1; });
+    assert.equal(lends, lent ? 1 : 0, `response ${response}`);
+    assert.equal(calls[0][1].defaultId, 1, "Cancel is the default");
+  }
+  let answer;
+  const slow = { showMessageBox: () => new Promise(resolve => { answer = resolve; }) };
+  const dialogs = createLendingDialogs({ dialog: slow, window: liveWindow, validate: named });
+  let lends = 0;
+  const first = dialogs.lendTerminal(true, async () => { lends += 1; });
+  await dialogs.lendTerminal(true, async () => { lends += 1; });
+  answer({ response: 0 });
+  await first;
+  assert.equal(lends, 1, "a second click while the question is open lends nothing more");
+  const off = fakeDialog();
+  let stopped = 0;
+  await createLendingDialogs({ dialog: off.dialog, window: liveWindow, validate: named }).lendTerminal(false, async () => { stopped += 1; });
+  assert.deepEqual([stopped, off.calls.length], [1, 0]);
+});
+
 test("the whole home folder is lent only after its own warning, and is named in the access dialog", async () => {
   const win = liveWindow(), isHome = async (path) => path === "/Users/me";
   for (const [response, lent] of [[0, true], [1, false], [-1, false]]) {
