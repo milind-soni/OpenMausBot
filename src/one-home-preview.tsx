@@ -1,12 +1,13 @@
 // Dev-only gallery of bringing the bots together on a server of the person's own, served at /one-home-preview.html; not in
 // the packaged app. It mounts the real rail and account line over fake bridges, with no server behind them.
-// ?state=menu|moving|failing&skin=midnight|daylight&lang=de
+// ?state=menu|moving|failing|suggest&skin=midnight|daylight&lang=de
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import type { CloudSendNotice } from "../electron/cloud-send.mjs";
 import type { RailState } from "../electron/cloud-rail.mjs";
 import { PlacesRail } from "@/components/PlacesRail";
 import { SidebarFooter } from "@/components/SidebarFooter";
+import { TwoPlacesCard } from "@/components/TwoPlacesCard";
 import { setLocale } from "@/lib/i18n";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
 import { initialState, StoreContext, type AppState } from "@/state/store";
@@ -54,6 +55,7 @@ function Gallery() {
           <SidebarFooter density="comfortable" simple toolsCollapsed={false} />
         </div>
         <div className="flex-1 bg-canvas" />
+        {stateName === "suggest" && <TwoPlacesCard suggest={{ key: "server:https://garage.example.test", name: "Garage server", kind: "server" }} onBring={async () => {}} onDismiss={() => {}} />}
       </div>
     </StoreContext.Provider>
   );

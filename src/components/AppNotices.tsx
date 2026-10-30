@@ -10,7 +10,8 @@ import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, clou
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstReplyPending } from "@/lib/corner-popup";
-import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore } from "@/lib/notices";
+import { CLOUD_INTRO, CLOUD_NOTICE, CLOUD_PRO_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, introShown, introStage, nextNotice, noticeSeen, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore } from "@/lib/notices";
+import { useTwoPlaces } from "@/lib/two-places";
 import { useSimpleModePromptSeen } from "@/lib/simple-mode-prompt";
 import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
 import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
@@ -28,6 +29,7 @@ import { localDesktopPage } from "./onboarding/WelcomeGate";
 import { UpdatesConsentDialog, updatesConsentBridge, useUpdatesConsent } from "./UpdatesConsent";
 import { useMausBotWelcomeDue } from "./MausBotWelcome";
 import { reportSimpleModePrompt, SimpleModePrompt } from "./SimpleModePrompt";
+import { TwoPlacesCard } from "./TwoPlacesCard";
 
 function StarCard({ onDismiss }: { onDismiss: () => void }) {
   return <NoticeCard titleId="github-star-title" notice="github-star" icon={Star} title={t("star.title")} onDismiss={onDismiss}>
@@ -81,6 +83,9 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const intent = useCloudIntent();
   const moving = useMoveQuiet(now);
   const mausBot = useMausBotWelcomeDue(viewer);
+  // Bots in two places: this computer's page only, where main knows what lives here.
+  const two = useTwoPlaces();
+  const twoFact = !local || two.suggest === null ? false : two.suggest === undefined ? null : true;
   useEffect(() => {
     if (!bridge) return;
     let active = true, updated = false;
@@ -160,12 +165,13 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const mausBotFirst = mausBot.due;
   const consentNow = consentWaits === true || consentFact === false ? false : consentWaits === null || mausBotFirst ? null : consentFact;
   // After a closed popup only the product-updates question may follow in this launch; nothing else does.
-  const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere || simpleDue ? nextNotice({
+  const notice = waits ? null : closed ? (consentNow === true ? UPDATES_CONSENT_NOTICE : null) : cards || popupHere || consentHere || simpleDue || twoFact !== false ? nextNotice({
     // As the Cloud Pro popup: never in the launch whose welcome just finished, nor over MausBot's first-launch card.
     [SIMPLE_MODE_NOTICE]: !simpleDue || afterWelcome === true ? false : afterWelcome === null || mausBotFirst || simpleBlocked ? null : true,
     [CLOUD_PRO_UPDATE_NOTICE]: !popupPending || moving || afterWelcome === true ? false
       : afterWelcome === null || mausBotFirst || popupState === "loading" || moving === null || (popupView !== null && popupBlocked) ? null : popupView !== null,
     [UPDATES_CONSENT_NOTICE]: consentNow,
+    [TWO_PLACES_NOTICE]: twoFact,
     [PRODUCT_HUNT_NOTICE]: !cards || moving || firstChat === true || brandStatus().source === "file" || now() >= PRODUCT_HUNT_UNTIL ? false
       : organization === null || moving === null || firstChat === null ? null : !organization,
     [CLOUD_INTRO]: moving ? false : moving === null ? null : introDue(),
@@ -248,6 +254,12 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
       void cloudNoticeStep(kind, bridge).then(next => setAccount(next), () => setFailed(true)).finally(() => setBusy(false));
     };
     return <CloudNoticeCard kind={kind} busy={busy} failed={failed} onAction={act} onNotNow={() => { close(); save(CLOUD_NOTICE_CARD[kind].dismissed); }} />;
+  }
+  if (notice === TWO_PLACES_NOTICE && two.suggest) {
+    const { key, kind } = two.suggest;
+    return <TwoPlacesCard suggest={two.suggest}
+      onBring={() => { track("two_places_card", { action: "bring", kind }); return two.accept(key).then(close); }}
+      onDismiss={() => { track("two_places_card", { action: "not_now", kind }); two.dismiss(key); close(); }} />;
   }
   if (notice === PRODUCT_HUNT_NOTICE) {
     return <ProductHuntCard onDone={action => { track("product_hunt_card", { action }); close(); save(PRODUCT_HUNT_NOTICE); }} />;
