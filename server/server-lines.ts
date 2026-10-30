@@ -24,6 +24,27 @@ export function serverLine(language: string | undefined, key: ServerLineKey, par
   return params ? template.replace(/\{(\w+)\}/g, (match, name: string) => (Object.hasOwn(params, name) ? String(params[name]) : match)) : template;
 }
 
+const escaped = (text: string) => text.replace(/[.*+?^$()|[\]{}\\]/g, "\\$&");
+const matchers = new Map<string, RegExp>();
+/** A line's template as a pattern: its words as written, any text where a `{name}` goes. */
+function matcherOf(template: string): RegExp {
+  let matcher = matchers.get(template);
+  if (!matcher) {
+    matcher = new RegExp(["^", template.split(/\{\w+\}/).map(escaped).join("[\\s\\S]+"), "$"].join(""));
+    matchers.set(template, matcher);
+  }
+  return matcher;
+}
+
+/** Whether `text` is this line in any language the server has, whatever its `{names}` were filled with: code that reads
+ * a line back (a monitor skipping its own notes) matches every language, never the English alone. */
+export function isServerLine(key: ServerLineKey, text: string): boolean {
+  return Object.values(packs).some((pack) => {
+    const template = pack[key];
+    return template !== undefined && matcherOf(template).test(text);
+  });
+}
+
 /** The language a line for this person is written in: their app's, else the place's (host/person-languages.ts).
  * Undefined reads as English. */
 export type LineLanguage = (person?: string) => string | undefined;

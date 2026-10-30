@@ -4348,7 +4348,7 @@ function noteHeldSkip(groupId: string, threadId: string, bot: BotRecord, message
     role: "bot",
     kind: "activity",
     from: { botId: bot.id, name: bot.name, color: bot.color },
-    tool: { name: heldMemberLine(bot.name), ok: false },
+    tool: { name: heldMemberLine(bot.name, threadLanguage(threadId)), ok: false },
   });
 }
 
@@ -4427,9 +4427,9 @@ async function waitForChatRoomMember(
   threadId: string,
   bot: BotRecord,
 ): Promise<"run" | "skip" | "stop"> {
-  const waitTool = {
-    name: `${bot.name} is finishing another conversation — will reply here when free`,
-    spoken: `${bot.name} is finishing another conversation`,
+  const language = threadLanguage(threadId), waitTool = {
+    name: serverLine(language, "server.rooms.finishingElsewhere", { bot: bot.name }),
+    spoken: serverLine(language, "server.rooms.finishingElsewhereSpoken", { bot: bot.name }),
   };
   let waitChip: Message | undefined;
   const availability = await waitForGroupMemberBot(bot, operation, () => {
@@ -4452,13 +4452,13 @@ async function waitForChatRoomMember(
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: `${bot.name} is no longer available — skipped this round`, ok: false },
+        tool: { name: serverLine(language, "server.rooms.unavailable", { bot: bot.name }), ok: false },
       });
       return "skip";
     case "timed_out": {
       const minutes = Math.max(1, Math.round(GROUP_GOAL_WAIT_MAX_MS / 60_000));
       const name =
-        `${bot.name} stayed busy in another conversation for ${minutes} minute${minutes === 1 ? "" : "s"} — skipped this round`;
+        serverLine(language, minutes === 1 ? "server.rooms.stayedBusy.one" : "server.rooms.stayedBusy.many", { bot: bot.name, count: minutes });
       if (waitChip) store.patchMessage(threadId, waitChip.id, { tool: { name, ok: false } });
       else {
         store.appendMessage(threadId, {
@@ -9836,7 +9836,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: message, ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.rooms.busyElsewhere", { bot: bot.name }), ok: false },
     });
     onDispatchError?.(message);
     return true;
@@ -10007,7 +10007,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: readyBot.id, name: readyBot.name, color: readyBot.color },
-      tool: { name: message, ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.rooms.settingsChanged", { bot: readyBot.name }), ok: false },
     });
     reportDispatchError(message);
     return true;
@@ -10023,7 +10023,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: message, ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.rooms.providerUpdating", { bot: bot.name }), ok: false },
     });
     reportDispatchError(message);
     return true;
@@ -10038,7 +10038,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: message, ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.rooms.cloudComputerChanging", { bot: bot.name }), ok: false },
     });
     reportDispatchError(message);
     return true;
@@ -10053,7 +10053,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: message, ok: false },
+      tool: { name: serverLine(threadLanguage(threadId), "server.rooms.becameBusy", { bot: bot.name }), ok: false },
     });
     reportDispatchError(message);
     return true;
@@ -10397,7 +10397,7 @@ async function runClaimedGroupMemberTurn(
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: roomTurnTimeoutMessage(bot.name, timeoutMinutes), ok: false },
+        tool: { name: roomTurnTimeoutMessage(bot.name, timeoutMinutes, threadLanguage(threadId)), ok: false },
       });
       finish("timed_out");
     });
@@ -10455,7 +10455,7 @@ async function runClaimedGroupMemberTurn(
     if (roomReset) {
       store.appendMessage(threadId, {
         role: "bot", kind: "activity", from: { botId: readyBot.id, name: readyBot.name, color: readyBot.color },
-        tool: { name: roomResetNote(readyBot.name, roomReset), ok: true },
+        tool: { name: roomResetNote(readyBot.name, roomReset, threadLanguage(threadId)), ok: true },
       });
     }
     if (roomReset || displaced) broadcast({ kind: "group", group: publicGroupState(store.group(groupId) ?? group) });
@@ -10618,7 +10618,7 @@ async function runClaimedGroupMemberTurn(
       role: "bot",
       kind: "activity",
       from: { botId: bot.id, name: bot.name, color: bot.color },
-      tool: { name: finishedWithoutSummaryLine(bot.name, reasking), ok: false },
+      tool: { name: finishedWithoutSummaryLine(bot.name, reasking, threadLanguage(threadId)), ok: false },
     });
     if (!reasking) return true;
     summaryReasks.add(reaskKey);
@@ -10666,7 +10666,7 @@ async function runClaimedGroupMemberTurn(
         role: "bot",
         kind: "activity",
         tool: {
-          name: `${peer.name} isn't in this room, so that mention didn't reach them — add them to the room to bring them in.`,
+          name: serverLine(threadLanguage(threadId), "server.rooms.mentionMissed", { bot: peer.name }),
           ok: false,
         },
       });
@@ -10968,7 +10968,7 @@ function startGroupTurn(
       role: "bot",
       kind: "activity",
       tool: {
-        name: `${mentionedArchived.name} is archived and can't respond — restore it or mention an active room member.`,
+        name: serverLine(threadLanguage(threadId), "server.rooms.archived", { bot: mentionedArchived.name }),
         ok: false,
       },
     });
@@ -10999,9 +10999,9 @@ function startGroupTurn(
     const defaultArchived = archived.find((member) => member.id === defaultArchivedId);
     let unavailableMessage: string | undefined;
     if (!mentionedArchived && !availableMembers.length) {
-      unavailableMessage = "No active room members can respond — restore an archived bot or add an active member.";
+      unavailableMessage = serverLine(threadLanguage(threadId), "server.rooms.noneActive");
     } else if (!mentionedArchived && defaultArchived) {
-      unavailableMessage = `${defaultArchived.name} is archived and can't respond — restore it or mention an active room member.`;
+      unavailableMessage = serverLine(threadLanguage(threadId), "server.rooms.archived", { bot: defaultArchived.name });
     }
     if (unavailableMessage) {
       store.appendMessage(threadId, {
@@ -11056,7 +11056,7 @@ function startGroupTurn(
       store.appendMessage(threadId, {
         role: "bot",
         kind: "activity",
-        tool: { name: `${owner?.name ?? "A room member"} is still stopping — this message was not dispatched`, ok: false },
+        tool: { name: owner ? serverLine(threadLanguage(threadId), "server.rooms.stillStopping", { bot: owner.name }) : serverLine(threadLanguage(threadId), "server.rooms.someoneStillStopping"), ok: false },
       });
       return;
     }
@@ -14255,7 +14255,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const chip: Omit<Message, "id" | "at"> = {
           role: "bot",
           kind: "activity",
-          tool: { name: `Posted in ${room.name}`, ok: true },
+          tool: { name: serverLine(threadLanguage(fromThreadId), "server.rooms.postedIn", { room: room.name }), ok: true },
           comm: { groupId: room.id, withBotId: poster.id, withName: room.name, withColor: poster.color },
         };
         if (owner.group) chip.from = { botId: poster.id, name: poster.name, color: poster.color };
@@ -14309,7 +14309,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const chip: Omit<Message, "id" | "at"> = {
             role: "bot",
             kind: "activity",
-            tool: { name: `Opened thread #${task.title}`, ok: true },
+            tool: { name: serverLine(threadLanguage(fromThreadId), "server.rooms.openedThread", { title: task.title }), ok: true },
             threadRef: { botId: from.id, threadId: task.threadId, title: task.title },
           };
           if (owner.group) chip.from = { botId: from.id, name: from.name, color: from.color };

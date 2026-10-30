@@ -399,30 +399,10 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/index.ts", "delegated work"],
     ["server/index.ts", "Resumed with a question from  …"],
     ["server/index.ts", "Resumed with  …  results"],
-    ["server/index.ts", "…  is finishing another conversation — will reply here when free"],
-    ["server/index.ts", "…  is no longer available — skipped this round"],
-    ["server/index.ts", "…  stayed busy in another conversation for  …  minute …  — skipped thi"],
     ["server/index.ts", "Answer passed to the waiting work"],
-    ["server/index.ts", "…  is busy in another conversation — skipped this round"],
-    ["server/index.ts", "… 's settings changed while starting — skipped this round"],
-    ["server/index.ts", "… 's computer provider is being updated — skipped this round"],
-    ["server/index.ts", "… 's cloud computer is being changed — skipped this round"],
-    ["server/index.ts", "…  became busy in another conversation — skipped this round"],
-    ["server/index.ts", "…  isn't in this room, so that mention didn't reach them — add them to"],
-    ["server/index.ts", "…  is archived and can't respond — restore it or mention an active roo"],
-    ["server/index.ts", "…  is still stopping — this message was not dispatched"],
-    ["server/index.ts", "A room member"],
-    ["server/index.ts", "Posted in  …"],
-    ["server/index.ts", "Opened thread # …"],
     ["server/peer-approval.ts", "@ …  wants to  …   …"],
     ["server/recall-disclosure.ts", "…  recalled  …  message …  from its private chat with you"],
     ["server/recall-disclosure.ts", "… 's recent-work brief covers  …  private chat …  with you"],
-    ["server/room-context.ts", "compacted  … 's context ( … % full): fresh session with the room's rec"],
-    ["server/room-context.ts", "… 's context was  … % full: compacted to a fresh session with the room"],
-    ["server/room-holds.ts", "…  is held (stopped by you) — @mention it or say resume"],
-    ["server/room-reply.ts", "…  finished without a summary — asking for a short result"],
-    ["server/room-reply.ts", "…  finished without a summary"],
-    ["server/room-turn-timeout.ts", "… 's room turn made no progress for  …   …  and was stopped"],
     ["server/routes/internal-threads.ts", "Closed by @ …"],
     ["server/store.ts", "needs your input"],
     ["server/store.ts", "reached its turn limit"],
@@ -554,6 +534,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["shared/live-call.ts", "Call with  …  ·  …"],
   ],
 };
+
 
 
 
