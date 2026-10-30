@@ -4925,5 +4925,13 @@
   "secretCard.file": "Botunuzun komutlarının 24 saat boyunca okuyabileceği özel bir dosyaya kaydedilir, sonra silinir. Sohbete asla eklenmez.",
   "secretCard.resumed": "Bot devam etti",
   "mcp.ownBot": "Yalnızca {bot} için: dosyaları {bot} botunun kendi klasöründe.",
-  "mcp.offFor": "{bots} için kapalı, çünkü onlarda başlamıyor. Kendiliğinden yeniden denetlenir."
+  "mcp.offFor": "{bots} için kapalı, çünkü onlarda başlamıyor. Kendiliğinden yeniden denetlenir.",
+  "botPanel.backups.title": "Yedek yapay zekâlar",
+  "botPanel.backups.hint": "Yalnızca {name} adlı botun yapay zekâsı kullanım sınırına ulaştığında ya da bir mesaja hiç başlayamadığında kullanılır. Devralabilen ilk yedek, yalnızca o sohbette devralır. Kullanım sınırı sıfırlanınca sohbet geri döner.",
+  "botPanel.backups.row": "Yedek {position}: {model}",
+  "botPanel.backups.remove": "{model} modelini yedeklerden kaldır",
+  "botPanel.backups.choose": "Yedek yapay zekâ seç",
+  "model.fallback.add": "Yedek yapay zekâ ekle",
+  "model.fallback.uses": "Başka bir ayar gerekmeden, bu botun yapay zekâsı kullanım sınırına ulaştığında ya da sağlayıcı bir isteğin hiç başlamadığını kanıtladığında sırayla kullanılır. Çalışmış olabilecek işler yeniden yürütülmez. Yalnızca o konu değişir; bot varsayılanları ve diğer konular aynı kalır. Yedek sağlayıcı ücret alabilir.",
+  "settings.recovery.ownBackups": "Kendi yedekleri olan botlar (Model → Bu botun yedek modelleri) bu ayar açık olsun ya da olmasın onları kullanır."
 }

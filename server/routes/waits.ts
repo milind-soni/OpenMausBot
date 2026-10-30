@@ -24,6 +24,7 @@ export const WAIT_MESSAGES = {
   self: "You cannot wait for yourself to finish. Tell the person yourself when you are done.",
   noWait: "None of your waits in this chat has that id. Use list_waits.",
   none: "You are not waiting for anything in this chat.",
+  noneToCancel: "You are not waiting for anything in this chat, so there is nothing to cancel.",
 } as const;
 
 export interface WaitRequest {
@@ -180,6 +181,7 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     const body = await ctx.readBody();
 
     if (ctx.path === CANCEL) {
+      if (!here().length) return void json(res, 404, { error: WAIT_MESSAGES.noneToCancel });
       const id = isRecord(body) ? body.id : undefined;
       if (typeof id !== "string" || !id) return void json(res, 400, { error: "id: the wait id from list_waits." });
       const stopped = here().some((wait) => wait.id === id) ? deps.waits.cancel(id, ctx.botId) : null;

@@ -3335,5 +3335,13 @@
   "secretCard.resumed": "机器人已继续",
   "notifications.status.notice": "通知",
   "mcp.ownBot": "仅限 {bot}：它的文件在 {bot} 自己的文件夹中。",
-  "mcp.offFor": "已为 {bots} 关闭，因为它在他们那里无法启动。会自动再次检查。"
+  "mcp.offFor": "已为 {bots} 关闭，因为它在他们那里无法启动。会自动再次检查。",
+  "botPanel.backups.title": "备用 AI",
+  "botPanel.backups.hint": "仅在 {name} 的 AI 达到使用上限，或无法开始处理消息时使用。由这里第一个能接手的 AI 接手，且只限该对话。使用上限重置后，对话会切换回来。",
+  "botPanel.backups.row": "备用 {position}：{model}",
+  "botPanel.backups.remove": "从备用中移除 {model}",
+  "botPanel.backups.choose": "选择备用 AI",
+  "model.fallback.add": "添加备用 AI",
+  "model.fallback.uses": "无需其他设置：当此机器人的 AI 达到使用上限，或提供方证明请求从未开始时，按顺序使用。可能已经执行过的工作不会重放。只有该对话会切换；机器人的默认设置和其他对话保持不变。备用提供方可能会收费。",
+  "settings.recovery.ownBackups": "有自己备用模型的机器人（模型 → 此机器人的备用模型）会改用它们，无论这里是否开启。"
 }

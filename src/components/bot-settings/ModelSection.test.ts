@@ -5,9 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 const instances = vi.hoisted(() => [] as InstanceInfo[]);
+const recovery = vi.hoisted(() => ({ enabled: true }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, instances, config: { automaticRecovery: { enabled: true } } }, dispatch: vi.fn() }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, instances, config: { automaticRecovery: recovery } }, dispatch: vi.fn() }) };
 });
 
 const { FallbackChain } = await import("./ModelSection");
@@ -44,6 +45,16 @@ describe("a bot's backup models", () => {
     find(tree)!.props.onChange({ target: { value: "gpt-b" } });
     expect(onChange).toHaveBeenCalledWith([{ instanceId: "codex", model: "gpt-b" }, { instanceId: "grok", model: "grok-4" }]);
     instances.pop();
+  });
+
+  it("says the list works on its own, with Automatic recovery off as well as on", () => {
+    for (const enabled of [true, false]) {
+      recovery.enabled = enabled;
+      const markup = renderToStaticMarkup(createElement(FallbackChain, { bot: bot([{ instanceId: "codex", model: "gpt-a" }]), onChange: vi.fn() }));
+      expect(markup).toContain("Used in order, with no other setting, when this bot&#x27;s AI is at its usage limit or the provider proves a request never started.");
+      expect(markup).not.toMatch(/Automatic recovery|inactive/);
+    }
+    recovery.enabled = true;
   });
 
   it("keeps showing a saved model the engine no longer lists", () => {

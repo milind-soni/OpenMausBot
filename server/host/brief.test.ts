@@ -65,6 +65,19 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?
 }
 
 describe("the brief", () => {
+  it.each(["completed", "failed"] as const)("includes a routine %s just after local midnight", async (status) => {
+    const s = setup({ needsYou: [{ kind: "signed-out", id: "sign-in", at: 0, instanceId: "claude", botIds: [] }] });
+    s.advance(21_643);
+    const run = (name: string, finishedAt: number): RoutineRun => ({
+      id: name, routineId: name, routineName: name, target: "bot", botId: s.chief.id, runOn: "maus",
+      scheduledFor: finishedAt, status, manual: false, createdAt: finishedAt, finishedAt,
+    });
+    s.runs.push(run("Before midnight", Date.parse("2026-10-22T03:59:59.999Z")), run("After midnight", Date.parse("2026-10-22T04:00:00.001Z")));
+    await s.brief.active("desktop", "America/New_York", "en");
+    expect(s.shown()).toContain("After midnight");
+    expect(s.shown()).not.toContain("Before midnight");
+  });
+
   it("counts only the emails it leaves out, and still says how many new ones wait", () => {
     const emails = Array.from({ length: 8 }, (_, at) => ({ messageId: `m${at}`, threadId: `t${at}`, from: `Sender ${at} <s${at}@x.test>`, subject: `Subject ${at}`, needsReply: false }));
     const shown = JSON.stringify(briefCard({ now: Date.parse("2026-10-22T08:00:00Z"), timeZone: "UTC", intro: false, needs: [], meetings: null, emails, waiting: 3, routines: [] }).card);

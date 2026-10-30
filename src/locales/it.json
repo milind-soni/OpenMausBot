@@ -2371,8 +2371,6 @@
   "model.section.effortHelpDefault": "Con quanto impegno questo bot ragiona nei gruppi e in ogni conversazione che usa il suo modello. Per impostazione predefinita non viene inviato alcun livello.",
   "model.effort.summary": "{level} impegno",
   "model.fallback.title": "Modelli di riserva per questo bot",
-  "model.fallback.help": "Se il Ripristino automatico è attivo in Impostazioni app, questi modelli si provano in ordine solo se il fornitore dimostra che la richiesta non è mai partita. Il lavoro che potrebbe essere già stato eseguito non viene ripetuto. Cambia solo quella conversazione; i predefiniti del bot e le altre conversazioni restano invariati. Il fornitore di riserva può addebitare dei costi.",
-  "model.fallback.off": "Il ripristino automatico è spento. Questo elenco resta inattivo finché non lo attivi in Impostazioni app.",
   "model.fallback.remove": "Rimuovi {name} dall'elenco di riserva",
   "model.effort.label": "Impegno di ragionamento",
   "model.effort.default": "Predefinito",
@@ -6132,5 +6130,13 @@
   "approval.status.timedOut": "Nessuna risposta in tempo: non eseguito",
   "secretCard.ref": "{app} lo conserva per un solo uso da parte dei suoi strumenti. Il tuo bot non lo vede mai e non viene mai aggiunto alla chat.",
   "secretCard.file": "Salvato in un file privato che i comandi del tuo bot possono leggere per 24 ore, poi eliminato. Non viene mai aggiunto alla chat.",
-  "secretCard.resumed": "Il bot ha ripreso"
+  "secretCard.resumed": "Il bot ha ripreso",
+  "botPanel.backups.title": "IA di riserva",
+  "botPanel.backups.hint": "Usate solo quando l'IA di {name} raggiunge il limite di utilizzo o non riesce a iniziare un messaggio. Subentra allora la prima qui che può farlo, solo in quella conversazione. Quando il limite di utilizzo si azzera, la conversazione torna indietro.",
+  "botPanel.backups.row": "Riserva {position}: {model}",
+  "botPanel.backups.remove": "Rimuovi {model} dalle riserve",
+  "botPanel.backups.choose": "Scegli un'IA di riserva",
+  "model.fallback.add": "Aggiungi un'IA di riserva",
+  "model.fallback.uses": "Usati in ordine, senza altre impostazioni, quando l'IA di questo bot raggiunge il limite di utilizzo o il fornitore dimostra che una richiesta non è mai partita. Il lavoro che potrebbe essere già stato eseguito non viene ripetuto. Cambia solo quella conversazione; i predefiniti del bot e le altre conversazioni restano invariati. Il fornitore di riserva può addebitare dei costi.",
+  "settings.recovery.ownBackups": "I bot con riserve proprie (Modello → Modelli di riserva per questo bot) usano quelle, che questa opzione sia attiva o no."
 }

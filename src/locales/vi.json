@@ -4925,5 +4925,13 @@
   "secretCard.file": "Được lưu vào một tệp riêng tư mà các lệnh của bot có thể đọc trong 24 giờ, sau đó bị xóa. Nó không bao giờ được thêm vào cuộc trò chuyện.",
   "secretCard.resumed": "Bot đã tiếp tục",
   "mcp.ownBot": "Chỉ dành cho {bot}: các tệp của nó nằm trong thư mục riêng của {bot}.",
-  "mcp.offFor": "Đã tắt cho {bots} vì nó không khởi động được với họ. Nó sẽ tự được kiểm tra lại."
+  "mcp.offFor": "Đã tắt cho {bots} vì nó không khởi động được với họ. Nó sẽ tự được kiểm tra lại.",
+  "botPanel.backups.title": "AI dự phòng",
+  "botPanel.backups.hint": "Chỉ dùng khi AI của {name} chạm giới hạn sử dụng hoặc không thể bắt đầu xử lý tin nhắn. Khi đó AI đầu tiên ở đây có thể tiếp quản sẽ làm thay, chỉ trong cuộc trò chuyện đó. Khi giới hạn sử dụng được đặt lại, cuộc trò chuyện sẽ quay về.",
+  "botPanel.backups.row": "Dự phòng {position}: {model}",
+  "botPanel.backups.remove": "Xóa {model} khỏi danh sách dự phòng",
+  "botPanel.backups.choose": "Chọn AI dự phòng",
+  "model.fallback.add": "Thêm AI dự phòng",
+  "model.fallback.uses": "Được dùng theo thứ tự, không cần cài đặt nào khác, khi AI của bot này chạm giới hạn sử dụng hoặc nhà cung cấp xác nhận yêu cầu chưa từng bắt đầu. Công việc có thể đã chạy sẽ không được chạy lại. Chỉ luồng đó chuyển đổi; cài đặt mặc định của bot và các luồng khác vẫn giữ nguyên. Nhà cung cấp dự phòng có thể tính phí.",
+  "settings.recovery.ownBackups": "Bot có mô hình dự phòng riêng (Mô hình → Mô hình dự phòng cho bot này) sẽ dùng chúng, dù mục này bật hay tắt."
 }

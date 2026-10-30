@@ -2489,8 +2489,6 @@
   "model.section.effortHelpDefault": "グループと、このボットのモデルを使用するすべてのスレッドで、ボットがどれだけ深く考えるかを設定します。既定ではレベルは送信されません。",
   "model.effort.summary": "推論の強度：{level}",
   "model.fallback.title": "このボットのバックアップモデル",
-  "model.fallback.help": "アプリ設定で「自動復旧」が有効な場合、プロバイダーがリクエストが開始されていないことを確認できたときに限り、これらのモデルを順に試します。実行された可能性のある作業は再実行されません。切り替わるのはそのスレッドだけで、ボットの既定値や他のスレッドは変わりません。バックアップのプロバイダーの料金が発生する場合があります。",
-  "model.fallback.off": "自動復旧はオフです。アプリ設定で有効にするまで、このリストは機能しません。",
   "model.fallback.remove": "{name}をフォールバックのリストから削除",
   "model.effort.label": "推論の強度",
   "model.effort.default": "既定",
@@ -6359,5 +6357,13 @@
   "approval.status.timedOut": "時間内に回答がなく、実行されませんでした",
   "secretCard.ref": "{app}が自分のツールで1回だけ使うために保管します。ボットが値を見ることはなく、チャットにも追加されません。",
   "secretCard.file": "ボットのコマンドが24時間だけ読める非公開ファイルに保存され、その後削除されます。チャットには追加されません。",
-  "secretCard.resumed": "ボットが再開しました"
+  "secretCard.resumed": "ボットが再開しました",
+  "botPanel.backups.title": "予備の AI",
+  "botPanel.backups.hint": "{name} の AI が利用上限に達したとき、またはメッセージに取りかかれないときだけ使います。引き継げる最初の AI が、その会話でだけ代わりに応答します。利用上限がリセットされると、会話は元に戻ります。",
+  "botPanel.backups.row": "予備 {position}: {model}",
+  "botPanel.backups.remove": "{model} を予備から外す",
+  "botPanel.backups.choose": "予備の AI を選ぶ",
+  "model.fallback.add": "予備の AI を追加",
+  "model.fallback.uses": "ほかの設定なしで、このボットの AI が利用上限に達したとき、またはリクエストが開始されていないことをプロバイダーが確認できたときに、順に使います。実行された可能性のある作業は再実行されません。切り替わるのはそのスレッドだけで、ボットの既定値や他のスレッドは変わりません。バックアップのプロバイダーの料金が発生する場合があります。",
+  "settings.recovery.ownBackups": "独自の予備があるボット（モデル → このボットのバックアップモデル）は、この設定のオン・オフに関係なく、そちらを使います。"
 }

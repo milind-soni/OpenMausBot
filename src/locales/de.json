@@ -2525,5 +2525,13 @@
   "secretCard.resumed": "Bot fortgesetzt",
   "notifications.status.notice": "Hinweis",
   "mcp.ownBot": "Nur für {bot}: Die Dateien liegen im eigenen Ordner von {bot}.",
-  "mcp.offFor": "Aus für {bots}, weil er dort nicht startet. Er wird von selbst erneut geprüft."
+  "mcp.offFor": "Aus für {bots}, weil er dort nicht startet. Er wird von selbst erneut geprüft.",
+  "botPanel.backups.title": "Ersatz-KIs",
+  "botPanel.backups.hint": "Nur genutzt, wenn die KI von {name} ihr Nutzungslimit erreicht hat oder mit einer Nachricht gar nicht erst beginnen kann. Dann übernimmt die erste hier, die das kann, nur in diesem Gespräch. Sobald ein Nutzungslimit zurückgesetzt ist, wechselt das Gespräch zurück.",
+  "botPanel.backups.row": "Ersatz {position}: {model}",
+  "botPanel.backups.remove": "{model} aus den Ersatz-KIs entfernen",
+  "botPanel.backups.choose": "Ersatz-KI wählen",
+  "model.fallback.add": "Ersatz-KI hinzufügen",
+  "model.fallback.uses": "Werden der Reihe nach genutzt, ohne weitere Einstellung, wenn die KI dieses Bots ihr Nutzungslimit erreicht hat oder der Anbieter belegt, dass eine Anfrage nie gestartet ist. Arbeit, die schon gelaufen sein könnte, wird nicht wiederholt. Nur dieser Thread wechselt; Bot-Standards und andere Threads bleiben unverändert. Beim Ersatzanbieter können Kosten anfallen.",
+  "settings.recovery.ownBackups": "Bots mit eigenen Ersatzmodellen (Modell → Ersatzmodelle für diesen Bot) nutzen stattdessen diese, ob das hier an ist oder nicht."
 }

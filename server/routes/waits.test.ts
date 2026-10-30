@@ -154,7 +154,8 @@ describe("the waits route", () => {
     expect(listed).not.toContain("w9");
     expect(waits.list).toHaveBeenCalledWith("bot-1");
     expect(await call("GET", "/api/internal/waits", undefined, { threadId: "thread-B" })).toMatchObject({ status: 200, payload: { text: "You are not waiting for anything in this chat." } });
-    expect(await call("POST", "/api/internal/waits/cancel", { id: "w1" }, { threadId: "thread-B" })).toMatchObject({ status: 404 });
+    expect(await call("POST", "/api/internal/waits/cancel", { id: "w1" }, { threadId: "thread-B" }))
+      .toMatchObject({ status: 404, payload: { error: "You are not waiting for anything in this chat, so there is nothing to cancel." } });
     waits.list.mockReturnValue([]);
   });
   it("keeps a turn that is not the person's conversation from listing", async () => {
