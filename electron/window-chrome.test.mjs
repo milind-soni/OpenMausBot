@@ -6,7 +6,7 @@ describe("window chrome", () => {
   it("uses inset traffic lights on macOS", () => {
     expect(windowChromeOptions("darwin")).toEqual({
       titleBarStyle: "hiddenInset",
-      trafficLightPosition: { x: 16, y: 16 },
+      trafficLightPosition: { x: 12, y: 7 },
     });
   });
 

@@ -1121,10 +1121,14 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   least), or the memory stall reaches 40% below the tenth, it stops an idle
   engine, else the newest of two or more busy ones, at most every 15 s, and
   not in the tick right after the kernel's own OOM killer acted.
-- **The kernel's order** (`server/oom-score.ts`): engines, and everything they
-  start, are born with `oom_score_adj` 1000; Chrome scores its tabs 200 and
-  up; the server is -800 and Caddy -900, so the health check is the last to
-  go.
+- **The kernel's order** (`server/oom-score.ts`): everything a bot runs is
+  born with `oom_score_adj` 1000: its engine and every tool and MCP server
+  that engine starts, the MCP servers the server runs for it, the helper
+  engines (background text, keep-warm pings), and its browser (agent-browser,
+  its daemon and Chrome, whose tabs Chrome then scores 200 and up). The
+  server is -800 and Caddy -900, so the health check is the last to go, and
+  the root supervisor that restarts them is -1000, never picked. When memory
+  runs out the kernel takes a bot's process, never the workspace.
 - **OpenCode reaches OpenMausBot's own tools over HTTP.** The agents,
   browser, computer, Data and HighLevel servers are endpoints of this server
   (`/api/internal/mcp-http/<name>`, `server/routes/own-mcp-http.ts`) with the
@@ -1132,13 +1136,25 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   process each (about 20–30 MB PSS apiece) in every OpenCode session. A server
   behind a tool selection keeps its stdio gate; the person's own servers are
   unchanged.
-- **The reason is said.** A turn whose engine was stopped for memory, by the
-  home or by the kernel (a SIGKILL while `/proc/vmstat`'s `oom_kill` rose),
-  fails with "This Cloud ran out of memory while N tasks ran at once, so this
-  one was stopped. It was not a problem with the AI provider. New tasks now
-  wait until there is memory for them.", and a turn that stalled while memory
-  was short says so after "no activity for 20 minutes". The health report
-  counts both as `out_of_memory`.
+- **The reason is said, in one line.** A turn whose engine was stopped for
+  memory, by the home or by the kernel (a SIGKILL while `/proc/vmstat`'s
+  `oom_kill` rose), ends with "Ran out of room, so I closed the browser to
+  keep everything else running." when its bot's browser was open (it is
+  closed too), else "Ran out of room, so I stopped this task to keep
+  everything else running."; a turn that stalled while memory was short says
+  so after "no activity for 20 minutes". The health report counts both as
+  `out_of_memory`.
+- **The work starts again when there is room.** A routine run gets its one
+  automatic retry, and a teammate's thread its Chief's; any other run stopped
+  for memory (the Chief's own chat, a bot without a Chief) starts once more by
+  itself 30 s later (`server/host/chief-notices.ts`), as a continuation of the
+  same request, and the memory gate holds it until it fits. The person hears
+  of it only if that run fails too.
+- **The day's pressure is reported** (`room` in the health report, below):
+  tasks that waited for memory and how long, turns stopped for it, processes
+  the kernel stopped, and minutes the machine stalled on memory (its `full
+  avg10` at 20% or more). The Admin offers a bigger plan from it
+  (openmaus-cloud `server/cloud-room.ts`).
 
 ### Why the server stays on loopback
 
@@ -1479,9 +1495,18 @@ wait for the next read, `truncated: true`):
     "disk": { "totalBytes": 10737418240, "freeBytes": 8589934592 }, "eventLogWritable": true },
   "firstHour": { "startedAt": 1790000000000, "apps": ["gmail"], "look": "delivered",
     "ms": { "seen": 41000, "firstMessage": 52000, "offered": 61000, "firstApp": 118000, "firstLook": 171000, "briefOn": 172000, "phoneOffered": 172000 } },
-  "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 }
+  "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 },
+  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 }
 }
 ```
+
+**`room`** is the last day's memory pressure where the home watches it (a Cloud
+home on Linux, `server/engine-memory.ts`), else `null`: how many tasks had to
+wait for memory and how long they waited in all (a wait still going counts its
+time so far), how many turns were stopped for memory (`stopped`), how many
+processes the kernel stopped (`killed`), and in how many minutes the machine
+stalled on memory. Counted in memory since boot, so a restart starts them
+again.
 
 **`firstHour`** is there on a personal Cloud that began with its first hour
 (`server/host/first-hour.ts`), else `null`: `startedAt` is the first boot,
@@ -1984,6 +2009,28 @@ page alike (`ogb.cloudPlan`), so the meter reads the same on both (`src/componen
   lines for what happened: on the new plan; still going through; the card was declined, nothing changed; the price
   changed, nothing charged; couldn't, nothing charged. Where the Admin can't change plans from the app (off, or an older
   Admin), Upgrade opens the Cloud page instead. Funnel source `app_usage` (the card) or `app_settings`.
+
+### Room card: short on memory or disk, and the plan that fixes it
+
+The session's `cloud.room` (additive, only beside `cloud.usage`; the Admin's `server/cloud-room.ts`, behind its
+`OMB_CLOUD_ROOM_OFFERS`) says this Cloud is short on room, from its health report's `room` and disk: `cause` is
+`{kind: "memory", waits, waitMinutes, stopped}` (the last day) or `{kind: "disk", usedGb, capGb}`, then either `plan`
+(the next plan up that fixes it: `tier`, `amount` in US cents a month, `memoryMb`/`fromMemoryMb`, `diskGb`/`fromDiskGb`)
+or `tip: true` on the top plan, and `id`. `electron/cloud-home.mjs` `parseCloudRoom` drops anything malformed; it is display
+only.
+
+- **Where:** the card sits where the usage meter's card is (the sidebar's foot and the phone bar, `src/components/CloudRoomCard.tsx`,
+  `src/lib/room-card.ts`), never while any bot is working (never mid-turn), never beside the usage meter's card, and on a
+  Team Cloud only for the team's own plan (its payer).
+- **What it says:** the cause ("3 tasks waited 6 minutes for memory today."), what the plan gives and costs ("Pro has twice
+  the memory. $49 a month. Today you pay only for the rest of this month."), **Upgrade** and **Not now**; on the top plan
+  a tip ("run fewer bots at once and close browsers you're not using") and **Got it**.
+- **Upgrade** is the usual one: the preview, then the person's confirm, with source `app_room`. After it the card offers
+  **Restart now** (`ogb.cloudPlan.restartNow()`, `POST /api/cloud/desktop/resize-now`, "Takes about a minute, and stops anything
+  running now"); otherwise the Cloud gets its new size the next time it's not busy.
+- **Not now** (`ogb.cloudPlan.roomNotNow(id)`, `POST /api/cloud/desktop/room`) hides it here at once and the Admin offers
+  nothing for two weeks. A new offer comes at most once a week. Both channels act only on the session's own Cloud, only from
+  a click.
 
 ## Add a Cloud
 
