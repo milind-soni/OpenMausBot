@@ -1,19 +1,17 @@
-// What this desktop keeps whatever page its window shows, whichever port its own page is served on: the notices it
-// has shown, its usage-analytics switch, the app's language, its answer to the product-updates email question and
+// What this desktop keeps whatever page its window shows, whichever port its own page is served on: the notices someone
+// closed, its usage-analytics switch, the app's language, its answer to the product-updates email question and
 // whether the person hid the window's rail of places.
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
-import { localDay } from "./cloud-trial-notice.mjs";
-import { ONBOARDING_CLOUD_HINT, onboardingHints } from "./onboarding-record.mjs";
+import { onboardingHints } from "./onboarding-record.mjs";
 import { DEFAULT_TALK_KEY, isTalkKey } from "./talk-keys.mjs";
 import { createUpdatesConsent, parseUpdatesConsent, registerUpdatesConsent } from "./updates-consent.mjs";
 import { accountFullName } from "./system-name.mjs";
 
 export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
-export const DESKTOP_NOTICES = Object.freeze(["cloud-pro-update-2026-10", "boat-credit-2026-11"]);
-const CLOUD_PRO = DESKTOP_NOTICES[0];
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
+export const DESKTOP_NOTICES = Object.freeze(["whats-new-2026-11", "boat-credit-2026-11"]);
+const WHATS_NEW = DESKTOP_NOTICES[0];
 /** A locale code such as "de" or "pt-br", or "" for following the system. */
 const LANGUAGE = /^(?:[a-z]{2,3}(?:-[a-z0-9]{2,8}){0,2})?$/i;
 const isLanguage = value => typeof value === "string" && value.length <= 24 && LANGUAGE.test(value);
@@ -44,15 +42,11 @@ const parseChat = value => value && typeof value === "object" && typeof value.bo
 function parse(raw) {
   const record = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const seen = Array.isArray(record.seen) ? DESKTOP_NOTICES.filter(id => record.seen.includes(id)) : [];
-  const shown = Object.fromEntries(DESKTOP_NOTICES.flatMap(id => {
-    const day = record.shown && typeof record.shown === "object" ? record.shown[id] : undefined;
-    return typeof day === "string" && DAY.test(day) ? [[id, day]] : [];
-  }));
   const updatesConsent = parseUpdatesConsent(record.updatesConsent);
   const quickAsks = record.quickAsks && typeof record.quickAsks === "object" && !Array.isArray(record.quickAsks)
     ? Object.fromEntries(Object.entries(record.quickAsks).flatMap(([server, chat]) => { const parsed = parseChat(chat); return parsed ? [[server, parsed]] : []; }))
     : {};
-  return { seen, shown, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}),
+  return { seen, ...(typeof record.analytics === "boolean" ? { analytics: record.analytics } : {}),
     ...(isLanguage(record.language) ? { language: record.language } : {}),
     ...(typeof record.installId === "string" && INSTALL_ID.test(record.installId) ? { installId: record.installId } : {}),
     ...(updatesConsent ? { updatesConsent } : {}),
@@ -63,7 +57,7 @@ function parse(raw) {
 }
 
 /** A record that cannot be written is still kept for this launch. */
-export function createDesktopPrefs({ read, write, now = Date.now }) {
+export function createDesktopPrefs({ read, write }) {
   let record = null;
   const current = () => {
     if (record) return record;
@@ -77,13 +71,6 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
     markSeen(id) {
       const saved = current();
       if (DESKTOP_NOTICES.includes(id) && !saved.seen.includes(id)) save({ ...saved, seen: [...saved.seen, id] });
-    },
-    /** True the first time a notice not yet seen counts as shown on a calendar day. */
-    shown(id) {
-      const saved = current(), day = localDay(now());
-      if (!DESKTOP_NOTICES.includes(id) || saved.seen.includes(id) || saved.shown[id] === day) return false;
-      save({ ...saved, shown: { ...saved.shown, [id]: day } });
-      return true;
     },
     /** null until a choice is saved. */
     analytics: () => current().analytics ?? null,
@@ -145,24 +132,23 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
  */
 export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, now = Date.now, systemName = accountFullName }) {
   let prefs = given ?? null;
-  const store = () => prefs ??= createDesktopPrefs({ read, write, now });
+  const store = () => prefs ??= createDesktopPrefs({ read, write });
   const from = (channel, pages, handler) => (event, ...args) => {
     const asking = page(event);
     if (!pages.includes(asking)) throw new Error(`${channel} is only available in this app's window`);
     return handler(asking, ...args);
   };
-  // This computer's workspace record counts on every page, before This computer's page has loaded: an earlier close, or the welcome's Cloud beat.
+  // This computer's workspace record counts on every page, before This computer's page has loaded.
   const state = async () => {
     const cloud = await cloudOffered();
     let hints = [];
     try { hints = onboardingHints(localConfig()); } catch {}
-    const seen = store().seen(), closed = hints.includes(CLOUD_PRO) || hints.includes(ONBOARDING_CLOUD_HINT);
-    return { seen: closed && !seen.includes(CLOUD_PRO) ? [...seen, CLOUD_PRO] : seen, cloud };
+    const seen = store().seen(), closed = hints.includes(WHATS_NEW);
+    return { seen: closed && !seen.includes(WHATS_NEW) ? [...seen, WHATS_NEW] : seen, cloud };
   };
   const ANY = ["local", "cloud", "server"];
   ipcMain.handle("desktop-notices:state", from("desktop-notices:state", ANY, state));
   ipcMain.handle("desktop-notices:seen", from("desktop-notices:seen", ANY, (_, id) => store().markSeen(id)));
-  ipcMain.handle("desktop-notices:shown", from("desktop-notices:shown", ANY, (_, id) => store().shown(id)));
   // A first run's default name for the profile: this computer's own page only, never a server's.
   ipcMain.handle("desktop-profile:system-name", from("desktop-profile:system-name", ["local"], () => systemName()));
   // Security: a server's page learns only that this desktop turned analytics off, never that it is on.

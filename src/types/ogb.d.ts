@@ -182,7 +182,8 @@ const __APP_VERSION__: string;
       cloudAdd?: {
         state(): Promise<import("../../electron/cloud-rail.mjs").AddCloudView>;
         /** Opens that plan's checkout in the browser, for a Cloud of this name and swatch; only from the person's click. */
-        start(tier: string, name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "opened" | "unsupported" | "failed" } | { outcome: "blocked"; blocked: import("../../electron/cloud-account.mjs").CloudAddBlock }>;
+        /** `source`: where the checkout started, one of the app's checkout sources (main ignores any other). */
+        start(tier: string, name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null, source?: string): Promise<{ outcome: "opened" | "unsupported" | "failed" } | { outcome: "blocked"; blocked: import("../../electron/cloud-account.mjs").CloudAddBlock }>;
         reopen(): Promise<boolean>;
         copyLink(): Promise<boolean>;
         /** Opens the Cloud just bought, once it is ready. */
