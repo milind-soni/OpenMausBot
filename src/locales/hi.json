@@ -37,6 +37,7 @@
   "notice.dismiss": "हमेशा के लिए हटाएँ",
   "notice.notNow": "अभी नहीं",
   "notice.openFailed": "आपका ब्राउज़र नहीं खुल सका। कृपया फिर से कोशिश करें।",
+  "server.teammates.sameRequest": "किसी दूसरे साथी ने अभी-अभी यही पूछा था, इसलिए इसे दूसरा जवाब नहीं, वही जवाब मिलेगा।",
   "server.reports.sent": "MausBot टीम को भेज दिया गया (रिपोर्ट {report})। Milind और Omkar को यह ईमेल से मिलेगी।",
   "server.reports.sentReply": "MausBot टीम को भेज दिया गया (रिपोर्ट {report})। Milind और Omkar को यह ईमेल से मिलेगी और वे {contact} पर जवाब देंगे।",
   "server.reports.sentLater": "पिछली कोशिश सफल न होने के बाद MausBot टीम को भेज दिया गया (रिपोर्ट {report})। Milind और Omkar को यह ईमेल से मिलेगी।",

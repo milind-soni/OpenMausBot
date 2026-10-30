@@ -14,6 +14,8 @@ import type { WaitManager } from "./waits.ts";
 import type { WebhookManager } from "./webhooks.ts";
 
 export const MOVED_REFUSAL = "This bot lives on My Cloud now.";
+/** Why a frozen copy refuses, naming the server of the person's own its bots moved to (`place`), else My Cloud. */
+export const movedRefusal = (place: string | null): string => (place ? `This bot lives on ${place} now.` : MOVED_REFUSAL);
 /** The one page a frozen copy serves: the desktop app's screen while My Cloud can't be opened (electron/home-window.mjs). */
 export const HOME_SCREEN = "/home";
 /** The desktop window's own rail of places (electron/chrome-rail.mjs): this app's page, beside whichever place is open. */
@@ -66,12 +68,13 @@ export async function switchAutomationsOff(automations: MoveAutomations, only?: 
 export function createMoveFreeze({ dataDir, exportOnly = false }: { dataDir: string; exportOnly?: boolean }) {
   const file = join(dataDir, "moved.json");
   let frozen = exportOnly || existsSync(file);
-  const named = (): string | null => {
-    try { const value: unknown = JSON.parse(readFileSync(file, "utf8")); const cloud = Reflect.get(Object(value), "cloud"); return typeof cloud === "string" ? cloud : null; } catch { return null; }
+  const named = (field: "cloud" | "place"): string | null => {
+    try { const value: unknown = JSON.parse(readFileSync(file, "utf8")); const named = Reflect.get(Object(value), field); return typeof named === "string" ? named : null; } catch { return null; }
   };
-  let movedTo = frozen && !exportOnly ? named() : null;
+  let movedTo = frozen && !exportOnly ? named("cloud") : null;
+  let place = frozen && !exportOnly ? named("place") : null;
   const held: Array<{ start(): void; stop(): void }> = [];
-  const refusal = () => (frozen ? (exportOnly ? ENDED_REFUSAL : MOVED_REFUSAL) : null);
+  const refusal = () => (frozen ? (exportOnly ? ENDED_REFUSAL : movedRefusal(place)) : null);
   const each = (step: "start" | "stop") => {
     for (const work of held) {
       try { work[step](); } catch (error) { console.warn(`move freeze: could not ${step} a schedule (${(error as Error).message})`); }
@@ -82,6 +85,8 @@ export function createMoveFreeze({ dataDir, exportOnly = false }: { dataDir: str
     frozen: () => frozen,
     /** The Cloud this computer's bots moved to, as the freeze named it. */
     cloud: () => movedTo,
+    /** The server of the person's own this computer's bots moved to, by the name they know it by; null for My Cloud. */
+    place: () => place,
     refusal,
     /** Where a page of this computer's frozen copy goes instead: its home screen, never the frozen workspace. The
      * window's rail stays the rail: it shows no workspace, only the places main lists. */
@@ -102,11 +107,12 @@ export function createMoveFreeze({ dataDir, exportOnly = false }: { dataDir: str
     refuses(method: string, path: string): string | null {
       return frozen && !READS.has(method.toUpperCase()) && !STILL_CHANGES.test(path) ? refusal() : null;
     },
-    freeze(cloud: string | null): void {
+    freeze(cloud: string | null, named: string | null = null): void {
       if (frozen) return;
-      writeFileAtomic(file, JSON.stringify({ v: 1, at: Date.now(), ...(cloud ? { cloud } : {}) }), { mode: 0o600 });
+      writeFileAtomic(file, JSON.stringify({ v: 1, at: Date.now(), ...(cloud ? { cloud } : {}), ...(named ? { place: named } : {}) }), { mode: 0o600 });
       frozen = true;
       movedTo = cloud;
+      place = named;
       each("stop");
     },
     /** Deletes this computer's copy of the workspace, credentials included, once the move is long done; only a computer
@@ -125,6 +131,7 @@ export function createMoveFreeze({ dataDir, exportOnly = false }: { dataDir: str
       rmSync(file, { force: true });
       frozen = false;
       movedTo = null;
+      place = null;
       each("start");
       return true;
     },

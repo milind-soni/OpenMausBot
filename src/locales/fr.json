@@ -37,6 +37,7 @@
   "notice.dismiss": "Masquer définitivement",
   "notice.notNow": "Pas maintenant",
   "notice.openFailed": "Impossible d'ouvrir votre navigateur. Veuillez réessayer.",
+  "server.teammates.sameRequest": "Un autre coéquipier a demandé la même chose il y a un instant : ceci reçoit donc cette réponse plutôt qu'une deuxième.",
   "server.reports.sent": "Envoyé à l'équipe MausBot (rapport {report}). Milind et Omkar le reçoivent par e-mail.",
   "server.reports.sentReply": "Envoyé à l'équipe MausBot (rapport {report}). Milind et Omkar le reçoivent par e-mail et répondront à {contact}.",
   "server.reports.sentLater": "Envoyé à l'équipe MausBot (rapport {report}) après l'échec d'une tentative précédente. Milind et Omkar le reçoivent par e-mail.",

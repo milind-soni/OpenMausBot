@@ -674,7 +674,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-[14px] font-medium leading-5 text-ink">{name}</span>
-              <AccountMoveStatus kind={move.kind} />
+              <AccountMoveStatus kind={move.kind} place={move.place} />
             </span>
             {noteworthy && (
               <span
