@@ -1,0 +1,38 @@
+# Linux checks on Boat (https://docs.boat.dev/ci): one boat-xlarge VM per run (16 vCPU, 32 GB) runs lint, typecheck and
+# the whole Linux vitest suite, so pull requests get results without waiting for GitHub's hosted runners. It runs only
+# while the repository variable BOAT_CI is "on", and only for this repository's own branches (a fork's pull request
+# never runs on Boat; Boat also refuses runs by anyone outside its allow-list). ci.yml is unchanged and still runs.
+name: Boat
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: boat-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux checks (Boat)
+    if: vars.BOAT_CI == 'on' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: boat-xlarge
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - name: vitest, every Linux file (e2e included)
+        env:
+          OMB_VITEST_E2E: "1"
+        run: pnpm exec vitest run --reporter=default
