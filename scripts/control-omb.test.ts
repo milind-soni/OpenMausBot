@@ -46,6 +46,15 @@ describe("the fixture's Live call environment", () => {
   });
 });
 
+describe("the fixture's dictation worker", () => {
+  it("passes only an explicit loopback worker address", () => {
+    expect(childEnv({ OMB_DICTATION_URL: " http://127.0.0.1:8810 " })).toHaveProperty("OMB_DICTATION_URL", "http://127.0.0.1:8810");
+    for (const url of ["https://example.com", "http://localhost:8810", "http://192.0.2.1:8810", "http://127.0.0.1:8810/private", ""]) {
+      expect(childEnv({ OMB_DICTATION_URL: url })).not.toHaveProperty("OMB_DICTATION_URL");
+    }
+  });
+});
+
 describe("the fixture's X research relay", () => {
   it("passes a loopback relay stub and its token through, the token only with the stub", () => {
     expect(childEnv({ OMB_CLOUD_X_URL: " http://127.0.0.1:4200/api/cloud/services/x ", OMB_CLOUD_X_TOKEN: "omb_x_fixture" }))

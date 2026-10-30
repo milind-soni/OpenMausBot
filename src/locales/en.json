@@ -6971,5 +6971,19 @@
   "commandPalette.searchPlaceholder": "Search bots, group chats, messages…",
   "secretCard.ref": "{app} keeps it for one use by its own tools. Your bot never sees it, and it is never added to chat.",
   "secretCard.file": "Saved to a private file your bot's commands can read for 24 hours, then deleted. It is never added to chat.",
-  "secretCard.resumed": "Bot resumed"
+  "secretCard.resumed": "Bot resumed",
+  "composer.dictation.starting": "Opening the microphone…",
+  "composer.dictation.recording": "Recording… Press the microphone to stop and transcribe. Up to 2 minutes.",
+  "composer.dictation.transcribing": "Transcribing… Your message will stay here for review.",
+  "composer.dictation.review": "Text ready. Review it before sending.",
+  "composer.dictation.cancel": "Cancel dictation",
+  "composer.dictation.finish": "Stop recording and transcribe",
+  "composer.dictation.microphonePermission": "Allow microphone access for this site or app, then try again.",
+  "composer.dictation.microphoneMissing": "The microphone is unavailable. Check its connection and try again.",
+  "composer.dictation.tooLarge": "This recording is too large. Try a shorter message.",
+  "composer.dictation.tooLong": "Record up to 2 minutes at a time.",
+  "composer.dictation.noSpeech": "No speech was detected. Try recording again.",
+  "composer.dictation.serverBusy": "Another recording is being transcribed. Wait a moment and try again.",
+  "composer.dictation.invalidAudio": "This recording could not be read. Try recording again.",
+  "composer.dictation.serverFailed": "The recording could not be transcribed. Try again."
 }

@@ -1,7 +1,8 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
+import { ComposerDictationButton, ComposerDictationStatus } from "./ComposerDictation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
-import { ArrowUp, Clock, Mic, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, Clock, Paperclip, Square, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
@@ -218,9 +219,10 @@ export function Composer({
     },
     [text, editText, editAttachments],
   );
-  const { recording, speechError, toggle: toggleMic, stop: stopDictation } = useComposerDictation({
+  const dictation = useComposerDictation({
     draftId, text, onText: editText, available: capabilities.dictation.available,
   });
+  const { recording, speechError, pending: dictationPending, serverRecording, stop: stopDictation } = dictation;
   const [caret, setCaret] = useState(0);
   const [tall, setTall] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -567,7 +569,7 @@ export function Composer({
     }
   };
   const send = () => {
-    if (locked || attachmentPending) return;
+    if (locked || attachmentPending || dictationPending) return;
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
       !imageTargetsSupport(effectiveText, effectiveChannelMode)
@@ -701,6 +703,7 @@ export function Composer({
 
   return (
     <div className={cn("pointer-events-none relative px-5", simpleDock ? "pb-4" : "pb-3")}>
+      <ComposerDictationStatus dictation={dictation} hasText={Boolean(text)} />
       {speechError && (
         <div className="pointer-events-auto mb-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}
@@ -854,7 +857,7 @@ export function Composer({
           rows={1}
           value={text}
           onChange={(e) => {
-            if (recording) stopDictation();
+            if (recording && !serverRecording) stopDictation();
             editText(e.target.value);
             setCaret(e.target.selectionStart ?? e.target.value.length);
             setDismissedAt(null);
@@ -963,28 +966,16 @@ export function Composer({
             <Square size={simpleDock ? 10 : 14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && capabilities.dictation.available && (
-          <button
-            onClick={toggleMic}
-            aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}
-            className={cn(
-              "flex shrink-0 items-center justify-center rounded-full",
-              simpleDock ? "size-7" : "size-8",
-              recording
-                ? "animate-pulse bg-danger/20 text-danger"
-                : advanced || singleRow ? "text-ink-secondary hover:bg-raised hover:text-ink" : SIMPLE_CONTROL,
-            )}
-            title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
-          >
-            <Mic size={16} strokeWidth={1.75} absoluteStrokeWidth className="[&_rect]:fill-current" />
-          </button>
+        {!locked && (!busy || recording || dictationPending) && (
+          <ComposerDictationButton dictation={dictation} compact={simpleDock}
+            className={advanced || singleRow ? "text-ink-secondary hover:bg-raised hover:text-ink" : SIMPLE_CONTROL} />
         )}
         {callShown && bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} />}
         {callShown && group && !advanced && <GroupCallButton group={group} members={members ?? []} placement="composer" fill={slot.fill} ink={slot.ink} />}
         {hasContent && !locked && (
           <button
             onClick={send}
-            disabled={attachmentPending}
+            disabled={attachmentPending || dictationPending}
             aria-label={sendNames.label}
             title={sendNames.title}
             style={busy && !canSteer ? undefined : slot.button.style}

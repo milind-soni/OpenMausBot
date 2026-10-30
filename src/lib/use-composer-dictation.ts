@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { withOpenSettings } from "@/components/OpenSystemSettings";
 import { t } from "./i18n";
+import { useServerDictation } from "./use-server-dictation";
 
 export function useComposerDictation({ draftId, text, onText, available }: {
   draftId: string;
@@ -8,6 +9,7 @@ export function useComposerDictation({ draftId, text, onText, available }: {
   onText: (text: string) => void;
   available: boolean;
 }) {
+  const server = useServerDictation({ draftId, text, onText, enabled: !available });
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<ReactNode>(null);
   const draft = useRef({ id: draftId, text });
@@ -86,5 +88,17 @@ export function useComposerDictation({ draftId, text, onText, available }: {
       setRecording(true);
     }
   };
-  return { recording, speechError, toggle, stop };
+  const stopAll = useCallback(() => { stop(); server.cancel(); }, [stop, server.cancel]);
+  return {
+    recording: recording || server.recording,
+    speechError: available ? speechError : server.error,
+    available: available || server.available,
+    starting: server.starting,
+    transcribing: server.transcribing,
+    pending: server.pending,
+    reviewReady: server.reviewReady,
+    serverRecording: server.recording,
+    toggle: available ? toggle : server.toggle,
+    stop: stopAll,
+  };
 }

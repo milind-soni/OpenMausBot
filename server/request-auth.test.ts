@@ -229,6 +229,17 @@ describe("resolveRequestAuth", () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
+  it("keeps browser dictation behind client authentication and the cookie origin check", () => {
+    const { token } = sessions.issue({ label: "Fixture browser", scopes: ["client"] });
+    const headers = { host: "dictation.example.test", origin: "http://dictation.example.test", cookie: `${cookieName}=${token}` };
+    for (const [method, path] of [["GET", "/api/dictation/status"], ["POST", "/api/dictation/transcribe"]]) {
+      expect(resolve({ host: headers.host }, path, method).auth).toBeNull();
+      expect(resolve(headers, path, method).auth?.kind).toBe("session");
+      expect(resolve({ ...headers, origin: "https://other.example.test" }, path, method)).toMatchObject({ auth: null, status: 403 });
+    }
+    expect(resolve(headers, "/api/dictation/settings", "PUT")).toMatchObject({ auth: null, status: 403 });
+  });
+
   it("accepts authenticated relay mutations without exposing the desktop owner capability", () => {
     const headers = {
       host: "127.0.0.1:8799",

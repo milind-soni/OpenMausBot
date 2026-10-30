@@ -197,6 +197,8 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   // @devs reports reach a loopback fake only, else a closed port: never the MausBot team.
   const bugReportUrl = parentEnv.OMB_BUG_REPORT_URL?.trim() ?? "";
   childEnv.OMB_BUG_REPORT_URL = /^http:\/\/127\.0\.0\.1:\d{1,5}\/[A-Za-z0-9/_-]*$/.test(bugReportUrl) ? bugReportUrl : "http://127.0.0.1:9/api/bug-reports";
+  const dictationUrl = parentEnv.OMB_DICTATION_URL?.trim() ?? "";
+  if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(dictationUrl)) childEnv.OMB_DICTATION_URL = dictationUrl;
   const tregUrl = parentEnv.OMB_TREG_URL?.trim() ?? "";
   if (/^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(tregUrl)) childEnv.OMB_TREG_URL = tregUrl;
   // Loopback only, for harness mechanics: a fake ElevenLabs the measurement

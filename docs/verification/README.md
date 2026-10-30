@@ -64,6 +64,7 @@ Use only mapped, tested commands:
 - [Taking control of a bot's computer](take-control.md)
 - [Saved steps: repeating a computer task without AI](saved-steps.md)
 - [Native dictation retention and send-to-stop](dictation.md)
+- [Browser dictation through a local transcription worker](server-dictation.md)
 - [Proactive routines and the brief](proactive-routines.md)
 - [Waits: tell me when, with no AI while waiting](waits.md)
 - [A new Cloud's first hour](first-hour.md)
