@@ -243,6 +243,10 @@ work, `session_search` (memory of the layer and the team's; conversations the tu
 turn's layer folder back read-write for that conversation's boxes only (`botBox.lend`). Member layers are sibling
 folders of the bot's own, never inside it, so no other turn of that bot can read them.
 
+The same request to one bot from two requesters is answered once only where the same people see both conversations
+(`shareAnswer`, see `docs/runtime-contract.md`): two bots working for Mira get one answer, while Mira's private work
+never gets the answer Ben's got, so each of them is answered on its own.
+
 ### Engine homes
 
 The engines keep each conversation's transcript and session files in their HOME (`~/.claude/projects`,

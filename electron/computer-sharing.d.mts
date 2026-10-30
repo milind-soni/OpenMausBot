@@ -119,7 +119,7 @@ export function createComputerSharing(options: {
   busy(): boolean;
   saveCloud(env: Workspace, input: { folders: unknown; screen?: boolean; internet?: boolean; chrome?: boolean; terminal?: boolean }, version?: number): Promise<CloudLendingState>;
   /** The move's project folders, lent to My Cloud with editing; rejects while that can't happen yet. */
-  lendProjects(paths: string[]): Promise<void>;
+  lendProjects(paths: string[], place?: { id: string; origin: string; name: string } | null): Promise<void>;
   paused(): boolean;
   /** Every Cloud stops using this computer, across restarts too, until resume(). */
   pause(): void;

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import "../server-line-packs.ts";
 import type { DevsReportPayload } from "../devs-report.ts";
 import type { SendOutcome } from "../devs-report-send.ts";
 import { personKey } from "../person-key.ts";
@@ -17,7 +18,7 @@ const SCOUT = { id: "scout", name: "Scout", threadId: "scout-main", modelSelecti
 const ROVER = { id: "rover", name: "Rover", threadId: "rover-main", modelSelection: { instanceId: "codex", model: "gpt-5.5", effort: "high" } };
 
 function fixture(options: { dataDir?: string; outcomes?: SendOutcome[]; sessions?: PublicSession[]; ownerKey?: string | null; team?: boolean;
-  profileEmail?: string; automated?: boolean } = {}) {
+  profileEmail?: string; automated?: boolean; lineLanguage?: DevsReportsDeps["lineLanguage"] } = {}) {
   const dataDir = options.dataDir ?? mkdtempSync(join(tmpdir(), "omb-devs-reports-"));
   if (!options.dataDir) dirs.push(dataDir);
   const listeners = new Set<(change: StoreChange) => void>();
@@ -48,7 +49,8 @@ function fixture(options: { dataDir?: string; outcomes?: SendOutcome[]; sessions
     working: (threadId) => busy.has(threadId), automated: () => options.automated === true,
     engine: (instanceId) => ({ name: instanceId === "claude" ? "Claude Code" : "Codex", snapshot: { state: "available", authenticated: true } }),
     appsReady: () => false, sessions: () => options.sessions ?? [], ownerKey: options.ownerKey ?? null, team: options.team === true,
-    profileEmail: () => options.profileEmail, language: () => "en", recentLog: () => ["2026-10-27T08:59:00.000Z warn engine probe slow"],
+    profileEmail: () => options.profileEmail, language: () => "en", ...(options.lineLanguage ? { lineLanguage: options.lineLanguage } : {}),
+    recentLog: () => ["2026-10-27T08:59:00.000Z warn engine probe slow"],
     send: async (payload) => { sent.push(payload); return outcomes.shift() ?? { ok: true, id: `report-${sent.length}` }; },
     now: () => clock, timer: false,
   };
@@ -175,6 +177,44 @@ describe("a message that tags @devs", () => {
     fx.advance(NO_ANSWER_MS);
     await fx.settle();
     expect(fx.sent).toHaveLength(1);
+    fx.stop();
+  });
+});
+
+describe("what the person is told, in their language", () => {
+  const german = (person?: string) => (person === "p-ada" ? "de" : undefined);
+  const ada = { sender: { name: "Ada", id: "p-ada" } };
+
+  it("the line the bot passes on is German, and so is the system line when the bot does not pass it on", async () => {
+    const fx = fixture({ profileEmail: "ada@example.com", lineLanguage: german });
+    fx.person("scout-main", "@devs die Bilder laden nicht", ada);
+    fx.busy.add("scout-main");
+    fx.reports.note("scout-main", true);
+    const answer = await fx.call("scout", "scout-main", { went_wrong: "Bilder laden nicht" });
+    const line = "An das MausBot-Team gesendet (Bericht report-1). Milind und Omkar bekommen ihn per E-Mail und antworten dir an ada@example.com.";
+    expect(answer.body.text).toBe(`Sent. Tell the person this line in your reply, word for word: "${line}"`);
+    fx.bot("scout-main", "Ich schaue mir das an.", { turnId: "t1", turnSucceeded: true });
+    fx.busy.delete("scout-main");
+    await fx.settle();
+    expect(fx.notices("scout-main")).toEqual([`notice: ${line}`]);
+    fx.stop();
+  });
+
+  it("a report that waits is explained in German, not twice when the bot passed it on, and its later send is told in German", async () => {
+    const fx = fixture({ outcomes: [{ ok: false, retry: true, why: "offline" }], lineLanguage: german });
+    fx.person("scout-main", "@devs offline", ada);
+    fx.busy.add("scout-main");
+    fx.reports.note("scout-main", true);
+    const answer = await fx.call("scout", "scout-main", { went_wrong: "offline" });
+    const waiting = "Noch nicht gesendet: der Server des MausBot-Teams war nicht erreichbar. Der Bericht ist gespeichert und wird so bald wie möglich von selbst gesendet, du musst ihn also nicht noch einmal senden.";
+    expect(answer.body.text).toBe(`Not sent. Tell the person this line in your reply, word for word: "${waiting}"`);
+    fx.bot("scout-main", waiting, { turnId: "t1", turnSucceeded: true });
+    fx.busy.delete("scout-main");
+    await fx.settle();
+    expect(fx.notices("scout-main")).toEqual([]);
+    fx.advance(RETRY_MS[0]);
+    await fx.settle();
+    expect(fx.notices("scout-main")).toEqual(["notice: An das MausBot-Team gesendet (Bericht report-2), nachdem ein früherer Versuch nicht geklappt hat. Milind und Omkar bekommen ihn per E-Mail."]);
     fx.stop();
   });
 });

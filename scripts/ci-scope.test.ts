@@ -170,9 +170,10 @@ describe("CI outputs", () => {
   it("runs the locale tests in their own shards, with the Electron node tests, when no full Linux run covers them", () => {
     const out = ciOutputs(selectCiScope(["src/locales/de.json"]), PR);
     expect(out.jobs).toEqual(["vitest"]);
+    expect(VITEST_SUBSETS["locale-tests"].files).toEqual(expect.arrayContaining(["src/", "scripts/generate-locale.test.mjs", "scripts/testing/key-readback.e2e.test.ts"]));
     expect(out.vitest_matrix.include).toEqual([1, 2].map((shard) => ({
       os: "ubuntu-latest", part: `locale tests ${shard}/2`, shard, shards: 2,
-      files: "src/ scripts/generate-locale.test.mjs scripts/testing/key-readback.e2e.test.ts", e2e: "all", node_tests: shard === 1,
+      files: VITEST_SUBSETS["locale-tests"].files.join(" "), e2e: "all", node_tests: shard === 1,
     })));
     expect(ciOutputs(selectCiScope(["src/locales/de.json", "src/App.tsx"]), PR).vitest_matrix).toEqual(vitestMatrix(["ubuntu-latest"]));
   });
@@ -385,7 +386,9 @@ describe("the repository's import graph", () => {
       .flatMap((directory) => codeFiles(join(ROOT, directory)))
       .filter((file) => !TEST_FILE.test(relative(ROOT, file).split("\\").join("/")));
     expect(runtime.length).toBeGreaterThan(500);
-    const loaded = importClosure([...runtime, join(ROOT, "src/components/app/app-frame-host.ts")]).filter((file) => file.startsWith("src/"));
+    // The language packs the server reads its lines from stay locale changes (SRC_OUTSIDE_RENDERER says why).
+    const loaded = importClosure([...runtime, join(ROOT, "src/components/app/app-frame-host.ts")])
+      .filter((file) => file.startsWith("src/") && !/^src\/locales\/[^/]+\.json$/.test(file));
     expect(loaded.sort()).toEqual([...SRC_OUTSIDE_RENDERER].sort());
   });
 

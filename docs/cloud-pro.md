@@ -582,9 +582,12 @@ the person's own uses this computer by itself while the desktop app runs and is
 signed in as them (`lendAutomatically` in `electron/computer-sharing.mjs`): My
 Cloud and each other Cloud the verified session lists as theirs
 (`createLendingTarget` in `electron/lending-target.mjs`), never a Team Cloud and
-never a server that only signed in with their account. Other users (desktop only,
-self-hosted, hosted team workspaces) keep computer sharing exactly as before: off
-unless a maintainer sets `features.sharedComputers` by hand.
+never a server that only signed in with their account. A server of the person's
+own that they made their bots' home (**Make <server> my home**, docs/self-hosting.md)
+is lent the same way, last, once the move is done and while that server says it
+is theirs alone. Other users (desktop only, self-hosted, hosted team workspaces)
+keep computer sharing exactly as before: off unless a maintainer sets
+`features.sharedComputers` by hand.
 
 ### What each Cloud gets
 
@@ -1363,8 +1366,8 @@ credit, the Admin also sets:
   A bot runs on the credit's default model unless the person picks another;
   when the relay's default changes (Haiku to Sonnet), bots still on the old
   default follow it.
-- **Every bot runs.** While nothing of the person's own is signed in, a bot on
-  an engine My Cloud can't run (a desktop copy's own Claude or Codex, signed
+- **Every bot runs.** While nothing of the person's own has ever been signed in
+  here, a bot on an engine My Cloud can't run (a desktop copy's own Claude or Codex, signed
   out here, or an engine only that desktop has) moves onto the credit when the
   engines are read: at start, when the credit's list arrives, when the app
   reads the engines, and before a message to that bot is sent. Where it came
@@ -1376,7 +1379,13 @@ credit, the Admin also sets:
   each bot and conversation still on the credit moves to it, with one line in
   each, and the credit is not offered to bots any more. A bot that came from
   another engine goes back to that engine and model when it is the one signed
-  in; otherwise it takes the new-bot default among the person's own.
+  in; otherwise it takes the new-bot default among the person's own. From then
+  on the credit takes no bot by itself: signing out of the last engine (or a
+  sign-in that lapsed) leaves every bot where it is, so a message to one says
+  to sign in again and routines wait
+  ([Routines wait while the owner has left](#routines-wait-while-the-owner-has-left)).
+  A bot can still be put on the credit by hand. That an engine of the person's
+  own was signed in is kept in `providers/trial-credit/own.json`.
 - **Checked once connected.** Right after an engine is connected in the
   welcome's **Connect your AI** step or the engine sign-in, the app sends it
   one tiny real message (`POST /api/instances/:id/check`) and says
@@ -1535,7 +1544,7 @@ place's state (`shared/place-view.ts`); a cause the server words itself
 `approval_undelivered`, `event_log`); the trial credit's refusal
 (`trial_used_up`, …); the turn's stop reason when it says more than "failed"
 (`auth_required`, `shutdown_timeout`, `provider_safety`, `update_required`,
-`spawn_error`, `quota`); the cause's class (`server/drivers/retry.ts`:
+`spawn_error`, `quota`, `tool_error`: a tool call that failed or wasn't allowed); the cause's class (`server/drivers/retry.ts`:
 `auth`, `quota`, `rate_limited`, …); the generic stop reason (`rpc_error`);
 else `unknown`. A turn that ends in `shutdown_timeout`, `auth_required`,
 `update_required`, `spawn_error` or `rpc_error` without a failed row of its own
@@ -1637,6 +1646,38 @@ the server starts instead of answering 502, so a webhook or the app's first
 request after a stop is answered late rather than refused; Caddy dials the
 server again every 50 ms, so a held request reaches it within 50 ms of its
 listening. The Admin sets it only for a plan that sleeps.
+
+## Routines wait while the owner has left
+
+A Cloud home pauses its routines by itself when its owner has left
+(`server/host/routine-holds-host.ts`, `server/routine-holds.ts`), so nothing
+runs on an AI or a plan nobody uses any more, fails, and messages a person who
+left:
+
+- **No AI of theirs.** The person had an AI of their own signed in here, and
+  none of theirs can run now (signed out in Settings, a key removed, a sign-in
+  that lapsed). An engine whose sign-in can't be read yet counts as one that
+  might.
+- **Every connection removed.** The owner removed their last MCP server or
+  connected app and none is left. An app list that can't be read changes
+  nothing. Adding or connecting one, or one found connected again (read at
+  most every 15 minutes while none was), ends it.
+- **The plan was cancelled**, as the Admin says with the signed request below.
+
+A cause that begins turns every routine that is on off, stamped with it
+(`heldFor`, shown under the routine as "Paused because …"), cancels their
+queued runs, and writes one quiet line in the owner's Chief's chat; nothing
+else is sent. Once no cause holds a routine it turns back on from now, without
+the runs it skipped (a one-time run whose time passed stays over). Turning a
+routine on or off by hand clears its stamp, so the person's choice wins. What
+was last read is kept in `routine-holds.json` and the causes holding routines
+in `routines.json` (`holds`), so a restart neither pauses nor frees anything
+before the engines are read again.
+
+**`POST /api/cloud/plan`**, signed over its JSON body like the sleep request:
+`{"v":1,"cancelled":true}` when the customer cancels, `{"v":1,"cancelled":false}`
+when renewal is back on. `200 {"ok":true}`; `400 {"error":"invalid_plan"}`
+without a boolean `cancelled`. The Admin does not send it yet.
 
 ## What the desktop reads from the Admin
 

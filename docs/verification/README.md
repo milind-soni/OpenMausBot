@@ -124,6 +124,11 @@ The [move to My Cloud fixture](cloud-send.md) runs this computer's server and a
 Cloud home with the desktop's own wiring between them, and runs and checks the
 one-time move as main does.
 
+The [server of the person's own as home fixture](own-home.md) runs this
+computer's server and servers of the person's own with main's wiring for
+**Make <server> my home**: the move, routines that run once, this computer then
+lent to that server by itself, and none of it for a server shared with others.
+
 The [MCP sign-in fixture](mcp-sign-in.md) checks remote sign-in, callback URL
 paste-back, MCP tools and logout cancellation through the real settings panel
 and a synthetic OAuth provider in a disposable workspace.

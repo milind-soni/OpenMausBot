@@ -189,8 +189,10 @@ export function routeOf(url, origin) {
  *   timers?: { set(work: () => void, ms: number): unknown, clear(timer: unknown): void, every(work: () => void, ms: number): unknown },
  *   hosts?(): { clearHostResolverCache(): Promise<void>, resolveHost(host: string, options?: { cacheUsage?: "allowed" | "staleAllowed" | "disallowed" }): Promise<{ endpoints: unknown[] }> } | null,
  *   readyStore?: { read(): unknown, write(value: unknown): void },
+ *   ownMove?(): { phase: string, name: string } | null,
  *   log?(line: string): void,
- * }} deps `hosts`: the window's Electron session, for its own resolver and host cache. `readyStore`: when My Cloud
+ * }} deps `ownMove()`: the move to a server of the person's own (own-home-main.mjs), whose freeze is never My Cloud's.
+ * `hosts`: the window's Electron session, for its own resolver and host cache. `readyStore`: when My Cloud
  * became ready (createReadyClock). `go(url, origin, place)`: main's one way to move the window, to My Cloud or a team's Cloud (`origin`, with the
  * `place` it is) or this computer's screen (null). `showLocal(leaving)`: the window as it was before the move (this computer's page, or a saved server it
  * shows); `leaving`: it showed a place or this computer's screen until now, so it goes back to this computer's page.
@@ -204,7 +206,7 @@ export function createHomeWindow(deps) {
   const { journal, frozen, account, restored = async () => {}, window, ensureWindow, localOrigin, cookieFetch, power, go, showLocal,
     remembered = () => null, remember = () => {}, left = () => {}, drop = (place) => { if (place.kind === "team") left(place.name); remember(null); },
     splash = () => null, lastInput = () => 0, publish = () => {}, rehomed = () => {}, versionEveryMs = VERSION_EVERY_MS, quietMs = QUIET_MS,
-    now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, log = () => {} } = deps;
+    now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {} } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
   /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
    * `naming`: since when, and how often, a brand-new My Cloud's name was not found. */
@@ -234,7 +236,8 @@ export function createHomeWindow(deps) {
     let frozenCloud = null;
     if (!kept) {
       const marker = await frozen().catch(() => null);
-      if (marker?.frozen) frozenCloud = typeof marker.cloud === "string" ? marker.cloud : true;
+      // A freeze for a server of the person's own names it (`place`): home is that server, shown as any saved server is.
+      if (marker?.frozen && !marker.place) frozenCloud = typeof marker.cloud === "string" ? marker.cloud : true;
     }
     if (frozenCloud || awayIn(kept)) await restored();
     const before = home;
@@ -252,6 +255,8 @@ export function createHomeWindow(deps) {
     if (screen) return named(screen);
     if (status) return named({ screen: status });
     if (home.kind === "signin" && !name) return { screen: "signin" };
+    const own = ownMove();
+    if (own && MOVING.has(own.phase)) return { screen: "moving", name: own.name };
     return named({ screen: MOVING.has(parseJournal(journal())?.phase ?? "") ? "moving" : "opening" });
   }
   const tell = () => { try { publish(view()); } catch {} };
