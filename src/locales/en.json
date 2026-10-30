@@ -1964,6 +1964,8 @@
   "chat.rescue.connect": "Connect your subscription",
   "chat.rescue.connectHint": "Sign in with an AI plan you already pay for",
   "chat.error.signedOut": "{name} isn't signed in yet. Sign in below, then send your message again.",
+  "chat.notice.signIn": "Sign in",
+  "chat.notice.signInHint": "Open AI settings to sign in again",
   "chat.error.details": "Details",
   "chat.error.requestTooLarge": "This message is too large for {model}. Start a new chat or pick a model that accepts more.",
   "chat.error.dismiss": "Dismiss",
