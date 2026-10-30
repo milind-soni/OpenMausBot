@@ -91,6 +91,7 @@
   "notice.dismiss": "今後表示しない",
   "notice.notNow": "今はしない",
   "notice.openFailed": "ブラウザーを開けませんでした。もう一度お試しください。",
+  "server.teammates.sameRequest": "少し前に別のチームメイトが同じことを尋ねたため、2 つ目の回答ではなくその回答を使います。",
   "server.reports.sent": "MausBot チームに送信しました（レポート {report}）。Milind と Omkar がメールで受け取ります。",
   "server.reports.sentReply": "MausBot チームに送信しました（レポート {report}）。Milind と Omkar がメールで受け取り、{contact} に返信します。",
   "server.reports.sentLater": "前回の送信がうまくいかなかったため、改めて MausBot チームに送信しました（レポート {report}）。Milind と Omkar がメールで受け取ります。",
