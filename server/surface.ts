@@ -87,6 +87,11 @@ export function browserIsThePlace(plan: SurfacePlan): boolean {
   return plan.computer === "off" && plan.browser;
 }
 
+/** The conversation's pin as a person chose it: a pin a turn made on its own (auto) is none. */
+export function chosenPin(task: { surface?: Surface; surfaceSource?: "user" | "auto" } | undefined): Surface | null | undefined {
+  return task?.surfaceSource === "auto" ? null : task?.surface;
+}
+
 export function cloudPlaceRefusal(engine: CloudEngine & { name: string }, source: PlaceSource, bot: string): PlaceUnavailableError | null {
   if (canWorkOnCloud(engine)) return null;
   return placeUnavailable("cloud", { state: "cc-cannot", params: { bot, model: engine.name }, source });
