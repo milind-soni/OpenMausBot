@@ -7,6 +7,7 @@ import { CloudTile } from "./cloud-buy/parts";
 import { cloudColor } from "@/lib/cloud-look";
 import { useStore } from "@/state/store";
 import { sharedComputersEnabled } from "@/lib/feature-flags";
+import { productName } from "@/lib/brand";
 
 type SavedWorkspaces = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
 type SavedEntry = SavedWorkspaces["environments"][number] | { id: string; name: string; origin: string; color: undefined };
@@ -163,7 +164,7 @@ export function ConnectedWorkspacesSettings() {
         </ul>}
     </Card>
     {sharingOffered && computerWorkspace && <ComputerSharingSettings key={computerWorkspace.id} workspace={computerWorkspace} onClose={() => setComputerId(null)} />}
-    <Card title="Connect to a server" subtitle="Already running OpenMausBot on a VPS, server, or another computer? Connect it here.">
+    <Card title="Connect to a server" subtitle={`Already running ${productName()} on a VPS, server, or another computer? Connect it here.`}>
       <form className="flex flex-col gap-3" onSubmit={(event) => {
         event.preventDefault();
         if (address.trim()) void perform(() => bridge.addFromLink(address.trim(), name.trim()));

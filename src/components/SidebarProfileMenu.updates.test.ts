@@ -23,6 +23,6 @@ it("offers no update entry on a page the desktop app doesn't answer, such as ano
 it("offers the restart once an update has downloaded by itself", () => {
   expect(entry({ status: "idle" })?.label).toBe("Check for updates");
   const ready = entry({ status: "downloaded", version: "0.2.0" });
-  expect(ready?.label).toBe("OpenMausBot 0.2.0 ready — restart");
+  expect(ready?.label).toBe("Restart to update to MausBot 0.2.0");
   expect(ready?.item.attention).toBe(true);
 });
