@@ -123,7 +123,11 @@ export function appPermissionHandlers({ rendererOrigin, mainContents, cloudHomeO
   };
 }
 
-// Both explicit IPC links and window.open must use the same web-only policy.
+// Both explicit IPC links and window.open use this one policy: a web link, or an email draft the person sends themselves.
+export function externalLinkUrl(rawUrl) {
+  return typeof rawUrl === "string" && /^\s*mailto:/i.test(rawUrl) ? emailDraftUrl(rawUrl) : externalWebUrl(rawUrl);
+}
+
 export function externalWebUrl(rawUrl) {
   if (typeof rawUrl !== "string") throw new Error("A web address is required");
   let url;
@@ -134,5 +138,25 @@ export function externalWebUrl(rawUrl) {
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("Only web links can be opened");
   if (url.username || url.password) throw new Error("Web links must not include user credentials");
+  return url.toString();
+}
+
+const EMAIL_DRAFT_FIELDS = new Set(["subject", "body"]);
+
+/** Security: one address, and only a subject and a body, so a link can add no recipient and attach no file (some mail
+ * clients honour an `attach` field). */
+export function emailDraftUrl(rawUrl) {
+  let url, address;
+  try {
+    url = new URL(rawUrl);
+    address = decodeURIComponent(url.pathname);
+  } catch {
+    throw new Error("That email link is invalid");
+  }
+  if (url.protocol !== "mailto:") throw new Error("Only email links can be drafted");
+  if (!/^[^\s@,;]+@[^\s@,;]+$/.test(address)) throw new Error("An email link names one address");
+  if ([...url.searchParams.keys()].some(field => !EMAIL_DRAFT_FIELDS.has(field.toLowerCase()))) {
+    throw new Error("An email link carries only a subject and a body");
+  }
   return url.toString();
 }
