@@ -112,19 +112,26 @@ describe("durable accepted follow-ups", () => {
     expect(journal.cancelledChatFollowup("channel", "group", "old-thread", "cancelled")).toBe(true);
   });
 
-  it("runs a steered row that was stopped before it was read as itself, ahead of the queue, and never shows it as queued", () => {
+  it("runs the person's messages ahead of a teammate's, a steered row stopped before it was read as itself, and never shows that row as queued", async () => {
     const store = storeFor("bot", "thread");
+    const handOn = queueSteeredMessage("bot", "thread", "Nightly note", { peerAsk: { botId: "chief", name: "Chief" } });
     const steered = store.appendMessage("thread", { role: "user", kind: "text", text: "is the PR up?", steered: true });
-    const queued = queueSteeredMessage("bot", "thread", "and the docs?", { sendId: "later" });
-    queueSteeredMessage("bot", "thread", steered.text!, { prompt: "is the PR up?\n\n[note]", rowId: steered.id, first: true });
-    expect(queuedSteerSnapshot(() => true)).toEqual({ thread: [{ queueId: queued.id, text: "and the docs?" }] });
+    // Sent a moment later, while the turn still ran: a runner can be slow enough for the clock to move.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const queued = queueSteeredMessage("bot", "thread", "and the docs?", { sendId: "later", first: true });
+    queueSteeredMessage("bot", "thread", steered.text!, { prompt: "is the PR up?\n\n[note]", rowId: steered.id, first: true, queuedAt: steered.at });
+    expect(queuedSteerSnapshot(() => true)).toEqual({ thread: [{ queueId: queued.id, text: "and the docs?" }, { queueId: handOn.id, text: "Nightly note" }] });
     const run = vi.fn();
-    drainSteeredMessages({ ...store, messagesFor: () => store.messages }, run);
-    // Both are the person's words, so they run as one turn, the stopped one first and as its own row.
+    const messagesFor = () => store.messages;
+    drainSteeredMessages({ ...store, messagesFor }, run);
+    // Both are the person's words, so they run as one turn, the stopped one first and as its own row, before the teammate's.
     expect(run.mock.calls[0]?.[2]).toBe("is the PR up?\n\n[note]\n\nand the docs?");
     expect(run.mock.calls[0]?.[4]).toEqual([steered.id, "message-1"]);
     expect(store.messages.map((message) => message.text)).toEqual(["is the PR up?", "and the docs?"]);
     expect(store.messages[1]).toMatchObject({ queueId: queued.id });
+    await Promise.resolve();
+    drainSteeredMessages({ ...store, messagesFor }, run);
+    expect(run.mock.calls[1]?.[2]).toBe("Nightly note");
   });
 
   it("keeps running a stopped steered row as itself across a restart", () => {
