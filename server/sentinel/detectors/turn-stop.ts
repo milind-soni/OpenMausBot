@@ -2,7 +2,7 @@
 import { capTitle, HARNESS_NOTICE, normalizeSignatureText, signatureOf } from "../normalize.ts";
 import type { Detector, Observation, Origin } from "../types.ts";
 
-export const TURN_TIMEOUT_NOTICE = /\bexceeded \d+ minutes?\b/i;
+export const TURN_TIMEOUT_NOTICE = /\b(?:exceeded|made no progress for) \d+ minutes?\b/i;
 
 const PERSON_STOPS = new Set(["interrupted", "cancelled"]);
 /** Settled ok, but out of budget rather than done. */
