@@ -28,6 +28,7 @@ vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
 
 const { ModelPicker } = await import("./ModelPicker");
+const { forgetStandInReads } = await import("./stand-in-read");
 
 type Option = InstanceInfo["models"]["options"][number];
 const claude = (options: Option[], authenticated = true): InstanceInfo => ({
@@ -85,6 +86,8 @@ beforeEach(() => {
   fixture.bots = [];
   fixture.instances = [claude(three)];
   fixture.dispatch.mockReset();
+  fixture.refreshModels.mockClear();
+  forgetStandInReads();
   parentKey.mockReset();
   document.documentElement.dataset.reducedMotion = "true";
   vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
@@ -289,5 +292,104 @@ describe("the floating menu and the pointer", () => {
     const rows = [...document.querySelectorAll<HTMLElement>("[data-simple-provider] [data-menu-row]")];
     flushSync(() => rows[1]!.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerType: "mouse" })));
     expect(focused()).toBe(rows[1]);
+  });
+});
+
+describe("an engine whose models were never read", () => {
+  const copilot = (placeholder: boolean, extra: Partial<InstanceInfo> = {}): InstanceInfo => ({
+    instanceId: "githubCopilot", driverKind: "copilotAgent", displayName: "GitHub Copilot", access: "subscription",
+    snapshot: { state: "available", version: "1.0.105", authenticated: true },
+    models: { default: "auto", options: [{ id: "auto", label: "Auto" }], ...(placeholder ? { placeholder } : {}) },
+    ...extra,
+  });
+
+  it.each([["Simple", false], ["full", true]])("is read when the %s picker opens, though the bot runs another engine", async (_mode, advanced) => {
+    fixture.advanced = advanced;
+    const engine = copilot(true);
+    fixture.instances = [claude(three), engine];
+    render();
+    await openWith("click");
+    expect(fixture.refreshModels).toHaveBeenCalledExactlyOnceWith(engine.instanceId);
+  });
+
+  it("is read when it turns up after the picker opened", async () => {
+    fixture.instances = [claude(three)];
+    render();
+    await openWith("click");
+    expect(fixture.refreshModels).not.toHaveBeenCalled();
+    const engine = copilot(true);
+    fixture.instances = [claude(three), engine];
+    render();
+    await settle();
+    expect(fixture.refreshModels).toHaveBeenCalledExactlyOnceWith(engine.instanceId);
+  });
+
+  it("is read once per page, so a read that failed does not start its CLI again at the next open", async () => {
+    fixture.refreshModels.mockRejectedValueOnce(new Error("signed out"));
+    const engine = copilot(true);
+    fixture.instances = [claude(three), engine];
+    render();
+    await openWith("click");
+    press("Escape");
+    await settle();
+    expect(menu()).toBeNull();
+    await openWith("click");
+    expect(menu()).not.toBeNull();
+    expect(fixture.refreshModels).toHaveBeenCalledExactlyOnceWith(engine.instanceId);
+  });
+
+  it("is read again after a sign-in that follows a failed read", async () => {
+    fixture.refreshModels.mockRejectedValueOnce(new Error("login expired"));
+    const engine = copilot(true);
+    fixture.instances = [claude(three), engine];
+    render();
+    await openWith("click");
+    fixture.instances = [claude(three), { ...engine, snapshot: { state: "available", version: "1.0.105", authenticated: false } }];
+    render();
+    await settle();
+    fixture.instances = [claude(three), engine];
+    render();
+    await settle();
+    expect(fixture.refreshModels).toHaveBeenCalledTimes(2);
+    expect(fixture.refreshModels).toHaveBeenLastCalledWith(engine.instanceId);
+  });
+
+  it("is not read again once its list came from the engine", async () => {
+    fixture.instances = [claude(three), copilot(false)];
+    render();
+    await openWith("click");
+    expect(fixture.refreshModels).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["its CLI", { snapshot: { state: "unavailable" } }],
+    ["its sign-in", { snapshot: { state: "available", version: "1.0.105", authenticated: false } }],
+    ["its organisation", { policy: { organizationName: "Acme", reason: "Managed by Acme" } }],
+  ] as Array<[string, Partial<InstanceInfo>]>)("waits for %s before it is read", async (_what, extra) => {
+    fixture.instances = [claude(three), copilot(true, extra)];
+    render();
+    await openWith("click");
+    expect(fixture.refreshModels).not.toHaveBeenCalled();
+  });
+
+  it("is read alongside the shown engine when that one has no models yet, each once", async () => {
+    fixture.advanced = true;
+    const engine = copilot(true);
+    fixture.instances = [{ ...claude(three), models: { default: "", options: [] } }, engine];
+    render();
+    await openWith("click");
+    expect(fixture.refreshModels).toHaveBeenCalledTimes(2);
+    expect(fixture.refreshModels).toHaveBeenCalledWith("claude");
+    expect(fixture.refreshModels).toHaveBeenCalledWith(engine.instanceId);
+  });
+
+  it("is read once when it is the engine shown, and leaves that engine's Refresh free", async () => {
+    fixture.advanced = true;
+    const engine = copilot(true);
+    fixture.instances = [claude(three), engine];
+    render({ ...scout(), modelSelection: { instanceId: engine.instanceId, model: "auto" } });
+    await openWith("click");
+    expect(fixture.refreshModels).toHaveBeenCalledExactlyOnceWith(engine.instanceId);
+    expect(document.querySelector<HTMLButtonElement>("[data-model-refresh]")?.disabled).toBe(false);
   });
 });

@@ -33,7 +33,7 @@ reach the child, while a token set on the engine itself does.
 
 The end-to-end test launches an isolated server with `launchVerificationServer`,
 which uses a disposable home, data directory and port pair, and fake engines
-only. It refreshes the Copilot and custom ACP catalogs, then moves one bot from
+only. Before the first refresh it checks that the Copilot catalog is the built-in "Auto" marked as a stand-in (`placeholder`), which the model picker reads once in the background when it opens, and after it that the catalog was saved for the next start. It refreshes the Copilot and custom ACP catalogs, then moves one bot from
 Claude to Copilot through the picker's bot route and the strict model route,
 moves one conversation to a custom ACP agent through the conversation route,
 and moves both back to Claude. Each turn's effective model is read from the fake

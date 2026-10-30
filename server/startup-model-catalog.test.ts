@@ -8,7 +8,7 @@ import { createAcpDriver, type AcpSupport } from "./drivers/acp/core.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import * as procs from "./procs.ts";
 import { holdUntilFirstEngineRead } from "./first-engine-read.ts";
-import { openStartupModelCatalog, writeStartupModelCache } from "./startup-model-catalog.ts";
+import { openStartupModelCatalog, readStartupModelCache, writeStartupModelCache } from "./startup-model-catalog.ts";
 
 const CACHED: ModelCatalog = {
   default: "cached-model",
@@ -208,5 +208,81 @@ describe("startup model catalogs", () => {
     expect(instance.models).toEqual(FRESH);
     expect(spawn).toHaveBeenCalled();
     await instance.dispose();
+  });
+
+  describe("a lazy ACP engine (resolveModelsOnCreate: false)", () => {
+    const STATIC: ModelCatalog = { default: "static-model", options: [{ id: "static-model", label: "Static" }] };
+    // Copilot's built-in "Auto" is marked as a stand-in; custom ACP's and DeepSeek's built-in lists are real catalogs.
+    const lazy = (resolveModels: () => Promise<ModelCatalog>, standIn = true) => {
+      const support = acpSupport(resolveModels);
+      const driver = createAcpDriver({ ...support, resolveModelsOnCreate: false, models: standIn ? { ...STATIC, placeholder: true } : STATIC });
+      return driver.create({ instanceId: "lazy", displayName: "Lazy", environment: {}, enabled: true, config: driver.defaultConfig() });
+    };
+
+    it("never caches a stand-in list, even when asked to", () => {
+      writeStartupModelCache("lazy", { ...STATIC, placeholder: true });
+      expect(readStartupModelCache("lazy")).toBeNull();
+    });
+
+    it("leaves a built-in list unmarked when it is a real catalog (custom ACP, DeepSeek)", async () => {
+      const instance = await lazy(() => Promise.reject(new Error("no models advertised")), false);
+      expect(instance.models).toEqual(STATIC);
+      await instance.refreshModels!();
+      expect(instance.models).toEqual(STATIC);
+      await instance.dispose();
+    });
+
+    it.each([
+      ["rejects", () => Promise.reject(new Error("signed out"))],
+      ["lists nothing", () => Promise.resolve({ default: "", options: [] })],
+    ] as Array<[string, () => Promise<ModelCatalog>]>)("keeps its built-in list marked, and caches nothing, when its first read %s", async (_case, read) => {
+      const instance = await lazy(read);
+      expect(instance.models).toEqual({ ...STATIC, placeholder: true });
+      await instance.refreshModels!();
+      expect(instance.models).toEqual({ ...STATIC, placeholder: true });
+      expect(readStartupModelCache("lazy")).toBeNull();
+      await instance.dispose();
+    });
+
+    it("drops the mark and caches the list once a read succeeds", async () => {
+      const instance = await lazy(() => Promise.resolve(FRESH));
+      await instance.refreshModels!();
+      expect(instance.models).toEqual(FRESH);
+      expect(readStartupModelCache("lazy")).toEqual(FRESH);
+      await instance.dispose();
+    });
+
+    it("takes a saved copy of its stand-in, from a build that cached one after a failed read, for no catalog", async () => {
+      mkdirSync(join(DATA_DIR, "providers", "engine-models"), { recursive: true });
+      writeFileSync(join(DATA_DIR, "providers", "engine-models", "lazy.json"), JSON.stringify(STATIC));
+      const instance = await lazy(() => Promise.reject(new Error("signed out")));
+      expect(instance.models).toEqual({ ...STATIC, placeholder: true });
+      await instance.dispose();
+      const real = await lazy(() => Promise.reject(new Error("signed out")), false);
+      expect(real.models).toEqual(STATIC);
+      await real.dispose();
+    });
+
+    it("keeps a read list that names only what its stand-in names, with its own labels, when a later read fails", async () => {
+      const read: ModelCatalog = { default: "static-model", options: [{ id: "static-model", label: "Read", variants: [{ id: "high", label: "High" }] }] };
+      const first = await lazy(() => Promise.resolve(read));
+      await first.refreshModels!();
+      await first.dispose();
+      const next = await lazy(() => Promise.reject(new Error("signed out")));
+      expect(next.models).toEqual(read);
+      await next.refreshModels!();
+      expect(next.models).toEqual(read);
+      await next.dispose();
+    });
+
+    it("keeps a saved list, unmarked, when a later read fails", async () => {
+      writeStartupModelCache("lazy", CACHED);
+      const instance = await lazy(() => Promise.reject(new Error("signed out")));
+      expect(instance.models).toEqual(CACHED);
+      await instance.refreshModels!();
+      expect(instance.models).toEqual(CACHED);
+      expect(readStartupModelCache("lazy")).toEqual(CACHED);
+      await instance.dispose();
+    });
   });
 });
