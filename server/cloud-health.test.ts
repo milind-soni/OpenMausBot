@@ -12,6 +12,7 @@ import { CLOUD_HEALTH_MAX_BYTES, HEALTH_BUCKET_CAP, createCloudHealth, createClo
 import { DATA_DIR, EVENTS_DIR } from "./config.ts";
 import { memoryStallText, memoryStopText } from "./engine-memory.ts";
 import type { RuntimeEvent } from "./contracts.ts";
+import { toolFailureMessage } from "./drivers/tool-failure.ts";
 import { createCloudSignedRoutes } from "./routes/cloud-signed.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { Store } from "./store.ts";
@@ -99,6 +100,14 @@ describe("the failure code a Cloud home reports", () => {
       { kind: "turn", code: "auth_required", engine: "claudeAgent", count: 1 },
       { kind: "turn", code: "shutdown_timeout", engine: "codex", count: 1 },
     ]);
+  });
+
+  it("files a turn a failed tool call stopped under tool_error, not unknown", () => {
+    const w = world();
+    w.emit(w.bot.threadId, { type: "turn.started" }, "openai-compat");
+    w.fail(toolFailureMessage(["composio_CLARITY_GET_INSIGHTS"], []));
+    w.emit(w.bot.threadId, { type: "turn.completed", ok: false, stopReason: "tool_error" }, "openai-compat");
+    expect(incidents(w)).toEqual([{ kind: "turn", code: "tool_error", engine: "openai-compat", count: 1 }]);
   });
 
   it("files a row whose turn never reports a stop under its own class once it has waited", () => {
