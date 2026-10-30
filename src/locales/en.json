@@ -496,6 +496,7 @@
   "toolStep.manageAutomations": "Manage automations",
   "toolStep.checkAutomations": "Check automations",
   "toolStep.useTool": "Use a tool",
+  "toolStep.usingWhose": "using {person}'s {app}",
   "attach.gallery": "Attachments",
   "attach.gallerySingle": "1 attachment",
   "attach.galleryCount": "{count} attachments",
