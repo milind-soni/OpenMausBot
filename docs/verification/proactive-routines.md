@@ -96,6 +96,7 @@ cap, busy bots, and Run now. The others:
   the morning time and its controls, who is waiting and since when, Not now,
   answering a question on the brief, distinct labels, the Done overnight card,
   and Found for you with Got it;
+- `server/host/watch-list.test.ts`: `watch_list`'s arguments, the records block in a bot's instructions (due items, forged markers defused), one bot never touching another's item, duplicates, the open-item cap, a restart and the route; `src/components/bot-settings/RoutinesSection.test.ts`: the Check in on its own template and when the button shows;
 - `server/host/found-updates.test.ts`: `report_finding`'s arguments, the card it
   posts, the 60-day key ledger across a restart, rooms, and its internal route;
 - `server/connected-reads.test.ts` and `server/records-block.test.ts`: the

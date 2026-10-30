@@ -30,7 +30,7 @@ vi.mock("../routines/RoutineList", async (importOriginal) => {
   };
 });
 
-const { RoutinesSection } = await import("./RoutinesSection");
+const { checkInRoutine, RoutinesSection } = await import("./RoutinesSection");
 
 const bot: Bot = {
   id: "bot-1",
@@ -96,6 +96,18 @@ function render(routines: Routine[], runs: RoutineRun[]) {
 }
 
 describe("RoutinesSection", () => {
+  it("offers a check-in until the bot has one: every three hours from 8:00 to 22:00, each run picking up from the last", () => {
+    expect(render([activeRoutine], [])).toContain("Check in on its own");
+    const input = checkInRoutine(bot.id, "maus", new Date(2026, 9, 30, 15, 12));
+    expect(input).toEqual({
+      name: "Check in", prompt: expect.stringContaining("tell me only what's new since your last check-in"), botId: bot.id, runOn: "maus",
+      schedule: { type: "interval", everyMinutes: 180, anchorAt: new Date(2026, 9, 30, 8).getTime(), window: { start: "08:00", end: "22:00" } },
+      continuity: true, overlap: "skip",
+    });
+    const checkIn: Routine = { ...activeRoutine, id: "r3", name: input.name, prompt: input.prompt, schedule: { ...input.schedule, type: "interval" } as Routine["schedule"] };
+    expect(render([activeRoutine, checkIn], [])).not.toContain("Check in on its own");
+  });
+
   it("shows an empty state when the bot has no routines", () => {
     const markup = render([], []);
     expect(markup).toContain("No schedules yet.");

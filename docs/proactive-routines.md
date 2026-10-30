@@ -73,6 +73,14 @@ desktop, headless and on a Cloud.
   reply's first line, then the bot, the routine or who asked ("You asked",
   "Another bot asked"), and the time, with **Open**. The brief's own runs,
   quiet runs and failures are left out. It is posted once and never edited.
+- **Bots that check in on their own**: a bot's Routines section offers **Check
+  in on its own**, which makes an ordinary routine named "Check in": every three
+  hours between 8:00 and 22:00, each run starting from the last one's report,
+  asking the bot to look over its watch list and the apps it can read and say
+  only what is new. Like any routine it is edited, paused or deleted in
+  Automations; the button is gone while the bot has one. What a check-in finds
+  reaches the brief through `report_finding`, and what a bot is waiting on stays
+  in its instructions through its watch list (`watch_list`).
 - **Meeting prep**: a card in the same chat when a meeting with other people is
   within four hours.
 - **The 10-minute reminder**: a card posted by the server, with no AI.
