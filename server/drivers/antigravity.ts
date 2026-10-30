@@ -8,6 +8,7 @@ import type {
   ProviderDriver,
   ProviderInstance,
   ProviderSnapshot,
+  SendTurnInput,
 } from "../contracts.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./acp/core.ts";
 import {
@@ -27,13 +28,30 @@ import { VERIFICATION_TEMP_KEY, scheduleAntigravityTempSweep } from "./antigravi
 import { augmentedPath } from "../env-path.ts";
 
 export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
-  default: "gemini-3.8-flash-high",
+  default: "gemini-3.8-flash",
   options: [
-    { id: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)" },
-    { id: "gemini-3.8-flash-medium", label: "Gemini 3.8 Flash (Medium)" },
-    { id: "gemini-3.8-flash-low", label: "Gemini 3.8 Flash (Low)" },
+    {
+      id: "gemini-3.8-flash",
+      label: "Gemini 3.8 Flash",
+      variants: [
+        { id: "low", label: "Low" },
+        { id: "medium", label: "Medium" },
+        { id: "high", label: "High" },
+      ],
+    },
   ],
 };
+
+/** Bots saved before the thinking-level option hold `gemini-3.8-flash-{low,medium,high}`; the official runtime
+ * offers only the base model with that option, so run the base at the saved level. A runtime that still offers
+ * the suffixed id, or a turn that chose its own level, keeps its selection. */
+export function normalizeAntigravityTurn(turn: SendTurnInput, offeredModels: readonly string[]): SendTurnInput {
+  if (turn.variant !== undefined) return turn;
+  const match = turn.model?.match(/^(gemini-3\.8-flash)-(low|medium|high)$/u);
+  return match && offeredModels.includes(match[1]) && !offeredModels.includes(match[0])
+    ? { ...turn, model: match[1], variant: match[2] }
+    : turn;
+}
 
 /** Antigravity's session modes: `yolo` for Full, `auto_edit` for auto-accept edits, `default` otherwise (it has no reviewer for Auto). */
 export function antigravityPermissionMode(fullAuto: boolean, approvalMode?: ApprovalMode): "yolo" | "auto_edit" | "default" {
@@ -61,6 +79,7 @@ const support: AcpSupport = {
   spawnArgs: () => [],
   selectModel: { configId: "model" },
   modelVariants: true,
+  normalizeSessionSelection: normalizeAntigravityTurn,
   // Google's server reads its new-session default from this variable (agy_acp_server 1.4.3
   // model_selection.get_default_model_id); a later switch re-fetches the model list (1.3-1.8 s).
   sessionModelEnv: "AGY_ACP_DEFAULT_MODEL",

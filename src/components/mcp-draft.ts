@@ -25,7 +25,13 @@ export interface McpOAuthClientListing {
   clientSecretConfigured: boolean;
   redirectUri: string;
 }
-export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & { scope?: "team" | "person"; managedBy?: string; runsOn?: { environmentId: string; label: string }; apps?: boolean };
+export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & {
+  scope?: "team" | "person"; managedBy?: string; runsOn?: { environmentId: string; label: string }; apps?: boolean;
+  /** The bot whose own server this is. */
+  bot?: string;
+  /** The bots it is off for, because it doesn't start for them. */
+  offFor?: string[];
+};
 
 export function isRemoteMcpListing(server: McpServerListing): server is RemoteMcpListing {
   return "url" in server;

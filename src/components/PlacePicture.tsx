@@ -1,16 +1,16 @@
 import { useRef, useState } from "react";
-import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { BANNER_ACCEPT, bannerSrc, prepareBanner, removeBanner, uploadBanner, type BannerProblem, type BannerSummary } from "@/lib/place-banner";
+import { SettingRow } from "./SettingsPrimitives";
 
 const PROBLEM: Readonly<Record<BannerProblem | "animated" | "failed", LocaleKey>> = {
   format: "placeLook.imageFormat", read: "placeLook.imageRead", size: "placeLook.imageSize", animated: "placeLook.imageMoving", failed: "placeLook.imageFailed",
 };
 
-/** The workspace's banner picture, next to its colour: choose one (shrunk and cleaned here, checked again by the
- * server), change it, or remove it. Whoever may change this workspace's settings may; everyone else sees it. */
-export function PlacePicture({ banner, canChange }: { banner: BannerSummary | null; canChange: boolean }) {
+/** The sidebar's picture, a row of its own: choose one (shrunk and cleaned here, checked again by the server), change
+ * it, or remove it. Whoever may change this place's settings may; everyone else sees it. */
+export function PlacePicture({ banner, canChange, subtitle }: { banner: BannerSummary | null; canChange: boolean; subtitle?: string }) {
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<LocaleKey | null>(null);
@@ -29,16 +29,18 @@ export function PlacePicture({ banner, canChange }: { banner: BannerSummary | nu
       return prepared.ok ? uploadBanner(prepared.blob) : prepared;
     });
   };
-  return <div data-place-picture={src ? "set" : "none"} className="flex flex-col gap-2">
-    <div className="flex flex-wrap items-center gap-2.5">
-      {src && <img src={src} alt={t("placeLook.currentImage")} className="h-10 w-24 rounded-md border border-ink/10 object-cover" />}
-      <button type="button" className="ui-button" disabled={!canChange || busy} onClick={() => input.current?.click()}>
-        {busy ? t("placeLook.imageSaving") : t(src ? "placeLook.changeImage" : "placeLook.useImage")}
-      </button>
-      {src && <button type="button" className={cn("ui-button")} disabled={!canChange || busy} onClick={() => void run(removeBanner)}>{t("placeLook.removeImage")}</button>}
-      <input ref={input} type="file" accept={BANNER_ACCEPT} hidden data-place-picture-input onChange={(event) => chosen(event.target.files?.[0])} />
-    </div>
-    {!canChange && <p className="text-[13px] text-ink-secondary">{t("placeLook.imageAdmins")}</p>}
-    {problem && <p role="alert" className="text-[13px] text-danger">{t(problem)}</p>}
+  const message = problem ? <p role="alert" className="text-danger">{t(problem)}</p>
+    : canChange ? null : <p className="text-ink-secondary">{t("placeLook.imageAdmins")}</p>;
+  return <div data-place-picture={src ? "set" : "none"}>
+    <SettingRow title={t("placeLook.sidebarPicture")} subtitle={subtitle} message={message}>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {src && <img src={src} alt={t("placeLook.currentImage")} className="h-8 w-14 rounded-md border border-ink/10 object-cover" />}
+        <button type="button" className="ui-button" disabled={!canChange || busy} onClick={() => input.current?.click()}>
+          {busy ? t("placeLook.imageSaving") : t(src ? "placeLook.changeImage" : "placeLook.useImage")}
+        </button>
+        {src && <button type="button" className="ui-button" disabled={!canChange || busy} onClick={() => void run(removeBanner)}>{t("placeLook.removeImage")}</button>}
+        <input ref={input} type="file" accept={BANNER_ACCEPT} hidden data-place-picture-input onChange={(event) => chosen(event.target.files?.[0])} />
+      </div>
+    </SettingRow>
   </div>;
 }

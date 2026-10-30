@@ -32,8 +32,8 @@ function start() {
   void refreshPlaceLook();
 }
 
-/** The colour of the place this page is, and whether it can be changed here: none in a browser, on an older app and on
- * this computer's own page. The sidebar's tint and Settings read the same one. */
+/** The colour of the place this page is, and whether it can be changed here: none in a browser and on an older app.
+ * The sidebar's tint and Settings read the same one. */
 export function usePlaceLook(): PlaceLook | null {
   const [look, setLook] = useState<PlaceLook | null>(current);
   useEffect(() => {

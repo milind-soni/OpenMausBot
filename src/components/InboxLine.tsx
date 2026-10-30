@@ -1,6 +1,7 @@
 // On a Team Cloud: a line in the person's inbox says who it is from and where it came from, with the way back there, and
 // what their assistant answered for them. An answer that came back from someone's inbox says who answered.
 import { useStore, openThread, type Message } from "@/state/store";
+import { isQuestionCard } from "@/lib/question-card";
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import type { TeamPerson } from "@/state/team-people";
@@ -17,12 +18,32 @@ export function InboxSender({ from, size = 16 }: { from: NonNullable<Message["in
   return <BotAvatar bot={bot ?? { name: from.name, color: "blue" }} state="happy" size={size} motion="none" motionKey={0} animated={false} />;
 }
 
+/** Where an inbox line came from, as a link that opens it there; none for a line from a conversation the person can't read. */
+export function useInboxOrigin(message: Pick<Message, "inbox">): { label: string; hint: string; open(): void } | undefined {
+  const { state, dispatch } = useStore();
+  const showThreads = useShowThreads();
+  const origin = message.inbox?.origin;
+  if (!origin) return undefined;
+  return {
+    label: t("inbox.in", { title: origin.title }),
+    hint: t("inbox.openOrigin", { title: origin.title }),
+    open: () => openThread(dispatch, { botId: origin.botId, threadId: origin.threadId }, state, showThreads),
+  };
+}
+
+/** A question's copy, and an approval's while it waits above the composer, say where they were asked in their own
+ * header. */
+function headedByItsCard({ inbox, card }: Message): boolean {
+  if (inbox?.kind !== "ask") return false;
+  return isQuestionCard(card) || Boolean(card?.requestId && card.tool && !card.answered && !card.dismissed && !card.expired);
+}
+
 /** Above an inbox line: from whom, through which bot, and the conversation it came from. */
 export function InboxCaption({ message }: { message: Message }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const item = message.inbox;
-  if (!item) return null;
+  if (!item || headedByItsCard(message)) return null;
   const who = item.assistant ? t("inbox.assistantOf", { name: item.from.name }) : t("inbox.from", { name: item.from.name });
   const origin = item.origin;
   return (

@@ -1,10 +1,10 @@
 // The colour of the place a page shows: drawn faintly at the top of its sidebar and on its circle in the rail, and
 // changed from its own Settings. A Cloud's colour (My Cloud, another of the person's own, a team's) is the Admin's, so
 // every app of theirs follows it: its owner or its team's Super admin and Admins change it there; everyone else sees it.
-// A server the person connected by hand keeps the colour this app saved for it, and so does a Cloud an older Admin
-// keeps no colour for. A page learns and changes only the colour of the place it is; this computer's own page has none.
-// The window's own rail changes the colour of any place it lists (a right-click on its circle), whatever that place's
-// server runs: the same rules, from this app's own page.
+// This computer, a server the person connected by hand, and a Cloud an older Admin keeps no colour for keep the colour
+// this app saved for them. A page learns and changes only the colour of the place it is. The window's own rail changes
+// the colour of any place it lists (a right-click on its circle), whatever that place's server runs: the same rules,
+// from this app's own page.
 import environments from "./environments.cjs";
 import { CLOUD_SWATCH_COLORS, CLOUD_SWATCHES, swatchColor } from "./cloud-list.mjs";
 
@@ -28,15 +28,17 @@ export function listedCloudOf(entry, { clouds = null, homeOrigin = null } = {}) 
 }
 
 /**
- * A saved place's colour, and where a change of it goes: `admin` (the Admin keeps it, and this person owns that Cloud
- * or is its team's Super admin or Admin), `local` (this app keeps it: a server connected by hand, or a Cloud an older
- * Admin lists no colours for), or none, with why: a team member's, or another Cloud of theirs while the sign-in is
- * away. Null for this computer and for no place. `cloudId` stays in main.
+ * A place's colour, and where a change of it goes: `admin` (the Admin keeps it, and this person owns that Cloud or is
+ * its team's Super admin or Admin), `local` (this app keeps it: This computer, a server connected by hand, or a Cloud an
+ * older Admin lists no colours for), or none, with why: a team member's, or another Cloud of theirs while the sign-in
+ * is away. Null for no place. `cloudId` stays in main.
  */
 export function placeLook(entry, { clouds = null, homeOrigin = null } = {}) {
-  if (!entry || entry.kind === "local" || typeof entry.origin !== "string" || !entry.origin) return null;
+  if (!entry) return null;
   const color = environments.ENTRY_COLORS.includes(entry.color) ? entry.color : null;
   const base = { name: entry.name, color, swatch: swatchOf(color) };
+  if (entry.kind === "local") return { ...base, change: "local" };
+  if (typeof entry.origin !== "string" || !entry.origin) return null;
   const mine = entry.home === true || (homeOrigin !== null && entry.origin === homeOrigin);
   if (!mine && !entry.team && !entry.cloud) return { ...base, change: "local" };
   const listed = listedCloudOf(entry, { clouds, homeOrigin });
@@ -68,12 +70,12 @@ export function pageLook(look) {
 
 /**
  * The page's own place's colour (`workspaces:look`) and its change (`workspaces:color`, a swatch or null for none),
- * each behind main's window guard. `place()`: the saved place on screen, which the guard made sure the asking page is;
- * `session()`: the verified session's Clouds and My Cloud's address; `setColor(cloudId, swatch)`: the Admin's change
- * (cloud-account.mjs setCloudColor); `save(id, color)`: this app's saved place, at once, so its circle and the top of
- * its sidebar follow before the session is read again. `rail`: the window's own rail, which changes the colour of any
- * place it lists with a colour to show (`workspaces:recolor`, its circle's id and a swatch): `owns(event)` its page
- * asks, `places()` railPlaces' list now, `saved(id)` that saved place.
+ * each behind main's window guard. `place()`: the place on screen (This computer included), which the guard made sure
+ * the asking page is; `session()`: the verified session's Clouds and My Cloud's address; `setColor(cloudId, swatch)`:
+ * the Admin's change (cloud-account.mjs setCloudColor); `save(id, color)`: this app's own record of that place, at
+ * once, so its circle and the top of its sidebar follow before the session is read again. `rail`: the window's own
+ * rail, which changes the colour of any place it lists with a colour to show (`workspaces:recolor`, its circle's id and
+ * a swatch): `owns(event)` its page asks, `places()` railPlaces' list now, `saved(id)` that place (This computer's too).
  */
 export function installPlaceLook({ ipcMain, guard, place, session, setColor, save, rail = null }) {
   const look = () => placeLook(place(), session());

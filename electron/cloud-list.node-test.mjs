@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cloudMachine, cloudSetupProgress, listedColors, MAX_CLOUDS, olderRelease, otherOwnClouds, ownCloudPlaces, parseCloudList, parseCloudRenewal, releaseVersion, signedInServers, swatchColor } from "./cloud-list.mjs";
+import { cloudMachine, cloudSetupProgress, cloudState, listedColors, MAX_CLOUDS, olderRelease, otherOwnClouds, ownCloudPlaces, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion, signedInServers, swatchColor } from "./cloud-list.mjs";
 import environments from "./environments.cjs";
 import { createHomePlaces } from "./home-places.mjs";
 
@@ -28,6 +28,34 @@ test("the session's Clouds are read strictly: a malformed one is left out whole,
   assert.deepEqual(parseCloudList([cloud({ status: "setting_up", origin: null, setup: { step: "storage", progress: 2 } })])[0].setup, { step: "storage", progress: 1 });
   assert.equal(parseCloudList([cloud({ status: "setting_up", origin: null, setup: { step: "dreaming" } })])[0].setup, undefined);
   assert.equal(parseCloudList([cloud({ status: "ready", setup: { step: "storage" } })])[0].setup, undefined, "only while it is set up");
+});
+
+test("each Cloud's `power` as the Admin says it of a Ready Cloud whose plan sleeps; anything malformed, or on a Cloud not Ready, is none", () => {
+  const power = { state: "asleep", since: 1_761_000_000_000, sleeps: true };
+  assert.deepEqual(parseCloudList([cloud({ power })])[0].power, power);
+  assert.deepEqual(parseCloudList([cloud({ power: { ...power, state: "waking", extra: 1 } })])[0].power, { ...power, state: "waking" });
+  for (const bad of [{ ...power, state: "dozing" }, { ...power, sleeps: false }, { ...power, since: -1 }, "asleep", null]) {
+    assert.equal(parseCloudList([cloud({ power: bad })])[0].power, undefined, JSON.stringify(bad));
+  }
+  assert.equal(parseCloudList([cloud({ status: "stopped", power })])[0].power, undefined, "only a Ready Cloud sleeps or wakes");
+});
+
+test("a Cloud that isn't running: the day its kept files go, and whether its owner may take it off their list, only as the Admin says it of one that fits", () => {
+  const day = 1_762_000_000_000;
+  const [ended] = parseCloudList([cloud({ status: "ended", deleteAfter: day, removable: true })]);
+  assert.deepEqual([ended.deleteAfter, ended.removable], [day, true]);
+  assert.deepEqual(parseCloudList([cloud({ status: "payment_problem", removable: true })])[0].removable, true, "never paid for");
+  for (const [over, why] of [
+    [{ status: "ready", deleteAfter: day, removable: true }, "a running Cloud has neither"], [{ status: "checkout", origin: null, removable: true }, "a checkout that can still be paid"],
+    [{ status: "ended", removable: "yes" }, "only true"], [{ status: "ended", role: "admin", removable: true }, "not their own"],
+    [{ status: "ended", teamId: "team-acme", removable: true }, "a team's Cloud"], [{ status: "ended", deleteAfter: -5 }, "a malformed day"],
+    [{ status: "ended", deleteAfter: "soon" }, "a malformed day"],
+  ]) {
+    const [read] = parseCloudList([cloud(over)]);
+    assert.deepEqual([read.deleteAfter, read.removable], [undefined, undefined], why);
+  }
+  assert.deepEqual(["ended", "stopped", "checkout", "payment_problem", "setting_up", "ready", "offline", undefined].map(status => cloudState(status ? { status } : null)),
+    ["ended", "ended", "checkout", "payment", "setup", null, null, null], "what this app says of each: a Cloud that opens says nothing");
 });
 
 test("a server or computer of the person's own that signed in with their account: read with or without an address, and never a Cloud of theirs", () => {
@@ -168,4 +196,15 @@ test("the plan's renewal is the account's own primary Cloud's, only as the Admin
     [{ ...own, renewal: { ...own.renewal, keptDays: 61 } }], [{ ...own, renewal: { ...own.renewal, keptDays: "1" } }]]) {
     assert.equal(parseCloudRenewal(clouds), null, JSON.stringify(clouds)?.slice(0, 80));
   }
+});
+
+test("the session's organizations: the Team plan this account runs them for, whether ＋ may add one now and why not; anything else is none", () => {
+  const plan = { planCloudId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", canAdd: true, count: 3, max: 10, seats: { used: 9, limit: 20 } };
+  assert.equal(parseOrganizations(undefined), null, "an older Admin, or no Team plan of this account's: no New organization");
+  assert.deepEqual(parseOrganizations(plan), { planCloudId: plan.planCloudId, canAdd: true, count: 3, max: 10 }, "its seats are the Cloud page's, not the app's");
+  assert.deepEqual(parseOrganizations({ ...plan, canAdd: false, addBlocked: "limit", count: 10 }), { planCloudId: plan.planCloudId, canAdd: false, blocked: "limit", count: 10, max: 10 });
+  assert.deepEqual(parseOrganizations({ ...plan, canAdd: false, addBlocked: "mystery" }), { planCloudId: plan.planCloudId, canAdd: false, count: 3, max: 10 }, "a reason this app doesn't know is none");
+  assert.deepEqual(parseOrganizations({ ...plan, addBlocked: "limit" }), { planCloudId: plan.planCloudId, canAdd: true, count: 3, max: 10 }, "a reason only counts while adding is closed");
+  for (const bad of [null, "x", [], { ...plan, planCloudId: "../x" }, { ...plan, planCloudId: 7 }, { ...plan, canAdd: "yes" }, { ...plan, count: -1 }, { ...plan, count: 1.5 },
+    { ...plan, max: 0 }, { ...plan, max: "10" }]) assert.equal(parseOrganizations(bad), null, JSON.stringify(bad));
 });

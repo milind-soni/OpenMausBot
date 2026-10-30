@@ -1,7 +1,9 @@
+import { basename, join } from "node:path";
+
 import type { WireBot, WireGroup } from "../../shared/wire.ts";
 import {
-  ATTACHMENTS_DIR, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES, parseAudioRange, readAttachment, saveFile, saveImageUpload,
-  validateAttachmentUploadId, type SavedAttachment,
+  ATTACHMENTS_DIR, deleteAttachment, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES, parseAudioRange, readAttachment,
+  saveFile, saveImageUpload, validateAttachmentUploadId, type SavedAttachment,
 } from "../attachments.ts";
 import { deliveredCopy } from "../bot-attachment.ts";
 import { memberBot, memberGroup, type Viewer, type VisibleSet } from "../bot-visibility.ts";
@@ -20,6 +22,8 @@ import type { queuedSteerSnapshot } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { createJobRoutes } from "./jobs.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
+
+const UPLOADED_NAME = /^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/;
 
 export type MessagePage = { messages: Array<Message | Record<string, unknown>>; hasMore?: boolean; activeLeafId: string | null };
 
@@ -51,9 +55,14 @@ export interface ThreadRouteDeps {
   botComputerControlSnapshot(botId: string): ReturnType<ComputerControl["snapshot"]>;
   messageFileRootsForThread(senderId: string, threadId: string): string[];
   viewerFor(auth: RequestAuth): Viewer;
+  /** A room's unread mark as this person has read it (a Team Cloud); the room as it is anywhere else. */
+  groupFor?(auth: RequestAuth, group: WireGroup): WireGroup;
   visibleTo(viewer: Viewer): VisibleSet;
   /** A Team Cloud: gives a member their own MausBot once, before their first list of bots. */
   memberDefaultBot?(email: string): unknown;
+  /** Who uploaded each file: only its uploader discards it, and only while nothing uses it. */
+  uploads: { note(auth: RequestAuth, name: string): void; owns(auth: RequestAuth, name: string): boolean };
+  attachmentInUse(name: string): boolean;
 }
 
 export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
@@ -90,7 +99,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         botQueuedMessages: visible.everything ? queued : Object.fromEntries(Object.entries(queued).filter(([threadId]) => visible.thread(threadId))),
         sections: visible.sections(store.sections),
         groups: store.groups.filter((g) => visible.group(g.id)).map((g) => {
-          const room = { ...publicGroupState(g), ...messagePage(g.threadId, limit) };
+          const group = publicGroupState(g);
+          const room = { ...(deps.groupFor?.(auth, group) ?? group), ...messagePage(g.threadId, limit) };
           return visible.everything || !visible.member ? room : memberGroup(room);
         }),
         computerControl: Object.fromEntries(
@@ -316,6 +326,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         });
         req.on("error", (e) => fail(400, e instanceof Error ? e.message : String(e)));
       });
+      deps.uploads.note(auth, basename(saved.path));
       return json(res, 201, saved);
     }
 
@@ -352,6 +363,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         // Returning must not destroy the socket: the caller still sends the 4xx when the byte count crosses the limit.
         const chunks = req.iterator({ destroyOnReturn: false }) as AsyncIterable<Buffer>;
         const saved = await saveFile(chunks, name, rawType ?? "", { uploadId, expectedBytes: declaredLength });
+        deps.uploads.note(auth, basename(saved.path));
         return json(res, 201, saved);
       } catch (error) {
         req.resume();
@@ -361,6 +373,13 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
 
     // Name-locked to the attachments dir: readAttachment refuses anything but a bare generated filename.
     m = path.match(/^\/api\/attachments\/([\w.-]+)$/);
+    if (m && method === "DELETE") {
+      const name = m[1]!;
+      if (!UPLOADED_NAME.test(name) || !deps.uploads.owns(auth, name)) return json(res, 404, { error: "no such attachment" });
+      if (deps.attachmentInUse(name)) return json(res, 409, { error: "This file is already in a message, so it stays." });
+      deleteAttachment(join(ATTACHMENTS_DIR, name));
+      return json(res, 200, { ok: true });
+    }
     if (m && method === "GET") {
       const attachment = readAttachment(m[1]!);
       if (!attachment) return json(res, 404, { error: "no such attachment" });

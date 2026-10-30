@@ -78,7 +78,7 @@ describe("app, role and key lists", () => {
       openai: "openai", anthropic: "anthropic", xai: "xai", openrouter: "openrouter", mistral: "mistral", cerebras: "cerebras", groq: "groq",
       meta: "meta", deepseek: "deepseek", opencodeGo: "opencode_go", openaiCompat: "openai_compat", liveKey: "openai_live",
       elevenlabs: "elevenlabs", fishAudio: "fish_audio", box: "boat", composio: "composio", treg: "treg", jev: "jev",
-      openrouterHelper: "openrouter_decider", imageOpenai: "openai_image",
+      openrouterHelper: "openrouter_decider", imageOpenai: "openai_image", postiz: "postiz",
     });
     for (const provider of Object.values(rows)) expect(KEY_PROVIDER).toContain(provider);
   });
@@ -87,7 +87,9 @@ describe("app, role and key lists", () => {
     const expected = {
       boxToken: "boat", xaiApiKey: "xai", opencodeGoApiKey: "opencode_go", ttsKey: "elevenlabs", fishAudioKey: "fish_audio",
       openaiImageApiKey: "openai_image",
-      onePasswordToken: "onepassword",
+      onePasswordToken: "onepassword", composioApiKey: "composio", openaiApiKey: "openai", anthropicApiKey: "anthropic",
+      openrouterApiKey: "openrouter", mistralApiKey: "mistral", cerebrasApiKey: "cerebras", groqApiKey: "groq", metaApiKey: "meta",
+      deepseekApiKey: "deepseek",
     };
     expect(Object.keys(expected).sort()).toEqual(Object.keys(CREDENTIAL_TARGETS).sort());
     for (const [target, provider] of Object.entries(expected)) expect(credentialProvider(target)).toBe(provider);

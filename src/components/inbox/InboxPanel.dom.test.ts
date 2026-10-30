@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const server = vi.hoisted(() => ({ calls: [] as Array<{ path: string; method: string; body?: unknown }>, view: null as null | { rows: Array<{ id: string; tab: string }> } }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("../../state/api", () => ({
   api: vi.fn(async (path: string, init?: RequestInit) => {
     server.calls.push({ path, method: init?.method ?? "GET", ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
@@ -13,7 +14,8 @@ vi.mock("../../state/api", () => ({
   }),
 }));
 
-import { initialState, StoreContext, type AppState } from "@/state/store";
+import { initialState, StoreContext, type AppState, type Bot } from "@/state/store";
+import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 import { closeInbox, currentInboxPanel, inboxVersion, openInbox, setInboxView, useInboxLoader } from "@/state/inbox";
 import { approvalRow, inboxView, messageRow, questionRow, reportRow, settledRow } from "@/testing/inbox-fixture";
 import type { InboxView } from "../../../shared/inbox";
@@ -24,9 +26,9 @@ import { InboxPanel } from "./InboxPanel";
 
 let root: Root;
 const dispatch = vi.fn();
-const mount = (child: ReactElement) => act(async () => {
+const mount = (child: ReactElement, bots: Bot[] = []) => act(async () => {
   root.render(createElement(StoreContext.Provider,
-    { value: { state: { ...initialState } as AppState, dispatch, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn() } as never }, child));
+    { value: { state: { ...initialState, bots } as AppState, dispatch, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn() } as never }, child));
 });
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 const click = (selector: string) => act(async () => { document.querySelector<HTMLElement>(selector)!.click(); });
@@ -99,6 +101,8 @@ describe("the inbox's card in the chat", () => {
     expect(document.querySelectorAll("[data-inbox-card]")).toHaveLength(1);
     expect(document.querySelector('[data-inbox-card="open"]')!.getAttribute("aria-label")).toBe("2 need you · 2 for your info");
     expect([...document.querySelectorAll("[data-inbox-card] [data-inbox-row]")].map((row) => (row as HTMLElement).dataset.inboxRow)).toEqual([approvalRow.id, questionRow.id]);
+    expect([...document.querySelectorAll('[data-inbox-card] [data-inbox-action="allow"]')].filter((button) => !button.closest("[data-inbox-row]")),
+      "the line the card sits under answers on its own card").toEqual([]);
     await click('[data-inbox-card] [data-inbox-choice="Pricing"]');
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "inbox", requestId: "req-question", behavior: "answer", message: "Pricing" }));
     await click('[data-inbox-card] header button');
@@ -118,6 +122,39 @@ describe("the inbox's card in the chat", () => {
     const cards = document.querySelectorAll("[data-inbox-card]");
     expect(cards).toHaveLength(1);
     expect(cards[0]!.getAttribute("data-inbox-card")).toBe("open");
+  });
+});
+
+describe("answer buttons in the asking bot's colour", () => {
+  const reporter = { id: "reporter", name: "Reporter", color: "orange" } as Bot;
+  /** The answer under a line, not the quick action on the row itself. */
+  const answer = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)].find((button) => !button.closest("[data-inbox-row]"))!;
+  const own = (selector: string) => {
+    const button = answer(selector);
+    expect(button.className.split(" ")).toContain(BOT_BUTTON);
+    expect(button.style.getPropertyValue("--bot-button")).toBe(botButtonTone("orange").fill);
+    expect(button.style.getPropertyValue("--bot-button-ink")).toBe(botButtonTone("orange").ink);
+  };
+
+  it("paints Allow on the chat's card and in the panel in the colour of the bot the line is from", async () => {
+    shown({ ...inboxView(), anchor: questionRow.id });
+    await mount(createElement(InboxCardSlot, { threadId: "inbox", messageId: questionRow.id }), [reporter]);
+    own('[data-inbox-card] [data-inbox-action="allow"]');
+    expect(answer('[data-inbox-card] [data-inbox-action="deny"]').className.split(" ")).not.toContain(BOT_BUTTON);
+    openInbox({ reading: approvalRow.id });
+    await mount(createElement(InboxPanel), [reporter]);
+    own('[data-inbox-reading] [data-inbox-action="allow"]');
+  });
+
+  it("keeps the plain primary for a teammate's line and for a bot this app does not know", async () => {
+    openInbox({ reading: messageRow.id });
+    await mount(createElement(InboxPanel), [reporter]);
+    const send = document.querySelector<HTMLElement>('[data-inbox-reading] button[type="submit"]')!;
+    expect(send.className.split(" ")).not.toContain(BOT_BUTTON);
+    expect(send.className.split(" ")).toContain("bg-accent");
+    shown({ ...inboxView(), anchor: questionRow.id });
+    await mount(createElement(InboxCardSlot, { threadId: "inbox", messageId: questionRow.id }));
+    expect(answer('[data-inbox-card] [data-inbox-action="allow"]').className.split(" ")).not.toContain(BOT_BUTTON);
   });
 });
 

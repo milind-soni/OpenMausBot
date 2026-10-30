@@ -22,11 +22,12 @@ function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
 
 describe("send_voice_note", () => {
   it("refuses a missing or blank note with the shape a retry needs", async () => {
-    for (const args of [{}, { text: "" }, { text: "   " }]) {
+    for (const args of [{}, { text: "   " }]) {
       const result = await callTool("send_voice_note", args, context());
       expect(result.isError, JSON.stringify(args)).toBe(true);
       expect(result.text).toContain("send_voice_note needs text");
     }
+    expect(await callTool("send_voice_note", { text: "" }, context())).toEqual({ text: "send_voice_note was not run: text must not be empty. Fix these and call it again.", isError: true });
   });
 
   it("refuses a note over 1000 characters and reports the length", async () => {

@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 
 import { BROWSER_UPLOAD_MAX_BYTES, FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 import { safeFileName } from "./browser/cdp/downloads.ts";
+import { inSecretFolder, SECRET_FILE_REFUSAL } from "./secret-folder.ts";
 
 const MAX_FILES = 10;
 const readChunk = promisify(read), writeChunk = promisify(write);
@@ -39,6 +40,7 @@ export function uploadableFiles(files: unknown, roots: readonly string[]): { fil
     if (!allowed.some((root) => inside(root, real))) {
       return { error: `${file} is not one of this conversation's attachments or in your working folder, so it cannot be uploaded. Ask the person to attach the file.` };
     }
+    if (inSecretFolder(real)) return { error: SECRET_FILE_REFUSAL };
     if (!statSync(real).isFile()) return { error: `${file} is not a file.` };
     resolved.push(real);
   }

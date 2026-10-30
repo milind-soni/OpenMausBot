@@ -6,7 +6,9 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import { lentScreenArguments, lentScreenToolListing } from "./lent-screen-tools.mjs";
+import { typeOneCharacterAtATime, typesInOneBurst } from "./paced-typing.mjs";
 import { helperMissing } from "./lent-screen-failures.mjs";
+import { commandPath } from "./shell-path.mjs";
 
 /** Reads stay under the 4 MB body that carries a result to the server (base64 of 2 MiB is 2.8 MB); writes stay small. */
 const READ_LIMIT = 2 * 1024 * 1024;
@@ -164,9 +166,11 @@ const hostEnvironment = () => Object.fromEntries(["PATH", "PATHEXT", "HOME", "US
 
 export const validCommandSeconds = value => value === undefined || (Number.isInteger(value) && value >= 1 && value <= MAX_COMMAND_SECONDS);
 
-export function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
+export async function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
   if (typeof command !== "string" || !command.trim() || command.length > 8000) throw new Error("Give a command of at most 8000 characters");
   if (!validCommandSeconds(seconds)) throw new Error(`Give timeout_seconds as a whole number from 1 to ${MAX_COMMAND_SECONDS}`);
+  signal.throwIfAborted();
+  const PATH = await commandPath();
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
     const windows = process.platform === "win32";
@@ -178,7 +182,7 @@ export function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
     const child = spawn(windows ? "powershell.exe" : "/bin/sh", windows ? ["-NoProfile", "-NonInteractive", "-Command", script] : ["-c", script], {
       cwd, detached: !windows, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
       // Without PATHEXT, PowerShell treats even .exe files as documents.
-      env: hostEnvironment(),
+      env: { ...hostEnvironment(), ...(PATH ? { PATH } : {}) },
     });
     const chunks = []; let bytes = 0; let reason; let settled = false;
     const graces = [];
@@ -212,7 +216,7 @@ export function sharedCommand(command, cwd, signal, seconds = COMMAND_SECONDS) {
 }
 
 /** Persistent transport: Cua observation references survive to the next call. Ending sharing closes this, not the app's daemon. */
-export function createSharedCua(connection) {
+export function createSharedCua(connection, { platform = process.platform } = {}) {
   const child = spawn(connection.mcpCommand, connection.mcpArgs, {
     stdio: ["pipe", "pipe", "ignore"], windowsHide: true,
     env: { ...hostEnvironment(), ...connection.mcpEnv },
@@ -247,7 +251,11 @@ export function createSharedCua(connection) {
     signal?.addEventListener("abort", abort, { once: true });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
   });
-  const ready = request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "omb-shared-desktop", version: "1" } }).then(() => child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n'));
+  let driver;
+  const ready = request("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "omb-shared-desktop", version: "1" } }).then(answer => {
+    driver = answer?.serverInfo;
+    child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+  });
   ready.catch(() => {});
   return {
     async call(operation, signal) {
@@ -260,6 +268,9 @@ export function createSharedCua(connection) {
       // Every tool and argument is checked here: nothing the server sends reaches the driver unless a lent screen accepts it.
       const lent = lentScreenArguments(operation.tool_name, operation.arguments);
       if (lent.error) throw new Error(lent.error);
+      if (typesInOneBurst(platform, driver?.version, operation.tool_name, lent.arguments)) {
+        return typeOneCharacterAtATime((name, args) => request("tools/call", { name, arguments: args }, signal), lent.arguments);
+      }
       return request("tools/call", { name: operation.tool_name, arguments: lent.arguments }, signal);
     },
     close() { lines.close(); fail(new Error("Computer sharing stopped")); },

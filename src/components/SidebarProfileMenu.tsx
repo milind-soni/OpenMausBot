@@ -23,6 +23,7 @@ import {
   Zap,
 } from "lucide-react";
 
+import { AccountMoveStatus, useAccountMove, type AccountMoveKind } from "./AccountMove";
 import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
@@ -41,7 +42,7 @@ import { api, useStore, type Action } from "@/state/store";
 import { serverCheckPhase, serverUpdateRow, type ServerUpdateCheck, type ServerUpdatePhase } from "@/lib/server-update";
 import type { CloudAccountBridge, CloudAccountState } from "../../electron/cloud-account.mjs";
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
-import { brand } from "../lib/brand";
+import { productName } from "../lib/brand";
 import { cloudColor } from "@/lib/cloud-look";
 import { cn } from "@/lib/cn";
 import { meterPercent, resetLine } from "@/lib/usage-meter";
@@ -105,8 +106,8 @@ export function updateLabel(phase: UpdatePhase, state: UpdaterState | null): str
     case "downloaded":
       return (
         state?.installMode === "handoff"
-          ? t("sidebar.update.readyInstall", { app: brand().name, version: state?.version ?? "" })
-          : t("sidebar.update.ready", { app: brand().name, version: state?.version ?? "" })
+          ? t("sidebar.update.readyInstall", { app: productName(), version: state?.version ?? "" })
+          : t("sidebar.update.ready", { app: productName(), version: state?.version ?? "" })
       ).replace("  ", " ");
     case "installing":
       return (
@@ -346,14 +347,30 @@ export function toolMenuItems({ activeView, automationsNeedYou, onAutomations, o
   ];
 }
 
-/** The Simple account button's name: the person, then whatever its dot is raised for. */
-export function accountLabel(name: string, { automationsNeedYou, update }: { automationsNeedYou: boolean; update: string | null }): string {
-  return [name, automationsNeedYou ? t("sidebar.account.automationsNeedYou") : "", update ?? ""].filter(Boolean).join(" · ");
+/** The account button's name: the person, then whatever its dot is raised for, then the move to My Cloud while it goes.
+ * A failing move and automations that need the person share one segment. */
+export function accountLabel(name: string, { automationsNeedYou, update, move = null }: { automationsNeedYou: boolean; update: string | null; move?: AccountMoveKind | null }): string {
+  const needsYou = move === "failed"
+    ? t(automationsNeedYou ? "sidebar.account.moveAndAutomationsNeedYou" : "sidebar.account.moveNeedsYou")
+    : automationsNeedYou ? t("sidebar.account.automationsNeedYou") : "";
+  return [name, needsYou, move === "sending" ? t("sidebar.account.moving") : "", update ?? ""].filter(Boolean).join(" · ");
+}
+
+export type AccountDot = "danger" | "accent";
+const DOT_COLOR: Record<AccountDot, string> = { danger: "bg-danger", accent: "bg-accent" };
+
+/** The avatar's dot: red while automations, a failed update or the failing move to My Cloud need the person, the accent
+ * for an update; none for the move on its way or done (what it brought waits in the menu). */
+export function accountDot({ automationsNeedYou, update, move }: { automationsNeedYou: boolean; update: "failed" | "news" | null; move: AccountMoveKind | null }): AccountDot | null {
+  if (automationsNeedYou || update === "failed" || move === "failed") return "danger";
+  return update ? "accent" : null;
 }
 
 /** `besideRail`: the window's rail of places stands beside the page and switches places, so Switch to… isn't offered twice. */
-export function placeMenuItems(place: Pick<WorkspacePlace, "bridge" | "current" | "cloudHome" | "onLine" | "openMenu" | "switchable">, { owner, onCloudSettings, besideRail = false }: {
+export function placeMenuItems(place: Pick<WorkspacePlace, "bridge" | "current" | "cloudHome" | "onLine" | "openMenu" | "switchable">, { owner, name, onCloudSettings, besideRail = false }: {
   owner: string | null;
+  /** A team's name on a team's Cloud. */
+  name?: string;
   onCloudSettings: () => void;
   besideRail?: boolean;
 }): SidebarMenuItem[] {
@@ -361,7 +378,7 @@ export function placeMenuItems(place: Pick<WorkspacePlace, "bridge" | "current" 
   if (!place.switchable) {
     if (!place.cloudHome && !place.current?.home) return [];
     const subtitle = [place.onLine, owner ? t("sidebar.cloudOwner", { email: owner }) : ""].filter(Boolean).join(" · ");
-    return [{ key: "place", label: t("cloudSetup.myCloud"), ...(subtitle ? { subtitle } : {}), icon: <Cloud size={16} />, trailing: here, onSelect: onCloudSettings }];
+    return [{ key: "place", label: name || t("cloudSetup.myCloud"), ...(subtitle ? { subtitle } : {}), icon: <Cloud size={16} />, trailing: here, onSelect: onCloudSettings }];
   }
   const current = place.current;
   const icon = cloudColor(current?.color) ? <CloudTile color={current?.color} size={16} />
@@ -436,6 +453,7 @@ export function profileMenuItems({
   usageSummary = null,
   update,
   updateTop = null,
+  move = [],
   account,
   simple,
   onUsage,
@@ -451,6 +469,8 @@ export function profileMenuItems({
   usageSummary?: UsageSummary | null;
   update: SidebarMenuItem | null;
   updateTop?: { label: string; action: string } | null;
+  /** the move to My Cloud's own rows, first of all (AccountMove) */
+  move?: SidebarMenuItem[];
   account: string | null;
   simple?: { tools: SidebarMenuItem[]; places: SidebarMenuItem[] };
   onUsage: () => void;
@@ -486,7 +506,10 @@ export function profileMenuItems({
   const settings: SidebarMenuItem = { key: "settings", label: t("sidebar.menu.settings"), icon: <SettingsIcon size={18} />, onSelect: onSettings };
   const accountItem: SidebarMenuItem | null = account ? { key: "account", label: account, icon: <CircleUserRound size={18} />, onSelect: onAccount } : null;
   const present = (...items: Array<SidebarMenuItem | null | false>) => items.filter((item): item is SidebarMenuItem => Boolean(item));
-  if (!simple) return [...present(usageItem), ...phone, support, settings, ...present(update), ...(accountItem ? [{ ...accountItem, separatorBefore: true }] : [])];
+  if (!simple) {
+    const rest = [...present(usageItem), ...phone, support, settings, ...present(update), ...(accountItem ? [{ ...accountItem, separatorBefore: true }] : [])];
+    return [...move, ...rest.map((item, index) => (move.length && index === 0 ? { ...item, separatorBefore: true } : item))];
+  }
   const raised: SidebarMenuItem | null = update && updateTop ? {
     ...update,
     label: updateTop.label,
@@ -495,6 +518,7 @@ export function profileMenuItems({
     trailing: <span className="flex h-6 shrink-0 items-center rounded-full bg-ink px-2.5 text-[12px] font-medium text-app">{updateTop.action}</span>,
   } : null;
   const groups = [
+    move,
     present(raised),
     [...present(usageItem), ...phone, { ...support, submenu: raised ? help : [...help, ...present(update)] }, settings],
     simple.tools,
@@ -555,6 +579,8 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const besideRail = railShown(usePlaces());
   const filesReady = useCloudFilesReady();
   const cloudAccount = !remote && Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true));
+  const openCloudAccount = () => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" });
+  const move = useAccountMove(state.config?.cloudHome === true, { onOpen: openCloudAccount, onPairPhone: () => dispatch(phonePairingSettingsAction()) });
 
   const items = profileMenuItems({
     phone: simple
@@ -569,6 +595,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
     usageSummary: cloudUsage ?? engineUsage,
     update: update?.item ?? null,
     updateTop: simple ? simpleUpdateTop(update) : null,
+    move: move.items,
     account: cloudAccount ? t("settings.section.cloudAccount") : null,
     ...(account ? { simple: {
       tools: toolMenuItems({
@@ -579,7 +606,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         onFiles: filesReady ? () => dispatch({ type: "showFiles" }) : undefined,
         archived: account.archived,
       }),
-      places: placeMenuItems(account.place, { owner: account.owner, besideRail, onCloudSettings: () => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }) }),
+      places: placeMenuItems(account.place, { owner: account.owner, name: state.config?.team?.name, besideRail, onCloudSettings: openCloudAccount }),
     } } : {}),
     onUsage: () => dispatch({ type: "toggleAppSettings", open: true, section: "usage" }),
     onSettings: () => dispatch({ type: "toggleAppSettings" }),
@@ -590,13 +617,16 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
     onAbout: () => setAboutOpen(true),
     onHelp: () => void openExternalLink(HELP_CENTER_URL),
     onFeedback: () => void openExternalLink(FEEDBACK_URL),
-    onAccount: () => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }),
+    onAccount: openCloudAccount,
   });
   const noteworthy = update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase);
   const needsYou = account?.automationsNeedYou === true;
   const initials = profileInitials(profile);
   const nameless = simple && initials === "?" ? <UserRound size={18} strokeWidth={1.75} aria-hidden /> : undefined;
-  const label = simple ? accountLabel(name, { automationsNeedYou: needsYou, update: noteworthy && update ? update.label : null }) : name;
+  const label = accountLabel(name, { automationsNeedYou: needsYou, update: simple && noteworthy && update ? update.label : null, move: move.kind });
+  const dot = accountDot({ automationsNeedYou: needsYou, update: noteworthy ? (update.phase === "error" ? "failed" : "news") : null, move: move.kind });
+  // Advanced's full row has its own update badge: its avatar's dot is the move's alone.
+  const moveDot = accountDot({ automationsNeedYou: false, update: null, move: move.kind });
 
   return (
     <>
@@ -615,15 +645,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             className={cn("relative flex size-9 items-center justify-center rounded-full ring-2 transition-shadow", open ? "ring-ink/15" : "ring-transparent hover:ring-ink/10")}
           >
             <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={36} fallback={nameless} fontSize={14} className="ring-1 ring-inset ring-ink/[0.04]" />
-            {(noteworthy || needsYou) && (
-              <span
-                aria-hidden
-                className={cn(
-                  "absolute -right-0.5 -top-0.5 size-2.5 rounded-full ring-2 ring-panel",
-                  needsYou || update?.phase === "error" ? "bg-danger" : "bg-accent",
-                )}
-              />
-            )}
+            {dot && <span aria-hidden data-account-dot={dot} className={cn("absolute -right-0.5 -top-0.5 size-2.5 rounded-full ring-2 ring-panel", DOT_COLOR[dot])} />}
           </span>
         ) : iconOnly ? (
           <span
@@ -636,15 +658,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             )}
           >
             <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={rail ? 30 : circle ? 26 : 28} />
-            {(noteworthy || needsYou) && (
-              <span
-                aria-hidden
-                className={cn(
-                  "absolute end-1 top-1 size-2.5 rounded-full ring-2 ring-app",
-                  needsYou || update?.phase === "error" ? "bg-danger" : "bg-accent",
-                )}
-              />
-            )}
+            {dot && <span aria-hidden data-account-dot={dot} className={cn("absolute end-1 top-1 size-2.5 rounded-full ring-2 ring-app", DOT_COLOR[dot])} />}
           </span>
         ) : (
           <span
@@ -654,8 +668,14 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
-            <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={28} />
-            <span className="min-w-0 flex-1 truncate text-[14px] font-medium leading-5 text-ink">{name}</span>
+            <span className="relative flex shrink-0">
+              <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={28} />
+              {moveDot && <span aria-hidden data-account-dot={moveDot} className={cn("absolute -right-0.5 -top-0.5 size-2 rounded-full ring-2 ring-app", DOT_COLOR[moveDot])} />}
+            </span>
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate text-[14px] font-medium leading-5 text-ink">{name}</span>
+              <AccountMoveStatus kind={move.kind} />
+            </span>
             {noteworthy && (
               <span
                 title={update.label}

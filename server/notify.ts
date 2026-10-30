@@ -23,6 +23,11 @@ export function buildSpendNotification(
   return { kind: "spend", botId: bot.id, botName: bot.name, threadId, title: text.title, body: summarize(text.body, 200) };
 }
 
+/** Something OpenMausBot did on its own about `bot` that the person hears once, in one plain line. */
+export function buildNoticeNotification(bot: Pick<NotifyBot, "id" | "name">, threadId: string, text: string): Notification {
+  return { kind: "notice", botId: bot.id, botName: bot.name, threadId, title: bot.name, body: summarize(text, 240) };
+}
+
 export function buildNotification(
   kind: NotifyKind,
   bot: Omit<NotifyBot, "threadId"> & { threadId?: string },
@@ -53,7 +58,9 @@ export function buildNotification(
                   ? `${who} resumed with results`
                   : kind === "mention"
                     ? `${who} mentioned you`
-                    : `${who} finished`;
+                    : kind === "wait"
+                      ? `${who}'s wait is over`
+                      : `${who} finished`;
 
   if ((kind === "done" || kind === "mention") && !body) return null;
 

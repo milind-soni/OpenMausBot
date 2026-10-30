@@ -389,6 +389,41 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`
   await assert.rejects(cua.call({ action: "computer_tools" }, signal), /disconnected/);
 });
 
+test("a lent Windows screen types foreground text one character at a time on a driver that sends it in one burst", async t => {
+  const { dir } = await fixture(t);
+  const script = path.join(dir, "cua-windows-fixture.mjs");
+  // Notepad behind cua-driver 0.28.2: of one SendInput burst only the first character lands, the rest repeat the last.
+  await writeFile(script, `import readline from 'node:readline'; let front = 7, document = ''; const calls = [];
+const hex = value => '0x' + value.toString(16);
+const answer = (name, args) => { calls.push(name);
+  if (name === 'bring_to_front') { const previous = front; front = args.window_id; return { content: [], structuredContent: { previous_fg_hwnd: hex(previous), target_hwnd: hex(front) } }; }
+  if (name === 'list_windows') return { content: [], structuredContent: { windows: [{ window_id: 7, pid: 70 }, { window_id: 9, pid: 90 }] } };
+  if (name === 'type_text') { const text = args.text; document += text.length < 2 ? text : text[0] + text.at(-1).repeat(text.length - 1); return { content: [{ type: 'text', text: 'typed' }], structuredContent: { effect: 'unverifiable', route: 'global_input' } }; }
+  return { content: [{ type: 'text', text: JSON.stringify({ document, calls, front }) }] }; };
+readline.createInterface({input:process.stdin}).on('line', line => { const m=JSON.parse(line); if(!m.id)return;
+const result=m.method==='initialize'?{protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'cua-driver',version:'0.28.2'}}:answer(m.params.name, m.params.arguments);
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n'); });`);
+  const signal = new AbortController().signal;
+  const typing = { action: "computer_call", tool_name: "type_text", arguments: { pid: 90, window_id: 9, delivery_mode: "foreground", text: "Notiz, 28.10" } };
+  const state = async cua => JSON.parse((await cua.call({ action: "computer_call", tool_name: "get_screen_size" }, signal)).content[0].text);
+  for (const platform of ["win32", "darwin"]) {
+    const cua = createSharedCua({ mcpCommand: process.execPath, mcpArgs: [script] }, { platform });
+    t.after(() => cua.close());
+    const typed = await cua.call(typing, signal);
+    const after = await state(cua);
+    if (platform === "win32") {
+      assert.equal(after.document, "Notiz, 28.10");
+      assert.equal(typed.content[0].text, "✅ Typed 12 char(s) on pid 90 via SendInput (delivery_mode:foreground), one character at a time.");
+      assert.deepEqual(after.calls, [..."Notiz, 28.10"].flatMap(() => ["bring_to_front", "type_text"]).concat("list_windows", "bring_to_front", "get_screen_size"));
+      assert.equal(after.front, 7);
+    } else {
+      assert.equal(after.document, "N00000000000");
+      assert.deepEqual(after.calls, ["type_text", "get_screen_size"]);
+    }
+    cua.close();
+  }
+});
+
 test("a protected directory spelled in another case is still refused", async t => {
   const { dir, folder, grant, run } = await fixture(t);
   if (!(await spellings(dir)).case) return t.skip("this filesystem is case-sensitive, so no case variant names the same directory");
