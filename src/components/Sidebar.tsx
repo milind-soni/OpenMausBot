@@ -1495,7 +1495,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
                   : sectionName
                     ? sectionedBots.filter((bot) => bot.section === sectionName)
                     : [];
-            const headless = simpleDesk ? id === PINNED_SECTION_ID || id === BOTS_SECTION_ID : simple && id === BOTS_SECTION_ID && index === 0;
+            const headless = simple && id === BOTS_SECTION_ID && index === 0;
             const collapsed = !headless && sectionCollapsed(id);
             const queued = collapsed ? [...sectionChiefItems, ...sectionBotItems].flatMap((bot) =>
               sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.queued).map((task) => `${bot.name}: ${task.title}`)) : [];

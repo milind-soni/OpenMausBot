@@ -498,8 +498,8 @@ export interface WireMessage extends HelperIntroField, SetupCardFields, WaitLine
   /** activity messages: tool name + outcome. */
   tool?: {
     name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string;
-    /** What the call works on, as its live status said it: the chip's and the "Now" card's specific words. */
-    step?: import("./turn-progress.ts").LiveStep;
+    /** What the call works on, as its live status said it: the chip's and the "Now" card's specific words. `whose`: the person whose own app or MCP server the call used. */
+    step?: import("./turn-progress.ts").LiveStep; whose?: { person: string; app: string };
     /** error rows: the installed Claude Code is too old for the model, and
      * the UI can offer to update it in place. notice rows: `rescue`, a turn that heard nothing from its AI for a while. */
     claudeUpdate?: boolean; rescue?: import("./first-reply-rescue.ts").FirstReplyRescue;
@@ -827,8 +827,8 @@ export interface GroupTask {
   pinnedMessageId?: string;
   /** The person pinned this channel thread above the update-ordered list. */
   pinned?: boolean;
-  /** This conversation's own turn ceiling, in whole minutes. Absent uses
-   * the global group turn limit. Direct chats do not use this ceiling. */
+  /** This conversation's own turn limit: whole minutes a turn may go without progress. Absent uses
+   * the global group turn limit. Direct chats do not use this limit. */
   turnTimeoutMinutes?: number;
   /** Epoch ms of the newest message, or createdAt when the thread has none. */
   updatedAt?: number;
@@ -890,7 +890,7 @@ export interface WireGroup {
   /** True while any member (or hand-off) is mid-turn. Computed at
    * projection time, never persisted. */
   working: boolean;
-  /** A direct-message channel's turn ceiling. Null on the wire means the
+  /** A direct-message channel's turn limit (minutes without progress). Null on the wire means the
    * global group limit. Channel conversations store theirs on each task. */
   turnTimeoutMinutes?: number | null;
   /** Members the person stopped in this room ("stop @Bot"), by bot id. A

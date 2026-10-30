@@ -1,7 +1,14 @@
 import type { Dispatch } from "react";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { api, type Action, type AppState, type Bot } from "@/state/store";
 
 const failure = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+
+/** Whether this person may move bots, from a menu or by dragging: into or out of a department, or to another place in
+ * a list. */
+export function useMayMoveBots(): boolean {
+  return useOwnerOrAdmin() !== false;
+}
 
 /** Every department in use, in the order the workspace lists them. */
 export function departmentNames(state: Pick<AppState, "sections" | "bots" | "groups">): string[] {

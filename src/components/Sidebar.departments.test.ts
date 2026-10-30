@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Action, AppState, Bot, Group } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({
-  values: [] as unknown[], index: 0, advanced: false, phone: false,
+  values: [] as unknown[], index: 0, advanced: false, phone: false, admin: null as boolean | null,
   state: {} as AppState, dispatch: vi.fn(), storage: new Map<string, string>(),
   requests: [] as Array<{ path: string; method: string; body: unknown }>,
 }));
@@ -37,6 +37,7 @@ vi.mock("./DesktopCapabilities", async () => {
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) };
@@ -109,6 +110,7 @@ beforeEach(() => {
   fixture.values = [];
   fixture.advanced = false;
   fixture.phone = false;
+  fixture.admin = null;
   fixture.storage = new Map();
   fixture.requests = [];
   rowElements = [];
@@ -288,6 +290,37 @@ describe("dragging a bot", () => {
     drag("dodo");
     row("atlas").botDrag!.row("atlas").onDrop(at() as never);
     expect(header(NEW_DEPARTMENT).naming!.value).toBe("New department");
+  });
+});
+
+describe("who may drag a bot: whoever the bot menu offers Move to department", () => {
+  it("gives a Team Cloud member without the admin scope no row to drag and no Alt+Up/Down, and starts no drag", () => {
+    const drawnEarlier = row("atlas").botDrag!;
+    fixture.admin = false;
+    expect(listed()).toEqual(["atlas", "bea", "cleo", "dodo", "echo"]);
+    expect(rows().map((props) => props.botDrag)).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    carried = transfer();
+    drawnEarlier.row("atlas").onDragStart(at() as never);
+    drawnEarlier.step("atlas", 1);
+    expect(carried.types).toEqual([]);
+    expect(actions()).toEqual([]);
+  });
+
+  it("drops nothing from a drag begun before the session said they are a member", () => {
+    drag("atlas");
+    fixture.admin = false;
+    section(userSectionId("Work")).onDragOver(at() as never);
+    section(userSectionId("Work")).onDrop(at() as never);
+    expect(actions()).toEqual([]);
+    expect(fixture.requests).toEqual([]);
+  });
+
+  it("lets an admin drag", () => {
+    fixture.admin = true;
+    for (const props of rows()) expect(props.botDrag!.row(props.bot.id).draggable).toBe(true);
+    drag("atlas");
+    section(userSectionId("Work")).onDrop(at() as never);
+    expect(actions()).toEqual([{ type: "updateBot", botId: "atlas", patch: { section: "Work" } }, { type: "botsOrdered", botIds: ["dodo", "echo", "atlas"] }]);
   });
 });
 
