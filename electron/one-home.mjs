@@ -189,8 +189,14 @@ export function createOneHome(deps) {
   };
 
   /** What the line on either page says: the phase, its progress, who it waits for, a day of failing, the done line
-   * until it is closed, and coming home. Null when there is nothing to say. */
+   * until it is closed, and coming home; `place`, a server of the person's own the move goes to, by its name. Null when
+   * there is nothing to say. */
   function view() {
+    const seen = phaseView(), place = read()?.cloud?.name;
+    return seen && typeof place === "string" ? { ...seen, place } : seen;
+  }
+
+  function phaseView() {
     const journal = read();
     if (!journal || journal.paused || (journal.told && journal.phase !== "keeping")) return null;
     if (journal.phase === "done") return { phase: "done", ...(Number.isSafeInteger(journal.doneAt) ? { at: journal.doneAt } : {}), ...(journal.counts ? { counts: journal.counts } : {}), phone: journal.phone === true, held: journal.held ?? [] };
@@ -314,7 +320,7 @@ export function createOneHome(deps) {
       }
       const computer = sentence((await deps.local.json("/api/cloud-connections").catch(() => null))?.computer?.label) ?? "this computer";
       const webhooks = Object.keys(switches).flatMap((key) => (key.startsWith("webhook:") ? [key.slice("webhook:".length)] : []));
-      const arrived = await session.call("POST", "/api/cloud-send/arrived", { v: 1, computer, webhooks });
+      const arrived = await session.call("POST", "/api/cloud-send/arrived", { v: 1, computer, webhooks, ...(journal.cloud.name ? { place: journal.cloud.name } : {}) });
       if (!arrived.ok) throw tagged(sentence(arrived.body?.error) ?? "My Cloud did not finish the move.", "switch_refused", { status: arrived.status });
     } catch (error) {
       log(`one home: switching over goes on later (${error?.message ?? error})`);
@@ -546,7 +552,7 @@ export function createOneHome(deps) {
       // A frozen server with no move under way is one this app no longer knows about: it is never lifted blindly.
       noted = await deps.local.frozen().then((frozen) => (frozen ? "frozen_without_move" : null), () => "local_unavailable");
       if (noted) { log(`one home: ${noted === "frozen_without_move" ? "this computer is frozen with no move under way" : "this computer's server did not say whether it is frozen"}`); return; }
-      journal = write({ v: 1, phase: "copy", cloud: { origin: cloud.origin, account: cloud.account, machine: cloud.machine }, startedAt: now() });
+      journal = write({ v: 1, phase: "copy", cloud: { origin: cloud.origin, account: cloud.account, machine: cloud.machine, ...(cloud.name ? { name: cloud.name } : {}) }, startedAt: now() });
     }
     if (journal.thaw && !(await thaw(journal))) return;
     journal = read() ?? journal;
