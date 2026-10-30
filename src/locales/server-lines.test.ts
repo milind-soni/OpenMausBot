@@ -385,28 +385,9 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/escalations.ts", "in its main conversation"],
     ["server/escalations.ts", "… 's work  …  is parked at a gate:  … ."],
     ["server/host/delegated-level.ts", "…  — delegated by  … ,  … a Chief of Staff on  …"],
-    ["server/host/goal-cards.ts", "…  is coordinating this goal."],
-    ["server/host/goal-cards.ts", "Goal in progress:  …"],
-    ["server/host/goal-cards.ts", "needs your input"],
-    ["server/host/goal-cards.ts", "reached its limit"],
-    ["server/host/handoff-sent.ts", "this room"],
-    ["server/host/handoff-sent.ts", "Sent to  …  directly: it isn't in  … ."],
-    ["server/host/handoff-sent.ts", "Sent to  …  …"],
-    ["server/host/person-inbox.ts", "… 's assistant answered"],
-    ["server/host/team-messages.ts", "Not passed to  …"],
-    ["server/index.ts", "Send failed —  …"],
-    ["server/index.ts", "Result withheld:  …"],
-    ["server/index.ts", "delegated work"],
-    ["server/index.ts", "Resumed with a question from  …"],
-    ["server/index.ts", "Resumed with  …  results"],
-    ["server/index.ts", "Answer passed to the waiting work"],
     ["server/peer-approval.ts", "@ …  wants to  …   …"],
-    ["server/recall-disclosure.ts", "…  recalled  …  message …  from its private chat with you"],
-    ["server/recall-disclosure.ts", "… 's recent-work brief covers  …  private chat …  with you"],
-    ["server/routes/internal-threads.ts", "Closed by @ …"],
     ["server/store.ts", "needs your input"],
     ["server/store.ts", "reached its turn limit"],
-    ["server/waiting-on-person.ts", "Queued for @ …  behind your  …  in “ … ”"],
   ],
   "AI engines and limits": [
     ["server/cloud-credit-moves.ts", "notice:  …  is connected, so this conversation uses it now instead of"],
@@ -541,6 +522,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
 
 
 
+
 const listed = (finding: Finding, file: string, snippet: string) => finding.file === file && finding.text.includes(snippet);
 
 describe("lines the server writes for a person", () => {
@@ -582,8 +564,8 @@ describe("lines the server writes for a person", () => {
     expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toMatch(/(?:^|;\s*)import "\.\/server-line-packs\.ts";/m);
   });
 
-  it("titles notifications in the language of the conversation's person (server/notify.ts)", () => {
-    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toContain("setNotificationLanguage(threadLanguage);");
+  it("tells every module the language of a conversation's person (server/server-lines.ts)", () => {
+    expect(readFileSync(join(ROOT, "server/index.ts"), "utf8")).toContain("setConversationLanguage(threadLanguage);");
   });
 });
 

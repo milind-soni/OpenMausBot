@@ -1,6 +1,6 @@
 import type { Notification, NotifyKind } from "../shared/notification.ts";
 import { personMentionExcerpt } from "../shared/person-mention.ts";
-import { serverLine, type ServerLineKey } from "./server-lines.ts";
+import { conversationLanguage, serverLine, type ServerLineKey } from "./server-lines.ts";
 
 export type { Notification, NotifyKind } from "../shared/notification.ts";
 
@@ -29,14 +29,6 @@ export function buildNoticeNotification(bot: Pick<NotifyBot, "id" | "name">, thr
   return { kind: "notice", botId: bot.id, botName: bot.name, threadId, title: bot.name, body: summarize(text, 240) };
 }
 
-/** Which language a conversation's notifications are titled in: its person's (server/index.ts sets this at start). Before
- * that, and in tests that set none, English. */
-let titleLanguage: (threadId: string) => string | undefined = () => undefined;
-export function setNotificationLanguage(language: (threadId: string) => string | undefined): void {
-  titleLanguage = language;
-}
-/** The language notifications about this conversation are titled in. */
-export const notificationLanguage = (threadId: string): string | undefined => titleLanguage(threadId);
 
 const TITLE: Partial<Record<NotifyKind, ServerLineKey>> = {
   approval: "server.notify.approval",
@@ -60,7 +52,7 @@ export function buildNotification(
   if (bot.notifications === false) return null;
 
   const body = summarize(detail);
-  const language = titleLanguage(threadId);
+  const language = conversationLanguage(threadId);
   const who = extra?.group ? serverLine(language, "server.notify.inRoom", { bot: bot.name, room: extra.group.name }) : bot.name;
   const title = kind === "sign-in"
     ? extra?.site ? serverLine(language, "server.notify.signIn", { who, site: extra.site }) : serverLine(language, "server.notify.signInWebsite", { who })

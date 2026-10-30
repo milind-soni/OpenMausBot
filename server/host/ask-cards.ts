@@ -13,6 +13,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { isStopCommand } from "../room-holds.ts";
 import { needsInputQuestion } from "../runtime-coordinator.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
+import { conversationLanguage } from "../server-lines.ts";
 import { settledWaitingChip } from "../waiting-on-person.ts";
 
 const OPEN_QUESTION = "needs-input-";
@@ -81,7 +82,7 @@ export function createAskCards(deps: AskCardsDeps) {
       const existing = store.messagesFor(chip.threadId).find((message) => message.id === chip.messageId);
       if (!existing?.tool) continue;
       store.patchMessage(chip.threadId, chip.messageId, {
-        tool: { ...existing.tool, ...settledWaitingChip(chip.name, chip.kind, resolved?.behavior ?? "deny", resolved?.source ?? "system") },
+        tool: { ...existing.tool, ...settledWaitingChip(chip.name, chip.kind, resolved?.behavior ?? "deny", resolved?.source ?? "system", conversationLanguage(chip.threadId)) },
       });
     }
   }

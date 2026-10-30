@@ -45,6 +45,15 @@ export function isServerLine(key: ServerLineKey, text: string): boolean {
   });
 }
 
+let languageOf: (threadId: string) => string | undefined = () => undefined;
+/** Where the server learns which language a conversation's lines are written in: its person's, else the place's
+ * (server/index.ts sets this at start). Before that, and in tests that set none, English. */
+export function setConversationLanguage(resolver: (threadId: string) => string | undefined): void {
+  languageOf = resolver;
+}
+/** The language a line in this conversation is written in, for code with no person or language of its own at hand. */
+export const conversationLanguage = (threadId: string): string | undefined => languageOf(threadId);
+
 /** The language a line for this person is written in: their app's, else the place's (host/person-languages.ts).
  * Undefined reads as English. */
 export type LineLanguage = (person?: string) => string | undefined;

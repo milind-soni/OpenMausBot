@@ -44,7 +44,7 @@ import { escapeAttribute } from "../src/lib/composer-attachments.ts";
 import { isPendingSignInRequest, normalizeSignInSite, signInOutcome, signInResumePrompt } from "../shared/sign-in-request.ts";
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
-import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { serverLine } from "./server-lines.ts";
+import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { serverLine, setConversationLanguage } from "./server-lines.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
 import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
@@ -197,7 +197,7 @@ import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAle
 import { fleetAvailable, fleetSocketPath } from "./fleet-client.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { cliProbeEnvironment, testCliBinary } from "./cli-probe.ts";
-import { buildMentionNotification, buildNoticeNotification, buildNotification, buildSpendNotification, setNotificationLanguage, type Notification } from "./notify.ts";
+import { buildMentionNotification, buildNoticeNotification, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
 import {
   isModelVariant,
   TurnNotStartedError, TurnAuthenticationRefusedError, TurnUsageLimitRefusedError,
@@ -293,7 +293,7 @@ import { computerEngineMoveText, removedComputerInstanceIds, writeComputerEngine
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "./peer-delivery.ts";
 import { createRoomAccess, PRIVATE_CHAT_ROOM_WRITE } from "./host/room-access.ts";
-import { outsideRoomNote, sentRow } from "./host/handoff-sent.ts";
+import { outsideRoomNote, sentRow, teammateResultRow } from "./host/handoff-sent.ts";
 import { createWebhookRoomPost } from "./host/webhook-room-deps.ts";
 import { createRoomJobs, parallelRoomJobsEnabled, type RoomRoundLine } from "./host/room-jobs.ts";
 import { createDelegatedLevel } from "./host/delegated-level.ts";
@@ -684,7 +684,7 @@ const CLOUD_ENV: NodeJS.ProcessEnv = { ...process.env, ...CLOUD_SECRETS };
 const CLOUD_HOME = cloudHomeConfiguration(CLOUD_ENV);
 const CLOUD_TEAM = CLOUD_HOME?.team ?? null, CLOUD_PERSONAL = CLOUD_HOME !== null && CLOUD_TEAM === null, TEAM_LABEL = CLOUD_TEAM ? { label: CLOUD_TEAM.name } : {};
 /** The language set on this server, else (on a Team Cloud) the team's default from the Admin. threadLanguage: the one a line in a conversation is written in, its person's, else the place's (server/server-lines.ts). */
-const appLanguage = (): string | undefined => cfg.language ?? CLOUD_TEAM?.language; const personLanguages = createPersonLanguages({ dataDir: DATA_DIR, configured: appLanguage }); const threadLanguage = (threadId: string): string | undefined => personLanguages.forLine(teamConversationPerson(threadId) ?? threadPersonKey(threadId)); setNotificationLanguage(threadLanguage);
+const appLanguage = (): string | undefined => cfg.language ?? CLOUD_TEAM?.language; const personLanguages = createPersonLanguages({ dataDir: DATA_DIR, configured: appLanguage }); const threadLanguage = (threadId: string): string | undefined => personLanguages.forLine(teamConversationPerson(threadId) ?? threadPersonKey(threadId)); setConversationLanguage(threadLanguage);
 if (CLOUD_HOME) repairMovedWorkspacePaths(DATA_DIR);
 if (CLOUD_PERSONAL) sessions.requireAdmin(CLOUD_PERSONAL_REFUSAL);
 const lendingEnabled = () => sharedComputersEnabled(cfg) || CLOUD_HOME !== null;
@@ -3860,7 +3860,7 @@ function noteQueuedBehindPerson(node: HandoffView): void {
   store.appendMessage(parent.threadId, { role: "bot", kind: "activity",
     from: { botId: bot.id, name: bot.name, color: bot.color },
     // A notice, not a step: nothing settles it, so it must never read as running.
-    tool: { name: queuedBehindPersonText(bot.name, card.kind, card.title), ok: true },
+    tool: { name: queuedBehindPersonText(bot.name, card.kind, card.title, threadLanguage(parent.threadId)), ok: true },
     threadRef: { botId: bot.id, threadId: card.threadId, title: card.title },
   });
 }
@@ -4015,7 +4015,7 @@ const coordinator: Coordinator = createCoordinator({
       if (child.mode === "notify") {
         if (child.status !== "completed" && store.taskByThread(child.botId, child.threadId)) {
           store.appendMessage(child.threadId, { role: "bot", kind: "activity",
-            tool: { name: `Send failed — ${child.result.split("\n", 1)[0]!.slice(0, 180)}`, ok: false, ...(child.id ? { handoffId: child.id } : {}) } });
+            tool: { name: serverLine(threadLanguage(child.threadId), "server.teammates.sendFailed", { detail: child.result.split("\n", 1)[0]!.slice(0, 180) }), ok: false, ...(child.id ? { handoffId: child.id } : {}) } });
         }
         return;
       }
@@ -4030,9 +4030,7 @@ const coordinator: Coordinator = createCoordinator({
         roomRequest: { id: child.id, phase: "result" },
         from: bot ? { botId: bot.id, name: bot.name, color: bot.color } : undefined,
         tool: {
-          name: problem ? `Result withheld: ${problem}`
-            : child.status === "completed" ? `${bot?.name ?? "Teammate"} replied${child.groupId ? ` · ${store.group(child.groupId)?.name ?? "Room"}` : ""}`
-            : `${bot?.name ?? "Teammate"} — ${child.status}: ${child.result.split("\n", 1)[0]!.slice(0, 180)}`,
+          name: teammateResultRow(threadLanguage(parent.threadId), child, bot?.name, problem, child.groupId ? store.group(child.groupId)?.name : undefined),
           ok: child.status === "completed" && !problem,
           ...(child.status === "completed" && !problem && child.result.trim()
             ? { output: redactSecretsInText(child.result.trim()).slice(0, 2_000) } : {}),
@@ -4079,15 +4077,15 @@ const coordinator: Coordinator = createCoordinator({
       if (resumed && !group) {
         const asking = coordinator.children(node.id).filter(child => child.question !== undefined && !child.cards?.length);
         const settledFrom = [...new Set((asking.length ? asking : coordinator.children(node.id)).map(child => store.bot(child.botId)?.name ?? "Teammate"))];
-        const who = settledFrom.length ? settledFrom.join(", ") : "delegated work";
+        const language = threadLanguage(node.threadId), who = settledFrom.length ? settledFrom.join(", ") : serverLine(language, "server.teammates.delegatedWork");
         store.appendMessage(node.threadId, {
           role: "bot", kind: "activity",
-          tool: { name: `${asking.length ? `Resumed with a question from ${who}` : `Resumed with ${who} results`}${node.restart ? " after a restart" : ""}, reviewing`, ok: true },
+          tool: { name: serverLine(language, asking.length ? node.restart ? "server.teammates.resumedQuestionRestart" : "server.teammates.resumedQuestion" : !settledFrom.length ? node.restart ? "server.teammates.resumedWorkResultsRestart" : "server.teammates.resumedWorkResults" : node.restart ? "server.teammates.resumedResultsRestart" : "server.teammates.resumedResults", { who }), ok: true },
         });
         const quiet = turnAnswers(node.threadId, { cardContinuation: true, coordination: node }).quiet;
         const routineRoot = !node.parentId && activeRoutineRunForThread(node.threadId) !== null;
         if (node.restart !== "rerun" && !quiet && !routineRoot && asking.length === 0) {
-          notify(buildNotification("delegation-settled", bot, node.threadId, serverLine(threadLanguage(node.threadId), "server.notify.resultsFrom", { who }), { avatarUrl: bot.avatarUrl }));
+          notify(buildNotification("delegation-settled", bot, node.threadId, serverLine(language, "server.notify.resultsFrom", { who }), { avatarUrl: bot.avatarUrl }));
         }
       if (!node.parentId && !quiet) reviewAnswerThreads.add(node.threadId);
       } else if (node.restart === "rerun" && !group) {
@@ -7832,7 +7830,7 @@ async function startTurn(
     && !opts?.computerSelectionContinuation && !opts?.editedMessageId && !commsDepth && !opts?.peerAsk && !userMessage.peerAsk;
   if (personLine && coordinator.answer(threadId, text)) {
     askCards.answeredInWords(threadId, text);
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Answer passed to the waiting work", ok: true } });
+    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(threadId), "server.teammates.answerPassed"), ok: true } });
     opts?.onTurnSettled?.();
     queueMicrotask(drainQueuedSends);
     return userMessage;
@@ -10303,7 +10301,7 @@ async function runClaimedGroupMemberTurn(
         role: "bot",
         kind: "activity",
         from: { botId: bot.id, name: bot.name, color: bot.color },
-        tool: { name: briefCrossingLabel(bot.name, crossing.count), ok: true },
+        tool: { name: briefCrossingLabel(bot.name, crossing.count, threadLanguage(threadId)), ok: true },
       });
     }
   }
@@ -13712,7 +13710,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           role: "bot",
           kind: "activity",
           from: { botId: bot.id, name: bot.name, color: bot.color },
-          tool: { name: recallCrossingLabel(bot.name, crossing.count), ok: true },
+          tool: { name: recallCrossingLabel(bot.name, crossing.count, threadLanguage(threadId)), ok: true },
         });
       };
       if (method === "GET" && path === "/api/internal/session-search") {
@@ -13996,7 +13994,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             }));
             if (!duplicate) {
               if (!EXTERNAL) delegatedThisTurn(node.id);
-              store.appendMessage(address.threadId, sentRow({ sender: internalSender, recipient, threadId: node.threadId, room: addressedRoom, via,
+              store.appendMessage(address.threadId, sentRow({ sender: internalSender, recipient, threadId: node.threadId, room: addressedRoom, via, language: threadLanguage(address.threadId),
                 reason: call.reason, doneWhen: call.doneWhen ? redactSecretsInText(call.doneWhen) : undefined, title: store.taskByThread(recipient.id, node.threadId)?.title }));
             }
           } catch (error) {

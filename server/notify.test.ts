@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { buildNotification, buildSpendNotification, notificationLanguage, setNotificationLanguage, summarize } from "./notify.ts";
+import { buildNotification, buildSpendNotification, summarize } from "./notify.ts";
+import { conversationLanguage, setConversationLanguage } from "./server-lines.ts";
 import "./server-line-packs.ts";
 
 const bot = { id: "bot-1", name: "Scout", threadId: "thread-1" };
@@ -128,12 +129,12 @@ describe("buildSpendNotification", () => {
 });
 
 describe("a notification's title", () => {
-  afterEach(() => setNotificationLanguage(() => undefined));
+  afterEach(() => setConversationLanguage(() => undefined));
 
   it("is in the language of the conversation's person", () => {
-    setNotificationLanguage((threadId) => (threadId === "beaver-main" ? "de" : undefined));
+    setConversationLanguage((threadId) => (threadId === "beaver-main" ? "de" : undefined));
     const bot = { id: "beaver", name: "Biber", threadId: "beaver-main" };
-    expect(notificationLanguage("beaver-main")).toBe("de");
+    expect(conversationLanguage("beaver-main")).toBe("de");
     expect(buildNotification("routine-failed", bot, "beaver-main", "Nightly report: signed out")?.title).toBe("Routine von Biber ist fehlgeschlagen");
     expect(buildNotification("question", bot, "beaver-main", "Send it?", { group: { id: "launch", name: "Launch" } })?.title).toBe("Biber in Launch hat eine Frage");
     expect(buildNotification("sign-in", bot, "beaver-main", "", { site: "github.com" })?.title).toBe("Biber braucht deine Anmeldung bei github.com");
