@@ -3,7 +3,7 @@ import { ArrowUp, Check, Plus } from "lucide-react";
 import { BotAvatar, MausAvatar } from "@/components/Avatar";
 import { engineReady } from "@/components/EngineLibrary";
 import { usePrefersReducedMotion } from "@/components/mascot-clock";
-import { brand } from "@/lib/brand";
+import { brand, productName } from "@/lib/brand";
 import { cn } from "@/lib/cn";
 import { DEFAULT_BOT_NAME, myDefaultBot, useViewerEmail } from "@/lib/default-bot";
 import { activeLocale, t } from "@/lib/i18n";
@@ -42,7 +42,7 @@ function DemoComposer({ reduced, onTyping }: { reduced: boolean; onTyping: (typi
     <div aria-hidden="true" data-demo-composer=""
       className="absolute left-1/2 top-[calc(50%-14px)] flex min-h-[76px] w-[348px] max-w-[calc(100%-32px)] -translate-x-1/2 select-none flex-col gap-2.5 rounded-[20px] border-[0.5px] border-ink/10 bg-composer px-2 pb-2 pt-3 text-left [:root[data-skin=daylight]_&]:shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03)]">
       <div className="mx-2 whitespace-nowrap text-[14px] leading-5">
-        {waiting ? <span className="text-ink-tertiary">{t("onboarding.meet.placeholder", { app: brand().name })}</span> : <span className="text-ink">{text}</span>}
+        {waiting ? <span className="text-ink-tertiary">{t("onboarding.meet.placeholder", { app: productName() })}</span> : <span className="text-ink">{text}</span>}
         {!reduced && (waiting || typing) && <span className="animate-meet-caret ml-px inline-block h-[15px] w-[1.5px] translate-y-[2px] bg-ink align-[-2px]" />}
       </div>
       <div className="flex items-center justify-between">
@@ -79,7 +79,7 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
   return (
     <div className="relative h-full min-h-[600px] w-full text-center">
       <h1 id="welcome-title" className="absolute left-1/2 top-[calc(50%-264px)] w-max max-w-[min(560px,calc(100%-32px))] -translate-x-1/2 text-[28px] font-normal leading-[34px] tracking-[-0.02em] text-ink">
-        {t("onboarding.meet.title", { app: brand().name })}
+        {t("onboarding.meet.title", { app: productName() })}
       </h1>
       <span className="absolute left-1/2 top-[calc(50%-75px)] flex -translate-x-1/2 -translate-y-1/2" style={{ width: MASCOT_SIZE, height: MASCOT_SIZE }}>
         {logo ? (

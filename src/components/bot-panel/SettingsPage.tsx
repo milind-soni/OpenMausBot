@@ -16,6 +16,7 @@ import { SoulField } from "../SoulField";
 import { useBotApps } from "../bot-settings/useBotApps";
 import type { useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import { useThreadApproval } from "../thread-approval";
+import { BackupAis } from "./BackupAis";
 import type { SimplePageId } from "./page-registry";
 import { buttonCls, Card, ColRow, NavRow, RowIcon, rowCls, RowText, Segmented, type SegmentOption } from "./rows";
 
@@ -36,7 +37,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
   editingInstructions?: boolean;
   onEditInstructions?: (open: boolean) => void;
 }) {
-  const { dispatch } = useStore();
+  const { dispatch, flushBotPatches } = useStore();
   const { capabilities, ready } = useDesktopCapabilities();
   const apps = useBotApps(bot);
   const approval = useThreadApproval(currentTaskBot(bot));
@@ -92,7 +93,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
             />
             {editingInstructions && (
               <div className="flex justify-end">
-                <button type="button" data-panel-done="soul" onClick={() => onEditInstructions?.(false)} className={buttonCls}>
+                <button type="button" data-panel-done="soul" onClick={() => { void flushBotPatches(bot.id); onEditInstructions?.(false); }} className={buttonCls}>
                   {t("botSettings.simple.done")}
                 </button>
               </div>
@@ -141,6 +142,8 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
           )}
         </ColRow>
       </Card>
+
+      <BackupAis bot={bot} onChange={(fallback) => patch({ fallback })} />
 
       <Card anchor="call">
         <ColRow data-panel-row="call-mode">

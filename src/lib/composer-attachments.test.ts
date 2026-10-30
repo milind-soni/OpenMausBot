@@ -22,7 +22,23 @@ import {
   composerTakesFocusOnOpen,
   replyTargetTakesFocus,
   dataContextFor,
+  discardUnsentUpload,
 } from "./composer-attachments";
+
+describe("discardUnsentUpload", () => {
+  it("asks the server to drop an uploaded file taken off the message, and nothing else", () => {
+    const fetchMock = vi.fn(async () => new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      discardUnsentUpload(fileAttachment("notes.txt", "/home/a/.openmausbot/attachments/0f1e2d3c-aaaa-4bbb-8ccc-123456789abc.txt", 3));
+      discardUnsentUpload({ kind: "paste", id: "p", text: "hi", size: 2, lines: 1 });
+      discardUnsentUpload({ kind: "image", id: "i", path: "", name: "x.png", size: 0, mime: "image/png", uploading: true });
+      expect(fetchMock.mock.calls).toEqual([["/api/attachments/0f1e2d3c-aaaa-4bbb-8ccc-123456789abc.txt", { method: "DELETE" }]]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
 
 describe("the viewed Data result and the words", () => {
   it("rides as its own field of the send (shared/data-context.ts), so the transcript keeps every typed line", () => {

@@ -55,8 +55,8 @@ export function moveQuietUntil(move: OneHomeView | null | undefined): number {
 /** The one-time move's line on either page: on its way (with progress, or who it waits for), almost done, failing for a
  * day (with Try again), what arrived (on My Cloud's page, once), coming home, where the bots came home instead, or this
  * computer's bots on their way home and home because the person keeps them here.
- * `page`: which page shows it. */
-export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "sending" | "failed" | "done"; text: string; extra: string[]; phone?: true; retry?: true } | null {
+ * `page`: which page shows it; `reason`: why a failing move failed, in main's words, when it said. */
+export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "sending" | "failed" | "done"; text: string; extra: string[]; phone?: true; retry?: true; reason?: string } | null {
   if (move.phase === "done") {
     if (page !== "cloud") return null;
     const list = move.counts ? arrivedList(move.counts) : [];
@@ -77,7 +77,10 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
   }
   if (move.phase === "copy" && move.updating) return { kind: "sending", text: t("cloudSend.move.updating"), extra: [] };
   const failing = "failing" in move ? move.failing : undefined;
-  if (failing) return { kind: "failed", text: failing.error ? t("cloudSend.move.failing", { error: failing.error }) : t("cloudSend.move.failingPlain"), extra: [], retry: true };
+  if (failing) {
+    return failing.error ? { kind: "failed", text: t("cloudSend.move.failing", { error: failing.error }), extra: [], retry: true, reason: failing.error }
+      : { kind: "failed", text: t("cloudSend.move.failingPlain"), extra: [], retry: true };
+  }
   if (move.phase === "finishing") return { kind: "sending", text: t("cloudSend.move.finishing"), extra: [] };
   // Who holds the move, by name, or what it is; nothing is claimed while it only waits for a quiet moment.
   if (move.phase === "wait" && move.waitingFor !== undefined) {

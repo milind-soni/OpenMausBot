@@ -35,7 +35,8 @@ import { X_CARD_SEARCH, XCard } from "./XCard";
 import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestConnectorResponses } from "@/lib/connector-status-merge";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { openKeySettings } from "./keys/key-focus";
-import { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
+import { lacksAdminScope, unlessRefused } from "@/lib/admin-scope";
+import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
 let cachedConnectorStatus: Record<string, ConnectorStatus> | null = null;
@@ -48,9 +49,13 @@ export interface ConnectorInventory {
   services: Record<string, ConnectorStatus>;
   /** false when the server could not read the credential store: nothing may be cleared on the strength of it. */
   authoritative: boolean;
+  /** This session may not see the connected apps: its role, not the credential store. */
+  refused?: true;
 }
 
-export function preloadConnectedApps(force = false): Promise<ConnectorInventory> {
+const REFUSED_INVENTORY: ConnectorInventory = { services: {}, authoritative: true, refused: true };
+
+export function preloadConnectedApps(force = false, background = false): Promise<ConnectorInventory> { // background: src/state/api.ts
   if (!force && cachedConnectorStatus !== null && Date.now() - cachedConnectorStatusAt < CONNECTOR_STATUS_CACHE_MS) {
     return Promise.resolve({
       services: cachedConnectorStatus,
@@ -58,8 +63,10 @@ export function preloadConnectedApps(force = false): Promise<ConnectorInventory>
     });
   }
   if (connectorStatusRequest) return connectorStatusRequest;
-  connectorStatusRequest = api("/api/connectors/connected")
-    .then((response: { services?: Record<string, ConnectorStatus>; credentialStore?: string; inventoryComplete?: boolean }) => {
+  type ConnectedAnswer = { services?: Record<string, ConnectorStatus>; credentialStore?: string; inventoryComplete?: boolean };
+  connectorStatusRequest = unlessRefused<ConnectedAnswer | null>("/api/connectors/connected", () => api("/api/connectors/connected", background ? { background: true } : undefined), null)
+    .then((response): ConnectorInventory => {
+      if (!response) return REFUSED_INVENTORY;
       const services: Record<string, ConnectorStatus> = response.services ?? {};
       if (response.credentialStore === "unavailable" || response.inventoryComplete === false) {
         cachedConnectorStatusAuthoritative = false;
@@ -229,8 +236,9 @@ export function PluginsPanel() {
     const requestGenerations = new Map(statusGenerations.current);
     setRefreshing(true);
     return preloadConnectedApps(force)
-      .then(({ services, authoritative }) => {
+      .then(({ services, authoritative, refused }) => {
         setStale(!authoritative);
+        if (refused) setError({ key: "connectors.adminOnly" });
         setStatus((current) => mergeCompleteConnectorStatus(
           current,
           services,
@@ -289,7 +297,8 @@ export function PluginsPanel() {
       })
       .catch((e) => {
         if (!alive) return;
-        setError(e.message);
+        setCards((current) => current ?? []);
+        setError(lacksAdminScope(e) ? { key: "connectors.adminOnly" } : e.message);
       });
     return () => {
       alive = false;
@@ -994,35 +1003,4 @@ export function PluginsPanel() {
       </div>
     );
   }
-}
-
-function AppsSection({ id, title, note, viewAll, after, children }: {
-  id: string;
-  title: string;
-  note?: string;
-  viewAll?: { label: string; onClick: () => void };
-  after?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <section aria-labelledby={id} data-apps-section={id}>
-      <div className="mb-1.5 flex min-h-7 items-center justify-between gap-3 px-2">
-        <h3 id={id} className="min-w-0 truncate text-[14px] font-semibold leading-5 text-ink">
-          {title}
-          {note && <span className="ms-2 text-[12px] font-normal text-ink-secondary">{note}</span>}
-        </h3>
-        {viewAll && (
-          <button
-            type="button"
-            onClick={viewAll.onClick}
-            className="shrink-0 rounded-full px-2 text-[13px] font-medium leading-5 text-ink-secondary transition-colors hover:text-ink"
-          >
-            {viewAll.label}
-          </button>
-        )}
-      </div>
-      <div className="grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2">{children}</div>
-      {after}
-    </section>
-  );
 }

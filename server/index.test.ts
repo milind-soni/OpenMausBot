@@ -9183,6 +9183,26 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("mounts the USB phone server on every turn, whatever its words: they pick only the phone skill's instructions", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Phone words" })).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
+      for (const [text, instructed] of [["hello", false], ["open the Uber app on my Android", true], ["thanks", false]] as const) {
+        rmSync(fakeClaudeDump, { force: true });
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { text })).status).toBe(202);
+        const seen = await readJsonFileWhenReady<{ systemPrompt: string; mcpConfig: { mcpServers: Record<string, unknown> } }>(fakeClaudeDump, 15_000);
+        expect(seen.mcpConfig.mcpServers.phone, text).toBeDefined();
+        expect(seen.systemPrompt.includes('<openmaus-skill id="phone-harness"'), text).toBe(instructed);
+        expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+        await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+          .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
+      }
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("re-enters setup mode for a configured bot when the user sends /setup, and rewrites the turn text", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Kiwi", description: "Files bugs." })).body.bot;
     try {
@@ -9504,7 +9524,7 @@ describe("harness HTTP API", () => {
   it("keeps skill authoring on by default and persists an explicit opt-out", async () => {
     const before = await api("GET", "/api/config");
     expect(before.status).toBe(200);
-    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
+    expect(before.body.features).toEqual({ browser: false, skillAuthoring: true, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true, savedSteps: true, savedStepsHere: process.platform === "darwin" });
     const untouched = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     expect(untouched.features?.skillAuthoring).toBeUndefined();
     expect(untouched.features?.skillReview).toBeUndefined();
@@ -9514,7 +9534,7 @@ describe("harness HTTP API", () => {
       features: { skillAuthoring: false },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
+    expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: false, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true, savedSteps: true, savedStepsHere: process.platform === "darwin" });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
     // Earlier browser coverage may have persisted its own toggle: opting out must preserve sibling settings.
@@ -9522,7 +9542,7 @@ describe("harness HTTP API", () => {
 
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });
     expect(tools.status).toBe(200);
-    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true });
+    expect(tools.body.features).toEqual({ browser: false, skillAuthoring: false, skillReview: false, skillReviewSteps: 10, skillsLibrary: false, shareLearnedSkills: "off", showToolCalls: true, sharedComputers: false, claudeUserMcp: false, claudeUserSkills: false, autoRecall: true, roomMemoryCapture: false, parallelRoomJobs: false, llmThreadTitles: true, savedSteps: true, savedStepsHere: process.platform === "darwin" });
 
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {
@@ -9989,6 +10009,13 @@ describe("harness HTTP API", () => {
   it.each(["direct", "room"] as const)("loads the browser tools up front only when the browser is the conversation's place in %s turns", async (target) => {
     const bots: string[] = [];
     const rooms: string[] = [];
+    const send = async (path: string) => {
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", path, { text: "Check the website." })).status).toBe(202);
+      const dump = await readJsonFileWhenReady(fakeClaudeDump) as { mcpConfig: { mcpServers: { browser?: { alwaysLoad?: boolean } } } };
+      expect(dump.mcpConfig.mcpServers.browser).toBeDefined();
+      return dump.mcpConfig.mcpServers.browser!;
+    };
     const mounted = async (computer: "browser" | undefined) => {
       const bot = (await api("POST", "/api/bots")).body.bot;
       bots.push(bot.id);
@@ -9997,23 +10024,30 @@ describe("harness HTTP API", () => {
         modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
         ...(computer ? { computer } : {}),
       })).status).toBe(200);
-      let path = `/api/bots/${bot.id}/messages`;
+      let path = `/api/bots/${bot.id}/messages`, stop = `/api/bots/${bot.id}/interrupt`;
       if (target === "room") {
         const room = (await api("POST", "/api/groups", { name: `Browser preload ${bots.length}`, memberIds: [bot.id] })).body.group;
         rooms.push(room.id);
         expect((await api("PATCH", `/api/groups/${room.id}/setup`, { action: "skip" })).status).toBe(200);
         path = `/api/groups/${room.id}/messages`;
+        stop = `/api/groups/${room.id}/interrupt`;
       }
-      rmSync(fakeClaudeDump, { force: true });
-      expect((await api("POST", path, { text: "Check the website." })).status).toBe(202);
-      const dump = await readJsonFileWhenReady(fakeClaudeDump) as { mcpConfig: { mcpServers: { browser?: { alwaysLoad?: boolean } } } };
-      expect(dump.mcpConfig.mcpServers.browser).toBeDefined();
-      return dump.mcpConfig.mcpServers.browser!;
+      return { bot, path, stop, browser: await send(path) };
     };
     try {
       expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
-      expect((await mounted(undefined)).alwaysLoad).toBeUndefined();
-      expect((await mounted("browser")).alwaysLoad).toBe(true);
+      const auto = await mounted(undefined);
+      expect(auto.browser.alwaysLoad).toBeUndefined();
+      expect((await mounted("browser")).browser.alwaysLoad).toBe(true);
+      // The first turn pinned the browser on its own; the next is handed it the same way, so its cached prompt carries over.
+      expect((await api("POST", auto.stop, {})).status).toBe(200);
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === auto.bot.id)?.busy, { timeout: 5_000 }).toBe(false);
+      if (target === "direct") {
+        const task = (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: { id: string }) => candidate.id === auto.bot.id).tasks[0];
+        expect(task).toMatchObject({ surface: "browser", surfaceAuto: true });
+      }
+      expect((await send(auto.path)).alwaysLoad).toBeUndefined();
     } finally {
       for (const id of rooms) await api("POST", `/api/groups/${id}/interrupt`, {}).catch(() => undefined);
       for (const id of bots) await api("POST", `/api/bots/${id}/interrupt`, {}).catch(() => undefined);
@@ -10436,7 +10470,7 @@ describe("harness HTTP API", () => {
     const first = (await api("POST", "/api/bots")).body.bot;
     const second = (await api("POST", "/api/bots")).body.bot;
     const before = await api("GET", "/api/config");
-    expect(before.body.localVm).toEqual({ mode: "shared", maxInstances: 2, idleTimeoutMinutes: 480 });
+    expect(before.body.localVm).toEqual({ mode: "shared", maxInstances: 2, idleTimeoutMinutes: 480, preserveInstalledApps: false });
 
     const shared = await api("GET", `/api/bots/${first.id}/local-computer`);
     expect(shared.status).toBe(200);
@@ -10446,7 +10480,7 @@ describe("harness HTTP API", () => {
       localVm: { mode: "per-bot", maxInstances: 5 },
     });
     expect(saved.status).toBe(200);
-    expect(saved.body.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480 });
+    expect(saved.body.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480, preserveInstalledApps: false });
 
     const [firstStatus, secondStatus] = await Promise.all([
       api("GET", `/api/bots/${first.id}/local-computer`),
@@ -10486,7 +10520,7 @@ describe("harness HTTP API", () => {
     expect(invalid.body.error).toContain("localVm.maxInstances");
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-    expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480 });
+    expect(disk.localVm).toEqual({ mode: "per-bot", maxInstances: 5, idleTimeoutMinutes: 480, preserveInstalledApps: false });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
   });
 
@@ -10505,7 +10539,7 @@ describe("harness HTTP API", () => {
 
       const saved = await api("PATCH", "/api/config", { localVm: { idleTimeoutMinutes: 30 } });
       expect(saved.status).toBe(200);
-      expect(saved.body.localVm).toEqual({ mode: "shared", maxInstances: 2, idleTimeoutMinutes: 30 });
+      expect(saved.body.localVm).toEqual({ mode: "shared", maxInstances: 2, idleTimeoutMinutes: 30, preserveInstalledApps: false });
       expect((await api("GET", "/api/config")).body.localVm.idleTimeoutMinutes).toBe(30);
       expect((await api("GET", "/api/local-computer")).body.idle_timeout_ms).toBe(30 * 60_000);
 

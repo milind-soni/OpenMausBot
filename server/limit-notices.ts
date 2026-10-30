@@ -35,6 +35,14 @@ export function limitNoticeText(facts: LimitNoticeFacts, timeZone?: string): str
     : `${what}, so ${facts.bot} waits: no other AI you have set up can take over.`;
 }
 
+/** "Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it.", and who carries on meanwhile
+ * when a backup the person chose does. */
+export function signedOutNoticeText(facts: { engine: string; bot: string; backup?: string; where: string }): string {
+  return facts.backup
+    ? `${facts.engine} is signed out ${facts.where}, so ${facts.bot} is using ${facts.backup} meanwhile. Sign in again in Settings → AI to keep using ${facts.engine}.`
+    : `${facts.engine} is signed out ${facts.where}. Sign in again in Settings → AI to keep using it.`;
+}
+
 export class LimitNotices {
   private readonly file: string;
   private readonly now: () => number;
@@ -69,6 +77,14 @@ export class LimitNotices {
     const key = `${botId}\u0000${engine}`;
     if (!(key in this.told)) return;
     delete this.told[key];
+    this.save();
+  }
+
+  /** The engine works again for every bot (it is signed in again): each bot's next refusal is a new stretch. */
+  endedEverywhere(engine: string): void {
+    const kept = Object.fromEntries(Object.entries(this.told).filter(([key]) => !key.endsWith(`\u0000${engine}`)));
+    if (Object.keys(kept).length === Object.keys(this.told).length) return;
+    this.told = kept;
     this.save();
   }
 

@@ -34,7 +34,7 @@ describe("LimitFailovers", () => {
   afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
   const from = { instanceId: "claude", model: "claude-sonnet-5" };
   const to = { instanceId: "codex", model: "gpt-fake-default" };
-  function fixture(options: { blocked?: number | null; current?: typeof from | null; allowed?: boolean } = {}) {
+  function fixture(options: { blocked?: number | null; current?: typeof from | null; allowed?: boolean; signedOut?: () => boolean } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "omb-limit-failovers-"));
     dirs.push(dir);
     let now = NOW;
@@ -43,7 +43,7 @@ describe("LimitFailovers", () => {
     const switched: LimitFailover[] = [];
     const deps = {
       file: join(dir, "limit-failovers.json"), now: () => now,
-      blockedUntil: () => state.blocked, threadModel: () => state.current,
+      blockedUntil: () => state.blocked, threadModel: () => state.current, signedOut: options.signedOut,
       switchBack: (failover: LimitFailover) => { if (options.allowed === false) return false; switched.push(failover); state.current = failover.from; return true; },
       note: (_threadId: string, line: string) => notes.push(line), engineName: (engine: string) => engine === "claude" ? "Claude" : engine,
     };
@@ -82,6 +82,28 @@ describe("LimitFailovers", () => {
     expect(f.failovers.restore("scout", "t")).toBe(false);
     f.at(NOW + HOUR + 1);
     expect(f.failovers.restore("scout", "t")).toBe(true);
+  });
+
+  it("with a reset that had already passed when the limit refused, waits as for no known reset", () => {
+    const f = fixture();
+    f.failovers.record({ botId: "scout", threadId: "t", from, to, resetsAt: NOW - 60_000, at: NOW });
+    expect(f.failovers.list()).toEqual([expect.objectContaining({ resetsAt: null })]);
+    f.at(NOW + 10 * 60_000);
+    expect(f.failovers.restore("scout", "t"), "not back at once on a time that told nothing").toBe(false);
+    f.at(NOW + HOUR + 1);
+    expect(f.failovers.restore("scout", "t")).toBe(true);
+  });
+
+  it("goes back to an AI that was signed out once it is signed in again, saying so", () => {
+    let out = true;
+    const f = fixture({ signedOut: () => out });
+    f.failovers.record({ botId: "scout", threadId: "t", from, to, resetsAt: null, at: NOW, why: "signed-out" });
+    f.at(NOW + 3 * HOUR);
+    expect(f.failovers.restore("scout", "t")).toBe(false);
+    out = false;
+    expect(f.failovers.restore("scout", "t")).toBe(true);
+    expect(f.notes).toEqual(["Claude is signed in again, so this conversation is back on Claude."]);
+    expect(new LimitFailovers(f.deps).list()).toEqual([]);
   });
 
   it("forgets a thread someone moved to another model, and remembers across a restart", () => {

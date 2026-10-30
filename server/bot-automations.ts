@@ -1,6 +1,7 @@
-// A bot's schedules, webhooks and app events live and die with it, however the bot is deleted.
+// A bot's schedules, webhooks, app events and waits live and die with it, however the bot is deleted.
 import type { AppTriggerManager } from "./app-triggers.ts";
 import type { RoutineManager } from "./routines.ts";
+import type { WaitManager } from "./waits.ts";
 import type { WebhookManager } from "./webhooks.ts";
 
 interface Automations {
@@ -8,6 +9,7 @@ interface Automations {
   webhooks: Pick<WebhookManager, "removeForBot" | "list">;
   /** App events: removing one also releases its watch on the connected-apps service. */
   apps?: Pick<AppTriggerManager, "list" | "remove">;
+  waits?: Pick<WaitManager, "removeForBot" | "owners">;
 }
 
 interface Bots {
@@ -17,7 +19,7 @@ interface Bots {
 }
 
 function removeFor(botId: string, automations: Automations): void {
-  for (const remove of [() => automations.routines.removeForBot(botId), () => automations.webhooks.removeForBot(botId)]) {
+  for (const remove of [() => automations.routines.removeForBot(botId), () => automations.webhooks.removeForBot(botId), () => automations.waits?.removeForBot(botId)]) {
     // A save that fails here leaves an orphan that never runs; the next start removes it.
     try { remove(); } catch (error) { console.error(`automations: could not remove deleted bot ${botId}'s automations yet`, error); }
   }
@@ -31,7 +33,7 @@ function removeFor(botId: string, automations: Automations): void {
 export function tieAutomationsToBots(store: Bots, automations: Automations): void {
   if (store.bots.length) {
     const owners = [...automations.routines.listRoutines(), ...automations.routines.listRuns(), ...automations.webhooks.list(), ...automations.apps?.list() ?? []];
-    for (const botId of new Set(owners.map((owner) => owner.botId))) if (!store.bot(botId)) removeFor(botId, automations);
+    for (const botId of new Set([...owners.map((owner) => owner.botId), ...automations.waits?.owners() ?? []])) if (!store.bot(botId)) removeFor(botId, automations);
   }
   store.onChange((change) => {
     if (change.type === "bot.deleted" && change.botId) removeFor(change.botId, automations);
