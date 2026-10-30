@@ -138,10 +138,11 @@ install_browser_apparmor_profile() {
     fi
     return
   fi
-  # Older hosts lack the AppArmor 4 ABI and user-namespace restriction.
-  # They use Chrome's normal sandbox without this optional allowlist.
-  # Never skip policy setup on a host exposing the restriction sysctl.
-  if [ ! -f "$APPARMOR_DIR/abi/4.0" ] && [ ! -e "$USERNS_RESTRICTION" ]; then
+  # Hosts without the AppArmor 4 ABI cannot parse this optional allowlist.
+  # Skip it only when the user-namespace restriction is also off, where
+  # Chrome's normal sandbox already works. A restricted host still fails
+  # closed below when the policy cannot be loaded.
+  if [ ! -f "$APPARMOR_DIR/abi/4.0" ] && [ "$restricted" != 1 ]; then
     return
   fi
   # The policy directory belongs to the OS: validate it, never chmod it.

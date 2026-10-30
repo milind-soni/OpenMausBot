@@ -30,6 +30,8 @@ const fixture = vi.hoisted(() => ({
   api: vi.fn(),
   dispatch: vi.fn(),
   switches: [] as ComponentProps<typeof Switch>[],
+  rail: null as { available: boolean; hidden: boolean } | null,
+  railHidden: [] as boolean[],
 }));
 // The Cloud account card reads the host platform (what a saved sign-in still locked asks for).
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: { platform: "darwin" } } }) }));
@@ -78,6 +80,7 @@ vi.mock("@/lib/interface-mode", () => ({
 }));
 vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 vi.mock("./PeopleSection", () => ({ PeopleSection: () => null }));
+vi.mock("@/lib/chrome-rail", () => ({ useChromeRail: () => fixture.rail, setChromeRailHidden: (hidden: boolean) => fixture.railHidden.push(hidden) }));
 vi.mock("./SettingsPrimitives", async (importOriginal) => {
   const original = await importOriginal<typeof import("./SettingsPrimitives")>();
   return {
@@ -102,6 +105,8 @@ beforeEach(() => {
   // these pin the Advanced rail; Simple has its own suite (SettingsModal.simple.test.ts)
   fixture.advancedMode = true;
   fixture.switches = [];
+  fixture.rail = null;
+  fixture.railHidden = [];
   vi.stubGlobal("window", {});
   vi.stubGlobal("document", { documentElement: { dataset: {} } });
   setLocale("en");
@@ -169,6 +174,19 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("channels are unchanged");
     expect(html).toContain("Turn this back on");
     expect(html).not.toContain("Maximum turn length");
+  });
+
+  it("keeps the switch for the window's rail of places with the sidebar's rows, where this window has one", () => {
+    expect(render()).not.toContain("Show your computers");
+    fixture.rail = { available: true, hidden: true };
+    const html = render();
+    const at = html.indexOf('aria-label="Show your computers"');
+    expect(at).toBeGreaterThan(html.indexOf(">Sidebar density<"));
+    expect(at).toBeLessThan(html.indexOf('aria-label="Show threads"'));
+    const toggle = fixture.switches.find((props) => props["aria-label"] === "Show your computers")!;
+    expect(toggle.checked).toBe(false);
+    toggle.onClick!({} as never);
+    expect(fixture.railHidden).toEqual([false]);
   });
 
   it.each([true, false])("only updates the local preference when the switch is %s", (enabled) => {

@@ -1,5 +1,6 @@
 // What this desktop keeps whatever page its window shows, whichever port its own page is served on: the notices it
-// has shown, its usage-analytics switch, the app's language and its answer to the product-updates email question.
+// has shown, its usage-analytics switch, the app's language, its answer to the product-updates email question and
+// whether the person hid the window's rail of places.
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { localDay } from "./cloud-trial-notice.mjs";
@@ -57,6 +58,7 @@ function parse(raw) {
     ...(updatesConsent ? { updatesConsent } : {}),
     ...(typeof record.talkShortcut === "boolean" ? { talkShortcut: record.talkShortcut } : {}),
     ...(isTalkKey(record.talkKey) ? { talkKey: record.talkKey } : {}),
+    ...(typeof record.railHidden === "boolean" ? { railHidden: record.railHidden } : {}),
     ...(Object.keys(quickAsks).length ? { quickAsks } : {}) };
 }
 
@@ -123,6 +125,12 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
     setQuickAsksChat(server, chat) {
       const parsed = typeof server === "string" ? parseChat(chat) : null;
       if (parsed) save({ ...current(), quickAsks: { ...current().quickAsks, [server]: parsed } });
+    },
+    /** The window's rail of places is shown until the person hides it. */
+    railHidden: () => current().railHidden === true,
+    setRailHidden(hidden) {
+      const railHidden = hidden === true;
+      if ((current().railHidden === true) !== railHidden) save({ ...current(), railHidden });
     },
   };
 }
