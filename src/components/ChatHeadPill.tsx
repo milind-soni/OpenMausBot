@@ -1,4 +1,4 @@
-import { ChevronRight, Lock, Users } from "lucide-react";
+import { ChevronRight, Lock, UserRound, Users } from "lucide-react";
 import type { ComponentProps } from "react";
 
 import { cn } from "@/lib/cn";
@@ -14,7 +14,18 @@ import { BOT_PANEL_ID } from "./bot-panel/side-panel";
 const UNTITLED = "New thread";
 const CHEVRON_MOTION = "duration-[140ms] ease-[cubic-bezier(.22,1,.36,1)]";
 
-export type ChatHeadPrivacy = { kind: "private" } | { kind: "shared"; team: string } | null;
+export type ChatHeadPrivacy = { kind: "private" } | { kind: "ownHelper" } | { kind: "shared"; team: string } | null;
+
+const PRIVACY_ICONS = { private: Lock, ownHelper: UserRound, shared: Users } as const;
+
+function privacyLabelOf(privacy: ChatHeadPrivacy): string | null {
+  switch (privacy?.kind) {
+    case "private": return t("team.privateHeader");
+    case "ownHelper": return t("team.ownHelperHeader");
+    case "shared": return t("team.sharedHeader", { team: privacy.team });
+    default: return null;
+  }
+}
 
 /** Simple mode's whole chat header: the bot's face and name in one pill, which opens and closes the bot panel. Away from
  * the bot's main conversation it also names the one on screen. A dot says another of the bot's conversations needs a
@@ -28,9 +39,8 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
   const { state } = useStore();
   const open = state.settingsOpen;
   const elsewhere = sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId).length;
-  const privacyLabel = privacy?.kind === "private" ? t("team.privateHeader")
-    : privacy?.kind === "shared" ? t("team.sharedHeader", { team: privacy.team }) : null;
-  const PrivacyIcon = privacy?.kind === "private" ? Lock : Users;
+  const privacyLabel = privacyLabelOf(privacy);
+  const PrivacyIcon = privacy ? PRIVACY_ICONS[privacy.kind] : Users;
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
   // Simple mode calls an untitled conversation what it is, never a "thread".
   const conversation = !awayFromMainThread(bot, false) ? null

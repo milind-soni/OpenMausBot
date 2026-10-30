@@ -52,6 +52,9 @@ export interface DesktopPrefs {
   /** The Quick asks chat made on this server (keyed by its data folder), null until one is saved. */
   quickAsksChat(server: string): { botId: string; threadId: string } | null;
   setQuickAsksChat(server: string, chat: { botId: string; threadId: string }): void;
+  /** False until the person hides the window's rail of places. */
+  railHidden(): boolean;
+  setRailHidden(hidden: boolean): void;
 }
 type Files = Pick<typeof import("node:fs"), "readFileSync" | "writeFileSync" | "renameSync" | "rmSync">;
 export declare function jsonFile(file: string, files?: Files): { read(): unknown; write(value: unknown): void };

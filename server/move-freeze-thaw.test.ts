@@ -40,7 +40,7 @@ function frozenCopy({ exportOnly = false } = {}) {
   freeze.hold(() => calls.start(), () => calls.stop());
   // Frozen past both times: the morning routine and the call are due the moment the schedulers start.
   clock += 75 * 60_000;
-  const automations = { routines: () => routines, calls: () => calls, webhooks: () => webhooks, appEvents: () => appEvents } as unknown as MoveAutomations;
+  const automations = { routines: () => routines, calls: () => calls, webhooks: () => webhooks, appEvents: () => appEvents, waits: () => null } as unknown as MoveAutomations;
   const route = createMoveFreezeRoutes({ freeze, busy: () => null, restart() {}, automationsOff: () => switchAutomationsOff(automations) });
   const lift = async (body: unknown) => {
     let answered: { status: number; body: any } | undefined;

@@ -209,6 +209,6 @@ describe("SecretRequestCard custom secrets", () => {
     expect(file).toContain("Saved to a private file your bot&#x27;s commands can read for 24 hours, then deleted.");
     expect(file).not.toContain("Where to get this key");
     const ref = view({ target: "customSecret", label: "Notion key", reason: "For Notion.", helpUrl: "", delivery: "ref" });
-    expect(ref).toContain("OpenMausBot keeps it for one use by its own tools. Your bot never sees it");
+    expect(ref).toContain("MausBot keeps it for one use by its own tools. Your bot never sees it");
   });
 });

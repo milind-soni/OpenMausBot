@@ -13,6 +13,7 @@ import { releaseComputerPanelFocus, useComputerPanelEntry } from "@/lib/computer
 import { RoutineEditor } from "./RoutinesPage";
 import { BrowserPanel, type BrowserSignIn } from "./BrowserPanel";
 import { SignInBanner } from "./SignInRequestCard";
+import { productName } from "@/lib/brand";
 
 function viewerAddress(raw: unknown): string {
   if (typeof raw !== "string" || !raw) throw new Error("The host did not return a live desktop link");
@@ -190,7 +191,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         `${bot.name}'s live desktop`,
         bot.id,
       );
-      if (!opened) throw new Error("OpenMausBot could not open the live desktop");
+      if (!opened) throw new Error(`${productName()} could not open the live desktop`);
     } catch (cause) {
       if (tookControl) {
         await api(`/api/bots/${bot.id}/computer/control`, {

@@ -28,6 +28,13 @@ describe("toolStepLabel", () => {
     expect(toolStepLabel({ name: "ls -la /Users/sam/project", summary: "ls -la /Users/sam/project" })).toBe("Run a command");
   });
 
+  it("says whose own account a step used, after what it did", () => {
+    const whose = { person: "Ada", app: "Notion" };
+    expect(toolStepLabel({ name: "mcp__own_apps__NOTION_SEARCH_NOTION_PAGE", whose })).toBe(`${toolStepLabel({ name: "mcp__own_apps__NOTION_SEARCH_NOTION_PAGE" })} · using Ada's Notion`);
+    expect(toolStepLabel({ name: "mcp__mail__read_inbox", whose: { person: "Ada", app: "mail" } })).toBe("Read inbox · using Ada's mail");
+    expect(toolStepLabel({ name: "Bash", summary: "ls", whose })).toBe("Run a command · using Ada's Notion");
+  });
+
   it("keeps a line the server already wrote in words", () => {
     expect(toolStepLabel({ name: "Messaged @Ada" })).toBe("Messaged @Ada");
     expect(toolStepLabel({ name: "Send failed — the sending bot no longer exists" })).toBe("Send failed — the sending bot no longer exists");

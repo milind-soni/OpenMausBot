@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { tieAutomationsToBots } from "./bot-automations.ts";
 
-function fixture(bots: string[], owners: { routines?: string[]; runs?: string[]; webhooks?: string[]; apps?: string[] }) {
+function fixture(bots: string[], owners: { routines?: string[]; runs?: string[]; webhooks?: string[]; apps?: string[]; waits?: string[] }) {
   let listener: ((change: { type: string; botId?: string }) => void) | undefined;
   const store = {
     bots: bots.map((id) => ({ id })),
@@ -15,6 +15,7 @@ function fixture(bots: string[], owners: { routines?: string[]; runs?: string[];
     },
     webhooks: { removeForBot: vi.fn(), list: () => (owners.webhooks ?? []).map((botId) => ({ botId })) },
     apps: { remove: vi.fn(async (_id: string) => true), list: () => (owners.apps ?? []).map((botId, index) => ({ id: `app-${index}`, botId })) },
+    waits: { removeForBot: vi.fn(), owners: () => owners.waits ?? [] },
   };
   tieAutomationsToBots(store, automations as never);
   return { automations, emit: (change: { type: string; botId?: string }) => listener!(change) };
@@ -55,5 +56,11 @@ describe("a bot's automations live and die with it", () => {
     expect(automations.apps.remove.mock.calls).toEqual([["app-1"], ["app-3"]]);
     await vi.waitFor(() => expect(error).toHaveBeenCalledTimes(1));
     error.mockRestore();
+  });
+
+  it("removes a deleted bot's waits, at start and when it is deleted", () => {
+    const { automations, emit } = fixture(["scout"], { waits: ["gone", "scout"] });
+    emit({ type: "bot.deleted", botId: "scout" });
+    expect(automations.waits.removeForBot.mock.calls).toEqual([["gone"], ["scout"]]);
   });
 });

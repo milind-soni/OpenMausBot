@@ -25,7 +25,16 @@ export interface CloudListEntry {
   lastSeenAt?: number;
   /** The OpenMausBot version it runs, for an update reminder. */
   version?: string;
+  /** Ended, stopped or with a payment problem, its files still kept: when they are deleted (ms). */
+  deleteAfter?: number;
+  /** Its owner may take it off their list (one of their own, in no team, that ended or was never paid for): the Admin's word. */
+  removable?: true;
+  /** A Ready Cloud whose plan sleeps: whether it is asleep now. */
+  power?: import("./cloud-power.mjs").CloudPower;
 }
+/** What this app says of a listed Cloud it doesn't open: ended, its checkout not finished, a payment problem, or being set up. */
+export type CloudState = "ended" | "checkout" | "payment" | "setup";
+export declare function cloudState(cloud: Pick<CloudListEntry, "status"> | null | undefined): CloudState | null;
 /**
  * The account's own plan's renewal, as the Admin says it for the account that pays (display only): a free trial (`trial`), its
  * renewal off (`cancelled`), when it renews (`renewsAt`) or, once cancelled, ends (`endsAt`; null: the end of the period paid
