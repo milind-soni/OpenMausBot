@@ -1179,6 +1179,10 @@ describe("Group Local VM ownership on the real isolated server", () => {
     await idle(bots[0].id);
     expect((await gate(c)).status).toBe(401);
     if (failure === "stall") expect(await roomOutcome(group.id)).toBe("stalled");
+    else {
+      const transcript = await api("GET", `/api/threads/${group.threadId}/messages?limit=50`);
+      expect(transcript.messages.some((message: any) => message.tool?.name?.includes("room turn made no progress"))).toBe(true);
+    }
     await api("PATCH", "/api/config", { localVm: { mode: "per-bot", maxInstances: 2 } });
     vmState({ noContainers: true });
     await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } });
