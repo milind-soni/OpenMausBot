@@ -35,7 +35,7 @@ const match = (pattern: RegExp, value: unknown): string | null => typeof value =
 
 /** Stop reasons a driver settles a failed turn with. Free text never becomes a code. */
 const STOP_CODES = new Set(["auth_required", "rpc_error", "shutdown_timeout", "provider_safety", "update_required", "spawn_error", "quota",
-  "exit_before_result", "error_during_execution", "error", "failed"]);
+  "tool_error", "exit_before_result", "error_during_execution", "error", "failed"]);
 /** Stops that say only that something failed: the cause's own class, when known, says more. */
 const GENERIC_STOPS = new Set(["rpc_error", "error", "failed", "error_during_execution", "exit_before_result"]);
 /** Engine stops that count as a failure even when no failed row was written for them. */

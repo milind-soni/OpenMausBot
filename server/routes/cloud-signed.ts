@@ -23,6 +23,10 @@ export const CLOUD_BOX_PATH = "/api/cloud/box";
  * theirs alone is deleted here (host/team-member-left.ts). */
 export const CLOUD_TEAM_MEMBER_LEFT_PATH = "/api/cloud/team/member-left";
 
+/** The plan was cancelled, or renews again: `{"v":1,"cancelled":true|false}`, signed with the body like the sleep request.
+ * While it is cancelled the home's routines wait (host/routine-holds-host.ts). */
+export const CLOUD_PLAN_PATH = "/api/cloud/plan";
+
 export function createCloudSignedRoutes(deps: {
   secret: string;
   sessions: Pick<SessionRegistry, "openPairing" | "revokeMember" | "attemptAllowed" | "noteFailure" | "clearFailures">;
@@ -37,6 +41,8 @@ export function createCloudSignedRoutes(deps: {
   teamAdmin?: { summary(): Promise<TeamAdminSummary> } | null;
   /** A Team Cloud's member left: delete what was theirs alone; absent on a My Cloud. */
   memberLeft?: ((email: string) => Promise<Record<string, unknown>>) | null;
+  /** The plan was cancelled (true) or renews again (false); absent on a server that is not a Cloud home. */
+  plan?: ((cancelled: boolean) => void) | null;
   now?: () => number;
 }) {
   const pairing = createCloudPairing({ secret: deps.secret, sessions: deps.sessions, team: deps.team ?? null, now: deps.now });
@@ -46,12 +52,14 @@ export function createCloudSignedRoutes(deps: {
   const boxReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const teamAdminReads = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   const memberLeftRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
+  const planRequests = createCloudRequestVerifier({ secret: deps.secret, now: deps.now });
   /** True when the request was one of these and has been answered. */
   return async ({ req, res, url, path, method }: CloudSignedRequest): Promise<boolean> => {
     const power = path === CLOUD_POWER_PATH || path === CLOUD_POWER_SLEEP_PATH ? deps.power?.() ?? null : null;
     const teamAdmin = path === CLOUD_TEAM_ADMIN_PATH && deps.team ? deps.teamAdmin ?? null : null;
     const memberLeft = path === CLOUD_TEAM_MEMBER_LEFT_PATH && deps.team ? deps.memberLeft ?? null : null;
-    if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin && !memberLeft) return false;
+    const plan = path === CLOUD_PLAN_PATH ? deps.plan ?? null : null;
+    if (path !== CLOUD_PAIRING_PATH && path !== CLOUD_HEALTH_PATH && path !== CLOUD_BOX_PATH && !power && !teamAdmin && !memberLeft && !plan) return false;
     res.setHeader("cache-control", "no-store");
     const source = requestSource(req);
     const header = (name: string) => { const value = req.headers[name]; return typeof value === "string" ? value : undefined; };
@@ -97,6 +105,20 @@ export function createCloudSignedRoutes(deps: {
       const email = teamMemberEmail((parsed as { email?: unknown } | null)?.email);
       if (!email) { json(res, 400, { error: "invalid_member" }); return true; }
       json(res, 200, { ok: true, ...(await memberLeft(email)) });
+      return true;
+    }
+    if (plan) {
+      if (method !== "POST") { json(res, 405, { error: "method_not_allowed" }); return true; }
+      if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) { json(res, 415, { error: "send the request as JSON (content-type: application/json)" }); return true; }
+      const body = await readSignedBody(req);
+      const verdict = planRequests.verify({ ...signed, method, target: `${path}${url.search}`, body });
+      if (!verdict.ok) { console.warn(`cloud plan request refused from ${source}: ${verdict.error}`); json(res, verdict.status, { error: verdict.error }); return true; }
+      let parsed: unknown;
+      try { parsed = JSON.parse(body.toString("utf8")); } catch { json(res, 400, { error: "invalid_body" }); return true; }
+      const cancelled = (parsed as { cancelled?: unknown } | null)?.cancelled;
+      if (typeof cancelled !== "boolean") { json(res, 400, { error: "invalid_plan" }); return true; }
+      plan(cancelled);
+      json(res, 200, { ok: true });
       return true;
     }
     if (path === CLOUD_BOX_PATH) {
