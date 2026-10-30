@@ -39,8 +39,10 @@ import { InboxPanel } from "@/components/inbox/InboxPanel";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
 import { PlacesRail } from "@/components/PlacesRail";
 import { CloudHowTo } from "@/components/CloudHowTo";
-import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
+import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip, windowFramed } from "@/components/DesktopCapabilities";
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
+import { WindowFrameBar } from "@/components/WindowFrameBar";
+import { cn } from "@/lib/cn";
 import { NoEngines } from "@/components/NoEngines";
 import { CloudEngineSignIn } from "@/components/CloudEngineSignIn";
 import { CloudIntent } from "@/components/CloudIntent";
@@ -302,9 +304,15 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     });
   }, [dispatch]);
 
+  const framed = windowFramed(capabilities.windowChrome);
   return (
-    <div className="flex h-full flex-col">
-      <UpdateBanner sidebarIndicator={!calendarFocus && (sidebarInline || drawerOpen)} />
+    <div className={cn("flex h-full flex-col", framed && "bg-frame")}>
+      <WindowFrameBar />
+      {/* A framed window shows the app in a rounded card under its top bar, beside the window's rail: the corners that
+          meet the frame are round, and the card runs to the window's right and bottom edges. */}
+      <div data-window-card={framed ? "" : undefined}
+        className={framed ? "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app ring-1 ring-ink/[0.06]" : "contents"}>
+      <UpdateBanner sidebarIndicator={framed || (!calendarFocus && (sidebarInline || drawerOpen))} />
       <CloudAsleepStrip />
       <LiveConnectionStrip connected={state.connected} hydrated={state.hydrated === true} />
       <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
@@ -426,6 +434,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         style={captionChrome.noDragStyle}
         className="pointer-events-none absolute left-3 top-3 size-[30px] md:hidden"
       />}
+      </div>
       </div>
       {/* Last child on purpose: Blink resolves -webkit-app-region in DOM order, so no-drag buttons must follow every drag region. */}
       <WindowCaptionButtons

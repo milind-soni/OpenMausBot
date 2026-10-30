@@ -131,6 +131,11 @@ export interface CoordinatorHost {
   chiefOf(address: RoomAddress): boolean;
   /** What the cut turn already did outward (sent, posted, paid): a turn that acted outward is not run again. */
   outward?(node: HandoffView): string[];
+  /** Whether `joiner`'s requester may read the answer `first` gives its own (the same people see both conversations),
+   * so the same request from two teammates is answered once. Absent: never. */
+  shareAnswer?(first: HandoffView, joiner: HandoffView): boolean;
+  /** `node` waits for `first`'s answer instead of running its own turn (only ever a request outside a room). */
+  joined?(node: HandoffView, first: HandoffView): void;
 }
 
 export interface Coordinator {

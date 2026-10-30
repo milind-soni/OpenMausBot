@@ -43,7 +43,7 @@ let startupScreen = null;
 let desktopTray = null;
 import { collisionFreeDownloadPath, defaultSaveName, openLogsFolder, revealDownloadWhenDone, revealInFolder, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
-import { appPermissionHandlers, externalWebUrl } from "./app-permissions.mjs";
+import { appPermissionHandlers, externalLinkUrl } from "./app-permissions.mjs";
 import { appFrameNavigationAllowed } from "./app-frame-guard.mjs";
 import { writeClipboardText } from "./clipboard-write.mjs";
 import {
@@ -1514,10 +1514,9 @@ const lendingActivity = createActivityWindow({ BrowserWindow, icon: APP_ICON, ba
 let lendingTray = null;
 function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
-    Tray, Menu, nativeImage, iconPath: APP_ICON,
-    onPause: () => sharingController().pause(),
+    Tray, Menu, nativeImage, iconPath: APP_ICON, onPause: () => sharingController().pause(), onActivity: () => lendingActivity.show(),
     onResume: () => void sharingController().resume()?.catch(error => slog(`lending resume: ${error?.message ?? error}`)),
-    onActivity: () => lendingActivity.show(),
+    onTerminal: on => void lendingDialogs.lendTerminal(on, () => sharingController().lendTerminal(on)).catch(error => slog(`lending terminal: ${error?.message ?? error}`)),
   });
   return lendingTray;
 }
@@ -2076,7 +2075,7 @@ function createWindow({ deferNavigation = false } = {}) {
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     try {
-      void shell.openExternal(externalWebUrl(url)).catch(() => {
+      void shell.openExternal(externalLinkUrl(url)).catch(() => {
         console.warn("The external web link could not be opened");
       });
     } catch {
@@ -2373,7 +2372,7 @@ ipcMain.handle("window:state", (event) => {
 
 // Links resolved after Chromium's click gesture ended would be blocked as popups via window.open.
 ipcMain.handle("desktop:open-external", localOnly("desktop:open-external", async (_event, rawUrl) => {
-  await shell.openExternal(externalWebUrl(rawUrl));
+  await shell.openExternal(externalLinkUrl(rawUrl));
   return true;
 }));
 

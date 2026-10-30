@@ -1,5 +1,5 @@
-// A small Team Cloud in memory for the inbox's unit tests: Acme's Owner Philipp, a member Marco, an Admin Ada and Carl,
-// who left; a shared bot Scout that Philipp owns, each person's own Chief, a bot of Marco's, and a room.
+// A small Team Cloud in memory for the inbox's unit tests: Acme's Owner Cleo, a member Ben, an Admin Ada and Carl,
+// who left; a shared bot Scout that Cleo owns, each person's own Chief, a bot of Ben's, and a room.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,8 +13,8 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { BotRecord, Message, StoreChange } from "../store.ts";
 
 export const key = (email: string) => personKey({ id: "", email });
-export const PHILIPP = { email: "philipp@acme.test", role: "owner" as const, name: "Philipp" };
-export const MARCO = { email: "marco@acme.test", role: "member" as const, name: "Marco" };
+export const CLEO = { email: "cleo@acme.test", role: "owner" as const, name: "Cleo" };
+export const BEN = { email: "ben@acme.test", role: "member" as const, name: "Ben" };
 export const ADA = { email: "ada@acme.test", role: "admin" as const, name: "Ada" };
 export const CARL = { email: "carl@acme.test", role: "member" as const, name: "Carl", leftAt: 5 };
 
@@ -29,20 +29,20 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
   const emit = (change: StoreChange) => { for (const listener of listeners) listener(change); };
   const threads = new Map<string, Message[]>();
   const audiences = new Map<string, Audience>([
-    ["philipp-private", memberAudience(key(PHILIPP.email))], ["marco-private", memberAudience(key(MARCO.email))], ["room-thread", roomAudience("room")],
+    ["cleo-private", memberAudience(key(CLEO.email))], ["ben-private", memberAudience(key(BEN.email))], ["room-thread", roomAudience("room")],
   ]);
   const starters = new Map<string, string>();
   const bots: Bot[] = [
-    { id: "scout", name: "Scout", color: "blue", threadId: "scout-main", createdBy: PHILIPP.email, tasks: [
-      { threadId: "scout-main", title: "Scout" }, { threadId: "philipp-private", title: "Philipp and Scout" }, { threadId: "marco-private", title: "Marco and Scout" },
+    { id: "scout", name: "Scout", color: "blue", threadId: "scout-main", createdBy: CLEO.email, tasks: [
+      { threadId: "scout-main", title: "Scout" }, { threadId: "cleo-private", title: "Cleo and Scout" }, { threadId: "ben-private", title: "Ben and Scout" },
     ] },
-    { id: "marcos-chief", name: "Marco's Chief", color: "green", threadId: "mc-main", chiefOfStaff: true, reportsTo: MARCO.email, tasks: [{ threadId: "mc-main", title: "Marco's Chief" }] },
-    { id: "philipps-chief", name: "Philipp's Chief", color: "red", threadId: "pc-main", chiefOfStaff: true, reportsTo: PHILIPP.email, tasks: [{ threadId: "pc-main", title: "Philipp's Chief" }] },
-    { id: "reporter", name: "Reporter", title: "Writes the reports", color: "teal", threadId: "rep-main", reportsTo: MARCO.email, activity: "working",
+    { id: "bens-chief", name: "Ben's Chief", color: "green", threadId: "mc-main", chiefOfStaff: true, reportsTo: BEN.email, tasks: [{ threadId: "mc-main", title: "Ben's Chief" }] },
+    { id: "cleos-chief", name: "Cleo's Chief", color: "red", threadId: "pc-main", chiefOfStaff: true, reportsTo: CLEO.email, tasks: [{ threadId: "pc-main", title: "Cleo's Chief" }] },
+    { id: "reporter", name: "Reporter", title: "Writes the reports", color: "teal", threadId: "rep-main", reportsTo: BEN.email, activity: "working",
       tasks: [{ threadId: "rep-main", title: "Reporter" }, { threadId: "rep-q4", title: "Q4 report", activity: "working" }] },
   ].filter((bot) => !(options.noChiefFor ?? []).includes(bot.reportsTo ?? "") || !bot.chiefOfStaff) as Bot[];
   const groups = [{ id: "room", name: "Launch", threadId: "room-thread", memberIds: ["scout"] }];
-  const roomPeople = new Set([key(PHILIPP.email), key(MARCO.email)]);
+  const roomPeople = new Set([key(CLEO.email), key(BEN.email)]);
   let made = 0, ids = 0, clock = 0;
   const tick = () => (clock = Math.max(Date.now(), clock + 1));
   const unread: string[] = [];
@@ -82,7 +82,7 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
     activePath: (threadId: string) => threads.get(threadId) ?? [],
     onChange: (listener: (change: StoreChange) => void) => { listeners.add(listener); return () => listeners.delete(listener); },
   };
-  const people: Array<{ email: string; role: "owner" | "admin" | "member"; name: string; leftAt?: number }> = [PHILIPP, MARCO, ADA, CARL];
+  const people: Array<{ email: string; role: "owner" | "admin" | "member"; name: string; leftAt?: number }> = [CLEO, BEN, ADA, CARL];
   const notified: Notification[] = [];
   const continued: Array<{ botId: string; threadId: string; text: string; from: { botId: string; name: string }; relay: Message["relay"] }> = [];
   const audienceOf = (threadId: string): Audience => audiences.get(threadId) ?? (starters.has(threadId) ? memberAudience(starters.get(threadId)!) : "team");
@@ -116,7 +116,7 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
       continueTurn: (botId, threadId, text, from, relay) => { continued.push({ botId, threadId, text, from, relay }); },
       changed: (threadId) => { changed.push(threadId); },
       handedFrom: (threadId) => options.handed?.[threadId] ?? null,
-      notes: (botId) => ({ reporter: "The Q4 report draft is due on Nov 3.", scout: "Philipp's notes.", "marcos-mausbot": "Notes only Marco sees." })[botId] ?? "",
+      notes: (botId) => ({ reporter: "The Q4 report draft is due on Nov 3.", scout: "Cleo's notes.", "bens-mausbot": "Notes only Ben sees." })[botId] ?? "",
       ...(options.representative ? { representative: options.representative } : {}),
     },
   });
