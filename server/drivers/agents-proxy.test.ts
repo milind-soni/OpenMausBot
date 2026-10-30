@@ -633,6 +633,7 @@ describe("agents-proxy MCP surface", () => {
       "list_threads",
       "close_thread",
       "start_thread",
+      "list_models",
       "vm_exec",
       "attach_file",
       "show_widget",
@@ -960,7 +961,7 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     const start = list.result.tools.find((tool: { name: string }) => tool.name === "start_thread");
     expect(start.inputSchema.required).toEqual(["title", "message"]);
-    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder"]);
+    expect(Object.keys(start.inputSchema.properties)).toEqual(["title", "message", "bot_id", "folder", "modelSelection", "report_back"]);
     expect(start.inputSchema.properties.bot_id).toEqual({ type: "string", enum: ["bot-asker"], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." });
     expect(start.description).toContain("Open a separate job on yourself");
     expect(start.description).toContain('use coordinate_bots for teammates (thread "new" opens a fresh thread on them)');
@@ -983,6 +984,25 @@ describe("agents-proxy MCP surface", () => {
       expect(lastThreadBody).toEqual({
         fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "QA: PR #9", message: "Review the login fix.", depth: 0, toBotId: "bot-helper",
       });
+    } finally {
+      threadResponse = previous;
+    }
+  });
+
+  it("start_thread on another model forwards the model and report_back, and says the result resumes the opener", async () => {
+    const previous = threadResponse;
+    threadResponse = { receipts: [{ botId: "bot-asker", outcome: "queued", detail: "handed to the coordinator", requestId: "asg-own-1", threadId: "thread-own" }],
+      self: true, reportBack: true, title: "Review: GPT", botId: "bot-asker", threadId: "thread-own", requestId: "asg-own-1" };
+    try {
+      const modelSelection = { instanceId: "codex", model: "gpt-5.5", effort: "high" };
+      const res = await callTool("start_thread", { title: "Review: GPT", message: "Review the diff.", modelSelection, report_back: true });
+      const text = res.result.content[0].text;
+      expect(res.result.isError).toBeFalsy();
+      expect(text).toContain("Opened thread #Review: GPT on yourself [thread id: thread-own].");
+      expect(text).toContain("its result comes back to this conversation and resumes you automatically (assignment id: asg-own-1)");
+      expect(text).toContain("finish your turn");
+      expect(lastThreadBody).toEqual({ fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", title: "Review: GPT", message: "Review the diff.",
+        depth: 0, modelSelection, reportBack: true });
     } finally {
       threadResponse = previous;
     }

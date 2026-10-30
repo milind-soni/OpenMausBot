@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { composeEnvelope } from "./envelope.ts";
 import { assignmentLevel } from "./level.ts";
 import type { RuntimeStore } from "./store.ts";
-import { asking, awaited, childrenSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, path, restartNote, wakeOwner } from "./tree.ts";
+import { asking, awaited, childrenSince, clip, continuations, CUT_TWICE, duration, isTerminal, loopStop, nextGuard, outwardDetail, ownsConversation, ownThread, path, restartNote, wakeOwner } from "./tree.ts";
 import { DEFAULT_LIMITS, type Assignment, type Assignee, type Clock, type EndResult, type EnqueueRequest, type EnqueueResult, type EnvelopeNames,
   type EventKind, type InboxItem, type InboxKind, type Level, type Limits, type LiveEdge, type Origin, type Outcome, type Owner,
   type Reply, type Requester, type RunInput, type RunResult, type StatusView, type TurnRunner } from "./types.ts";
@@ -189,7 +189,8 @@ export class Runtime {
     const lineage = parent ? path(this.store, parent) : [];
     const root = lineage[0];
     const target = req.assignee;
-    if (lineage.some(a => a.assignee.botId === target.botId &&
+    const ancestors = ownThread(lineage, target, req.ownThread) ? lineage.slice(0, -1) : lineage;
+    if (ancestors.some(a => a.assignee.botId === target.botId &&
       (!a.assignee.destination.groupId || !target.destination.groupId || a.assignee.destination.groupId === target.destination.groupId))) {
       return refuse("Cannot assign work back to an ancestor; results return automatically");
     }

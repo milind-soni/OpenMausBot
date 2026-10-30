@@ -207,6 +207,8 @@ export interface EnqueueRequest {
   driverKind?: string;
   approved?: boolean;
   batchKey?: string;
+  /** A new thread of the requester's own bot (tree.ts ownThread): the requesting turn is not an ancestor it refuses. */
+  ownThread?: boolean;
 }
 
 export type EnqueueResult =

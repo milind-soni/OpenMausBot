@@ -288,7 +288,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "start_thread",
     description:
-      "Open a separate job on yourself: one conversation with its own history and its own run, shown to the person as a row under you, without switching the person's selected conversation. Use it only when the user requests independent jobs (for example one review per pull request, \"review each pull request\" — one thread per pull request) instead of doing them inside this conversation. The title becomes the row's name, so make it short and specific, and write it as #Title when you mention it to the person; give complete instructions, since the run will not see this conversation. You can open at most five per turn; a self-opened job cannot open more jobs. This is not a teammate handoff: use coordinate_bots for teammates (thread \"new\" opens a fresh thread on them) and their automatic replies. If a call is refused, do not retry it: say what you still wanted opened.",
+      "Open a separate job on yourself: one conversation with its own history and its own run, shown to the person as a row under you, without switching the person's selected conversation. Use it when the user requests independent jobs (for example one review per pull request, \"review each pull request\" — one thread per pull request) instead of doing them inside this conversation, or for a second opinion from another engine: modelSelection from list_models, report_back true. The title becomes the row's name, so make it short and specific, and write it as #Title when you mention it to the person; give complete instructions, since the run will not see this conversation. You can open at most five per turn; a self-opened job cannot open more jobs. This is not a teammate handoff: use coordinate_bots for teammates (thread \"new\" opens a fresh thread on them) and their automatic replies. If a call is refused, do not retry it: say what you still wanted opened.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -297,9 +297,18 @@ const TOOL_DEFINITIONS = [
         message: { type: "string", description: "The complete first message of the thread — everything the run needs, since it will not see this conversation." },
         bot_id: { type: "string", description: START_THREAD_SELF_ID },
         folder: { type: "string", description: "Optional: the name of one of your existing folders to file the thread under. Leave out unless the person named one." },
+        modelSelection: { type: "object", additionalProperties: false, description: "Optional: ids exactly as list_models gives them. Default: this conversation's.", properties: {
+          instanceId: { type: "string" }, model: { type: "string" }, effort: { type: "string" },
+        }, required: ["instanceId", "model"] },
+        report_back: { type: "boolean", description: "True: its result comes back to you here; end your turn. Not from a room." },
       },
       required: ["title", "message"],
     },
+  },
+  {
+    name: "list_models",
+    description: "Read-only: engines (instanceId), their models, state and efforts, for start_thread's modelSelection. Never invent an id.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
     name: "vm_exec",

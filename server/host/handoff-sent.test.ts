@@ -30,6 +30,12 @@ describe("sentRow", () => {
     const direct = sentRow({ sender, recipient, threadId: "buyer-work", via: "direct" });
     expect([direct.tool?.name, direct.threadRef?.title, direct.sentDirectly]).toEqual(["Sent to Buyer Research", "Teammate work", undefined]);
   });
+
+  it("names a bot's own new thread by its title, linked like a teammate's", () => {
+    const own = sentRow({ sender, recipient: sender, threadId: "chief-review", title: "Review: GPT", via: "direct", doneWhen: "every finding has a line" });
+    expect(own).toMatchObject({ tool: { name: "Opened thread #Review: GPT", ok: true }, doneWhen: "every finding has a line",
+      threadRef: { botId: "chief", threadId: "chief-review", title: "Review: GPT" } });
+  });
 });
 
 describe("outsideRoomNote", () => {

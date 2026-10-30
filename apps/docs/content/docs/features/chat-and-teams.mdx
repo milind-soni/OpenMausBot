@@ -106,6 +106,12 @@ Off a team, nothing changes: the @ list shows bots, and `@you` still means you.
 
 Bots can hand work to other bots, in any department. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation: you see a "Sent to Bolt" line where the work went out, and the answer when it comes back. A bot does not need to be in a group chat to get work from one: work for a bot that isn't in the chat goes to that bot directly, in a thread of its own, and the chat shows "Sent to Bolt directly: it isn't in this room." Nobody is added to the chat, so nobody new reads it.
 
+### A second opinion from another model
+
+A bot doesn't need a teammate to get work done on another model. It can open a thread of its own on any model you have connected, from another provider too, and have the result come back to it: for example three reviews of one change, each on a different model, with no review bots to set up. The bot reads the models it can use with `list_models` and opens each thread with `start_thread`, a `modelSelection` and `report_back`. You see "Opened thread #Review: GPT" where it went out and "#Review: GPT replied" when the answer comes back, and the bot then carries on with every result in hand. The thread is a row under the bot like any other, so you can open it and read the whole review.
+
+A model whose provider is signed out or unavailable is refused when the thread is opened, so a second opinion never quietly comes from the bot's own model. These threads can't be opened from a group chat, and a thread opened this way can't open more of its own.
+
 ### Creating a specialist with a chosen model
 
 A Chief also adds a specialist on its own when a job needs one: an ongoing area of work, a different skill set, or work to run in parallel. The bot is created at once, the Chief tells you in one line, and the change has an **Undo**. When what you want matches a ready-made team in the library, the Chief reads its roles with `list_team_library` and creates them the same way.
