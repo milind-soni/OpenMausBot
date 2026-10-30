@@ -12,10 +12,11 @@ export function indicatorText({ clouds, using, paused }, device) {
   return { line: `${listed(clouds)} can use ${it}`, title: "" };
 }
 
-export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, device = deviceWord() }) {
+export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPause, onResume, onActivity, onTerminal, device = deviceWord() }) {
   let tray = null;
   let shown = null;
   const draw = view => {
+    if (!tray || tray.isDestroyed()) return;
     const { line, title } = indicatorText(view, device);
     tray.setToolTip(`OpenMausBot: ${line}`);
     // Electron shows a tray title beside the icon on macOS only.
@@ -24,12 +25,15 @@ export function createLendingIndicator({ Tray, Menu, nativeImage, iconPath, onPa
       { label: line, enabled: false },
       { type: "separator" },
       view.paused ? { label: "Resume", click: () => onResume() } : { label: "Pause", click: () => onPause() },
+      ...view.paused ? [] : [{ label: `Let Clouds run commands on this ${device}`, type: "checkbox", checked: view.terminal,
+        // Electron 43 ticks a checkbox on click by itself: the menu keeps the saved choice until the person confirms one.
+        click: () => { draw(view); onTerminal(!view.terminal); } }],
       { label: "See activity", click: () => onActivity() },
     ]));
   };
   return {
-    update({ clouds = [], using = [], paused = false }) {
-      const next = { clouds: [...clouds], using: paused ? [] : [...using], paused: paused === true };
+    update({ clouds = [], using = [], paused = false, terminal = false }) {
+      const next = { clouds: [...clouds], using: paused ? [] : [...using], paused: paused === true, terminal: terminal === true };
       if (shown && JSON.stringify(next) === JSON.stringify(shown)) return;
       shown = next;
       if (!next.clouds.length) { if (tray && !tray.isDestroyed()) tray.destroy(); tray = null; return; }
