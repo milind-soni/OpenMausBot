@@ -1,5 +1,5 @@
 // Routines that wait while their owner has left (host/routine-holds-host.ts reads why): no AI of theirs is signed in here
-// any more, they removed every connected app and server, or the plan was cancelled. A cause that begins turns every routine
+// any more, they removed every connected app and MCP server, or the plan was cancelled. A cause that begins turns every routine
 // that is on off, stamped with that cause, so its list says why and nothing runs to fail or to message a person who left.
 // Once no cause holds a stamped routine it turns back on from now, without the runs it skipped. Turning a routine on or
 // off by hand clears its stamp: the person's choice wins, and a later change of cause leaves it alone.

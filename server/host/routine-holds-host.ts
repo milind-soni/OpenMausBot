@@ -19,7 +19,7 @@ const RECHECK_MS = 15 * 60_000;
 export const ROUTINE_HOLD_LINES: Record<RoutineHoldCause, string> = {
   plan_cancelled: "Your routines are paused because the plan was cancelled. To keep one running until the plan ends, turn it back on in Routines.",
   no_engine: "Your routines are paused: none of your AI accounts is signed in here any more. They turn back on by themselves when you sign in again.",
-  no_connections: "Your routines are paused: every connected app and server was removed. They turn back on when you connect one, or turn one back on in Routines.",
+  no_connections: "Your routines are paused: every connected app and MCP server was removed. They turn back on when you connect one, or turn one back on in Routines.",
 };
 
 interface Saved { away?: true; planCancelled?: true; connectionsGone?: true }
