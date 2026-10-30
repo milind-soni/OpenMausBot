@@ -4,6 +4,7 @@
 import { WEB_URL_MAX, WIDGET_LIMITS, type WidgetRoot } from "../../shared/widget.ts";
 import type { CalendarEvent } from "../connected-reads.ts";
 import { intlLocale } from "../language.ts";
+import { morningWords, type MorningWords } from "./brief-morning-words.ts";
 import { briefWords, type BriefWords } from "./brief-words.ts";
 import { localDate, validZone } from "./check-plan.ts";
 import { clip, oneLine } from "./text-clip.ts";
@@ -102,14 +103,27 @@ export function reminderCard(input: { event: CalendarEvent; timeZone?: string; n
 }
 
 export const BRIEF_ROWS = 6;
+const DONE_ROWS = 8;
+/** Room left in a button's label for the name of whose row it is on. */
+const CHOICE_LABEL = 50;
 export const DISMISS_ACTION = "dismiss_row";
 export const DRAFT_ACTION = "draft_reply";
+export const ANSWER_ACTION = "answer_row";
+export const LATER_ACTION = "not_now";
+export const MORNING_ACTION = "morning_time";
+/** The morning times the brief offers, "HH:MM" in the person's zone. */
+export const MORNING_CHOICES = ["06:00", "07:00", "08:00", "09:00", "10:00"] as const;
+export const MORNING_OFF = "off";
 
 export interface BriefEmail { messageId: string; threadId: string; from: string; subject: string; why?: string; needsReply: boolean }
 /** `page`: the live page a routine's run published; its row's Open page opens it, while Open opens the run's chat. */
 export interface BriefRow { text: string; note: string; open?: OpenTarget; page?: string }
-/** A row that needs the person. `key` names what it is about in no particular language, so a new language is not news. */
-export type NeedRow = BriefRow & { key: string };
+/** A row that needs the person. `key` names what it is about in no particular language, so a new language is not news.
+ * `ref` is the id a press on the row names: with it the row offers Not now, and `choices` answer its question in place.
+ * `bot` and `since` say who is waiting and from when. */
+export type NeedRow = BriefRow & { key: string; ref?: string; bot?: string; since?: number; choices?: string[] };
+/** A piece of work a bot finished while the person was away. */
+export interface DoneRow { text: string; note: string; open?: OpenTarget }
 export interface BriefMeeting { title: string; start: number; joinUrl?: string }
 export interface BriefFacts {
   now: number;
@@ -129,6 +143,14 @@ export interface BriefFacts {
   ideas?: BriefRow[];
   /** The morning brief's first line: what was done while the person was away, already in their words. */
   overnight?: string;
+  /** When today's card was first posted: the card opens with a greeting for that time of day and a count of what is in it. */
+  greetAt?: number;
+  /** How many finished pieces of work the Done overnight card lists. */
+  doneOvernight?: number;
+  /** The morning time ("HH:MM", absent when off), and whether the person is choosing a new one. Absent: no time row. */
+  morning?: { at?: string; choosing: boolean };
+  /** Questions answered from this card today, as receipts under Needs you. */
+  answered?: Array<{ bot: string; answer: string }>;
 }
 
 const BRIEF_TEXT = { line: 120, note: 160, sender: 40, label: 32, link: 600 } as const;
@@ -144,8 +166,8 @@ const rowBeside = (value: string, note: string, presses: Node[]): Node =>
   ({ type: "Row", gap: 3, align: "center", children: [{ type: "Col", flex: 1, children: rowLines(value, note) }, ...presses] });
 const rowUnder = (value: string, note: string, presses: Node[]): Node =>
   ({ type: "Col", gap: 1, children: [...rowLines(value, note), ...buttons(presses)] });
-function capped(rows: Node[], w: BriefWords): Node[] {
-  const shown = rows.slice(0, BRIEF_ROWS);
+function capped(rows: Node[], w: BriefWords, max = BRIEF_ROWS): Node[] {
+  const shown = rows.slice(0, max);
   return rows.length > shown.length ? [...shown, caption(w.more(rows.length - shown.length))] : shown;
 }
 const section = (title: string, rows: Node[], w: BriefWords, empty?: string, after: Node[] = []): Node[] =>
@@ -166,13 +188,86 @@ function emailRow(email: BriefEmail, w: BriefWords): Node {
 
 const longDate = (now: number, timeZone: string | undefined, language: string | undefined): string =>
   plain(new Date(now).toLocaleDateString(intlLocale(language), { weekday: "long", month: "long", day: "numeric", timeZone: zoneOf(timeZone) }));
+const shortDate = (at: number, timeZone: string | undefined, language: string | undefined): string =>
+  plain(new Date(at).toLocaleDateString(intlLocale(language), { month: "short", day: "numeric", timeZone: zoneOf(timeZone) }));
+
+/** "08:00" as the person's language writes a time of day. */
+export function clockLabel(clock: string, language: string | undefined): string {
+  const at = Date.UTC(2000, 0, 1, Number(clock.slice(0, 2)), Number(clock.slice(3, 5)));
+  return plain(new Date(at).toLocaleTimeString(intlLocale(language), { hour: "numeric", minute: "2-digit", timeZone: "UTC" }));
+}
+
+function waitingSince(since: number, facts: BriefFacts, m: MorningWords): string {
+  const { timeZone: zone, language } = facts, day = localDate(since, zone);
+  if (day === localDate(facts.now, zone)) return m.waiting.today(clockTime(since, zone, language));
+  if (day === localDate(facts.now - DAY, zone)) return m.waiting.yesterday(clockTime(since, zone, language));
+  return m.waiting.earlier(shortDate(since, zone, language));
+}
+
+/** A card's buttons that reach the server need labels no other button in it has: a repeat names whose row it is on. */
+function distinctLabels(): (label: string, owner: string) => string {
+  const used = new Set<string>();
+  return (label, owner) => {
+    let named = label;
+    for (let n = 1; used.has(named); n += 1) named = n === 1 && owner ? `${label} (${owner})` : `${label} (${owner ? `${owner}, ` : ""}${n})`;
+    used.add(named);
+    return named;
+  };
+}
+
+function needRow(row: NeedRow, facts: BriefFacts, w: BriefWords, m: MorningWords, label: ReturnType<typeof distinctLabels>): Node {
+  const note = [row.bot, row.since === undefined ? "" : waitingSince(row.since, facts, m), row.note].filter(Boolean).join(" · ");
+  if (!row.ref) return rowBeside(row.text, note, openButton(row.open, w));
+  const ref = row.ref, owner = oneLine(row.bot ?? row.text, 24);
+  return rowUnder(row.text, note, [
+    ...(row.choices ?? []).map((choice, option) => button(label(clip(choice, CHOICE_LABEL), owner), { type: ANSWER_ACTION, payload: { row: ref, option } })),
+    ...openButton(row.open, w),
+    button(label(m.notNow, owner), { type: LATER_ACTION, payload: { row: ref } }),
+  ]);
+}
+
+function partOfDay(at: number, timeZone: string | undefined): keyof MorningWords["greeting"] {
+  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: zoneOf(timeZone), hour: "2-digit", hourCycle: "h23" }).format(new Date(at)));
+  return hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
+}
+
+const upperFirst = (text: string): string => text.charAt(0).toLocaleUpperCase() + text.slice(1);
+
+function greetingLine(greetAt: number, parts: string[], facts: BriefFacts, w: BriefWords, m: MorningWords): Node {
+  const greeting = m.greeting[partOfDay(greetAt, facts.timeZone)];
+  const said = parts.length ? `${upperFirst(parts.join(m.comma))}${m.stop}` : w.nothingNeedsYou;
+  return { type: "Text", value: clip(`${greeting}${m.stop}${m.gap}${said}`, WIDGET_LIMITS.text), weight: "medium" };
+}
+
+function morningRow(morning: NonNullable<BriefFacts["morning"]>, language: string | undefined, m: MorningWords, label: ReturnType<typeof distinctLabels>): Node[] {
+  const pick = (clock: string, text: string, primary = false): Node => button(label(text, ""), { type: MORNING_ACTION, payload: { at: clock } }, primary);
+  if (morning.choosing) {
+    return [caption(m.changeTime), ...buttons([
+      ...MORNING_CHOICES.map((clock) => pick(clock, clockLabel(clock, language), clock === morning.at)),
+      ...(morning.at ? [pick(MORNING_OFF, m.turnOff)] : []),
+      button(label(m.cancel, ""), { type: MORNING_ACTION, payload: { cancel: true } }),
+    ])];
+  }
+  const said = morning.at ? m.morningAt(clockLabel(morning.at, language)) : m.morningOff;
+  const press = morning.at ? button(label(m.changeTime, ""), { type: MORNING_ACTION, payload: { pick: true } }) : pick(MORNING_CHOICES[2], m.turnOn);
+  return [{ type: "Row", gap: 3, align: "center", children: [{ type: "Col", flex: 1, children: [caption(said)] }, press] }];
+}
+
+export function doneCard(input: { rows: DoneRow[]; since: number; now: number; timeZone?: string; language?: string }): BuiltCard {
+  const w = briefWords(input.language), m = morningWords(input.language);
+  const rows = input.rows.map((row) => rowBeside(row.text, row.note, openButton(row.open, w)));
+  return {
+    card: root(m.doneTitle, m.doneSince(clockTime(input.since, input.timeZone, input.language)), capped(rows, w, DONE_ROWS)),
+    summary: summary(`${m.doneTitle}: ${m.done(input.rows.length)}`),
+  };
+}
 
 export function briefCard(facts: BriefFacts): BuiltCard {
   const { timeZone: zone, language } = facts;
-  const w = briefWords(language);
+  const w = briefWords(language), m = morningWords(language), label = distinctLabels();
   const replies = facts.emails.filter((email) => email.needsReply);
   const important = facts.emails.filter((email) => !email.needsReply);
-  const needRows = [...replies.map((email) => emailRow(email, w)), ...facts.needs.map((row) => rowBeside(row.text, row.note, openButton(row.open, w)))];
+  const needRows = [...replies.map((email) => emailRow(email, w)), ...facts.needs.map((row) => needRow(row, facts, w, m, label))];
   const meetings = [...(facts.meetings ?? [])].sort((a, b) => a.start - b.start);
   const meetingRows = meetings.map((meeting) => rowBeside(`${clockTime(meeting.start, zone, language)} · ${meeting.title}`, "", joinButton(meeting, w.join)));
   const waiting = facts.waiting === true ? w.waitingMany : facts.waiting ? w.waitingCount(facts.waiting) : undefined;
@@ -180,21 +275,25 @@ export function briefCard(facts: BriefFacts): BuiltCard {
   const waitingNotice = waiting ? [caption(waiting)] : [];
   const routineRows = facts.routines.map((row) => rowBeside(row.text, row.note, [...pageButton(row.page, w), ...openButton(row.open, w)]));
   const ideaRows = (facts.ideas ?? []).map((row) => rowBeside(row.text, row.note, []));
-  const children: Node[] = [
-    ...(facts.overnight ? [{ type: "Text", value: clip(facts.overnight, BRIEF_TEXT.note * 2), weight: "medium" }] : []),
-    ...(facts.intro ? [caption(w.intro)] : []),
-    ...section(w.needsYou, needRows, w, w.nothingNeedsYou),
-    ...(facts.meetings === null ? [] : section(w.yourDay, meetingRows, w, w.noMoreMeetings)),
-    ...(importantRows.length || waitingNotice.length ? section(w.importantEmails, importantRows, w, undefined, waitingNotice) : []),
-    ...(routineRows.length ? section(w.routines, routineRows, w) : []),
-    ...(ideaRows.length ? section(w.ideas, ideaRows, w) : []),
-  ];
+  const done = facts.doneOvernight ?? 0;
   const parts = [
     needRows.length && w.summary.needs(needRows.length),
+    done && m.done(done),
     facts.meetings && facts.meetings.length && w.summary.meetings(facts.meetings.length),
     important.length && w.summary.emails(important.length),
     facts.routines.length && w.summary.routines(facts.routines.length),
     ideaRows.length && w.summary.ideas(ideaRows.length),
-  ].filter(Boolean);
+  ].filter((part): part is string => Boolean(part));
+  const children: Node[] = [
+    ...(facts.greetAt === undefined ? [] : [greetingLine(facts.greetAt, parts, facts, w, m)]),
+    ...(facts.overnight ? [{ type: "Text", value: clip(facts.overnight, BRIEF_TEXT.note * 2), weight: "medium" }] : []),
+    ...(facts.intro ? [caption(w.intro)] : []),
+    ...section(w.needsYou, needRows, w, w.nothingNeedsYou, (facts.answered ?? []).map((one) => caption(m.answered(one.bot, one.answer)))),
+    ...(facts.meetings === null ? [] : section(w.yourDay, meetingRows, w, w.noMoreMeetings)),
+    ...(importantRows.length || waitingNotice.length ? section(w.importantEmails, importantRows, w, undefined, waitingNotice) : []),
+    ...(routineRows.length ? section(w.routines, routineRows, w) : []),
+    ...(ideaRows.length ? section(w.ideas, ideaRows, w) : []),
+    ...(facts.morning ? [{ type: "Divider" }, ...morningRow(facts.morning, language, m, label)] : []),
+  ];
   return { card: root(w.title, longDate(facts.now, zone, language), children), summary: summary(`${w.title}: ${parts.length ? parts.join(", ") : w.summary.nothing}`) };
 }

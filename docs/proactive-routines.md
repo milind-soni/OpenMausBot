@@ -43,15 +43,32 @@ desktop, headless and on a Cloud.
   brief is never posted. It opens on the first open of the day and after three
   hours away. Any other moment, it never takes the screen from the chat in use.
   Its first appearance says what it does and that the person can tell MausBot
-  to stop or change it. Sections:
+  to stop or change it. It opens with a greeting for the time of day it was
+  first posted and a count of what is in it ("Good morning. 3 need you, 5 done
+  overnight, 2 meetings."). Sections:
   1. **Needs you**: emails waiting on a reply, failed or missed routines,
      meetings that clash, an app that can't be read ("Couldn't read Gmail ·
      Reconnect Gmail in Connected apps"), a signed-out AI, a usage limit, a
-     question a bot is waiting on;
+     question a bot is waiting on. A bot's question and a failed routine say
+     which bot and since when ("Mail Bot · Waiting since yesterday 6:50 PM").
+     A question with one part and two to four choices can be answered on the
+     brief: the press answers the bot's own card as the person who pressed, so
+     the same rules apply as in that chat, and a receipt line stays under Needs
+     you for the day. Any row a press can name offers **Not now**, which keeps
+     it off the brief until the next day.
   2. **Your day**: today's meetings, with Join for an https meeting link;
   3. **Important emails**: what the watch picked, each with a one-line why,
      **Draft a reply**, **Open in Gmail** and **Dismiss**;
-  4. **Routines**: other routines' results today.
+  4. **Routines**: other routines' results today, after the Done overnight card
+     when there is one;
+  5. **The morning time**: "Morning brief at 8:00 AM" with **Change time**,
+     which offers 6:00 to 10:00 and **Turn off**.
+- **Done overnight**: at the morning time, when the person was away, a second
+  card lists what every bot finished since they were last here (16 hours at
+  most), one line each: the first sentence of a routine's result or the
+  reply's first line, then the bot, the routine or who asked ("You asked",
+  "Another bot asked"), and the time, with **Open**. The brief's own runs,
+  quiet runs and failures are left out. It is posted once and never edited.
 - **Meeting prep**: a card in the same chat when a meeting with other people is
   within four hours.
 - **The 10-minute reminder**: a card posted by the server, with no AI.
@@ -140,18 +157,25 @@ there is no brief at all. Its row says
 - `watch.json`: that the default routine was made, so it is never made again,
   and the bot each briefing routine was handed to.
 - A card the server built carries `serverCard`. A bot can't edit it, and it
-  replays into a turn only as records. Dismiss works only for the owner or an
-  admin, only on the brief, checks thread ownership before reading a widget, and
-  starts no turn. Recent dismissals go into the next triage as records.
+  replays into a turn only as records. Dismiss, Not now, the morning time and
+  an answer work only for the owner or an admin, only on the brief, check thread
+  ownership before reading a widget, and start no turn of MausBot's. A press
+  names only an id; the question and its choice are read back from the bot's
+  own card, and an answer goes through the same route as a press in that chat. Recent dismissals go into the next triage as records.
 - A hosted team workspace or Team Cloud gets no watch and no brief. Presence is
   recorded for the owner only.
-- A personal Cloud that began with its first hour (`server/host/first-hour.ts`)
-  also has a morning time, 8:00 in the person's zone: the day's brief is posted
-  or refreshed then and pushed, with its first line saying what was done since
+- Every install with a brief has a morning time, 8:00 in the person's zone
+  unless they pick another or turn it off on the brief (`morningAt` in
+  `brief.json`): the day's brief is posted or refreshed then and pushed, with
+  the Done overnight card under it. A desktop that is closed at that time does
+  it at the first minute it runs after it. Picking a time counts as today's
+  morning, so nothing is pushed while the person is looking. A watch run still
+  sorting the night's mail gets 20 minutes first, and a sleeping Cloud is woken
+  ten minutes early for it (`nextWakeAt`). A personal Cloud that began with its
+  first hour (`server/host/first-hour.ts`) also leads with what was done since
   the person was last here (emails sorted, reply drafts written, meetings
-  prepared, from `value.json`), and only what was. A watch run still sorting
-  the night's mail gets 20 minutes first, and a sleeping Cloud is woken at 7:50
-  for it (`nextWakeAt`). The very first morning push says it is the first brief.
+  prepared, from `value.json`), and its very first morning push says it is the
+  first brief.
 - An install that can't reach connected apps gets no watch, and so no brief,
   until it can. It checks once a minute, since a Cloud's access arrives after
   start. A scripted test install without the fake connected-apps service

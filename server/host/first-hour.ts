@@ -428,7 +428,6 @@ export function createFirstHour(deps: FirstHourDeps) {
         deps.wrote(place.bot, place.threadId);
       }
     },
-    morningAt: (): string | undefined => (state ? MORNING : undefined),
     /** The person opened the app: their name and language reach the greeting, and the offer comes even if they do not write. */
     arrived(): void {
       if (!state) return;

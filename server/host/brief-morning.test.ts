@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { widgetActionByLabel, type WidgetRoot } from "../../shared/widget.ts";
 import type { CalendarEvent } from "../connected-reads.ts";
 import type { RoutineRun } from "../routines.ts";
 import { Store } from "../store.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import { createBrief, MORNING_WAKE_EARLY_MS } from "./brief.ts";
 
 const MINUTE = 60_000;
@@ -15,7 +17,9 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const clock = (ms: number, zone: string) => new Intl.DateTimeFormat("en-US", { timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(ms));
 
-function setup(options: { zone: string; start: string; morning?: string; overnight?: string }) {
+const owner: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
+
+function setup(options: { zone: string; start: string; overnight?: string }) {
   const dir = mkdtempSync(join(tmpdir(), "omb-brief-morning-"));
   dirs.push(dir);
   let now = Date.parse(options.start);
@@ -33,7 +37,6 @@ function setup(options: { zone: string; start: string; morning?: string; overnig
     hostTimeZone: () => undefined, language: () => undefined, session: () => null, address: () => "me@x.test",
     failRun: () => {}, keep: () => {}, items: () => null,
     morning: {
-      at: () => options.morning ?? "08:00",
       push: (summary) => (first ? ((first = false), "Your first brief is ready") : summary),
       overnight: (since) => { sinces.push(since); return options.overnight; },
     },
@@ -44,7 +47,14 @@ function setup(options: { zone: string; start: string; morning?: string; overnig
     attendees: [{ email: "me@x.test", self: true, organizer: true }, { email: "ada@x.test", name: "Ada", self: false, organizer: false }],
   });
   const tick = async () => { brief.tick(); await settle(); await settle(); };
-  return { brief, store, chief, pushed, hooks, sinces, runs, cards, meeting, tick, now: () => now, set: (iso: string) => { now = Date.parse(iso); }, advance: (ms: number) => { now += ms; } };
+  const press = async (label: string) => {
+    const card = cards().at(-1)!;
+    const entry = widgetActionByLabel(card.widget!.root as WidgetRoot, label);
+    if (!entry) throw new Error(`no button labelled ${label}`);
+    expect(brief.serverPress(chief, store.bot(chief.id)!.threadId, card.id, entry.action, owner)).toBe("handled");
+    await settle();
+  };
+  return { brief, store, chief, pushed, hooks, sinces, runs, cards, meeting, tick, press, now: () => now, set: (iso: string) => { now = Date.parse(iso); }, advance: (ms: number) => { now += ms; } };
 }
 
 describe("the morning brief", () => {
@@ -155,12 +165,27 @@ describe("the morning brief", () => {
     expect(s.brief.nextWakeAt()).toBe(Date.parse("2026-10-25T06:50:00Z"));
   });
 
-  it("is never pushed where no morning time is set", async () => {
-    const s = setup({ zone: "UTC", start: "2026-10-22T08:05:00Z", morning: "" });
-    await s.brief.active("desktop", "UTC", "en");
+  it("is never pushed once the person turns it off on the card, and comes at the time they pick", async () => {
+    const s = setup({ zone: "UTC", start: "2026-10-22T07:00:00Z" });
     await s.brief.report({ routine: {} as never, at: s.now(), meetings: [s.meeting(Date.parse("2026-10-22T10:00:00Z"))], clashes: [] });
+    await s.brief.active("desktop", "UTC", "en");
+    expect(JSON.stringify(s.cards().at(-1)!.widget!.root)).toContain("Morning brief at 8:00 AM");
+    await s.press("Change time");
+    await s.press("Turn off");
+    expect(JSON.stringify(s.cards().at(-1)!.widget!.root)).toContain("Morning brief is off");
+    s.set("2026-10-22T08:05:00Z");
     await s.tick();
     expect(s.pushed).toEqual([]);
     expect(s.brief.nextWakeAt()).toBeNull();
+    await s.press("Turn on");
+    await s.press("Change time");
+    await s.press("7:00 AM");
+    s.set("2026-10-23T06:59:00Z");
+    await s.tick();
+    expect(s.pushed).toEqual([]);
+    s.set("2026-10-23T07:00:00Z");
+    await s.brief.report({ routine: {} as never, at: s.now(), meetings: [s.meeting(Date.parse("2026-10-23T10:00:00Z"))], clashes: [] });
+    await s.tick();
+    expect(s.pushed).toEqual(["Your first brief is ready"]);
   });
 });
