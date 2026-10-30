@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { InboxView } from "../../shared/inbox";
 import { inboxView, messageRow, reportRow } from "@/testing/inbox-fixture";
 import { api } from "./api";
-import { currentInbox, doneInboxRow, readInboxRow, refreshInbox, replyToInboxRow, setInboxView } from "./inbox";
+import { currentInbox, doneInboxRow, forgetInbox, readInboxRow, refreshInbox, replyToInboxRow, setInboxView } from "./inbox";
 
 vi.mock("./api", () => ({ api: vi.fn() }));
 
@@ -206,4 +206,34 @@ it("removes failed Done from the latest confirmed snapshot", async () => {
   requests[0]!.reject(new Error("offline"));
   await flush();
   expect(currentInbox()?.rows[0]).toMatchObject({ tab: "info", unread: true, text: "Other client's edit" });
+});
+
+it("drops a GET that lands after the inbox is forgotten, and reads nothing more", async () => {
+  const loading = refreshInbox();
+  forgetInbox();
+  await reply(0, inboxView([messageRow]));
+  await loading;
+  expect(currentInbox()).toBeNull();
+  expect(requests).toHaveLength(1);
+});
+
+it("drops a read or Done answer that lands after the inbox is forgotten, and reads nothing more", async () => {
+  readInboxRow(messageRow);
+  doneInboxRow(messageRow);
+  forgetInbox();
+  await reply(0, inboxView([{ ...messageRow, unread: false }]));
+  requests[1]!.settled = true;
+  requests[1]!.reject(new Error("offline"));
+  await flush();
+  expect(currentInbox()).toBeNull();
+  expect(requests).toHaveLength(2);
+});
+
+it("reads nothing after a message reply when the inbox was forgotten meanwhile", async () => {
+  const sending = replyToInboxRow(inboxView(), messageRow, "Thanks");
+  forgetInbox();
+  await reply(0, done);
+  await sending;
+  expect(currentInbox()).toBeNull();
+  expect(requests).toHaveLength(1);
 });
