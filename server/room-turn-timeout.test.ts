@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ROOM_TURN_PROGRESS,
   RoomTurnDeadline,
   RoomTurnStallRegistry,
   effectiveRoomTurnTimeoutMinutes,
@@ -30,6 +31,65 @@ describe("room turn timeout", () => {
     deadline.stop();
   });
 
+  it("keeps a turn that shows progress going past the limit, and stops it once it shows none for the limit", async () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout);
+    deadline.start();
+
+    for (let minute = 0; minute < 30; minute += 1) {
+      await vi.advanceTimersByTimeAsync(60_000);
+      deadline.progress();
+    }
+    expect(onTimeout).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onTimeout).toHaveBeenCalledOnce();
+    deadline.stop();
+  });
+
+  it("counts the engine's work as progress, and not retries, session news or cards", () => {
+    for (const type of ["content.delta", "item.started", "item.updated", "item.completed", "item.output", "turn.progress"] as const) {
+      expect(ROOM_TURN_PROGRESS.has(type)).toBe(true);
+    }
+    for (const type of ["turn.retrying", "cap.exhausted", "session.started", "session.model-variants", "runtime.notice", "request.opened", "turn.wait_started"] as const) {
+      expect(ROOM_TURN_PROGRESS.has(type)).toBe(false);
+    }
+  });
+
+  it("progress while waiting gives the turn the full limit once the wait ends", async () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout);
+    deadline.start();
+
+    await vi.advanceTimersByTimeAsync(4 * 60_000);
+    deadline.setWaiting(true);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    deadline.progress();
+    deadline.setWaiting(false);
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(onTimeout).toHaveBeenCalledOnce();
+    deadline.stop();
+  });
+
+  it("stops a turn whose progress arrives after the limit, before the timer ran", () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+    const deadline = new RoomTurnDeadline(5, onTimeout);
+    deadline.start();
+
+    // A stalled event loop delivers the event past the limit, before the timer callback ran.
+    vi.setSystemTime(Date.now() + 5 * 60_000 + 1);
+    deadline.progress();
+    expect(onTimeout).toHaveBeenCalledOnce();
+    deadline.stop();
+  });
+
   it("can be cancelled when the room turn settles", async () => {
     vi.useFakeTimers();
     const onTimeout = vi.fn();
@@ -48,12 +108,12 @@ describe("room turn timeout", () => {
     deadline.start();
 
     await vi.advanceTimersByTimeAsync(15 * 60_000);
-    deadline.setWaitingOnHuman(true);
+    deadline.setWaiting(true);
 
     await vi.advanceTimersByTimeAsync(30 * 60_000);
     expect(onTimeout).not.toHaveBeenCalled();
 
-    deadline.setWaitingOnHuman(false);
+    deadline.setWaiting(false);
     await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
     expect(onTimeout).not.toHaveBeenCalled();
 
@@ -69,14 +129,14 @@ describe("room turn timeout", () => {
     deadline.start();
 
     await vi.advanceTimersByTimeAsync(4 * 60_000);
-    deadline.setWaitingOnHuman(true);
+    deadline.setWaiting(true);
     await vi.advanceTimersByTimeAsync(10 * 60_000);
-    deadline.setWaitingOnHuman(true);
-    deadline.setWaitingOnHuman(false);
+    deadline.setWaiting(true);
+    deadline.setWaiting(false);
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(onTimeout).not.toHaveBeenCalled();
 
-    deadline.setWaitingOnHuman(false);
+    deadline.setWaiting(false);
     await vi.advanceTimersByTimeAsync(6 * 60_000 - 1);
     expect(onTimeout).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -92,10 +152,10 @@ describe("room turn timeout", () => {
 
     // A stalled event loop delivers the card event past the deadline, before the timer callback ran.
     vi.setSystemTime(Date.now() + 5 * 60_000 + 1);
-    deadline.setWaitingOnHuman(true);
+    deadline.setWaiting(true);
     expect(onTimeout).toHaveBeenCalledOnce();
 
-    deadline.setWaitingOnHuman(false);
+    deadline.setWaiting(false);
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(onTimeout).toHaveBeenCalledOnce();
   });
@@ -106,9 +166,9 @@ describe("room turn timeout", () => {
     const deadline = new RoomTurnDeadline(5, onTimeout);
     deadline.start();
 
-    deadline.setWaitingOnHuman(false);
+    deadline.setWaiting(false);
     await vi.advanceTimersByTimeAsync(2 * 60_000);
-    deadline.setWaitingOnHuman(false);
+    deadline.setWaiting(false);
 
     await vi.advanceTimersByTimeAsync(3 * 60_000 - 1);
     expect(onTimeout).not.toHaveBeenCalled();
@@ -124,9 +184,9 @@ describe("room turn timeout", () => {
     deadline.start();
 
     await vi.advanceTimersByTimeAsync(1 * 60_000);
-    deadline.setWaitingOnHuman(true);
+    deadline.setWaiting(true);
     deadline.stop();
-    deadline.setWaitingOnHuman(false);
+    deadline.setWaiting(false);
 
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(onTimeout).not.toHaveBeenCalled();
@@ -192,10 +252,10 @@ describe("room turn timeout", () => {
 
   it("formats singular and plural timeout messages", () => {
     expect(roomTurnTimeoutMessage("Atlas", 1)).toBe(
-      "Atlas's room turn exceeded 1 minute and was stopped",
+      "Atlas's room turn made no progress for 1 minute and was stopped",
     );
     expect(roomTurnTimeoutMessage("Atlas", 20)).toBe(
-      "Atlas's room turn exceeded 20 minutes and was stopped",
+      "Atlas's room turn made no progress for 20 minutes and was stopped",
     );
   });
 });
