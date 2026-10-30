@@ -17,9 +17,8 @@ import {
 
 const dirs: string[] = [];
 
-/** What the bot is sent: the routine header, then its instructions. */
-const routineTurn = (name: string, text: string, trigger: "schedule" | "manual" = "schedule") =>
-  `[${trigger === "schedule" ? "Scheduled routine" : "Routine"} ${JSON.stringify(name)} — do this now:]\n${text}`;
+const routineTurn = (id: string, name: string, text: string, trigger: "schedule" | "manual" = "schedule") =>
+  `[${trigger === "schedule" ? "Scheduled routine" : "Routine"} ${JSON.stringify(name)} — do this now:]\nTrigger id: ${id}\n${text}`;
 
 function tempFile() {
   const dir = mkdtempSync(join(tmpdir(), "omb-routines-"));
@@ -657,7 +656,7 @@ describe("cron routines use the existing persistent scheduler", () => {
     await h.manager.tick(); expect(h.started).toHaveLength(0);
     h.setNow(routine.nextRunAt!);
     await h.manager.tick(); await h.manager.tick();
-    expect(h.started).toEqual([{ botId: "maus-1", threadId: "thread-1", prompt: routineTurn("Monthly report", "Write the report") }]);
+    expect(h.started).toEqual([{ botId: "maus-1", threadId: "thread-1", prompt: routineTurn(routine.id, "Monthly report", "Write the report") }]);
     expect(h.manager.listRuns()[0]).toMatchObject({ scheduledFor: routine.nextRunAt, status: "running", triggerSource: "schedule" });
     expect(h.manager.listRoutines()[0].nextRunAt).toBe(Date.parse("2026-11-01T09:00:00Z"));
   });
@@ -821,8 +820,8 @@ describe("persistent routine results destinations", () => {
     expect(second.resultsThreadId).toBe(first.resultsThreadId);
     expect(h.created()).toBe(1);
     expect(h.started).toEqual([
-      { botId: "maus-1", threadId: "thread-1", prompt: routineTurn("Daily report", "Write a fresh report", "manual") },
-      { botId: "maus-1", threadId: "thread-2", prompt: routineTurn("Daily report", "Write a fresh report", "manual") },
+      { botId: "maus-1", threadId: "thread-1", prompt: routineTurn(routine.id, "Daily report", "Write a fresh report", "manual") },
+      { botId: "maus-1", threadId: "thread-2", prompt: routineTurn(routine.id, "Daily report", "Write a fresh report", "manual") },
     ]);
     complete(h, "thread-2");
     const loaded = new RoutineManager(h.options);
@@ -1803,7 +1802,7 @@ describe("RoutineManager", () => {
 
     h.setBot("ready");
     await h.manager.tick();
-    expect(h.started).toEqual([{ botId: "maus-2", threadId: "thread-1", prompt: routineTurn("Review queue", "Review the queue") }]);
+    expect(h.started).toEqual([{ botId: "maus-2", threadId: "thread-1", prompt: routineTurn(routine.id, "Review queue", "Review the queue") }]);
     expect(h.manager.listRuns()[0]).toMatchObject({ status: "running", threadId: "thread-1" });
     expect(h.manager.activeRunForBot("maus-2")?.threadId).toBe("thread-1");
     expect(h.manager.isActiveThread("thread-1")).toBe(true);
@@ -1869,7 +1868,7 @@ describe("RoutineManager", () => {
     expect(h.manager.update(routine.id, { name: "Renamed", prompt: "Updated" })?.nextRunAt).toBe(routine.nextRunAt);
     await h.manager.tick();
     expect(h.manager.listRuns()[0]).toMatchObject({ scheduledFor: routine.nextRunAt, status: "running" });
-    expect(h.started[0]?.prompt).toBe(routineTurn("Renamed", "Updated"));
+    expect(h.started[0]?.prompt).toBe(routineTurn(routine.id, "Renamed", "Updated"));
   });
 
   it("keeps delegated work active through its continuation and accumulates turn costs", async () => {
@@ -1945,7 +1944,7 @@ describe("RoutineManager", () => {
     const h = harness();
     h.setBot("busy");
     const anchorAt = new Date(2026, 7, 17, 8, 5).getTime();
-    h.manager.create({
+    const routine = h.manager.create({
       name: "Frequent check",
       prompt: "Check the latest queue",
       botId: "maus-interval",
@@ -1970,7 +1969,7 @@ describe("RoutineManager", () => {
     expect(h.started).toEqual([{
       botId: "maus-interval",
       threadId: "thread-1",
-      prompt: routineTurn("Frequent check", "Check the latest queue"),
+      prompt: routineTurn(routine.id, "Frequent check", "Check the latest queue"),
     }]);
   });
 
@@ -1978,7 +1977,7 @@ describe("RoutineManager", () => {
     const mondayAtEight = new Date(2026, 7, 17, 8, 0, 0).getTime();
     const h = harness(mondayAtEight);
     h.setBot("busy");
-    h.manager.create({
+    const routine = h.manager.create({
       name: "Business-hours check",
       prompt: "Check at an allowed time",
       botId: "maus-interval",
@@ -2007,7 +2006,7 @@ describe("RoutineManager", () => {
     expect(h.started).toEqual([{
       botId: "maus-interval",
       threadId: "thread-1",
-      prompt: routineTurn("Business-hours check", "Check at an allowed time"),
+      prompt: routineTurn(routine.id, "Business-hours check", "Check at an allowed time"),
     }]);
     expect(h.manager.listRuns()[0]).toMatchObject({
       status: "running",
@@ -2019,7 +2018,7 @@ describe("RoutineManager", () => {
     const mondayAtEightOhFive = new Date(2026, 7, 17, 8, 5, 0).getTime();
     const h = harness(mondayAtEightOhFive);
     h.setBot("busy");
-    h.manager.create({
+    const routine = h.manager.create({
       name: "Phase-aligned check",
       prompt: "Keep the original cadence",
       botId: "maus-interval",
@@ -2055,7 +2054,7 @@ describe("RoutineManager", () => {
     expect(h.started).toEqual([{
       botId: "maus-interval",
       threadId: "thread-1",
-      prompt: routineTurn("Phase-aligned check", "Keep the original cadence"),
+      prompt: routineTurn(routine.id, "Phase-aligned check", "Keep the original cadence"),
     }]);
     expect(h.manager.listRuns()[0]).toMatchObject({
       status: "running",
@@ -2523,7 +2522,7 @@ describe("RoutineManager", () => {
     h.setBot("ready");
     await h.manager.tick();
 
-    expect(h.started[0]?.prompt).toBe(routineTurn("Original brief", "Use the original instructions"));
+    expect(h.started[0]?.prompt).toBe(routineTurn(routine.id, "Original brief", "Use the original instructions"));
     expect(h.manager.listRuns()[0]).toMatchObject({
       routineName: "Original brief",
       prompt: "Use the original instructions",
@@ -2568,7 +2567,7 @@ describe("RoutineManager", () => {
     h.setBot("ready");
     await h.manager.tick();
     expect(h.started[0]?.prompt).toBe(
-      `${routineTurn("Original context", "Use the original attachment")}\n\n<attached-file path="/tmp/original.txt" name="original.txt" />`,
+      `${routineTurn(routine.id, "Original context", "Use the original attachment")}\n\n<attached-file path="/tmp/original.txt" name="original.txt" />`,
     );
     expect(h.manager.listRuns()[0]?.attachments?.[0]?.path).toBe("/tmp/original.txt");
     expect(h.manager.listRoutines()[0]?.attachments?.[0]?.path).toBe("/tmp/replacement.txt");
@@ -2594,7 +2593,7 @@ describe("RoutineManager", () => {
     await h.manager.tick();
 
     expect(h.started[0]?.prompt).toBe(
-      `${routineTurn("Inspect image", "Inspect it")}\n\n<attached-image path="/tmp/a&quot;&amp;&lt;&gt;&#9;&#10;&#13;.png" name="image.png" />`,
+      `${routineTurn(routine.id, "Inspect image", "Inspect it")}\n\n<attached-image path="/tmp/a&quot;&amp;&lt;&gt;&#9;&#10;&#13;.png" name="image.png" />`,
     );
     expect(h.manager.listRoutines()[0]?.prompt).toBe("Inspect it");
     expect(h.manager.listRoutines()[0]?.attachments?.[0]?.path).toBe(unusualPath);
@@ -3650,8 +3649,8 @@ describe("routine continuity", () => {
     const first = await runOnce(h, routine.id, anchorAt, "Nothing shipped yesterday.");
     const second = await runOnce(h, routine.id, anchorAt + 60 * 60_000, "Still nothing.");
 
-    expect(first).toBe(routineTurn("Morning brief", "Write the brief"));
-    expect(second).toBe(routineTurn("Morning brief", "Write the brief"));
+    expect(first).toBe(routineTurn(routine.id, "Morning brief", "Write the brief"));
+    expect(second).toBe(routineTurn(routine.id, "Morning brief", "Write the brief"));
     expect(second).not.toContain("previous-run");
   });
 
@@ -3669,8 +3668,8 @@ describe("routine continuity", () => {
     const first = await runOnce(h, routine.id, anchorAt, "Two deploys, one rollback.");
     const second = await runOnce(h, routine.id, anchorAt + 60 * 60_000);
 
-    expect(first).toBe(routineTurn("Morning brief", "Write the brief"));
-    expect(second).toContain(routineTurn("Morning brief", "Write the brief"));
+    expect(first).toBe(routineTurn(routine.id, "Morning brief", "Write the brief"));
+    expect(second).toContain(routineTurn(routine.id, "Morning brief", "Write the brief"));
     expect(second).toContain("Two deploys, one rollback.");
     expect(second).toContain("<previous-run finished=");
     expect(second).toContain("untrusted, bounded excerpt");
@@ -3767,7 +3766,7 @@ describe("routine continuity", () => {
     const routine = h.manager.create({ name: "Private brief", prompt: "Write the brief", botId: "maus-1", schedule: everyHour(anchorAt), continuity: true });
     await runOnce(h, routine.id, anchorAt, "Private result from the old assignment.");
     h.manager.update(routine.id, patch);
-    expect(await runOnce(h, routine.id, anchorAt + 60 * 60_000)).toBe(routineTurn("Private brief", "Write the brief"));
+    expect(await runOnce(h, routine.id, anchorAt + 60 * 60_000)).toBe(routineTurn(routine.id, "Private brief", "Write the brief"));
   });
 
   it("survives a reload, because continuity is part of the stored routine", async () => {
@@ -3801,7 +3800,7 @@ describe("routine continuity", () => {
 
     const second = await runOnce(h, routine.id, anchorAt + 60 * 60_000);
 
-    expect(second).toBe(routineTurn("Morning brief", "Write the brief"));
+    expect(second).toBe(routineTurn(routine.id, "Morning brief", "Write the brief"));
   });
 
   it("refuses continuity on a room goal, which does not run the bot prompt path", () => {
