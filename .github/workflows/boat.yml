@@ -1,6 +1,7 @@
 # Linux checks on Boat (https://docs.boat.dev/ci), so pull requests get results without waiting for GitHub's hosted
 # runners. The same split as ci.yml's Linux leg (scripts/ci-scope.mjs: 8 shards, every e2e file, one file at a time per
-# shard, so one VM per shard): lint and typecheck on one boat VM, each vitest shard on its own boat VM (4 vCPU, 8 GB).
+# shard, so one VM per shard): lint and typecheck on one boat-large VM, each vitest shard on its own boat-large VM (8 vCPU, 16 GB: GitHub's
+# ubuntu-latest has 16 GB, and typecheck runs out of heap on 8 GB).
 # Runs only while the repository variable BOAT_CI is "on", and only for this repository's own branches (a fork's pull
 # request never runs on Boat; Boat also refuses runs by anyone outside its allow-list). ci.yml is unchanged.
 name: Boat
@@ -21,7 +22,7 @@ jobs:
   static:
     name: Lint and typecheck (Boat)
     if: vars.BOAT_CI == 'on' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: boat
+    runs-on: boat-large
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,11 +34,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+        env:
+          NODE_OPTIONS: --max-old-space-size=12288
 
   vitest:
     name: Linux vitest (Boat, shard ${{ matrix.shard }}/8)
     if: vars.BOAT_CI == 'on' && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
-    runs-on: boat
+    runs-on: boat-large
     timeout-minutes: 30
     strategy:
       fail-fast: false
