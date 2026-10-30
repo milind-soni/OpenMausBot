@@ -13,6 +13,6 @@ export function ChromeRail() {
   const [, setEpoch] = useState(0);
   useEffect(() => { setLocale(language || globalThis.navigator?.language); setEpoch((epoch) => epoch + 1); }, [language]);
   // The page beside the rail chose its skin: the rail wears the same one.
-  useEffect(() => window.ogb?.rail?.onSkin(wearSkin), []);
+  useEffect(() => window.ogb?.rail?.onSkin?.(wearSkin), []);
   return <DesktopCapabilitiesProvider><div data-chrome-rail className="h-full"><PlacesRail chrome /></div></DesktopCapabilitiesProvider>;
 }

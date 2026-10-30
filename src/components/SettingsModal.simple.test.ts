@@ -5,7 +5,7 @@ import { setLocale, t } from "@/lib/i18n";
 import type { AppSettingsSection } from "@/state/store";
 import type { Switch } from "./SettingsPrimitives";
 import { SECTIONS, SIMPLE_FOLDED, SIMPLE_HIDDEN_SECTIONS, SIMPLE_PAGES, SettingsModal, revealSettingsBlock } from "./SettingsModal";
-import { SIMPLE_ADVANCED_ONLY } from "./SettingsSimplePages";
+import { SIMPLE_ADVANCED_ONLY, SimpleLooksPage } from "./SettingsSimplePages";
 
 const fixture = vi.hoisted(() => ({
   section: "general" as AppSettingsSection,
@@ -17,6 +17,8 @@ const fixture = vi.hoisted(() => ({
   ownerOrAdmin: null as boolean | null,
   updater: null as import("@/lib/updater").UpdaterState | null,
   serverUpdate: null as ReturnType<typeof import("./SidebarProfileMenu").useServerUpdateItem>,
+  rail: null as { available: boolean; hidden: boolean } | null,
+  railHidden: [] as boolean[],
 }));
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
@@ -31,6 +33,7 @@ vi.mock("@/lib/interface-mode", () => ({
 }));
 vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.ownerOrAdmin }));
+vi.mock("@/lib/chrome-rail", () => ({ useChromeRail: () => fixture.rail, setChromeRailHidden: (hidden: boolean) => fixture.railHidden.push(hidden) }));
 vi.mock("./SettingsPrimitives", async (importOriginal) => {
   const original = await importOriginal<typeof import("./SettingsPrimitives")>();
   return {
@@ -87,6 +90,8 @@ beforeEach(() => {
   fixture.ownerOrAdmin = null;
   fixture.updater = null;
   fixture.serverUpdate = null;
+  fixture.rail = null;
+  fixture.railHidden = [];
   fixture.api.mockResolvedValue({});
   vi.stubGlobal("window", desktop);
   vi.stubGlobal("document", { documentElement: { dataset: {} } });
@@ -157,6 +162,34 @@ describe("Settings in Simple mode", () => {
     expect(html).toMatch(/aria-expanded="false" aria-controls="[^"]+"[^>]*>Add<\/button>/);
   });
 
+  it("puts the sidebar's colour and picture right under Theme in General, the switch for the window's rail beside them, and only the skins behind More looks", () => {
+    fixture.rail = { available: true, hidden: false };
+    const html = render();
+    const appearance = html.slice(html.indexOf('data-settings-block="appearance"'), html.indexOf(">Notifications<"));
+    const order = ['role="radiogroup" aria-label="Theme"', ">Sidebar picture<", 'aria-label="Show your computers"', 'aria-label="Color my messages with the bot&#x27;s color"', ">More looks<"]
+      .map((needle) => appearance.indexOf(needle));
+    expect(order.every((at) => at > -1), String(order)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(appearance).toContain("A circle for each place your bots live, at the window&#x27;s left edge.");
+    const toggle = fixture.switches.find((props) => props["aria-label"] === "Show your computers")!;
+    expect(toggle.checked).toBe(true);
+    toggle.onClick!({} as never);
+    expect(fixture.railHidden).toEqual([true]);
+    const looks = renderToStaticMarkup(createElement(SimpleLooksPage, { onBack: () => {} }));
+    expect(looks).toContain('data-settings-block="looks"');
+    expect(looks).not.toContain("data-place-picture");
+  });
+
+  it("shows the rail's switch only where this window has a rail to hide", () => {
+    for (const rail of [null, { available: false, hidden: true }]) {
+      fixture.rail = rail;
+      expect(render()).not.toContain("Show your computers");
+    }
+    fixture.rail = { available: true, hidden: true };
+    render();
+    expect(fixture.switches.find((props) => props["aria-label"] === "Show your computers")?.checked).toBe(false);
+  });
+
   it("keeps the everyday rows and leaves the fifteen builder controls to Advanced, where search still points", () => {
     const general = open("general");
     for (const shown of ['aria-label="Send usage analytics"', 'aria-label="Color my messages with the bot&#x27;s color"', 'aria-label="Send messages with"',
@@ -177,7 +210,7 @@ describe("Settings in Simple mode", () => {
     vi.stubGlobal("window", { ogb: { ...desktop.ogb, updater: { check: vi.fn(), install: vi.fn(), onState: vi.fn() } } });
     fixture.updater = { status: "idle" };
     const html = open("updates");
-    expect(html).toMatch(/>OpenMausBot [^<]+<\/div>/);
+    expect(html).toMatch(/>MausBot [^<]+<\/div>/);
     for (const shown of ["Check for updates", "MARKER:updatesConsent;", "Replay welcome tour", "Diagnostics"]) expect(placement(html, shown), shown).toBe("shown");
   });
 
@@ -186,7 +219,7 @@ describe("Settings in Simple mode", () => {
     const onSelect = vi.fn();
     fixture.serverUpdate = { phase: "up-to-date", pending: false, label: "Up to date", item: { key: "update", label: "Up to date", subtitle: "v1.2.3", icon: null, disabled: false, onSelect } };
     const html = open("updates");
-    expect(html).toMatch(/>OpenMausBot [^<]+<\/div>/);
+    expect(html).toMatch(/>MausBot [^<]+<\/div>/);
     expect(html).toContain("Up to date v1.2.3");
     expect(placement(html, "Check for updates")).toBe("shown");
   });

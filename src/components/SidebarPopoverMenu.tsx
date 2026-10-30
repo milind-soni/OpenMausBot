@@ -24,6 +24,10 @@ export interface SidebarMenuItem {
   keepOpen?: boolean;
   submenu?: SidebarMenuItem[];
   chevron?: boolean;
+  /** a sentence that wraps instead of being cut short */
+  wrap?: boolean;
+  /** the row's tooltip, for what its one line leaves out */
+  title?: string;
   onSelect: () => void;
   tourId?: string;
 }
@@ -104,6 +108,7 @@ function MenuRows({
             role="menuitem"
             data-tour={item.tourId}
             data-menu-key={item.key}
+            title={item.title}
             disabled={item.disabled}
             aria-haspopup={item.submenu ? "menu" : undefined}
             aria-expanded={item.submenu ? openSubmenu === item.key : undefined}
@@ -117,19 +122,19 @@ function MenuRows({
           >
             {item.icon && (
               <span
-                className={cn("flex size-4 shrink-0 items-center justify-center [&>svg]:size-4", item.active ? "text-accent" : "text-ink-secondary")}
+                className={cn("flex size-4 shrink-0 items-center justify-center [&>svg]:size-4", item.wrap && "h-[18px] self-start", item.active ? "text-accent" : "text-ink-secondary")}
               >
                 {item.icon}
               </span>
             )}
             {item.subtitle || item.note ? (
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate">{item.label}</span>
+                <span className={item.wrap ? "break-words" : "truncate"}>{item.label}</span>
                 {item.subtitle && <span className="truncate text-[12px] font-normal leading-4 text-ink-secondary">{item.subtitle}</span>}
                 {item.note && <span className="text-[12px] font-normal leading-snug text-ink-tertiary">{item.note}</span>}
               </span>
             ) : (
-              <span className="flex-1 truncate">{item.label}</span>
+              <span className={cn("flex-1", item.wrap ? "min-w-0 break-words" : "truncate")}>{item.label}</span>
             )}
             {item.value && <span className="shrink-0 text-[13px] font-normal leading-[18px] tabular-nums text-ink-secondary">{item.value}</span>}
             {item.trailing}

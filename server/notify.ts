@@ -58,7 +58,9 @@ export function buildNotification(
                   ? `${who} resumed with results`
                   : kind === "mention"
                     ? `${who} mentioned you`
-                    : `${who} finished`;
+                    : kind === "wait"
+                      ? `${who}'s wait is over`
+                      : `${who} finished`;
 
   if ((kind === "done" || kind === "mention") && !body) return null;
 

@@ -189,6 +189,50 @@ describe("Handoffs", () => {
     expect(f.records.get("claude")).toEqual({ session: "s", through: "m5", ids: [] });
   });
 
+  it("counts nothing of a withheld turn as received, so the next turn offers its line and reply once", () => {
+    const order = ids(4);
+    const f = setup(order, { session: "s", through: "m1", ids: [] });
+    f.replies.set("turn", ["m3"]);
+    f.start({ resumeCursor: "s", carried: ["m2"], own: ["m2"] });
+    f.handoffs.withhold("t");
+    f.event({ type: "turn.started" });
+    f.event({ type: "item.started", itemType: "tool", title: "mcp__computer__click" });
+    f.event({ type: "item.completed", itemType: "assistant_text", text: "Done." });
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
+    expect(unseenIds(order, f.records.get("claude")!)).toEqual(["m2", "m3"]);
+  });
+
+  it("hands a withheld turn on when its engine runs it after all", () => {
+    const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
+    f.replies.set("turn", ["m3"]);
+    f.handoffs.begin("t", "claim", {
+      botId: "b", instanceId: "claude", config: "c", resumeCursor: "s", started: { sent: [] }, recovery: { sent: [] },
+      resumed: { sent: [] }, placed: [], carried: ["m2"], own: ["m2"],
+    });
+    f.handoffs.dispatching("t", "claim");
+    const handOn = f.handoffs.withhold("t");
+    f.handoffs.bindTurn("t", "claim", "turn");
+    expect(f.handoffs.current("t")).toBeUndefined();
+    handOn("turn");
+    f.event({ ...output, turnId: "other-turn" });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m1", ids: [] });
+    f.event(output);
+    f.event({ type: "turn.completed", ok: true });
+    expect(f.records.get("claude")).toEqual({ session: "s", through: "m3", ids: [] });
+  });
+
+  it("never hands a withheld turn over a newer turn's handoff", () => {
+    const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
+    f.start({ resumeCursor: "s", carried: ["m2"], own: ["m2"] });
+    const handOn = f.handoffs.withhold("t");
+    f.start({ resumeCursor: "s", carried: ["m3"], own: ["m3"] });
+    const newer = f.handoffs.current("t");
+    handOn("turn");
+    expect(f.handoffs.current("t")).toBe(newer);
+    expect(() => new Handoffs({ order: () => [], read: () => undefined, write: () => {}, replies: () => [] }).withhold("t")("turn")).not.toThrow();
+  });
+
   it("does not count provider-client error narration or a failed completion as acceptance", () => {
     const f = setup(ids(4), { session: "s", through: "m1", ids: [] });
     f.start({ resumeCursor: "s", placed: ["m2"], carried: ["m3"] });

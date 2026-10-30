@@ -47,7 +47,7 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async () => { throw new Error('fixture denial'); } }); true`);
     await ui("click", "--name", "Copy as Markdown");
-    await expect.poll(() => evaluate("document.querySelector('[role=menu] [role=status]')?.textContent")).toBe("Copy failed — try download");
+    await expect.poll(() => evaluate("document.querySelector('[role=menu] [role=status]')?.textContent")).toBe("Couldn't copy. Use Download instead.");
     await evaluate(`Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => { window.copiedTranscript = text; } }); true`);
     await evaluate(`document.querySelector('[role=menu] button:has([role=status])').click(); true`);
     await expect.poll(() => evaluate("document.querySelector('[role=menu] [role=status]')?.textContent")).toBe("Copied");

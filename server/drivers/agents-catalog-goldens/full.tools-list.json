@@ -1510,6 +1510,92 @@
       }
     },
     {
+      "name": "wait_until",
+      "description": "Tell the person in this chat when something happens. No AI runs while you wait, only plain code checks. Ends after hours (default 24, 1-168).",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "A noun phrase in the person's words, e.g. \"the build\"."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "url_contains",
+              "url_missing",
+              "file_exists",
+              "file_missing",
+              "file_changed",
+              "process_running",
+              "process_gone",
+              "bot_idle"
+            ],
+            "description": "url_*: the page at url has or lacks text. file_*: path exists, is gone or changes. process_*: process (name or pid) runs or stops. bot_idle: bot (name or id) finishes its work."
+          },
+          "url": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "process": {
+            "type": "string"
+          },
+          "bot": {
+            "type": "string"
+          },
+          "follow_up": {
+            "type": "string",
+            "description": "Only if the person asked for something to be done then: that request, for a run that won't see this chat. You carry it out here."
+          },
+          "hours": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "kind"
+        ]
+      }
+    },
+    {
+      "name": "list_waits",
+      "description": "Your waits in this chat that have not ended (wait_until): id, label, what it checks, when it was made and when it stops.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "cancel_wait",
+      "description": "Stop one of your waits; its id comes from list_waits or wait_until's answer.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    {
       "name": "propose_profile",
       "description": "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), or your alert and voice toggles (notifications, speakReplies). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section. Read the result: it applies immediately at every access level, and the person sees it with an Undo where possible. If applied, continue the work without another confirmation. Only a pending result (a Cloud conversation its owner did not drive) means ending the turn to wait for the owner. Never claim success without an applied result; report failures honestly. This does not elevate another bot's execution permissions.",
       "inputSchema": {

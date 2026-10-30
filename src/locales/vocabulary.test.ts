@@ -13,7 +13,7 @@ const RETIRED: ReadonlyArray<readonly [string, RegExp, string]> = [
   ["OpenMausBot Cloud", /OpenMausBot Cloud/i, "MausBot Cloud"],
   ["MausBot Pro", /MausBot Pro\b/, "MausBot Cloud"],
   // \b before "_" fails, so environment names such as OMB_PUBLIC_IPV4 pass.
-  ["OMB", /\bOMB\b/, "OpenMausBot"],
+  ["OMB", /\bOMB\b/, "MausBot"],
   ["Cloud box", /Cloud box/i, "cloud desktop"],
   ["Hosted desktop", /Hosted desktop/i, "cloud desktop"],
   ["Cloud VM", /Cloud VM/i, "cloud desktop"],
