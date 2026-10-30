@@ -90,6 +90,21 @@ would be lent. On a pull request it first runs the base branch's `electron/`
 the same way, so one run shows what the change does; only this branch's result
 decides the job.
 
+How Windows Security treats the real installer is the job of the Windows
+Defender check (`.github/workflows/windows-defender-check.yml`), run by hand
+or by the `defender-check` label on a pull request. On a fresh GitHub Windows
+machine it builds the installer the way the release does, turns Defender's
+protection on the way a home PC has it (GitHub's image turns most of it off and
+excludes every drive), saves the installer like a browser download
+(`Zone.Identifier`, `ZoneId=3`), installs it silently, opens the app for two
+minutes and presses Start screen control through the app's DevTools port. Its
+summary says what Defender found (threat detections and Operational events
+1116, 1117, 1006–1008 and 1015), whether `cua-driver-background.exe` runs, what
+the app's log says about computer control and whether Start screen control
+worked; the `defender-check` artifact holds the rest. It is Windows Server,
+not Windows 10 or 11: SmartScreen's "Windows protected your PC" screen and
+Smart App Control still need a person's PC.
+
 ### When a Cloud can't use this computer
 
 The icon's menu says what the person's own Clouds can't use and why, with the
