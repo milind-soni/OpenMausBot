@@ -78,7 +78,10 @@ headers ride the same way (`server/bot-box/broker-mcp.ts`): the turn's server li
 turns while the servers are the same, so a long-lived engine process keeps its MCP sessions. A request for the grant
 itself goes to the upstream exactly as it was given (a server at `/mcp` is reached at `/mcp`, never `/mcp/`, which a
 Cloudflare Worker answers with 404), anything below it below that address, with the client's query beside the
-upstream's own. Connected apps (Composio,
+upstream's own. MCP Settings → **Test** reaches a URL server the same way where turns are boxed
+(`server/bot-box/broker-probe.ts`): a grant made like a turn's, through the broker's socket, revoked when the test
+ends. A server that answers directly but not through the broker fails the test with "Your bots can't reach this
+server", never "Connected", and says the fault is ours. Connected apps (Composio,
 HighLevel) were already behind the harness (`/api/internal/connectors/*` with a per-turn bearer) and stay there.
 
 A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Cerebras, MiniMax, Kimi, Cursor, Factory,

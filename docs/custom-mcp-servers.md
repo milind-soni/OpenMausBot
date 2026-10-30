@@ -300,7 +300,8 @@ Known limits:
 
 Every engine except Claude Code reaches URL servers through OpenMausBot's own
 connector, the same one **Test** uses, so a server that passes Test works in
-chat too. Some servers refuse any handshake field they do not know, and the
+chat too. On a Cloud whose bots run in their box, bots reach a URL server
+through the box's credential broker, and so does Test (docs/bot-box.md). Some servers refuse any handshake field they do not know, and the
 engines' own MCP clients add such fields: a bot connecting by itself got "Tool
 not found" for every tool of a server that passed Test. Claude Code still
 connects by itself, since its handshake has only fields the MCP spec defines.
