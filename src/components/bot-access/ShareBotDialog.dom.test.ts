@@ -26,7 +26,7 @@ const CARA = { email: "cara@acme.test", name: "Cara", role: "member" };
 const EVE = { email: "eve@acme.test", name: "Eve", role: "member" };
 const payroll = (fields: Partial<Bot>): Bot => ({
   id: "payroll", threadId: "t-main", name: "Payroll", title: "", description: "", notifications: true, color: "teal", unread: false,
-  modelSelection: { instanceId: "claude", model: "claude-opus-5-5" }, createdBy: ADA.email, ...fields,
+  modelSelection: { instanceId: "claude", model: "claude-opus-5-5" }, messages: [], createdBy: ADA.email, ...fields,
 });
 const editable = payroll({ yourAccess: "edit", access: { everyone: "none", people: { [BOB.email]: "view", [CARA.email]: "chat" } } });
 
