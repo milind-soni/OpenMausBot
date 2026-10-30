@@ -22,6 +22,8 @@ export interface QuestionRoutingDeps {
   answerLive(threadId: string, requestId: string, text: string): Promise<boolean>;
   /** The open sign-in cards this work waits on were answered elsewhere: they settle, and the place goes back to its bot. */
   settleSignIns(node: HandoffView): void;
+  /** The work runs in one person's private chat and its requester's chat is not that one: its questions stay theirs. */
+  keptPrivate(node: HandoffView, requester: HandoffView): boolean;
 }
 
 /** A question a bot waits on: parked work (its own question, or only sign-ins), or a turn waiting on its question card. */
@@ -37,12 +39,12 @@ export function createQuestionRouting(deps: QuestionRoutingDeps) {
 
   /** At Full access a question asked with an ask tool in work handed on, which the person started, is answered at once
    * with this instead of a card; undefined shows the card. What only the person can give still reaches them, and so
-   * does every question in work an outside event started. */
+   * does every question in work an outside event started or in work that runs in their private chat. */
   function notAsked(input: { botId: string; threadId: string; level: ApprovalMode; question: string }): string | undefined {
     if (input.level !== "full" || personOnly(input.question)) return undefined;
     const node = deps.active().find((n) => n.threadId === input.threadId && n.botId === input.botId && n.status === "running" && n.parentId !== undefined);
     const requester = node?.parentId ? deps.node(node.parentId) : undefined;
-    if (!node || !requester || node.origin?.kind === "outside") return undefined;
+    if (!node || !requester || node.origin?.kind === "outside" || deps.keptPrivate(node, requester)) return undefined;
     return `Not asked: at this level nobody is interrupted. Take the sensible default yourself, carry on, and say in one plain line what you chose. If you truly cannot choose, end your turn with NEEDS INPUT:, the question and Default: your pick, and @${store.bot(requester.botId)?.name ?? "your requester"} decides.`;
   }
 

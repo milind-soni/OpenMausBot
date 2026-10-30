@@ -83,6 +83,8 @@ export interface HostTurnResult {
   evidence?: TurnEvidence;
   cap?: { note: string; handoffPath?: string };
   cards?: { question: string; ids: string[] };
+  /** The question it ends on stayed in one person's private chat: only that person can answer it. */
+  privateQuestion?: boolean;
   /** The host's stall watchdog stopped the turn, including a room turn a stall ended during setup, before it had an
    * outcome: it failed as `stalled`, not as a provider error. */
   stalled?: boolean;

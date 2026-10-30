@@ -508,7 +508,7 @@ export class RuntimeCoordinator implements Coordinator {
     const question = root ? undefined : needsInputQuestion(result.text);
     if (question === undefined) return { kind: "completed", text: result.text, ...evidence(result) };
     const named = withDefault(question);
-    const decide = requesterDecides(a) && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
+    const decide = requesterDecides(a) && !result.privateQuestion && !personOnly(named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
     return { kind: "needs_input", question, ...decide, ...evidence(result) };
   }
 

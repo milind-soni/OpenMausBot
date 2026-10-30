@@ -1391,6 +1391,17 @@ describe("RuntimeCoordinator: who answers a teammate's question", () => {
     expect(ask.coordinator.node(asked.id)?.decide).toBeUndefined();
   });
 
+  it("leaves a question whose words stayed in one person's private chat to that person at Full access", async () => {
+    const w = world((node, turn) => node.botId === "builder" && !/answered|Nobody was asked/.test(turn)
+      ? { ok: true, text: "NEEDS INPUT: builder has a question for Ada, in builder's chat with Ada.", privateQuestion: true } : undefined);
+    w.host.levels.builder = { level: "full" };
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Sort her inbox");
+    ended(w, "gen-1");
+    w.coordinator.tick(); await flush();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "waiting", question: "builder has a question for Ada, in builder's chat with Ada." });
+    expect(w.coordinator.node(node.id)?.decide).toBeUndefined();
+  });
+
   it("puts a question to the person at Full access when an outside event started the work: its brief is not the person's authority", async () => {
     const w = world(asks("NEEDS INPUT: CSV or Excel?\nDefault: CSV"));
     w.host.levels.builder = { level: "full" };

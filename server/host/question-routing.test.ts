@@ -10,7 +10,7 @@ const FUCHS = bot("fuchs", "Fuchs", { chiefOfStaff: true });
 const DACHS = bot("dachs", "Dachs");
 const OTTER = bot("otter", "Otter");
 
-function world(options: { live?: string[] } = {}) {
+function world(options: { live?: string[]; privateTo?: string } = {}) {
   const threads = new Map<string, Message[]>();
   let ids = 0;
   const rows = (threadId: string) => threads.get(threadId) ?? [];
@@ -58,6 +58,7 @@ function world(options: { live?: string[] } = {}) {
     live: (_threadId, requestId) => (options.live ?? []).includes(requestId),
     answerLive: async (threadId, requestId, text) => { answeredLive.push({ threadId, requestId, text }); return true; },
     settleSignIns: (parked) => { settled.push(parked.id); },
+    keptPrivate: (child, requester) => child.threadId === options.privateTo && requester.threadId !== options.privateTo,
   };
   return { routing: createQuestionRouting(deps), store, rows, node, nodes, answeredNodes, answeredLive, settled };
 }
@@ -71,7 +72,7 @@ describe("at Full access a question asked with an ask tool", () => {
         + "If you truly cannot choose, end your turn with NEEDS INPUT:, the question and Default: your pick, and @Fuchs decides.");
   });
 
-  it("still reaches the person when only they can give it, below Full access, in their own chat, and in work an outside event started", () => {
+  it("still reaches the person when only they can give it, below Full access, in their own chat, in work an outside event started, and in work in their private chat", () => {
     const w = world();
     w.node({ status: "running" });
     expect(w.routing.notAsked({ botId: "dachs", threadId: "work", level: "full", question: "Please sign in to the bank portal" })).toBeUndefined();
@@ -81,6 +82,9 @@ describe("at Full access a question asked with an ask tool", () => {
     const hooked = world();
     hooked.node({ status: "running", origin: { kind: "outside" } });
     expect(hooked.routing.notAsked({ botId: "dachs", threadId: "work", level: "full", question: "CSV or Excel?" })).toBeUndefined();
+    const theirs = world({ privateTo: "work" });
+    theirs.node({ status: "running", origin: { kind: "user", request: "Sort my inbox" } });
+    expect(theirs.routing.notAsked({ botId: "dachs", threadId: "work", level: "full", question: "CSV or Excel?" })).toBeUndefined();
   });
 });
 
