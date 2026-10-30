@@ -231,6 +231,7 @@ const TOOL_DEFINITIONS = [
       reply: { type: "string", enum: ["resume", "none"], description: "resume (default): the result resumes you. none: a one-way notice that is never awaited; nothing comes back and nothing resumes you." },
       consult: { type: "boolean", description: "True for a question: the teammate answers from what it knows, acting on nothing, and you are resumed with the answer. Leave out for work." },
       done_when: { type: "string", maxLength: 1000, description: "Optional: what must be true for this to count as done, in one or two sentences; the teammate is held to it." },
+      answers: { type: "string", description: "Only to answer a teammate's question instead of sending work: the assignment id its question note names. message is the answer." },
     }, required: ["bot_ids", "message"] },
   },
   {

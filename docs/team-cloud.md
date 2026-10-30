@@ -356,12 +356,19 @@ inbox is unread.
 An ask in the person's own private chat, where they are, stays only there. The Admins' asks (a bot nobody owns) are not
 anyone's inbox. A member without any bot of their own gets the notification where it was written, as before.
 
-**A teammate's question.** Work handed on that needs the person asks them with a card: a decision with a few set
-answers through the bot's question tool, the bot's own choices as buttons, and anything else as a card with a reply field
-in place of its `NEEDS INPUT:` line (docs/runtime-contract.md). Its copy reaches their inbox with the same buttons, and
-the conversation that handed the work on gets no chip about it when that conversation is the inbox itself. A line the
-person types while the bot waits on its own question card answers that card, as a tap would, and so does a reply to the
-card or to its copy.
+**A teammate's question.** At Full access ("Just do it", every bot's default) a question from work handed on never
+reaches the person unless only they can give what it asks (a sign-in or code, a payment, a secret or an account of
+theirs): the bot that handed the work on answers it, and with no answer from it the bot goes on with the default it
+named and says so; its card in the bot's conversation shows who picked what, waits on nobody, and still takes the
+person's own answer. What only the person can do is asked for exactly, once, while the rest of the work moves on. On
+"Ask me first" work handed on that needs the person asks them with a card: a decision with a few set answers through the
+bot's question tool, the bot's own choices as buttons, and anything else as a card with a reply field in place of its
+`NEEDS INPUT:` line (docs/runtime-contract.md). It waits however long they take. Its copy reaches their inbox with the
+same buttons, and the conversation that handed the work on gets no chip about it when that conversation is the inbox
+itself. A line the person types while the bot waits on its own question card answers that card, as a tap would, and so
+does a reply to the card or to its copy, and an answer their Chief or another bot passes on with `coordinate_bots`
+(`answers`, the question's assignment id). A question whose work ended, or that the bot replaced with a newer one, closes,
+and its copy, Needs you and the overview follow; a restart posts nothing again.
 
 **Answering is replying.** A reply to a line (the chat's Reply) goes back as the table says, and the inbox's bot takes no
 turn for it; the line records the answer and a "Told Philipp" chip follows it. A bot that asked carries on: its

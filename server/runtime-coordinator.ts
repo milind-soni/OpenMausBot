@@ -6,8 +6,9 @@ import { composeEnvelope, composeQuestion, composeReport, composeResume, compose
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
+import { personOnly, withDefault } from "./runtime/questions.ts";
 import { childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
-import type { Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import type { Answerer, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 
 const NOT_RUNNING = "The originating room task is no longer running";
 const WRONG_SPEAKER = "The handoff belongs to a different room speaker";
@@ -58,14 +59,20 @@ function runtimeOrigin(origin: WorkOrigin | undefined, source: RoomAddress): Ori
     : { kind: "outside", source: "chat", ref: source.threadId };
 }
 
+/** At Full access a teammate's question is its requester's to answer, unless only the person can give what it asks. */
+const requesterAnswers = (a: Assignment, question: string): boolean =>
+  a.level === "full" && a.requester.kind === "bot_turn" && !personOnly(question);
+
+/** The question a reply ends on: its last line starts with NEEDS INPUT:, or the line before a closing `Default:` line. */
 export function needsInputQuestion(text: string): string | undefined {
   const lines = text.split(/\r?\n/);
-  let last = lines.length - 1;
-  while (last >= 0 && lines[last]!.trim() === "") last -= 1;
+  const filled = (from: number) => { let at = from; while (at >= 0 && lines[at]!.trim() === "") at -= 1; return at; };
+  const last = filled(lines.length - 1);
   if (last < 0) return undefined;
-  const line = lines[last]!.trim();
+  const at = /^default:/i.test(lines[last]!.trim()) ? filled(last - 1) : last;
+  const line = at < 0 ? "" : lines[at]!.trim();
   if (!NEEDS_INPUT.test(line)) return undefined;
-  const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(last + 1)].join("\n").trim();
+  const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(at + 1)].join("\n").trim();
   return question || undefined;
 }
 
@@ -81,6 +88,10 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
   if (a.outcome !== undefined) node.outcome = a.outcome;
   if (a.outcomeDetail !== undefined) node.outcomeDetail = a.outcomeDetail;
   if (a.question !== undefined) node.question = a.question;
+  if (a.decide !== undefined) node.decide = a.decide;
+  if (a.answer !== undefined) node.answer = a.answer;
+  if (a.answeredBy !== undefined) node.answeredBy = a.answeredBy;
+  if (a.carrying !== undefined) node.carrying = a.carrying;
   if (a.cards !== undefined) node.cards = a.cards;
   if (a.continuation !== undefined) node.continuation = { ...a.continuation };
   if (a.goalRunId !== undefined) node.goalRunId = a.goalRunId;
@@ -295,11 +306,16 @@ export class RuntimeCoordinator implements Coordinator {
     this.runtime.end(id, end);
   }
 
-  answerNode(id: string, text: string): boolean {
+  answerNode(id: string, text: string, by?: Answerer): boolean {
     this.ready();
     const a = this.store.get(id);
     if (!a || a.status !== "needs_input") return false;
-    return this.runtime.answer(id, text);
+    return this.runtime.answer(id, text, by);
+  }
+
+  parkedFor(botId: string): HandoffView[] {
+    this.ready();
+    return this.live().filter(n => n.status === "needs_input" && n.assignee.botId === botId).map(n => this.project(n));
   }
 
   answerRoot(id: string, text: string): boolean {
@@ -493,8 +509,10 @@ export class RuntimeCoordinator implements Coordinator {
     if (result.cards) return { kind: "needs_input", question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
     if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
-    if (question !== undefined) return { kind: "needs_input", question, ...evidence(result) };
-    return { kind: "completed", text: result.text, ...evidence(result) };
+    if (question === undefined) return { kind: "completed", text: result.text, ...evidence(result) };
+    const named = withDefault(question);
+    const decide = requesterAnswers(a, named.question) ? { decide: named.default ? { default: named.default } : {} } : {};
+    return { kind: "needs_input", question, ...decide, ...evidence(result) };
   }
 
   private live(): Assignment[] {

@@ -206,6 +206,11 @@ export function customMcpPrompt(names: string[], off: ReadonlyArray<{ name: stri
   const left = off.map(({ name, error }) => ` The MCP server "${name}" is off for you because it doesn't start for you (${error}); it is tried again on its own.`).join("");
   return mounted + left;
 }
+/** At Full access ("Just do it") nothing a bot can settle waits on the person; the cheapest way to find something out
+ * comes first, and the person last. */
+export const JUST_DO_IT_PROMPT =
+  " Just do it is on: do not stop to ask the person to confirm a step or choose between options. Use what you know, a connected app, the web, a signed-in browser, then the computer; take the sensible default for anything left, carry on, and say in one plain line what you chose. Ask them only for what only they can do: a sign-in, a payment, a secret or an account of theirs.";
+
 export const CREDENTIAL_PROMPT =
   " If a supported API key is missing for the service actually needed, use request_credential to create a secure credential request; a 1Password service account token, for signing in with logins from a 1Password vault, is one too (credential_id onePasswordToken). Before requesting a computer-provider key, inspect the configured targets with select_computer; an existing self-hosted VPS does not need Boat credentials. Do not request a different provider's key merely because a task mentions cloud. For any other secret (a Stripe or npm token, a webhook signing secret), give request_credential a label, reason and delivery: ref for add_mcp_server, file for your own commands. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
 /** Ten minutes stays inside the 20-minute turn stall watchdog, which sees nothing while a command runs. */

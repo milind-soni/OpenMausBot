@@ -40,6 +40,7 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
     groupByThread: (threadId: string) => (threadId === "room" ? { id: "room" } : undefined),
   };
   const nodes = new Map<string, HandoffView>();
+  const answered: Array<{ id: string; text: string }> = [];
   const notified: Notification[] = [];
   const answers: Array<{ threadId: string; requestId: string; message: string }> = [];
   let refuse: { status: number; error: string } | null = null;
@@ -56,6 +57,13 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
       return { ok: true as const };
     }),
     answeredIn: (threadId, requestId) => (threadId === "inbox" && requestId.startsWith("req") ? "work" : threadId),
+    answerNode: (id, text) => {
+      const parked = nodes.get(id);
+      if (!parked || parked.status !== "waiting") return false;
+      answered.push({ id, text });
+      nodes.set(id, { ...parked, status: "queued", question: undefined, answer: text } as HandoffView);
+      return true;
+    },
   };
   const cards = createAskCards(deps);
   const node = (over: Partial<HandoffView> = {}): HandoffView => {
@@ -67,7 +75,7 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
   };
   nodes.set("root", { id: "root", rootId: "root", threadId: "inbox", botId: "luchs" } as HandoffView);
   const say = (threadId: string, text: string) => store.appendMessage(threadId, { role: "bot", kind: "text", text });
-  return { cards, store, rows, notified, answers, node, say, deps, refuse: (value: typeof refuse) => { refuse = value; } };
+  return { cards, store, rows, notified, answers, answered, node, say, deps, refuse: (value: typeof refuse) => { refuse = value; } };
 }
 
 describe("a teammate's NEEDS INPUT question", () => {
@@ -126,17 +134,111 @@ describe("a teammate's NEEDS INPUT question", () => {
     expect(w.rows("work").map((row) => row.card?.requestId)).toEqual(["needs-input-as_1-1", "needs-input-as_1-2"]);
   });
 
-  it("keeps a room member's question and a parked card's wait as they were: a chip and the work's notice, no card", () => {
+  it("asks a room member's question with the same card, in place of the member's own line, and answers the waiting work from it", () => {
     const room = world();
-    room.say("work", `NEEDS INPUT: ${QUESTION}`);
-    room.cards.park(room.node({ groupId: "room" }), QUESTION);
-    expect(room.rows("work").some((row) => row.card)).toBe(false);
-    expect(room.notified.map((notification) => notification.kind)).toEqual(["delegation-settled"]);
+    room.store.appendMessage("work", { role: "bot", kind: "text", text: "Mein Teil ist fertig.", from: { botId: "luchs", name: "Luchs", color: "orange" } });
+    room.store.appendMessage("work", { role: "bot", kind: "text", text: `Geprüft.\nNEEDS INPUT: ${QUESTION}`, from: { botId: "biber", name: "Biber", color: "teal" } });
+    const member = room.node({ groupId: "room", question: QUESTION });
+    room.cards.park(member, QUESTION);
+    const [other, line, card] = room.rows("work");
+    expect(other!.text).toBe("Mein Teil ist fertig.");
+    expect(line).toMatchObject({ text: "Geprüft.", from: { botId: "biber" } });
+    expect(card).toMatchObject({ kind: "options", from: { botId: "biber" }, card: { subtitle: QUESTION, requestId: "needs-input-as_1-1" } });
+    expect(room.notified.map((notification) => notification.kind)).toEqual(["question"]);
+    expect(room.cards.answerParked("work", "needs-input-as_1-1", "Kurz und freundlich")).toBe(true);
+    expect(room.answered).toEqual([{ id: "as_1", text: "Kurz und freundlich" }]);
+    expect(room.rows("work").find((row) => row.card)!.card).toMatchObject({ answered: "answer", answeredText: "Kurz und freundlich" });
+    expect(room.cards.answerParked("work", "needs-input-as_1-1", "noch einmal")).toBe(false);
+  });
 
+  it("keeps a parked card's wait as it was: a chip and the work's notice", () => {
     const card = world({ inboxThread: "inbox" });
     card.cards.park(card.node({ cards: ["m9"] }), "Waiting on the person: connect Gmail");
     expect(card.rows("inbox").map((row) => row.tool?.name)).toEqual(["Biber needs your input: Waiting on the person: connect Gmail"]);
     expect(card.notified.map((notification) => notification.kind)).toEqual(["delegation-settled"]);
+  });
+});
+
+describe("at Full access a teammate's question goes to its requester", () => {
+  it("shows who decides, in place of the line, with no chip and no notification, and then what was picked and by whom", () => {
+    const w = world({ inboxThread: "inbox" });
+    w.say("work", `Geprüft.\nNEEDS INPUT: CSV oder Excel?\nDefault: CSV`);
+    const node = w.node({ decide: { default: "CSV" }, question: "CSV oder Excel?\nDefault: CSV" });
+    w.cards.park(node, "CSV oder Excel?\nDefault: CSV");
+    const card = () => w.rows("work").find((row) => row.card)!.card!;
+    expect(w.rows("work")[0]!.text).toBe("Geprüft.");
+    expect(card()).toMatchObject({ subtitle: "CSV oder Excel?", options: [], answered: "answer", answeredBy: { kind: "bot", name: "Luchs" } });
+    expect(card().answeredText).toBeUndefined();
+    expect(w.rows("inbox")).toEqual([]);
+    expect(w.notified).toEqual([]);
+    w.cards.park(node, "CSV oder Excel?\nDefault: CSV", true);
+    expect(w.rows("work").filter((row) => row.card)).toHaveLength(1);
+
+    w.cards.decided({ ...node, status: "queued", answer: "CSV", answeredBy: { kind: "default" } }, "Biber");
+    expect(card()).toMatchObject({ answered: "answer", answeredText: "CSV", answeredBy: { kind: "bot", name: "Biber" } });
+    w.cards.closed({ ...node, status: "completed", outcome: "done" });
+    expect(card(), "a decided question stays decided").toMatchObject({ answered: "answer", answeredText: "CSV" });
+  });
+
+  it("closes a question its requester was still deciding when the work ends without it", () => {
+    const w = world();
+    w.say("work", "NEEDS INPUT: CSV oder Excel?");
+    const node = w.node({ decide: {} });
+    w.cards.park(node, "CSV oder Excel?");
+    w.cards.closed({ ...node, status: "cancelled", outcome: "stopped" });
+    const card = w.rows("work").find((row) => row.card)!.card!;
+    expect(card).toMatchObject({ answered: "unavailable", dismissed: true, stopped: true });
+    expect(card.answeredBy).toBeUndefined();
+  });
+
+  it("offers the default a person's question names as a one-tap choice", () => {
+    const w = world();
+    w.say("work", "NEEDS INPUT: Welche Rechnung?\nDefault: die vom Oktober");
+    w.cards.park(w.node(), "Welche Rechnung?\nDefault: die vom Oktober");
+    expect(w.rows("work")[0]!.card).toMatchObject({ subtitle: "Welche Rechnung?", options: ["die vom Oktober"] });
+    expect(w.notified[0]!.body).toBe("Welche Rechnung?");
+  });
+});
+
+describe("nothing stale waits on the person", () => {
+  const ask = (w: ReturnType<typeof world>, threadId: string, requestId: string, at?: { from?: Message["from"] }) =>
+    w.store.appendMessage(threadId, { role: "bot", kind: "options", text: "Soll ich?", ...(at?.from ? { from: at.from } : {}),
+      card: { title: "Your bot has a question", subtitle: "Soll ich?", options: ["Ja"], requestId, requestType: "question" } });
+
+  it("a parked card's chip is not posted again after a restart, even when other lines came after it", () => {
+    const w = world();
+    const node = w.node({ cards: ["m9"] });
+    w.cards.park(node, "Waiting on the person: sign in to notion.so");
+    w.say("inbox", "Luchs: noch etwas anderes");
+    w.cards.park(node, "Waiting on the person: sign in to notion.so", true);
+    expect(w.rows("inbox").filter((row) => row.tool?.name.includes("needs your input"))).toHaveLength(1);
+    expect(w.notified).toHaveLength(1);
+  });
+
+  it("a newer question closes the bot's older one that no turn waits on any more, but not one a turn still waits on", () => {
+    const w = world({ live: ["req-2", "req-3"] });
+    ask(w, "work", "req-1");
+    ask(w, "work", "req-2");
+    ask(w, "work", "req-3");
+    w.cards.askedAgain("work", "req-3", "biber");
+    expect(w.rows("work").map((row) => row.card!.answered ?? null)).toEqual(["unavailable", null, null]);
+  });
+
+  it("the person's own line answers a question in their chat that no turn waits on any more", () => {
+    const w = world({ live: ["req-live"] });
+    ask(w, "chat", "req-old");
+    ask(w, "chat", "req-live");
+    w.cards.answeredByLine("chat", "Ja, mach das");
+    expect(w.rows("chat").map((row) => [row.card!.answered ?? null, row.card!.answeredText ?? null])).toEqual([["answer", "Ja, mach das"], [null, null]]);
+  });
+
+  it("a bot's own reply that ends on NEEDS INPUT becomes the question card, once", () => {
+    const w = world();
+    w.store.appendMessage("chat", { role: "bot", kind: "text", text: "Ich habe zwei Entwürfe.\nNEEDS INPUT: Welcher gefällt dir?", turnId: "t1" });
+    w.cards.ownQuestion("biber", "chat", "t1");
+    w.cards.ownQuestion("biber", "chat", "t1");
+    expect(w.rows("chat").map((row) => [row.kind, row.text])).toEqual([["text", "Ich habe zwei Entwürfe."], ["options", "Welcher gefällt dir?"]]);
+    expect(w.rows("chat")[1]!.card).toMatchObject({ subtitle: "Welcher gefällt dir?", requestType: "question", options: [] });
   });
 });
 
@@ -177,7 +279,16 @@ describe("how an open question card settles", () => {
     expect(done.card()).toMatchObject({ answered: "answer", answeredText: "Ja" });
     const finished = parked();
     finished.w.cards.closed({ ...finished.node, status: "completed", outcome: "done" });
-    expect(finished.card().answered).toBeUndefined();
+    expect(finished.card(), "finished work no longer waits on anyone").toMatchObject({ answered: "unavailable", dismissed: true });
+  });
+
+  it("closes a question the work asked with its question tool once that work ends, unless a turn still waits on it", () => {
+    const w = world({ live: ["req-live"] });
+    const node = w.node();
+    w.store.appendMessage("work", { role: "bot", kind: "options", text: "Soll ich?", card: { title: "Your bot has a question", subtitle: "Soll ich?", options: ["Ja"], requestId: "req-1", requestType: "question" } });
+    w.store.appendMessage("work", { role: "bot", kind: "options", text: "Wirklich?", card: { title: "Your bot has a question", subtitle: "Wirklich?", options: ["Ja"], requestId: "req-live", requestType: "question" } });
+    w.cards.closed({ ...node, status: "completed", outcome: "done" });
+    expect(w.rows("work").map((row) => [row.card!.requestId, row.card!.answered ?? null])).toEqual([["req-1", "unavailable"], ["req-live", null]]);
   });
 });
 
@@ -231,12 +342,12 @@ describe("a typed line answers a question card", () => {
     expect(fixed.answers).toEqual([]);
   });
 
-  it("leaves a line in a chat no teammate handed on to be steered or queued, even while its question card waits", async () => {
+  it("answers the question card the bot's turn waits on in the person's own chat too: the line would only wait behind it", async () => {
     const w = world({ live: ["req-1"] });
     const asked = question(w, "chat");
-    expect(await w.cards.typed(AUTH, "chat", "Nimm die zweite", undefined, {})).toBeNull();
-    expect(await w.cards.typed(AUTH, "chat", "Nimm die zweite", asked, {})).toBeNull();
-    expect(w.answers).toEqual([]);
+    const result = await w.cards.typed(AUTH, "chat", "Nimm die zweite", undefined, {});
+    expect(w.answers).toEqual([{ threadId: "chat", requestId: "req-1", message: "Nimm die zweite" }]);
+    expect(result?.message).toMatchObject({ role: "user", replyToId: asked.id });
   });
 
   it("passes on why an answer was refused, and writes no line", async () => {
@@ -265,8 +376,9 @@ describe("askToolName", () => {
   const bot = (toolScope?: BotRecord["toolScope"]) => ({ modelSelection: { instanceId: "claude", model: "m" }, toolScope }) as BotRecord;
   const claude = () => ({ kind: "mcp" as const, server: "ogb", name: "ask_user" });
 
-  it("names the engine's question tool unless the bot's tool selection leaves it out", () => {
-    expect(askToolName(bot(), claude)).toBe("ask_user");
+  it("names the engine's question tool as its model calls it, unless the bot's tool selection leaves it out", () => {
+    expect(askToolName(bot(), claude)).toBe("mcp__ogb__ask_user");
+    expect(askToolName(bot(), () => ({ kind: "native", name: "AskQuestion" }))).toBe("AskQuestion");
     expect(askToolName(bot({ deny: ["mcp:ogb:ask_user"] }), claude)).toBeUndefined();
     expect(askToolName(bot({ allow: ["mcp:agents:*"] }), claude)).toBeUndefined();
     expect(askToolName(bot(), () => undefined)).toBeUndefined();
