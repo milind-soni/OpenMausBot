@@ -6,13 +6,13 @@ import { requestTooLargeMessage } from "../../shared/request-too-large";
 
 describe("plainErrorLine", () => {
   it.each([
-    ["Failed to fetch", "Couldn't reach OpenMausBot. Check that it's running, then try again."],
-    ["NetworkError when attempting to fetch resource.", "Couldn't reach OpenMausBot. Check that it's running, then try again."],
+    ["Failed to fetch", "Couldn't reach MausBot. Check that it's running, then try again."],
+    ["NetworkError when attempting to fetch resource.", "Couldn't reach MausBot. Check that it's running, then try again."],
     ["The operation was aborted due to timeout", "That took too long. Try again."],
     ["502 Bad Gateway", "Something went wrong on the other end. Try again."],
     ["500 Internal Server Error", "Something went wrong on the other end. Try again."],
     ["404 Not Found", "That couldn't be found. It may have been removed."],
-    ["413 Payload Too Large", "That's too large to send."],
+    ["413 Payload Too Large", "That's too large to send. Try a smaller file or a shorter message."],
     ["429 Too Many Requests", "Too many requests right now. Wait a moment, then try again."],
     ['API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}', "The service is busy right now. Try again in a moment."],
     ["API Error: 529 Overloaded. This is a server-side issue, usually temporary.", "Overloaded. This is a server-side issue, usually temporary."],

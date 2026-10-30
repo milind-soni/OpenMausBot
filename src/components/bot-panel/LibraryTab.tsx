@@ -10,9 +10,9 @@ import { AttachedFileChip } from "../AttachmentPreview";
 import { recentChangedFiles, sharedFileReferences } from "../ComputerFilesPane";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { useManagedSkills } from "../bot-settings/SkillsSection";
-import { memoryNotes } from "./memory-notes";
 import type { SimplePageId } from "./page-registry";
 import { Card, CardLabel, NavRow } from "./rows";
+import { panelMemoryNotes } from "./memory-notes";
 import { useMemoryDoc } from "./use-memory-doc";
 
 export interface LibraryItems {
@@ -62,7 +62,7 @@ export function LibraryTab({ bot, onOpen }: { bot: Bot; onOpen: (page: SimplePag
     if (phone) dispatch({ type: "toggleSettings", open: false });
   };
   const skillsOn = skills.skills.filter((skill) => skill.enabled).length;
-  const notes = memory.doc ? memoryNotes(memory.doc.text).length : null;
+  const notes = memory.docs ? panelMemoryNotes(memory.docs).length : null;
   const memoryValue = bot.memoryEnabled === false ? t("botPanel.memory.off")
     : notes === null ? (memory.error ? t("botPanel.memory.nothingYet") : undefined)
     : notes === 0 ? t("botPanel.memory.nothingYet")
