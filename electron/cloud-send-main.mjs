@@ -144,6 +144,8 @@ export function installCloudSend({ ipcMain, cloudPage, server, local, home, cook
 
   return {
     receive: handoff.receive,
+    /** This computer's server's private port, asked as a send asks it: another move's sends share it. */
+    handoff: (what) => handoff.request(server(), what),
     /** The one-time move to My Cloud (cloud-send.mjs): a pass that carries everything, `final` the one after this computer
      * stops, and the check of what arrived. */
     move: (options) => send.send({ reason: "move", final: options?.final === true }),
