@@ -884,24 +884,48 @@ no AI to carry on, it says the bot waits instead. Nobody is asked.
   then the backups chosen for the bot or in Automatic recovery; then the AI a
   new bot would get. Only an AI that can run a turn now (installed, signed in,
   allowed by your organisation, not limited itself) with the tools and the
-  working folder the current one has. Never another sign-in to the same
-  subscription, which would rotate accounts around the provider's limit; a
-  pay-per-use API key on the same AI is fine.
+  working folder the current one has, and one the conversation's approval level
+  can move to without asking (Auto-accept edits stays on an AI that has it).
+  Never another sign-in to the same subscription, which would rotate accounts
+  around the provider's limit; a pay-per-use API key on the same AI is fine.
 - **What moves.** The person's message that met the limit is sent again on that
   AI, in that conversation alone; the bot's own model and its other
-  conversations stay where they are. While the limit lasts, every new turn
-  (a person's, a routine's, a webhook's) goes straight to that AI without
-  asking the limited one first, and a routine run the limit stopped starts
-  again on it.
+  conversations stay where they are. While the limit lasts, every new turn and
+  conversation of every bot that uses the limited AI (a person's, a routine's,
+  a webhook's) goes straight to that AI without asking the limited one first,
+  and a routine run the limit stopped starts again on it.
 - **How long.** The limited AI is held until the reset it named, or for an hour
-  when it named none. One model's own limit holds that model alone, and for at
-  most six hours before it is tried again. A conversation that moved goes back
-  once its AI's limit has reset, with one line saying so.
+  when it named none or named one already past; the next turn after that hour
+  checks it again. One model's own limit holds that model alone, and for at
+  most six hours before it is tried again. The holds are saved
+  (`limit-holds.json`, `limit-takeover-holds.json`), so a restart, an update or
+  a sleep the Cloud was stopped for keeps them. A conversation that moved goes
+  back once its AI's limit has reset, with one line saying so.
 
 This is on by default. Start the server with `OMB_QUOTA_SWITCH=0` to switch it
 off: then only the backups Automatic recovery names take over, and the
 notification says the bot waits. Any other value, or none, leaves it on. It
 has no setting in `config.json` yet.
+
+### When an engine is signed out
+
+When a turn stops because its AI is signed out (its sign-in expired or was
+revoked), the person hears it once, in that conversation and as a
+notification: "Claude is signed out on the Cloud. Sign in again in Settings →
+AI to keep using it.", with a Sign in button that opens those settings. Each
+later refused turn still shows that it failed, with no second notice; its
+Chief gets one incident, not one a turn. An account out of credit, which some
+engines stop the same way, is no sign-out.
+
+The backups a turn its AI never started would get carry on meanwhile (the
+bot's own backup AIs, or else the app-wide backup while Automatic recovery is
+on), by the same rules as a usage limit (another sign-in to the same AI is fine
+here, since nothing is rotated around a limit): the person's message is sent
+again there, every new turn and conversation starts there, and a conversation
+that moved goes back once the AI is signed in again in the app, or a turn on it
+works. No AI is picked for a sign-out by itself, so with no such backup nothing
+moves. A new turn tries the signed-out AI again an hour after its last refusal,
+unless its status still says signed out.
 
 ### Which engine a new bot uses
 

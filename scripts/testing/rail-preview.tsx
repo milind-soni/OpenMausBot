@@ -5,6 +5,7 @@ import type { PlaceLook } from "../../electron/place-look.mjs";
 import App from "../../src/App";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
 import { setAdvancedMode } from "../../src/lib/interface-mode";
+import { setSidebarDensity } from "../../src/lib/sidebar-preferences";
 import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
 import { applySkin, type SkinId } from "../../src/lib/skins";
 import "../../src/styles.css";
@@ -16,12 +17,17 @@ import "../../src/styles.css";
 // person's own servers that signed in. ?look=<colour>|none is the place's colour (its tint), ?member a team's Cloud
 // its member is on, ?settings=look Settings → Appearance at the place's colour, ?menu=<id> that circle's own menu (a
 // right-click: its colour). ?place=computer is this computer's own page instead, on a desktop with no Cloud: no rail,
-// or with ?rail one beside it (this computer and a server connected by hand).
+// or with ?rail one beside it (this computer and a server connected by hand). ?density=icons collapses the sidebar to
+// avatars; ?settings=general opens Settings at its first page, ?settings=strip at the switch for the window's rail.
+// ?hidden starts with the rail hidden (the sidebar's button shows it again). The rail is drawn on the page itself, as an
+// older app's page draws it; ?chrome stands in for the window's own rail instead: the room the app's preload leaves
+// for it, with nothing drawn there, so the page lays out as it does beside the real one.
 const params = new URLSearchParams(location.search);
 setAnalyticsEnabled(false);
 setEmailGateDone("skipped");
 markSimpleModePromptSeen();
 setAdvancedMode(params.get("mode") !== "simple");
+setSidebarDensity(params.get("density") === "icons" ? "icons" : "comfortable");
 applySkin((params.get("skin") ?? "midnight") as SkinId);
 
 const place = (id: string, name: string, extra: Partial<RailPlace> = {}): RailPlace => ({ id, name, color: null, kind: "cloud", opens: true, ...extra });
@@ -69,6 +75,14 @@ const adding = params.get("adding") === "setting_up"
   ? { adding: { name: "Client C", color: "rose" as const, tier: "pro", startedAt: Date.now(), status: "setting_up" as const, progress: 0.55, link: true as const } } : {};
 const addView: AddCloudView = { signedIn: true, hasCloud: true, supported: true, canAdd: true, offer, count: 3, home: { name: "My Cloud", color: "blue" }, ...adding };
 const ok = async () => {};
+const chrome = params.has("chrome");
+let hidden = params.has("hidden");
+const placesHeard = new Set<() => void>(), stripHeard = new Set<(state: { available: boolean; hidden: boolean }) => void>();
+const strip = () => ({ available: listed.length > 1, hidden });
+const room = document.createElement("style");
+room.textContent = "html { box-sizing: border-box !important; padding-left: 64px !important; --rail-beside: 64px; }";
+const besidePage = () => { if (chrome && !hidden) document.head.append(room); else room.remove(); };
+besidePage();
 Object.assign(window, { ogb: {
   platform: "darwin",
   app: { version: "0.1.130", ownPage: computer },
@@ -80,7 +94,9 @@ Object.assign(window, { ogb: {
   applySkin: ok, setUnreadCount: () => {}, permStatus: async () => ({}),
   workspaces: {
     state: async () => (computer ? { local: true, name: "This computer" } : { local: false, name: "My Cloud", origin: "https://omb-u-1.fly.dev", color: "blue" }),
-    menu: ok, line: async () => null, places: async () => rail, open: ok, add: ok, onChanged: () => () => {},
+    menu: ok, line: async () => null, open: ok, add: ok,
+    places: async () => (hidden ? { ...rail, places: [] } : chrome ? { ...rail, places: [], beside: true as const } : rail),
+    onChanged: (heard: () => void) => { placesHeard.add(heard); return () => { placesHeard.delete(heard); }; },
     look: async () => look,
     recolor: async (id: string, swatch: CloudSwatch) => {
       rail.places = rail.places.map((entry) => (entry.id === id ? { ...entry, color: COLOR[swatch], paint: { swatch: COLOR[swatch] ? swatch : null } } : entry));
@@ -89,6 +105,17 @@ Object.assign(window, { ogb: {
     color: async (swatch: CloudSwatch) => { look = { ...look, swatch: COLOR[swatch] ? swatch : null, color: COLOR[swatch] }; return { outcome: "saved", look }; },
   },
   cloudAdd: { state: async () => addView, start: async () => ({ outcome: "opened" }), reopen: async () => true, copyLink: async () => true, open: ok, interest: ok, sheet: ok },
+  rail: {
+    state: async () => strip(),
+    setHidden: async (next: boolean) => {
+      hidden = next;
+      besidePage();
+      for (const heard of placesHeard) heard();
+      for (const heard of stripHeard) heard(strip());
+      return strip();
+    },
+    onState: (heard: (state: { available: boolean; hidden: boolean }) => void) => { stripHeard.add(heard); return () => { stripHeard.delete(heard); }; },
+  },
 } });
 
 if (member) {
@@ -120,23 +147,18 @@ const sheet = params.get("sheet");
 if (sheet === "connect") void click('[data-rail-place="signed-in:s-render"]');
 else if (sheet) void click("[data-rail-add]").then(() => (sheet === "server" ? click('[data-place-add-choice="server"]') : sheet === "add" ? undefined : click('[data-place-add-choice="cloud"]')))
   .then(() => (sheet === "name" ? click("[data-plan-buy='pro']") : undefined));
-/** A Settings row's own button, by the row's title (Simple mode's pages name no section). */
-const clickRow = (title: string) => new Promise<void>((resolve) => {
-  const tick = () => {
-    const row = [...document.querySelectorAll<HTMLElement>("[role='group'][aria-labelledby]")]
-      .find((group) => document.getElementById(group.getAttribute("aria-labelledby") ?? "")?.textContent === title);
-    const button = row?.querySelector<HTMLElement>("button");
-    if (button) { button.click(); resolve(); } else setTimeout(tick, 100);
-  };
-  tick();
-});
-if (params.get("settings") === "look") {
-  const opened = () => new Promise<void>((resolve) => { const tick = () => { if (openSettings) { openSettings(); resolve(); } else setTimeout(tick, 100); }; tick(); });
-  void opened().then(() => (params.get("mode") === "simple" ? clickRow("More looks") : click('[data-settings-section="appearance"]')))
+const openedSettings = () => new Promise<void>((resolve) => { const tick = () => { if (openSettings) { openSettings(); resolve(); } else setTimeout(tick, 100); }; tick(); });
+const settings = params.get("settings");
+if (settings) {
+  // Simple mode's General page has the sidebar's rows and the rail's switch; Advanced keeps them in Appearance.
+  void openedSettings().then(() => (params.get("mode") === "simple" || settings === "general" ? undefined : click('[data-settings-section="appearance"]')))
     .then(() => new Promise<void>((resolve) => setTimeout(resolve, 300)))
     .then(() => {
+      if (settings === "general") return document.querySelector("[data-settings-block='appearance']")?.scrollIntoView({ block: "start" });
+      // The rail's switch closes the picture, with the sidebar's own rows above it.
+      if (settings === "strip") return document.querySelector("[data-rail-switch]")?.scrollIntoView({ block: "end" });
       const shown = document.querySelector("[data-place-look], [data-place-picture]");
-      (shown?.closest("[data-sidebar-look], .rounded-xl") ?? shown)?.scrollIntoView({ block: "center" });
+      (shown?.closest("[data-sidebar-look]") ?? shown)?.scrollIntoView({ block: "center" });
     });
 }
 if (params.has("more")) void click("[data-rail-more-button]");

@@ -3,10 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createMoveFreeze, ENDED_REFUSAL, HOME_SCREEN, MOVED_REFUSAL, RAIL_PAGE } from "./move-freeze.ts";
+import { createMoveFreeze, ENDED_REFUSAL, HOME_SCREEN, MOVED_REFUSAL, RAIL_PAGE, switchAutomationsOff, type MoveAutomations } from "./move-freeze.ts";
 import type { MoveWait } from "./move-waits.ts";
 import { createMoveFreezeRoutes } from "./routes/move-freeze.ts";
 import { PASS } from "./routes/table.ts";
+import { WaitManager, type WaitNotice } from "./waits.ts";
 
 const dirs: string[] = [];
 const dataDir = () => { const dir = mkdtempSync(join(tmpdir(), "omb-move-freeze-")); dirs.push(dir); return dir; };
@@ -82,6 +83,45 @@ describe("this computer's copy, frozen at the move", () => {
     expect(freeze.unfreeze()).toBe(false);
     expect(freeze.frozen()).toBe(true);
     expect(freeze.refuses("POST", "/api/bots/b1/messages")).toBe(ENDED_REFUSAL);
+  });
+});
+
+describe("switching this computer's automations off for a move", () => {
+  it("cancels every wait, one already over but not yet posted too, so none posts, notifies or follows up once the freeze lifts", async () => {
+    const present = new Set<string>();
+    let chatBusy = true, clock = Date.UTC(2026, 9, 27, 9, 0);
+    const posts: WaitNotice[] = [], followUps: string[] = [], cards: string[][] = [];
+    const waits = new WaitManager({
+      file: join(dataDir(), "waits.json"), now: () => clock, probes: { stamp: async (path) => (present.has(path) ? { size: 1, mtimeMs: 1 } : null) },
+      sourceAlive: () => true, botBusy: () => false,
+      post: (_wait, notice) => { if (chatBusy) return false; posts.push(notice); return true; },
+      followUp: (wait) => { followUps.push(wait.label); },
+      showCard: (wait) => `card-${wait.id}`,
+      settleCard: (wait, how) => { cards.push([wait.label, how]); },
+    });
+    const made = async (botId: string, label: string, path: string) => {
+      const result = await waits.create({ botId, threadId: `t-${botId}`, label, condition: { kind: "file_exists", path }, followUp: "Tell them." });
+      if (result.state !== "created") throw new Error(result.state);
+      return result.wait.id;
+    };
+    const report = await made("b1", "the report", "/report"), build = await made("b2", "the build", "/build");
+    present.add("/build");
+    clock += 5_000;
+    await waits.tick();
+    expect(waits.all().map((wait) => [wait.label, wait.ending?.status])).toEqual([["the report", undefined], ["the build", "fired"]]);
+
+    const automations: MoveAutomations = { routines: () => null, calls: () => null, webhooks: () => null, appEvents: () => null, waits: () => waits };
+    expect(await switchAutomationsOff(automations, new Set(["routine:r1"])), "only what is named").toEqual([]);
+    expect(waits.all()).toHaveLength(2);
+    expect(await switchAutomationsOff(automations)).toEqual([`wait:${report}`, `wait:${build}`]);
+    expect(cards).toEqual([["the report", "cancelled"], ["the build", "cancelled"]]);
+    expect(waits.all()).toEqual([]);
+
+    chatBusy = false;
+    present.add("/report");
+    clock += 5_000;
+    await waits.tick();
+    expect([posts, followUps]).toEqual([[], []]);
   });
 });
 

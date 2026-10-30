@@ -975,20 +975,21 @@ describe("structured tool execution boundaries", () => {
   });
 
   it.each([
-    { scenario: "one chunk", pieces: ["abab"] },
-    { scenario: "split chunks", pieces: ["ab", "ab"] },
+    // Letters outside hex and the usual id alphabets, so a random id in the events can never contain the credential.
+    { scenario: "one chunk", pieces: ["zqxzqx"] },
+    { scenario: "split chunks", pieces: ["zqx", "zqx"] },
   ])("redacts an overlapping-prefix credential received in $scenario", async ({ pieces }) => {
     const f = await fixture((_request, response) => sse(response, [
       chunk({ content: "Before " }),
       ...pieces.map((piece) => chunk({ content: piece })),
       chunk({ content: " after." }, "stop"),
-    ]), "openai-compat", "abab");
+    ]), "openai-compat", "zqxzqx");
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: true });
     const combined = f.recorder.events.filter((event) => event.type === "content.delta").map((event) => event.delta).join("");
     expect(combined).toBe("Before [redacted] after.");
     expect(f.recorder.events).toContainEqual(expect.objectContaining({ type: "item.completed", itemType: "assistant_text", text: combined }));
-    expect(JSON.stringify(f.recorder.events)).not.toContain("abab");
+    expect(JSON.stringify(f.recorder.events)).not.toContain("zqxzqx");
   });
 
   it("redacts a configured credential echoed by a tool from events, diagnostics, and the returned tool result", async () => {
