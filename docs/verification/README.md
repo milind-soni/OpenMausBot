@@ -229,7 +229,8 @@ roles and device revocation through the real HTTP API with a stubbed email
 service. It does not drive the People settings UI through `control-omb`.
 
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
-default focus, keyboard wrapping and focus return against two disposable bots.
+default focus, keyboard wrapping and focus return against two disposable bots;
+its departments recipe drags bots to reorder them and into new departments.
 
 The [sidebar attention geometry fixture](sidebar-attention.md) measures the
 Active Threads popover's width and inset at each expanded sidebar density in a

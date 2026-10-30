@@ -645,14 +645,14 @@ describe("the Details tab", () => {
 });
 
 describe("the Bot settings page", () => {
-  it("holds Instructions, Before it acts, Call mode, Apps, Job and Hide, with every title on one edge", () => {
+  it("holds Instructions, Before it acts, Backup AIs, Call mode, Apps, Job and Hide, with every title on one edge", () => {
     const rendered = settingsPage(makeBot({ defaultBot: {} }));
-    const order = ['data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="call-mode"', 'data-panel-page="apps"', 'data-panel-row="job"', 'data-panel-row="default-bot-hide"']
+    const order = ['data-panel-edit="soul"', 'data-panel-row="approval"', 'data-panel-row="backups"', 'data-panel-row="call-mode"', 'data-panel-page="apps"', 'data-panel-row="job"', 'data-panel-row="default-bot-hide"']
       .map((marker) => rendered.html.indexOf(marker));
     expect(order.every((index) => index > -1)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(switches(rendered.html)).toBe(0);
-    expect(rendered.html.match(/pl-\[38px\]/g)).toHaveLength(2);
+    expect(rendered.html.match(/pl-\[38px\]/g)).toHaveLength(4);
   });
 
   it("shows the first line of the instructions, or how to start, and edits them in place with Done", () => {

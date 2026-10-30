@@ -209,7 +209,7 @@ import {
   newId,
 } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
-import { recoveryCapabilityError } from "./automatic-recovery.ts";
+import { recoveryCapabilityError, startupBackups } from "./automatic-recovery.ts";
 import { createQuotaSwitchHost } from "./host/quota-switch.ts"; import { quotaSwitchEnabled } from "./quota-switch.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
 import { createMcpServersHost } from "./host/mcp-servers-host.ts"; import { createLimitTakeover } from "./host/limit-takeover.ts";
@@ -8534,7 +8534,7 @@ async function startTurn(
       handoffs.dispatching(threadId, dispatchClaimId, dispatchContext.handoff);
       const clock = takesTurnClock(userTurnText) ? turnClockLine(Date.now(), hostTimeZone()) + nearLimitNote(limitClock.limit(instanceId), engineName(instanceId), hostTimeZone()) : "";
       const shareNote = skillsHost.shareNote(bot, threadId, Boolean(privateWorkspace));
-      const startupRecovery = cfg.automaticRecovery?.enabled === true && (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery.backup ? 1 : 0));
+      const startupRecovery = (opts?.automaticRecoveryIndex ?? 0) < startupBackups(liveBot ?? bot, cfg.automaticRecovery).length;
       const engineHeld = limitClock.blockedUntil(instanceId), modelHeld = engineHeld ? null : limitTakeover.modelHeld({ instanceId, model }), limitScope = engineHeld ? "engine" as const : modelHeld?.scope ?? "engine", limitResets = engineHeld ? limitClock.resetAt(instanceId) ?? undefined : modelHeld?.resetsAt;
       // A limit already known: the turn goes straight to an AI that can carry on, with the reset only when one was named.
       if ((engineHeld || modelHeld) && (startupRecovery || (quotaSwitchEnabled() && limitTakeover.backups(bot.id, { instanceId, model }, limitScope).length))) throw new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, limitResets && limitResets > Date.now() ? limitResets : undefined, limitScope, true);
@@ -8663,9 +8663,8 @@ async function startTurn(
       if (e instanceof PlaceUnavailableError) clearFailedAutoPin(bot.id, threadId, e.place);
       let message = e instanceof Error ? e.message : String(e);
       const current = store.projectBotForTask(bot.id, threadId);
-      const backups = e instanceof TurnUsageLimitRefusedError && current && quotaSwitchEnabled() ? limitTakeover.backups(bot.id, current.modelSelection, e.scope) : cfg.automaticRecovery?.enabled
-        ? current?.fallback?.length ? current.fallback : cfg.automaticRecovery.backup ? [cfg.automaticRecovery.backup] : []
-        : [];
+      const backups = e instanceof TurnUsageLimitRefusedError && current && quotaSwitchEnabled() ? limitTakeover.backups(bot.id, current.modelSelection, e.scope)
+        : current ? startupBackups(current, cfg.automaticRecovery) : [];
       const nextIndex = backups.findIndex((candidate, index) => index >= (opts?.automaticRecoveryIndex ?? 0) &&
         registry.get(candidate.instanceId)?.enabled && (e instanceof TurnUsageLimitRefusedError ? (candidate.instanceId === instanceId ? e.scope !== "engine" : limitBackupAllowed(instance, registry.get(candidate.instanceId)!, instanceConfigs(cfg)[candidate.instanceId]))
           : !(e instanceof TurnAuthenticationRefusedError) || candidate.instanceId !== instanceId) &&
@@ -8882,7 +8881,7 @@ const automationDestinations = createAutomationDestinations({ store, mainThread:
   cloud: CLOUD_HOME ? { owner: CLOUD_OWNER_KEY!, opener: routineOpener, reportFromOthers: cloudReportFromOthers, opened: (threadId, person) => threadStarters.set(threadId, person) } : null });
 routines = new RoutineManager({
   emit: broadcast, limitResetAt: (engine) => limitClock.resetAt(engine), checks: proactive.checks,
-  limitBackup: (botId, scope) => { const bot = store.bot(botId); return quotaSwitchEnabled() ? Boolean(bot && limitTakeover.backups(botId, bot.modelSelection, scope).length) : cfg.automaticRecovery?.enabled === true && Boolean(bot?.fallback?.length || cfg.automaticRecovery.backup); },
+  limitBackup: (botId, scope) => { const bot = store.bot(botId); return quotaSwitchEnabled() ? Boolean(bot && limitTakeover.backups(botId, bot.modelSelection, scope).length) : Boolean(bot && startupBackups(bot, cfg.automaticRecovery).length); },
   launchId: DESKTOP_MANAGED && /^[\w-]{1,100}$/.test(process.env.OMB_DESKTOP_LAUNCH_ID ?? "")
     ? process.env.OMB_DESKTOP_LAUNCH_ID : undefined,
   skipStartupRuns: Boolean(CLOUD_HOME) && wokeFromSleep(DATA_DIR), // a Cloud home waking from a sleep it was stopped for
