@@ -30,7 +30,7 @@ export async function runRoutineCheck(
     timer.unref?.();
   });
   try {
-    const work = hook.check(routine, { ...context, signal: controller.signal }).then((result) => {
+    const work = hook.check(routine, { ...context, signal: controller.signal, release }).then((result) => {
       if (abandoned && result.run) release(result.run.key);
       return result;
     });

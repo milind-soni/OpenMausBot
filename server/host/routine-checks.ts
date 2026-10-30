@@ -203,7 +203,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     if (entry.failures?.[app]) delete entry.failures[app];
   };
 
-  async function check(routine: Routine, context: { manual: boolean; hold?: CheckHold; signal?: AbortSignal }): Promise<RoutineCheckResult> {
+  async function check(routine: Routine, context: { manual: boolean; hold?: CheckHold; signal?: AbortSignal; release?: (key: string) => void }): Promise<RoutineCheckResult> {
     const signal = context.signal;
     signal?.throwIfAborted();
     const checks = routine.checks ?? [];
@@ -352,8 +352,13 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     if (run) handed.set(run.key, { mail: items.mail, prep: items.prep.map(({ key: meeting, event }) => ({ key: meeting, event })) });
     save();
     if (sortedCount) deps.sorted?.(routine.id, sortedCount);
-    if (brief) await awaitRoutineCheck(Promise.resolve(deps.report(report)), signal);
-    signal?.throwIfAborted();
+    try {
+      if (brief) await awaitRoutineCheck(Promise.resolve(deps.report(report)), signal);
+      signal?.throwIfAborted();
+    } catch (error) {
+      if (run) context.release?.(run.key);
+      throw error;
+    }
     const sentence = troubleSentence(trouble);
     return { ...(run ? { run } : {}), ...(sentence ? { trouble: sentence } : {}), ...(wakeAt !== undefined ? { wakeAt } : {}) };
   }

@@ -205,8 +205,8 @@ export interface RoutineCheckResult { run?: { prompt: string; key: string }; tro
 
 export interface RoutineChecks extends RoutineCheckLifecycle {
   /** Runs a routine's checks. With `hold` they may do only what needs no AI, and their items wait.
-   * After cancellation, no continuation may write ledger, report or workspace state. */
-  check(routine: Routine, context: { manual: boolean; hold?: CheckHold; signal?: AbortSignal }): Promise<RoutineCheckResult>;
+   * After cancellation, no continuation may write ledger, report or workspace state. `release` returns discarded items through the scheduler write fence. */
+  check(routine: Routine, context: { manual: boolean; hold?: CheckHold; signal?: AbortSignal; release?: (key: string) => void }): Promise<RoutineCheckResult>;
   pendingKeys?(): string[];
   /** Items handed to a run that was never queued. */
   release(key: string): void;
@@ -1241,7 +1241,7 @@ export class RoutineManager {
   }
   private releaseCheck(key: string): void {
     if (this.options.checks?.pendingKeys && !this.options.checks.pendingKeys().includes(key)) return;
-    if (!this.scheduler.active && !this.closing) this.checkReleases.add(key);
+    if (!this.scheduler.active) this.checkReleases.add(key);
     else this.options.checks?.release(key);
   }
   handleRuntimeEvent(event: RuntimeEvent): RoutineRun | null {
