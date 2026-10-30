@@ -12,8 +12,6 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: { platform: f.platform } }, ready: true }) }));
 vi.mock("@/state/store", async original => ({ ...await original<typeof import("@/state/store")>(), useStore: () => ({ state: { bots: [{ name: "Ember" }] }, dispatch: vi.fn() }) }));
 import { CloudAccountSettings, CloudPlanOnCloud, TeamPeopleCard, cloudLinkAction, cloudPlanLabel } from "./CloudAccountSettings";
-import { CloudLending } from "./CloudLending";
-import { LentComputersCard } from "./LentComputers";
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
 function render(props?: { linkRequest?: number; cloudHome?: boolean; teamHome?: { name: string; cloudPage?: string }; onConnectPhone?: () => void; onAddCloud?: () => void; onSignIn?: () => void }) { f.index = 0; f.effects = []; let tree: ReactNode; function Capture() { tree = CloudAccountSettings(props); return tree; }
@@ -221,7 +219,7 @@ it("on the person's own Cloud, Settings shows the plan read only, with Manage, a
   await flush(); expect(plan.signIn).toHaveBeenCalledExactlyOnceWith();
   plan.state.mockRejectedValueOnce(new Error("cloud-plan:state is only available in this app's window")); f.values = []; view(); f.effects[0](); await flush();
   const refused = view();
-  expect(refused.html).toContain("Your plan is managed in the OpenMausBot app on your computer.");
+  expect(refused.html).toContain("Your plan is managed in the MausBot app on your computer.");
   expect(refused.nodes.some(node => node.type === "button")).toBe(false);
   none(refused.html, ["Could not complete", 'role="alert"', "Loading"]);
 });
@@ -232,11 +230,11 @@ it("on My Cloud once it is home, Settings is that app's own: the plan is managed
     return { html: renderToStaticMarkup(createElement(Capture)), nodes: nodes(tree) }; };
   view(); f.effects[0](); await flush();
   all(view().html, ["Your plan is managed on your Plan page.", "Your plan, as MausBot Cloud verified it.", "Manage in your browser"]);
-  none(view().html, ["OpenMausBot app", "on your computer"]);
+  none(view().html, ["MausBot app", "on your computer"]);
   plan.state.mockResolvedValueOnce({ status: "paid", tier: "pro", home: true }); f.values = []; view(); f.effects[0](); await flush();
   all(view().html, ["Pro active · verified by MausBot Cloud", "Your plan, as MausBot Cloud verified it."]); none(view().html, ["on your computer"]);
   plan.state.mockResolvedValueOnce({ status: "none" }); f.values = []; view(); f.effects[0](); await flush();
-  all(view().html, ["Your plan is managed in the OpenMausBot app on your computer.", "verified it for the app on your computer"]);
+  all(view().html, ["Your plan is managed in the MausBot app on your computer.", "verified it for the app on your computer"]);
 });
 
 const pro: CloudAccountState = { ...free, entitlement: { plan: "pro", status: "active", expiresAt: 1_900_000_000_000, version: 2 } };
@@ -264,20 +262,25 @@ it.each([
 });
 it("while the bots move to My Cloud, says how the move goes, with nothing to open or switch back to; Open the Cloud comes back after", async () => {
   let move: unknown = { phase: "copy", chats: { done: 3, total: 12 } };
-  const lending = { state: vi.fn().mockResolvedValue({ available: false, screenAvailable: false }), chooseFolder: vi.fn(), save: vi.fn(), stop: vi.fn() };
-  vi.stubGlobal("window", { ogb: { cloudAccount: { ...bridge, lending }, cloudSendPage: { notice: vi.fn(async () => ({ ready: true, bots: [], move })), onNotice: vi.fn(() => () => {}), dismiss: vi.fn() } } });
+  vi.stubGlobal("window", { ogb: { cloudAccount: bridge, cloudSendPage: { notice: vi.fn(async () => ({ ready: true, bots: [], move })), onNotice: vi.fn(() => () => {}), dismiss: vi.fn() } } });
   const moving = async () => { await ready({ ...pro, machine: { status: "ready", origin } }); f.effects[2](); await flush(); return render(); };
   let view = await moving();
   all(view.html, ["Moving your bots to My Cloud… 3 of 12 chats", "data-cloud-moving"]);
   none(view.html, [">Open the Cloud</button>", "Switch back to This computer", "The Cloud is ready"]);
-  expect(view.nodes.find(node => node.type === CloudLending)?.props).toMatchObject({ moving: true });
   move = { phase: "finishing" };
   f.values = []; view = await moving();
   all(view.html, ["Moving to My Cloud… almost done"]); none(view.html, [">Open the Cloud</button>", "Switch back to This computer"]);
   move = undefined;
   f.values = []; view = await moving();
   all(view.html, [">Open the Cloud</button>", "Switch back to This computer", "The Cloud is ready"]); none(view.html, ["data-cloud-moving", "Moving"]);
-  expect(view.nodes.find(node => node.type === CloudLending)?.props).toMatchObject({ moving: false });
+});
+it("this computer's Settings has no lending card: no switch, no Which Cloud, nothing to choose, whatever the Cloud's state", async () => {
+  for (const machine of [{ status: "ready", origin }, { status: "provisioning" }, { status: "stopped", origin }] as const) {
+    f.values = [];
+    await ready({ ...pro, machine });
+    const html = render().html;
+    none(html, ["data-cloud-lending", "data-lending-for", "data-lend-this-computer", "Let my bots use this", "Which Cloud", "role=\"switch\""]);
+  }
 });
 it("says why a ready Cloud can't be reached when the Admin knows, with no button that can't reach it", async () => {
   const since = Date.UTC(2026, 9, 16, 9);
@@ -449,8 +452,8 @@ it("on the Cloud itself, opens this Cloud's phone pairing directly; never where 
   const onCloud = render({ cloudHome: true, onConnectPhone }).nodes as unknown as Array<ReactElement<{ onConnectPhone?: () => void }>>;
   const card = onCloud.find(node => node.type === CloudPlanOnCloud);
   expect(card!.props.onConnectPhone).toBe(onConnectPhone);
-  // My Cloud's own page also shows the computers lent to it.
-  expect(onCloud.some(node => node.type === LentComputersCard)).toBe(true);
+  const cloudPage = render({ cloudHome: true, onConnectPhone }).html;
+  for (const lending of ["data-lent-computers", "data-lend-this-computer", "Computers shared with the Cloud", "Let my bots use this", "role=\"switch\""]) expect(cloudPage).not.toContain(lending);
   expect(view({}).html).not.toContain(PHONE);
   plan.state.mockRejectedValueOnce(new Error("cloud-plan:state is only available in this app's window")); f.values = []; view({ onConnectPhone }); f.effects[0](); await flush();
   expect(view({ onConnectPhone }).nodes.some(node => node.type === "button")).toBe(false);
@@ -466,7 +469,7 @@ it("on a Team Cloud, sends people to the Plan page for its people and plan, neve
   expect(card.props.team).toBe(team);
   const html = renderToStaticMarkup(createElement(TeamPeopleCard, { team }));
   all(html, ["People and plan", "Invite people to Acme, change their roles and manage its plan on your Plan page.", 'href="https://cloud.example.com/cloud"', "Open your Plan page"]);
-  none(html, ["managed in the OpenMausBot app on your computer"]);
+  none(html, ["managed in the MausBot app on your computer"]);
   expect(renderToStaticMarkup(createElement(TeamPeopleCard, { team: { name: "Acme" } }))).not.toContain("href=");
   // My Cloud's own page is unchanged.
   expect(render({ cloudHome: true }).nodes.some(node => node.type === CloudPlanOnCloud)).toBe(true);

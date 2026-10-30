@@ -7,6 +7,8 @@ import { copyText } from "@/lib/copy-text";
 import { DEVICE_SIGN_IN_COPY, DeviceSignIn, deviceSignInProvider } from "./DeviceSignIn";
 import { ClaudeSignIn } from "./ClaudeSignIn";
 import { RefreshEngines } from "./EngineLibrary";
+import { AppCopyNotice, AppCopySetup } from "./EngineAppCopy";
+import { noteAppCopySwitch } from "@/state/engine-install";
 import { keyEntry, keyForInstance, type KeyId } from "./keys/key-catalog";
 import { openKeySettings } from "./keys/key-focus";
 import { KeyRow, SavedKeyLine } from "./keys/KeyRow";
@@ -166,6 +168,9 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const standalone = instance.install?.server?.standalone;
+  // The app installs its own build without npm; the npm command only helps when the server has npm.
+  const terminalCommand = standalone && !instance.install?.server?.package ? null : command;
 
   const run = async () => {
     if (busy) return;
@@ -173,7 +178,8 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
     setDone(false);
     setError(null);
     try {
-      const { instances } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/install`, { method: "POST" });
+      const { instances, usingAppCopy } = await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/install`, { method: "POST" });
+      noteAppCopySwitch(instance.instanceId, usingAppCopy === true);
       const installed = (instances as InstanceInfo[] | undefined)?.find((candidate) => candidate.instanceId === instance.instanceId);
       if (instances) dispatch({ type: "instances", instances });
       if (installed?.snapshot.state !== "available") {
@@ -202,12 +208,19 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
           ? t("engineSetup.serverInstalling")
           : t(mode === "update" ? "engineSetup.serverUpdate" : "engineSetup.serverInstall", { name: instance.displayName })}
       </button>
+      {standalone && mode === "install" && !busy && !done && (
+        <p className="text-center text-[11px] text-ink-tertiary">
+          {/* Decimal megabytes, as macOS and Windows show file sizes. */}
+          {t("engineSetup.standaloneDownloadNote", { mb: Math.max(1, Math.round(standalone.downloadBytes / 1_000_000)) })}
+        </p>
+      )}
       {done && !busy && <p role="status" className="text-center text-[11px] text-success">{t("engineSetup.installVerified")}</p>}
+      {!busy && <AppCopyNotice instance={instance} />}
       {error && <p role="alert" className="whitespace-pre-wrap text-[12px] leading-relaxed text-danger">{error}</p>}
-      {command && (
+      {terminalCommand && (
         <details className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
           <summary className="cursor-pointer select-none">{t("engineSetup.preferTerminal")}</summary>
-          <CommandRow command={command} actionLabel={t(mode === "update" ? "engineSetup.openUpdate" : "engineSetup.openInstall")} compact allowTerminal={state.config?.cloudHome !== true} />
+          <CommandRow command={terminalCommand} actionLabel={t(mode === "update" ? "engineSetup.openUpdate" : "engineSetup.openInstall")} compact allowTerminal={state.config?.cloudHome !== true} />
         </details>
       )}
     </div>
@@ -374,6 +387,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
             <input
               value={callbackUrl}
               onChange={(event) => setCallbackUrl(event.target.value)}
+              aria-label={t("engineSetup.otherComputerUrl")}
               placeholder="http://127.0.0.1:…/?code=…"
               className="mt-2 w-full rounded-md border border-hairline bg-inset px-2 py-1.5 text-[11px] text-ink outline-none focus:border-accent"
             />
@@ -550,6 +564,11 @@ export function EngineSetup({
         </p>
       </div>
     );
+  }
+
+  // The app's own copy is out of reach of the person's terminal, so its sign-in is finished here.
+  if (signInOnly && install.appCopy && !deviceSignIn && !browserSignIn && !pasteSignIn) {
+    return <AppCopySetup instance={instance} className={className} unframed={unframed} />;
   }
 
   return (

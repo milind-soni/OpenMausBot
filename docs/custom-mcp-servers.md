@@ -231,6 +231,36 @@ turns before changing this selection; the next direct or channel turn gets the
 new list. The list does not filter project-local `.mcp.json` files and is not a
 shell sandbox. Individual tool approvals depend on the engine and approval mode.
 
+### A bot's own servers, and servers that don't start
+
+A bot can add a command server with `add_mcp_server` (saved switched off, as
+always). A conversation folder (`task-workspaces/<bot>/<conversation>`) goes
+when its conversation does, so when the command, its arguments or its
+environment point into one of the bot's conversation folders, those files are
+first copied into the bot's own folder under `tools/`, and the server runs
+from the copy.
+
+Where bots are boxed (a Cloud), each bot's turn sees only its own folders.
+There a server whose files are in the bot's own folder (`workspaces/<bot>`) or
+its conversation folders is that bot's own: it starts only for that bot, and
+the `config.json` entry says so with `"bot": "<bot id>"`. A command that uses
+another bot's files is refused there. On a desktop every bot reaches every
+folder, so such a server stays every bot's. Servers you add in Settings stay
+every bot's. The first time bots run boxed after an update, a server no bot
+owns whose files are in the folders of one existing bot becomes that bot's own
+the same way, once, and you hear about it once: "The Blender tool only works
+for Iris, so it's off for your other bots."
+
+Each enabled command server is also started once for each bot that uses it,
+the way that bot's AI starts it (in the bot's box on a Cloud, from its own
+folder), when it is added, changed or turned on, before a bot's first turn
+with it, and again whenever the bot's AI reports it did not connect. A server
+that doesn't start for a bot is left out of that bot's turns, so its failure
+doesn't follow every session or tool search; you hear about it once, the
+server's row in Settings says who it is off for, and it is tried again on its
+own every half hour (one that started is checked again every six hours). The
+checks are kept in `<data>/mcp-health.json`.
+
 ### Servers with hundreds of tools
 
 Some servers offer more tools than a model can usefully read at once: Whop's

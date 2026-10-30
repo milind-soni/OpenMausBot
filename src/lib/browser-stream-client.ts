@@ -62,6 +62,8 @@ export interface PreviewStreamControl {
   };
   /** The bot's work outlasted the person's takeover and was cut off. */
   readonly stale?: boolean;
+  /** The person watching holds the browser, from this view or another of theirs: they may hand it back from here. */
+  readonly owned?: boolean;
 }
 
 /** Status line shown above a viewer; `null` control means the socket is not connected. */
@@ -265,9 +267,11 @@ export interface PreviewStreamClient {
   readonly stop: () => void;
 }
 
-/** A viewer that may operate sizes the page while it watches, and may restart or wake it; everything else needs control. */
+/** A viewer that may operate sizes the page while it watches, and may restart or wake it; the person holding the browser
+ * hands it back from any of their views; everything else needs control. */
 const allowed = (input: PreviewStreamInput, control: PreviewStreamControl): boolean =>
-  input.type === "takeControl" || input.type === "resize" || input.type === "frameCap" || input.type === "restart" || input.type === "wake" || control.controller === "you";
+  input.type === "takeControl" || input.type === "resize" || input.type === "frameCap" || input.type === "restart" || input.type === "wake"
+  || (input.type === "releaseControl" && control.owned === true) || control.controller === "you";
 
 const ACK_MESSAGE = JSON.stringify({ type: "ack" });
 export function createPreviewStreamClient(
@@ -335,6 +339,7 @@ export function createPreviewStreamClient(
         generation,
         dialog,
         stale,
+        owned,
         text,
         id,
         fileName,
@@ -412,6 +417,7 @@ export function createPreviewStreamClient(
           generation,
           dialog,
           ...(stale === true ? { stale: true } : {}),
+          ...(owned === true ? { owned: true } : {}),
         };
         const first = control === null;
         control = nextControl;

@@ -7,8 +7,8 @@ import { cn } from "@/lib/cn";
 import { cardRows, moneyBackShort, planCards, sharedTrialDays, trialTimeline, type CloudPlanCard, type CloudPlanCardRow } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { CloudMascots } from "./CloudMascots";
-import { Heading, LINK, PRIMARY_WIDE, QUIET_WIDE, SCREEN, Tag } from "./parts";
+import { NightCard } from "./NightCard";
+import { LINK, PRIMARY_WIDE, QUIET_WIDE, SCREEN, Tag } from "./parts";
 
 const FEATURES: ReadonlyArray<readonly [LucideIcon, LocaleKey, LocaleKey]> = [
   [Moon, "cloudBuy.benefit.awayTitle", "cloudBuy.benefit.away"],
@@ -81,13 +81,17 @@ export function ChooseScreen({ offer, current = null, own = null, now, busy, sig
   const moneyBack = moneyBackShort(offer);
   const trial = Boolean(sharedTrialDays(offer));
   return <div data-cloud-add={offer.plans.some(plan => plan.trialDays) ? "offer-trial" : "offer"} className={SCREEN}>
-    <div className="grid gap-y-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end sm:gap-x-6">
-      <Heading mark={<CloudMascots size={22} />} title={t("pro.name")}
-        sub={<><span className="font-medium text-ink">{t("cloudBuy.title")}</span> {t("cloudBuy.lede")}</>} />
-      <button type="button" aria-expanded={compare} aria-controls={cards.map(card => detailsId(card.tier)).join(" ")} onClick={() => setCompare(!compare)}
-        className="-ms-2.5 inline-flex items-center gap-1 justify-self-start rounded-full py-0.5 pe-1.5 ps-2.5 text-[13px] leading-[18px] text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink sm:-me-2 sm:ms-0 sm:justify-self-end motion-reduce:transition-none">
-        {t("pro.seePlans")}<ChevronDown size={14} strokeWidth={1.5} aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", compare && "rotate-180")} />
-      </button>
+    <div className="-mx-4 -mt-3">
+      <NightCard>
+        <h2 id="cloud-add-title" tabIndex={-1} className="text-[17px] font-medium leading-6 tracking-[-0.008em] outline-none!">{t("pro.name")}</h2>
+        <p className="mt-0.5 max-w-[440px] text-[14px] leading-5 text-(--cloud-night-ink-quiet) [text-wrap:pretty]">
+          <span className="font-medium text-(--cloud-night-ink)">{t("cloudBuy.title")}</span> {t("cloudBuy.lede")}
+        </p>
+        <button type="button" aria-expanded={compare} aria-controls={cards.map(card => detailsId(card.tier)).join(" ")} onClick={() => setCompare(!compare)}
+          className="-ms-2 mt-2 inline-flex items-center gap-1 self-start rounded-full py-0.5 pe-1.5 ps-2 text-[13px] leading-[18px] text-(--cloud-night-ink-quiet) transition-colors hover:bg-white/10 hover:text-(--cloud-night-ink) motion-reduce:transition-none">
+          {t("pro.seePlans")}<ChevronDown size={14} strokeWidth={1.5} aria-hidden="true" className={cn("transition-transform motion-reduce:transition-none", compare && "rotate-180")} />
+        </button>
+      </NightCard>
     </div>
     {notice && <p role="status" className="rounded-[12px] bg-ink/[0.04] px-4 py-3 text-[13px] leading-[18px] text-ink">{notice}</p>}
     <section aria-labelledby="cloud-add-plans">

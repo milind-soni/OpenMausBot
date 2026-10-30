@@ -36,10 +36,12 @@ function phrases(phase: string, keys: LocaleKey[]): LiveActivityPhrases {
 }
 
 /** Simple mode's one rotating line for what the bot is doing now: plain words in place of file names, sizes and
- * timers, chosen by the kind of step (a tool's spoken narration is read by its name, as every other step is). */
+ * timers, chosen by the kind of step (a tool's spoken narration is read by its name, as every other step is); a
+ * command, search or page the server could name is said by name. */
 export function friendlyNowPhrases(status: LiveStatus | null, message?: Message): LiveActivityPhrases {
   const plain = message?.kind === "activity" && message.tool?.spoken ? { ...message, tool: { ...message.tool, spoken: undefined } } : message;
   const now = turnNowPhrases(status, plain);
+  if (now?.phase.startsWith("step:")) return now;
   const tool = (status && "tool" in status ? status.tool : undefined) ?? (message?.kind === "activity" && message.tool?.ok === undefined ? message.tool?.name : undefined);
   const service = toolService(tool);
   if (service) return { phase: `friendly:service:${service}`, phrases: [t("chat.friendly.service", { service })] };

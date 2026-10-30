@@ -8,6 +8,7 @@ import { z } from "zod";
 import { nameFromEmail, ownerEmail } from "../../shared/bot-owner.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { mentionablePeople, teammateMentions } from "../../shared/person-mention.ts";
+import type { InboxView } from "../../shared/inbox.ts";
 import type { NeedsYouItem } from "../../shared/today.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
 import { audienceMember, type Audience } from "../audience.ts";
@@ -21,7 +22,7 @@ import type { BotRecord, GroupRecord, Message, Store, StoreChange } from "../sto
 import type { TeamPeople } from "../team-people.ts";
 import { currentTimeZone } from "../time-zone.ts";
 import { loadMemory } from "../workspace.ts";
-import { createPersonInbox, type Delivery, type Item, type Passed, type PersonInboxDeps } from "./person-inbox.ts";
+import { createPersonInbox, type Delivery, type Item, type Passed, type PersonInbox, type PersonInboxDeps } from "./person-inbox.ts";
 import { createRepresentative, type RepresentativeDeps } from "./representative.ts";
 import { oneLine } from "./text-clip.ts";
 
@@ -54,7 +55,7 @@ export interface TeamMessagesDeps {
   sees(person: { email: string; role: TeamRole }): { bot(botId: string): boolean; thread(threadId: string): boolean };
   notify(notification: Notification): void;
   /** What the inbox needs from the server: whose asks are whose, hand-offs, a bot carrying on, the assistant's reads. */
-  inbox: Pick<PersonInboxDeps, "askedPerson" | "handedFrom" | "continueTurn"> & Partial<Pick<PersonInboxDeps, "notes" | "ensureOwnBot">> & {
+  inbox: Pick<PersonInboxDeps, "askedPerson" | "handedFrom" | "continueTurn"> & Partial<Pick<PersonInboxDeps, "notes" | "ensureOwnBot" | "changed">> & {
     representative?: Omit<RepresentativeDeps, "timeZone"> & Partial<Pick<RepresentativeDeps, "timeZone">>;
   };
   now?: () => number;
@@ -210,7 +211,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
   /** A teammate's line tags @Bob: their words reach Bob's inbox, wherever they wrote them; Bob's answer reaches theirs. */
   function personWrote(threadId: string, line: Message) {
     const writer = byKey(line.sender?.id);
-    if (writer) inbox.seen(writer.key, threadId);
+    if (writer) { inbox.seen(writer.key, threadId); inbox.wrote(writer.key, threadId); }
     const at = owner(threadId);
     if (!at || !line.text) return;
     const writerName = writer?.name ?? line.sender?.name ?? "Someone";
@@ -267,6 +268,23 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
   const arrivedOn = new Map<string, string>();
   const sessionPerson = (auth: RequestAuth) => (auth.kind === "session" && auth.session.email ? byKey(keyOf(auth.session.email)) : undefined);
 
+  /** A reply this inbox's own person wrote to one of its lines: it goes back where the line came from, and this inbox's
+   * bot takes no turn. Null for any other line, which is sent as usual. */
+  function replyIn(auth: RequestAuth, threadId: string, replyToId: string, text: string, line: { sendId?: string; sender?: ResolvedSender; reaction?: string }): { status: number; message?: Message; error?: string } | null {
+    const me = sessionPerson(auth);
+    if (!team || !me || inbox.personOf(threadId) !== me.key) return null;
+    const item = inbox.replyable(threadId, replyToId);
+    if (!item) return null;
+    const again = line.sendId ? store.messagesFor(threadId).find((message) => message.sendId === line.sendId) : undefined;
+    if (again) return { status: 202, message: again };
+    if (recent(threadId).length >= MESSAGE_PERSON_HOURLY) return { status: 429, error: tooMany().text };
+    const posted = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, ...(line.sendId ? { sendId: line.sendId } : {}),
+      ...(line.sender ? { sender: line.sender } : {}), ...(line.reaction ? { reaction: line.reaction } : {}) });
+    const back = answerFromInbox(threadId, null, item, text);
+    if (back.status !== 200) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `Not passed to ${item.from}`, ok: false, output: back.text } });
+    return { status: 202, message: posted };
+  }
+
   function inboxPrompt(threadId: string, own: string | null): string {
     if (!own || inbox.personOf(threadId) !== own) return "";
     const person = byKey(own);
@@ -305,20 +323,30 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       const text = people + inboxPrompt(threadId, own);
       return text ? `${text}\n` : "";
     },
-    /** A reply this inbox's own person wrote to one of its lines: it goes back where the line came from, and this
-     * inbox's bot takes no turn. Null for any other line, which is sent as usual. */
-    replyIn(auth: RequestAuth, threadId: string, replyToId: string, text: string, line: { sendId?: string; sender?: ResolvedSender }): { status: number; message?: Message; error?: string } | null {
+    replyIn,
+    /** A 👍 or 👎 this inbox's own person gives one of its lines: their answer, back where the line came from, as a
+     * reply would be. Null for any other line, which the reaction reaches as usual. */
+    reactedIn(auth: RequestAuth, threadId: string, messageId: string, emoji: string, line: { sendId: string; sender?: ResolvedSender }): Promise<{ queued: false; repeated?: true }> | null {
+      const repeated = store.messagesFor(threadId).some((message) => message.sendId === line.sendId);
+      const passed = replyIn(auth, threadId, messageId, emoji, { ...line, reaction: emoji });
+      if (!passed) return null;
+      if (passed.status >= 400) return Promise.reject(Object.assign(new Error(passed.error ?? "That answer can't be passed back."), { status: passed.status }));
+      return Promise.resolve(repeated ? { queued: false, repeated: true } : { queued: false });
+    },
+    /** The session's person's inbox as its panel lists it; null off a team or for someone without one. */
+    view(auth: RequestAuth): InboxView | null {
       const me = sessionPerson(auth);
-      if (!team || !me || inbox.personOf(threadId) !== me.key) return null;
-      const item = inbox.replyable(threadId, replyToId);
-      if (!item) return null;
-      const again = line.sendId ? store.messagesFor(threadId).find((message) => message.sendId === line.sendId) : undefined;
-      if (again) return { status: 202, message: again };
-      if (recent(threadId).length >= MESSAGE_PERSON_HOURLY) return { status: 429, error: tooMany().text };
-      const posted = store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, ...(line.sendId ? { sendId: line.sendId } : {}), ...(line.sender ? { sender: line.sender } : {}) });
-      const back = answerFromInbox(threadId, null, item, text);
-      if (back.status !== 200) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `Not passed to ${item.from}`, ok: false, output: back.text } });
-      return { status: 202, message: posted };
+      return team && me ? inbox.view(me.key) : null;
+    },
+    /** The session's person is done with a line of news in their inbox. */
+    markDone(auth: RequestAuth, id: string): ReturnType<PersonInbox["markDone"]> {
+      const me = sessionPerson(auth);
+      return team && me ? inbox.markDone(me.key, id) : "unknown";
+    },
+    /** The session's person read a line of their inbox. */
+    markRead(auth: RequestAuth, id: string): boolean {
+      const me = sessionPerson(auth);
+      return Boolean(team && me && inbox.markRead(me.key, id));
     },
     /** This person's Needs you lines: the messages in their inbox they have not opened, newest first. */
     needsYou(auth: RequestAuth): NeedsYouItem[] {

@@ -4,10 +4,10 @@
 import { useSyncExternalStore } from "react";
 
 import type { RuntimeEvent } from "../../shared/runtime-events";
-import type { TurnProgressActivity } from "../../shared/turn-progress";
+import { progressKey, type TurnProgressActivity, type TurnProgressFields } from "../../shared/turn-progress";
 
 export type LiveStatus =
-  | { activity: TurnProgressActivity; tool?: string; file?: string; bytes?: number; itemId?: string }
+  | ({ activity: TurnProgressActivity } & Omit<TurnProgressFields, "type" | "activity">)
   | { activity: "thinking" | "reply"; itemId?: undefined };
 
 export interface TurnLive {
@@ -25,8 +25,7 @@ const listeners = new Map<string, Set<() => void>>();
 function sameStatus(a: LiveStatus | null, b: LiveStatus | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  const left = a as Record<string, unknown>, right = b as Record<string, unknown>;
-  return ["activity", "tool", "file", "bytes", "itemId"].every((key) => left[key] === right[key]);
+  return ("bytes" in a ? a.bytes : undefined) === ("bytes" in b ? b.bytes : undefined) && progressKey(a) === progressKey(b);
 }
 
 function put(threadId: string, next: TurnLive): void {
@@ -54,8 +53,11 @@ export function noteTurnEvent(event: RuntimeEvent): void {
     case "session.exited":
       return put(threadId, { turnId, ended: true, status: null });
     case "turn.progress": {
-      const { activity, tool, file, bytes, itemId } = event;
-      return put(threadId, { turnId, ended: false, status: { activity, ...(tool ? { tool } : {}), ...(file ? { file } : {}), ...(bytes !== undefined ? { bytes } : {}), ...(itemId ? { itemId } : {}) } });
+      const { activity, tool, file, bytes, itemId, target, detail, quiet, tail } = event;
+      return put(threadId, { turnId, ended: false, status: {
+        activity, ...(tool ? { tool } : {}), ...(file ? { file } : {}), ...(bytes !== undefined ? { bytes } : {}), ...(itemId ? { itemId } : {}),
+        ...(target ? { target } : {}), ...(detail ? { detail } : {}), ...(quiet ? { quiet } : {}), ...(tail?.length ? { tail } : {}),
+      } });
     }
     case "content.delta":
       return put(threadId, { turnId, ended: false, status: { activity: event.streamKind === "reasoning_text" ? "thinking" : "reply" } });

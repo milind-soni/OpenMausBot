@@ -27,7 +27,7 @@ export function pageVersions(app: AppPayload): { first: number; last: number } {
   return { first: Math.max(0, last - (app.history?.length ?? 0)), last };
 }
 
-/** Which version the card shows (null: the newest), and the "Updated" flash when update_html replaces it. */
+/** Which version the card shows (null: the newest), and the "Updated" flash when show_html replaces it. */
 export function usePageVersion(app: AppPayload): { rev: number; first: number; last: number; latest: boolean; flash: boolean; show(rev: number | null): void } {
   const { first, last } = pageVersions(app);
   const [viewing, setViewing] = useState<number | null>(null);

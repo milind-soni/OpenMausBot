@@ -52,6 +52,7 @@ describe("createLocalVmUpdater", () => {
         return current;
       },
       keepSignIns: async () => { calls.push(`keep (lifecycle busy: ${lifecycleBusy.has(target.key)}, provision busy: ${provisionBusy})`); return "rescued"; },
+      keepApps: async () => "none",
       imageBusy: { get: () => imageBusy, set: (busy) => { imageBusy = busy; } },
       provisionBusy: { get: () => provisionBusy, set: (busy) => { provisionBusy = busy; } },
       lifecycleBusy,

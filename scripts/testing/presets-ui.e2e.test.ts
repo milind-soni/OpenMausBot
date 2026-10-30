@@ -89,7 +89,7 @@ describe("Preset bots in the real renderer", () => {
     const preview = await snapshot();
     expect(preview).toContain("Preset bots: 1 · appear in New bot");
     expect(preview).not.toContain("Team members");
-    expect(preview).toContain("Preset bots — added to New bot");
+    expect(preview).toContain("Preset bots (added to New bot)");
     await ui("screenshot", "--out", evidence("import-preview"));
     await click("Add presets");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Preset bots added to New bot: 1");

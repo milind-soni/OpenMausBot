@@ -316,7 +316,7 @@ describe("My Chrome on My Cloud, through the person's lent Chrome", () => {
     const browser = (await host.browserIntegration("scout", "mine", turn))!;
     expect(await call(browser, OWNER)).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("is lent but offline") }] });
     lend(null);
-    expect(await call(browser, OWNER)).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("turn on Your Chrome") }] });
+    expect(await call(browser, OWNER)).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("lends its Chrome by itself") }] });
     expect(engine).not.toHaveBeenCalled();
   });
 
@@ -340,7 +340,7 @@ describe("My Chrome on My Cloud, through the person's lent Chrome", () => {
     cfg.browserEngine = { engine: "chrome" };
     expect((await host.browserIntegration("scout", "mine", turn))?.spec.env.AGENT_BROWSER_CDP, "nor the new engine's").toBe(browser.spec.env.AGENT_BROWSER_CDP);
     expect(egress).not.toHaveBeenCalled();
-    expect(await call(browser, OWNER)).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("turn on Your Chrome") }] });
+    expect(await call(browser, OWNER)).toMatchObject({ isError: true, content: [{ text: expect.stringContaining("lends its Chrome by itself") }] });
     expect(engine).not.toHaveBeenCalled();
   });
 

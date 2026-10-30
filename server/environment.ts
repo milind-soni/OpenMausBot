@@ -34,6 +34,8 @@ export interface EnvironmentDescriptor {
     commandTimeouts?: true;
     /** A person's own OMB Cloud home. */
     cloudHome?: true;
+    /** A team's Cloud home: `label` is the team's name. */
+    cloudTeam?: true;
     /** A Cloud home that takes the one-time move from the person's computer: by-row chats, the manifest, the chats and
      * credentials checks, and lines its owner wrote there stamped as the owner's. */
     move?: 1;
@@ -137,6 +139,7 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
       ...(input.sharedComputers === true && input.cloudHome === true ? { deviceLink: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true && input.cloudTeam !== true ? { myChromeLink: true as const } : {}),
       ...(input.cloudHome === true ? { cloudHome: true as const, move: 1 as const } : {}),
+      ...(input.cloudHome === true && input.cloudTeam === true ? { cloudTeam: true as const } : {}),
       selfUpdate: input.desktopManaged ? "desktop-managed" : "operator",
       emailSignIn: input.emailSignIn === true,
       jobs: true,

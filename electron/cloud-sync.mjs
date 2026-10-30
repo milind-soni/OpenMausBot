@@ -217,8 +217,9 @@ export function createCloudFilesService({
             continue;
           }
           const approveDeletes = current.deletes === "remove" ? true : current.deletes === "keep" ? false : null;
-          // Bots' changes from while this computer was away land first, so this pass carries them up to the copy.
-          const lentFolder = current.lentId ? lent?.folders.find((entry) => entry.id === current.lentId) : null;
+          // Bots' changes from while this computer was away land first, so this pass carries them up to the copy; while
+          // lending is paused they wait on My Cloud, as they do while this computer is away.
+          const lentFolder = current.lentId && !lent?.paused ? lent?.folders.find((entry) => entry.id === current.lentId) : null;
           const waiting = summary.folders.find((entry) => entry.id === current.id)?.staged ?? 0;
           const landed = lentFolder && waiting > 0 ? await applyStaged({ client: cloud, folderId: current.id, folder: lentFolder, protectedPaths: lent.protectedPaths,
             now, trashItem, markDownloaded, platform, stopper: passStopper }) : null;

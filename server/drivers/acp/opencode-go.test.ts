@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
@@ -17,6 +17,7 @@ import {
   discoverOpenCodeModels,
   openCodeFreeFallback,
   openCodeOwnedDirectories,
+  OpenCodeDriver,
   openCodeProviderKeysAllowed,
   openMausOwnsWorkingFolder,
   parseOpenCodeModelsOutput,
@@ -26,6 +27,9 @@ import {
   surveyOpenCodeEfforts,
 } from "./opencode-go.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
+import { enginesBinDir, serverInstallFor } from "../../engine-install.ts";
+import { registerFallbackPathDir, registerPathDir, resetPathCacheForTests } from "../../env-path.ts";
+import { standaloneAssetFor, standaloneEngineDir } from "../../engine-standalone.ts";
 import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import * as quietStatus from "./quiet-status.ts";
@@ -806,6 +810,54 @@ describe("OpenCode turns without a sign-in gate", () => {
       vi.restoreAllMocks();
     }
   });
+
+  // OpenCode 1.18.27 against a provider at its limit (a 429 naming GoUsageLimitError, retry-after 5 h): one "stream
+  // error" row in its log, then nothing over ACP while it sleeps the whole retry-after, uncapped, five times over.
+  it("ends a turn that waits out a usage limit as that limit, so another AI can carry on", async () => {
+    vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 0 });
+    vi.stubEnv("OMB_ACP_QUIET_NOTICE_MS", "300");
+    vi.stubEnv("OMB_ACP_QUIET_TICK_MS", "50");
+    vi.stubEnv("OMB_ACP_LIMIT_QUIET_MS", "400");
+    const row = `timestamp=2026-10-28T22:11:15.919Z level=ERROR run=fixture_run message="stream error" providerID=opencode-go modelID=kimi-k3 session.id={session} small=false agent=build mode=primary error.error="AI_APICallError: Usage limit reached"`;
+    const f = await open("opencode-go-limit", () => ({
+      FAKE_ACP_MODE: "quiet-then-answer", FAKE_ACP_QUIET_MS: "30000", FAKE_ACP_MODELS: "opencode/big-pickle",
+      FAKE_ACP_OPENCODE_LOG: JSON.stringify([row]),
+    }));
+    try {
+      const { done, events } = await f.run("t-go-limit", "opencode/big-pickle");
+      expect(done).toMatchObject({ ok: false, stopReason: "quota" });
+      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ limit: "engine", message: expect.stringMatching(/usage limit/i) });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("marks OpenCode's own usage-limit refusal as the account's limit, so another AI can carry on", async () => {
+    const f = await open("opencode-gave-up", (scratch) => ({ FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_FAILURE_FILE: join(scratch, "failure.json") }));
+    writeFileSync(join(f.scratch, "failure.json"), JSON.stringify({
+      code: -32603, message: "Internal error: Monthly usage limit reached for this key", data: { service: "session", errorName: "APIError" },
+    }));
+    const { done, events } = await f.run("t-gave-up", "opencode/big-pickle");
+    expect(done).toMatchObject({ ok: false });
+    expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ limit: "engine" });
+  });
+
+  it("stops an engine with no open request, no CPU use and nothing logged after a few minutes, not the full silence guard", async () => {
+    vi.spyOn(quietStatus, "sampleProcessTree").mockResolvedValue({ cpuMs: 0, connections: 0 });
+    vi.stubEnv("OMB_ACP_QUIET_NOTICE_MS", "200");
+    vi.stubEnv("OMB_ACP_QUIET_TICK_MS", "50");
+    vi.stubEnv("OMB_ACP_NO_SIGNS_STOP_MS", "500");
+    const f = await open("opencode-lifeless", () => ({ FAKE_ACP_MODE: "quiet-then-answer", FAKE_ACP_QUIET_MS: "30000", FAKE_ACP_MODELS: "opencode/big-pickle" }));
+    try {
+      const { done, events } = await f.run("t-lifeless", "opencode/big-pickle");
+      expect(done).toMatchObject({ ok: false });
+      expect(events.find((event) => event.type === "runtime.error")).toMatchObject({ stalled: true, message: expect.stringContaining("no open request to its model and no CPU use") });
+    } finally {
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+    }
+  });
 });
 
 // Measured on opencode 1.18.27: a pooled `opencode acp` kept its old model list after `opencode auth login`.
@@ -1369,5 +1421,126 @@ describe("OpenCode one-off calls (connection checks, memory upkeep)", () => {
       await instance.dispose();
       await removeTempDir(scratch);
     }
+  });
+});
+
+describe("OpenCode without Node.js", () => {
+  const release = OpenCodeDriver.install?.standalone;
+
+  it.each([
+    ["darwin-arm64", "opencode"], ["darwin-x64", "opencode"], ["linux-x64", "opencode"], ["linux-arm64", "opencode"],
+    ["linux-x64-musl", "opencode"], ["linux-arm64-musl", "opencode"], ["win32-x64", "opencode.exe"], ["win32-arm64", "opencode.exe"],
+  ])("has a pinned %s build on OpenCode's own release, from a host the installer accepts", (platform, executable) => {
+    const asset = standaloneAssetFor(release, platform);
+    expect(asset?.executable).toBe(executable);
+    const url = new URL(asset!.url);
+    expect(url.protocol).toBe("https:");
+    expect(release!.hosts).toContain(url.hostname);
+    expect(url.pathname).toBe(`/anomalyco/opencode/releases/download/v${release!.version}/${url.pathname.split("/").at(-1)}`);
+    expect(asset!.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(asset!.executableSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("offers Settings' Install button with no npm on this machine", () => {
+    expect(serverInstallFor(OpenCodeDriver.install, false)).toMatchObject({ standalone: { version: release!.version } });
+  });
+
+  it.skipIf(process.platform === "win32").each([
+    ["the app's own copy with OpenCode's self-updater off", true],
+    ["a copy the person installed with its updater left alone", false],
+  ])("runs %s", async (_label, appCopy) => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-autoupdate-"));
+    const dump = join(scratch, "env.json");
+    let cli = FAKE_CLI;
+    if (appCopy) {
+      const version = join(standaloneEngineDir("opencode"), release!.version);
+      mkdirSync(version, { recursive: true });
+      cli = join(version, "opencode");
+      writeFileSync(cli, `#!/bin/sh\nexec '${FAKE_CLI}' "$@"\n`, { mode: 0o755 });
+    }
+    const driver = createOpenCodeDriver(async () => catalog("opencode/big-pickle"));
+    const instance = await driver.create({
+      instanceId: `opencode-autoupdate-${appCopy}`, displayName: "OpenCode", enabled: true,
+      config: { cli, fullAuto: false, workspace: scratch },
+      environment: { HOME: scratch, XDG_CONFIG_HOME: scratch, XDG_DATA_HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_DUMP: dump },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-autoupdate", botId: "bot-7", text: "hi", model: "opencode/big-pickle", approvalMode: "full" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const env = (JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> }).env;
+      expect(env.OPENCODE_DISABLE_AUTOUPDATE).toBe(appCopy ? "1" : undefined);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      await removeTempDir(standaloneEngineDir("opencode"));
+      await removeTempDir(scratch);
+    }
+  });
+});
+
+describe.skipIf(process.platform === "win32")("which OpenCode runs", () => {
+  async function runTurn(scratch: string, log: string, withOwnCopy: boolean) {
+    const original = process.env.PATH, sealed = process.env.OMB_TEST_SEALED_PATH;
+    const dump = join(scratch, "env.json");
+    const copy = (folder: string, label: string) => {
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, "opencode"), `#!/bin/sh\necho ${label} >> '${log}'\nexec '${FAKE_CLI}' "$@"\n`, { mode: 0o755 });
+    };
+    const own = join(scratch, "own-bin");
+    if (withOwnCopy) copy(own, "own");
+    // A copy npm put in the app's folder before OpenCode had its own build, and the app's own build.
+    copy(enginesBinDir(), "npm");
+    copy(join(standaloneEngineDir("opencode"), "bin"), "standalone");
+    // Only these copies and node: a real OpenCode on this computer (Homebrew, npm) must never answer the test's turn.
+    process.env.OMB_TEST_SEALED_PATH = "1";
+    process.env.PATH = withOwnCopy ? `${own}${delimiter}${dirname(process.execPath)}` : dirname(process.execPath);
+    resetPathCacheForTests();
+    registerPathDir(enginesBinDir());
+    registerFallbackPathDir(join(standaloneEngineDir("opencode"), "bin"));
+    const driver = createOpenCodeDriver(async () => catalog("opencode/big-pickle"));
+    const instance = await driver.create({
+      instanceId: `opencode-which-${withOwnCopy}`, displayName: "OpenCode", enabled: true,
+      config: { cli: "opencode", fullAuto: false, workspace: scratch },
+      environment: { HOME: scratch, XDG_CONFIG_HOME: scratch, XDG_DATA_HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_DUMP: dump },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-which", botId: "bot-7", text: "hi", model: "opencode/big-pickle", approvalMode: "full" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      return (JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> }).env;
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      process.env.PATH = original;
+      if (sealed === undefined) delete process.env.OMB_TEST_SEALED_PATH;
+      else process.env.OMB_TEST_SEALED_PATH = sealed;
+      resetPathCacheForTests();
+    }
+  }
+
+  let scratch = "";
+  afterEach(async () => {
+    await removeTempDir(enginesBinDir());
+    await removeTempDir(standaloneEngineDir("opencode"));
+    if (scratch) await removeTempDir(scratch);
+    scratch = "";
+  });
+
+  it("runs the person's own copy ahead of the one npm put in the app's folder, with its updater left alone", async () => {
+    scratch = mkdtempSync(join(tmpdir(), "omb-opencode-which-"));
+    const log = join(scratch, "runs.log");
+    const env = await runTurn(scratch, log, true);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["own"]);
+    expect(env.OPENCODE_DISABLE_AUTOUPDATE).toBeUndefined();
+    expect(env.PATH.split(delimiter).at(-1)).toBe(enginesBinDir());
+  });
+
+  it("runs the app's own build ahead of the npm copy, with OpenCode's self-updater off", async () => {
+    scratch = mkdtempSync(join(tmpdir(), "omb-opencode-which-"));
+    const log = join(scratch, "runs.log");
+    const env = await runTurn(scratch, log, false);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["standalone"]);
+    expect(env.OPENCODE_DISABLE_AUTOUPDATE).toBe("1");
   });
 });

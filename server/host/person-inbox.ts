@@ -11,7 +11,8 @@ import { join } from "node:path";
 import { z } from "zod";
 
 import { botOwner } from "../../shared/bot-owner.ts";
-import type { InboxItem } from "../../shared/inbox.ts";
+import type { InboxItem, InboxRow, InboxTab, InboxTask, InboxView } from "../../shared/inbox.ts";
+import { liveCardKind } from "../../shared/live-approval.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { ASK_NOTIFICATIONS } from "../ask-routing.ts";
 import { writeFileAtomic } from "../atomic.ts";
@@ -30,6 +31,8 @@ const BRIEF_TITLE = "Brief";
 const MAX_ITEMS = 2_000;
 const KEEP_MS = 30 * 24 * 60 * 60_000;
 const NOTE_MAX = 2_000;
+const VIEW_ROWS = 200;
+const ROW_TEXT_MAX = 4_000;
 /** Questions one person's assistant may answer in an hour; past it they wait for the person. */
 export const ASSISTANT_HOURLY = 20;
 const HOUR_MS = 60 * 60_000;
@@ -51,6 +54,8 @@ const itemSchema = z.object({
   at: z.number(),
   answered: z.boolean().optional(),
   seen: z.boolean().optional(),
+  /** The person marked it done: news they need nothing more from. */
+  done: z.boolean().optional(),
 });
 const fileSchema = z.object({ version: z.literal(1), homes: z.record(person, z.object({ botId: id, threadId: id })), items: z.array(itemSchema).max(MAX_ITEMS) });
 
@@ -106,6 +111,8 @@ export interface PersonInboxDeps {
   notes(botId: string): string;
   /** Gives a member who has neither a Chief nor a MausBot yet the MausBot every member gets. */
   ensureOwnBot?(email: string): void;
+  /** What waits on this inbox's person may have changed: its bot goes out to them again. */
+  changed?(threadId: string): void;
   now?: () => number;
 }
 
@@ -148,15 +155,11 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     if (email) deps.ensureOwnBot?.(email);
     const bot = representativeOf(person);
     if (!bot) return null;
-    const kept = homes[person];
-    const task = kept?.botId === bot.id ? store.taskByThread(bot.id, kept.threadId) : undefined;
-    if (task && !task.archivedAt) return { bot, threadId: task.threadId };
-    const own = store.tasks(bot.id).filter((one) => !one.archivedAt && !one.routineRunId && !one.openedBy && deps.starters.get(one.threadId) === person);
-    const brief = own.find((one) => one.title === BRIEF_TITLE);
-    const chat = brief ?? own.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))[0];
-    let threadId = chat?.threadId;
-    if (brief) store.patchTask(bot.id, brief.threadId, { title: INBOX_TITLE });
-    else if (!chat) {
+    const standing = standingHome(person, bot);
+    if (standing?.kept) return { bot, threadId: standing.threadId };
+    let threadId = standing?.threadId;
+    if (standing?.brief) store.patchTask(bot.id, standing.threadId, { title: INBOX_TITLE });
+    else if (!standing) {
       const created = store.createTask(bot.id, INBOX_TITLE, false);
       if (!created) return null;
       deps.starters.set(created.threadId, person);
@@ -166,6 +169,22 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     indexHomes();
     save();
     return { bot, threadId: threadId! };
+  }
+
+  function standingHome(person: string, bot: BotRecord): { threadId: string; kept: boolean; brief: boolean } | null {
+    const kept = homes[person];
+    const task = kept?.botId === bot.id ? store.taskByThread(bot.id, kept.threadId) : undefined;
+    if (task && !task.archivedAt) return { threadId: task.threadId, kept: true, brief: false };
+    const own = store.tasks(bot.id).filter((one) => !one.archivedAt && !one.routineRunId && !one.openedBy && deps.starters.get(one.threadId) === person);
+    const brief = own.find((one) => one.title === BRIEF_TITLE);
+    const chat = brief ?? own.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))[0];
+    return chat ? { threadId: chat.threadId, kept: false, brief: Boolean(brief) } : null;
+  }
+
+  /** Whether this conversation is the person's inbox, or the one `home` would make it, before anything reached it. */
+  function isHomeOf(threadId: string, person: string | null): boolean {
+    const bot = team && person && deps.person(person) ? representativeOf(person) : null;
+    return bot ? standingHome(person!, bot)?.threadId === threadId : false;
   }
 
   let homeThreads = new Map<string, string>();
@@ -189,6 +208,48 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   }
 
   const line = (item: Item) => store.messagesFor(item.threadId).find((message) => message.id === item.id);
+
+  /** The card that asked, in the conversation it was asked in; undefined once that conversation is gone. */
+  const asking = (item: Item) => item.requestId && item.origin
+    ? store.messagesFor(item.origin.threadId).findLast((message) => message.card?.requestId === item.requestId && !message.inbox)
+    : undefined;
+  /** An ask waits on its person while its copy here and the card that asked are open, however either is answered or
+   * closed. */
+  const askWaits = (item: Item, copy = line(item)) => item.kind === "ask" && liveCardKind(copy?.card) !== null && liveCardKind(asking(item)?.card) !== null;
+
+  /** The person wrote in the conversation a message came from after it reached them: they answered it there. */
+  function answeredThere(item: Item): boolean {
+    if (item.kind !== "message" || !item.origin) return false;
+    const lines = store.messagesFor(item.origin.threadId);
+    for (let index = lines.length - 1; index >= 0 && lines[index]!.at > item.at; index--) {
+      const said = lines[index]!;
+      if (said.role === "user" && !said.peerAsk && said.sender?.id === item.person) return true;
+    }
+    return false;
+  }
+
+  /** Nothing waits on the person any more: an ask's card is closed where it was asked, or a message was answered here or there. */
+  const settled = (item: Item) => item.kind === "ask" && item.requestId ? !askWaits(item) : Boolean(item.answered) || answeredThere(item);
+
+  /** When what each inbox lists last changed, so a client showing it reads it again; `touch` also sends its bot out. */
+  const changedAt = new Map<string, number>();
+  const mark = (threadId: string) => { changedAt.set(threadId, Math.max(now(), (changedAt.get(threadId) ?? 0) + 1)); };
+  const touch = (threadId: string) => { mark(threadId); deps.changed?.(threadId); };
+
+  /** The tab a line is listed in: an ask by its card where it was asked, anything else by its answer or the person's done. */
+  function tabOf(item: Item, copy?: Message): InboxTab {
+    if (item.kind === "ask" && item.requestId) return askWaits(item, copy) ? "needs-you" : "done";
+    return item.done || settled(item) ? "done" : "info";
+  }
+
+  /** How many asks in this inbox wait on its person: questions, approvals and work handed on, open here and where they
+   * were asked. */
+  function openAsks(threadId: string): number {
+    const asks = items.filter((item) => item.threadId === threadId && item.kind === "ask" && item.requestId);
+    if (!asks.length) return 0;
+    const copies = new Map(store.messagesFor(threadId).map((message) => [message.id, message]));
+    return asks.filter((item) => askWaits(item, copies.get(item.id))).length;
+  }
 
   function notifyItem(item: Item, title: string, kind: Notification["kind"], body: string): void {
     const bot = store.bot(item.botId);
@@ -225,7 +286,6 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     const posted = store.appendMessage(at.threadId, delivery.card
       ? { role: "bot", kind: "options", text: delivery.text, card: { ...delivery.card }, inbox: wire }
       : { role: "bot", kind: "text", text: delivery.text, inbox: wire });
-    store.patchTask(at.bot.id, at.threadId, { unread: true });
     const item: Item = {
       id: posted.id, person: to, botId: at.bot.id, threadId: at.threadId, kind: delivery.kind, from: delivery.from.name.slice(0, 200),
       ...(delivery.from.email ? { fromEmail: delivery.from.email } : {}), ...(delivery.from.botId ? { fromBot: delivery.from.botId } : {}),
@@ -235,6 +295,8 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     };
     items.push(item);
     save();
+    mark(at.threadId);
+    store.patchTask(at.bot.id, at.threadId, { unread: true });
     if (delivery.representable && deps.representative) void represent(item, delivery, at.bot);
     else if (!delivery.quiet) notifyItem(item, delivery.title, delivery.notify, delivery.text);
     return item;
@@ -295,6 +357,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     const posted = line(item);
     if (posted?.inbox) store.patchMessage(item.threadId, item.id, { inbox: { ...posted.inbox, answers: [...(posted.inbox.answers ?? []), { by, text: oneLine(text, 600), at: now() }] } });
     save();
+    touch(item.threadId);
     return passed;
   }
 
@@ -333,15 +396,22 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     return items.find((item) => item.threadId === threadId && item.requestId === requestId && item.origin)?.origin?.threadId ?? threadId;
   }
 
+  /** A copy follows the card it was copied from; once that card's conversation is gone, nothing can answer the copy. */
+  function follow(item: Item, card: NonNullable<Message["card"]> | null): void {
+    const copy = line(item);
+    if (!copy?.card) return;
+    const next = card ?? (liveCardKind(copy.card) ? { ...copy.card, answered: "unavailable", dismissed: true } : copy.card);
+    if (JSON.stringify(copy.card) === JSON.stringify(next)) return;
+    store.patchMessage(item.threadId, item.id, { card: { ...next } });
+    if (Boolean(liveCardKind(copy.card)) !== Boolean(liveCardKind(next))) touch(item.threadId);
+  }
+
   const unsubscribe = team ? store.onChange((change: StoreChange) => {
     if (change.type === "message.patch" && change.message.card?.requestId && !change.message.inbox) {
       const card = change.message.card;
-      for (const item of items) {
-        if (item.requestId !== card.requestId || item.origin?.threadId !== change.threadId) continue;
-        const copy = line(item);
-        if (copy?.card && JSON.stringify(copy.card) !== JSON.stringify(card)) store.patchMessage(item.threadId, item.id, { card: { ...card } });
-      }
+      for (const item of items) if (item.requestId === card.requestId && item.origin?.threadId === change.threadId) follow(item, card);
     } else if (change.type === "thread.deleted") {
+      for (const item of items) if (item.requestId && item.origin?.threadId === change.threadId) follow(item, null);
       const before = items.length;
       items = items.filter((item) => item.threadId !== change.threadId);
       for (const [key, at] of Object.entries(homes)) if (at.threadId === change.threadId) delete homes[key];
@@ -353,6 +423,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   return {
     home,
     personOf,
+    isHomeOf,
     deliver,
     route,
     answeredIn,
@@ -373,17 +444,66 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     },
     /** The lines in this inbox that wait on its person's answer, oldest first. */
     waiting(threadId: string): Item[] {
-      return items.filter((item) => item.threadId === threadId && item.to !== undefined && !item.answered);
+      return items.filter((item) => item.threadId === threadId && item.to !== undefined && !settled(item));
     },
-    /** What arrived in this person's inbox that they have not opened yet, newest first. */
+    openAsks,
+    /** A task's wire when it is a person's inbox: that it is, how many asks wait on them there, and when its list changed. */
+    wire(threadId: string): InboxTask {
+      if (!personOf(threadId)) return {};
+      const open = openAsks(threadId), at = changedAt.get(threadId);
+      return { inbox: true, ...(open ? { openAsks: open } : {}), ...(at ? { inboxChangedAt: at } : {}) };
+    },
+    /** This person's inbox as it lists its lines; null for someone without one. */
+    view(person: string): InboxView | null {
+      const at = homes[person];
+      if (!at || personOf(at.threadId) !== person) {
+        const bot = team && deps.person(person) ? representativeOf(person) : null;
+        return bot ? { botId: bot.id, threadId: null, rows: [], anchor: null } : null;
+      }
+      const lines = new Map(store.messagesFor(at.threadId).map((message) => [message.id, message]));
+      const own = items.filter((item) => item.person === person && item.threadId === at.threadId && lines.has(item.id)).sort((a, b) => b.at - a.at);
+      const rows = own.slice(0, VIEW_ROWS).map((item): InboxRow => {
+        const posted = lines.get(item.id)!;
+        return {
+          id: item.id, kind: item.kind, tab: tabOf(item, posted), from: posted.inbox?.from ?? { name: item.from }, ...(posted.inbox?.via ? { via: posted.inbox.via } : {}),
+          ...(posted.inbox?.origin ? { origin: posted.inbox.origin } : {}), text: clip(posted.text ?? item.text, ROW_TEXT_MAX), at: item.at, unread: !item.seen,
+          ...(posted.inbox?.replies ? { replies: true as const } : {}), ...(posted.inbox?.answers?.length ? { answers: posted.inbox.answers } : {}),
+          ...(item.kind === "ask" && posted.card ? { card: posted.card } : {}),
+        };
+      });
+      const anchor = own.find((item) => item.kind === "ask") ?? own[0];
+      return { botId: at.botId, threadId: at.threadId, rows, anchor: anchor?.id ?? null };
+    },
+    /** The person is done with a line of news; an ask is done only once its card is answered or closed where it was asked. */
+    markDone(person: string, id: string): "done" | "unknown" | "an ask" {
+      const item = items.find((one) => one.person === person && one.id === id);
+      if (!item) return "unknown";
+      if (item.kind === "ask" && item.requestId) return "an ask";
+      if (!item.done) { item.done = true; item.seen = true; save(); touch(item.threadId); }
+      return "done";
+    },
+    /** The person read a line. */
+    markRead(person: string, id: string): boolean {
+      const item = items.find((one) => one.person === person && one.id === id);
+      if (!item) return false;
+      if (!item.seen) { item.seen = true; save(); touch(item.threadId); }
+      return true;
+    },
+    /** The person wrote in a conversation: their inbox's list changes when a message from there waited on them. */
+    wrote(person: string, threadId: string): void {
+      const inboxes = new Set(items.filter((item) => item.person === person && item.kind === "message" && item.origin?.threadId === threadId && !item.answered && !item.done)
+        .map((item) => item.threadId));
+      for (const inbox of inboxes) touch(inbox);
+    },
+    /** What arrived in this person's inbox that they have not opened yet and still waits on them, newest first. */
     unseen(person: string): Item[] {
-      return items.filter((item) => item.person === person && !item.seen && !item.answered).sort((a, b) => b.at - a.at);
+      return items.filter((item) => item.person === person && !item.seen && !settled(item)).sort((a, b) => b.at - a.at);
     },
     /** The person opened or wrote in this conversation: what waited there for them is seen. */
     seen(person: string, threadId: string): void {
       let changed = false;
       for (const item of items) if (item.person === person && item.threadId === threadId && !item.seen) { item.seen = true; changed = true; }
-      if (changed) save();
+      if (changed) { save(); touch(threadId); }
     },
     /** The person left: their inbox and what waited in it are forgotten. */
     forget(person: string): void {

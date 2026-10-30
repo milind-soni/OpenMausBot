@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   browserIsThePlace,
+  chosenPin,
   cloudPlaceRefusal,
   computerSkippedNote,
   computerToolsRefusal,
@@ -20,6 +21,28 @@ describe("browserIsThePlace", () => {
     expect(browserIsThePlace(resolveSurface({ destination: "browser", browserOn: false }))).toBe(false);
     expect(browserIsThePlace(resolveSurface({ destination: "local", browserOn: true }))).toBe(false);
     expect(browserIsThePlace(resolveSurface({ destination: "off", browserOn: true }))).toBe(false);
+  });
+});
+
+describe("chosenPin", () => {
+  // The browser's tools are loaded up front where the browser is the chosen place: decided on that alone, the turn that
+  // pinned the browser on its own hands the next turn the browser exactly as it was handed itself.
+  const preloads = (destination: "browser" | undefined, task?: { surface?: "browser" | "local"; surfaceSource?: "user" | "auto" }) =>
+    browserIsThePlace(resolveSurface({ destination, pinnedSurface: chosenPin(task), browserOn: true }));
+
+  it("leaves out a pin a turn made on its own, and keeps the person's", () => {
+    expect(chosenPin(undefined)).toBeUndefined();
+    expect(chosenPin({ surface: "browser", surfaceSource: "auto" })).toBeNull();
+    expect(chosenPin({ surface: "browser", surfaceSource: "user" })).toBe("browser");
+    expect(chosenPin({ surface: "local" })).toBe("local");
+  });
+
+  it("hands an Auto conversation's browser the same way before and after a turn pinned it", () => {
+    expect(preloads(undefined)).toBe(false);
+    expect(preloads(undefined, { surface: "browser", surfaceSource: "auto" })).toBe(false);
+    expect(preloads("browser")).toBe(true);
+    expect(preloads("browser", { surface: "browser", surfaceSource: "auto" })).toBe(true);
+    expect(preloads(undefined, { surface: "browser", surfaceSource: "user" })).toBe(true);
   });
 });
 

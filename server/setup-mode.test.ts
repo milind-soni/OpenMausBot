@@ -76,7 +76,7 @@ describe("setupSystemPrompt", () => {
   it("is the skill_manage-naming block when active with skills on", () => {
     const prompt = setupSystemPrompt(true, { skills: true, connectedApps: AVAILABLE });
     expect(prompt.startsWith("\n\n")).toBe(true);
-    for (const tool of ["propose_profile", "create_trigger", "skill_manage", "request_credential"]) {
+    for (const tool of ["propose_profile", "trigger", "skill_manage", "request_credential"]) {
       expect(prompt).toContain(tool);
     }
     expect(prompt).toContain("at most four questions");
@@ -87,7 +87,7 @@ describe("setupSystemPrompt", () => {
     for (const prompt of [setupSystemPrompt(true, { connectedApps: AVAILABLE }), setupSystemPrompt(true, { skills: false, connectedApps: AVAILABLE })]) {
       expect(prompt).not.toContain("skill_manage");
       expect(prompt).toContain("propose_profile");
-      expect(prompt).toContain("create_trigger");
+      expect(prompt).toContain("trigger for a schedule or webhook");
       expect(prompt).toContain("request_credential");
       expect(prompt).toContain("describe procedures plainly in your standing instructions");
     }

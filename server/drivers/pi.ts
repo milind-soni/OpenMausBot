@@ -47,6 +47,9 @@ import { appendNative } from "./native.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
 
+import { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
+export { decodePiFrame, PiRpcChunks, piLineReader } from "./pi-rpc.ts";
+
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
 const PI_MODEL_UPDATE_ARGS = ["update", "--models", "--no-approve"];
@@ -102,6 +105,12 @@ interface PiModelEntry {
   id: string;
   name?: string;
 }
+
+function piModelId(model: unknown): string | null {
+  const entry = model as Partial<PiModelEntry> | null | undefined;
+  return typeof entry?.provider === "string" && entry.provider && typeof entry.id === "string" && entry.id
+    ? `${entry.provider}/${entry.id}` : null;
+}
 interface PiModelsResponse {
   type: "response";
   command: "get_available_models";
@@ -134,119 +143,6 @@ export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatal
     if (catalog) return catalog;
   }
   return { default: fallbackDefault, options: [] };
-}
-
-/** omp's RPC v2 splits a frame over 1 MiB into base64 `rpc_chunk` pieces (`chunkId`/`count`/
- *  `byteLength` per frame, sequential `index`, `data` per piece). Any inconsistency drops the sequence. */
-export class PiRpcChunks {
-  /** omp's advertised cap on one reassembled frame. */
-  static readonly MAX_BYTES = 64 * 1024 * 1024;
-  /** omp's cap on one decoded piece, which also bounds the piece count. */
-  static readonly MAX_PIECE_BYTES = 256 * 1024;
-  static readonly MAX_COUNT = PiRpcChunks.MAX_BYTES / PiRpcChunks.MAX_PIECE_BYTES;
-  private chunkId: string | null = null;
-  private count = 0;
-  private byteLength = 0;
-  private bytes = 0;
-  private parts: Buffer[] = [];
-
-  accept(message: Record<string, unknown>): Record<string, unknown> | null {
-    const { chunkId, index, count, byteLength, data } = message;
-    if (
-      typeof chunkId !== "string" || chunkId.length === 0 || typeof data !== "string" ||
-      data.length === 0 || data.length > Math.ceil(PiRpcChunks.MAX_PIECE_BYTES / 3) * 4 ||
-      !Number.isInteger(index) || !Number.isInteger(count) || !Number.isInteger(byteLength) ||
-      (index as number) < 0 || (count as number) < 2 || (count as number) > PiRpcChunks.MAX_COUNT ||
-      (index as number) >= (count as number) ||
-      (byteLength as number) < 0 || (byteLength as number) > PiRpcChunks.MAX_BYTES
-    ) {
-      this.reset();
-      return null;
-    }
-    if (chunkId !== this.chunkId) {
-      if (index !== 0) {
-        this.reset();
-        return null;
-      }
-      this.chunkId = chunkId;
-      this.count = count as number;
-      this.byteLength = byteLength as number;
-      this.parts = [];
-      this.bytes = 0;
-    } else if (count !== this.count || byteLength !== this.byteLength) {
-      this.reset();
-      return null;
-    }
-    const part = Buffer.from(data, "base64");
-    // An empty piece would let a sequence grow without approaching `byteLength`.
-    if (
-      index !== this.parts.length || part.length === 0 || part.length > PiRpcChunks.MAX_PIECE_BYTES ||
-      this.bytes + part.length > this.byteLength
-    ) {
-      this.reset();
-      return null;
-    }
-    this.parts.push(part);
-    this.bytes += part.length;
-    if (this.parts.length < this.count) return null;
-    const complete = this.bytes === this.byteLength;
-    const text = Buffer.concat(this.parts).toString("utf8");
-    this.reset();
-    if (!complete) return null;
-    try {
-      const frame = JSON.parse(text) as unknown;
-      return frame && typeof frame === "object" && !Array.isArray(frame)
-        ? frame as Record<string, unknown>
-        : null;
-    } catch {
-      return null;
-    }
-  }
-
-  private reset(): void {
-    this.chunkId = null;
-    this.count = 0;
-    this.byteLength = 0;
-    this.bytes = 0;
-    this.parts = [];
-  }
-}
-
-export function decodePiFrame(line: string, chunks: PiRpcChunks): Record<string, unknown> | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-  const frame = parsed as Record<string, unknown>;
-  return frame.type === "rpc_chunk" ? chunks.accept(frame) : frame;
-}
-
-const PI_MAX_LINE = PiRpcChunks.MAX_BYTES;
-
-export function piLineReader(onLine: (line: string) => boolean | void): (chunk: string) => void {
-  let buf = "";
-  let dropping = false;
-  return (chunk) => {
-    buf += chunk;
-    let nl: number;
-    while ((nl = buf.indexOf("\n")) !== -1) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      if (dropping) {
-        dropping = false;
-        continue;
-      }
-      if (line.length > PI_MAX_LINE || !line.trim()) continue;
-      if (onLine(line)) return;
-    }
-    if (buf.length > PI_MAX_LINE) {
-      buf = "";
-      dropping = true;
-    }
-  };
 }
 
 export function splitPiModel(id: string): { provider: string; modelId: string } | null {
@@ -527,12 +423,18 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
     const listeners = new Set<RuntimeEventListener>();
     const active = new Map<string, {
-      stop: () => void;
+      stop: () => Promise<void>;
       turnId: string;
       pending: Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>;
       child?: { stdin: { write: (s: string) => void } };
       steer?: (text: string) => Promise<SteerOutcome>;
     }>();
+
+    const stopAll = async () => {
+      const results = await Promise.allSettled([...active.values()].map(({ stop }) => Promise.resolve().then(stop)));
+      const failure = results.find((result) => result.status === "rejected");
+      if (failure) throw failure.reason;
+    };
 
     const emit = (event: RuntimeEvent) => {
       for (const l of Array.from(listeners)) l(event);
@@ -563,8 +465,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       const pending = new Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>();
       const askTimers = new Set<ReturnType<typeof setTimeout>>();
       let settled = false;
+      let completion: Promise<void> | null = null;
       let endStopReason: string | undefined;
       let endUsage: { input?: number; output?: number } | undefined;
+      let completionOutcome: { ok: boolean; stopReason: string; usage?: { input: number; output: number } } | null = null;
       let endErrorMessage: string | undefined;
       let agentEndTimer: ReturnType<typeof setTimeout> | null = null;
       const images = readPiPromptImages(turn);
@@ -646,8 +550,12 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
       };
 
-      const settle = (ok: boolean, stopReason?: string | null, usage?: { input?: number; output?: number }) => {
-        if (settled) return;
+      const settle = (ok: boolean, stopReason?: string | null, usage = endUsage): Promise<void> => {
+        if (completion) return completion;
+        const outcome = completionOutcome ??= {
+          ok, stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
+          ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
+        };
         settled = true;
         if (agentEndTimer) {
           clearTimeout(agentEndTimer);
@@ -656,24 +564,29 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         for (const timer of askTimers) clearTimeout(timer);
         askTimers.clear();
         pending.clear();
-        flushAssistantText();
-        emit({
-          ...base(threadId, turnId),
-          type: "turn.completed",
-          ok,
-          stopReason: stopReason ?? (ok ? "end_turn" : "failed"),
-          ...(usage ? { usage: { input: usage.input ?? 0, output: usage.output ?? 0 } } : {}),
-        });
         try {
           child.stdin.end();
         } catch {}
-        try {
-          killCliTree(child);
-        } catch {}
-        try {
-          rmSync(mcpTempDir, { recursive: true, force: true });
-        } catch {}
-        active.delete(threadId);
+        completion = (async () => {
+          // The TERM grace lets Pi end the detached tool processes it started; a CLI that ignores TERM is killed after it.
+          if (!await killCliTree(child)) throw new Error("Pi process termination could not be confirmed");
+          rejectWaiters(new Error("pi turn ended"));
+          try {
+            rmSync(mcpTempDir, { recursive: true, force: true });
+          } catch {}
+          active.delete(threadId);
+          flushAssistantText();
+          emit({
+            ...base(threadId, turnId),
+            type: "turn.completed",
+            ...outcome,
+          });
+        })();
+        void completion.catch((error: Error) => {
+          completion = null;
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: error.message });
+        });
+        return completion;
       };
 
       const finishRun = () => {
@@ -694,10 +607,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         try {
           send({ type: "abort" });
         } catch {}
-        try {
-          killCliTree(child);
-        } catch {}
-        settle(true, "cancelled");
+        return settle(true, "cancelled");
       };
 
       // pi queues a steer into the running agent without aborting the step, answers success only after
@@ -723,6 +633,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
       const onEvent = (evt: PiEvent) => {
         appendNative(threadId, { dir: "in", source: "pi.rpc", msg: evt });
+        if (settled) return;
         switch (evt.type) {
           case "response": {
             const key = typeof evt.id === "string" && responseWaiters.has(evt.id) ? evt.id : evt.command;
@@ -833,6 +744,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           case "compaction_end":
           case "auto_compaction_start":
           case "auto_compaction_end": {
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
             // pi compaction (manual or automatic) can absorb the turn that carried the standing prompt.
             if (sessionReady && sessionFile) {
               compactionObserved = true;
@@ -844,27 +757,33 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           {
             // A killed child can still flush one buffered frame after the turn settled.
             if (settled) return;
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
             const sr = evt.message?.stopReason;
+            const usage = evt.usage ?? evt.message?.usage;
+            if (usage) endUsage = { input: (endUsage?.input ?? 0) + (usage.input ?? 0), output: (endUsage?.output ?? 0) + (usage.output ?? 0) };
             // toolUse: pi ran a tool and auto-continues; the next turn_end carries the outcome.
             if (sr === "toolUse" || sr === "tool_use" || sr === "tool_calls") return;
             endStopReason = sr;
-            endUsage = evt.usage ?? evt.message?.usage;
             endErrorMessage = evt.message?.errorMessage;
             // pi can schedule maintenance (overflow-recovery compaction) after the final turn_end;
             // only agent_end proves the session is done rewriting itself.
-            if (agentEndTimer) clearTimeout(agentEndTimer);
             agentEndTimer = setTimeout(finishRun, PI_AGENT_END_GRACE_MS);
             agentEndTimer.unref?.();
+            return;
+          }
+          case "turn_start":
+          case "agent_start": {
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
             return;
           }
           case "agent_end": {
             // Non-terminal agent_end: upstream pi sets willRetry: true before an automatic retry; the omp
             // fork sets isTerminal: false while maintenance or async delivery is scheduled.
+            if (agentEndTimer) clearTimeout(agentEndTimer);
+            agentEndTimer = null;
             if (evt.isTerminal === false || evt.willRetry === true) return;
-            if (agentEndTimer) {
-              clearTimeout(agentEndTimer);
-              agentEndTimer = null;
-            }
             finishRun();
             return;
           }
@@ -907,7 +826,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // The resumeCursor is pi's sessionFile, which switch_session takes as `sessionPath`.
       const sessionPath = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       let sessionFile = sessionPath;
+      let sessionId: string | null = sessionFile;
       let sessionReady = false;
+      let sessionOpened = false;
+      let confirmedModel: string | null = null;
       try {
         const command = sessionPath ? "switch_session" : "new_session";
         const hsPromise = awaitResponse(command, Infinity);
@@ -915,13 +837,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         const slow = setTimeout(() => emit({ ...base(threadId, turnId), type: "runtime.notice", message: PI_SESSION_SLOW }), PI_SESSION_SLOW_MS);
         const hs = (await hsPromise.finally(() => clearTimeout(slow))) as { sessionFile?: string; sessionId?: string } | undefined;
         if (hs?.sessionFile) sessionFile = hs.sessionFile;
+        sessionId = sessionFile ?? hs?.sessionId ?? null;
         sessionReady = true;
-        emit({
-          ...base(threadId, turnId),
-          type: "session.started",
-          sessionId: sessionFile ?? hs?.sessionId ?? null,
-          model: turn.model ?? null,
-        });
+        sessionOpened = true;
       } catch {
         // pi --no-session accepts a prompt without an explicit session.
       }
@@ -932,9 +850,26 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         try {
           const modelPromise = awaitResponse("set_model");
           send({ type: "set_model", provider: chosen.provider, modelId: chosen.modelId });
-          await modelPromise;
+          confirmedModel = piModelId(await modelPromise);
+          if (!confirmedModel) throw new Error("Pi did not confirm the selected model");
+        } catch (error) {
+          if (!settled) {
+            emit({ ...base(threadId, turnId), type: "runtime.error", message: String((error as Error).message) });
+            await settle(false);
+          }
+          return { turnId };
+        }
+      }
+      if (!chosen) {
+        try {
+          const statePromise = awaitResponse("get_state");
+          send({ type: "get_state" });
+          const state = await statePromise as { model?: unknown } | undefined;
+          confirmedModel = piModelId(state?.model);
         } catch {}
       }
+      if (settled) return { turnId };
+      if (sessionOpened) emit({ ...base(threadId, turnId), type: "session.started", sessionId, model: confirmedModel });
 
       // After the model: the supported level set is model-dependent.
       if (turn.effort) {
@@ -944,6 +879,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           await levelPromise;
         } catch {}
       }
+      if (settled) return { turnId };
 
       if (scopeReadyPath) {
         let ready = false;
@@ -1069,10 +1005,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           nativeImageInput: true,
           // pi rejects an unsupported level and the turn keeps the engine default.
           effortLevels: EFFORT_LEVELS,
-          queueing: true,
+          queueing: true, askTool: { kind: "native", name: "ask_user" },
         },
         sendTurn,
-        interruptTurn: async (threadId) => active.get(threadId)?.stop(),
+        interruptTurn: async (threadId) => { await active.get(threadId)?.stop(); },
         respondToRequest: async (threadId, requestId, decision) => {
           const entry = active.get(threadId);
           const answer = entry?.pending.get(requestId);
@@ -1093,17 +1029,18 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           return entry?.steer ? await entry.steer(text) : "refused";
         },
         hasSession: (threadId) => active.has(threadId),
-        stopAll: async () => {
-          for (const { stop } of active.values()) stop();
-        },
+        stopAll,
         onEvent: (listener) => {
           listeners.add(listener);
           return () => listeners.delete(listener);
         },
       },
       dispose: async () => {
-        for (const { stop } of active.values()) stop();
-        listeners.clear();
+        try {
+          await stopAll();
+        } finally {
+          listeners.clear();
+        }
       },
     };
   },

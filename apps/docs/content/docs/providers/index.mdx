@@ -16,6 +16,7 @@ OpenMausBot does not proxy every message through its own model account. It start
 | Codex | Codex CLI login | Model discovery, approvals, steering, and computer tools |
 | Grok | Grok CLI login | ACP-based local model catalog and session support |
 | Cursor | Cursor Agent CLI login or API key | ACP driver with live model discovery |
+| GitHub Copilot | `copilot login`, or `COPILOT_GITHUB_TOKEN` | ACP driver with the plan's live models, each labelled with its premium request multiplier |
 | Kimi | Kimi CLI login | ACP integration |
 | Droid | Factory Droid CLI login | ACP integration |
 | Antigravity | Google account through the official ACP server | Managed install, isolated accounts, live models, and approval cards |
@@ -25,6 +26,8 @@ OpenMausBot does not proxy every message through its own model account. It start
 | Pi | Pi CLI login | Native driver |
 
 Additional driver instances can be declared in local configuration. Unavailable engines remain visible with a reason instead of crashing the provider fleet.
+
+GitHub Copilot runs the official Copilot CLI (`npm install -g @github/copilot`) in its ACP mode and bills the signed-in Copilot plan, unless the CLI is set up to bring its own key: `COPILOT_PROVIDER_*` variables in the `githubCopilot` instance's `environment`, or a `providers.json` in the Copilot CLI home (`~/.copilot`, or `COPILOT_HOME`), send model requests to that provider, which bills them. A `GH_TOKEN` or `GITHUB_TOKEN` in OpenMausBot's own environment never reaches it, because either would take precedence over the CLI's login; put one in the `githubCopilot` instance's `environment` to use it. `COPILOT_ALLOW_ALL` is always removed, so tool approvals stay with OpenMausBot.
 
 To use OpenRouter, Fireworks AI, DeepSeek, Cline, or your own OpenAI- or Anthropic-compatible service, see [Other model providers](./model-providers.mdx).
 

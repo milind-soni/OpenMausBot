@@ -13,7 +13,6 @@
           },
           "offset": {
             "type": "integer",
-            "minimum": 0,
             "description": "Character offset copied from the previous result's notice. Defaults to 0."
           }
         },
@@ -53,20 +52,14 @@
             "items": {
               "type": "string",
               "description": "A teammate's id exactly as list_bots or your roster prints it ([id: …]). A teammate's unique display name also resolves; a name shared by two reachable teammates is refused."
-            },
-            "minItems": 1,
-            "maxItems": 4,
-            "uniqueItems": true
+            }
           },
           "message": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 4000,
             "description": "Question or task for these teammates; later requests in the same conversation can build on earlier ones. Send separate requests when responsibilities differ."
           },
           "reason": {
             "type": "string",
-            "maxLength": 200,
             "description": "Optional one line for the person about why this goes to them (shown as a chip)."
           },
           "rework": {
@@ -104,7 +97,6 @@
           },
           "done_when": {
             "type": "string",
-            "maxLength": 1000,
             "description": "Optional: what must be true for this to count as done, in one or two sentences; the teammate is held to it."
           }
         },
@@ -198,7 +190,6 @@
           },
           "title": {
             "type": "string",
-            "maxLength": 200,
             "description": "A short name for the page."
           },
           "page_id": {
@@ -241,7 +232,7 @@
     },
     {
       "name": "request_credential",
-      "description": "Ask for a supported API key or a 1Password service account token (onePasswordToken) through OpenMausBot's secure credential flow: the app shows a secure entry card, as does a freshly QR-paired phone; older pairings show how to pair again. Never claim a secure field opened unless this request succeeds, and never ask the user to paste a secret into chat. OpenMausBot saves it and never returns it to you. After calling this tool, end the turn; OpenMausBot resumes the task after the user saves or declines.",
+      "description": "Ask the person for a secret on a secure card in the app or a QR-paired phone, never in chat. credential_id: a key OpenMausBot keeps (onePasswordToken: a 1Password service account token). Other secrets: label, reason, delivery. You never see the value; end the turn, and you resume when they save or decline.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -254,18 +245,38 @@
               "ttsKey",
               "fishAudioKey",
               "openaiImageApiKey",
-              "onePasswordToken"
-            ],
-            "description": "The credential the current task requires."
+              "onePasswordToken",
+              "composioApiKey",
+              "openaiApiKey",
+              "anthropicApiKey",
+              "openrouterApiKey",
+              "mistralApiKey",
+              "cerebrasApiKey",
+              "groqApiKey",
+              "metaApiKey",
+              "deepseekApiKey"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "description": "Other secret's card title, e.g. Stripe secret key."
           },
           "reason": {
             "type": "string",
-            "description": "Optional short, non-sensitive explanation of why the task needs it."
+            "description": "Short, non-sensitive: why, and where to find it."
+          },
+          "placeholder": {
+            "type": "string"
+          },
+          "delivery": {
+            "type": "string",
+            "enum": [
+              "ref",
+              "file"
+            ],
+            "description": "ref: a one-use secretRef for add_mcp_server. file: a private file your commands read."
           }
-        },
-        "required": [
-          "credential_id"
-        ]
+        }
       }
     },
     {
@@ -277,13 +288,10 @@
         "properties": {
           "site": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 2048,
             "description": "The page to sign in on: its address, or the domain, such as example.com."
           },
           "reason": {
             "type": "string",
-            "maxLength": 240,
             "description": "One short sentence, in your words, on what the sign-in is for."
           }
         },
@@ -301,7 +309,6 @@
         "properties": {
           "username": {
             "type": "string",
-            "maxLength": 512,
             "description": "Which saved login to use when the site has more than one."
           },
           "submit": {
@@ -320,8 +327,6 @@
         "properties": {
           "text": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 1000,
             "description": "The note verbatim: short, speakable text, at most 1000 characters."
           }
         },
@@ -349,13 +354,10 @@
           },
           "text": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 1000,
             "description": "Non-blank new text for append, replace, or supersede: the fact itself, without a date or bullet. Omit for remove and forget; use remove to delete a passage."
           },
           "old_text": {
             "type": "string",
-            "minLength": 1,
             "description": "Exact unique existing passage for replace, supersede, or remove; for forget, words naming it. Omit for append."
           },
           "until": {
@@ -371,7 +373,7 @@
     },
     {
       "name": "find_tool",
-      "description": "Find an OpenMausBot tool that is not in your tool list. Say what you want to do in a few words, or give the tool's name. Each match comes back with its description and exact input schema; run one with use_tool. Tools reached this way: list_shared_computers, shared_computer, assignment_status, raise_escalation, list_threads, close_thread, start_thread, vm_exec, show_widget, update_widget, show_html, update_html, unpublish_page, create_bot, list_team_setup, list_team_library, propose_team_setup, propose_bot_deletion, create_room, manage_room, x_search, x_user_posts, x_post, x_profile, research_search, research_endpoint, research_call, decide, extract, message_person, report_bug, retry_thread, memory_log, session_search, session_read, list_triggers, list_trigger_events, create_trigger, manage_trigger, propose_profile, propose_model, propose_team_memory, skills_list, skill_manage, add_mcp_server.",
+      "description": "Find an OpenMausBot tool that is not in your tool list. Say what you want to do in a few words, or give the tool's name. Each match comes back with its description and exact input schema; run one with use_tool. Tools reached this way: list_shared_computers, shared_computer, assignment_status, raise_escalation, list_threads, close_thread, start_thread, vm_exec, show_widget, show_html, unpublish_page, create_bot, list_team_setup, list_team_library, propose_team_setup, propose_bot_deletion, manage_room, x_search, research_search, research_endpoint, research_call, decide, extract, message_person, report_bug, retry_thread, memory_log, session_search, trigger_info, trigger, delete_trigger, wait_until, list_waits, cancel_wait, propose_profile, propose_model, propose_team_memory, skills_list, skill_manage, add_mcp_server.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,

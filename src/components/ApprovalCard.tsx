@@ -1,5 +1,5 @@
 import { useContext, useState, type ReactNode } from "react";
-import { Check, ShieldCheck, Undo2, X } from "lucide-react";
+import { Check, Clock3, ShieldCheck, Undo2, X } from "lucide-react";
 import { api, ApiError, StoreContext, type Bot, type Message, type OptionCardData } from "@/state/store";
 import { shareLearnedSkillsMode } from "@/lib/feature-flags";
 import { cn } from "@/lib/cn";
@@ -13,6 +13,7 @@ import { PROFILE_REQUEST_FIELDS, type ProfileRequestField } from "../../shared/p
 import type { RoutineRequestSchedule } from "../../shared/routine-request";
 import type { SkillShareRecord } from "../../shared/skill-request";
 import { cardAutomation } from "@/lib/automations";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { yourComputerAsk } from "@/lib/your-computer";
 import { TriggerCard } from "./TriggerCard";
 import { CardHint } from "./CardHint";
@@ -44,6 +45,12 @@ const AUTOMATION_APPLIED_LINE = {
   run_now: "approval.applied.automation.runNow",
   delete: "approval.applied.automation.delete",
 } as const;
+const WAIT_APPLIED_LINE = {
+  waiting: "approval.applied.wait",
+  fired: "approval.applied.waitFired",
+  expired: "approval.applied.waitExpired",
+  cancelled: "approval.applied.waitCancelled",
+} as const;
 
 const SKILL_APPLIED_LINE = {
   create: "approval.applied.skill.create",
@@ -64,10 +71,10 @@ const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
 const staleRoutineCard = (card: OptionCardData) => Boolean(card.routineRequest && !card.answered);
 
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
-  if (card.expired === true || staleRoutineCard(card)) return t("approval.status.expired");
+  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest);
+  if (card.expired === true || staleRoutineCard(card)) return t(isProposal || !card.tool ? "approval.status.expired" : "approval.status.timedOut");
   if (!card.answered) return undefined;
   if (card.undone === true) return t("approval.status.undone");
-  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest);
   if (card.answered !== "allow") return isProposal ? t("approval.status.cancelled") : t("approval.status.denied");
   if (card.teamSetupRequest) return card.teamSetupRequest.deletion ? "Bot deleted" : "Team setup applied";
   const routineAction = card.routineRequest?.operation.action;
@@ -127,7 +134,7 @@ function plainWhen(schedule: RoutineRequestSchedule): string {
   return scheduleLabel(schedule);
 }
 
-export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean } | undefined {
+export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean; cancels?: boolean } | undefined {
   const routine = card.routineRequest;
   if (routine) {
     const operation = routine.operation;
@@ -146,6 +153,8 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
             : false;
     return { line: t(AUTOMATION_APPLIED_LINE[operation.action], { name, title }), canUndo };
   }
+  const wait = card.waitRequest;
+  if (wait) return { line: t(WAIT_APPLIED_LINE[wait.settled ?? "waiting"], { name, title: wait.label }), canUndo: !wait.settled, cancels: true };
   const webhook = card.webhookRequest;
   if (webhook) {
     const target = webhook.operation.forBot ? ` · ${t("approval.applied.forBot", { target: `@${webhook.operation.forBot.name}` })}` : "";
@@ -198,7 +207,7 @@ function AppliedChangeLine({
   card: OptionCardData;
   name: string;
   threadId?: string;
-  summary: { line: string; canUndo: boolean };
+  summary: { line: string; canUndo: boolean; cancels?: boolean };
 }) {
   const [open, setOpen] = useState(false);
   const [undoing, setUndoing] = useState(false);
@@ -207,7 +216,10 @@ function AppliedChangeLine({
   // Kept until the card's own patch arrives, so the Share button cannot come back in between.
   const [sharedNow, setSharedNow] = useState<{ requestId: string; shared: SkillShareRecord }>();
   const config = useContext(StoreContext)?.state.config ?? null;
+  const reviewsTeamMemory = useOwnerOrAdmin() !== false;
+  const canUndo = summary.canUndo && (!card.teamMemoryRequest || reviewsTeamMemory);
   const undone = card.undone === true;
+  const cancels = summary.cancels === true;
   const skill = card.skillRequest;
   const shared = skill?.shared ?? (sharedNow && sharedNow.requestId === card.requestId ? sharedNow.shared : undefined);
   const canShare = Boolean(skill && !shared && !undone && threadId && card.requestId)
@@ -232,9 +244,12 @@ function AppliedChangeLine({
     setError(undefined);
     api(`/api/threads/${threadId}/undo`, { method: "POST", body: JSON.stringify({ requestId: card.requestId }) })
       .catch((failure: unknown) => {
+        // A wait that had already ended answers 409, and its card then says how it ended.
+        if (cancels && failure instanceof ApiError && failure.status === 409) return;
         setError(failure instanceof ApiError && failure.body?.code === "changed-since"
           ? t("approval.applied.changedSince")
-          : t("approval.applied.undoFailed", { error: failure instanceof Error ? failure.message : String(failure) }));
+          : cancels ? t("approval.applied.cancelFailed", { name })
+            : t("approval.applied.undoFailed", { error: failure instanceof Error ? failure.message : String(failure) }));
       })
       .finally(() => setUndoing(false));
   };
@@ -247,16 +262,16 @@ function AppliedChangeLine({
           {shared && !undone && (
             <span> · {sharedNames.length ? t("approval.applied.sharedSkill", { names: sharedNames.join(", ") }) : t("approval.applied.sharedSkillNobody")}</span>
           )}
-          {undone && <span> · {t("approval.applied.undone")}</span>}
+          {undone && !cancels && <span> · {t("approval.applied.undone")}</span>}
         </span>
-        {!undone && summary.canUndo && threadId && (
+        {!undone && canUndo && threadId && (
           <button
             type="button"
             onClick={undo}
             disabled={undoing}
             className={cn(TEXT_ACTION, "text-accent disabled:opacity-60")}
           >
-            {undoing ? t("approval.applied.undoing") : t("approval.applied.undo")}
+            {cancels ? t(undoing ? "approval.applied.cancelling" : "common.cancel") : t(undoing ? "approval.applied.undoing" : "approval.applied.undo")}
           </button>
         )}
         {canShare && (
@@ -316,6 +331,7 @@ function CompactApprovalRow({
   showDetailInline,
   outcome,
   allowed,
+  expired = false,
   byVoice,
   waiting,
   answeredBelow,
@@ -326,6 +342,7 @@ function CompactApprovalRow({
   showDetailInline: boolean;
   outcome?: string;
   allowed: boolean;
+  expired?: boolean;
   byVoice: ReactNode;
   waiting: boolean;
   answeredBelow: boolean;
@@ -350,7 +367,9 @@ function CompactApprovalRow({
           ? <ShieldCheck size={14} className="shrink-0 self-center text-accent" aria-hidden="true" />
           : allowed
             ? <Check size={14} className="shrink-0 self-center text-success" aria-hidden="true" />
-            : <X size={14} className="shrink-0 self-center" aria-hidden="true" />}
+            : expired
+              ? <Clock3 size={14} className="shrink-0 self-center" aria-hidden="true" />
+              : <X size={14} className="shrink-0 self-center" aria-hidden="true" />}
         <span className={cn("min-w-0 break-words", waiting && "text-ink")}>{header}</span>
         {summary && <span className="min-w-0 break-words">{waiting ? summary : `· ${summary}`}</span>}
         {detail && showDetailInline && (
@@ -453,6 +472,7 @@ export function ApprovalCard({
         showDetailInline={!outbound}
         outcome={outcome}
         allowed={settled === "allow" && !expired}
+        expired={expired}
         byVoice={byVoice}
         waiting={waiting}
         answeredBelow={Boolean(card.requestId && card.tool && !card.dismissed)}

@@ -56,7 +56,7 @@ const ready = { instanceId: "claude", snapshot: { state: "available", authentica
 /** A Cloud whose first-job question was answered before the welcome existed keeps that checklist. */
 const setUpBeforeWelcome = (...hints: string[]) => { f.state.config.onboarding = { ...EMPTY_ONBOARDING, hintsSeen: [CLOUD_INTENT_ASKED, ...hints] }; };
 const signedOut = { instanceId: "claude", snapshot: { state: "available", authenticated: false } };
-let lent: unknown[], open: ReturnType<typeof vi.fn>;
+let lent: unknown[];
 let dispatched: unknown[];
 
 beforeEach(() => {
@@ -68,8 +68,7 @@ beforeEach(() => {
     bots: [{ id: "b1", threadId: "t1", name: "Maus" }], routines: [],
     config: { cloudHome: true, onboarding: { ...EMPTY_ONBOARDING } },
   };
-  open = vi.fn().mockResolvedValue(undefined);
-  vi.stubGlobal("window", { ogb: { platform: "darwin", cloudLending: { open } }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
+  vi.stubGlobal("window", { ogb: { platform: "darwin" }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
   vi.mocked(api).mockImplementation(async (path: string, init?: RequestInit) => {
     if (path === "/api/shared-computers") return { computers: lent };

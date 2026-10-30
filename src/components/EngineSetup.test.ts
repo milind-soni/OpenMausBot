@@ -173,6 +173,65 @@ describe("install from Settings on the server", () => {
     expect(markup).toContain("npm install -g kimi-fixture");
   });
 
+  it("offers the vendor's own build on a machine without Node.js, and drops the Node.js line", () => {
+    const opencode = (server?: NonNullable<InstanceInfo["install"]>["server"]): InstanceInfo => ({
+      ...instance({ state: "unavailable", reason: "`opencode` CLI not found" }),
+      instanceId: "opencode",
+      driverKind: "opencodeGo",
+      displayName: "OpenCode",
+      install: {
+        command: { linux: "npm install -g opencode-ai", darwin: "npm install -g opencode-ai", win32: "npm install -g opencode-ai" },
+        needsNode: true,
+        ...(server ? { server } : {}),
+      },
+    });
+    const standalone = render(opencode({ standalone: { version: "1.19.4", downloadBytes: 79_667_571 } }));
+    expect(standalone).toContain("Install OpenCode here");
+    expect(standalone).not.toContain("Requires Node.js");
+    // No npm on the server, so no npm command to paste into a terminal.
+    expect(standalone).not.toContain("npm install -g opencode-ai");
+    // Decimal megabytes, as macOS and Windows show file sizes: 79,667,571 bytes is about 80 MB.
+    expect(standalone).toContain("About 80 MB download");
+    expect(render(opencode({ standalone: { version: "1.19.4", downloadBytes: 64_291_659 } }))).toContain("About 64 MB download");
+    const withNpm = render(opencode({ standalone: { version: "1.19.4", downloadBytes: 79_667_571 }, package: "opencode-ai" }));
+    expect(withNpm).toContain("Prefer a terminal?");
+    expect(withNpm).toContain("npm install -g opencode-ai");
+    const neither = render(opencode());
+    expect(neither).not.toContain("Install OpenCode here");
+    expect(neither).toContain("Requires Node.js");
+  });
+
+  it("finishes the app's own signed-out copy in the app, never in a terminal", () => {
+    const appCopy = (snapshot: InstanceInfo["snapshot"]): InstanceInfo => ({
+      ...instance(snapshot),
+      instanceId: "opencodeGo",
+      driverKind: "opencodeGo",
+      displayName: "OpenCode",
+      install: {
+        command: { linux: "npm install -g opencode-ai", darwin: "npm install -g opencode-ai", win32: "npm install -g opencode-ai" },
+        needsNode: true,
+        docsUrl: "https://opencode.ai/docs/",
+        server: { standalone: { version: "1.19.4", downloadBytes: 64_291_659 } },
+        appCopy: true,
+      },
+    });
+    const markup = render(appCopy({ state: "available", authenticated: false, version: "1.19.4" }));
+    expect(markup).toContain("OpenCode is installed");
+    expect(markup).toContain("free models");
+    expect(markup).toContain("Open API keys");
+    expect(markup).toContain("Check again");
+    for (const line of ["Terminal", "terminal", "one-line installer", "npm install", "Install and sign in on the computer", "Sign in to OpenCode"]) {
+      expect(markup).not.toContain(line);
+    }
+    // A remote client's Settings has no keys, so it names the computer instead of offering the button.
+    vi.stubGlobal("window", { ogb: { platform: "linux", remoteClient: { active: true } } });
+    const remote = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: appCopy({ state: "available", authenticated: false, version: "1.19.4" }) })));
+    expect(remote).toContain("on the computer running MausBot");
+    expect(remote).not.toContain("Open API keys");
+    // Missing or broken, the app's copy is installed again from here.
+    expect(render(appCopy({ state: "unavailable", reason: "`opencode` version check failed." }))).toContain("Install OpenCode here");
+  });
+
   it("never offers an install when only sign-in is missing", () => {
     const markup = render(npmEngine({ state: "available", authenticated: false, version: "1.0.0" }));
     expect(markup).not.toContain("Install Kimi here");
@@ -201,7 +260,7 @@ describe("server device-code sign-in", () => {
     };
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
     expect(markup).toContain("Continue with ChatGPT");
-    expect(markup).toContain("separate from MausBot Cloud and API billing");
+    expect(markup).toContain("separate from MausBot Cloud and from paying with an API key");
     expect(markup).not.toContain("codex login");
     expect(markup).not.toContain("Device-code login");
   });
@@ -283,7 +342,7 @@ describe("API-key engine setup", () => {
 
   it("has no button on a remote client, whose settings hide the keys", () => {
     const html = render(keyEngine("openai-compat", { state: "unavailable" }), { platform: "darwin", remoteClient: { active: true } });
-    expect(html).toContain("on the computer running OpenMausBot");
+    expect(html).toContain("on the computer running MausBot");
     expect(html).not.toContain("Open API keys");
   });
 

@@ -280,6 +280,13 @@ function handle(cmd: any) {
       else send(response);
       return;
     }
+    case "get_state":
+      send({ type: "response", command: "get_state", success: true, data: {
+        model: null, thinkingLevel: "off", isStreaming: false, isCompacting: false,
+        steeringMode: "one-at-a-time", followUpMode: "one-at-a-time", sessionFile: currentSessionFile,
+        sessionId: `s-${sessionCounter}`, autoCompactionEnabled: true, messageCount: 0, pendingMessageCount: 0,
+      } });
+      return;
     case "new_session":
       if (mode === "session-error") {
         send({ type: "response", command: "new_session", success: false, error: "fake pi: session unavailable" });

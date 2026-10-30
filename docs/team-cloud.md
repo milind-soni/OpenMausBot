@@ -15,14 +15,16 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   in the @ list too, and whatever is addressed to one of them reaches their inbox (below, "One inbox per person"). "New conversation"
   is yours alone: no other Member and no Admin, the Super admin included, sees it, writes in it or learns of it, in
   lists, counts, unread marks, searches, files, notifications, streams, a bot's tools or another bot. A group chat is
-  seen by whoever sees it. Every private chat says so in its header, *"Private · only you"*, and the first one on a
+  seen by whoever sees it, and its unread mark is each person's own: a bot's reply there is unread for everyone until
+  they read it, and one person reading it clears it for nobody else (`room-reads.json`). Every private chat says so in its header, *"Private · only you"*, and the first one on a
   device also says it as a sentence: *"Your chats in Acme are private. Only you can see them: not other members, not
   Acme's admins."* The server marks such a conversation `private: true` on the wire (`WireTask.private`). When you leave
   the team (or are removed), your private chats and everything only yours there are deleted, never handed to an admin
   (below).
 - **Memory.** Each bot keeps three kinds of notes: the team's, a group chat's and a person's. A turn reads the team's notes and
   the notes of where it is, and saves into where it is. What you tell a bot privately never reaches a room or another
-  person's chat; what a group chat decides never reaches your private chat. "About you" is yours alone: `GET`/`PUT /api/me`
+  person's chat; what a group chat decides never reaches your private chat. You can open, edit and delete what a bot
+  remembers about you (the bot panel's What it remembers, `/api/bots/<bot>/memory/mine`); nobody else can. "About you" is yours alone: `GET`/`PUT /api/me`
   (the app's Profile on a team), read into your own conversations only.
 - **Profile.** "You" is the person signed in: your own name, picture and About you (`people/<person>/profile.json` and
   `about.json`, `GET`/`PUT /api/me`), with the address of your verified sign-in, which nothing here changes. Settings →
@@ -41,7 +43,7 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   (below), never off the team.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
   Team Cloud and serve every member's turn through the broker. An Admin can instead make an app or an MCP server *each
-  person's own* (below): then every member connects their own, and only their own private chats use it. A person's
+  person's own* (below): then every member connects their own, and only work their own message started uses it. A person's
   connections from elsewhere have no way in: a share code, a moved MCP sign-in or a HighLevel connection is refused with
   *"Personal connections never enter Acme. Ask an admin to connect it for Acme."* A login from a sign-in card is saved by
   an Admin only, for the whole team.
@@ -93,7 +95,8 @@ this server shares with every bot. It exists only on a Team Cloud.
   `/api/connectors/:slug/authorize` and `DELETE /api/connectors/:slug/accounts/:id` for apps. Every check, side effect
   and record is the app's own, and each change is that member's. A User's session is refused there as anywhere.
 - A Team Cloud always keeps its admin activity (`/api/admin-activity`), even with no User signed in: it is shared by
-  definition. The Admin's Team admin → Activity reads it with the same session, beside the team's own record there; Usage
+  definition. Beside what any shared workspace records, a team bot's name, title, description, instructions and colour
+  changes are recorded too. The Admin's Team admin → Activity reads it with the same session, beside the team's own record there; Usage
   reads `/api/usage` (by person, bot and model) and `/api/usage/traces` (the runs) the same way. A member's private chat
   shows there as metadata only: its usage counts and cost by person and bot, an activity row's when, bot, tool and
   outcome; never its runs' titles or a decision's words.
@@ -106,18 +109,24 @@ Every app (a Composio toolkit) and MCP server has a scope. `team`, the default a
 is, is one connection an Admin makes and every turn uses. `person` is one connection per member, made by that member on
 their team page in MausBot Cloud (the Admin's Cloud page calls the routes below as them).
 
-- **Who gets a member's own connection.** Only a turn in that member's private chat (`member:<person>`) that their own
-  message started (the request proven for that turn, as lent computers use). Never a group chat, the bot's main chat,
-  another member's chat (no Admin can write in theirs), a routine, a webhook, or work handed on from another conversation.
+- **Who gets a member's own connection.** Only a turn that acts for them (server/host/acting-person.ts), read from the
+  harness's records: their own message started it, in their private chat, a group chat or the bot's main chat; or it is
+  work handed on (delegated, assigned, consulted, or a thread a bot opened for it) by a turn that acted for them, recorded
+  as it is handed on (`handed-people.json`, so a restart keeps it). A turn stops acting for anyone once another person's
+  words join it after it began (a line of theirs, queued or sent into it, or their answer to one of its cards), and never
+  acts for anyone in another member's private chat (no Admin can write in theirs). A routine, a webhook and a bot's own
+  work act for nobody. Each step that uses one says whose ("using Ada's Gmail").
 - **Apps.** A member's own apps are their own installation on the connected-apps service (their own Composio user),
   registered the first time they press Connect. Their turn gets a second bridge, `own_apps`, beside the team's
   `composio`; the relay checks every frame again: the team's bridge refuses a `person` app (and code that calls apps
   while the team's own installation still holds one), a member's bridge refuses a team app and anything outside their
   own turn. A connection card for a `person` app is never shown: the bot gets one plain line to say, *"Connect your
-  Gmail here: <their team page>"*, or that it works only in each person's private chat.
+  Gmail here: <their team page>"*; in work that acts for nobody, that the person can ask themselves, or an admin can
+  connect it for the whole team on the team's Apps page. Either way the bot doesn't try it another way (the browser or
+  another tool).
 - **MCP servers.** Only a server reached by its address can be `person`. A `person` server's team credential is never
-  attached to any turn; a member's own turn gets the server with their own key (in the header the Admin's key used, else
-  `Authorization: Bearer`) or their own sign-in. Both are pinned to the server's address: re-pointed, they aren't sent.
+  attached to any turn; a turn that acts for a member gets the server with their own key (in the header the Admin's key
+  used, else `Authorization: Bearer`) or their own sign-in; one not mounted is named to the bot with why and the fix. Both are pinned to the server's address: re-pointed, they aren't sent.
   Removing the server forgets every member's key and sign-in for it.
 - **Storage.** `team-connection-scopes.json` (no secret, carried by backups) and `people-connections/` (0700; each
   member's installation token, keys and sign-ins, 0600), which no backup carries and no bot box binds. Nothing a route
@@ -130,7 +139,7 @@ their team page in MausBot Cloud (the Admin's Cloud page calls the routes below 
 | `POST /api/team/my-connections/apps/:slug/connect` | the member | `{ url }`, the app's own sign-in (a new tab) |
 | `DELETE /api/team/my-connections/apps/:slug` | the member | |
 | `POST /api/team/my-connections/mcp/:name/sign-in` | the member | `{ auth }`; it comes back to this server's `/mcp-oauth/callback` |
-| `PUT /api/team/my-connections/mcp/:name/key { value }` | the member | write-only |
+| `PUT /api/team/my-connections/mcp/:name/key { value, url? }` | the member | write-only; with `url`, returns 409 if the server URL changed |
 | `DELETE /api/team/my-connections/mcp/:name` | the member | |
 
 The signed read (`GET /api/cloud/team/admin`) adds `scopes: { apps, mcp }` and `people: { apps: { <slug>: [address] },
@@ -167,9 +176,12 @@ the Admin (404). A session is also kept only across a clean restart.
 **When someone leaves.** The Admin tells the machine when a member is removed or leaves: `POST
 /api/cloud/team/member-left` with `{ "email": "<address>" }`, signed with its body like the sleep request (400
 `invalid_member` for a bad address; only on a Team Cloud). The machine then deletes what was that person's alone and
-answers `{ ok, chats, layers, sessions, files, browsers }`: every session and phone of theirs and any open code of
-theirs end at once; their private chats with every bot are deleted as the app deletes a conversation (messages,
-notifications, follow-ups, a running turn stopped first), with the uploaded files only those chats used; their memory
+answers `{ ok, chats, layers, sessions, files, browsers, bots }`: every session and phone of theirs and any open code of
+theirs end at once; their own MausBot is deleted as the app deletes a bot, with its chats and notes (`bots`, its chats
+counted in `chats`), and should they join again they get a new one; their private chats with every bot are deleted as
+the app deletes a conversation (messages, notifications, follow-ups, a running turn stopped first), with the uploaded
+files only those chats used and every file they uploaded that nothing uses (a file they took off a message before
+sending goes at once: `DELETE /api/attachments/<name>`, its uploader only, while nothing uses it); their memory
 layers (`workspaces/<bot>--member-<person>`, their journal and search index); their "About you" and profile
 (`people/<person>/`); their own connections, keys and MCP sign-ins; and their own browser of every bot and shared
 profile. Nothing of it is handed to an admin. Each conversation keeps its starter in `thread-starters.json` (a hash), so a
@@ -180,8 +192,10 @@ own chats before they go is not built.
 code carrying the caller's `member` claim (address, role, the role's scopes) and the time the Admin last vouched for
 them; on a Team Cloud `POST /api/auth/pairing` does the same for an admin session, so no team session makes a bare
 code. The session it opens is a team session that ends within the hour of that check, not of the scan; each later
-Admin-signed pairing of the same member in the same role moves it (`SessionRegistry.memberChecked`). A role change
-leaves it to end; a removed member's phone signs out within the hour.
+Admin-signed pairing of the same member in the same role moves it (`SessionRegistry.memberChecked`). An Admin-signed
+pairing at another role ends every session, phone and open code of that member at the old role at once
+(`SessionRegistry.revokeMember` with the new role kept): the Admin signs one as soon as the Owner changes a role, so a
+demoted Admin loses admin scope then, not within the hour.
 
 ## The audience rule
 
@@ -215,7 +229,7 @@ Search, SSE (live and replayed), attachments, notifications, usage traces, routi
 through the same check, a deleted private chat included. Incidents and escalations from a private chat go to its person,
 never into a Chief's thread; work handed on from a private chat runs in a thread of that same person's, and nothing
 from a private chat is handed into a room or posted in one; a conversation a bot opens from a shared chat is the
-team's, never the last speaker's; `retry_thread`, `close_thread` and `session_read` reach only what the turn may read;
+team's, never the last speaker's; `retry_thread`, `close_thread` and `session_search` reading a message reach only what the turn may read;
 and team memory is never published from a private chat. Then the memory system prompt
 (the turn's layer, plus the team's notes read-only), recall (`buildRecall.memoryIds`: the layer and the team's), recent
 work, `session_search` (memory of the layer and the team's; conversations the turn may read), memory writes
@@ -342,11 +356,39 @@ inbox is unread.
 An ask in the person's own private chat, where they are, stays only there. The Admins' asks (a bot nobody owns) are not
 anyone's inbox. A member without any bot of their own gets the notification where it was written, as before.
 
+**A teammate's question.** Work handed on that needs the person asks them with a card: a decision with a few set
+answers through the bot's question tool, the bot's own choices as buttons, and anything else as a card with a reply field
+in place of its `NEEDS INPUT:` line (docs/runtime-contract.md). Its copy reaches their inbox with the same buttons, and
+the conversation that handed the work on gets no chip about it when that conversation is the inbox itself. A line the
+person types while the bot waits on its own question card answers that card, as a tap would, and so does a reply to the
+card or to its copy.
+
 **Answering is replying.** A reply to a line (the chat's Reply) goes back as the table says, and the inbox's bot takes no
 turn for it; the line records the answer and a "Told Philipp" chip follows it. A bot that asked carries on: its
 conversation gets a line from the inbox's bot, "Marco replied to your message ("…"): …" (`relay.kind: "reply"`), which
 starts its turn or waits behind the running one. Writing to the Chief in the inbox instead ("tell Philipp yes") works
-too: its turns there are told what waits on the person, and `message_person` to a line's sender answers that line.
+too: its turns there are told what waits on the person, and `message_person` to a line's sender answers that line. A 👍
+or 👎 on a line answers it the same way, with that emoji.
+
+**What waits on the person** is read from where it was asked, each time. An ask waits while the card that asked is open
+in its conversation: once it is answered there, from the inbox's copy (either respond route), by a reaction or on a
+call, or closed (an approval whose turn ended or was stopped, a question the person closed), it no longer waits, and the
+copy follows the card. A question its turn left open still waits for a late answer; once its conversation is deleted,
+the copy is closed. A line that wants an answer waits until the person answers it, from the inbox or with a line of
+their own in the conversation it came from. The inbox's task carries the asks that wait (`WireTask.openAsks`, sent again
+whenever one is asked or settled), which the app shows on the person's own row under People and adds to its unread
+count: the browser tab's title and the app's icon.
+
+**The inbox's list and its card.** `GET /api/inbox` lists the session's own person's inbox (`InboxView`,
+`shared/inbox.ts`), newest first, each line in one tab: **Needs you** while it waits on them (an ask, by the rule above;
+their count is the badge), **For your info** for news until they answer it or mark it done, and **Done** once it is
+settled or marked done. `POST /api/inbox/<line>/done` marks news done (an open ask refuses, 409: only its answer settles
+it) and `POST /api/inbox/<line>/read` marks one line read; each answers with the list as it is now. The app shows the
+list in the right panel, opened from the card, the badge or the person's own row under People: dense rows with each
+line's quick answers, a reading view with the reply, and a sheet at phone width. Answering from a row answers the copy's
+card or replies to the line, through the same routes as in the chat. In the inbox conversation one card sits under the
+newest line that needed the person (`InboxView.anchor`) and updates in place. The inbox's task carries
+`inboxChangedAt`, which moves whenever the list changes; a client showing the list reads it again then.
 
 **The representative.** When a message asks something a fact the person already shares with the team answers, their
 inbox's bot answers it for them (`server/host/representative.ts`); the answer goes back like a reply, as "Marco's
@@ -376,9 +418,9 @@ sidebar lists the team's people with their pictures: your own row opens your inb
 the composer on screen. Each person is tagged by their whole name, and by their first name when no other teammate shares
 it (`shared/person-mention.ts`). A bot's turn is told the team's people (names and admin roles; not the person it talks
 with), that `message_person` reaches their inbox, and that a tag already did. Needs you lists the inbox's messages the
-person has not opened (`kind: "message"`); the app opens the inbox on the person's first arrival of the day when
-something waits there. The state is ids, names and short excerpts, in `person-inbox.json`; a member who leaves takes
-their inbox with them.
+person has not opened and that still wait (`kind: "message"`); the app opens the inbox on the person's first arrival of
+the day when something waits there. The state is ids, names and short excerpts, in `person-inbox.json`; a member who
+leaves takes their inbox with them.
 
 On a My Cloud and on a desktop there are no team people: the @ list shows bots, `@you` and the profile name tag the one
 person as before, and `message_person` and the inbox do not exist.

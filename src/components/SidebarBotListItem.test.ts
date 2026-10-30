@@ -222,9 +222,9 @@ describe("BotListItem", () => {
       }
     });
 
-    it("says Expired once nothing can answer it", () => {
+    it("says it got no answer in time once nothing can answer it", () => {
       const markup = renderRow(approval({ expired: true, options: [] }));
-      expect(markup).toContain("Expired");
+      expect(markup).toContain("No answer in time");
       expect(markup).not.toContain("Approval needed");
     });
   });
@@ -311,11 +311,12 @@ describe("BotListItem", () => {
     expect(markup).not.toContain("](https://");
   });
 
-  it("shows typing dots instead of preview text while the bot works", () => {
-    const markup = renderRow(bot({ busy: true }));
+  it("says what the bot is doing in place of its preview text while it works, in a line as tall as the preview", () => {
+    const markup = renderRow(bot({ busy: true, messages: [{ id: "b1", role: "bot", kind: "text", text: "hello", at: 1 }] as Bot["messages"] }));
 
-    expect(markup).toContain("animate-status-pulse");
-    expect(markup).toContain('class="sr-only">Working…');
+    expect(markup).toContain('<span dir="auto" data-sidebar-working-phrase="" class="truncate">Thinking</span>');
+    expect(markup).not.toContain(">hello<");
+    expect(markup).not.toContain("animate-status-pulse");
   });
 
   it("marks the avatar with a green presence dot only while the bot works", () => {
@@ -455,7 +456,7 @@ describe("bot deletion feedback", () => {
     });
 
     it("keeps the status line while something is happening", () => {
-      expect(renderRow(bot({ busy: true }), true)).toContain('class="sr-only">Working…');
+      expect(renderRow(bot({ busy: true }), true)).toContain('data-sidebar-working-phrase=""');
       expect(renderRow(bot({ activity: "waiting-on-you" }), true)).toContain("Waiting for you…");
       expect(renderRow(bot({ waitingForTeammates: true, busy: false }), true)).toContain("Waiting on a teammate…");
     });

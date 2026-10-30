@@ -413,7 +413,7 @@ process.env.FAKE_CLAUDE_MODE ??= "happy";
 await import(${JSON.stringify(pathToFileURL(join(ROOT, "server", "testing", "fake-claude-cli.ts")).href)});
 `, { mode: 0o755 });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ language: "en", instances: {
-    ...Object.fromEntries(["cursor", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
+    ...Object.fromEntries(["cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi"].map((id) => [id, { driver: "not-a-real-driver" }])),
     claude: { driver: "claudeAgent", displayName: "Claude", config: { cli: claude }, environment: { FAKE_CLAUDE_ROOM_PLAN: planPath } },
   } }));
   const port = await freePortBlock([0, 1]);

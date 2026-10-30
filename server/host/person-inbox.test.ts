@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import type { Notification } from "../../shared/notification.ts";
-import { key, MARCO, PHILIPP, teamInbox } from "../testing/team-inbox-fixture.ts";
+import { ADA, key, MARCO, PHILIPP, session, teamInbox } from "../testing/team-inbox-fixture.ts";
 import { PERSON_INBOX_FILE } from "./person-inbox.ts";
 
 const fixtures: Array<ReturnType<typeof teamInbox>> = [];
@@ -70,6 +70,158 @@ describe("asks routed to a person", () => {
     const f = fixture({ team: false });
     const one = ask("reporter", "Reporter", "rep-main");
     expect(f.team.route(one)).toBe(one);
+  });
+});
+
+describe("what still waits on the person", () => {
+  const question = (requestId: string) => ({ title: "Your bot has a question", subtitle: "Which landing page?", options: ["Home", "Pricing"], requestId, requestType: "question" as const });
+  const asked = (f: ReturnType<typeof fixture>, threadId: string, requestId: string, made: ReturnType<typeof card | typeof question> = card(requestId)) => {
+    if (!f.bots.find((bot) => bot.id === "reporter")!.tasks.some((task) => task.threadId === threadId)) f.bots.find((bot) => bot.id === "reporter")!.tasks.push({ threadId, title: threadId });
+    const line = f.store.appendMessage(threadId, { role: "bot", kind: "options", text: made.title, card: made });
+    f.team.route(ask("reporter", "Reporter", threadId, made.requestType === "question" ? "question" : "approval"));
+    return line;
+  };
+
+  it("counts an ask only while the card that asked is open where it was asked, whoever closes it there", () => {
+    const f = fixture();
+    const counted: number[] = [];
+    const patchTask = f.store.patchTask;
+    f.store.patchTask = (botId, threadId, patch) => { if (patch.unread) counted.push(f.team.inbox.openAsks(threadId)); return patchTask(botId, threadId, patch); };
+    const approval = asked(f, "rep-shared", "req-1");
+    const choice = asked(f, "rep-weekly", "req-2", question("req-2"));
+    const inbox = f.inboxOf(MARCO).threadId;
+    expect(counted, "the inbox goes out to Marco with each new ask already counted").toEqual([1, 2]);
+    expect(f.team.inbox.openAsks(inbox)).toBe(2);
+    expect(f.team.inbox.wire(inbox)).toEqual({ inbox: true, openAsks: 2, inboxChangedAt: expect.any(Number) });
+    f.store.patchMessage("rep-shared", approval.id, { card: { ...card("req-1"), answered: "allow" } });
+    expect(f.team.inbox.openAsks(inbox), "approved where it was asked").toBe(1);
+    expect(f.changed).toEqual([inbox]);
+    f.store.patchMessage("rep-weekly", choice.id, { card: { ...question("req-2"), dismissed: true } });
+    expect(f.team.inbox.openAsks(inbox), "closed without an answer").toBe(0);
+    expect(f.team.inbox.wire(inbox)).toEqual({ inbox: true, inboxChangedAt: expect.any(Number) });
+    expect(f.lines(inbox).map((row) => row.card)).toEqual([expect.objectContaining({ answered: "allow" }), expect.objectContaining({ dismissed: true })]);
+    expect(f.team.inbox.wire("rep-shared"), "only the inbox says it is one").toEqual({});
+  });
+
+  it("never counts what is only news: a message, a routine's report or a failure", () => {
+    const f = fixture();
+    f.team.pass("scout", "philipp-private", "Marco", "Can you review the deck?");
+    f.team.route({ kind: "done", botId: "scout", botName: "Scout", threadId: "marco-private", title: "Scout finished", body: "Daily digest: 3 new leads." }, { routine: true });
+    f.team.route({ kind: "routine-failed", botId: "reporter", botName: "Reporter", threadId: "rep-main", title: "Reporter's routine failed", body: "Timed out" });
+    const inbox = f.inboxOf(MARCO).threadId;
+    expect(f.lines(inbox)).toHaveLength(3);
+    expect(f.team.inbox.openAsks(inbox)).toBe(0);
+  });
+
+  it("keeps what is still open after a restart, and nothing that was settled", () => {
+    const f = fixture();
+    const settled = asked(f, "rep-shared", "req-1");
+    asked(f, "rep-weekly", "req-2");
+    f.store.patchMessage("rep-shared", settled.id, { card: { ...card("req-1"), answered: "deny", dismissed: true } });
+    f.restart();
+    const inbox = f.inboxOf(MARCO).threadId;
+    expect(f.team.inbox.openAsks(inbox)).toBe(1);
+    f.store.patchMessage("rep-weekly", f.lines("rep-weekly")[0]!.id, { card: { ...card("req-2"), answered: "allow" } });
+    expect(f.team.inbox.openAsks(inbox), "the copy still follows the card after the restart").toBe(0);
+    expect(f.lines(inbox)[1]!.card).toMatchObject({ answered: "allow" });
+  });
+
+  it("closes the copy of an ask whose conversation is gone, so nothing in the inbox waits on a card no one can answer", () => {
+    const f = fixture();
+    asked(f, "rep-shared", "req-1");
+    const inbox = f.inboxOf(MARCO).threadId;
+    f.deleteThread("rep-shared");
+    expect(f.lines(inbox)[0]!.card).toMatchObject({ answered: "unavailable", dismissed: true });
+    expect(f.team.inbox.openAsks(inbox)).toBe(0);
+    expect(f.changed).toEqual([inbox]);
+  });
+
+  it("lets a message answered where it came from leave Needs you and what the Chief is told waits, through a restart", () => {
+    const f = fixture();
+    const reply = f.store.appendMessage("scout-main", { role: "bot", kind: "text", text: "@Marco can you confirm the Q4 numbers?", turnId: "t1" });
+    f.store.patchMessage("scout-main", reply.id, { turnSucceeded: true });
+    const inbox = f.inboxOf(MARCO).threadId;
+    expect(f.team.needsYou(session(MARCO.email))).toEqual([expect.objectContaining({ kind: "message", from: "Scout", threadId: inbox })]);
+    expect(f.team.prompt("marcos-chief", inbox, true)).toContain('Waiting on "Marco"\'s answer');
+    f.said("scout-main", "Philipp here, I'll leave it to Marco.", PHILIPP);
+    expect(f.team.needsYou(session(MARCO.email)), "someone else's line answers nothing for Marco").toHaveLength(1);
+    f.said("scout-main", "Confirmed, the numbers are right.", MARCO);
+    expect(f.team.needsYou(session(MARCO.email))).toEqual([]);
+    expect(f.team.inbox.waiting(inbox)).toEqual([]);
+    expect(f.team.prompt("marcos-chief", inbox, true)).not.toContain("Waiting on");
+    f.restart();
+    expect(f.team.needsYou(session(MARCO.email))).toEqual([]);
+    expect(f.team.inbox.waiting(inbox)).toEqual([]);
+  });
+});
+
+describe("the inbox as its panel lists it", () => {
+  const approve = (requestId: string) => ({ title: "Approval needed", subtitle: "rm -rf ./build", options: ["Allow", "Deny"], requestId, tool: "Bash", requestType: "permission" as const });
+  const askOf = (f: ReturnType<typeof fixture>, threadId: string, made: ReturnType<typeof approve>) => {
+    const reporter = f.bots.find((bot) => bot.id === "reporter")!;
+    if (!reporter.tasks.some((task) => task.threadId === threadId)) reporter.tasks.push({ threadId, title: threadId });
+    const asked = f.store.appendMessage(threadId, { role: "bot", kind: "options", text: made.title, card: made });
+    f.team.route(ask("reporter", "Reporter", threadId));
+    return asked;
+  };
+  const tabs = (f: ReturnType<typeof fixture>) => Object.fromEntries((f.team.inbox.view(key(MARCO.email))?.rows ?? []).map((row) => [row.text, row.tab]));
+
+  it("puts an open ask under Needs you, news under For your info, and what is settled or done under Done", () => {
+    const f = fixture();
+    f.team.pass("scout", "philipp-private", "Marco", "Can you review the deck?");
+    f.team.pass("reporter", "rep-main", "Marco", "The Q4 draft is ready.");
+    f.team.route({ kind: "done", botId: "scout", botName: "Scout", threadId: "marco-private", title: "Scout finished", body: "Daily digest: 3 new leads." }, { routine: true });
+    const approval = askOf(f, "rep-shared", approve("req-1"));
+    askOf(f, "rep-weekly", approve("req-2"));
+    const inbox = f.inboxOf(MARCO).threadId;
+    const view = f.team.inbox.view(key(MARCO.email))!;
+    expect(view).toMatchObject({ botId: "marcos-chief", threadId: inbox });
+    expect(view.rows.map((row) => row.at)).toEqual(view.rows.map((row) => row.at).sort((a, b) => b - a));
+    expect(view.rows[0]).toMatchObject({ kind: "ask", tab: "needs-you", unread: true, card: { requestId: "req-2", tool: "Bash" }, from: { name: "Reporter" } });
+    expect(view.anchor, "the card in the chat sits under the newest ask").toBe(view.rows[0]!.id);
+    expect(tabs(f)).toEqual({
+      "Can you review the deck?": "info", "The Q4 draft is ready.": "info", "Daily digest: 3 new leads.": "info",
+      "Run: rm -rf ./build": "needs-you",
+    });
+    expect(view.rows.filter((row) => row.tab === "needs-you")).toHaveLength(2);
+
+    f.store.patchMessage("rep-shared", approval.id, { card: { ...approve("req-1"), answered: "allow" } });
+    const deck = view.rows.find((row) => row.text === "Can you review the deck?")!;
+    f.team.replyIn(session(MARCO.email), inbox, deck.id, "Tonight.", {});
+    const report = view.rows.find((row) => row.text === "Daily digest: 3 new leads.")!;
+    expect(f.team.inbox.markDone(key(MARCO.email), report.id)).toBe("done");
+    expect(f.team.inbox.markDone(key(MARCO.email), view.rows[0]!.id), "an open ask is settled by answering it").toBe("an ask");
+    expect(f.team.inbox.markDone(key(PHILIPP.email), report.id), "only its own person").toBe("unknown");
+    const after = f.team.inbox.view(key(MARCO.email))!.rows;
+    expect(after.filter((row) => row.tab === "needs-you").map((row) => row.card?.requestId)).toEqual(["req-2"]);
+    expect(after.filter((row) => row.tab === "info").map((row) => row.text)).toEqual(["The Q4 draft is ready."]);
+    expect(after.filter((row) => row.tab === "done")).toHaveLength(3);
+    expect(f.team.inbox.openAsks(inbox), "the badge counts what Needs you lists").toBe(1);
+  });
+
+  it("marks one line read, and tells the person's client each time what it lists changes", () => {
+    const f = fixture();
+    f.team.pass("scout", "philipp-private", "Marco", "Can you review the deck?");
+    const reply = f.store.appendMessage("scout-main", { role: "bot", kind: "text", text: "@Marco can you confirm the numbers?", turnId: "t1" });
+    f.store.patchMessage("scout-main", reply.id, { turnSucceeded: true });
+    const inbox = f.inboxOf(MARCO).threadId;
+    const [deck, tag] = f.team.inbox.view(key(MARCO.email))!.rows.slice().reverse();
+    const stamps = () => f.team.inbox.wire(inbox).inboxChangedAt ?? 0;
+    const before = stamps();
+    expect(f.team.inbox.markRead(key(MARCO.email), deck!.id)).toBe(true);
+    expect(f.team.inbox.view(key(MARCO.email))!.rows.find((row) => row.id === deck!.id)!.unread).toBe(false);
+    expect(f.team.inbox.view(key(MARCO.email))!.rows.find((row) => row.id === tag!.id)!.unread).toBe(true);
+    expect(stamps()).toBeGreaterThan(before);
+    f.changed.length = 0;
+    f.said("scout-main", "Confirmed.", MARCO);
+    expect(f.changed, "answered where it came from").toEqual([inbox]);
+    expect(tabs(f)["@Marco can you confirm the numbers?"]).toBe("done");
+    f.changed.length = 0;
+    f.team.inbox.markDone(key(MARCO.email), deck!.id);
+    f.team.inbox.markRead(key(MARCO.email), deck!.id);
+    expect(f.changed, "a second mark changes nothing").toEqual([inbox]);
+    expect(f.team.inbox.view(key(PHILIPP.email))?.rows ?? [], "Philipp's inbox holds nothing of Marco's").toEqual([]);
+    expect(f.team.inbox.view(key(ADA.email)), "no Chief, no MausBot: no inbox").toBeNull();
   });
 });
 

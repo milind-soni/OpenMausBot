@@ -82,6 +82,15 @@ export function registerPathDir(dir: string): void {
   resetPathCache();
 }
 
+// App-installed standalone builds go last: a copy the person installs themselves, anywhere, takes over.
+const fallbackDirs: string[] = [];
+
+export function registerFallbackPathDir(dir: string): void {
+  if (fallbackDirs.includes(dir)) return;
+  fallbackDirs.push(dir);
+  resetPathCache();
+}
+
 /** `probed` resets too, or a rescan would drop rc-file PATH entries and never probe the login shell again. */
 export function resetPathCache(): void {
   cached = null;
@@ -90,6 +99,7 @@ export function resetPathCache(): void {
 
 export function augmentedPath(): string {
   if (cached === null) {
+    const fallback = fallbackDirs.filter((d) => existsSync(d));
     cached = mergePaths([
       ...registeredDirs.filter((d) => existsSync(d)),
       ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
@@ -97,7 +107,7 @@ export function augmentedPath(): string {
       // Keep the last login-shell result while a rescan re-probes, or rc-only CLIs vanish for the response that triggered it.
       ...(loginShellPath ? loginShellPath.split(delimiter) : []),
       ...(process.platform === "win32" ? windowsKnownDirs() : knownDirs()).filter((d) => existsSync(d)),
-    ]);
+    ].filter((d) => !fallback.includes(d)).concat(fallback));
   }
   if (!probed && !process.env.VITEST && !sealedFixture() && process.platform !== "win32") {
     probed = true;
@@ -122,7 +132,9 @@ function probeLoginShellPath(): void {
       const m = /__OMB_PATH__([^\n]*)/.exec(stdout);
       if (!m || !m[1]) return;
       loginShellPath = m[1];
-      cached = mergePaths([...(cached ?? "").split(delimiter), ...m[1].split(delimiter)]);
+      // Fallback dirs stay last, behind what the person's shell adds.
+      const fallback = fallbackDirs.filter((d) => existsSync(d));
+      cached = mergePaths([...(cached ?? "").split(delimiter).filter((d) => !fallback.includes(d)), ...m[1].split(delimiter), ...fallback]);
     },
   );
 }
@@ -132,6 +144,7 @@ export function resetPathCacheForTests(): void {
   probed = false;
   loginShellPath = null;
   registeredDirs.length = 0;
+  fallbackDirs.length = 0;
 }
 
 /** Windows CLIs keep state under USERPROFILE; a HOME leaking in from a POSIX-flavoured shell is not it. */
@@ -145,12 +158,13 @@ export function harnessHome(name: string, env: Record<string, string | undefined
   return join(userHome(env), `.${name}`);
 }
 
-export function findCliCandidates(name: string): string[] {
+/** Every copy of `name` on `path` (the app's PATH unless given), in the order a lookup would find them. */
+export function findCliCandidates(name: string, path: string = augmentedPath()): string[] {
   if (!name || /[\n\r]/.test(name)) return [];
   if (/[/\\]/.test(name) || /^[a-zA-Z]:/.test(name)) return [name];
   const exts = process.platform === "win32" ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
   const out: string[] = [];
-  for (const dir of augmentedPath().split(delimiter)) {
+  for (const dir of path.split(delimiter)) {
     if (!dir) continue;
     for (const ext of exts) {
       const p = join(dir, name + ext);
