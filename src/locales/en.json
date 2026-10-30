@@ -8804,6 +8804,7 @@
   "activity.tool.team.listRooms": "List rooms",
   "activity.tool.team.listSharedComputers": "List shared computers",
   "activity.tool.team.listTeamLibrary": "List team library",
+  "activity.tool.team.listModels": "List models",
   "activity.tool.team.listTeamSetup": "List team setup",
   "activity.tool.team.listThreads": "List threads",
   "activity.tool.team.listTriggerEvents": "List trigger events",

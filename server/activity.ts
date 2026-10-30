@@ -99,6 +99,7 @@ const TEAM_ACTION_KEYS: Record<string, string> = {
   list_rooms: "activity.tool.team.listRooms",
   list_shared_computers: "activity.tool.team.listSharedComputers",
   list_team_library: "activity.tool.team.listTeamLibrary",
+  list_models: "activity.tool.team.listModels",
   list_team_setup: "activity.tool.team.listTeamSetup",
   list_threads: "activity.tool.team.listThreads",
   list_trigger_events: "activity.tool.team.listTriggerEvents",

@@ -8766,6 +8766,7 @@
   "activity.tool.team.listRooms": "列出房間",
   "activity.tool.team.listSharedComputers": "列出共用電腦",
   "activity.tool.team.listTeamLibrary": "列出團隊資料庫",
+  "activity.tool.team.listModels": "列出模型",
   "activity.tool.team.listTeamSetup": "列出團隊設定",
   "activity.tool.team.listThreads": "列出對話",
   "activity.tool.team.listTriggerEvents": "列出自動化事件",
