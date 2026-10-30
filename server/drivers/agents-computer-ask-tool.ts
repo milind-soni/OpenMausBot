@@ -14,13 +14,13 @@ export const COMPUTER_ASK_TOOL_DEFINITIONS = [
   {
     name: ASK_FOR_COMPUTER_TOOL,
     description:
-      "Ask the person to turn on what a request needs from their own computer when list_shared_computers or shared_computer says it isn't available: one card with your why and a one-tap Turn on. Waits up to 40 s and returns its computer_id once on; if not yet, end your turn: you carry on here by yourself once it's on.",
+      "Ask the person to turn on what a request needs from their own computer when list_shared_computers or shared_computer says it isn't available: one card with your why and a one-tap Turn on. Waits up to 40 s; returns its computer_id once on. If not yet, end your turn: you carry on once it's on.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         need: { type: "string", enum: [...COMPUTER_NEEDS], description: "screen: its apps and screen; folders: its files; terminal: commands." },
-        why: { type: "string", maxLength: 200, description: "One short sentence for the card: what you'll do there and why." },
+        why: { type: "string", maxLength: 200, description: "One sentence for the card: what you'll do there and why." },
       },
       required: ["need", "why"],
     },

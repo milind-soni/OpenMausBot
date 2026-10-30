@@ -37,3 +37,9 @@ export async function openExternalLink(url: string): Promise<void> {
   }
   window.open(url, "_blank", "noopener,noreferrer");
 }
+
+/** A browser hands a mailto: link to its own mail app; the desktop app's window may not navigate to one, so main opens it. */
+export async function openEmailDraft(url: string): Promise<void> {
+  if (window.ogb) return openExternalLink(url);
+  window.location.href = url;
+}
