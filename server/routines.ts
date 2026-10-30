@@ -14,7 +14,7 @@ import { cloneSchedule, limitResetOccurrence, mergeScheduleUpdate, nextOccurrenc
 import { runsOnce } from "../shared/limit-reset.ts";
 import {
   isRoutineProblemRun, type RoutineAccess, type RoutineCheck, type RoutineContextAttachment, type RoutineDelivery, type RoutineIntervalWindow, type RoutineRetryCause,
-  type RoutineRunReport, type RoutineRunStatus, type RoutineRunTrigger,
+  type RoutineHoldCause, type RoutineRunReport, type RoutineRunStatus, type RoutineRunTrigger,
 } from "../shared/routines.ts";
 import type { PartPair, RoutinePart } from "./package-parts.ts";
 import {
@@ -28,7 +28,8 @@ import { activeMs, askOf, settleAsk, waitingFor, type RoutineRunAsk } from "./ro
 import { failsLikeLastOutcome, outcomesNewestFirst } from "./routine-outcomes.ts";
 import { EVENT_RETRY_WINDOW_MS, loadEventReceipts, MAX_EVENT_RECEIPTS, type EventRunReceipt } from "./routine-event-receipts.ts";
 import { cloneAttachments } from "./routine-attachments.ts";
-import { loadInstalledPackage, loadRoutine, loadRun } from "./routine-load.ts";
+import { loadInstalledPackage, loadRequestReceipts, loadRoutine, loadRun } from "./routine-load.ts";
+import { applyHolds, holdCauses, type AppliedHolds } from "./routine-holds.ts";
 import { sanitizeInput } from "./routine-input.ts";
 import { checkHold, CHECK_BOOT_HOLD_MS, type CheckHold } from "./routine-check-pacing.ts";
 import { resolveRoutineResultsThread, routineRunDefinition, type ResultsThreadAllocation } from "./routine-run-definition.ts";
@@ -71,6 +72,7 @@ export interface Routine {
   failureStreak?: number;
   weekRuns?: { ok: number; total: number };
   warning?: string;
+  heldFor?: RoutineHoldCause;
   sourceThreadId?: string;
   resultsThreadId?: string;
   installedPackage?: RoutinePackageStamp;
@@ -189,6 +191,7 @@ interface RoutineFile {
   webhookRunReceipts?: EventRunReceipt[];
   startupLaunchId?: string;
   ownerNotices?: RoutineOwnerNotice[];
+  holds?: RoutineHoldCause[];
 }
 
 
@@ -273,19 +276,6 @@ const WAKE_HORIZON_MS = 60 * 60_000;
 
 export const ROUTINE_RESTARTED = "OpenMausBot restarted while this routine was running";
 const MAX_RUNS = 2_000;
-const ROUTINE_REQUEST_ACTIONS = new Set<RoutineRequestOperation["action"]>([
-  "create",
-  "update",
-  "pause",
-  "resume",
-  "run_now",
-  "delete",
-]);
-
-function isRoutineRequestAction(value: unknown): value is RoutineRequestOperation["action"] {
-  return typeof value === "string" && ROUTINE_REQUEST_ACTIONS.has(value as RoutineRequestOperation["action"]);
-}
-
 function cloneRoutine(routine: Routine): Routine {
   return {
     ...routine,
@@ -318,6 +308,8 @@ export class RoutineManager {
   private ticking = false;
   private closing = false;
   private ownerNotices: RoutineOwnerNotice[] = [];
+  /** Why routines are held now (routine-holds.ts): a change between two of these pauses or frees routines. */
+  private holds: RoutineHoldCause[] = [];
   private readonly failureFacts = new Map<string, RoutineFailureFacts>();
   /** Saves are refused while set, so an empty state never overwrites an unreadable file. */
   private unreadable = false;
@@ -345,22 +337,11 @@ export class RoutineManager {
         return loaded ? [loaded] : [];
       }) : [];
       this.runs = Array.isArray(disk.runs) ? disk.runs.map(loadRun) : [];
-      this.routineRequestReceipts = Array.isArray(disk.routineRequestReceipts)
-        ? disk.routineRequestReceipts.filter((receipt): receipt is RoutineRequestReceipt =>
-            typeof receipt?.requestId === "string" &&
-            typeof receipt?.messageId === "string" &&
-            typeof receipt?.botId === "string" &&
-            typeof receipt?.threadId === "string" &&
-            isRoutineRequestAction(receipt?.action) &&
-            receipt?.fingerprintVersion === 1 &&
-            typeof receipt?.fingerprint === "string" && /^[a-f0-9]{64}$/.test(receipt.fingerprint) &&
-            typeof receipt?.resultId === "string" &&
-            Number.isFinite(receipt?.appliedAt)
-          )
-        : [];
+      this.routineRequestReceipts = loadRequestReceipts(disk.routineRequestReceipts);
       this.webhookRunReceipts = loadEventReceipts(disk.webhookRunReceipts, this.runs, this.now());
       this.frozenPending = disk.frozenResultsCleared !== true;
       this.ownerNotices = loadOwnerNotices(disk.ownerNotices);
+      this.holds = holdCauses(disk.holds);
       if (typeof disk.startupLaunchId === "string") this.startupLaunchId = disk.startupLaunchId;
     } catch (error) {
       this.routines = [];
@@ -629,6 +610,7 @@ export class RoutineManager {
         // updatedAt doubles as the confirmation cards' optimistic revision: keep it monotonic within one ms.
         updatedAt: Math.max(now, routine.updatedAt + 1),
       });
+      if (patch.enabled !== undefined) delete routine.heldFor;
       if (!clean.continuity) delete routine.continuity;
       if (clean.overlap !== "queue") delete routine.overlap;
       if (!clean.runOnStartup) delete routine.runOnStartup;
@@ -703,7 +685,8 @@ export class RoutineManager {
   disableForGroup(groupId: string) {
     let changed = false;
     for (const routine of this.routines) {
-      if (routine.target !== "room-goal" || routine.groupId !== groupId || !routine.enabled) continue;
+      if (routine.target !== "room-goal" || routine.groupId !== groupId || (!routine.enabled && !routine.heldFor)) continue;
+      delete routine.heldFor;
       routine.enabled = false;
       routine.nextRunAt = null;
       routine.updatedAt = Math.max(this.now(), routine.updatedAt + 1);
@@ -923,6 +906,17 @@ export class RoutineManager {
   }
 
   /** Moves only the next run to `until`; the runs after it keep their schedule. A limit-reset routine has no time to move. */
+  /** Why routines wait now (routine-holds.ts). Returns the causes that began and paused a routine, for one line to the owner. */
+  holdFor(causes: readonly RoutineHoldCause[]): RoutineHoldCause[] {
+    const after = holdCauses(causes);
+    if (this.unreadable || after.join() === this.holds.join()) return [];
+    let held: AppliedHolds<Routine, RoutineRun> | undefined;
+    this.commitMutation(() => { held = applyHolds(this.routines, this.runs, this.holds, after, this.now(), (schedule, now) => this.initialOccurrence(schedule, now)); this.holds = after; });
+    for (const run of held!.cancelled) this.emitRun(run);
+    for (const routine of [...held!.paused, ...held!.resumed]) this.emitRoutine(routine);
+    return held!.paused.length ? held!.began : [];
+  }
+
   deferNextRun(id: string, until: number): Routine | null {
     const routine = this.routines.find((candidate) => candidate.id === id);
     if (!routine) return null;
@@ -1570,6 +1564,7 @@ export class RoutineManager {
       webhookRunReceipts: this.webhookRunReceipts,
       ...(this.startupLaunchId === undefined ? {} : { startupLaunchId: this.startupLaunchId }),
       ...(this.ownerNotices.length ? { ownerNotices: this.ownerNotices } : {}),
+      ...(this.holds.length ? { holds: this.holds } : {}),
     } satisfies RoutineFile, null, 2), { mode: 0o600 });
   }
 }
