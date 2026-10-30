@@ -240,10 +240,10 @@ test("every page beside the rail, from any server, moves over by the rail's widt
   const page = pageWithPreload();
   page.tell(CHROME_RAIL_WIDTH);
   assert.equal(page.head.children.length, 1);
-  assert.match(page.head.children[0].textContent, /padding-left: 64px !important; --rail-beside: 64px;/, "and the page can read how far it moved");
+  assert.match(page.head.children[0].textContent, /padding-left: 36px !important; --rail-beside: 36px;/, "and the page can read how far it moved");
   page.frame.zoom = 1.25;
   page.resize();
-  assert.match(page.head.children[0].textContent, /padding-left: 51\.2px !important; --rail-beside: 51\.2px;/, "zoomed in, the same 64 points on screen");
+  assert.match(page.head.children[0].textContent, /padding-left: 28\.8px !important; --rail-beside: 28\.8px;/, "zoomed in, the same 36 points on screen");
   page.tell("9999");
   assert.match(page.head.children[0].textContent, /padding-left: 160px/, "never more than 200 points, whatever is sent");
   page.tell(0);
