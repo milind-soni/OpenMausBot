@@ -379,21 +379,6 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["server/webhook-requests.ts", "does what it is asked"],
     ["shared/plain-time-zone.ts", "every day"],
   ],
-  "connect prompts and sign-ins": [
-    ["server/automation-reports.ts", "I need you to sign in to  …  …"],
-    ["server/automation-reports.ts", "I need you to connect  … ."],
-    ["server/automation-reports.ts", "I need your  … ."],
-    ["server/connector-card-text.ts", "this app"],
-    ["server/connector-card-text.ts", "Connect  …  as “ … ” to continue."],
-    ["server/connector-card-text.ts", "Connect  …  to continue."],
-    ["server/host/secret-cards.ts", "… 's commands can read it from a private file for 24 hours; it is neve"],
-    ["server/host/secret-cards.ts", "…  gets a one-use reference for OpenMausBot's own tools and never sees"],
-    ["server/host/secret-cards.ts", "Securely provide the  …  from OpenMausBot on your phone or computer. I"],
-    ["server/host/secret-cards.ts", "…   …  can use it but never read it back."],
-    ["server/index.ts", "Connect  …  as “ … ” so the bot can continue"],
-    ["server/index.ts", "Connect  …  so the bot can continue"],
-    ["shared/sign-in-request.ts", "…  needs you to sign in to  … . Open this conversation in OpenMausBot"],
-  ],
   "rooms and teammates": [
     ["server/escalations.ts", "in the room \" … \""],
     ["server/escalations.ts", "in its thread # …"],
@@ -579,6 +564,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
     ["shared/live-call.ts", "Call with  …  ·  …"],
   ],
 };
+
 
 
 

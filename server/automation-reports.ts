@@ -53,18 +53,20 @@ export function automationContextText(line: AutomationLine, at: number, text: st
   return `[Your automation ${JSON.stringify(line.name)} ${what} at ${localTime(at)}:]\n${text}`;
 }
 
-/** A sign-in, connection or credential card still waiting on the person, in plain words; null once it is settled. */
-export function waitingCardText(message: Pick<Message, "kind" | "signIn" | "connector" | "secret">): string | null {
+/** A sign-in, connection or credential card still waiting on the person, in plain words in their language; null once
+ * it is settled. */
+export function waitingCardText(message: Pick<Message, "kind" | "signIn" | "connector" | "secret">, language?: string): string | null {
   const { signIn, connector, secret } = message;
   if (message.kind === "signin" && signIn && signInWaits(signIn) && !signIn.resumed && !signIn.stopped) {
     const reason = signIn.reason?.trim();
-    return `I need you to sign in to ${signIn.site}${reason ? `: ${reason}${/[.!?]$/.test(reason) ? "" : "."}` : "."}`;
+    return reason ? serverLine(language, "server.connect.signInWhy", { site: signIn.site, reason: /[.!?]$/.test(reason) ? reason : `${reason}.` })
+      : serverLine(language, "server.connect.signIn", { site: signIn.site });
   }
   if (message.kind === "connector" && connector && connector.status !== "connected" && !connector.dismissed && !connector.resumed && !connector.stopped) {
-    return `I need you to connect ${connector.label}.`;
+    return serverLine(language, "server.connect.app", { app: connector.label });
   }
   if (message.kind === "secret" && secret && !secret.provided && !secret.dismissed && !secret.superseded && !secret.resumed && !secret.stopped) {
-    return `I need your ${secret.label}.`;
+    return serverLine(language, "server.connect.secret", { label: secret.label });
   }
   return null;
 }
@@ -139,7 +141,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
   /** An option card is copied whole and answered through its request; any other card the run waits on is named. */
   const writeCopy = (line: Extract<Waiting, { kind: "card" }>, target: { bot: BotRecord; threadId: string }) => {
     const original = store.messagesFor(line.threadId).find((message) => message.id === line.messageId);
-    const named = original ? waitingCardText(original) : null;
+    const named = original ? waitingCardText(original, deps.threadLanguage?.(target.threadId)) : null;
     if (!original || (!named && !liveCardKind(original.card))) return;
     const automation = lineOf(line.run, { needsYou: true, copyOf: original.id });
     store.appendMessage(target.threadId, named ? { role: "bot", kind: "text", text: named, automation } : { role: "bot", kind: "options", card: { ...original.card! }, automation });

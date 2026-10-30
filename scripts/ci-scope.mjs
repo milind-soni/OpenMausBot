@@ -46,7 +46,7 @@ export const VITEST_SUBSETS = {
     part: "locale tests",
     files: ["src/", "scripts/generate-locale.test.mjs", "scripts/testing/key-readback.e2e.test.ts", "scripts/server-locale-plugin.test.ts",
       "server/server-lines.test.ts", "server/host/devs-reports.test.ts", "server/automation-reports.test.ts", "server/incidents.test.ts",
-      "server/routine-run-card.test.ts", "server/host/chief-notices-retry.test.ts"],
+      "server/routine-run-card.test.ts", "server/host/chief-notices-retry.test.ts", "server/connector-card-text.test.ts", "server/host/secret-cards.test.ts"],
     shards: 2,
     nodeTests: true,
   },

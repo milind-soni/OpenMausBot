@@ -381,6 +381,19 @@ describe("automation reports", () => {
     expect(f.lines().at(-1)?.automation).not.toHaveProperty("copyOf");
   });
 
+  it("names a card the run waits on in the language of the chat's person", () => {
+    const f = fixture({ threadLanguage: () => "de" });
+    const run = f.finished(null, "Dashboard check", { status: "running" });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "signin", text: "Sign in", signIn: { url: "https://example.com", site: "example.com", place: "browser", reason: "das Dashboard braucht eine Anmeldung" } });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "connector", connector: { slug: "clarity", label: "Microsoft Clarity", description: "", status: "required", resumeKey: "resume-key-1" } });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "secret", secret: { target: "xaiApiKey", label: "xAI API key", description: "", placeholder: "", helpUrl: "", requestKey: "secret-1" } });
+    expect(f.lines().map((line) => line.text)).toEqual([
+      "Bitte melde dich bei example.com an: das Dashboard braucht eine Anmeldung.",
+      "Bitte verbinde Microsoft Clarity.",
+      "Bitte hinterlege xAI API key.",
+    ]);
+  });
+
   it("copies a card into a busy chat only after its turn, and not at all once it was answered elsewhere", () => {
     const f = fixture();
     const run = f.finished(null, "Inbox brief", { status: "running" });

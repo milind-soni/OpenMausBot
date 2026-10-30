@@ -41,7 +41,7 @@ import {
 } from "../shared/approval-mode.ts";
 import { createApprovalModeSupport } from "./harness-capabilities.ts";
 import { escapeAttribute } from "../src/lib/composer-attachments.ts";
-import { isPendingSignInRequest, normalizeSignInSite, signInFallbackText, signInOutcome, signInResumePrompt } from "../shared/sign-in-request.ts";
+import { isPendingSignInRequest, normalizeSignInSite, signInOutcome, signInResumePrompt } from "../shared/sign-in-request.ts";
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts";
@@ -114,7 +114,7 @@ import { liveCardKind, liveDecisionRefusal } from "../shared/live-approval.ts";
 import { vpsLeftBehindNotice } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
-import { connectorCardText } from "./connector-card-text.ts";
+import { connectorCardDescription, connectorCardText, signInCardText } from "./connector-card-text.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts"; import { chiefLevel, readTeamRolesWith } from "./chief-level.ts"; import { defaultBotRefusal, ensureDefaultBot } from "./default-bot.ts";
 import { buildRecall, recallRooms, recallThreadIds, withRecalled } from "./recall.ts";
 import { hostTimeZone, takesTurnClock, turnClockLine, withTurnClock } from "./turn-clock.ts";
@@ -11660,7 +11660,7 @@ function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
   };
 }
 
-const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
+const secretCards = createSecretCards({ store, cfg, botLogins, phoneSecrets, phoneSecretSubmissions, connectorThread, answerCardNode, threadLanguage, dataDir: DATA_DIR, providerKeysRefused: Boolean(hostedModels), layerFolder: (botId, threadId) => workspaceDir(teamHost.layer(botId, threadId)), turnVm: (threadId) => localVmThreadTargets.get(threadId)?.key });
 ROUTES.push(createSecretCardRoutes({ cards: secretCards, phoneSecretSubmissions, threadVisible: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), answerContext: (auth, botId, threadId) => ({ personalCloud: Boolean(CLOUD_PERSONAL), shared: sharedMembership(), owner: (CLOUD_TEAM ? teamOwners.routing.askedPerson(botId, threadId) : null) ?? threadStarters.get(threadId) ?? null, person: auth.kind === "session" ? personKey(auth.session) : null }) }));
 
 // By design OpenMausBot never receives a website password: the person signs in where the bot works, and the bot uses that session.
@@ -11695,7 +11695,7 @@ function requestSignIn(from: BotRecord, threadId: string, rawSite: unknown, rawR
   const message = store.appendMessage(threadId, {
     role: "bot",
     kind: "signin",
-    text: signInFallbackText(from.name, target.site),
+    text: signInCardText(from.name, target.site, threadLanguage(threadId)),
     ...(owner.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
     signIn: { url: target.url, site: target.site, place, ...(reason ? { reason } : {}) },
   });
@@ -14798,13 +14798,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           requireActiveInternalCapability();
           const connected = connectionState[item.slug]?.connected === true;
           const status = item.alias ? "required" : connected ? "connected" : "required";
-          const description = item.alias
-            ? `Connect ${toolkit.label} as “${item.alias}” so the bot can continue`
-            : toolkit.blurb || `Connect ${toolkit.label} so the bot can continue`;
+          const language = threadLanguage(threadId);
+          // The app catalog's own words, when it has some, are English; ours are in the person's language.
+          const description = item.alias ? connectorCardDescription(toolkit.label, item.alias, language) : toolkit.blurb || connectorCardDescription(toolkit.label, undefined, language);
           const message = store.appendMessage(threadId, {
             role: "bot",
             kind: "connector",
-            text: connectorCardText(toolkit.label, item.alias),
+            text: connectorCardText(toolkit.label, item.alias, language),
             ...(owner.group ? { from: { botId: owner.bot.id, name: owner.bot.name, color: owner.bot.color } } : {}),
             connector: {
               slug: item.slug,
